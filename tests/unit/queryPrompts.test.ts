@@ -62,12 +62,49 @@ describe('getAskPlutoPrompt', () => {
     expect(context.every((source) => prompt.includes(source.meeting_id))).toBe(
       true,
     );
-    expect(prompt.length).toBeLessThan(24_000);
+    expect(prompt.length).toBeLessThan(12_000);
     expect(prompt).toContain('Write a readable chat response');
+    expect(prompt).toContain(
+      'Keep each sentence to one independently verifiable claim',
+    );
+    expect(prompt).toContain('Do not add headings');
+    expect(prompt).not.toContain('Topics: None');
+    expect(prompt).not.toContain('Decisions: None');
+    expect(prompt).not.toContain('Action Items: None');
     expect(prompt).toContain('use bullets only when they materially improve');
     expect(prompt).not.toContain(
       'Use markdown bullet points to list key items',
     );
+  });
+
+  it('asks for concise evidence-close claims that survive local validation', () => {
+    const prompt = getAskPlutoPrompt(
+      'What happened in the current meeting?',
+      [
+        {
+          meeting_id: 'meeting-1',
+          meeting_title: 'Recording review',
+          mid: null,
+          evidence_text:
+            'The recorder consistently misses the first twenty seconds of audio.',
+          score: 1,
+          score_breakdown: {
+            fts_rank: 0,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+    );
+
+    expect(prompt).toContain('Prefer wording already present in the evidence');
+    expect(prompt).toContain('Split compound facts into separate sentences');
+    expect(prompt).toContain('Return at most 2 concise supported points');
+    expect(prompt).toContain('Make every point self-contained');
+    expect(prompt).toContain('"an application"');
+    expect(prompt).toContain('smallest set of directly supporting sources');
   });
 
   it('includes user corrections as constraints rather than meeting evidence', () => {

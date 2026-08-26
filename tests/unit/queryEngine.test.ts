@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
 import {
+  buildExtractiveTemporalSummary,
+  mergeRetrievalResultsByMeeting,
   parseQuery,
   retrieveContext,
 } from '../../electron/intelligence/queryEngine';
@@ -222,6 +224,106 @@ describe('Query Engine', () => {
       expect(result.length).toBeGreaterThan(0);
       expect(result[0].meeting_id).toBe('m1');
       expect(result[0].score).toBeGreaterThan(0);
+    });
+  });
+
+  describe('mergeRetrievalResultsByMeeting', () => {
+    it('keeps one context item when temporal and inherited scopes contain the same meeting', () => {
+      const temporal = {
+        meeting_id: 'meeting-1',
+        meeting_title: 'Today review',
+        mid: null,
+        evidence_text: 'Temporal evidence',
+        score: 1,
+        score_breakdown: {
+          fts_rank: 0,
+          graph_proximity: 0,
+          recency_decay: 1,
+          mention_weight: 0,
+        },
+      };
+      const inherited = {
+        ...temporal,
+        evidence_text: 'Inherited duplicate evidence',
+      };
+
+      expect(mergeRetrievalResultsByMeeting([temporal], [inherited])).toEqual([
+        temporal,
+      ]);
+    });
+  });
+
+  describe('buildExtractiveTemporalSummary', () => {
+    it('returns named completed analysis and omits contextless fragments', () => {
+      const result = buildExtractiveTemporalSummary(
+        "Summarize today's meetings",
+        [
+          {
+            meeting_id: 'review',
+            meeting_title: 'Transcription System Performance Review',
+            mid: null,
+            evidence_text:
+              '[Current meeting]: Transcription System Performance Review\n[Analysis]: The team identified a recording delay missing the first twenty seconds of audio and evaluated live transcription refinement.',
+            score: 1,
+            score_breakdown: {
+              fts_rank: 0,
+              graph_proximity: 0,
+              recency_decay: 1,
+              mention_weight: 0,
+            },
+          },
+          {
+            meeting_id: 'vague',
+            meeting_title: 'Meeting',
+            mid: null,
+            evidence_text:
+              "[Current meeting]: Meeting\n[Analysis]: One speaker expressed embarrassment about an application's origin.",
+            score: 1,
+            score_breakdown: {
+              fts_rank: 0,
+              graph_proximity: 0,
+              recency_decay: 1,
+              mention_weight: 0,
+            },
+          },
+        ],
+      );
+
+      expect(result).toBe(
+        'Transcription System Performance Review: The team identified a recording delay missing the first twenty seconds of audio. [Source 1]',
+      );
+    });
+
+    it('leaves non-summary follow-ups to model synthesis', () => {
+      expect(buildExtractiveTemporalSummary('What else came up?', [])).toBe(
+        null,
+      );
+    });
+
+    it('answers what happened from one named meeting with prepared analysis', () => {
+      expect(
+        buildExtractiveTemporalSummary(
+          'What happened in the current meeting?',
+          [
+            {
+              meeting_id: 'current',
+              meeting_title: 'Recording review',
+              mid: null,
+              evidence_text:
+                '[Current meeting]: Recording review\n[Analysis]: The team found a twenty-second recording gap and assigned an audio capture investigation.',
+              score: 1,
+              score_breakdown: {
+                fts_rank: 0,
+                graph_proximity: 0,
+                recency_decay: 1,
+                mention_weight: 0,
+              },
+            },
+          ],
+        ),
+      ).toBe(
+        'Recording review: The team found a twenty-second recording gap and assigned an audio capture investigation. [Source 1]',
+      );
     });
   });
 });

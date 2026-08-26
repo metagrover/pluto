@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ollamaHttpFetch,
   ollamaHttpStream,
@@ -134,5 +134,32 @@ describe('ollamaHttpFetch', () => {
     expect(response.ok).toBe(true);
     expect(chunks.join('')).toBe(packet.toString('utf8'));
     expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it('closes the active upstream response when streaming is aborted', async () => {
+    const controller = new AbortController();
+    let upstreamClosed = false;
+    const server = createServer((request, response) => {
+      request.on('close', () => {
+        upstreamClosed = true;
+      });
+      response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      response.write('{"response":"started"}\n');
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no address');
+
+    const generation = ollamaHttpStream(
+      `http://127.0.0.1:${address.port}/api/generate`,
+      { method: 'POST', body: '{}', signal: controller.signal },
+      () => controller.abort(new DOMException('preempted', 'AbortError')),
+    );
+
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(upstreamClosed).toBe(true));
   });
 });

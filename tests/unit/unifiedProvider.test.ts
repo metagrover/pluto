@@ -190,20 +190,32 @@ describe('UnifiedLLMProvider', () => {
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
+      ollama_fast_model: 'phi4-mini:3.8b',
     });
 
     await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
 
-    expect(requestBodies[0]).toMatchObject({ think: false });
-    expect(requestBodies[0].options).toMatchObject({
-      num_ctx: 8192,
-      num_predict: 1024,
+    expect(requestBodies[0]).toMatchObject({
+      model: 'phi4-mini:3.8b',
+      think: false,
     });
-    expect(requestBodies[1]).toMatchObject({ think: false });
-    expect(requestBodies[1].options).toMatchObject({
-      num_ctx: 16384,
-      num_predict: 2048,
+    expect(requestBodies[0].options).toMatchObject({
+      num_ctx: 4096,
+      num_predict: 192,
+    });
+    expect(requestBodies[1]).toMatchObject({
+      model: 'phi4-mini:3.8b',
+      keep_alive: 0,
+      stream: false,
+    });
+    expect(requestBodies[2]).toMatchObject({
+      model: 'qwen3.5:9b',
+      think: false,
+    });
+    expect(requestBodies[2].options).toMatchObject({
+      num_ctx: 4096,
+      num_predict: 256,
       top_k: 40,
       top_p: 1,
     });
@@ -304,7 +316,15 @@ describe('UnifiedLLMProvider', () => {
     let generationCalls = 0;
     const fetchMock = installFetchMock((_url, init) => {
       generationCalls += 1;
-      if (generationCalls > 1) {
+      if (generationCalls === 2) {
+        expect(parseRequestBody(init)).toMatchObject({
+          model: 'qwen3.5:9b',
+          keep_alive: 0,
+          stream: false,
+        });
+        return jsonResponse({ response: '' });
+      }
+      if (generationCalls > 2) {
         return jsonResponse({
           response: 'The current meeting is about pricing.',
         });
@@ -319,6 +339,7 @@ describe('UnifiedLLMProvider', () => {
     });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
+      ollama_fast_model: 'phi4-mini:3.8b',
     });
 
     const title = provider.generateTitle('A meeting transcript');
@@ -327,7 +348,53 @@ describe('UnifiedLLMProvider', () => {
 
     await expect(title).resolves.toBe('Meeting');
     await expect(answer).resolves.toBe('The current meeting is about pricing.');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('lets Ask Pluto preempt and then resume an active topic-analysis pass', async () => {
+    let generationCalls = 0;
+    const fetchMock = installFetchMock((_url, init) => {
+      generationCalls += 1;
+      if (generationCalls === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        });
+      }
+      const body = parseRequestBody(init);
+      if (String(body.prompt).includes('Question:')) {
+        return jsonResponse({ response: 'The meeting covered pricing.' });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          title: 'Pricing',
+          summary: 'The meeting covered pricing.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    const analysis = provider.generateStructuredAnalysis(
+      '[Sam] (0s): We discussed pricing.',
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const answer = provider.answerAskPluto('Question: What did we discuss?');
+
+    await expect(answer).resolves.toBe('The meeting covered pricing.');
+    await expect(analysis).resolves.toMatchObject({
+      quality: { fallback_used: false },
+      topics: [{ summary: 'The meeting covered pricing.' }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('uses Qwen as the single default across meeting-intelligence tasks', async () => {
@@ -1581,12 +1648,12 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
       num_predict: 2500,
     });
     expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
-      num_ctx: 8192,
-      num_predict: 1024,
+      num_ctx: 4096,
+      num_predict: 192,
     });
     expect(calculateOllamaContextBudget('question', 'askPlutoDeep')).toEqual({
-      num_ctx: 16384,
-      num_predict: 2048,
+      num_ctx: 4096,
+      num_predict: 256,
     });
   });
 

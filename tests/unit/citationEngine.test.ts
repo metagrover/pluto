@@ -5,6 +5,7 @@ import {
   auditCitations,
   buildCitationChain,
   buildSafeAnswerPresentation,
+  claimIsSupportedByEvidence,
   createValidatedAnswerStream,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
@@ -153,6 +154,18 @@ describe('Citation Engine', () => {
       expect(deltas.join('')).toBe('Sam owns launch signoff.');
       expect(presentation.answer).toBe(deltas.join(''));
       expect(presentation.outcome).toBe('answered');
+    });
+
+    it('streams a supported cited bullet without requiring final punctuation', () => {
+      const deltas: string[] = [];
+      const stream = createValidatedAnswerStream(sources, (delta) =>
+        deltas.push(delta),
+      );
+
+      stream.push('- Sam owns launch signoff ');
+      stream.push('[Source 1]');
+
+      expect(deltas.join('')).toBe('- Sam owns launch signoff');
     });
   });
 
@@ -379,6 +392,127 @@ describe('Citation Engine', () => {
       });
     });
 
+    it('keeps the matching passage when support appears late in a long analysis line', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Recording review',
+          evidence_text: `[Analysis]: ${'Unrelated setup sentence. '.repeat(20)}The recorder consistently misses the first twenty seconds of audio.`,
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const audited = auditCitations(
+        buildCitationChain(
+          'The recorder consistently misses the first twenty seconds of audio. [Source 1]',
+          context,
+        ),
+        context,
+      );
+
+      expect(audited[0]).toMatchObject({
+        evidence_span:
+          'The recorder consistently misses the first twenty seconds of audio.',
+        evidence_valid: true,
+      });
+    });
+
+    it('uses the persisted meeting title as support when a claim names its source meeting', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Transcription System Performance Review',
+          evidence_text:
+            'The team identified a recording delay missing the first twenty seconds of audio.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const audited = auditCitations(
+        buildCitationChain(
+          'During the Transcription System Performance Review, the team identified a recording delay missing the first twenty seconds of audio. [Source 1]',
+          context,
+        ),
+        context,
+      );
+
+      expect(audited[0].evidence_valid).toBe(true);
+    });
+
+    it('does not treat a sentence-start pronoun as an unsupported named entity', () => {
+      expect(
+        claimIsSupportedByEvidence(
+          'They evaluated whether live transcription refinement is necessary.',
+          'The team evaluated whether live transcription refinement is necessary.',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows a supported positive claim when evidence has an unrelated negative detail', () => {
+      expect(
+        claimIsSupportedByEvidence(
+          "One speaker expressed embarrassment about the application's origin and questioned who initiated it.",
+          "The speaker expressed embarrassment about the application's origin, stated it was not their idea, and questioned who initiated it.",
+        ),
+      ).toBe(true);
+    });
+
+    it('uses structured MID action items exposed to the answer prompt as evidence', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Transcription review',
+          evidence_text: 'The team reviewed transcription performance.',
+          mid: {
+            action_items: [
+              {
+                description:
+                  'Evaluate whether live transcription refinement is necessary.',
+              },
+            ],
+          },
+        },
+      ] as RetrievalResult[];
+
+      const audited = auditCitations(
+        buildCitationChain(
+          'Evaluate whether live transcription refinement is necessary. [Source 1]',
+          context,
+        ),
+        context,
+      );
+
+      expect(audited[0]).toMatchObject({
+        evidence_span:
+          'Evaluate whether live transcription refinement is necessary.',
+        evidence_valid: true,
+      });
+    });
+
+    it('combines adjacent evidence lines when a concise claim spans both', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Knowledge cafe',
+          evidence_text:
+            'The knowledge cafe slides were discussed.\nThe slides will be shared with the group.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const audited = auditCitations(
+        buildCitationChain(
+          'The knowledge cafe slides will be shared with the group. [Source 1]',
+          context,
+        ),
+        context,
+      );
+
+      expect(audited[0].evidence_valid).toBe(true);
+      expect(audited[0].evidence_span).toContain('knowledge cafe slides');
+      expect(audited[0].evidence_span).toContain('shared with the group');
+    });
+
     it('rejects evidence that reverses the claim with negation', () => {
       const context = [
         {
@@ -505,6 +639,27 @@ describe('Citation Engine', () => {
   });
 
   describe('buildSafeAnswerPresentation', () => {
+    it('omits grounded but contextless claims that are not useful as chat answers', () => {
+      const vague = {
+        claim:
+          "One speaker expressed embarrassment regarding an application's origin.",
+        meeting_id: 'meeting-1',
+        meeting_title: 'Meeting',
+        evidence_span:
+          "One speaker expressed embarrassment regarding an application's origin.",
+        evidence_valid: true,
+        trust_status: 'grounded' as const,
+      };
+
+      expect(
+        buildSafeAnswerPresentation(`${vague.claim} [Source 1]`, [vague]),
+      ).toMatchObject({
+        outcome: 'no_evidence',
+        citations: [],
+        unsupportedClaimCount: 1,
+      });
+    });
+
     it('treats a refusal as no evidence rather than a grounded answer', () => {
       expect(
         buildSafeAnswerPresentation(
@@ -552,6 +707,62 @@ describe('Citation Engine', () => {
         trustStatus: 'grounded',
         unsupportedClaimCount: 1,
       });
+    });
+
+    it('preserves readable line breaks between supported bullets', () => {
+      const citations = [
+        {
+          claim: '- Sam owns pricing approval.',
+          meeting_id: 'm1',
+          meeting_title: 'Pricing review',
+          evidence_span: 'Sam owns pricing approval.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: '- The launch is Friday.',
+          meeting_id: 'm2',
+          meeting_title: 'Launch review',
+          evidence_span: 'The launch is Friday.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      expect(
+        buildSafeAnswerPresentation(
+          '- Sam owns pricing approval. [Source 1]\n- The launch is Friday. [Source 2]\n- Alex owns launch approval.',
+          citations,
+        ).answer,
+      ).toBe('- Sam owns pricing approval.\n- The launch is Friday.');
+    });
+
+    it('separates supported prose claims into readable chat paragraphs', () => {
+      const citations = [
+        {
+          claim: 'Sam owns pricing approval.',
+          meeting_id: 'm1',
+          meeting_title: 'Pricing review',
+          evidence_span: 'Sam owns pricing approval.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: 'The launch is Friday.',
+          meeting_id: 'm2',
+          meeting_title: 'Launch review',
+          evidence_span: 'The launch is Friday.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      expect(
+        buildSafeAnswerPresentation(
+          'Sam owns pricing approval. [Source 1] The launch is Friday. [Source 2] Unsupported filler.',
+          citations,
+        ).answer,
+      ).toBe('Sam owns pricing approval.\n\nThe launch is Friday.');
     });
 
     it('returns no evidence when every generated claim is unsupported', () => {

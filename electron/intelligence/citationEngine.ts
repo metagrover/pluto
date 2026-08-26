@@ -44,10 +44,16 @@ const CLAIM_STOPWORDS = new Set([
   'are',
   'as',
   'at',
+  'about',
   'be',
   'by',
+  'during',
+  'did',
+  'do',
+  'does',
   'for',
   'from',
+  'if',
   'in',
   'is',
   'it',
@@ -56,10 +62,15 @@ const CLAIM_STOPWORDS = new Set([
   'or',
   'that',
   'the',
+  'their',
+  'them',
+  'they',
   'this',
   'to',
   'was',
+  'we',
   'were',
+  'who',
   'will',
   'with',
 ]);
@@ -76,18 +87,79 @@ const contentTokens = (text: string): string[] =>
     .filter((token) => !CLAIM_STOPWORDS.has(token))
     .map(stemToken);
 
-const hasNegation = (text: string): boolean =>
-  /\b(no|not|never|neither|nor|without|didn't|doesn't|isn't|wasn't|won't|can't)\b/i.test(
-    text,
+const negationSignatures = (text: string): string[][] =>
+  text
+    .toLowerCase()
+    .replace(/\b(?:didn't|doesn't|isn't|wasn't|won't|can't)\b/g, ' not ')
+    .split(/[.;!?]/)
+    .flatMap((clause) => {
+      const tokens = clause.match(/[\p{L}\p{N}'-]+/gu) || [];
+      const negationIndex = tokens.findIndex((token) =>
+        /^(?:no|not|never|neither|nor|without)$/.test(token),
+      );
+      if (negationIndex < 0) return [];
+      const before = contentTokens(tokens.slice(0, negationIndex).join(' '));
+      const after = contentTokens(tokens.slice(negationIndex + 1).join(' '));
+      const signature = [...before.slice(-1), ...after.slice(0, 3)];
+      return signature.length > 0 ? [signature] : [];
+    });
+
+const negationConflicts = (claim: string, evidence: string): boolean => {
+  const claimSignatures = negationSignatures(claim);
+  const evidenceSignatures = negationSignatures(evidence);
+  if (claimSignatures.length === 0 && evidenceSignatures.length === 0) {
+    return false;
+  }
+  const supportsSignature = (text: string, signature: string[]): boolean => {
+    const tokens = new Set(contentTokens(text));
+    return (
+      signature.length > 0 &&
+      signature.filter((token) => tokens.has(token)).length /
+        signature.length >=
+        0.75
+    );
+  };
+  if (claimSignatures.length === 0) {
+    return evidenceSignatures.some((signature) =>
+      supportsSignature(claim, signature),
+    );
+  }
+  if (evidenceSignatures.length === 0) {
+    return claimSignatures.some((signature) =>
+      supportsSignature(evidence, signature),
+    );
+  }
+  return !claimSignatures.some((claimSignature) =>
+    evidenceSignatures.some((evidenceSignature) => {
+      const evidenceTokens = new Set(evidenceSignature);
+      return (
+        claimSignature.filter((token) => evidenceTokens.has(token)).length /
+          Math.max(claimSignature.length, evidenceSignature.length) >=
+        0.75
+      );
+    }),
   );
+};
 
 const NON_ENTITY_CAPITALIZED_WORDS = new Set([
   'A',
   'An',
+  'Another',
+  'At',
   'Compared',
+  'During',
   'Earlier',
+  'For',
+  'From',
+  'In',
   'It',
   'Later',
+  'Multiple',
+  'No',
+  'On',
+  'One',
+  'Several',
+  'They',
   'That',
   'The',
   'There',
@@ -112,13 +184,7 @@ export const claimIsSupportedByEvidence = (
   evidence: string | undefined,
 ): boolean => {
   if (!evidence?.trim()) return false;
-  if (hasNegation(claim) !== hasNegation(evidence)) return false;
-  if (
-    hasNegation(claim) &&
-    contentTokens(claim).join(' ') !== contentTokens(evidence).join(' ')
-  ) {
-    return false;
-  }
+  if (negationConflicts(claim, evidence)) return false;
 
   const claimNumbers = claim.match(/\b\d+(?:\.\d+)?%?\b/g) || [];
   if (claimNumbers.some((value) => !evidence.includes(value))) return false;
@@ -140,17 +206,45 @@ export const claimIsSupportedByEvidence = (
 /**
  * Get the first meaningful evidence span from a retrieval result's MID.
  */
+const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
+  const evidenceUnits = source.evidence_text.split('\n').flatMap((line) => {
+    const cleanLine = line.replace(/^\[[^\]]+\]:?\s*/, '').trim();
+    if (!cleanLine) return [];
+    const sentences = cleanLine
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => sentence.trim())
+      .filter((sentence) => sentence.length > 20);
+    return sentences.length > 1 ? sentences : [cleanLine];
+  });
+  const adjacentEvidence = evidenceUnits.flatMap((_, index) =>
+    [2, 3]
+      .map((windowSize) => evidenceUnits.slice(index, index + windowSize))
+      .filter((window) => window.length > 1)
+      .map((window) => window.join('\n'))
+      .filter((window) => window.length <= 320),
+  );
+  return [
+    ...(source.mid?.evidence_spans?.map((span) => span.quote) || []),
+    ...(source.mid?.decisions?.map((decision) => decision.description) || []),
+    ...(source.mid?.action_items?.map((item) => item.description) || []),
+    ...evidenceUnits,
+    ...adjacentEvidence,
+  ].filter((candidate, index, candidates) => {
+    const normalized = candidate.trim().toLocaleLowerCase();
+    return (
+      normalized.length > 0 &&
+      candidates.findIndex(
+        (value) => value.trim().toLocaleLowerCase() === normalized,
+      ) === index
+    );
+  });
+};
+
 const getBestEvidenceSpan = (
   source: RetrievalResult,
   claim: string,
 ): string | undefined => {
-  const candidates = [
-    ...(source.mid?.evidence_spans?.map((span) => span.quote) || []),
-    ...source.evidence_text
-      .split('\n')
-      .map((line) => line.replace(/^\[[^\]]+\]:?\s*/, '').trim())
-      .filter((line) => line.length > 20),
-  ];
+  const candidates = getSourceEvidenceCandidates(source);
   return candidates
     .map((evidence, index) => ({
       evidence,
@@ -160,7 +254,7 @@ const getBestEvidenceSpan = (
     .sort(
       (left, right) => right.score - left.score || left.index - right.index,
     )[0]
-    ?.evidence.slice(0, 240);
+    ?.evidence.slice(0, 320);
 };
 
 /**
@@ -263,10 +357,16 @@ export const auditCitations = (
       ) {
         const needle = citation.evidence_span.toLowerCase().trim();
         const spanFound =
+          (source ? getSourceEvidenceCandidates(source) : []).some(
+            (candidate) => {
+              const haystack = candidate.toLowerCase();
+              return haystack.includes(needle) || needle.includes(haystack);
+            },
+          ) ||
           mid?.evidence_spans?.some((span) => {
             const haystack = span.quote.toLowerCase();
             return haystack.includes(needle) || needle.includes(haystack);
-          }) || source?.evidence_text.toLowerCase().includes(needle);
+          });
 
         if (!spanFound) {
           structurallyValid = false;
@@ -289,6 +389,12 @@ export const auditCitations = (
     const source = sources.find(
       (candidate) => candidate.meeting_id === citation.meeting_id,
     );
+    const directSupport = [
+      citation.evidence_span || '',
+      source?.meeting_title || source?.mid?.title || '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     const provisionalSource =
       source !== undefined &&
       /^\[(?:Current recording|Live transcript|Interim transcript)[^\]]*(?:provisional|unconfirmed)/im.test(
@@ -301,13 +407,21 @@ export const auditCitations = (
       claimIsSupportedByEvidence(
         citation.claim,
         group
-          .map((item) => item.citation.evidence_span || '')
+          .flatMap((item) => {
+            const itemSource = sources.find(
+              (candidate) => candidate.meeting_id === item.citation.meeting_id,
+            );
+            return [
+              item.citation.evidence_span || '',
+              itemSource?.meeting_title || itemSource?.mid?.title || '',
+            ];
+          })
           .filter(Boolean)
           .join('\n'),
       );
     const evidence_valid =
       structurallyValid &&
-      (claimIsSupportedByEvidence(citation.claim, citation.evidence_span) ||
+      (claimIsSupportedByEvidence(citation.claim, directSupport) ||
         combinedSupport);
 
     return {
@@ -330,6 +444,14 @@ const isMaterialClaim = (sentence: string): boolean => {
   if (/^I couldn't find information/i.test(withoutCitations)) return false;
   return contentTokens(withoutCitations).length >= 2;
 };
+
+const CONTEXTLESS_CLAIM_PATTERN =
+  /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
+
+const isContextfulClaim = (claim: string): boolean =>
+  !CONTEXTLESS_CLAIM_PATTERN.test(
+    claim.replace(/\[Source\s+\d+\]/gi, '').trim(),
+  );
 
 export const auditAnswerGrounding = (
   answer: string,
@@ -361,6 +483,7 @@ export const auditAnswerGrounding = (
       COMPARATIVE_CLAIM_PATTERN.test(cleanSentence);
     const supported =
       matching.length > 0 &&
+      isContextfulClaim(cleanSentence) &&
       matching.every((citation) => citation.evidence_valid) &&
       (!comparisonNeedsTwoSources || citedMeetings.size >= 2);
     if (!supported) {
@@ -430,6 +553,7 @@ export const buildSafeAnswerPresentation = (
   const supportedGroups = [...grouped.values()].filter((group) => {
     const meetings = new Set(group.map((citation) => citation.meeting_id));
     return (
+      isContextfulClaim(group[0].claim) &&
       group.every((citation) => citation.evidence_valid) &&
       (!COMPARATIVE_CLAIM_PATTERN.test(group[0].claim) || meetings.size >= 2)
     );
@@ -438,7 +562,7 @@ export const buildSafeAnswerPresentation = (
   if (supportedCitations.length === 0) {
     return {
       answer:
-        "I found potentially relevant meeting material, but I couldn't verify a supported answer.",
+        "I found meeting material, but it doesn't contain enough specific, supported context to answer that clearly.",
       citations: [],
       outcome: 'no_evidence',
       trustStatus: undefined,
@@ -447,13 +571,18 @@ export const buildSafeAnswerPresentation = (
   }
 
   const supportedClaims = supportedGroups.map((group) => group[0].claim.trim());
+  const supportedClaimSeparator = supportedClaims.every((claim) =>
+    /^[-*]\s/.test(claim),
+  )
+    ? '\n'
+    : '\n\n';
   const inferred = supportedGroups.some(
     (group) =>
       new Set(group.map((citation) => citation.meeting_id)).size >= 2 ||
       group.some((citation) => citation.trust_status === 'inferred'),
   );
   return {
-    answer: supportedClaims.join(' '),
+    answer: supportedClaims.join(supportedClaimSeparator),
     citations: supportedCitations,
     outcome: 'partial',
     trustStatus: inferred ? 'inferred' : 'grounded',
@@ -509,13 +638,6 @@ export const createValidatedAnswerStream = (
     rawAnswer += delta;
     const references = [...rawAnswer.matchAll(/\[Source\s+\d+\]/gi)];
     if (references.length <= auditedReferenceCount) return;
-
-    const finalReference = references.at(-1);
-    const beforeReference = rawAnswer
-      .slice(0, finalReference?.index ?? rawAnswer.length)
-      .replace(/(?:\s*\[Source\s+\d+\])+\s*$/gi, '')
-      .trimEnd();
-    if (!/[.!?]$/.test(beforeReference)) return;
 
     auditedReferenceCount = references.length;
     emitSupportedExtension(auditCurrentAnswer());

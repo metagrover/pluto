@@ -141,9 +141,18 @@ export const SettingsTab = ({
   theme,
   setTheme,
 }: SettingsTabProps) => {
+  const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
+
+  useEffect(() => {
+    void window.ipcRenderer
+      .invoke('GET_SETTING', 'ollama_fast_model')
+      .then((value) => {
+        if (typeof value === 'string') setOllamaFastModel(value);
+      });
+  }, []);
 
   useEffect(() => {
     void window.ipcRenderer
@@ -211,23 +220,42 @@ export const SettingsTab = ({
           </SettingsRow>
 
           {llmProvider === 'ollama' ? (
-            <SettingsRow
-              htmlFor="ollama-model"
-              label="Local Model"
-              helper="Leave blank to use the first available model."
-            >
-              <Input
-                id="ollama-model"
-                type="text"
-                placeholder="Auto-detect installed model"
-                value={ollamaModel}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setOllamaModel(value);
-                  persistSetting('ollama_model', value);
-                }}
-              />
-            </SettingsRow>
+            <>
+              <SettingsRow
+                htmlFor="ollama-model"
+                label="Local Analysis & Deep Model"
+                helper="Used for meeting preparation and deeper cross-meeting analysis. Leave blank to auto-detect."
+              >
+                <Input
+                  id="ollama-model"
+                  type="text"
+                  placeholder="Auto-detect installed model"
+                  value={ollamaModel}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setOllamaModel(value);
+                    persistSetting('ollama_model', value);
+                  }}
+                />
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="ollama-fast-model"
+                label="Fast Chat Model"
+                helper="Optional smaller local model for everyday Ask Pluto answers. Deep questions continue to use the analysis model."
+              >
+                <Input
+                  id="ollama-fast-model"
+                  type="text"
+                  placeholder="Use the analysis model"
+                  value={ollamaFastModel}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setOllamaFastModel(value);
+                    persistSetting('ollama_fast_model', value);
+                  }}
+                />
+              </SettingsRow>
+            </>
           ) : (
             <SettingsRow
               htmlFor="api-key"

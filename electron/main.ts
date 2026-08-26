@@ -333,8 +333,10 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
+  buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
+  mergeRetrievalResultsByMeeting,
   parseQuery,
   retrieveContext,
 } from './intelligence/queryEngine';
@@ -3214,20 +3216,12 @@ app.whenReady().then(async () => {
             buildMeetingRetrievalResult(meeting, 'Earlier meeting'),
           );
         comparisonMeetingCount = historicalPinnedResults.length;
-        const pinnedResults = [
-          ...(currentPinnedResult ? [currentPinnedResult] : []),
-          ...temporalPinnedResults.filter(
-            (result) => result.meeting_id !== currentPinnedResult?.meeting_id,
-          ),
-          ...historicalPinnedResults,
-          ...priorPinnedResults.filter(
-            (result) =>
-              result.meeting_id !== currentPinnedResult?.meeting_id &&
-              !historicalPinnedResults.some(
-                (historical) => historical.meeting_id === result.meeting_id,
-              ),
-          ),
-        ];
+        const pinnedResults = mergeRetrievalResultsByMeeting(
+          currentPinnedResult ? [currentPinnedResult] : [],
+          temporalPinnedResults,
+          historicalPinnedResults,
+          priorPinnedResults,
+        );
         retrievalStartedAt = Date.now();
         const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
           {
@@ -3298,20 +3292,7 @@ app.whenReady().then(async () => {
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
         );
 
-        const settings = await getAllSettings(db);
-        const provider = await getProvider(settings);
-        const prompt = getAskPlutoPrompt(
-          queryText,
-          context,
-          parsed.intent,
-          priorTurns,
-          formatAskPlutoCorrectionsForPrompt(relevantCorrections),
-        );
         sendStatus('generating');
-        console.log(
-          `[Pluto] Generating answer via provider: ${provider.name} ...`,
-        );
-        providerRequestedAt = Date.now();
         const validatedAnswerStream = createValidatedAnswerStream(
           context,
           (delta) => {
@@ -3323,17 +3304,40 @@ app.whenReady().then(async () => {
             });
           },
         );
-        const answerRaw = await provider.answerAskPluto(prompt, {
-          signal: controller.signal,
-          mode: reasoningMode,
-          onStart: () => {
-            providerStartedAt ??= Date.now();
-          },
-          onToken: (delta) => {
-            if (controller.signal.aborted) return;
-            validatedAnswerStream.push(delta);
-          },
-        });
+        const extractiveAnswer = buildExtractiveTemporalSummary(
+          queryText,
+          context,
+        );
+        let answerRaw: string;
+        if (extractiveAnswer) {
+          answerRaw = extractiveAnswer;
+          validatedAnswerStream.push(answerRaw);
+        } else {
+          const settings = await getAllSettings(db);
+          const provider = await getProvider(settings);
+          const prompt = getAskPlutoPrompt(
+            queryText,
+            context,
+            parsed.intent,
+            priorTurns,
+            formatAskPlutoCorrectionsForPrompt(relevantCorrections),
+          );
+          console.log(
+            `[Pluto] Generating answer via provider: ${provider.name} ...`,
+          );
+          providerRequestedAt = Date.now();
+          answerRaw = await provider.answerAskPluto(prompt, {
+            signal: controller.signal,
+            mode: reasoningMode,
+            onStart: () => {
+              providerStartedAt ??= Date.now();
+            },
+            onToken: (delta) => {
+              if (controller.signal.aborted) return;
+              validatedAnswerStream.push(delta);
+            },
+          });
+        }
         generationCompletedAt = Date.now();
 
         const presentation = validatedAnswerStream.finalize(answerRaw);

@@ -31,11 +31,11 @@ export const getAskPlutoPrompt = (
   const largeScope = context.length > 6;
   const evidenceBudget =
     context.length === 1
-      ? 3600
+      ? 2600
       : largeScope
-        ? Math.max(420, Math.floor(12_000 / context.length))
-        : 2400;
-  const structuredFieldBudget = largeScope ? 220 : 900;
+        ? Math.max(240, Math.floor(6400 / context.length))
+        : 1800;
+  const structuredFieldBudget = largeScope ? 80 : 600;
   const contextStr =
     context.length === 0
       ? 'None'
@@ -46,7 +46,7 @@ export const getAskPlutoPrompt = (
               c.mid?.topics
                 ?.map((t) => t.name)
                 .join(', ')
-                .slice(0, largeScope ? 180 : 600) || 'None';
+                .slice(0, largeScope ? 100 : 400) || 'None';
             const decisions =
               c.mid?.decisions
                 ?.map((d) => d.description)
@@ -58,11 +58,14 @@ export const getAskPlutoPrompt = (
                 .join('; ')
                 .slice(0, structuredFieldBudget) || 'None';
             const evidence = c.evidence_text.slice(0, evidenceBudget);
+            const details = [`Evidence: ${evidence}`];
+            if (!largeScope && topicNames !== 'None') {
+              details.push(`Topics: ${topicNames}`);
+            }
+            if (decisions !== 'None') details.push(`Decisions: ${decisions}`);
+            if (actions !== 'None') details.push(`Action Items: ${actions}`);
             return `[Source ${i + 1}] Meeting: "${title}" (ID: ${c.meeting_id})
-Evidence: ${evidence}
-Topics: ${topicNames}
-Decisions: ${decisions}
-Action Items: ${actions}`;
+${details.join('\n')}`;
           })
           .join('\n\n---\n\n');
 
@@ -90,6 +93,11 @@ RULES:
 4. Use specific details: participant names, project names, dates, numbers, exact decisions — pull these directly from the evidence.
 5. If the Context does not contain the answer, say: "I couldn't find information about that in your meetings."
 6. User corrections are authoritative constraints on what the user says is wrong. Never cite a user correction as meeting evidence, and never use one to make an otherwise unsupported meeting claim look grounded.
+7. Keep each sentence to one independently verifiable claim. Split compound facts into separate sentences.
+8. Prefer wording already present in the evidence. A concise supported answer is better than a broader paraphrase the evidence cannot verify.
+9. Return at most 2 concise supported points and stay under 90 words. Return fewer rather than inventing coverage.
+10. Make every point self-contained: identify the meeting, project, product, person, or concrete topic needed to understand it. Omit contextless claims that rely on vague stand-ins such as "one speaker", "a participant", "an application", or "something".
+11. Do not add headings. For cross-meeting synthesis, cite the contributing sources on the synthesized sentence, but never cite a source that does not directly support part of that sentence.
 
 Question: ${query}
 
@@ -108,7 +116,8 @@ ${contextStr}`;
 CITATION RULES:
 - For each factual claim, add an inline source reference like [Source 1] or [Source 2] at the end of the sentence.
 - Use the source numbers that correspond to the Context sources above.
-- Every bullet point or key claim MUST have at least one [Source N] reference.`;
+- Every bullet point or key claim MUST have at least one [Source N] reference.
+- Prefer the smallest set of directly supporting sources; do not append every source to a claim.`;
   }
 
   return prompt;

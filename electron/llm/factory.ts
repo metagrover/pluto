@@ -10,6 +10,7 @@ function getSettingsHash(settings: LLMSettings): string {
   return JSON.stringify({
     type: settings.llm_provider || 'ollama',
     ollama: settings.ollama_model,
+    ollamaFast: settings.ollama_fast_model,
     ollamaStructuredThinking: settings.ollama_structured_thinking,
     ollamaSeed: settings.ollama_seed,
     llm: settings.llm_model,
@@ -177,6 +178,7 @@ export async function getAllSettings(db: {
     claude_api_key: getStringSetting('claude_api_key'),
     llm_model: getStringSetting('llm_model'),
     ollama_model: getStringSetting('ollama_model'),
+    ollama_fast_model: getStringSetting('ollama_fast_model'),
     ollama_structured_thinking: getBooleanSetting('ollama_structured_thinking'),
     ollama_seed: getIntegerSetting('ollama_seed'),
     gemini_model: getStringSetting('gemini_model'),

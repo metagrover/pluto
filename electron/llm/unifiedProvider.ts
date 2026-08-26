@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
-import { createSerializedTaskGate } from '../serializedTaskGate';
+import {
+  createSerializedTaskGate,
+  isSerializedTaskPreemption,
+} from '../serializedTaskGate';
 import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
@@ -362,6 +365,7 @@ const compactOversizedAnalysis = (
 // generation at the provider boundary so request timeouts measure model work,
 // not time spent waiting behind another analysis or knowledge request.
 const runWithOllamaGenerationGate = createSerializedTaskGate<symbol, string>();
+let electronActiveOllamaModel: string | null = null;
 
 type LLMTask =
   | 'summary'
@@ -382,6 +386,11 @@ type LLMTask =
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
+
+const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
+  task === 'topicSegmentation' ||
+  task === 'topicAnalysis' ||
+  task === 'analysisEditorial';
 
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
@@ -439,6 +448,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
   private cachedOllamaModels = new Map<string, string>();
+  private activeOllamaModel: string | null = null;
 
   constructor(
     private providerType: ProviderType,
@@ -601,7 +611,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       if (!isShortMeeting) {
         try {
           const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
-          const segRaw = await this.generateText({
+          const segRaw = await this.generateResumableAnalysisText({
             prompt: segmentationPrompt,
             task: 'topicSegmentation',
             jsonMode: true,
@@ -702,7 +712,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             userNotes,
             template,
           );
-          const topicRaw = await this.generateText({
+          const topicRaw = await this.generateResumableAnalysisText({
             prompt: topicPrompt,
             task: 'topicAnalysis',
             jsonMode: true,
@@ -909,7 +919,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt: string,
     signal?: AbortSignal,
   ): Promise<AnalysisDocumentV3 | null> {
-    const raw = await this.generateText({
+    const raw = await this.generateResumableAnalysisText({
       prompt,
       task: 'analysisEditorial',
       jsonMode: true,
@@ -1335,7 +1345,9 @@ export class UnifiedLLMProvider implements LLMProvider {
                 : 10,
             {
               preemptible:
-                options.task === 'knowledgeDoc' || options.task === 'title',
+                options.task === 'knowledgeDoc' ||
+                options.task === 'title' ||
+                isResumableMeetingAnalysisTask(options.task),
             },
           );
           break;
@@ -1347,6 +1359,20 @@ export class UnifiedLLMProvider implements LLMProvider {
     } finally {
       if (!isBackground) {
         knowledgeSynthesisPause.release('llm_active');
+      }
+    }
+  }
+
+  private async generateResumableAnalysisText(
+    options: TextGenerationOptions,
+  ): Promise<string> {
+    while (true) {
+      try {
+        return await this.generateText(options);
+      } catch (error) {
+        if (!isSerializedTaskPreemption(error) || options.signal?.aborted) {
+          throw error;
+        }
       }
     }
   }
@@ -1452,7 +1478,15 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal,
     onToken,
   }: TextGenerationOptions): Promise<string> {
-    const model = await this.resolveOllamaModel();
+    const model = await this.resolveOllamaModel(task);
+    const activeModel = process.versions.electron
+      ? electronActiveOllamaModel
+      : this.activeOllamaModel;
+    if (activeModel && activeModel !== model) {
+      await this.unloadOllamaModel(activeModel);
+    }
+    this.activeOllamaModel = model;
+    if (process.versions.electron) electronActiveOllamaModel = model;
     const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
     const progressAware = usesProgressAwareOllamaDeadline(task);
     const shouldStream = Boolean(onToken) || progressAware;
@@ -1545,21 +1579,46 @@ export class UnifiedLLMProvider implements LLMProvider {
           throw new Error(`Ollama API error: ${response.statusText}`);
         }
         return answer;
+      } catch (error) {
+        const fastModel = (this.settings.ollama_fast_model || '').trim();
+        if (
+          signal?.aborted &&
+          isSerializedTaskPreemption(signal.reason) &&
+          fastModel &&
+          fastModel !== model
+        ) {
+          await this.unloadOllamaModel(model);
+        }
+        throw error;
       } finally {
         deadline?.dispose();
       }
     }
 
-    const response = await this.ollamaFetch(
-      '/api/generate',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      },
-      getOllamaTimeoutMs(task),
-      signal,
-    );
+    let response: Response;
+    try {
+      response = await this.ollamaFetch(
+        '/api/generate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        },
+        getOllamaTimeoutMs(task),
+        signal,
+      );
+    } catch (error) {
+      const fastModel = (this.settings.ollama_fast_model || '').trim();
+      if (
+        signal?.aborted &&
+        isSerializedTaskPreemption(signal.reason) &&
+        fastModel &&
+        fastModel !== model
+      ) {
+        await this.unloadOllamaModel(model);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       throw new Error(`Ollama API error: ${response.statusText}`);
@@ -1576,6 +1635,35 @@ export class UnifiedLLMProvider implements LLMProvider {
     return data.response ?? '';
   }
 
+  private async unloadOllamaModel(model: string): Promise<void> {
+    try {
+      await this.ollamaFetch(
+        '/api/generate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            keep_alive: 0,
+            stream: false,
+          }),
+        },
+        30_000,
+      );
+      if (this.activeOllamaModel === model) {
+        this.activeOllamaModel = null;
+      }
+      if (electronActiveOllamaModel === model) {
+        electronActiveOllamaModel = null;
+      }
+    } catch (error) {
+      console.warn(
+        `[Ollama] Failed to unload preempted model ${model}:`,
+        error,
+      );
+    }
+  }
+
   private getGeminiClient(): GoogleGenerativeAI {
     if (!this.settings.gemini_api_key) {
       throw new Error('Gemini API key not configured');
@@ -1586,7 +1674,11 @@ export class UnifiedLLMProvider implements LLMProvider {
     return this.geminiClient;
   }
 
-  private async resolveOllamaModel(): Promise<string> {
+  private async resolveOllamaModel(task?: LLMTask): Promise<string> {
+    const configuredFastModel = (this.settings.ollama_fast_model || '').trim();
+    if (task === 'askPluto' && configuredFastModel) {
+      return configuredFastModel;
+    }
     const configuredModel = (
       this.settings.ollama_model ||
       this.settings.llm_model ||
@@ -1761,7 +1853,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') return 0.2;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
-    if (task === 'askPluto' || task === 'askPlutoDeep') return 0.4;
+    if (task === 'askPluto' || task === 'askPlutoDeep') return 0.2;
     if (task === 'queryClassification') return 0.1;
     return 0.3;
   }
@@ -1872,9 +1964,9 @@ export function calculateOllamaContextBudget(
     task === 'queryClassification'
       ? 128
       : task === 'askPluto'
-        ? 1024
+        ? 192
         : task === 'askPlutoDeep'
-          ? 2048
+          ? 256
           : task === 'analysisEditorial'
             ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
             : task === 'knowledgeDoc' ||
@@ -1888,15 +1980,15 @@ export function calculateOllamaContextBudget(
     task === 'askPluto'
       ? 8192
       : task === 'askPlutoDeep'
-        ? 16384
+        ? 12288
         : task === 'knowledgeDoc' || task === 'analysisEditorial'
           ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
           : 16384;
   const minimumContext =
-    task === 'askPluto' || task === 'title'
-      ? 8192
-      : task === 'askPlutoDeep'
-        ? 16384
+    task === 'askPluto' || task === 'askPlutoDeep'
+      ? 4096
+      : task === 'title'
+        ? 8192
         : 4096;
   const num_ctx = Math.min(
     maxCap,

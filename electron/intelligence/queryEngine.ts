@@ -395,6 +395,69 @@ const calculateRecencyDecay = (dateStr: string | null | undefined): number => {
   return 1 / (1 + Math.max(0, daysAgo) * 0.1);
 };
 
+export const mergeRetrievalResultsByMeeting = (
+  ...resultSets: RetrievalResult[][]
+): RetrievalResult[] => {
+  const seenMeetingIds = new Set<string>();
+  return resultSets.flatMap((results) =>
+    results.filter((result) => {
+      if (seenMeetingIds.has(result.meeting_id)) return false;
+      seenMeetingIds.add(result.meeting_id);
+      return true;
+    }),
+  );
+};
+
+const EXTRACTIVE_TEMPORAL_SUMMARY_QUERY =
+  /\b(?:summari[sz]e|summary|analy[sz]e|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+const CONTEXTLESS_SUMMARY_TEXT =
+  /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
+const GENERIC_MEETING_TITLE =
+  /^(?:meeting|untitled meeting|recovered recording)$/i;
+
+const extractPreparedAnalysis = (evidence: string): string | null => {
+  const match = evidence.match(
+    /\[(?:Analysis|Overview|Summary)\]:\s*([\s\S]*?)(?=\n\[[^\]]+\]:|$)/i,
+  );
+  if (!match?.[1]) return null;
+  const normalized = match[1].replace(/\s+/g, ' ').trim();
+  if (normalized.length < 40 || CONTEXTLESS_SUMMARY_TEXT.test(normalized)) {
+    return null;
+  }
+  const primaryClaim = normalized.split(
+    /\s+and\s+(?=(?:evaluated|discussed|considered|reviewed|questioned)\b)/i,
+  )[0];
+  if (primaryClaim.length <= 280) {
+    return /[.!?]$/.test(primaryClaim) ? primaryClaim : `${primaryClaim}.`;
+  }
+  const bounded = primaryClaim.slice(0, 280);
+  const sentenceEnd = Math.max(
+    bounded.lastIndexOf('.'),
+    bounded.lastIndexOf('!'),
+    bounded.lastIndexOf('?'),
+  );
+  return (sentenceEnd >= 80 ? bounded.slice(0, sentenceEnd + 1) : bounded)
+    .trim()
+    .replace(/[,;:]$/, '.');
+};
+
+export const buildExtractiveTemporalSummary = (
+  query: string,
+  context: RetrievalResult[],
+): string | null => {
+  if (!EXTRACTIVE_TEMPORAL_SUMMARY_QUERY.test(query) || context.length < 1) {
+    return null;
+  }
+  const claims = context.flatMap((source, index) => {
+    const title = (source.meeting_title || source.mid?.title || '').trim();
+    if (!title || GENERIC_MEETING_TITLE.test(title)) return [];
+    const analysis = extractPreparedAnalysis(source.evidence_text);
+    if (!analysis) return [];
+    return [`${title}: ${analysis} [Source ${index + 1}]`];
+  });
+  return claims.length > 0 ? claims.slice(0, 2).join('\n\n') : null;
+};
+
 /**
  * Core Retrieval logic: Vectorless RAG
  */
@@ -587,7 +650,10 @@ export const retrieveContext = async (
   // 5. Time filter processing
   // (Range logic can be added here if temporal_range is set)
 
-  for (const pinnedResult of options.pinnedResults || []) {
+  const pinnedResults = mergeRetrievalResultsByMeeting(
+    options.pinnedResults || [],
+  );
+  for (const pinnedResult of pinnedResults) {
     resultsMap[pinnedResult.meeting_id] = pinnedResult;
   }
 
@@ -608,12 +674,10 @@ export const retrieveContext = async (
   const filteredResults = finalResults.filter((res) => res.score > 0.05);
   filteredResults.sort((a, b) => b.score - a.score);
 
-  if (!options.pinnedResults?.length) return filteredResults.slice(0, 6);
-  const pinnedIds = new Set(
-    options.pinnedResults.map((result) => result.meeting_id),
-  );
+  if (!pinnedResults.length) return filteredResults.slice(0, 6);
+  const pinnedIds = new Set(pinnedResults.map((result) => result.meeting_id));
   return [
-    ...options.pinnedResults,
+    ...pinnedResults,
     ...filteredResults.filter((result) => !pinnedIds.has(result.meeting_id)),
   ].slice(0, 6);
 };
