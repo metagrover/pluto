@@ -92,6 +92,15 @@ describe('SetupWizard', () => {
     await act(async () => vi.advanceTimersByTime(800));
 
     expect(container.textContent).toContain('Ready in just three minutes.');
+    expect(
+      container.querySelector('[data-testid="setup-typewriter-cursor"]'),
+    ).toBeTruthy();
+
+    await act(async () => vi.advanceTimersByTime(400));
+
+    expect(
+      container.querySelector('[data-testid="setup-typewriter-cursor"]'),
+    ).toBeFalsy();
   });
 
   it('prepares local recording requirements without Python or provider setup', async () => {

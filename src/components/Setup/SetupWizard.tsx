@@ -33,6 +33,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
+  const [showSetupCursor, setShowSetupCursor] = useState(false);
   const [requirements, setRequirements] = useState<SetupReadinessInput>({
     transcription: 'checking',
     microphone: 'checking',
@@ -125,15 +126,23 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     const qualifier = 'just ';
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setTypedSetupQualifier(qualifier);
+      setShowSetupCursor(false);
       return;
     }
 
-    const timers = [...qualifier].map((_, index) =>
-      window.setTimeout(
-        () => setTypedSetupQualifier(qualifier.slice(0, index + 1)),
-        450 + index * 70,
+    const timers = [
+      window.setTimeout(() => setShowSetupCursor(true), 450),
+      ...[...qualifier].map((_, index) =>
+        window.setTimeout(
+          () => setTypedSetupQualifier(qualifier.slice(0, index + 1)),
+          450 + index * 70,
+        ),
       ),
-    );
+      window.setTimeout(
+        () => setShowSetupCursor(false),
+        450 + qualifier.length * 70 + 280,
+      ),
+    ];
 
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [hydrated, step]);
@@ -206,7 +215,14 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em] sm:text-[2.25rem]"
               >
                 <span aria-hidden="true">
-                  Ready in {typedSetupQualifier}three minutes.
+                  Ready in {typedSetupQualifier}
+                  {showSetupCursor && (
+                    <span
+                      data-testid="setup-typewriter-cursor"
+                      className="mx-0.5 inline-block h-[0.78em] w-[2px] translate-y-[0.06em] animate-[pulse_650ms_steps(1,end)_infinite] bg-current motion-reduce:hidden"
+                    />
+                  )}
+                  three minutes.
                 </span>
               </h2>
               <p className="mt-2 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
