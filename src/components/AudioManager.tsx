@@ -732,11 +732,8 @@ export const AudioManager = ({
         };
       }
 
-      onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
-      isRecordingRef.current = true;
-      setIsRecording(true);
       systemAudioHealthRef.current = 'warning';
       publishCaptureHealth({
         microphone: 'healthy',
@@ -1144,7 +1141,12 @@ export const AudioManager = ({
         console.log('[Pluto] Microphone recording started.');
       }
 
-      // 6. No restart loop needed
+      // Only expose the recording state once live PCM and durable microphone
+      // capture are active. Until this point the UI remains in its explicit
+      // starting state, so speech is not invited before it can be recorded.
+      onRecordingStarted?.(startTimeRef.current);
+      isRecordingRef.current = true;
+      setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
       return { admitted: true, meetingId };
     } catch (e) {

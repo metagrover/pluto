@@ -139,6 +139,36 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(stoppedStartingIndex).toBeGreaterThan(readinessIndex);
   });
 
+  it('does not publish recording until microphone capture is active', () => {
+    const startIndex = source.indexOf('const startSession = async ()');
+    const microphonePcmIndex = source.indexOf(
+      "eouSessionRef.current?.append('mic', copied)",
+      startIndex,
+    );
+    const recorderStartIndex = source.indexOf(
+      'micRecorder.start(CHUNK_SECONDS * 1000)',
+      microphonePcmIndex,
+    );
+    const recordingStartedIndex = source.indexOf(
+      'onRecordingStarted?.(startTimeRef.current)',
+      startIndex,
+    );
+    const recordingStateIndex = source.indexOf(
+      'setIsRecording(true)',
+      startIndex,
+    );
+    const lifecycleIndex = source.indexOf(
+      "publishCaptureLifecycle({ state: 'recording', meetingId })",
+      startIndex,
+    );
+
+    expect(microphonePcmIndex).toBeGreaterThan(startIndex);
+    expect(recorderStartIndex).toBeGreaterThan(microphonePcmIndex);
+    expect(recordingStartedIndex).toBeGreaterThan(recorderStartIndex);
+    expect(recordingStateIndex).toBeGreaterThan(recorderStartIndex);
+    expect(lifecycleIndex).toBeGreaterThan(recordingStateIndex);
+  });
+
   it('publishes the frozen meeting preview before finalization work', () => {
     const stopIndex = source.indexOf('const stopSession = async');
     const previewIndex = source.indexOf('onFinalizationStarted?.({', stopIndex);
