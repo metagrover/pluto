@@ -37,16 +37,26 @@ export const Logo: React.FC<LogoProps> = ({
         style={{ width: size, height: size }}
         className="relative flex-shrink-0"
       >
-        <img
-          src={logoSvg}
-          alt="Pluto Logo"
-          className="w-full h-full object-contain block dark:hidden transition-all duration-300 hover:scale-110 active:scale-95"
-        />
-        <img
-          src={logoDarkSvg}
-          alt="Pluto Logo"
-          className="w-full h-full object-contain hidden dark:block transition-all duration-300 hover:scale-110 active:scale-95"
-        />
+        {variant === 'light' ? (
+          <img
+            src={logoDarkSvg}
+            alt="Pluto Logo"
+            className="block h-full w-full object-contain transition-all duration-300 hover:scale-110 active:scale-95"
+          />
+        ) : (
+          <>
+            <img
+              src={logoSvg}
+              alt="Pluto Logo"
+              className="block h-full w-full object-contain transition-all duration-300 hover:scale-110 active:scale-95 dark:hidden"
+            />
+            <img
+              src={logoDarkSvg}
+              alt="Pluto Logo"
+              className="hidden h-full w-full object-contain transition-all duration-300 hover:scale-110 active:scale-95 dark:block"
+            />
+          </>
+        )}
       </div>
 
       {(showText || showTagline) && (
