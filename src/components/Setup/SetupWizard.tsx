@@ -179,17 +179,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             footer="Your audio and transcript stay under your control."
           />
 
-          <section className="relative isolate flex min-h-[38rem] items-center overflow-hidden px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-40 -top-40 -z-10 h-[32rem] w-[32rem] rounded-full bg-[oklch(0.82_0.07_85/0.12)] blur-3xl"
-            />
+          <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
             <div className="w-full max-w-xl">
-              <h2 className="max-w-[11ch] font-serif text-[2.75rem] font-medium leading-[1.02] tracking-[-0.035em] sm:text-[3.25rem]">
-                Get Pluto ready.
+              <h2 className="font-serif text-[2.5rem] font-medium leading-[1.08] tracking-[-0.03em] sm:text-[2.75rem]">
+                Ready in three minutes.
               </h2>
               <p className="mt-4 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
-                Three steps, about three minutes.
+                One download. Two permissions.
               </p>
 
               <ol className="mt-9 border-y border-[oklch(0.86_0.012_85)]">
@@ -213,7 +209,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               <button
                 type="button"
                 onClick={() => void startSetup()}
-                className="group mt-8 inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-[0_10px_28px_oklch(0.25_0.035_258/0.14)] transition-[background-color,transform,box-shadow] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] hover:shadow-[0_12px_32px_oklch(0.25_0.035_258/0.18)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)]"
+                className="group mt-8 inline-flex min-h-12 min-w-48 items-center justify-center gap-3 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)]"
               >
                 Begin setup
                 <ArrowRight

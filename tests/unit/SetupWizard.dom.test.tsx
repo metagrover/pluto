@@ -91,7 +91,8 @@ describe('SetupWizard', () => {
     expect(container.textContent).toContain(
       'notes, decisions, people, and next steps',
     );
-    expect(container.textContent).toContain('Get Pluto ready.');
+    expect(container.textContent).toContain('Ready in three minutes.');
+    expect(container.textContent).toContain('One download. Two permissions.');
     expect(container.textContent).toContain('Local transcription');
     expect(container.textContent).toContain('Microphone access');
     expect(container.textContent).toContain('System audio access');
