@@ -1,5 +1,7 @@
 # Meeting Model Evaluation — #674
 
+**Subsequent user decision:** Keep future work local-model-only. The hosted-baseline recommendation below is historical and superseded; no API key is required. Next: review concise general prompting and targeted guardrails, with implementation pending design approval. Recorded model results remain unchanged.
+
 User approval: evaluate alternatives to `qwen3.5:9b` using synthetic transcripts only. Keep production model/settings/meetings unchanged. No merge or push.
 
 ## Fixed comparison
