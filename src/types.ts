@@ -62,7 +62,16 @@ export type AnalysisErrorCategory =
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
   | 'unsupported_action_item_due'
-  | 'unsupported_recent_win';
+  | 'unsupported_recent_win'
+  | 'unsupported_decision_decider'
+  | 'unsupported_decision_rationale'
+  | 'unsupported_key_point_speaker'
+  | 'editorial_invalid_json'
+  | 'editorial_input_too_large'
+  | 'editorial_dropped_settled_item'
+  | 'editorial_failed'
+  | 'terminology_invalid_json'
+  | 'terminology_failed';
 
 export interface TopicPoint {
   text: string;
@@ -108,6 +117,31 @@ export interface AnalysisGenerationMetadata {
   prompt_version: string;
   generated_at: string;
   error_categories: AnalysisErrorCategory[];
+  generation_options?: {
+    structured_thinking?: boolean;
+    seed?: number;
+  };
+  terminology?: {
+    schemaVersion: 1;
+    generatedAt: string;
+    provider: string;
+    model: string;
+    policyVersion: string;
+    proposals: Array<{
+      rawForms: string[];
+      preferredTerm: string | null;
+      segmentIndexes: number[];
+      confidence: 'high' | 'medium' | 'low';
+      signals: Array<
+        | 'repeated_context'
+        | 'known_person'
+        | 'known_entity'
+        | 'spoken_definition'
+        | 'variant_consistency'
+      >;
+      status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
+    }>;
+  };
 }
 
 export interface AnalysisDocumentV3 {

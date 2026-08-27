@@ -197,11 +197,12 @@ export const resolveTranscriptEvidence = (
   evidence: string | undefined,
   transcript: string,
   claim?: string,
+  options: AnalysisGroundingOptions = {},
 ): ResolvedTranscriptEvidence | null => {
   const normalizedEvidence = normalizeTranscriptEvidence(evidence ?? '');
   if (!normalizedEvidence) return null;
   const evidenceClaimSupport = claim
-    ? claimSupportRatio(claim, evidence ?? '')
+    ? claimSupportRatio(claim, evidence ?? '', options.terminologyAliases)
     : 1;
   const evidenceSupportsClaim = evidenceClaimSupport >= MIN_FULL_CLAIM_SUPPORT;
   const lines = transcript.split(/\r?\n/);
@@ -242,7 +243,8 @@ export const resolveTranscriptEvidence = (
         if (
           !evidenceSupportsClaim &&
           (!claim ||
-            claimSupportRatio(claim, sourceLine) < MIN_FULL_CLAIM_SUPPORT)
+            claimSupportRatio(claim, sourceLine, options.terminologyAliases) <
+              MIN_FULL_CLAIM_SUPPORT)
         ) {
           continue;
         }
@@ -265,8 +267,43 @@ export const resolveTranscriptEvidence = (
   return null;
 };
 
-function claimSupportRatio(claim: string, evidence: string): number {
-  const claimTokens = normalizeTranscriptEvidence(claim)
+export interface AnalysisGroundingOptions {
+  terminologyAliases?: Record<string, string[]>;
+}
+
+const normalizeClaimTerminology = (
+  claim: string,
+  aliases: Record<string, string[]> = {},
+): string => {
+  let normalized = normalizeTranscriptEvidence(claim);
+  for (const [preferred, rawForms] of Object.entries(aliases)) {
+    const normalizedPreferred = normalizeTranscriptEvidence(preferred);
+    const normalizedRaw = normalizeTranscriptEvidence(rawForms[0] ?? '');
+    if (
+      !normalizedPreferred ||
+      !normalizedRaw ||
+      /\d/.test(normalizedPreferred) ||
+      /\d/.test(normalizedRaw) ||
+      /\b(?:no|not|never|without)\b/.test(normalizedPreferred) ||
+      /\b(?:no|not|never|without)\b/.test(normalizedRaw)
+    ) {
+      continue;
+    }
+    const escaped = normalizedPreferred.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    normalized = normalized.replace(
+      new RegExp(`\\b${escaped}\\b`, 'g'),
+      normalizedRaw,
+    );
+  }
+  return normalized;
+};
+
+function claimSupportRatio(
+  claim: string,
+  evidence: string,
+  terminologyAliases: Record<string, string[]> = {},
+): number {
+  const claimTokens = normalizeClaimTerminology(claim, terminologyAliases)
     .replace(/\b(?:proceed|move forward) with\b/g, 'use')
     .split(' ')
     .filter((token) => token.length >= 2);
@@ -353,6 +390,112 @@ const isPassiveUnownedNeed = (evidence: string): boolean =>
   /\bneeds? to be\b/i.test(evidence) &&
   !/\b(?:assigned|i can|i will|i'll|owns?|sure|yes|will do)\b/i.test(evidence);
 
+const GENERIC_ACTION_ASSIGNEE =
+  /^(?:group|team|the team|we|everyone|i|me|you)$/i;
+const FIRST_PERSON_ACTION_COMMITMENT =
+  /\b(?:i will|i['’]ll|i can|i am going to|i['’]m going to|i commit to)\b/i;
+const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;
+const NAMED_ACTION_COMMITMENT =
+  /\b([\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*){0,2})\s+(?:will|shall|can|owns?|is assigned|was assigned)\b/gu;
+
+const capitalizeActionText = (value: string): string =>
+  value.replace(/^\p{Ll}/u, (character) =>
+    character.toLocaleUpperCase('en-US'),
+  );
+
+const canonicalizeActionText = (text: string, assignee?: string): string => {
+  const subjectPatterns = [
+    '(?:the\\s+team|team|we|i)',
+    ...(assignee && !GENERIC_ACTION_ASSIGNEE.test(assignee.trim())
+      ? [assignee.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]
+      : []),
+  ];
+  const framing = new RegExp(
+    `^(?:${subjectPatterns.join('|')})\\s+(?:will|shall|can|(?:is|are|am)\\s+going\\s+to|(?:has|have)\\s+(?:agreed|committed)\\s+to)\\s+`,
+    'i',
+  );
+  const canonical = text
+    .trim()
+    .replace(/^(?:i|we)['’]ll\s+/i, '')
+    .replace(framing, '')
+    .trim();
+  return capitalizeActionText(canonical || text.trim());
+};
+
+const resolveActionAssignee = (
+  claimedAssignee: string | undefined,
+  resolved: ResolvedTranscriptEvidence,
+): { assignee?: string; rejectedClaimedAssignee: boolean } => {
+  const firstPersonSpeakers = new Set(
+    resolved.sourceLines
+      .filter((line) =>
+        FIRST_PERSON_ACTION_COMMITMENT.test(transcriptLineContent(line)),
+      )
+      .map(transcriptLineSpeaker)
+      .filter((speaker): speaker is string => Boolean(speaker)),
+  );
+  if (firstPersonSpeakers.size === 1) {
+    const [assignee] = firstPersonSpeakers;
+    return {
+      assignee,
+      rejectedClaimedAssignee: Boolean(
+        claimedAssignee &&
+          !GENERIC_ACTION_ASSIGNEE.test(claimedAssignee) &&
+          normalizeTranscriptEvidence(claimedAssignee) !==
+            normalizeTranscriptEvidence(assignee),
+      ),
+    };
+  }
+
+  if (
+    resolved.sourceLines.some((line) =>
+      GROUP_ACTION_COMMITMENT.test(transcriptLineContent(line)),
+    )
+  ) {
+    return {
+      assignee: 'Group',
+      rejectedClaimedAssignee: Boolean(
+        claimedAssignee && !GENERIC_ACTION_ASSIGNEE.test(claimedAssignee),
+      ),
+    };
+  }
+
+  const namedAssignees = new Set(
+    resolved.sourceLines.flatMap((line) =>
+      [...transcriptLineContent(line).matchAll(NAMED_ACTION_COMMITMENT)]
+        .map((match) => match[1]?.trim())
+        .filter(
+          (assignee): assignee is string =>
+            Boolean(assignee) && !GENERIC_ACTION_ASSIGNEE.test(assignee),
+        ),
+    ),
+  );
+  if (namedAssignees.size === 1) {
+    const [assignee] = namedAssignees;
+    return {
+      assignee,
+      rejectedClaimedAssignee: Boolean(
+        claimedAssignee &&
+          normalizeTranscriptEvidence(claimedAssignee) !==
+            normalizeTranscriptEvidence(assignee),
+      ),
+    };
+  }
+
+  if (
+    claimedAssignee &&
+    !GENERIC_ACTION_ASSIGNEE.test(claimedAssignee) &&
+    fieldSupportedBySource(claimedAssignee, resolved.sourceLine) &&
+    settledFieldSupportedByTurn(claimedAssignee, resolved, 'action')
+  ) {
+    return { assignee: claimedAssignee, rejectedClaimedAssignee: false };
+  }
+
+  return {
+    rejectedClaimedAssignee: Boolean(claimedAssignee),
+  };
+};
+
 const isDecisionEquivalentAction = (
   action: ActionItemV3,
   decisions: DecisionV3[],
@@ -398,6 +541,7 @@ const isUnsettledProposal = (sourceLine: string): boolean =>
 const isSettledClaimSupported = (
   claim: string,
   resolved: ResolvedTranscriptEvidence,
+  terminologyAliases: Record<string, string[]> = {},
 ): boolean => {
   const clauses = resolved.sourceLines.flatMap((line) =>
     (transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ?? [])
@@ -405,7 +549,9 @@ const isSettledClaimSupported = (
       .filter(Boolean),
   );
   const supportingClauses = clauses.filter(
-    (clause) => claimSupportRatio(claim, clause) >= MIN_FULL_CLAIM_SUPPORT,
+    (clause) =>
+      claimSupportRatio(claim, clause, terminologyAliases) >=
+      MIN_FULL_CLAIM_SUPPORT,
   );
   const quotedClauseCount = (
     resolved.quotedEvidence.match(/[^.?!;]+[.?!;]?/g) ?? []
@@ -423,8 +569,9 @@ const isSettledClaimSupported = (
   }
   return (
     supportingClauses.length === 0 &&
-    claimSupportRatio(claim, resolved.sourceLine) >= MIN_FULL_CLAIM_SUPPORT &&
-    claimSupportRatio(claim, resolved.quotedEvidence) >=
+    claimSupportRatio(claim, resolved.sourceLine, terminologyAliases) >=
+      MIN_FULL_CLAIM_SUPPORT &&
+    claimSupportRatio(claim, resolved.quotedEvidence, terminologyAliases) >=
       MIN_PARTIAL_CLAIM_SUPPORT &&
     quotedClauseCount === 1 &&
     hasExplicitResolutionCue(resolved.quotedEvidence) &&
@@ -437,14 +584,18 @@ const resolveKeyPointSpeaker = (
   text: string,
   claimedSpeaker: string,
   transcript: string,
+  terminologyAliases: Record<string, string[]> = {},
 ): string | undefined => {
   const supportedSpeakers = new Set(
     transcript
       .split(/\r?\n/)
       .filter(
         (line) =>
-          claimSupportRatio(text, transcriptLineContent(line)) >=
-            MIN_FULL_CLAIM_SUPPORT &&
+          claimSupportRatio(
+            text,
+            transcriptLineContent(line),
+            terminologyAliases,
+          ) >= MIN_FULL_CLAIM_SUPPORT &&
           hasMatchingScopedPolarity(text, transcriptLineContent(line)) &&
           !hasLexicalContradiction(text, transcriptLineContent(line)),
       )
@@ -482,19 +633,27 @@ const POSITIVE_OUTCOME_SIGNAL =
 const groundRecentWin = (
   recentWin: RecentWinV3 | undefined,
   transcript: string,
+  options: AnalysisGroundingOptions,
 ): RecentWinV3 | undefined => {
   if (!recentWin) return undefined;
   const resolved = resolveTranscriptEvidence(
     recentWin.evidence,
     transcript,
     recentWin.win,
+    options,
   );
   if (
     !resolved ||
-    claimSupportRatio(recentWin.win, resolved.evidence) <
-      MIN_PARTIAL_CLAIM_SUPPORT ||
-    claimSupportRatio(recentWin.why_it_counts, resolved.sourceLine) <
-      MIN_PARTIAL_CLAIM_SUPPORT ||
+    claimSupportRatio(
+      recentWin.win,
+      resolved.evidence,
+      options.terminologyAliases,
+    ) < MIN_PARTIAL_CLAIM_SUPPORT ||
+    claimSupportRatio(
+      recentWin.why_it_counts,
+      resolved.sourceLine,
+      options.terminologyAliases,
+    ) < MIN_PARTIAL_CLAIM_SUPPORT ||
     !POSITIVE_OUTCOME_SIGNAL.test(resolved.sourceLine)
   ) {
     return undefined;
@@ -505,12 +664,13 @@ const groundRecentWin = (
 export const groundAnalysisDocument = (
   analysis: AnalysisDocumentV3,
   transcript: string,
+  options: AnalysisGroundingOptions = {},
 ): {
   analysis: AnalysisDocumentV3;
   errorCategories: AnalysisErrorCategory[];
 } => {
   const errorCategories: AnalysisErrorCategory[] = [];
-  const recent_win = groundRecentWin(analysis.recent_win, transcript);
+  const recent_win = groundRecentWin(analysis.recent_win, transcript, options);
   if (analysis.recent_win && !recent_win) {
     pushCategory(errorCategories, 'unsupported_recent_win');
   }
@@ -521,6 +681,7 @@ export const groundAnalysisDocument = (
         point.text,
         point.speaker,
         transcript,
+        options.terminologyAliases,
       );
       if (speaker) return { ...point, speaker };
       pushCategory(errorCategories, 'unsupported_key_point_speaker');
@@ -532,12 +693,20 @@ export const groundAnalysisDocument = (
         decision.evidence,
         transcript,
         decision.text,
+        options,
       );
       if (
         !resolved ||
-        claimSupportRatio(decision.text, resolved.evidence) <
-          MIN_FULL_CLAIM_SUPPORT ||
-        !isSettledClaimSupported(decision.text, resolved) ||
+        claimSupportRatio(
+          decision.text,
+          resolved.evidence,
+          options.terminologyAliases,
+        ) < MIN_FULL_CLAIM_SUPPORT ||
+        !isSettledClaimSupported(
+          decision.text,
+          resolved,
+          options.terminologyAliases,
+        ) ||
         isUnresolvedDeferral(decision.text)
       ) {
         pushCategory(errorCategories, 'unsupported_decision');
@@ -568,36 +737,45 @@ export const groundAnalysisDocument = (
     });
 
     const action_items = topic.action_items.flatMap((item): ActionItemV3[] => {
+      const canonicalItem = {
+        ...item,
+        text: canonicalizeActionText(item.text, item.assignee),
+      };
       const resolved = resolveTranscriptEvidence(
-        item.evidence,
+        canonicalItem.evidence,
         transcript,
-        item.text,
+        canonicalItem.text,
+        options,
       );
       if (
         !resolved ||
-        claimSupportRatio(item.text, resolved.evidence) <
-          MIN_FULL_CLAIM_SUPPORT ||
-        !isSettledClaimSupported(item.text, resolved) ||
-        isDecisionEquivalentAction(item, decisions) ||
+        claimSupportRatio(
+          canonicalItem.text,
+          resolved.evidence,
+          options.terminologyAliases,
+        ) < MIN_FULL_CLAIM_SUPPORT ||
+        !isSettledClaimSupported(
+          canonicalItem.text,
+          resolved,
+          options.terminologyAliases,
+        ) ||
+        isDecisionEquivalentAction(canonicalItem, decisions) ||
         isPassiveUnownedNeed(resolved.sourceLine)
       ) {
         pushCategory(errorCategories, 'unsupported_action_item');
         return [];
       }
       const grounded: ActionItemV3 = {
-        text: item.text,
+        text: canonicalItem.text,
         evidence: resolved.evidence,
         topic: topic.title,
       };
-      if (item.assignee) {
-        if (
-          fieldSupportedBySource(item.assignee, resolved.sourceLine) &&
-          settledFieldSupportedByTurn(item.assignee, resolved, 'action')
-        ) {
-          grounded.assignee = item.assignee;
-        } else {
-          pushCategory(errorCategories, 'unsupported_action_item_owner');
-        }
+      const ownership = resolveActionAssignee(item.assignee, resolved);
+      if (ownership.assignee) {
+        grounded.assignee = ownership.assignee;
+      }
+      if (ownership.rejectedClaimedAssignee) {
+        pushCategory(errorCategories, 'unsupported_action_item_owner');
       }
       if (item.due) {
         if (

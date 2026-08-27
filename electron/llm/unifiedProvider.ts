@@ -24,6 +24,7 @@ import type {
   AnalysisErrorCategory,
   AnalysisGenerationMetadata,
   DecisionV3,
+  MeetingTerminologyArtifactV1,
   RecentWinV3,
   TopicSection,
 } from './analysisTypes';
@@ -37,6 +38,7 @@ import {
   getStructuredAnalysisRepairPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
+  getTerminologyReconciliationPrompt,
   getTitlePrompt,
   getTopicAnalysisPrompt,
   getTopicSegmentationPrompt,
@@ -53,6 +55,15 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
+import {
+  type TerminologyCandidate,
+  aggregateTerminologyCandidates,
+  buildTerminologyContextBlock,
+  createTerminologyArtifact,
+  discoverRepeatedTerminologyCandidates,
+  getAppliedTerminologyAliases,
+  parseTerminologyCandidates,
+} from './terminologyReconciliation';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
@@ -65,7 +76,7 @@ const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 const CONSERVATIVE_CHARACTERS_PER_TOKEN = 1;
-export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v7';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v9';
 
 const mergeUniqueByKey = <T>(
   primary: T[],
@@ -127,8 +138,11 @@ const mergeEditorialWithGroundedLocal = (
   localDraft: AnalysisDocumentV3,
   editedDraft: AnalysisDocumentV3,
   transcript: string,
+  terminologyAliases: Record<string, string[]> = {},
 ): { analysis: AnalysisDocumentV3; repairedSettledOmission: boolean } => {
-  const groundedLocal = groundAnalysisDocument(localDraft, transcript).analysis;
+  const groundedLocal = groundAnalysisDocument(localDraft, transcript, {
+    terminologyAliases,
+  }).analysis;
   const topics = editedDraft.topics.map((topic) => ({
     ...topic,
     key_points: [...topic.key_points],
@@ -255,13 +269,22 @@ const buildAnalysisQualityIssues = (
       'Some generated actions or decisions could not be verified against transcript evidence and were omitted.',
     );
   }
+  if (
+    ['terminology_invalid_json', 'terminology_failed'].some((category) =>
+      categorySet.has(category as AnalysisErrorCategory),
+    )
+  ) {
+    issues.push(
+      'Terminology reconciliation was unavailable, so raw transcript wording was preserved.',
+    );
+  }
   return issues;
 };
 
 const HOUSEKEEPING_TOPIC =
   /\b(screen shar(?:e|ing)|introductions?|repository links?|link sharing|tool mechanics?)\b/i;
 const GENERIC_EMPTY_ANALYSIS =
-  /\bno substantive (?:discussion|discussions|outcome|outcomes|content|detail|details)\b/i;
+  /\b(?:no substantive (?:discussion|discussions|outcome|outcomes|content|detail|details)|nothing substantive|contains? only (?:filler|small talk)|no factual (?:data|detail|details|content))\b/i;
 
 const isGenericEmptyAnalysisText = (value: string): boolean =>
   GENERIC_EMPTY_ANALYSIS.test(value);
@@ -456,6 +479,7 @@ type LLMTask =
   | 'structuredAnalysis'
   | 'analysisEditorial'
   | 'topicSegmentation'
+  | 'terminologyReconciliation'
   | 'topicAnalysis'
   | 'speaker'
   | 'title'
@@ -472,6 +496,7 @@ const isAbortError = (error: unknown): boolean =>
 
 const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
   task === 'topicSegmentation' ||
+  task === 'terminologyReconciliation' ||
   task === 'topicAnalysis' ||
   task === 'analysisEditorial';
 
@@ -481,6 +506,7 @@ export const getOllamaTimeoutMs = (task: string): number =>
     : task === 'structuredAnalysis' ||
         task === 'analysisEditorial' ||
         task === 'topicSegmentation' ||
+        task === 'terminologyReconciliation' ||
         task === 'topicAnalysis'
       ? OLLAMA_ANALYSIS_TIMEOUT_MS
       : OLLAMA_TIMEOUT_MS;
@@ -489,6 +515,7 @@ const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
   task === 'structuredAnalysis' ||
   task === 'analysisEditorial' ||
   task === 'topicSegmentation' ||
+  task === 'terminologyReconciliation' ||
   task === 'topicAnalysis' ||
   task === 'knowledgeDoc';
 
@@ -571,7 +598,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; knownTerms?: string[] } = {},
   ): Promise<AnalysisDocumentV3> {
     if (this.providerType === 'ollama') {
       return this.generateStructuredAnalysisMultiPass(
@@ -579,6 +606,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         userNotes,
         template,
         options.signal,
+        options.knownTerms ?? [],
       );
     }
     return this.generateStructuredAnalysisSinglePass(
@@ -665,6 +693,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
     signal?: AbortSignal,
+    knownTerms: string[] = [],
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
     const windows = sliceTranscriptWindows(transcript, 60, 10);
@@ -672,6 +701,17 @@ export class UnifiedLLMProvider implements LLMProvider {
     const rawActionItems: ActionItemV3[] = [];
     const rawDecisions: DecisionV3[] = [];
     const recentWins: RecentWinV3[] = [];
+    const deterministicCandidates: TerminologyCandidate[] =
+      discoverRepeatedTerminologyCandidates(transcript.split(/\r?\n/));
+    const discoveredCandidates: TerminologyCandidate[] = [];
+    const windowPlans: Array<{
+      win: (typeof windows)[number];
+      topicSegments: Array<{
+        title: string;
+        start_segment: number;
+        end_segment: number;
+      }>;
+    }> = [];
 
     for (const win of windows) {
       const winTranscript = win.lines.join('\n');
@@ -691,7 +731,6 @@ export class UnifiedLLMProvider implements LLMProvider {
             },
           ]
         : [];
-
       if (!isShortMeeting) {
         try {
           const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
@@ -725,6 +764,13 @@ export class UnifiedLLMProvider implements LLMProvider {
               }))
               .filter((t) => t.title.length > 0);
           }
+          discoveredCandidates.push(
+            ...parseTerminologyCandidates(
+              segParsed.terminology_candidates,
+              win.lines,
+              win.startSegment,
+            ),
+          );
         } catch (e) {
           if (isAbortError(e)) throw e;
           console.warn(
@@ -770,6 +816,52 @@ export class UnifiedLLMProvider implements LLMProvider {
           end_segment: nextStart === undefined ? win.endSegment : nextStart - 1,
         };
       });
+      windowPlans.push({ win, topicSegments });
+    }
+
+    const candidateClusters = aggregateTerminologyCandidates([
+      ...discoveredCandidates,
+      ...deterministicCandidates,
+    ]);
+    let terminologyArtifact: MeetingTerminologyArtifactV1 | undefined;
+    if (candidateClusters.length > 0) {
+      try {
+        const raw = await this.generateResumableAnalysisText({
+          prompt: getTerminologyReconciliationPrompt(
+            candidateClusters,
+            knownTerms,
+          ),
+          task: 'terminologyReconciliation',
+          jsonMode: true,
+          signal,
+        });
+        const parsed = JSON.parse(this.cleanJsonText(raw)) as Record<
+          string,
+          unknown
+        >;
+        if (!Array.isArray(parsed.proposals)) {
+          this.pushErrorCategory(errorCategories, 'terminology_invalid_json');
+        } else {
+          terminologyArtifact = createTerminologyArtifact({
+            candidates: candidateClusters,
+            proposals: parsed.proposals,
+            knownTerms,
+            provider: this.providerType,
+            model: this.resolveModelName(),
+            generatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        console.warn('[Analysis] Terminology reconciliation failed safely');
+        this.pushErrorCategory(errorCategories, 'terminology_failed');
+      }
+    }
+    const terminologyContext = terminologyArtifact
+      ? buildTerminologyContextBlock(terminologyArtifact)
+      : '';
+
+    for (const { win, topicSegments } of windowPlans) {
       for (const segment of topicSegments) {
         const lastLineIndex = Math.max(0, win.lines.length - 1);
         const requestedStart = Math.floor(
@@ -795,6 +887,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             slice,
             userNotes,
             template,
+            terminologyContext,
           );
           const topicRaw = await this.generateResumableAnalysisText({
             prompt: topicPrompt,
@@ -951,6 +1044,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           draftContext,
           userNotes,
           template,
+          terminologyContext,
         );
         if (!editorialPromptFits(editorialPrompt)) {
           this.pushErrorCategory(errorCategories, 'editorial_input_too_large');
@@ -974,6 +1068,9 @@ export class UnifiedLLMProvider implements LLMProvider {
               localDraft,
               edited,
               transcript,
+              terminologyArtifact
+                ? getAppliedTerminologyAliases(terminologyArtifact)
+                : {},
             );
             finalDraft = merged.analysis;
             if (merged.repairedSettledOmission) {
@@ -1002,6 +1099,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       transcript,
       retryCount: 0,
       errorCategories,
+      terminologyArtifact,
     });
   }
 
@@ -1032,11 +1130,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string;
     retryCount: number;
     errorCategories: AnalysisErrorCategory[];
+    terminologyArtifact?: MeetingTerminologyArtifactV1;
   }): AnalysisDocumentV3 {
     const grounded = this.applyTranscriptGrounding(
       params.analysis,
       params.transcript,
       params.errorCategories,
+      params.terminologyArtifact,
     );
     return {
       ...grounded,
@@ -1052,7 +1152,10 @@ export class UnifiedLLMProvider implements LLMProvider {
           ]),
         ],
       },
-      generation_metadata: this.buildAnalysisMetadata(params.errorCategories),
+      generation_metadata: this.buildAnalysisMetadata(
+        params.errorCategories,
+        params.terminologyArtifact,
+      ),
     };
   }
 
@@ -1060,8 +1163,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     analysis: AnalysisDocumentV3,
     transcript: string,
     errorCategories: AnalysisErrorCategory[],
+    terminologyArtifact?: MeetingTerminologyArtifactV1,
   ): AnalysisDocumentV3 {
-    const grounded = groundAnalysisDocument(analysis, transcript);
+    const grounded = groundAnalysisDocument(analysis, transcript, {
+      terminologyAliases: terminologyArtifact
+        ? getAppliedTerminologyAliases(terminologyArtifact)
+        : {},
+    });
     for (const category of grounded.errorCategories) {
       this.pushErrorCategory(errorCategories, category);
     }
@@ -1096,6 +1204,7 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   private buildAnalysisMetadata(
     errorCategories: AnalysisErrorCategory[],
+    terminologyArtifact?: MeetingTerminologyArtifactV1,
   ): AnalysisGenerationMetadata {
     return {
       provider: this.providerType,
@@ -1105,6 +1214,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       prompt_version: STRUCTURED_ANALYSIS_PROMPT_VERSION,
       generated_at: new Date().toISOString(),
       error_categories: [...new Set(errorCategories)],
+      ...(terminologyArtifact ? { terminology: terminologyArtifact } : {}),
       ...(this.providerType === 'ollama'
         ? {
             generation_options: {
@@ -1909,6 +2019,9 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'topicSegmentation') {
       return 'You are a meeting topic segmentation expert. Always respond with valid JSON only.';
     }
+    if (task === 'terminologyReconciliation') {
+      return 'You reconcile uncertain meeting terminology conservatively. Always respond with valid JSON only.';
+    }
     if (task === 'topicAnalysis') {
       return 'You are a meeting topic analyst. Always respond with valid JSON only.';
     }
@@ -1943,6 +2056,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'analysisEditorial') return 0.1;
     if (task === 'structuredAnalysis') return 0.7;
     if (task === 'topicSegmentation') return 0.1;
+    if (task === 'terminologyReconciliation') return 0;
     if (task === 'topicAnalysis') return 0.1;
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
@@ -1958,6 +2072,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'analysisEditorial') return OLLAMA_EDITORIAL_OUTPUT_TOKENS;
     if (task === 'structuredAnalysis') return 4096;
     if (task === 'topicSegmentation') return 512;
+    if (task === 'terminologyReconciliation') return 2048;
     if (task === 'topicAnalysis') return 2048;
     if (task === 'summary') return 1024;
     if (task === 'summaryRepair') return 1024;
@@ -2065,11 +2180,13 @@ export function calculateOllamaContextBudget(
           ? 512
           : task === 'analysisEditorial'
             ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-            : task === 'knowledgeDoc' ||
-                task === 'structuredAnalysis' ||
-                task === 'summary'
-              ? 4096
-              : 2500;
+            : task === 'terminologyReconciliation'
+              ? 2048
+              : task === 'knowledgeDoc' ||
+                  task === 'structuredAnalysis' ||
+                  task === 'summary'
+                ? 4096
+                : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
