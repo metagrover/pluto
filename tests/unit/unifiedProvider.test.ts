@@ -167,6 +167,12 @@ describe('UnifiedLLMProvider', () => {
       expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(parseRequestBody(init).response_format).toEqual({
+        type: 'json_object',
+      });
+      expect(parseRequestBody(init).format).toBeUndefined();
+    }
     expect(
       fetchMock.mock.calls.map(([, init]) => parseRequestBody(init).model),
     ).toEqual(['configured-analysis-model', 'configured-analysis-model']);
@@ -182,8 +188,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions the source-guarded writer and audit as notes-v12', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v12');
+  it('versions the schema-constrained writer and audit as notes-v14', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v14');
   });
 
   beforeEach(() => {

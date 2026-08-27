@@ -7,6 +7,7 @@ describe('meeting analysis run coordinator', () => {
   it.each([false, true])(
     'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
     async (notificationFails) => {
+      const beginMeetingAnalysisRun = vi.fn();
       const generateStructuredAnalysis = vi.fn().mockResolvedValue({
         analysis_schema_version: 3,
         overview: 'Reviewed notes.',
@@ -38,7 +39,7 @@ describe('meeting analysis run coordinator', () => {
             userNotesHash: 'notes-terms',
           }),
           getMeetingAnalysisRun: () => null,
-          beginMeetingAnalysisRun: vi.fn(),
+          beginMeetingAnalysisRun,
           updateMeetingAnalysisRunStatus: vi.fn(),
           updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
           isMeetingAnalysisRunCurrent: () => true,
@@ -72,6 +73,31 @@ describe('meeting analysis run coordinator', () => {
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
         }),
+      );
+      // The persisted/reusable run identity must invalidate pre-schema outputs.
+      const fingerprint = createHash('sha256')
+        .update(
+          JSON.stringify({
+            sourceRevision: 'source-terms',
+            eligibilityRevision: 'eligible-terms',
+            userNotesHash: 'notes-terms',
+            terms: ['Ogletree'],
+            template: 'auto',
+            provider: 'ollama',
+            model: null,
+            thinking: null,
+            seed: null,
+            contextTokens: 16384,
+            promptVersion: 'notes-v14',
+          }),
+          'utf8',
+        )
+        .digest('hex');
+      expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
+        expect.objectContaining({ inputRevision: fingerprint }),
+      );
+      expect(generateStructuredAnalysis.mock.calls[0]?.[3].cacheKey).toBe(
+        fingerprint,
       );
     },
   );

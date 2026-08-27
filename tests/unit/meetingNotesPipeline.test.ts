@@ -108,11 +108,14 @@ it('uses one writer and one complete-document editor without segmentation or a t
     'notesWriter',
     'notesAudit',
   ]);
+  expect(
+    generate.mock.calls.map(([request]) => request.responseContract),
+  ).toEqual(['draft', 'editor']);
   expect(result.all_action_items).toEqual([
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v13',
+    prompt_version: 'notes-v15',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -233,6 +236,9 @@ it.each(['faithful', 'inverted'] as const)(
         'notesAudit',
         'notesAudit',
       ]);
+      expect(
+        generate.mock.calls.map(([request]) => request.responseContract),
+      ).toEqual(['draft', 'audit', 'audit']);
       expect(generate.mock.calls[2]![0].prompt).toContain(
         'notes_audit_invalid_commitment:s0:item:1',
       );
@@ -1200,6 +1206,11 @@ it('rejects publication when the final hierarchical audit fails', async () => {
     'notesMerge',
   );
   expect(mergeAuditCalls).toBe(1);
+  for (const [request] of generate.mock.calls) {
+    expect(request.responseContract).toBe(
+      request.task === 'notesAudit' ? 'editor' : 'draft',
+    );
+  }
 });
 
 it('uses original cross-leaf evidence for an answered question and late term definition', async () => {

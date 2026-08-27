@@ -13,6 +13,7 @@ import { resolveSourceSpan } from './meetingNotesSource';
 import {
   type AuditVerdict,
   MeetingNotesError,
+  NOTES_PROMPT_VERSION,
   type NotesAudit,
   type NotesDraft,
   type NotesItem,
@@ -967,7 +968,7 @@ export const projectAuditedNotes = (
       provider: 'ollama',
       model: 'source-grounded',
       generation_path: 'single_pass',
-      prompt_version: 'notes-v12',
+      prompt_version: NOTES_PROMPT_VERSION,
       generated_at: new Date().toISOString(),
       error_categories: [],
       pipeline_version: 'writer-audit-v1',

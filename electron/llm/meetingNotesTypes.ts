@@ -1,5 +1,9 @@
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
+// Shared by generation metadata and persistent run/cache identity.
+export const NOTES_PROMPT_VERSION = 'notes-v14';
+export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v15';
+
 export type SourceSpan = {
   segment: number;
   start: number;
@@ -73,9 +77,11 @@ export type NotesAudit = {
 };
 
 export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
+export type NotesResponseContract = 'draft' | 'audit' | 'editor';
 
 export type NotesRequest = {
   task: NotesTask;
+  responseContract: NotesResponseContract;
   prompt: string;
   outputTokens: number;
   contextTokens: number;

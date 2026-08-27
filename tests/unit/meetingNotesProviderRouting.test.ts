@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { buildNotesResponseSchema } from '../../electron/llm/meetingNotesSchema';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
 import {
@@ -115,7 +116,13 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
         ([request]) => (request as { task: string }).task,
       ),
     ).toEqual(['notesWriter', 'notesAudit']);
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v12');
+    for (const [request] of generate.mock.calls) {
+      const schema = (request as { notesResponseSchema?: unknown })
+        .notesResponseSchema;
+      if (kind === 'ollama') expect(schema).toBeDefined();
+      else expect(schema).toBeUndefined();
+    }
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v14');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -262,6 +269,20 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
       source: f.source,
     });
     expect(requests).toHaveLength(2);
+    expect(requests[0]?.format).toMatchObject({
+      type: 'object',
+      required: ['meetingType', 'overview', 'sections'],
+      additionalProperties: false,
+    });
+    expect(requests[1]?.format).toMatchObject({
+      type: 'object',
+      required: ['changes', 'verdicts', 'dispositions', 'terminology'],
+      additionalProperties: false,
+    });
+    expect(requests.map((request) => request.format)).toEqual([
+      buildNotesResponseSchema('draft', ['R0']),
+      buildNotesResponseSchema('audit', ['R0']),
+    ]);
     expect(urls.every((url) => url.endsWith('/api/chat'))).toBe(true);
     for (const request of requests)
       expect(request).toMatchObject({
@@ -277,4 +298,78 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it.each(['unknown source label', 'nested text', 'missing review target'])(
+  'keeps the same exact schema on one repair and rejects %s without publishing',
+  async (failure) => {
+    const f = makeDirectNotesFixture();
+    const encode = (value: unknown) =>
+      JSON.stringify(value, (key, entry) =>
+        key === 'sources' ? ['R0'] : entry,
+      );
+    const writer = JSON.parse(encode(f.draft));
+    const audit = JSON.parse(encode(f.audit));
+    const outputs: string[] = [];
+    if (failure === 'missing review target') {
+      audit.verdicts.pop();
+      outputs.push(
+        encode(writer),
+        JSON.stringify(audit),
+        JSON.stringify(audit),
+      );
+    } else {
+      if (failure === 'unknown source label')
+        writer.sections[0].items[0].sources = ['R99'];
+      else writer.sections[0].items[0].text = { text: 'Send the outline' };
+      outputs.push(JSON.stringify(writer), JSON.stringify(writer));
+    }
+    const requests: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      const content = outputs.shift();
+      if (!content) throw new Error('unexpected_notes_request');
+      return {
+        ok: true,
+        text: async () =>
+          `${JSON.stringify({ message: { role: 'assistant', content }, done: true, done_reason: 'stop' })}\n`,
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'configured-model',
+    });
+    const auditFailure = failure === 'missing review target';
+    await expect(
+      provider.generateStructuredAnalysis('', '', 'auto', { source: f.source }),
+    ).rejects.toThrow(
+      auditFailure ? 'notes_audit_invalid' : 'notes_writer_invalid',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(auditFailure ? 3 : 2);
+    const attempts = auditFailure ? requests.slice(1) : requests;
+    const schema = buildNotesResponseSchema(auditFailure ? 'audit' : 'draft', [
+      'R0',
+    ]);
+    expect(attempts.map((request) => request.format)).toEqual([schema, schema]);
+    expect(JSON.stringify(attempts[1]?.messages)).toContain(
+      'Repair the prior response',
+    );
+  },
+);
+
+it('fails a schema-rejecting local transport without retrying as unconstrained JSON', async () => {
+  const f = makeDirectNotesFixture();
+  const fetchMock = vi.fn(async () => ({
+    ok: false,
+    statusText: 'schema unsupported',
+    text: async () => '',
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'configured-model',
+  });
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source: f.source }),
+  ).rejects.toThrow('schema unsupported');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

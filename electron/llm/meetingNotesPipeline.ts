@@ -31,6 +31,8 @@ import {
 import {
   type GenerateMeetingNotesInput,
   MeetingNotesError,
+  NOTES_EDITOR_PROMPT_VERSION,
+  NOTES_PROMPT_VERSION,
   type NotesAudit,
   type NotesDraft,
   type NotesItem,
@@ -114,6 +116,12 @@ const makeRequest = (
   outputTokens: number,
 ): NotesRequest => ({
   task,
+  responseContract:
+    task === 'notesAudit'
+      ? input.reviewProtocol === 'editor'
+        ? 'editor'
+        : 'audit'
+      : 'draft',
   prompt,
   outputTokens,
   contextTokens: input.contextTokens,
@@ -280,7 +288,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v1:source-labels:guardrails-v1',
+        'writer-audit-v1:source-labels:guardrails-v1:schema-v1',
       ]),
     )
     .digest('hex');
@@ -473,7 +481,9 @@ const metadataFor = (
     model: input.model,
     generation_path: mode === 'direct' ? 'single_pass' : 'multi_pass',
     prompt_version:
-      input.reviewProtocol === 'editor' ? 'notes-v13' : 'notes-v12',
+      input.reviewProtocol === 'editor'
+        ? NOTES_EDITOR_PROMPT_VERSION
+        : NOTES_PROMPT_VERSION,
     generated_at: new Date().toISOString(),
     error_categories: [],
     pipeline_version:

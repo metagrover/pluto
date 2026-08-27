@@ -65,6 +65,7 @@ export const createNotesWireRequest = (prompt: string, spans: SourceSpan[]) => {
     );
   };
   return {
+    sourceLabels: [...byLabel.keys()],
     prompt: `Source descriptors are opaque labels such as R0. Use sources:["R0"] and copy the labels from SOURCE DATA. Never write or calculate character offsets. Each label resolves to an exact original source span.\n${encoded}`,
     decode: (raw: string): string => {
       try {

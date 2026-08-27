@@ -13,7 +13,9 @@ import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import { generateMeetingNotes } from './meetingNotesPipeline';
+import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
+import { NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
@@ -47,7 +49,7 @@ const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
-export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v12';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
   /context_length_exceeded|context[_ ](?:window|length|size).*(?:exceed|overflow|too (?:large|long))|(?:exceed|overflow).*(?:context|input.*tokens)|(?:prompt|input) (?:is )?too long/i.test(
@@ -357,6 +359,7 @@ interface TextGenerationOptions {
   onStart?: () => void;
   onToken?: (delta: string) => void;
   notesBudget?: { contextTokens: number; outputTokens: number };
+  notesResponseSchema?: Record<string, unknown>;
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
@@ -441,6 +444,14 @@ export class UnifiedLLMProvider implements LLMProvider {
           task: request.task,
           jsonMode: true,
           signal: request.signal,
+          ...(this.providerType === 'ollama'
+            ? {
+                notesResponseSchema: buildNotesResponseSchema(
+                  request.responseContract,
+                  wire.sourceLabels,
+                ),
+              }
+            : {}),
           notesBudget: {
             contextTokens: request.contextTokens,
             outputTokens: request.outputTokens,
@@ -955,6 +966,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal,
     onToken,
     notesBudget,
+    notesResponseSchema,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel(task);
     const activeModel = process.versions.electron
@@ -990,7 +1002,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     };
 
     if (jsonMode) {
-      requestBody.format = 'json';
+      requestBody.format = notesResponseSchema ?? 'json';
       requestBody.think = this.settings.ollama_structured_thinking ?? false;
     }
     if (task === 'queryClassification') requestBody.think = false;

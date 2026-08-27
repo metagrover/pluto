@@ -4,6 +4,7 @@ import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import { NotesStageCache } from './llm/meetingNotesStageCache';
+import { NOTES_PROMPT_VERSION } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 
 type MeetingRecord = {
@@ -164,7 +165,6 @@ type ActiveRun = {
   promise: Promise<PublishedMeetingNotes>;
 };
 
-const NOTES_PROMPT_VERSION = 'notes-v12';
 const NOTES_CONTEXT_TOKENS = 16_384;
 
 const hashFingerprint = (value: unknown): string =>
