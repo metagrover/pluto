@@ -100,7 +100,8 @@ function matchesTask(
     purpose &&
     recipientPattern?.test(task.slice(0, purpose.index)) &&
     !CONDITION.test(purpose[2]!) &&
-    !TASK_BOUNDARY.test(purpose[2]!);
+    !TASK_BOUNDARY.test(purpose[2]!) &&
+    !/\bi (?:commit|promise) to\b/i.test(purpose[2]!);
   if (scopedPurpose && !recipientPattern!.test(text)) return false;
   const parts = taskParts(scopedPurpose ? task.slice(0, purpose.index) : task);
   if (!parts) return false;

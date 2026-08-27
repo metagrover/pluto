@@ -798,7 +798,20 @@ const rejectedOfferDecisionClause = (
   const offer = transcriptLineContent(resolved.sourceLines[0]!);
   const offered = /^i (?:could|can)\s+(.+?)[.!]?$/i.exec(offer);
   if (!offered || /[.?!;]/.test(offered[1]!)) return undefined;
-  const conditionIndex = offered[1]!.search(DECISION_PREREQUISITE);
+  const condition = DECISION_PREREQUISITE.exec(offered[1]!);
+  const conditionIndex = condition?.index ?? -1;
+  if (condition) {
+    const tail = offered[1]!.slice(condition.index + condition[0].length);
+    // A coordinated/modal tail or another prerequisite may introduce another
+    // offer. Never discard it and assume "that offer" names the first task.
+    if (
+      /[,:]|\b(?:and|or|but|can|could|would|might|will|shall|may)\b/i.test(
+        tail,
+      ) ||
+      DECISION_PREREQUISITE.test(tail)
+    )
+      return undefined;
+  }
   const offeredTask = normalizeTranscriptEvidence(
     conditionIndex < 0 ? offered[1]! : offered[1]!.slice(0, conditionIndex),
   );

@@ -272,4 +272,21 @@ describe('guardrail task scope and explicit withdrawal', () => {
         ),
       ).not.toEqual([]);
   });
+
+  it.each(['commit', 'promise'])(
+    'does not hide a separate I %s to commitment in a purpose tail',
+    (verb) => {
+      expect(
+        issuesFor(
+          [
+            {
+              speaker: 'Priya',
+              text: `I will send the report to Lena so Lena can brief visitors and I ${verb} to book the courier.`,
+            },
+          ],
+          [{ text: 'Send the report to Lena.' }],
+        ),
+      ).toEqual([{ code: 'missing_action', segments: [0] }]);
+    },
+  );
 });

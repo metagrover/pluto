@@ -318,4 +318,19 @@ describe('settled decision with a rejected conditional offer', () => {
       ]),
     ).toEqual({ text, owner: null, due: null });
   });
+
+  it.each([
+    'I could animate the introduction if useful and I could translate the captions if useful.',
+    'I could animate the introduction if useful and I can prepare the captions.',
+    'I could animate the introduction if useful and prepare the captions.',
+    'I could animate the introduction if useful or translate the captions once approved.',
+    'I could animate the introduction if useful, provided the captions are translated.',
+  ])(
+    'abstains when a conditional tail cannot prove a sole offer: %s',
+    (ambiguousOffer) => {
+      expect(
+        review(claim, [`Marin: ${ambiguousOffer}`, `Cleo: ${choice}`]),
+      ).toBeNull();
+    },
+  );
 });
