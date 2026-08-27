@@ -88,3 +88,61 @@ it('rejects an atomic audit when a change targets an unknown block', () => {
     'invalid_notes_audit',
   );
 });
+
+it('does not drop a reviewed accepted request solely for paraphrasing', () => {
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [
+        {
+          speaker: 'Nira',
+          text: 'Could you send the outline to the reviewers?',
+        },
+        { speaker: 'Milo', text: 'Yes, I will do that.' },
+      ],
+    }),
+  );
+  const sources = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const draft: NotesDraft = {
+    meetingType: 'general',
+    overview: null,
+    sections: [
+      {
+        id: 's0',
+        title: { id: 't0', text: 'Outline review', sources },
+        items: [
+          {
+            id: 'a0',
+            kind: 'action',
+            text: 'Share the outline with reviewers',
+            sources,
+            owner: 'Milo',
+            due: null,
+          },
+        ],
+      },
+    ],
+  };
+  const audit: NotesAudit = {
+    changes: [],
+    dispositions: [],
+    terminology: [],
+    verdicts: [
+      { target: 't0', status: 'supported', sources },
+      { target: 'a0', status: 'supported', sources },
+    ],
+  };
+
+  expect(
+    projectAuditedNotes(applyNotesAudit({ source, draft, audit }))
+      .all_action_items,
+  ).toEqual([
+    expect.objectContaining({
+      text: 'Share the outline with reviewers',
+      assignee: 'Milo',
+    }),
+  ]);
+});

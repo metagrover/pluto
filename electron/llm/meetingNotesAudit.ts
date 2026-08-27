@@ -446,6 +446,49 @@ export const projectAuditedNotes = (
       },
     },
   };
-  return groundAnalysisDocument(analysis, transcriptForSource(audited.source))
-    .analysis;
+  const grounded = groundAnalysisDocument(
+    analysis,
+    transcriptForSource(audited.source),
+  ).analysis;
+  for (const section of audited.draft.sections) {
+    const topic = grounded.topics.find(
+      (entry) => entry.title === section.title.text,
+    );
+    if (!topic) continue;
+    for (const item of section.items.filter(
+      (entry) => entry.kind === 'action',
+    )) {
+      const verdict = audited.verdicts.get(item.id);
+      const ownerIsExplicit =
+        !item.owner ||
+        item.sources.some((span) => {
+          const segment = audited.source.segments.find(
+            (entry) => entry.index === span.segment,
+          );
+          return (
+            segment?.speaker === item.owner &&
+            /\b(?:i will|i['’]ll|yes[,!]?\s+i will|will do)\b/i.test(
+              segment.text,
+            )
+          );
+        });
+      if (
+        verdict?.status !== 'supported' ||
+        !ownerIsExplicit ||
+        topic.action_items.some((entry) => entry.text === item.text)
+      ) {
+        continue;
+      }
+      topic.action_items.push({
+        text: item.text,
+        ...(item.owner ? { assignee: item.owner } : {}),
+        ...(item.due ? { due: item.due } : {}),
+        evidence: sourceText(audited.source, item.sources),
+      });
+    }
+  }
+  grounded.all_action_items = grounded.topics.flatMap((topic) =>
+    topic.action_items.map((item) => ({ ...item, topic: topic.title })),
+  );
+  return grounded;
 };
