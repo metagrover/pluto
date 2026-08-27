@@ -188,39 +188,42 @@ describe('parseAnalysisDocumentV3', () => {
     });
   });
 
-  it('round-trips additive source-grounded provenance metadata', () => {
-    const source_provenance = {
-      schema_version: 1 as const,
-      source_revision: 'synthetic-revision',
-      blocks: {
-        overview: {
-          id: 'overview',
-          sources: [{ segment: 0, start: 0, end: 12 }],
+  it.each(['writer-audit-v1', 'writer-editor-v1'])(
+    'round-trips additive %s provenance metadata',
+    (pipelineVersion) => {
+      const source_provenance = {
+        schema_version: 1 as const,
+        source_revision: 'synthetic-revision',
+        blocks: {
+          overview: {
+            id: 'overview',
+            sources: [{ segment: 0, start: 0, end: 12 }],
+          },
         },
-      },
-    };
-    const result = parseAnalysisDocumentV3(
-      JSON.stringify({
-        ...validV3,
-        generation_metadata: {
-          ...validV3.generation_metadata,
-          pipeline_version: 'writer-audit-v1',
-          mode: 'direct',
-          audit_status: 'complete',
-          audit_change_count: 1,
-          source_provenance,
-        },
-      }),
-    );
+      };
+      const result = parseAnalysisDocumentV3(
+        JSON.stringify({
+          ...validV3,
+          generation_metadata: {
+            ...validV3.generation_metadata,
+            pipeline_version: pipelineVersion,
+            mode: 'direct',
+            audit_status: 'complete',
+            audit_change_count: 1,
+            source_provenance,
+          },
+        }),
+      );
 
-    expect(result?.generation_metadata).toMatchObject({
-      pipeline_version: 'writer-audit-v1',
-      mode: 'direct',
-      audit_status: 'complete',
-      audit_change_count: 1,
-      source_provenance,
-    });
-  });
+      expect(result?.generation_metadata).toMatchObject({
+        pipeline_version: pipelineVersion,
+        mode: 'direct',
+        audit_status: 'complete',
+        audit_change_count: 1,
+        source_provenance,
+      });
+    },
+  );
 
   it('round-trips a valid meeting-scoped terminology artifact', () => {
     const terminology = {

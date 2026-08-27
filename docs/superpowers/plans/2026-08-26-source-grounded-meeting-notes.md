@@ -26,6 +26,42 @@ The user approved the architecture and initially selected Terra for implementati
 
 ### Current implementation and acceptance record — 2026-08-27
 
+#### Approved accuracy-first revision (supersedes conflicting gates below)
+
+The user approved autonomous completion of the writer/editor revision. Accuracy, readable coverage and reliability are release gates; latency is measured but the former 30-second target is not a blocker. Keep the configured local model and all publication/edit/source safeguards. No production DB writes, merge or push are implied.
+
+1. Add failing `tests/unit/meetingNotesEditor.test.ts` cases for complete-document review, corrected discussion/commitments, invalid sources, unsupported commitments rejected without silent deletion, and terminology provenance. Implement `electron/llm/meetingNotesEditor.ts` using the existing draft parser/projection and source guards; the model returns a complete draft, not patches or a verdict matrix. A hierarchy-only cancellation record remains necessary to conserve inherited commitments; it is not required for direct notes.
+2. Add independent, varied synthetic acceptance cases and mutation-tested scorers. Prove the editor through the real configured provider before changing the production route. Use the original six-turn regression plus personal, interview, brainstorm, accepted-request, qualified promise, reversal and source-defined terminology cases. Do not weaken assertions based on model outputs.
+3. Switch `meetingNotesPipeline.ts` to the proven editor for direct/leaf/merge review. Keep bounded correction and budgets, exact source aliases, inherited conservation, cancellation and validated-writer caching. Version new results distinctly (`notes-v11`, `writer-editor-v1`) and preserve old reads/downstream authority.
+4. Run provider, hierarchy, coordinator, edit/history and downstream regression suites; full unit suite, typecheck, scoped Biome and changelog validation. Test long-source late reversals and middle commitments against the actual model, not only mocks.
+5. Diagnose isolated Electron rendering independently, then verify actual notes publication/regeneration, title preservation, edit conflicts, retry/failure and navigation. Use a synthetic isolated profile, never production meetings.
+6. Perform independent spec and quality review, resolve findings, record exact real-provider results and remaining limits, restore Electron ABI and commit the local branch. No claim of completion from JSON validity alone.
+
+Test commands: `pnpm exec vitest run tests/unit/meetingNotesEditor.test.ts`; `RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 pnpm exec vitest run --config vitest.manual.config.ts tests/manual/meetingNotesEditorAcceptance.test.ts`; `pnpm exec vitest run`; `pnpm exec tsc --noEmit`; `git diff --check`.
+
+#### Editor prototype acceptance checkpoint — 2026-08-27
+
+**Release blocked on semantic quality. The complete-document editor is opt-in through an internal test option only; the production provider still selects writer/audit. This is an experimental checkpoint, not a shipped improvement.** No production meeting, model selection, or saved setting was changed. The branch is not merged or pushed.
+
+The real-provider harness uses the existing local `qwen3.5:9b` (Q4_K_M), Ollama 0.32.15, a 16,384-token context, synthetic transcripts and fixed seeds. Independent scorers cover personal conversations, past work, brainstorming, conditional promises versus willingness, accepted requests, replacement deadlines, rejected alternatives and source-defined acronyms, plus the original six-turn regression. Mutation tests reject incorrect owners, dates, modality, missing facts and stale promises. Passing JSON/provenance checks is not semantic acceptance.
+
+| Controlled check | Observed result | Decision |
+| --- | --- | --- |
+| Nine-case batch, seed 41, standalone editor | Five passed. Conditional promise remained a point; six-turn editor retained an unaccepted offer as an action even after bounded repair. Two other failures were parser/scorer defects described below. | Do not promote. Timings were not a controlled benchmark because a unit-test spy briefly fell through into another synthetic provider request. |
+| Three formerly failing cases after hiding writer kind/owner/due, seed 41 | Accepted request passed. Conditional promise still omitted from actions. Six-turn output still included a withdrawn promise and unaccepted offer; repair repeated the errors. | Anchoring-only hypothesis rejected; field stripping reverted. |
+| Reasoning editor, chat endpoint, 8,192-token budget | A three-turn case exhausted the output budget after approximately 389 seconds, without an accepted document. | Remaining reasoning tests cancelled; no reasoning-default change. |
+| Simple source-only prose diagnostic, same model, thinking off | Correctly distinguished the conditional promise from the unaccepted offer. | Do not claim the model is universally incapable; the combined editing/classification/formatting task is the unresolved boundary. One diagnostic is not a production-quality proof. |
+
+Two valid contract fixes were independently reviewed: omitted owner/due on descriptive points/questions normalize to null (actions/decisions still require the fields), and rejection rationale may appear once in a visible decision rather than being duplicated in narrative. Neither fix relaxes action precision/recall, owner, deadline, modality or withdrawal gates.
+
+Transport investigation independently reproduced an Ollama `/api/generate` JSON/thinking failure: empty final answer despite completion. The same tiny request through `/api/chat` returned a final answer. Notes requests now use chat, consume only final content, and preserve truncation/cancellation checks; unit coverage includes fragmented UTF-8 and a final packet without a newline. This fixes transport, not the remaining semantic errors. See [Ollama issue 17544](https://github.com/ollama/ollama/issues/17544).
+
+Prototype safeguards include exact-source validation, rejection rather than silent removal of unsupported commitments, inherited-content/identity conservation, terminology authorization from trusted user terms or explicit cited definitions, and preservation of speaker names and original evidence. Unit tests now reject unmocked fetch calls to prevent provider traffic from exhausted mocks. Experimental reasoning/output-budget switches were removed from the acceptance harness after the failed trials.
+
+Fresh checkpoint verification: **227 unit-test files / 2,237 tests passed**, `pnpm exec tsc --noEmit` passed, scoped Biome checked all 29 changed/new TypeScript files with no findings, and `git diff --check` passed. Independent spec and quality reviews approve retaining an unpromoted checkpoint only, not release. Default-provider tests explicitly assert `notes-v10` / `writer-audit-v1`; prototype pipeline tests explicitly opt into the editor.
+
+**Next decision, not an approved implementation change:** reconsider the two-pass task boundary before further prompt edits. A dedicated source-reconciliation stage could establish current facts, commitments and reversals before prose composition, but that changes the approved pipeline and needs its own real-provider proof. Alternatively, an explicitly authorized model/runtime evaluation could test whether the existing two-pass contract can meet the gates. Do not silently add stages, switch models, weaken the scorers or ship the prototype. Long-source real-provider acceptance and isolated Electron publication/edit/failure verification remain unperformed for the editor because the short-source gate failed.
+
 **Status: implemented locally; NOT accepted for delivery, merged, pushed, or running in the user's app.** The original per-step checkboxes below are the historical execution recipe, not evidence that an implementation task or acceptance gate passed. This matrix supersedes their execution status.
 
 | Plan area | Current implementation and evidence | Remaining gate |

@@ -61,6 +61,39 @@ it('passes cancellation to Gemini transport and bounds/rejects its truncated out
 
 afterEach(() => vi.unstubAllGlobals());
 
+it.each([true, false])(
+  'uses Ollama chat for notes and returns only final content (thinking=%s)',
+  async (thinking) => {
+    const fetcher = vi.fn(async (url, init) => {
+      expect(String(url)).toContain('/api/chat');
+      expect(JSON.parse(init.body)).toMatchObject({
+        messages: [{ role: 'user', content: 'Return JSON' }],
+        think: thinking,
+        format: 'json',
+        stream: true,
+        options: { num_ctx: 16384, num_predict: 2048 },
+      });
+      expect(JSON.parse(init.body)).not.toHaveProperty('prompt');
+      return {
+        ok: true,
+        text: async () =>
+          [
+            JSON.stringify({ message: { thinking: 'PRIVATE_REASONING' } }),
+            JSON.stringify({ message: { content: '{' } }),
+            JSON.stringify({ message: { content: '}' } }),
+            JSON.stringify({ done: true, done_reason: 'stop' }),
+          ].join('\n'),
+      };
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+      ollama_structured_thinking: thinking,
+    }) as unknown as Transport;
+    await expect(provider.generateText(request)).resolves.toBe('{}');
+  },
+);
+
 it('classifies reported provider input overflow without exposing error bodies', async () => {
   vi.stubGlobal(
     'fetch',
@@ -110,6 +143,35 @@ const request = {
   jsonMode: true,
   notesBudget: { contextTokens: 16384, outputTokens: 2048 },
 };
+
+it('decodes chat packets split at every byte without leaking reasoning or duplicating the final packet', async () => {
+  const payload = new TextEncoder().encode(
+    [
+      JSON.stringify({ message: { thinking: 'PRIVATE_REASONING' } }),
+      JSON.stringify({ message: { content: '{"text":"café"}' } }),
+      JSON.stringify({ done: true, done_reason: 'stop' }),
+    ].join('\n'),
+  );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              for (const byte of payload)
+                controller.enqueue(Uint8Array.of(byte));
+              controller.close();
+            },
+          }),
+        ),
+    ),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'qwen3.5:9b',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).resolves.toBe('{"text":"café"}');
+});
 
 it('forwards notes output limits to OpenAI and rejects length termination even for valid JSON', async () => {
   const fetcher = vi.fn(async (_url, init) => {

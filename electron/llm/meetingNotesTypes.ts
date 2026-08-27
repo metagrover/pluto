@@ -93,6 +93,8 @@ export type NotesContext = {
 };
 
 export type GenerateMeetingNotesInput = {
+  /** Internal acceptance route, removed when the editor is promoted. */
+  reviewProtocol?: 'editor';
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;

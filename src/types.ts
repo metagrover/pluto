@@ -142,7 +142,7 @@ export interface AnalysisGenerationMetadata {
       status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
     }>;
   };
-  pipeline_version?: 'writer-audit-v1';
+  pipeline_version?: 'writer-audit-v1' | 'writer-editor-v1';
   mode?: 'direct' | 'hierarchical';
   audit_status?: 'complete';
   audit_change_count?: number;

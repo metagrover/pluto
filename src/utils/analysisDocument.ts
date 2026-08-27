@@ -399,7 +399,9 @@ const rendererEditPaths = (doc: AnalysisDocumentV3): string[] => [
   ]),
 ];
 
-const isSourceGroundedV10 = (doc: AnalysisDocumentV3): boolean =>
+const isSourceGrounded = (doc: AnalysisDocumentV3): boolean =>
+  doc.generation_metadata?.pipeline_version === 'writer-editor-v1' ||
+  doc.generation_metadata?.prompt_version === 'notes-v11' ||
   doc.generation_metadata?.pipeline_version === 'writer-audit-v1' ||
   doc.generation_metadata?.prompt_version === 'notes-v10';
 
@@ -486,10 +488,10 @@ export const getAnalysisEditBlocks = (
   }
 
   if (
-    isSourceGroundedV10(doc) &&
+    isSourceGrounded(doc) &&
     rendererEditPaths(doc).some((path) => !editBlockSourceKey(doc, path))
   ) {
-    // A v10 projection should always carry complete renderer-path provenance.
+    // A source-grounded projection must carry complete renderer-path provenance.
     // Returning no blocks forces preservation into recoverable conflicts rather
     // than treating corrupt provenance as a legacy text-only document.
     return [];

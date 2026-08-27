@@ -143,38 +143,42 @@ continues on next line.
     });
   });
 
-  it('treats incomplete source-grounded provenance as a conflict boundary', () => {
-    const blocks = getAnalysisEditBlocks({
-      analysis_schema_version: 3,
-      overview: 'Overview',
-      topics: [],
-      all_action_items: [],
-      all_decisions: [],
-      meeting_type: 'general',
-      quality: {
-        format_pass: true,
-        retry_count: 0,
-        fallback_used: false,
-        issues: [],
-      },
-      generation_metadata: {
-        provider: 'ollama',
-        model: 'local',
-        generation_path: 'single_pass',
-        prompt_version: 'notes-v10',
-        generated_at: '2026-08-26T00:00:00.000Z',
-        error_categories: [],
-        pipeline_version: 'writer-audit-v1',
-        source_provenance: {
-          schema_version: 1,
-          source_revision: 'source-a',
-          blocks: {},
+  it.each(['writer-audit-v1', 'writer-editor-v1'] as const)(
+    'treats incomplete %s provenance as a conflict boundary',
+    (pipelineVersion) => {
+      const blocks = getAnalysisEditBlocks({
+        analysis_schema_version: 3,
+        overview: 'Overview',
+        topics: [],
+        all_action_items: [],
+        all_decisions: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
         },
-      },
-    });
+        generation_metadata: {
+          provider: 'ollama',
+          model: 'local',
+          generation_path: 'single_pass',
+          prompt_version:
+            pipelineVersion === 'writer-editor-v1' ? 'notes-v11' : 'notes-v10',
+          generated_at: '2026-08-26T00:00:00.000Z',
+          error_categories: [],
+          pipeline_version: pipelineVersion,
+          source_provenance: {
+            schema_version: 1,
+            source_revision: 'source-a',
+            blocks: {},
+          },
+        },
+      });
 
-    expect(blocks).toEqual([]);
-  });
+      expect(blocks).toEqual([]);
+    },
+  );
 
   it('drops legacy whitespace-only overlays before rendering', () => {
     const edits = parseUserEditsJson(

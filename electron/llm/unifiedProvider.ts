@@ -1006,6 +1006,14 @@ export class UnifiedLLMProvider implements LLMProvider {
         this.settings.ollama_seed;
     }
 
+    // Ollama's generate endpoint can apply JSON grammar to the reasoning
+    // channel, yielding no final answer. Chat defers grammar until the answer.
+    const useNotesChat = Boolean(notesBudget);
+    if (useNotesChat) {
+      requestBody.prompt = undefined;
+      requestBody.messages = [{ role: 'user', content: prompt }];
+    }
+
     const start = Date.now();
     try {
       console.log(
@@ -1060,14 +1068,17 @@ export class UnifiedLLMProvider implements LLMProvider {
                 ? 'notes_input_overflow'
                 : 'notes_provider_error',
             );
-          if (typeof packet.response !== 'string' || !packet.response) continue;
-          answer += packet.response;
-          onToken?.(packet.response);
+          const content = useNotesChat
+            ? (packet.message as { content?: unknown } | undefined)?.content
+            : packet.response;
+          if (typeof content !== 'string' || !content) continue;
+          answer += content;
+          onToken?.(content);
         }
       };
       try {
         const response = await this.ollamaStream(
-          '/api/generate',
+          useNotesChat ? '/api/chat' : '/api/generate',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1079,7 +1090,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             consumeChunk(chunk);
           },
         );
-        if (pending.trim()) consumeChunk(`${pending}\n`);
+        if (pending.trim()) consumeChunk('\n');
         if (!response.ok) {
           throw new Error(`Ollama API error: ${response.statusText}`);
         }

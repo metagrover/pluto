@@ -11,6 +11,12 @@ import {
 } from './meetingNotesAudit';
 import { estimateNotesTokens, planNotesCapacity } from './meetingNotesBudget';
 import {
+  buildNotesEditorPrompt,
+  countEditedBlocks,
+  parseEditedNotes,
+} from './meetingNotesEditor';
+import { identifyEditedNotes } from './meetingNotesEditorIdentity';
+import {
   type InheritedCommitment,
   planNotesLeaves,
   splitNotesDraftForMerge,
@@ -35,6 +41,17 @@ import {
 
 const WRITER_OUTPUT_TOKENS = 2048;
 const AUDIT_OUTPUT_TOKENS = 1536;
+const reviewPrompt = (
+  input: GenerateMeetingNotesInput,
+  options: Parameters<typeof buildNotesAuditPrompt>[0],
+) =>
+  input.reviewProtocol === 'editor'
+    ? buildNotesEditorPrompt(options)
+    : buildNotesAuditPrompt(options);
+const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
+  input.reviewProtocol === 'editor'
+    ? WRITER_OUTPUT_TOKENS
+    : AUDIT_OUTPUT_TOKENS;
 const SAFETY_TOKENS = 512;
 export const NOTES_HIERARCHY_LIMITS = {
   maxDepth: 8,
@@ -307,6 +324,7 @@ const preserveInheritedIds = (
 };
 
 type AuditedNode = {
+  changeCount: number;
   draft: NotesDraft;
   audit: NotesAudit;
   audited: AuditedNotes;
@@ -321,22 +339,53 @@ const auditDraft = async (
   evidenceSpans: SourceSpan[],
   knownTerms: NotesKnownTerm[],
   inherited: NotesItem[] = [],
-): Promise<{ audited: AuditedNotes; draft: NotesDraft; audit: NotesAudit }> => {
+  idPrefix = 'document',
+): Promise<{
+  audited: AuditedNotes;
+  draft: NotesDraft;
+  audit: NotesAudit;
+  changeCount: number;
+}> => {
   const sourceText = serializeSource(input, evidenceSpans);
-  const auditPrompt = buildNotesAuditPrompt({
+  const auditPrompt = reviewPrompt(input, {
     sourceText,
     draft,
     userNotes: input.context.userNotes,
     knownTerms,
     ...(inherited.length ? { inherited } : {}),
   });
-  assertFits(input, auditPrompt, AUDIT_OUTPUT_TOKENS);
+  assertFits(input, auditPrompt, reviewOutputTokens(input));
   const result = await withOneRepair(
     input,
     'notesAudit',
     auditPrompt,
-    AUDIT_OUTPUT_TOKENS,
+    reviewOutputTokens(input),
     (raw) => {
+      if (input.reviewProtocol === 'editor') {
+        const result = parseEditedNotes({
+          raw,
+          source: input.source,
+          terminology: {
+            trustedUserTerms: input.context.trustedUserTerms,
+            provider: input.provider,
+            model: input.model,
+          },
+        });
+        assertAllowedSources(result.draft, evidenceSpans);
+        assertAuditSourcesAllowed(result.audit, evidenceSpans);
+        const preserved = identifyEditedNotes(
+          result.draft,
+          inherited,
+          JSON.parse(raw),
+          idPrefix,
+        );
+        result.audited.draft = preserved;
+        return {
+          ...result,
+          draft: preserved,
+          changeCount: countEditedBlocks(draft, preserved),
+        };
+      }
       const audit = parseNotesAudit(raw);
       assertAuditSourcesAllowed(audit, evidenceSpans);
       const audited = applyNotesAudit({
@@ -350,7 +399,12 @@ const auditDraft = async (
         },
       });
       assertAllowedSources(audited.draft, evidenceSpans);
-      return { audit, audited, draft: audited.draft };
+      return {
+        audit,
+        audited,
+        draft: audited.draft,
+        changeCount: audit.changes.length,
+      };
     },
     evidenceSpans,
   );
@@ -370,10 +424,14 @@ const metadataFor = (
     provider: input.provider,
     model: input.model,
     generation_path: mode === 'direct' ? 'single_pass' : 'multi_pass',
-    prompt_version: 'notes-v10',
+    prompt_version:
+      input.reviewProtocol === 'editor' ? 'notes-v11' : 'notes-v10',
     generated_at: new Date().toISOString(),
     error_categories: [],
-    pipeline_version: 'writer-audit-v1',
+    pipeline_version:
+      input.reviewProtocol === 'editor'
+        ? 'writer-editor-v1'
+        : 'writer-audit-v1',
     mode,
     audit_status: 'complete',
     audit_change_count: auditChangeCount,
@@ -396,7 +454,7 @@ const runHierarchy = async (
       knownTerms,
       template: input.context.template,
     });
-    const auditPrompt = buildNotesAuditPrompt({
+    const auditPrompt = reviewPrompt(input, {
       sourceText,
       draft: {},
       userNotes: input.context.userNotes,
@@ -418,7 +476,7 @@ const runHierarchy = async (
       fits(capacityInput, writerPrompt, WRITER_OUTPUT_TOKENS) &&
       estimateNotesTokens(auditPrompt) +
         WRITER_OUTPUT_TOKENS +
-        AUDIT_OUTPUT_TOKENS +
+        reviewOutputTokens(input) +
         SAFETY_TOKENS <=
         planningTokens &&
       estimateNotesTokens(mergePrompt) +
@@ -457,8 +515,16 @@ const runHierarchy = async (
       await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
       `leaf${index}`,
     );
-    const audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
+    const audited = await auditDraft(
+      input,
+      draft,
+      evidenceSpans,
+      knownTerms,
+      [],
+      `leaf${index}`,
+    );
     nodes.push({
+      changeCount: audited.changeCount,
       draft: audited.draft,
       audit: audited.audit,
       audited: audited.audited,
@@ -510,7 +576,7 @@ const runHierarchy = async (
           ...left.evidenceSpans,
           ...right.evidenceSpans,
         ]);
-        const auditBase = buildNotesAuditPrompt({
+        const auditBase = reviewPrompt(input, {
           sourceText: serializeSource(input, evidence),
           draft: {},
           userNotes: input.context.userNotes,
@@ -528,7 +594,7 @@ const runHierarchy = async (
           ) &&
           estimateNotesTokens(auditBase) +
             WRITER_OUTPUT_TOKENS +
-            AUDIT_OUTPUT_TOKENS +
+            reviewOutputTokens(input) +
             SAFETY_TOKENS <=
             planningTokens
         )
@@ -603,6 +669,7 @@ const runHierarchy = async (
       evidenceSpans,
       knownTerms,
       inherited,
+      `merge${generatedNodes}`,
     );
     validateInheritedItems(
       inherited.map(
@@ -631,6 +698,7 @@ const runHierarchy = async (
       })),
     );
     const parent: AuditedNode = {
+      changeCount: audited.changeCount,
       draft: audited.draft,
       audit: audited.audit,
       audited: audited.audited,
@@ -652,18 +720,12 @@ const runHierarchy = async (
   const root = level[0];
   if (!root) throw new MeetingNotesError('notes_context_exhausted');
   const document = projectAuditedNotes(root.audited);
-  return metadataFor(
-    input,
-    document,
-    'hierarchical',
-    root.audit.changes.length,
-    {
-      depth: root.depth,
-      nodes: generatedNodes,
-      max_depth: NOTES_HIERARCHY_LIMITS.maxDepth,
-      max_nodes: NOTES_HIERARCHY_LIMITS.maxNodes,
-    },
-  );
+  return metadataFor(input, document, 'hierarchical', root.changeCount, {
+    depth: root.depth,
+    nodes: generatedNodes,
+    max_depth: NOTES_HIERARCHY_LIMITS.maxDepth,
+    max_nodes: NOTES_HIERARCHY_LIMITS.maxNodes,
+  });
 };
 
 const runMeetingNotes = async (
@@ -678,7 +740,7 @@ const runMeetingNotes = async (
     knownTerms,
     template: input.context.template,
   });
-  const preliminaryAuditPrompt = buildNotesAuditPrompt({
+  const preliminaryAuditPrompt = reviewPrompt(input, {
     sourceText,
     draft: {},
     userNotes: input.context.userNotes,
@@ -689,7 +751,7 @@ const runMeetingNotes = async (
     writerInputTokens: estimateNotesTokens(writerPrompt),
     auditBaseInputTokens: estimateNotesTokens(preliminaryAuditPrompt),
     writerOutputTokens: WRITER_OUTPUT_TOKENS,
-    auditOutputTokens: AUDIT_OUTPUT_TOKENS,
+    auditOutputTokens: reviewOutputTokens(input),
     safetyTokens: SAFETY_TOKENS,
   });
   if (capacity.mode !== 'direct') return runHierarchy(input, knownTerms);
@@ -707,14 +769,16 @@ const runMeetingNotes = async (
       })),
   );
   assertNotCancelled(input);
-  const auditPrompt = buildNotesAuditPrompt({
+  const auditPrompt = reviewPrompt(input, {
     sourceText,
     draft,
     userNotes: input.context.userNotes,
     knownTerms,
   });
   if (
-    estimateNotesTokens(auditPrompt) + AUDIT_OUTPUT_TOKENS + SAFETY_TOKENS >
+    estimateNotesTokens(auditPrompt) +
+      reviewOutputTokens(input) +
+      SAFETY_TOKENS >
     input.contextTokens
   ) {
     return runHierarchy(input, knownTerms);
@@ -736,7 +800,7 @@ const runMeetingNotes = async (
     input,
     projectAuditedNotes(audited.audited),
     'direct',
-    audited.audit.changes.length,
+    audited.changeCount,
   );
 };
 

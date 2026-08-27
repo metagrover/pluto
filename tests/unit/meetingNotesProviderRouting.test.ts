@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
 import {
@@ -8,12 +8,32 @@ import {
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 import kindCorrection from '../manual/fixtures/meetingNotesV10KindCorrection.json';
 
-afterEach(() => vi.restoreAllMocks());
+// These are unit tests: exhausted response queues must never reach a live model.
+let unexpectedTransportAttempts = 0;
+beforeEach(() => {
+  unexpectedTransportAttempts = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      unexpectedTransportAttempts += 1;
+      throw new Error('unexpected_live_transport');
+    }),
+  );
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  expect(
+    unexpectedTransportAttempts,
+    'Unit tests must never escape to live transport',
+  ).toBe(0);
+});
 
-it('applies the captured real-model kind correction without repair or loss of discussion', async () => {
+it('applies the captured real-model kind correction on the shipped legacy default without repair or loss of discussion', async () => {
   const provider = new UnifiedLLMProvider('ollama', {});
   const generate = vi
     .spyOn(provider as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce(JSON.stringify(kindCorrection.writer))
     .mockResolvedValueOnce(JSON.stringify(kindCorrection.audit));
   const result = await provider.generateStructuredAnalysis('', '', 'auto', {
@@ -43,7 +63,8 @@ it('forwards cancellation through entity extraction after publication', async ()
   const provider = new UnifiedLLMProvider('ollama', {});
   const generate = vi
     .spyOn(provider as never, 'generateText')
-    .mockResolvedValue('{}');
+    .mockRejectedValue(new Error('unexpected_notes_request'))
+    .mockResolvedValueOnce('{}');
   const signal = new AbortController().signal;
   await provider.extractEntities('Synthetic discussion', undefined, { signal });
   expect(generate).toHaveBeenCalledWith(
@@ -77,12 +98,13 @@ it.each(['notesWriter', 'notesAudit', 'notesMerge'])(
 );
 
 it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
-  'routes raw and indexed %s callers through the same two-stage contract',
+  'routes raw and indexed %s callers through the shipped legacy two-stage contract',
   async (kind) => {
     const fixture = makeDirectNotesFixture();
     const provider = new UnifiedLLMProvider(kind, {});
     const generate = vi
       .spyOn(provider as never, 'generateText')
+      .mockRejectedValue(new Error('unexpected_notes_request'))
       .mockResolvedValueOnce(JSON.stringify(fixture.draft))
       .mockResolvedValueOnce(JSON.stringify(fixture.audit));
     const result = await provider.generateStructuredAnalysis(
@@ -94,15 +116,19 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       ),
     ).toEqual(['notesWriter', 'notesAudit']);
     expect(result.generation_metadata?.prompt_version).toBe('notes-v10');
+    expect(result.generation_metadata?.pipeline_version).toBe(
+      'writer-audit-v1',
+    );
     expect(result.all_action_items).toHaveLength(1);
   },
 );
 
-it('repairs malformed writer output once and still requires an independent audit', async () => {
+it('repairs malformed writer output once and still requires an independent legacy audit', async () => {
   const f = makeDirectNotesFixture();
   const p = new UnifiedLLMProvider('ollama', {});
   const generate = vi
     .spyOn(p as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce('invalid')
     .mockResolvedValueOnce(JSON.stringify(f.draft))
     .mockResolvedValueOnce(JSON.stringify(f.audit));
@@ -127,7 +153,9 @@ it.each(['notes_writer_timeout', 'notes_audit_timeout'])(
   async (error) => {
     const f = makeDirectNotesFixture();
     const p = new UnifiedLLMProvider('ollama', {});
-    const generate = vi.spyOn(p as never, 'generateText');
+    const generate = vi
+      .spyOn(p as never, 'generateText')
+      .mockRejectedValue(new Error('unexpected_notes_request'));
     if (error.includes('audit'))
       generate.mockResolvedValueOnce(JSON.stringify(f.draft));
     generate.mockRejectedValueOnce(new Error(error));
@@ -143,9 +171,11 @@ it('reuses only the validated writer after audit failure and audits again on man
   const p = new UnifiedLLMProvider('ollama', {});
   const generate = vi
     .spyOn(p as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce(JSON.stringify(f.draft))
     .mockRejectedValueOnce(new Error('notes_audit_timeout'))
-    .mockResolvedValue(JSON.stringify(f.audit));
+    .mockResolvedValueOnce(JSON.stringify(f.audit))
+    .mockResolvedValueOnce(JSON.stringify(f.audit));
   const options = {
     source: f.source,
     stageCache: new NotesStageCache(),
@@ -165,7 +195,9 @@ it('rejects a cancelled caller before requesting any stage', async () => {
   const f = makeDirectNotesFixture();
   const p = new UnifiedLLMProvider('ollama', {});
   const controller = new AbortController();
-  const generate = vi.spyOn(p as never, 'generateText');
+  const generate = vi
+    .spyOn(p as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'));
   controller.abort();
   await expect(
     p.generateStructuredAnalysis('', '', 'auto', {
@@ -181,6 +213,7 @@ it('resumes a preempted writer without repairing it or rerunning a completed wri
   const p = new UnifiedLLMProvider('ollama', {});
   const generate = vi
     .spyOn(p as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockRejectedValueOnce(
       new DOMException('foreground_preempted', 'AbortError'),
     )
@@ -197,16 +230,22 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
   const f = makeDirectNotesFixture();
   const outputs = [f.draft, f.audit];
   const requests: Record<string, unknown>[] = [];
+  const urls: string[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (_url, init) => {
+    vi.fn(async (url, init) => {
+      if (!outputs.length) throw new Error('unexpected_notes_request');
+      urls.push(String(url));
       const body = JSON.parse(init.body);
       requests.push(body);
       return {
         ok: true,
         text: async () =>
           `${JSON.stringify({
-            response: JSON.stringify(outputs.shift()),
+            message: {
+              role: 'assistant',
+              content: JSON.stringify(outputs.shift()),
+            },
             done: true,
             done_reason: 'stop',
           })}\n`,
@@ -223,6 +262,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
       source: f.source,
     });
     expect(requests).toHaveLength(2);
+    expect(urls.every((url) => url.endsWith('/api/chat'))).toBe(true);
     for (const request of requests)
       expect(request).toMatchObject({
         model: 'configured-model',

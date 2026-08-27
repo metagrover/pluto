@@ -4,13 +4,18 @@ import {
   NOTES_HIERARCHY_LIMITS,
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
-import { MeetingNotesError } from '../../electron/llm/meetingNotesTypes';
+import {
+  MeetingNotesError,
+  type NotesDraft,
+} from '../../electron/llm/meetingNotesTypes';
 import {
   makeDirectNotesFixture,
   makeNotesContext,
   makeSyntheticNotesSource,
 } from '../fixtures/meeting-notes-v10';
 
+// The complete-document editor remains opt-in. These pipeline scenarios select
+// the prototype explicitly; provider-routing tests cover the shipped default.
 type PromptDescriptor = {
   descriptor: { segment: number; start: number; end: number };
   text: string;
@@ -35,13 +40,7 @@ const spanFor = (prompt: string, marker: string) => {
 const auditDraft = (prompt: string) =>
   JSON.parse(
     prompt.match(/BEGIN DRAFT DATA\n([\s\S]*?)\nEND DRAFT DATA/)?.[1] ?? '{}',
-  ) as {
-    overview: { id: string } | null;
-    sections: Array<{
-      title: { id: string };
-      items: Array<{ id: string; kind: string }>;
-    }>;
-  };
+  ) as NotesDraft;
 
 const inheritedFromAudit = (prompt: string) =>
   JSON.parse(
@@ -63,33 +62,37 @@ const auditFor = (
   const removed = options.removeAction
     ? items.find((item) => item.kind === 'action')
     : undefined;
-  const ids = [
-    ...(draft.overview ? [draft.overview.id] : []),
-    ...draft.sections.flatMap((section) => [
-      section.title.id,
-      ...section.items.map((item) => item.id),
-    ]),
-  ];
-  return JSON.stringify({
-    changes: removed ? [{ op: 'remove', target: removed.id }] : [],
-    verdicts: ids.map((target) => ({
-      target,
-      status: 'supported',
+  if (removed) {
+    for (const section of draft.sections) {
+      section.items = section.items.filter((item) => item.id !== removed.id);
+    }
+    // A full editor response preserves the cancellation as a descriptive fact,
+    // while the disposition accounts for the omitted inherited commitment.
+    draft.sections[0]!.items.push({
+      id: `${removed.id}:cancelled`,
+      kind: 'point',
+      text: 'The outline plan was cancelled.',
       sources: [source],
-    })),
+      owner: null,
+      due: null,
+    });
+  }
+  return JSON.stringify({
+    ...draft,
     dispositions: options.dispositions ?? [],
     terminology: [],
   });
 };
 
-it('uses one writer and one audit without segmentation or a third rewrite', async () => {
+it('uses one writer and one complete-document editor without segmentation or a third rewrite', async () => {
   const fixture = makeDirectNotesFixture();
   const generate = vi
     .fn()
     .mockResolvedValueOnce(JSON.stringify(fixture.draft))
-    .mockResolvedValueOnce(JSON.stringify(fixture.audit));
+    .mockResolvedValueOnce(JSON.stringify(fixture.draft));
 
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source: fixture.source,
     context: makeNotesContext(),
     generate,
@@ -106,8 +109,8 @@ it('uses one writer and one audit without segmentation or a third rewrite', asyn
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v10',
-    pipeline_version: 'writer-audit-v1',
+    prompt_version: 'notes-v11',
+    pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
 });
@@ -124,6 +127,7 @@ it('repartitions original source after reported input overflow instead of repair
     );
   });
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source: fixture.source,
     context: makeNotesContext(),
     generate,
@@ -150,15 +154,17 @@ it('repartitions original source after reported input overflow instead of repair
   expect(generate.mock.calls[1]![0].contextTokens).toBe(16384);
 });
 
-it('repairs an incomplete audit once with the rejected payload and missing block diagnosis', async () => {
+it('repairs an incomplete edited document once with the rejected payload and missing-source block diagnosis', async () => {
   const fixture = makeDirectNotesFixture();
-  const incomplete = { ...fixture.audit, verdicts: [] };
+  const incomplete = structuredClone(fixture.draft);
+  incomplete.sections[0]!.items[0]!.sources = [];
   const generate = vi
     .fn()
     .mockResolvedValueOnce(JSON.stringify(fixture.draft))
     .mockResolvedValueOnce(JSON.stringify(incomplete))
-    .mockResolvedValueOnce(JSON.stringify(fixture.audit));
+    .mockResolvedValueOnce(JSON.stringify(fixture.draft));
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source: fixture.source,
     context: makeNotesContext(),
     generate,
@@ -172,7 +178,7 @@ it('repairs an incomplete audit once with the rejected payload and missing block
   expect(generate).toHaveBeenCalledTimes(3);
   const repair = generate.mock.calls[2]![0].prompt;
   expect(repair).toContain(JSON.stringify(incomplete));
-  expect(repair).toContain('notes_audit_missing_verdict');
+  expect(repair).toContain('s0:item:0:missing_source');
   expect(result.quality.retry_count).toBe(1);
 });
 
@@ -201,16 +207,7 @@ it('uses explicit trusted terms for terminology application, never entity hints'
       });
     }
     return JSON.stringify({
-      changes: [],
-      verdicts: [
-        { target: 'overview', status: 'supported', sources: [span] },
-        { target: 'recent-win', status: 'supported', sources: [span] },
-        {
-          target: 'recent-win-impact',
-          status: 'supported',
-          sources: [span],
-        },
-      ],
+      ...auditDraft(request.prompt),
       dispositions: [],
       terminology: [
         {
@@ -225,6 +222,7 @@ it('uses explicit trusted terms for terminology application, never entity hints'
   });
 
   const entityOnly = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source,
     context: {
       ...makeNotesContext(),
@@ -237,6 +235,7 @@ it('uses explicit trusted terms for terminology application, never entity hints'
     contextTokens: 16384,
   });
   const userTrusted = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source,
     context: {
       ...makeNotesContext(),
@@ -270,6 +269,7 @@ it('rejects a malformed writer response after one bounded repair', async () => {
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source: fixture.source,
       context: makeNotesContext(),
       generate,
@@ -288,6 +288,7 @@ it('propagates a direct writer transport failure without a repair request', asyn
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source: fixture.source,
       context: makeNotesContext(),
       generate,
@@ -309,6 +310,7 @@ it('propagates a direct audit transport failure without a repair request', async
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source: fixture.source,
       context: makeNotesContext(),
       generate,
@@ -329,6 +331,7 @@ it('repairs a malformed direct audit once, but not a second malformed response',
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source: fixture.source,
       context: makeNotesContext(),
       generate,
@@ -350,6 +353,7 @@ it('stops after a caller aborts between the direct writer and audit', async () =
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source: fixture.source,
       context: makeNotesContext(),
       generate,
@@ -374,6 +378,7 @@ it('propagates a hierarchical writer transport failure without a repair request'
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source,
       context: makeNotesContext(),
       generate,
@@ -404,33 +409,7 @@ it('uses bounded source-backed leaf and merge stages when the full meeting canno
         }
       : { segment: 0, start: 0, end: 1 };
     if (request.task === 'notesAudit') {
-      const draftMatch = request.prompt.match(
-        /BEGIN DRAFT DATA\n([\s\S]*?)\nEND DRAFT DATA/,
-      );
-      const draft = JSON.parse(draftMatch?.[1] ?? '{}') as {
-        overview: { id: string } | null;
-        sections: Array<{
-          title: { id: string };
-          items: Array<{ id: string }>;
-        }>;
-      };
-      const ids = [
-        ...(draft.overview ? [draft.overview.id] : []),
-        ...draft.sections.flatMap((section) => [
-          section.title.id,
-          ...section.items.map((item) => item.id),
-        ]),
-      ];
-      return JSON.stringify({
-        changes: [],
-        verdicts: ids.map((target) => ({
-          target,
-          status: 'supported',
-          sources: [span],
-        })),
-        dispositions: [],
-        terminology: [],
-      });
+      return auditFor(request.prompt, span);
     }
     return JSON.stringify({
       meetingType: 'general',
@@ -440,6 +419,7 @@ it('uses bounded source-backed leaf and merge stages when the full meeting canno
   });
 
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source,
     context: makeNotesContext(),
     generate,
@@ -571,6 +551,7 @@ it('reconciles a middle commitment with a later cancellation using original evid
   });
 
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source,
     context: makeNotesContext(),
     generate,
@@ -636,6 +617,7 @@ it('rejects publication when the final hierarchical audit fails', async () => {
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source,
       context: makeNotesContext(),
       generate,
@@ -746,6 +728,7 @@ it('uses original cross-leaf evidence for an answered question and late term def
   });
 
   const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
     source,
     context: makeNotesContext(),
     generate,
@@ -774,6 +757,7 @@ it('fails at the node ceiling before making a partial hierarchy request', async 
 
   await expect(
     generateMeetingNotes({
+      reviewProtocol: 'editor',
       source,
       context: makeNotesContext(),
       generate,

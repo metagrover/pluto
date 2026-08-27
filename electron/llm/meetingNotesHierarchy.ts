@@ -72,7 +72,16 @@ export const validateInheritedItems = (
 ) => {
   const parentById = new Map(parent.map((item) => [item.id, item]));
   for (const item of inherited) {
-    if (parentById.has(item.id)) continue;
+    const retained = parentById.get(item.id);
+    if (
+      retained &&
+      retained.text === item.text &&
+      retained.kind === item.kind &&
+      retained.owner === item.owner &&
+      retained.due === item.due &&
+      JSON.stringify(retained.sources) === JSON.stringify(item.sources)
+    )
+      continue;
     const disposition = dispositions.find(
       (candidate) =>
         candidate.target === item.id &&

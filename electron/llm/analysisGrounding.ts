@@ -343,7 +343,7 @@ const settledFieldSupportedByTurn = (
     if (normalizedSpeaker === normalizedValue) {
       return kind === 'action'
         ? /\b(?:i can|i will|i'll|i own|i'll own|will do)\b/i.test(content)
-        : /\b(?:i decided|i approved|i selected|we decided|we approved|we selected|we will|will use|proceed)\b/i.test(
+        : /\b(?:i decided|i approved|i selected|we decided|we approved|we selected|we will|will use|proceed|the decision is)\b/i.test(
             content,
           );
     }
@@ -664,6 +664,11 @@ export const groundRecentWin = (
 /** Field/polarity checks for a claim already reviewed against exact canonical
  * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
  * Never select this path from persisted metadata or a model confidence flag. */
+export const isUnacceptedConditionalWillingness = (evidence: string): boolean =>
+  /\bif\b/i.test(evidence) &&
+  /\bi can\b/i.test(evidence) &&
+  !/\b(?:agreed|yes|will|commit)\b/i.test(evidence);
+
 export const groundSourceReviewedItem = (
   item: {
     text: string;
@@ -686,9 +691,7 @@ export const groundSourceReviewedItem = (
     isUnacceptedRequest(evidence) ||
     (/\b(?:may|might|could|should|maybe|perhaps)\b/i.test(evidence) &&
       !hasExplicitResolutionCue(evidence)) ||
-    (/\bif\b/i.test(evidence) &&
-      /\bi can\b/i.test(evidence) &&
-      !/\b(?:agreed|yes|will|commit)\b/i.test(evidence))
+    isUnacceptedConditionalWillingness(evidence)
   )
     return null;
   const ownership =

@@ -14,6 +14,39 @@ import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
 import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
+it.each(['point', 'question'])(
+  'defaults absent non-commitment metadata to unknown for %s only',
+  (kind) => {
+    const { draft } = makeDirectNotesFixture();
+    const raw = JSON.parse(JSON.stringify(draft));
+    const item = raw.sections[0].items[0];
+    item.kind = kind;
+    item.owner = undefined;
+    item.due = undefined;
+    expect(
+      parseNotesDraft(JSON.stringify(raw)).sections[0]!.items[0],
+    ).toMatchObject({ owner: null, due: null });
+    item.owner = 42;
+    expect(() => parseNotesDraft(JSON.stringify(raw))).toThrow(
+      'notes_writer_invalid',
+    );
+  },
+);
+
+it.each(['action', 'decision'])(
+  'requires explicit commitment metadata for %s',
+  (kind) => {
+    const { draft } = makeDirectNotesFixture();
+    const raw = JSON.parse(JSON.stringify(draft));
+    raw.sections[0].items[0].kind = kind;
+    raw.sections[0].items[0].owner = undefined;
+    raw.sections[0].items[0].due = undefined;
+    expect(() => parseNotesDraft(JSON.stringify(raw))).toThrow(
+      'notes_writer_invalid',
+    );
+  },
+);
+
 it('omits an empty section after its last claim is rejected', () => {
   const fixture = makeDirectNotesFixture();
   fixture.audit.verdicts[1]!.status = 'unsupported';

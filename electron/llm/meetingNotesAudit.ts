@@ -1,8 +1,14 @@
-import { groundRecentWin, groundSourceReviewedItem } from './analysisGrounding';
+import {
+  groundRecentWin,
+  groundSourceReviewedItem,
+  isUnacceptedConditionalWillingness,
+  normalizeTranscriptEvidence,
+} from './analysisGrounding';
 import type {
   AnalysisDocumentV3,
   MeetingTerminologyArtifactV1,
 } from './analysisTypes';
+import { createEditorTerminologyArtifact } from './meetingNotesEditorTerminology';
 import { resolveSourceSpan } from './meetingNotesSource';
 import {
   type AuditVerdict,
@@ -86,8 +92,19 @@ const parseItem = (value: unknown, assignedId?: string): NotesItem | null => {
       : typeof field === 'string' && field.trim()
         ? field.trim()
         : null;
-  if (value.owner !== null && typeof value.owner !== 'string') return null;
-  if (value.due !== null && typeof value.due !== 'string') return null;
+  const narrative = value.kind === 'point' || value.kind === 'question';
+  if (
+    !(narrative && value.owner === undefined) &&
+    value.owner !== null &&
+    typeof value.owner !== 'string'
+  )
+    return null;
+  if (
+    !(narrative && value.due === undefined) &&
+    value.due !== null &&
+    typeof value.due !== 'string'
+  )
+    return null;
   return {
     ...supported,
     kind: value.kind as NotesItem['kind'],
@@ -772,6 +789,91 @@ export const applyNotesAudit = ({
             audit,
             terminology,
           ),
+        }
+      : {}),
+  };
+  reviewedResults.add(result);
+  return result;
+};
+
+/** Complete-document source review uses the same provenance and projection boundary,
+ * without pretending the editor returned per-block audit verdicts. Invalid settled
+ * claims fail the review; they must not silently erase otherwise useful discussion. */
+export const acceptEditedNotes = ({
+  source,
+  draft,
+  terminology,
+  proposals = [],
+}: {
+  source: NotesSource;
+  draft: NotesDraft;
+  terminology?: AuditTerminologyContext;
+  proposals?: NotesAudit['terminology'];
+}): AuditedNotes => {
+  const next = structuredClone(draft);
+  for (const block of blocksForDraft(next)) {
+    validateSources(source, block.sources);
+    const evidence = sourceText(source, block.sources);
+    if (
+      (block.text.match(/\bR\d+\b/g) ?? []).some(
+        (label) => !evidence.includes(label),
+      )
+    ) {
+      throw new MeetingNotesError(`notes_editor_source_label:${block.id}`);
+    }
+  }
+  for (const section of next.sections) {
+    for (const item of section.items) {
+      if (item.kind !== 'action' && item.kind !== 'decision') continue;
+      const evidence = sourceText(source, item.sources);
+      if (isUnacceptedConditionalWillingness(evidence)) {
+        throw new MeetingNotesError(
+          `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
+        );
+      }
+      const sourceLines = item.sources.map((span) => {
+        const segment = source.segments.find(
+          (entry) => entry.index === span.segment,
+        )!;
+        return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
+      });
+      const checked = groundSourceReviewedItem(
+        { ...item, kind: item.kind },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLines,
+          sourceLine: sourceLines.join(' '),
+          lineIndex: item.sources[0]!.segment,
+        },
+      );
+      if (
+        !checked ||
+        (item.owner &&
+          normalizeTranscriptEvidence(item.owner) !==
+            normalizeTranscriptEvidence(checked.owner ?? '')) ||
+        (item.due && !checked.due)
+      ) {
+        throw new MeetingNotesError(
+          `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
+        );
+      }
+      Object.assign(item, checked);
+    }
+  }
+  const result: AuditedNotes = {
+    source,
+    draft: next,
+    verdicts: new Map(),
+    acceptedTerminology: structuredClone(proposals),
+    ...(terminology
+      ? {
+          terminologyArtifact: createEditorTerminologyArtifact({
+            source,
+            draft: next,
+            proposals,
+            context: terminology,
+          }),
         }
       : {}),
   };
