@@ -138,6 +138,33 @@ export interface PersistedMeeting {
   created_at?: string | null;
 }
 
+export type MeetingAnalysisRunStatus =
+  | 'running'
+  | 'published'
+  | 'failed'
+  | 'cancelled';
+export type MeetingAnalysisSecondaryStatus =
+  | 'pending'
+  | 'running'
+  | 'complete'
+  | 'failed'
+  | 'superseded';
+
+export type MeetingAnalysisRun = {
+  meeting_id: string;
+  run_id: string;
+  input_revision: string;
+  source_revision: string;
+  eligibility_revision: string;
+  user_notes_hash: string;
+  notes_status: MeetingAnalysisRunStatus;
+  secondary_status: MeetingAnalysisSecondaryStatus;
+  stage: string;
+  error_code: string | null;
+  started_at: string;
+  updated_at: string;
+};
+
 /**
  * DATABASE MIGRATION / INITIALIZATION
  */
@@ -224,6 +251,21 @@ const initDb = () => {
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS meeting_analysis_runs (
+        meeting_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        input_revision TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        eligibility_revision TEXT NOT NULL,
+        user_notes_hash TEXT NOT NULL,
+        notes_status TEXT NOT NULL,
+        secondary_status TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        error_code TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       -- Settings table
@@ -2531,6 +2573,98 @@ export const getMeetings = () => {
 export const getMeeting = (id: string | number) => {
   recoverExpiredTranscriptValidationRetries();
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id));
+};
+
+const validNotesStatus = new Set<MeetingAnalysisRunStatus>([
+  'running',
+  'published',
+  'failed',
+  'cancelled',
+]);
+const validSecondaryStatus = new Set<MeetingAnalysisSecondaryStatus>([
+  'pending',
+  'running',
+  'complete',
+  'failed',
+  'superseded',
+]);
+
+export const beginMeetingAnalysisRun = (input: {
+  meetingId: string | number;
+  runId: string;
+  inputRevision: string;
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+}): { status: 'started' } => {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO meeting_analysis_runs (
+      meeting_id, run_id, input_revision, source_revision, eligibility_revision,
+      user_notes_hash, notes_status, secondary_status, stage, error_code, started_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', 'notes_writer', NULL, ?, ?)
+    ON CONFLICT(meeting_id) DO UPDATE SET
+      run_id = excluded.run_id,
+      input_revision = excluded.input_revision,
+      source_revision = excluded.source_revision,
+      eligibility_revision = excluded.eligibility_revision,
+      user_notes_hash = excluded.user_notes_hash,
+      notes_status = 'running',
+      secondary_status = 'pending',
+      stage = 'notes_writer',
+      error_code = NULL,
+      started_at = excluded.started_at,
+      updated_at = excluded.updated_at`,
+  ).run(
+    String(input.meetingId),
+    input.runId,
+    input.inputRevision,
+    input.sourceRevision,
+    input.eligibilityRevision,
+    input.userNotesHash,
+    now,
+    now,
+  );
+  return { status: 'started' };
+};
+
+export const getMeetingAnalysisRun = (
+  meetingId: string | number,
+): MeetingAnalysisRun | null =>
+  (db
+    .prepare('SELECT * FROM meeting_analysis_runs WHERE meeting_id = ?')
+    .get(String(meetingId)) as MeetingAnalysisRun | undefined) ?? null;
+
+export const updateMeetingAnalysisRunStatus = (input: {
+  meetingId: string | number;
+  runId: string;
+  notesStatus: MeetingAnalysisRunStatus;
+  secondaryStatus: MeetingAnalysisSecondaryStatus;
+  stage: string;
+  errorCode?: string | null;
+}): boolean => {
+  if (
+    !validNotesStatus.has(input.notesStatus) ||
+    !validSecondaryStatus.has(input.secondaryStatus)
+  ) {
+    throw new Error('invalid_meeting_analysis_run_status');
+  }
+  const result = db
+    .prepare(
+      `UPDATE meeting_analysis_runs
+       SET notes_status = ?, secondary_status = ?, stage = ?, error_code = ?, updated_at = ?
+       WHERE meeting_id = ? AND run_id = ?`,
+    )
+    .run(
+      input.notesStatus,
+      input.secondaryStatus,
+      input.stage,
+      input.errorCode ?? null,
+      new Date().toISOString(),
+      String(input.meetingId),
+      input.runId,
+    );
+  return result.changes === 1;
 };
 
 export const getAnalysisQualityStats = () => {
