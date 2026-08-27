@@ -753,8 +753,8 @@ export const applyNotesAudit = ({
   }
 
   for (const section of next.sections) {
-    section.items = section.items.flatMap((item) => {
-      if (item.kind !== 'action' && item.kind !== 'decision') return [item];
+    section.items = section.items.map((item) => {
+      if (item.kind !== 'action' && item.kind !== 'decision') return item;
       const evidence = sourceText(source, item.sources);
       const sourceLines = item.sources.map((span) => {
         const segment = source.segments.find(
@@ -772,7 +772,13 @@ export const applyNotesAudit = ({
           lineIndex: item.sources[0]!.segment,
         },
       );
-      return checked ? [{ ...item, ...checked }] : [];
+      // A supported verdict and a failed source check require repair, not a
+      // clean publication with the disputed material silently deleted.
+      if (!checked)
+        throw new MeetingNotesError(
+          `notes_audit_invalid_commitment:${item.id}:correct_wording_or_kind_from_source`,
+        );
+      return { ...item, ...checked };
     });
   }
 

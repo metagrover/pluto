@@ -118,6 +118,196 @@ it('uses one writer and one complete-document editor without segmentation or a t
   });
 });
 
+it.each(['faithful', 'inverted'] as const)(
+  'conserves the real supported privacy decision or fails explicitly: %s',
+  async (wording) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Tariq',
+        text: 'Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko?',
+      },
+      {
+        speaker: 'Niko',
+        text: "I'll be using the table. Bea is preparing and uploading it, not me.",
+      },
+      {
+        speaker: 'Bea',
+        text: "Yes, I accept that task. I'll have the anonymized table there by Monday.",
+      },
+      {
+        speaker: 'Tariq',
+        text: "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality.",
+      },
+    ]);
+    const spans = source.segments.map(({ index, text }) => ({
+      segment: index,
+      start: 0,
+      end: text.length,
+    }));
+    // Replay the real writer/audit content after lossless wire-label decoding.
+    const writer = {
+      meetingType: 'team_sync',
+      overview: null,
+      recentWin: null,
+      sections: [
+        {
+          title: { text: 'Survey Data Management', sources: [spans[0]] },
+          items: [
+            {
+              text: 'Bea will upload the anonymized survey table to the research workspace for Niko by Monday.',
+              sources: [spans[0], spans[2]],
+              kind: 'action',
+              owner: 'Bea',
+              due: 'Monday',
+            },
+            {
+              text: "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.",
+              sources: [spans[3]],
+              kind: 'decision',
+              owner: null,
+              due: null,
+            },
+          ],
+        },
+      ],
+    };
+    const audit = {
+      changes: [],
+      dispositions: [],
+      terminology: [],
+      verdicts: [
+        { target: 's0:title', status: 'supported', sources: [spans[0]] },
+        {
+          target: 's0:item:0',
+          status: 'supported',
+          sources: [spans[0], spans[2]],
+        },
+        { target: 's0:item:1', status: 'supported', sources: [spans[3]] },
+      ],
+    };
+    if (wording === 'inverted') {
+      writer.sections[0]!.items[1]!.text =
+        'The decision is to publish individual responses.';
+    }
+    const snapshot = structuredClone(source);
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(writer))
+      .mockResolvedValue(JSON.stringify(audit));
+    const result = generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    if (wording === 'faithful') {
+      const document = await result;
+      expect(document.all_decisions).toEqual([
+        {
+          text: writer.sections[0]!.items[1]!.text,
+          evidence: source.segments[3]!.text,
+        },
+      ]);
+      expect(document.topics[0]!.decisions).toEqual(document.all_decisions);
+      expect(document.all_action_items).toHaveLength(1);
+      expect(document.all_action_items[0]).toMatchObject({
+        assignee: 'Bea',
+        due: 'Monday',
+      });
+      expect(
+        document.generation_metadata?.source_provenance?.blocks[
+          'all_decisions:0'
+        ]?.sources,
+      ).toEqual([spans[3]]);
+      expect(document.quality.retry_count).toBe(0);
+      expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+        'notesWriter',
+        'notesAudit',
+      ]);
+    } else {
+      await expect(result).rejects.toThrow('notes_audit_invalid');
+      expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+        'notesWriter',
+        'notesAudit',
+        'notesAudit',
+      ]);
+      expect(generate.mock.calls[2]![0].prompt).toContain(
+        'notes_audit_invalid_commitment:s0:item:1',
+      );
+    }
+    expect(source).toEqual(snapshot);
+  },
+);
+
+it('repairs a supported but invalid action by preserving its offer as discussion', async () => {
+  const fixture = makeDirectNotesFixture();
+  fixture.source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: 'If legal approves, I can draft the announcement.',
+    },
+  ]);
+  const sources = [
+    { segment: 0, start: 0, end: fixture.source.segments[0]!.text.length },
+  ];
+  fixture.draft.sections[0]!.title = {
+    id: 's0:title',
+    text: 'Announcement',
+    sources,
+  };
+  const action = fixture.draft.sections[0]!.items[0]!;
+  Object.assign(action, {
+    text: 'Milo will draft the announcement if legal approves.',
+    sources,
+  });
+  fixture.audit.verdicts.forEach((verdict) => {
+    verdict.sources = sources;
+  });
+  const discussion = {
+    ...action,
+    kind: 'point',
+    owner: null,
+    due: null,
+    text: 'Milo can draft the announcement if legal approves; no assignment was accepted.',
+  };
+  const corrected = {
+    ...fixture.audit,
+    changes: [{ op: 'replace', target: action.id, value: discussion }],
+  };
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+    .mockResolvedValueOnce(JSON.stringify(fixture.audit))
+    .mockResolvedValueOnce(JSON.stringify(corrected));
+  const document = await generateMeetingNotes({
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'test',
+    contextTokens: 16384,
+  });
+  expect(document.all_action_items).toEqual([]);
+  expect(document.topics).toEqual([
+    expect.objectContaining({ summary: discussion.text }),
+  ]);
+  expect(
+    document.generation_metadata?.source_provenance?.blocks['topic:0:summary']
+      ?.sources,
+  ).toEqual(sources);
+  expect(document.quality.retry_count).toBe(1);
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+    'notesAudit',
+  ]);
+  expect(generate.mock.calls[2]![0].prompt).toContain(
+    `notes_audit_invalid_commitment:${action.id}`,
+  );
+});
+
 it.each(['audit', 'editor'] as const)(
   'publishes one action for exact repeated promises without repair in %s review',
   async (reviewProtocol) => {

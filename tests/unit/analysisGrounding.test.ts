@@ -111,6 +111,100 @@ describe('source-reviewed explicit negative decisions', () => {
       ),
     ).toBeNull();
   });
+
+  it('preserves a full source-copy explicit policy decision containing may without changing qualifiers', () => {
+    const evidence =
+      "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality.";
+    const text =
+      "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.";
+    expect(review(text, evidence, null)).toEqual({
+      text,
+      owner: null,
+      due: null,
+    });
+  });
+
+  it.each([
+    'The decision is not final; aggregate counts may be published.',
+    'The decision is pending approval; aggregate counts may be published.',
+    'The decision is that aggregate counts may be published, but it is not finalized.',
+  ])(
+    'does not treat an explicitly unfinished decision status as settled: %s',
+    (text) => {
+      expect(review(text, text, null)).toBeNull();
+    },
+  );
+
+  it.each([
+    'The decision is that aggregate counts may be published once legal approves.',
+    'The decision is that aggregate counts may be published pending legal approval.',
+  ])(
+    'retains a settled policy with its publication prerequisite: %s',
+    (text) => {
+      expect(review(text, text, null)).toEqual({
+        text,
+        owner: null,
+        due: null,
+      });
+    },
+  );
+
+  it.each([
+    [
+      'Individual responses may not be published.',
+      'Individual responses may not be published.',
+    ],
+    [
+      'The decision is not to publish individual responses; aggregate counts will be published.',
+      'The decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is to publish aggregate counts.',
+      'The decision is not to publish individual responses. Aggregate counts may be published.',
+    ],
+    [
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+    ],
+    [
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+    ],
+  ])(
+    'does not relax modal guards for an unsupported or qualified decision: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+
+  it('does not use the explicit policy-copy allowance for actions', () => {
+    const evidence =
+      'The decision is not to publish individual responses; aggregate counts may be published.';
+    expect(
+      groundSourceReviewedItem(
+        { text: evidence, kind: 'action', owner: null, due: null },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Tariq: ${evidence}`,
+          sourceLines: [`Tariq: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
 });
 
 const document = (): AnalysisDocumentV3 => ({

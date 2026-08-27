@@ -752,6 +752,116 @@ it('preserves source-reviewed paraphrased decisions without a lexical overlap th
   ]);
 });
 
+it.each([
+  [
+    'We decided to publish individual responses.',
+    'We decided not to publish individual responses.',
+  ],
+  [
+    'We might not publish individual responses.',
+    'The decision is not to publish individual responses.',
+  ],
+  [
+    'We decided not to publish individual responses.',
+    'We decided to publish individual responses.',
+  ],
+])(
+  'fails explicitly when a supported audit decision cannot pass the existing source guard: %s',
+  (evidence, text) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Tariq', text: evidence }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: evidence.length }];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Privacy', sources },
+            items: [
+              { kind: 'decision', text, owner: null, due: null, sources },
+            ],
+          },
+        ],
+      }),
+    );
+    const audit: NotesAudit = {
+      changes: [],
+      dispositions: [],
+      terminology: [],
+      verdicts: ['s0:title', 's0:item:0'].map((target) => ({
+        target,
+        status: 'supported',
+        sources,
+      })),
+    };
+    const snapshot = structuredClone({ source, draft, audit });
+    expect(() => applyNotesAudit({ source, draft, audit })).toThrow(
+      'notes_audit_invalid_commitment:s0:item:0',
+    );
+    expect({ source, draft, audit }).toEqual(snapshot);
+  },
+);
+
+it.each([
+  [
+    'We decided not to publish individual responses.',
+    'We decided not to publish individual responses.',
+  ],
+  [
+    "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality.",
+    "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.",
+  ],
+])(
+  'preserves a validated negative decision with its original text and evidence: %s',
+  (evidence, text) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Tariq', text: evidence }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: evidence.length }];
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Privacy', sources },
+            items: [
+              {
+                kind: 'decision',
+                text,
+                sources,
+                owner: null,
+                due: null,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const audit: NotesAudit = {
+      changes: [],
+      dispositions: [],
+      terminology: [],
+      verdicts: ['s0:title', 's0:item:0'].map((target) => ({
+        target,
+        status: 'supported',
+        sources,
+      })),
+    };
+    const result = projectAuditedNotes(
+      applyNotesAudit({ source, draft, audit }),
+    );
+    expect(result.all_decisions).toEqual([{ text, evidence }]);
+    expect(result.topics[0]!.decisions).toEqual(result.all_decisions);
+    expect(
+      result.generation_metadata?.source_provenance?.blocks['all_decisions:0']
+        ?.sources,
+    ).toEqual(sources);
+  },
+);
+
 it('does not resurrect an unconditional commitment or fabricated deadline after audit', () => {
   const source = createNotesSource(
     JSON.stringify([
@@ -795,7 +905,9 @@ it('does not resurrect an unconditional commitment or fabricated deadline after 
     };
     return projectAuditedNotes(applyNotesAudit({ source, draft, audit }));
   };
-  expect(make('Send the outline.').all_action_items).toEqual([]);
+  expect(() => make('Send the outline.')).toThrow(
+    'notes_audit_invalid_commitment',
+  );
   const conditional = make('Send the outline if approval comes Friday.');
   expect(conditional.all_action_items).toHaveLength(1);
   expect(conditional.all_action_items[0]!.due).toBeUndefined();

@@ -776,6 +776,19 @@ export const groundSourceReviewedItem = (
       ? explicitDispositionClause(item.text, resolved)
       : undefined;
   const evidence = disposition?.evidence ?? resolved.evidence;
+  // An explicit settled choice copied in full can use "may" as permission.
+  // This exception never borrows a neighboring cue or relaxes other modalities.
+  const exactDecisionCopy =
+    item.kind === 'decision' &&
+    /^\s*the decision is\b/i.test(evidence) &&
+    !isUnsettledProposal(evidence.replace(/\bmay\b/gi, '')) &&
+    !/\btentative(?:ly)?\b/i.test(evidence) &&
+    // Pending publication can be a condition; a pending decision is not settled.
+    !/\b(?:the decision|but it)\s+is\s+(?:pending\b|not\s+(?:yet\s+)?final(?:ized|ised)?\b)/i.test(
+      evidence,
+    ) &&
+    normalizeTranscriptEvidence(item.text) ===
+      normalizeTranscriptEvidence(evidence);
   const conditional =
     /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
   const numbers = (value: string): string[] =>
@@ -800,7 +813,8 @@ export const groundSourceReviewedItem = (
     (conditional.test(evidence) && !conditional.test(item.text)) ||
     isUnacceptedRequest(evidence) ||
     (/\b(?:may|might|could|should|maybe|perhaps)\b/i.test(evidence) &&
-      !hasExplicitResolutionCue(evidence)) ||
+      !hasExplicitResolutionCue(evidence) &&
+      !exactDecisionCopy) ||
     isUnacceptedConditionalWillingness(evidence)
   )
     return null;
