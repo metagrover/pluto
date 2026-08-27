@@ -91,3 +91,22 @@ it('fails explicitly when fixed prompt content cannot fit any source window', ()
     'notes_context_exhausted',
   );
 });
+
+it('adds at most one fitting prior utterance as supplemental overlap', () => {
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [
+        { speaker: 'Me', text: 'A' },
+        { speaker: 'Me', text: 'B' },
+        { speaker: 'Me', text: 'C' },
+      ],
+    }),
+  );
+
+  const leaves = partitionNotesSource(source, (packet) => packet.length <= 3);
+
+  expect(leaves).toHaveLength(2);
+  expect(leaves[1]?.primaryText).toBe('C');
+  expect(leaves[1]?.overlapSpans).toEqual([{ segment: 1, start: 0, end: 1 }]);
+  expect(leaves[1]?.sourceText).toBe('B\nC');
+});

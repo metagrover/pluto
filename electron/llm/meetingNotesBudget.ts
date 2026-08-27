@@ -173,5 +173,15 @@ export const partitionNotesSource = (
     });
   }
   if (!windows.length) throw new MeetingNotesError('notes_context_exhausted');
-  return windows;
+  return windows.map((window, index) => {
+    if (index === 0) return window;
+    const prior = windows[index - 1];
+    const priorSpan = prior?.primarySpans.at(-1);
+    if (!priorSpan) return window;
+    const overlapText = primaryTextFor(source, [priorSpan]);
+    const sourceText = `${overlapText}\n${window.primaryText}`;
+    return fitsPrompt(sourceText)
+      ? { ...window, overlapSpans: [priorSpan], sourceText }
+      : window;
+  });
 };
