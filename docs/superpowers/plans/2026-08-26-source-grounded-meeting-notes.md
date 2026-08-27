@@ -1,6 +1,6 @@
 # Source-grounded meeting notes implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execute inline with the user-selected Terra model; do not launch implementation or delegate merely because this plan exists.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. The user transferred implementation ownership from Terra to the primary agent on 2026-08-27. Do not restart delegation or implementation from this historical checklist. The verification matrix below is the current state.
 
 **Goal:** Deliver coherent, attributable, source-grounded meeting notes using one writer and one audit on the direct path, with bounded long-input handling and trustworthy publication.
 
@@ -22,7 +22,71 @@
 
 **Branch:** `codex/674-source-grounded-notes`
 
-The user has approved the architecture and requested this plan. Implementation is the next turn after switching the coding agent to Terra (`gpt-5.6-terra`), not work performed by the planning turn. Do not change Pluto's configured meeting-analysis model when switching the coding agent.
+The user approved the architecture and initially selected Terra for implementation. The primary agent has now taken over integration and acceptance. Do not change Pluto's configured meeting-analysis model when changing the coding agent.
+
+### Current implementation and acceptance record — 2026-08-27
+
+**Status: implemented locally; NOT accepted for delivery, merged, pushed, or running in the user's app.** The original per-step checkboxes below are the historical execution recipe, not evidence that an implementation task or acceptance gate passed. This matrix supersedes their execution status.
+
+| Plan area | Current implementation and evidence | Remaining gate |
+|---|---|---|
+| 1–3: source, contracts, prompts | Immutable indexed source; strict draft/audit parser; whole-conversation prompts; no fixed topic/action count. Synthetic point-only and commitment cases covered. | Real-provider semantic acceptance. |
+| 4–5: audit, terminology, projection | Complete retained-block verdicts; bounded additions/removals; qualifiers, explicit owners/dates, source provenance, recent win; automatic entity hints cannot establish trusted spelling. Derived overview retains provenance. | A model verdict is not proof of factual correctness. |
+| 6: direct pipeline | Writer + audit, deterministic v3 projection, one malformed-response repair per stage; transport/cancel errors never become empty success. | Three-seed local acceptance is not passing. |
+| 7: hierarchy | Full primary partition, overlap, original evidence at merges, inherited commitment/owner/deadline conservation; smallest fitting pair selection and item-boundary repacking; depth 8/node 128 limits. Reported input overflow reduces source-planning budget without changing the configured transport context or truncating source. | Large synthetic real-provider run not completed; mocked hierarchy tests are not latency/semantic proof. |
+| 8: transport/metrics | All four providers use the pipeline; output limits, truncation rejection, cancellation; Ollama final-packet metrics and stream-completion checks; notes stages use the existing analysis capacity deadline. Content-free secondary error logging. | Cloud transports are mocked, not credential-backed live tests. |
+| 9: coordinator/cache | Main-owned run identity and fingerprint; source/eligibility/user-note CAS; coalescing/cancellation; four-entry, 15-minute validated-writer cache; every explicit regeneration audits again. | No production DB regeneration performed. |
+| 10: edits/title/history | Latest-row publication, meaningful title protection, placeholder title derived without another LLM request; source-aware edit rebase, recoverable conflicts, exact history restoration. | DOM and DB tests, not a live rendered-app pass. |
+| 11–12: secondary/IPC/recovery | Notes publish before signals/entities/MID/knowledge; guarded secondary writes, secondary-only retry, restart recovery; automatic/manual/retry/partial-gap routes share one owner. Failed regeneration stays visible alongside old notes after navigation. | Live app boundary remains unverified. |
+| 13: verification | Final unit/DOM suite: 222 files / 2,072 tests passed at 01:48 PDT. Typecheck, scoped Biome, diff whitespace check, changelog validation and commit audit hooks pass. | Real semantic/performance gate and live rendered QA remain open. |
+| 14: handoff | Decision/changelog/issue updated with local-only state and known limits. No private meeting data used in committed fixtures. | Local commits and final status recorded at handoff; no merge/push authorization. |
+
+#### Real-provider findings (synthetic input only)
+
+- The same configured `qwen3.5:9b` was used; no model download, switch, or cloud fallback.
+- A strict output-grammar experiment produced well-formed two-stage output but omitted the retained explicit promise in all three seeds (41/42/43). Wall times were approximately 102/117/91 seconds. This experiment was rejected; it is not the current implementation.
+- Plain JSON restored broader coverage but the model copied illustrative character offsets. The production adapter now uses request-local `R0` labels which code expands to exact original spans. Unknown labels are rejected, never inferred. Canonical transcript bytes and evidence validation are unchanged.
+- The first label-based run retained the required owner, deadline, and condition, but the auditor followed an incomplete item-replacement example. The prompt now distinguishes narrative replacement from a complete item replacement. The parser was not weakened to accept missing item fields.
+- That run spent about 62 seconds loading for the writer and 230 seconds loading for the audit. Concurrent live-app model/context activity makes these wall times unsuitable for a speedup claim. The timed-out test process was stopped; the harness now aborts its request before its watchdog so later seeds cannot overlap an abandoned request.
+- The stored-fixture scorer passed 47/48 historical fixtures. This is not evaluation of newly generated notes. The broad live benchmark was stopped when it overlapped a diagnostic run; no result is claimed.
+- The existing small-fixture **30-second average gate remains unchanged**. No passing performance result or speedup multiplier is claimed. Current-final-prompt results are recorded below after the final bounded run.
+
+#### Acceptance-driven corrections after initial integration
+
+- Commit `a8b58512d` integrates the provider, source-audit, coordinator, persistence, edits/history and renderer work. It is a local commit, not a release.
+- Intermediate source-label seeds 41 and 42 passed the original commitment checks in 128,917 ms and 95,730 ms with two requests and no repair. Reviewing the actual seed-42 notes exposed missing conditional discussion and withdrawal context. The acceptance test now checks those narrative topics, the retained condition, and duplicate actions rather than treating the action list as sufficient.
+- The broader audit prompt produced the correct complete action-to-point corrections, but application code rejected any item-kind change. A captured synthetic writer/audit pair now regresses that exact failure. Complete NotesItem reclassification is allowed under source review; incompatible narrative/item shapes remain rejected. This closes the mismatch with the approved semantic-audit responsibility, not a relaxation of source validity.
+- Intermediate seed 43 copied a concrete instructional example into the draft without a source and repeated it on repair. The source gate correctly rejected it. Concrete writer examples have been removed; missing-source repair errors now identify the item without logging its text. No invented reference or unsupported item is accepted to make the test pass.
+- Added a separately opted-in large synthetic hierarchy test. It is not silently included in the three short seeds and has not been run against the provider. Run only when an isolated runtime is available: `RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 RUN_MEETING_NOTES_LARGE_ACCEPTANCE=1 pnpm exec vitest run --disableConsoleIntercept --config vitest.manual.config.ts tests/manual/meetingNotesV10Acceptance.test.ts -t 'real hierarchy'`.
+- Follow-up commit `b89634354` contains the kind-correction replay, broader narrative checks, example-leakage prevention, precise source errors, renderer-notification isolation and opt-in large gate.
+- Follow-up commit `ecc4f7670` rejects an incoherent audit that marks a section heading unsupported while supporting its children, instead of silently deleting valid claims with the heading. It also includes the supplemental source descriptor when sizing overlap; previously the indexed budget callback could miss that descriptor. Both have red/green regression evidence.
+
+#### Final local verification commands
+
+- `pnpm exec vitest run`: 222 files / 2,072 tests pass.
+- `pnpm exec tsc --noEmit`: pass.
+- Scoped `pnpm exec biome check` on changed code/tests: pass; commit hooks recheck staged files.
+- `pnpm run changelog:check`: 142 fragments validated.
+- `pnpm run audit:high` through commit hooks: no high severity advisories across 194 installed packages.
+- `git diff --check`: pass.
+- Manual test opt-in discovery/typecheck passes with provider tests skipped when their environment flags are absent. A skip is not a provider pass.
+- No Electron installation was launched from this worktree; its Node-test SQLite binding does not establish Electron readiness. Run `pnpm run fix-sqlite-abi` here before any authorized worktree Electron launch. Main-checkout bindings were not rebuilt.
+
+#### Last completed live batch — expanded semantic gate
+
+**Result: 0/3 passed; one opt-in large test skipped.** This batch used the final writer/audit prompts and item-kind correction. It was already running when the final unsupported-heading safeguard and overlap fix were added, so it is not a live-provider pass of `ecc4f7670`. Those fixes have fresh unit coverage; they prevent unsafe loss/publication, not demonstrated semantic recovery.
+
+| Seed | Wall time | Requests / repairs | Observed failure |
+|---|---:|---:|---|
+| 41 | 136,101 ms | 3 / 1 | Missing audit fields required repair; unsupported heading removed the section despite supported children. No retained action. Final safeguard now rejects this incoherent audit instead. |
+| 42 | 97,578 ms | 2 / 0 | Correct retained commitment/owner/deadline/condition, but conditional discussion and withdrawal context disappeared from visible notes. Failed the new narrative-coverage gate. |
+| 43 | 150,023 ms | 2 / 0 | Writer omitted the retained commitment from items; audit mentioned it in overview but did not insert it. Unsupported heading discarded remaining children; source labels leaked into overview prose. Final safeguard rejects the heading inconsistency, not the underlying omission. |
+
+These are genuine acceptance failures, not test flakiness to waive. Runtime contention explains load/wait time, **not** semantic omissions. No new model download, settings change, relaxed two-request gate, extra retry loop, or unsupported deterministic commitment synthesis was used. All test processes have completed; no provider test is left running. Controlled idle-runtime performance, large hierarchy and rendered verification still require permission to stop/pause the running app or launch an isolated app session. That permission was requested, not assumed. No claim of full implementation acceptance or completion of #674 is made.
+
+#### Remaining delivery boundary
+
+Do not mark #674 complete on code/test evidence alone. Finish current-prompt semantic seeds and the larger synthetic hierarchy case, measure publication separately from secondary work, and obtain a live rendered notes/conflict/status pass. A controlled idle-runtime test or app launch requires separate permission to pause/restart the running app; stored meeting regeneration, merge, and push remain unauthorized. Any remaining model-quality failure must be reported separately from runtime contention, not explained away by it.
 
 Read `AGENTS.md`, `.agent/skills/executing-plans/SKILL.md`, `.agent/skills/test-driven-development/SKILL.md`, and the approved design before implementation. Use `.agent/skills/verification-before-completion/SKILL.md` before delivery. For the narrowly scoped conflict/error UI in Task 10, read the applicable UI skill before editing that surface. Do not introduce a new design direction.
 
@@ -388,7 +452,7 @@ it('adds a source-backed commitment omitted by the writer', () => {
 ```
 
 - [ ] **4.2 Run:** `pnpm exec vitest run tests/unit/meetingNotesAudit.test.ts`. Expect failure before implementation. Verify fixture offsets against the source string; derive `end` from `.length` when constructing more fixtures.
-- [ ] **4.3 Implement parse/apply/project functions.** Strictly parse all nested objects; bound strings and arrays by request output limits. Reject duplicate IDs, unknown targets, prototype-like IDs, invalid spans, incompatible item-kind replacement, unreviewed inserted blocks, and conflicting operations. Apply the complete validated patch to a clone atomically; never partially apply an invalid audit. Do not use a general JSON Patch engine.
+- [ ] **4.3 Implement parse/apply/project functions.** Strictly parse all nested objects; bound strings and arrays by request output limits. Reject duplicate IDs, unknown targets, prototype-like IDs, invalid spans, incompatible narrative/item shape replacement, unreviewed inserted blocks, and conflicting operations. A complete validated item may change kind under source review so the audit can correct a misclassified commitment; action/decision field guards and hierarchical conservation still apply. Apply the complete validated patch to a clone atomically; never partially apply an invalid audit. Do not use a general JSON Patch engine.
 
 The public functions are `parseNotesDraft(raw: string): NotesDraft`, `parseNotesAudit(raw: string): NotesAudit`, `applyNotesAudit({source,draft,audit}): AuditedNotes`, and `projectAuditedNotes(audited: AuditedNotes): AnalysisDocumentV3`. Define `AuditedNotes` in this module as an internal result containing source, final draft, validated verdict map, and accepted terminology aliases. Only `applyNotesAudit` constructs it.
 
@@ -714,6 +778,6 @@ Acceptance requires: no invented settled item/owner/deadline in the targeted fix
 - [ ] Focused/full tests, typecheck, lint, privacy checks, and applicable real-provider verification are recorded.
 - [ ] No unrelated main-checkout edits were included; no private meeting content was committed.
 
-## Terra continuation prompt
+## Historical Terra continuation prompt (superseded by primary-agent takeover)
 
 > Implement issue #674 using `docs/superpowers/plans/2026-08-26-source-grounded-meeting-notes.md` and its approved design. Work in `/Users/metagrover/Desktop/pluto/.worktrees/674-source-grounded-notes` on `codex/674-source-grounded-notes`. Use the executing-plans skill and TDD, completing the tasks in dependency order with small local commits and recorded verification. The architecture is decided: one writer plus one source-grounded audit for fitting inputs, bounded hierarchy otherwise. Keep Pluto's configured meeting-analysis model unchanged. Preserve unrelated dirty files in the main checkout. Do not substitute prompt assertions for behavioral implementation, silently weaken grounding, or drop source coverage to pass tests. Verify with synthetic production-provider fixtures after implementation; do not mutate stored user meetings or restart the running app without permission. Keep going until the implementation and safe in-scope verification are complete; report any genuine external blocker specifically. Do not push or merge without a separate delivery instruction.

@@ -2,7 +2,7 @@
 
 **Issue:** [#674](https://github.com/metagrover/pluto/issues/674)
 
-**Status:** Architecture approved; implementation not started.
+**Status:** Implemented on the local #674 branch; real-provider acceptance and live rendered verification remain open. Not merged, pushed, or shipped. See the implementation plan's current verification matrix.
 
 **Baseline:** `f1fbb7d53` on local `master`.
 
@@ -48,7 +48,7 @@ The successful direct path has exactly two LLM requests: writer and audit. The a
 
 ## Model and latency contract
 
-- Retain the configured provider, model, thinking setting, and privacy boundary. Terra is the implementation agent, not a replacement meeting-analysis model.
+- Retain the configured provider, model, thinking setting, and privacy boundary. The implementation-agent choice does not change the meeting-analysis model.
 - Route using a single conservative estimator and output reservations for both writer and audit. The initial local context ceiling remains the existing 16,384-token ordinary-task ceiling; no automatic increase to the advertised model maximum.
 - Reduce generated redundancy: each action/decision appears once in model output; code derives rollups and evidence strings.
 - Fold terminology proposals into the writer/audit exchange. No unconditional standalone terminology request.
