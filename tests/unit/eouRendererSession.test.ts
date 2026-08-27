@@ -94,6 +94,46 @@ describe('EOU renderer session', () => {
     );
   });
 
+  it('aligns independent source token clocks to their first meeting-clock sample', async () => {
+    const transport = makeTransport();
+    const onSegments = vi.fn();
+    let meetingSeconds = 3;
+    const session = createEouRendererSession({
+      meetingId: 'meeting-1',
+      generation: 1,
+      sampleRates: { mic: 8_000, system: 8_000 },
+      transport,
+      nowSeconds: () => meetingSeconds,
+      onSegments,
+      onUnavailable: vi.fn(),
+    });
+    await session.start();
+    session.append('mic', new Float32Array(2_560));
+    meetingSeconds = 4.5;
+    session.append('system', new Float32Array(2_560));
+
+    transport.emitUpdate({
+      meetingId: 'meeting-1',
+      generation: 1,
+      event: {
+        streamId: 'eou-meeting-1-system',
+        source: 'system',
+        generation: 1,
+        revision: 1,
+        processedAudioSeconds: 0.32,
+        committedText: 'hello',
+        tentativeText: '',
+        tokens: [
+          { text: 'hello', startSeconds: 0, endSeconds: 0.2, committed: true },
+        ],
+      },
+    });
+
+    expect(onSegments).toHaveBeenCalledWith([
+      expect.objectContaining({ timestampMs: 4_180, endTimestampMs: 4_380 }),
+    ]);
+  });
+
   it('fails unavailable once at four outstanding frames without stopping capture', async () => {
     const transport = makeTransport();
     const blocked = deferred<unknown>();

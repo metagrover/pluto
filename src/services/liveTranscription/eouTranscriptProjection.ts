@@ -37,7 +37,10 @@ const sourceRank: Record<LiveSource, number> = { mic: 0, system: 1 };
 const STREAM_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 
 export function createEouTranscriptProjection(): {
-  apply(update: ParakeetEouUpdate): LiveTranscriptSegment[];
+  apply(
+    update: ParakeetEouUpdate,
+    sourceOffsetSeconds?: number,
+  ): LiveTranscriptSegment[];
   reset(generation: number): void;
 } {
   let generation: number | null = null;
@@ -45,8 +48,11 @@ export function createEouTranscriptProjection(): {
   let rows: LiveTranscriptSegment[] = [];
 
   return {
-    apply(update) {
+    apply(update, sourceOffsetSeconds = 0) {
       validateUpdate(update);
+      if (!Number.isFinite(sourceOffsetSeconds) || sourceOffsetSeconds < 0) {
+        throw new Error('parakeet_event_invalid');
+      }
       if (generation === null) generation = update.generation;
       if (update.generation !== generation) return rows;
       const previous = projections[update.source];
@@ -77,11 +83,13 @@ export function createEouTranscriptProjection(): {
             endSeconds:
               committedTokens.at(-1)?.endSeconds ??
               update.processedAudioSeconds,
+            tokens: committedTokens.slice(previous.committedTokenCount),
+            sourceOffsetSeconds,
           }),
         );
       }
       const tentative = update.tentativeText
-        ? makeSegment(update, 'tentative')
+        ? makeSegment(update, 'tentative', { sourceOffsetSeconds })
         : null;
       projections = {
         ...projections,
@@ -138,11 +146,19 @@ const emptyProjections = (): Record<LiveSource, SourceProjection> => ({
 const makeSegment = (
   update: ParakeetEouUpdate,
   kind: 'committed' | 'tentative',
-  override?: { text: string; startSeconds: number; endSeconds: number },
+  override?: {
+    text?: string;
+    startSeconds?: number;
+    endSeconds?: number;
+    tokens?: ParakeetEouToken[];
+    sourceOffsetSeconds?: number;
+  },
 ): ProjectedSegment => {
-  const selectedTokens = update.tokens.filter((candidate) =>
-    kind === 'committed' ? candidate.committed : !candidate.committed,
-  );
+  const selectedTokens =
+    override?.tokens ??
+    update.tokens.filter((candidate) =>
+      kind === 'committed' ? candidate.committed : !candidate.committed,
+    );
   const token = selectedTokens[0];
   const rawText =
     override?.text ??
@@ -154,17 +170,24 @@ const makeSegment = (
           ? `eou:${update.generation}:${update.source}:committed-${update.revision}`
           : `eou:${update.generation}:${update.source}:tentative`,
       speaker: 'Speaker',
-      text: kind === 'committed' ? punctuateCommittedText(rawText) : rawText,
+      text:
+        kind === 'committed'
+          ? punctuateCommittedText(rawText, selectedTokens)
+          : rawText,
       rawText,
       source: update.source,
       timestampMs:
-        (override?.startSeconds ??
+        ((override?.startSeconds ??
           token?.startSeconds ??
-          update.processedAudioSeconds) * 1_000,
+          update.processedAudioSeconds) +
+          (override?.sourceOffsetSeconds ?? 0)) *
+        1_000,
       endTimestampMs:
-        (override?.endSeconds ??
+        ((override?.endSeconds ??
           selectedTokens.at(-1)?.endSeconds ??
-          update.processedAudioSeconds) * 1_000,
+          update.processedAudioSeconds) +
+          (override?.sourceOffsetSeconds ?? 0)) *
+        1_000,
       confirmed: kind === 'committed',
     },
     source: update.source,
@@ -172,18 +195,50 @@ const makeSegment = (
   };
 };
 
-const punctuateCommittedText = (text: string): string => {
+const QUESTION_START =
+  /^(?:who|what|when|where|why|how|is|are|am|was|were|do|does|did|can|could|will|would|should|have|has|had)\b/iu;
+
+const punctuateCommittedText = (
+  text: string,
+  tokens: ParakeetEouToken[],
+): string => {
   const normalized = text.trim().replace(/\s+/g, ' ');
   if (!normalized) return normalized;
-  const capitalized = normalized.replace(/[a-z]/i, (letter) =>
-    letter.toUpperCase(),
-  );
-  if (/[.!?…]["')\]]?$/u.test(capitalized)) return capitalized;
-  const isQuestion =
-    /^(?:who|what|when|where|why|how|is|are|am|was|were|do|does|did|can|could|will|would|should|have|has|had)\b/iu.test(
-      normalized,
-    );
-  return `${capitalized}${isQuestion ? '?' : '.'}`;
+  const words = normalized.split(' ');
+  const canUsePauses = tokens.length === words.length;
+  let sentenceStart = 0;
+  let capitalizeNext = true;
+
+  return words
+    .map((word, index) => {
+      let presented = capitalizeNext
+        ? word.replace(/[a-z]/i, (letter) => letter.toUpperCase())
+        : word;
+      capitalizeNext = false;
+      const terminal = /[.!?…]["')\]]?$/u.test(presented);
+      if (terminal) {
+        sentenceStart = index + 1;
+        capitalizeNext = true;
+        return presented;
+      }
+
+      const nextGap = canUsePauses
+        ? (tokens[index + 1]?.startSeconds ?? Number.POSITIVE_INFINITY) -
+          tokens[index].endSeconds
+        : index === words.length - 1
+          ? Number.POSITIVE_INFINITY
+          : 0;
+      if (nextGap >= 0.8) {
+        const sentence = words.slice(sentenceStart, index + 1).join(' ');
+        presented += QUESTION_START.test(sentence) ? '?' : '.';
+        sentenceStart = index + 1;
+        capitalizeNext = true;
+      } else if (nextGap >= 0.4 && !/[,;:]$/u.test(presented)) {
+        presented += ',';
+      }
+      return presented;
+    })
+    .join(' ');
 };
 
 const validateUpdate = (update: ParakeetEouUpdate): void => {

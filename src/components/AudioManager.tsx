@@ -9,6 +9,7 @@ import {
 } from '../services/diarizationFirstFinalization';
 import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
 import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
+import { reconcileLiveTranscriptSegments } from '../services/liveTranscription/liveTranscriptReconciliation';
 import {
   computeRms,
   createWavBlob,
@@ -683,6 +684,7 @@ export const AudioManager = ({
             return window.ipcRenderer.on('PARAKEET_EOU_UNAVAILABLE', handler);
           },
         },
+        nowSeconds: getMeetingElapsedSeconds,
         onSegments: (segments) => {
           if (
             currentMeetingIdRef.current !== meetingId ||
@@ -692,13 +694,27 @@ export const AudioManager = ({
           processedMicSegmentsRef.current = segments.map(
             toStoredLiveTranscriptCandidate,
           );
+          const activeWindow = activeSpeakerWindowRef.current;
+          const activityWindows = activeWindow
+            ? [
+                ...speakerTimelineRef.current,
+                {
+                  ...activeWindow,
+                  endTime: getMeetingElapsedSeconds(),
+                },
+              ]
+            : speakerTimelineRef.current;
+          const readingSegments = reconcileLiveTranscriptSegments({
+            segments,
+            activityWindows,
+          });
           liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
             segments,
             () => {
               // Tentative native EOU rows are stable by id and are replaced in
               // place as recognition advances. Publish them in the primary
               // transcript instead of hiding first text in the faint footer.
-              onLiveTranscript?.(segments);
+              onLiveTranscript?.(readingSegments);
               onInterimTranscript?.('');
             },
           );

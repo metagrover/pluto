@@ -648,7 +648,7 @@
     @apply flex min-w-0 items-start gap-2;
   }
   .meeting-markdown-preview {
-    @apply w-full cursor-text text-[16px] leading-[1.5] outline-none;
+    @apply w-full cursor-text text-[16px] leading-[1.55] outline-none;
     color: var(--notes-ink);
   }
   .meeting-markdown-preview > :first-child {
@@ -661,8 +661,8 @@
     @apply my-0;
   }
   .meeting-markdown-preview p + p {
-    /* 24px = 1.5 × 16px = one textarea line — keeps preview & edit heights in sync */
-    margin-top: 24px;
+    /* One textarea line keeps preview and multiline editing in sync. */
+    margin-top: 24.8px;
   }
   .meeting-markdown-preview ul,
   .meeting-markdown-preview ol {
@@ -1006,10 +1006,10 @@
     @apply grid min-h-0 flex-1 grid-cols-[minmax(340px,0.82fr)_minmax(460px,1.18fr)];
   }
   .live-transcript {
-    @apply relative min-h-0 min-w-0 overflow-hidden bg-pro-bg;
+    @apply relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-pro-bg;
   }
   .live-transcript-scroll {
-    @apply h-full overscroll-contain overflow-y-auto px-8 pb-20 pt-6 lg:px-12;
+    @apply min-h-0 flex-1 overscroll-contain overflow-y-auto px-8 pb-8 pt-6 lg:px-12;
   }
   .live-transcript-heading,
   .live-transcript-body {
@@ -1042,15 +1042,17 @@
   .transcript-turn p {
     @apply max-w-[70ch] text-[15px] leading-[1.7] text-pro-text-main;
   }
+  .transcript-turn__content {
+    @apply flex min-w-0 flex-col gap-3;
+  }
+  .transcript-paragraph-part--tentative {
+    @apply text-pro-text-main/70;
+  }
   .live-transcript-follow-control {
-    @apply pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4;
+    @apply flex shrink-0 justify-center border-t border-pro-border/50 bg-pro-surface px-4 py-3;
   }
   .live-transcript-follow-control button {
-    @apply pointer-events-auto flex min-h-11 items-center gap-2 rounded-full border border-pro-border bg-pro-surface px-4 text-xs font-semibold text-pro-text-main shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-pro-bg hover:shadow-md active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg;
-  }
-  .transcript-typewriter-caret {
-    @apply ml-0.5 inline-block h-[1em] w-px translate-y-[0.12em] bg-pro-accent;
-    animation: transcript-caret 900ms steps(2, jump-none) infinite;
+    @apply flex min-h-11 items-center gap-2 rounded-full border border-pro-border bg-pro-bg px-4 text-xs font-semibold text-pro-text-main shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-pro-surface hover:shadow-md active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface;
   }
   .transcript-interim {
     @apply ml-[102px] max-w-[70ch] border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted;
@@ -1270,18 +1272,6 @@
 }
 
 /* Advanced Animations */
-@keyframes transcript-caret {
-  0%,
-  45% {
-    opacity: 1;
-  }
-
-  55%,
-  100% {
-    opacity: 0.2;
-  }
-}
-
 @keyframes nebula-float {
   0%,
   100% {
@@ -1452,7 +1442,7 @@
 .meeting-markdown-preview ul,
 .meeting-markdown-preview li,
 .meeting-markdown-preview div {
-  @apply text-[16px] leading-[1.5] text-pro-text-main;
+  @apply text-[16px] leading-[1.55] text-pro-text-main;
 }
 
 .meeting-note-block {
@@ -1462,7 +1452,7 @@
   @apply !pl-0;
 }
 .meeting-note-block textarea {
-  @apply text-[16px] leading-[1.5] text-pro-text-main py-0;
+  @apply text-[16px] leading-[1.55] text-pro-text-main py-0;
 }
 
 .meeting-action-check {
@@ -1511,7 +1501,7 @@
 .meeting-editable-copy textarea {
   @apply m-0 block w-full resize-none border-none bg-transparent outline-none ring-0 focus:ring-0;
   padding: 0 !important;
-  line-height: 1.5 !important;
+  line-height: 1.55 !important;
 }
 
 .meeting-note-block__marker {
