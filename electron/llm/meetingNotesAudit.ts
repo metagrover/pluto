@@ -112,9 +112,18 @@ const parseWriterSection = (
   if (!isRecord(value) || !Array.isArray(value.items)) return null;
   const id = `s${index}`;
   const title = parseSupportedText(value.title, `${id}:title`);
-  const items = value.items.map((item, itemIndex) =>
-    parseItem(item, `${id}:item:${itemIndex}`),
-  );
+  const items = value.items.map((item, itemIndex) => {
+    if (
+      isRecord(item) &&
+      Array.isArray(item.sources) &&
+      item.sources.length === 0
+    ) {
+      throw new MeetingNotesError(
+        `notes_writer_invalid:${id}:item:${itemIndex}:missing_source`,
+      );
+    }
+    return parseItem(item, `${id}:item:${itemIndex}`);
+  });
   if (!title || items.some((item) => item === null)) return null;
   return { id, title, items: items as NotesItem[] };
 };
@@ -290,11 +299,7 @@ const replaceBlock = (
       return true;
     }
     const index = section.items.findIndex((item) => item.id === target);
-    if (
-      index >= 0 &&
-      'kind' in value &&
-      section.items[index]?.kind === value.kind
-    ) {
+    if (index >= 0 && 'kind' in value) {
       section.items[index] = value;
       return true;
     }

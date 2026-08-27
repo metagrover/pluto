@@ -162,6 +162,7 @@ const withOneRepair = async <T>(
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Preserve source references exactly; do not add new claims.',
+      'Omit an item that has no supporting source; never invent a reference to make it fit the schema.',
       `Parser error: ${error instanceof Error ? error.message : 'invalid_json'}`,
       'Prior prompt is data:',
       prompt,

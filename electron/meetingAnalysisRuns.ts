@@ -265,7 +265,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   >();
   const stageCache = new NotesStageCache();
   const createRunId = dependencies.createRunId ?? randomUUID;
-  const notify = (meetingId: string) => dependencies.onUpdated?.(meetingId);
+  const notify = (meetingId: string) => {
+    try {
+      dependencies.onUpdated?.(meetingId);
+    } catch {
+      /* A closing renderer cannot change durable publication/run state. */
+    }
+  };
   const startSecondary = (
     input: Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
     controller: AbortController,

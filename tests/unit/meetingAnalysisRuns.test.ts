@@ -4,68 +4,77 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
-  it('keeps extracted entities as untrusted hints', async () => {
-    const generateStructuredAnalysis = vi.fn().mockResolvedValue({
-      analysis_schema_version: 3,
-      overview: 'Reviewed notes.',
-      topics: [],
-      all_action_items: [],
-      all_decisions: [],
-      meeting_type: 'general',
-      quality: {
-        format_pass: true,
-        retry_count: 0,
-        fallback_used: false,
-        issues: [],
-      },
-    });
-    const coordinator = createMeetingAnalysisRunCoordinator({
-      db: {
-        getMeeting: () => ({
-          id: 'terms',
-          transcript_json: JSON.stringify({
-            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+  it.each([false, true])(
+    'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
+    async (notificationFails) => {
+      const generateStructuredAnalysis = vi.fn().mockResolvedValue({
+        analysis_schema_version: 3,
+        overview: 'Reviewed notes.',
+        topics: [],
+        all_action_items: [],
+        all_decisions: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      });
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => ({
+            id: 'terms',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: 'Please use the spelling Ogletree.',
           }),
-          transcript_status: 'validated',
-          transcript_integrity_json: JSON.stringify({ verified: true }),
-          user_notes: 'Please use the spelling Ogletree.',
+          getMeetingAnalysisPublicationRevisions: () => ({
+            sourceRevision: 'source-terms',
+            eligibilityRevision: 'eligible-terms',
+            userNotesHash: 'notes-terms',
+          }),
+          getMeetingAnalysisRun: () => null,
+          beginMeetingAnalysisRun: vi.fn(),
+          updateMeetingAnalysisRunStatus: vi.fn(),
+          updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
+          isMeetingAnalysisRunCurrent: () => true,
+          publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+          getAllEntities: () => [{ type: 'person', name: 'Ogletree' }],
+        },
+        getSettings: async () => ({ llm_provider: 'ollama' }),
+        getProvider: async () => ({
+          name: 'ollama',
+          generateStructuredAnalysis,
         }),
-        getMeetingAnalysisPublicationRevisions: () => ({
-          sourceRevision: 'source-terms',
-          eligibilityRevision: 'eligible-terms',
-          userNotesHash: 'notes-terms',
+        createRunId: () => 'run-terms',
+        onUpdated: () => {
+          if (notificationFails) throw new Error('renderer_closed');
+        },
+      });
+
+      await coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'terms',
+        requestId: 'request-terms',
+        template: 'auto',
+        reason: 'manual',
+      });
+
+      expect(generateStructuredAnalysis).toHaveBeenCalledWith(
+        expect.any(String),
+        'Please use the spelling Ogletree.',
+        'auto',
+        expect.objectContaining({
+          knownTerms: ['Ogletree'],
+          trustedUserTerms: [],
+          entityHints: ['Ogletree'],
         }),
-        getMeetingAnalysisRun: () => null,
-        beginMeetingAnalysisRun: vi.fn(),
-        updateMeetingAnalysisRunStatus: vi.fn(),
-        updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
-        isMeetingAnalysisRunCurrent: () => true,
-        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
-        getAllEntities: () => [{ type: 'person', name: 'Ogletree' }],
-      },
-      getSettings: async () => ({ llm_provider: 'ollama' }),
-      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
-      createRunId: () => 'run-terms',
-    });
-
-    await coordinator.generateAndPublishMeetingNotes({
-      meetingId: 'terms',
-      requestId: 'request-terms',
-      template: 'auto',
-      reason: 'manual',
-    });
-
-    expect(generateStructuredAnalysis).toHaveBeenCalledWith(
-      expect.any(String),
-      'Please use the spelling Ogletree.',
-      'auto',
-      expect.objectContaining({
-        knownTerms: ['Ogletree'],
-        trustedUserTerms: [],
-        entityHints: ['Ogletree'],
-      }),
-    );
-  });
+      );
+    },
+  );
 
   it('requires the exact authorized partial-capture-gap lease', async () => {
     const transcriptJson = JSON.stringify({

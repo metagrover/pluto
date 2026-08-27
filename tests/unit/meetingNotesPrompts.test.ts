@@ -27,6 +27,7 @@ it('gives the auditor an explicit exhaustive review checklist and all insertion 
   expect(prompt).toContain('insert_section');
   expect(prompt).toContain('"op":"insert"');
   expect(prompt).toContain('First read EVERY source turn');
+  expect(prompt).toContain('Review the item kind separately from the wording');
   expect(prompt).toContain(
     '"target":"existing item id","value":{"id":"existing item id","kind":"point"',
   );
@@ -61,6 +62,7 @@ it('does not ask the writer to generate duplicate rollups or a forced executive 
 
   expect(prompt).not.toContain('all_action_items');
   expect(prompt).not.toContain('Chief of Staff');
+  expect(prompt).not.toContain('book the venue');
   expect(prompt).toContain(
     'An overview mention is not a substitute for an action',
   );

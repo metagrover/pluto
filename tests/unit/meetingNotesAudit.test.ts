@@ -35,6 +35,17 @@ it('labels uncertain discussion rather than publishing it as an unqualified fact
   ).toEqual(fixture.draft.sections[0]!.items[0]!.sources);
 });
 
+it('lets the audit correct an item kind while preserving the material discussion', () => {
+  const fixture = makeDirectNotesFixture();
+  const item = fixture.draft.sections[0]!.items[0]!;
+  fixture.audit.changes = [
+    { op: 'replace', target: item.id, value: { ...item, kind: 'point' } },
+  ];
+  const result = projectAuditedNotes(applyNotesAudit(fixture));
+  expect(result.all_action_items).toEqual([]);
+  expect(result.topics[0]?.summary).toBe(item.text);
+});
+
 it('rejects a deduplication record without an identified replacement', () => {
   expect(() =>
     parseNotesAudit(
@@ -53,6 +64,15 @@ it('rejects a deduplication record without an identified replacement', () => {
       }),
     ),
   ).toThrow('notes_audit_invalid');
+});
+
+it('identifies an unsourced writer item for the one repair without copying private text into the error', () => {
+  const { draft } = makeDirectNotesFixture();
+  draft.sections[0]!.items[0]!.sources = [];
+  draft.sections[0]!.items[0]!.text = 'PRIVATE_MARKER';
+  expect(() => parseNotesDraft(JSON.stringify(draft))).toThrow(
+    'notes_writer_invalid:s0:item:0:missing_source',
+  );
 });
 
 it('adds a source-backed commitment omitted by the writer', () => {

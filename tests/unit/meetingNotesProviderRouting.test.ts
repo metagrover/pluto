@@ -1,12 +1,43 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
 import {
   UnifiedLLMProvider,
   getOllamaTimeoutMs,
 } from '../../electron/llm/unifiedProvider';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
+import kindCorrection from '../manual/fixtures/meetingNotesV10KindCorrection.json';
 
 afterEach(() => vi.restoreAllMocks());
+
+it('applies the captured real-model kind correction without repair or loss of discussion', async () => {
+  const provider = new UnifiedLLMProvider('ollama', {});
+  const generate = vi
+    .spyOn(provider as never, 'generateText')
+    .mockResolvedValueOnce(JSON.stringify(kindCorrection.writer))
+    .mockResolvedValueOnce(JSON.stringify(kindCorrection.audit));
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source: createNotesSource(
+      JSON.stringify({ segments: kindCorrection.segments }),
+    ),
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(result.all_action_items).toHaveLength(1);
+  expect(result.all_action_items[0]).toMatchObject({
+    assignee: 'Dana',
+    due: 'Wednesday',
+  });
+  const narrative = result.topics
+    .flatMap((topic) => [
+      topic.summary,
+      ...topic.key_points.map((point) => point.text),
+    ])
+    .join(' ');
+  expect(narrative).toContain('Ava withdraws');
+  expect(narrative).toContain(
+    'Ben can draft the announcement if legal approves',
+  );
+});
 
 it('forwards cancellation through entity extraction after publication', async () => {
   const provider = new UnifiedLLMProvider('ollama', {});

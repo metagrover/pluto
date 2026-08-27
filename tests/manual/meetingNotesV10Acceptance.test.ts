@@ -79,6 +79,81 @@ const responseDiagnostics = (raw: string) => {
 };
 
 suite('v10 synthetic local-provider acceptance', () => {
+  it.skipIf(process.env.RUN_MEETING_NOTES_LARGE_ACCEPTANCE !== '1')(
+    'preserves a middle commitment and a late reversal across a real hierarchy',
+    async () => {
+      const background =
+        'We compared several options and described their tradeoffs. This discussion does not assign work or settle a decision. ';
+      const segments = Array.from({ length: 18 }, (_, index) => ({
+        speaker: 'Casey',
+        text: `Discussion ${index + 1}. ${background.repeat(24)}`,
+      }));
+      segments.splice(2, 0, syntheticSegments[0]!);
+      segments.splice(10, 0, syntheticSegments[5]!);
+      segments.push(syntheticSegments[4]!);
+      const largeSource = createNotesSource(JSON.stringify({ segments }));
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: model,
+        ollama_seed: 41,
+        ollama_structured_thinking: false,
+      });
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(new Error('large_acceptance_deadline')),
+        29 * 60_000,
+      );
+      const started = performance.now();
+      try {
+        const result = await provider.generateStructuredAnalysis(
+          '',
+          '',
+          'auto',
+          {
+            source: largeSource,
+            contextTokens: 16384,
+            signal: controller.signal,
+          },
+        );
+        console.log(
+          JSON.stringify({
+            acceptance: 'meeting-notes-v10-large',
+            latencyMs: Math.round(performance.now() - started),
+            sourceSegments: segments.length,
+            mode: result.generation_metadata?.mode,
+            hierarchy: result.generation_metadata?.hierarchy,
+          }),
+        );
+        expect(result.generation_metadata?.mode).toBe('hierarchical');
+        expect(result.all_action_items).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              text: expect.stringMatching(/reviewed FAQ/i),
+              assignee: 'Dana',
+              due: expect.stringMatching(/Wednesday/i),
+            }),
+          ]),
+        );
+        expect(
+          result.all_action_items.map((item) => item.text).join(' '),
+        ).not.toMatch(/integration checklist/i);
+        expect(
+          result.all_action_items.find((item) =>
+            /reviewed FAQ/i.test(item.text),
+          )?.text,
+        ).toMatch(/after.*audit/i);
+        const sources = Object.values(
+          result.generation_metadata?.source_provenance?.blocks ?? {},
+        ).flatMap((block) => block.sources);
+        expect(sources.some((span) => span.segment === 10)).toBe(true);
+        for (const span of sources)
+          expect(resolveSourceSpan(largeSource, span).trim()).not.toBe('');
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    30 * 60_000,
+  );
+
   it.each(seeds)(
     'keeps commitments grounded and respects qualifiers (seed %i)',
     async (seed) => {
@@ -154,6 +229,14 @@ suite('v10 synthetic local-provider acceptance', () => {
         console.log(JSON.stringify({ seed, responses, analysis }));
       const actions = analysis.all_action_items;
       const decisions = analysis.all_decisions;
+      const visibleNotes = [
+        analysis.overview,
+        ...analysis.topics.flatMap((topic) => [
+          topic.title,
+          topic.summary,
+          ...topic.key_points.map((point) => point.text),
+        ]),
+      ].join(' ');
       const settledText = [...actions, ...decisions]
         .map((item) => item.text.toLowerCase())
         .join('\n');
@@ -179,6 +262,10 @@ suite('v10 synthetic local-provider acceptance', () => {
       expect(analysis.generation_metadata?.audit_status).toBe('complete');
       expect(analysis.quality.retry_count).toBe(0);
       expect(directCallCount).toBe(2);
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.text).toMatch(/after.*audit/i);
+      expect(visibleNotes).toMatch(/checklist/i);
+      expect(visibleNotes).toMatch(/announcement/i);
       expect(actions).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
