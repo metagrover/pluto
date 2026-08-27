@@ -23,10 +23,12 @@ export default {
         'inner-soft': 'inset 0 2px 4px 0 rgba(26, 35, 64, 0.03)',
       },
       borderRadius: {
-        lg: '0.375rem',
-        xl: '0.375rem',
-        '2xl': '0.5rem',
-        '3xl': '0.5rem',
+        sm: '0.25rem',
+        md: '0.375rem',
+        lg: '0.5rem',
+        xl: '0.75rem',
+        '2xl': '1rem',
+        '3xl': '1.25rem',
       },
       fontFamily: {
         serif: ['Lora', 'Georgia', 'serif'],

@@ -156,7 +156,7 @@ describe('ProjectHealthCard', () => {
       />,
     );
 
-    expect(markup).toContain('bg-red-500/10 text-red-500');
+    expect(markup).toContain('bg-pro-urgent/10 text-pro-urgent');
     expect(markup).not.toContain('bg-pro-bg text-pro-text-muted');
   });
 

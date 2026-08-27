@@ -38,22 +38,22 @@ function GroundingBadge({
 }) {
   if (score < 0.4 || meetingCount === 0) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-500 text-[10px] font-medium shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />{' '}
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-pro-warning/10 border border-pro-warning/30 text-pro-warning text-[10px] font-medium shadow-sm">
+        <span className="w-1.5 h-1.5 rounded-full bg-pro-warning animate-pulse" />{' '}
         Inferred
       </span>
     );
   }
   if (score < 0.8 || !hasContext) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-medium shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Synthesized
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-pro-accent/10 border border-pro-accent/30 text-pro-accent text-[10px] font-medium shadow-sm">
+        <span className="w-1.5 h-1.5 rounded-full bg-pro-accent" /> Synthesized
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-[10px] font-medium shadow-sm">
-      <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Grounded
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-pro-success/10 border border-pro-success/30 text-pro-success text-[10px] font-medium shadow-sm">
+      <span className="w-1.5 h-1.5 rounded-full bg-pro-success" /> Grounded
     </span>
   );
 }
@@ -207,7 +207,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
             {/* 1. Header (Shrink-0) */}
             <header className="shrink-0 bg-pro-surface border-b border-pro-border p-6 flex items-center justify-between z-20">
               <div className="flex flex-col gap-0.5">
-                <h2 className="text-2xl font-bold text-pro-text-primary capitalize">
+                <h2 className="text-2xl font-bold text-pro-text-main capitalize">
                   {selectedEntityNode.label}
                 </h2>
                 <div className="flex items-center gap-2 mt-1">
@@ -238,7 +238,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                 <button
                   type="button"
                   onClick={clearSelection}
-                  className="p-2 hover:bg-pro-bg rounded-lg text-pro-text-muted hover:text-pro-text-primary transition-colors"
+                  className="p-2 hover:bg-pro-bg rounded-lg text-pro-text-muted hover:text-pro-text-main transition-colors"
                 >
                   <X size={20} />
                 </button>
@@ -253,10 +253,10 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsResolving(true)}
-                    className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 flex items-center justify-between cursor-pointer hover:bg-red-500/20 transition-colors w-full text-left"
+                    className="bg-pro-urgent/10 border border-pro-urgent/40 rounded-lg p-4 flex items-center justify-between cursor-pointer hover:bg-pro-urgent/20 transition-colors w-full text-left"
                   >
                     <div>
-                      <h3 className="text-red-500 font-bold text-sm flex items-center gap-2">
+                      <h3 className="text-pro-urgent font-bold text-sm flex items-center gap-2">
                         ⚠️ Conflict Detected
                       </h3>
                       <p className="text-pro-text-muted text-xs mt-1">
@@ -264,7 +264,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                         {activeConflict[0].relationship.replace(/_/g, ' ')}".
                       </p>
                     </div>
-                    <span className="text-red-500 text-xs font-semibold">
+                    <span className="text-pro-urgent text-xs font-semibold">
                       Resolve &rarr;
                     </span>
                   </button>
@@ -272,16 +272,16 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                 {/* Conflict Resolution UI */}
                 {activeConflict && isResolving && (
-                  <section className="bg-pro-surface border border-red-500/50 rounded-lg p-4 flex flex-col gap-4">
+                  <section className="bg-pro-surface border border-pro-urgent/40 rounded-lg p-4 flex flex-col gap-4">
                     <div className="flex justify-between items-center border-b border-pro-border/50 pb-2">
-                      <h3 className="font-bold text-pro-text-primary">
+                      <h3 className="font-bold text-pro-text-main">
                         Resolve Conflict:{' '}
                         {activeConflict[0].relationship.replace(/_/g, ' ')}
                       </h3>
                       <button
                         type="button"
                         onClick={() => setIsResolving(false)}
-                        className="text-pro-text-muted hover:text-pro-text-primary text-xs"
+                        className="text-pro-text-muted hover:text-pro-text-main text-xs"
                       >
                         Cancel
                       </button>
@@ -312,7 +312,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                                 {(edge.confidence * 100).toFixed(0)}%
                               </span>
                             </div>
-                            <p className="text-sm font-medium text-pro-text-primary">
+                            <p className="text-sm font-medium text-pro-text-main">
                               {targetLabel}
                             </p>
                             <button
@@ -334,7 +334,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                 {/* Synthetic Summary */}
                 <section className="flex flex-col gap-4">
                   <div className="flex justify-between items-center border-b border-pro-border/50 pb-2">
-                    <h3 className="font-bold text-pro-text-primary text-[11px] font-medium">
+                    <h3 className="font-bold text-pro-text-main text-[11px] font-medium">
                       Synthetic Summary
                     </h3>
                     <div className="flex items-center gap-2">
@@ -367,7 +367,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                                   onClick={() =>
                                     handleSentenceClick(s.source_meeting_ids[0])
                                   }
-                                  className="inline text-left cursor-pointer hover:bg-pro-accent/5 hover:text-pro-text-primary transition-all rounded-sm"
+                                  className="inline text-left cursor-pointer hover:bg-pro-accent/5 hover:text-pro-text-main transition-all rounded-sm"
                                 >
                                   <RichText text={s.text} nodes={_nodes} />
                                 </button>
@@ -398,7 +398,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                 {/* Relational Discovery */}
                 <section className="flex flex-col gap-4">
-                  <h3 className="font-bold text-pro-text-primary text-[11px] font-medium border-b border-pro-border/50 pb-2">
+                  <h3 className="font-bold text-pro-text-main text-[11px] font-medium border-b border-pro-border/50 pb-2">
                     Relational Discovery
                   </h3>
                   <MentionedWithCard entity={selectedEntityNode} />
@@ -407,7 +407,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                 {/* Meeting Context */}
                 <section className="flex flex-col gap-4 pb-12">
-                  <h3 className="font-bold text-pro-text-primary text-[11px] font-medium border-b border-pro-border/50 pb-2">
+                  <h3 className="font-bold text-pro-text-main text-[11px] font-medium border-b border-pro-border/50 pb-2">
                     Mentioned In
                   </h3>
                   <div className="flex flex-col gap-4 border-l-2 border-pro-border ml-2 pl-4">
@@ -437,7 +437,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                                 )
                               : 'Unknown'}
                           </div>
-                          <div className="text-sm text-pro-text-primary font-bold group-hover:text-pro-accent transition-colors">
+                          <div className="text-sm text-pro-text-main font-bold group-hover:text-pro-accent transition-colors">
                             {m.title}
                           </div>
                           {m.context && (
@@ -473,7 +473,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                     <span className="text-pro-accent animate-pulse font-bold text-xs">
                       ●
                     </span>
-                    <span className="text-[10px] font-semibold text-pro-text-muted/60 font-medium group-hover:text-pro-text-primary transition-colors">
+                    <span className="text-[10px] font-semibold text-pro-text-muted/60 font-medium group-hover:text-pro-text-main transition-colors">
                       {meetingsLoading
                         ? 'Indexing Proofs…'
                         : `Found ${snippetCount} Evidence Snippets`}
@@ -489,7 +489,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                   {/* Drawer Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-pro-border/50 bg-pro-surface shrink-0">
                     <div className="flex items-center gap-3">
-                      <h3 className="font-semibold text-pro-text-primary text-[10px] font-medium">
+                      <h3 className="font-semibold text-pro-text-main text-[10px] font-medium">
                         Evidence Dock
                       </h3>
                       {snippetCount > 0 && (
@@ -521,7 +521,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                               : 'hover:bg-pro-surface border-l-4 border-l-transparent'
                           }`}
                         >
-                          <div className="text-[11px] font-bold text-pro-text-primary truncate">
+                          <div className="text-[11px] font-bold text-pro-text-main truncate">
                             {m.title}
                           </div>
                           <div className="text-[9px] text-pro-text-muted/50 mt-1 font-bold">
@@ -591,7 +591,7 @@ function RichText({
         const key = `${i}:${part}`;
         if (part.startsWith('**') && part.endsWith('**')) {
           return (
-            <strong key={key} className="text-pro-text-primary font-bold">
+            <strong key={key} className="text-pro-text-main font-bold">
               {part.slice(2, -2)}
             </strong>
           );
@@ -628,7 +628,7 @@ function RichText({
             );
           }
           return (
-            <span key={key} className="text-pro-text-primary/80">
+            <span key={key} className="text-pro-text-main/80">
               {entityName}
             </span>
           );

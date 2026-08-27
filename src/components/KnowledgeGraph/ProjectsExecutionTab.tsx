@@ -10,6 +10,7 @@ import {
   upsertEntity,
 } from '../../api/knowledgeGraph';
 import type { ActionCommitmentMetadata } from '../../utils/actionCommitment';
+import { PageHeader } from '../ui/PageHeader';
 
 export const buildQuickAddActionEntity = (value: string) => {
   const description = value.trim();
@@ -43,20 +44,20 @@ const HEALTH_CONFIG: Record<
   on_track: {
     dot: '🟢',
     label: 'On Track',
-    color: 'text-emerald-500',
-    bg: 'bg-emerald-500/10',
+    color: 'text-pro-success',
+    bg: 'bg-pro-success/10',
   },
   at_risk: {
     dot: '🟡',
     label: 'At Risk',
-    color: 'text-amber-500',
-    bg: 'bg-amber-500/10',
+    color: 'text-pro-warning',
+    bg: 'bg-pro-warning/10',
   },
   slipping: {
     dot: '🔴',
     label: 'Slipping',
-    color: 'text-red-500',
-    bg: 'bg-red-500/10',
+    color: 'text-pro-urgent',
+    bg: 'bg-pro-urgent/10',
   },
   complete: {
     dot: '✓',
@@ -376,7 +377,7 @@ const TaskRow: React.FC<{
       {/* Task info */}
       <div className="flex-1 min-w-0">
         <p
-          className={`text-[13px] font-bold leading-snug truncate ${
+          className={`text-[13px] font-medium leading-snug truncate ${
             isCompleted
               ? 'line-through text-pro-text-muted'
               : 'text-pro-text-main'
@@ -388,7 +389,7 @@ const TaskRow: React.FC<{
 
       {/* Assignee */}
       {metadata.assignee_name && (
-        <span className="text-[10px] font-bold text-pro-accent bg-pro-accent/10 px-2 py-1 rounded-md shrink-0">
+        <span className="text-[10px] font-semibold text-pro-accent bg-pro-accent/10 px-2 py-0.5 rounded-md shrink-0">
           {metadata.assignee_name}
         </span>
       )}
@@ -396,9 +397,9 @@ const TaskRow: React.FC<{
       {/* Due date */}
       {task.due_date && (
         <span
-          className={`text-[10px] font-medium px-2 py-1 rounded-md shrink-0 ${
+          className={`text-[10px] font-medium px-2 py-0.5 rounded-md shrink-0 ${
             isOverdue
-              ? 'bg-red-500/10 text-red-500'
+              ? 'bg-pro-urgent/10 text-pro-urgent'
               : 'bg-pro-bg text-pro-text-muted'
           }`}
         >
@@ -454,7 +455,7 @@ const QuickAddTask: React.FC<{
           if (e.key === 'Enter') handleSubmit();
         }}
         placeholder="Add a task..."
-        className="flex-1 bg-transparent text-[13px] font-bold text-pro-text-main placeholder:text-pro-text-muted/30 outline-none"
+        className="flex-1 bg-transparent text-[13px] font-medium text-pro-text-main placeholder:text-pro-text-muted/30 outline-none"
         disabled={saving}
       />
       {value.trim() && (
@@ -709,6 +710,35 @@ export const ProjectsExecutionTab: React.FC<{
     (task) => task.status === 'completed',
   );
 
+  const activeTasks = useMemo(
+    () => allTasks.filter((t) => t.status === 'active' || t.status === 'overdue'),
+    [allTasks],
+  );
+  const overdueTasks = useMemo(
+    () =>
+      activeTasks.filter(
+        (t) =>
+          t.status === 'overdue' ||
+          (t.due_date && new Date(t.due_date).getTime() < Date.now()),
+      ),
+    [activeTasks],
+  );
+  const executionSummary = useMemo(
+    () =>
+      buildExecutionSummary({
+        activeTaskCount: activeTasks.length,
+        activeProjectCount: activeProjects.length,
+        activeInboxTaskCount: activeUngroupedTasks.length,
+        overdueTaskCount: overdueTasks.length,
+      }),
+    [
+      activeTasks.length,
+      activeProjects.length,
+      activeUngroupedTasks.length,
+      overdueTasks.length,
+    ],
+  );
+
   if (loading && allTasks.length === 0) {
     return (
       <div className="animate-pulse space-y-6">
@@ -770,9 +800,17 @@ export const ProjectsExecutionTab: React.FC<{
 
   return (
     <div className="flex flex-col gap-8" data-testid="projects-briefing">
-      <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">
-        Projects
-      </h1>
+      <div>
+        <PageHeader title="Projects" className="mb-3" />
+        <div className="flex flex-col gap-1 -mt-6">
+          <h2 className="text-xl font-semibold text-pro-text-main">
+            {executionSummary.heading}
+          </h2>
+          <p className="text-sm text-pro-text-muted">
+            {executionSummary.detail}
+          </p>
+        </div>
+      </div>
 
       {/* Project Groups */}
       <div className="flex flex-col">
@@ -793,7 +831,7 @@ export const ProjectsExecutionTab: React.FC<{
 
       {completedProjects.length > 0 && (
         <details
-          className="rounded-md border border-pro-border bg-pro-surface"
+          className="rounded-xl border border-pro-border bg-pro-surface overflow-hidden"
           open={completedProjects.some(
             (project) => project.id === selectedProjectId,
           )}
@@ -822,7 +860,7 @@ export const ProjectsExecutionTab: React.FC<{
 
       {/* Ungrouped / Inbox Tasks */}
       {ungroupedTasks.length > 0 && (
-        <div className="rounded-md border border-pro-border bg-pro-surface overflow-hidden">
+        <div className="rounded-xl border border-pro-border bg-pro-surface overflow-hidden">
           <div className="flex items-center gap-3 p-5 border-b border-pro-border/30">
             <div className="w-10 h-10 rounded-md bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
               📥
@@ -872,7 +910,7 @@ export const ProjectsExecutionTab: React.FC<{
 
       {/* Quick-add at footer if no ungrouped section */}
       {ungroupedTasks.length === 0 && (
-        <div className="rounded-md border border-dashed border-pro-border/40 bg-pro-bg">
+        <div className="rounded-xl border border-dashed border-pro-border/40 bg-pro-bg">
           <QuickAddTask onTaskAdded={fetchData} />
         </div>
       )}

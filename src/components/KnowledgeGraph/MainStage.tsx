@@ -78,10 +78,10 @@ interface WhyItem {
 }
 
 const STATUS_STYLES: Record<KnowledgeDocStatus, string> = {
-  up_to_date: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  synthesizing: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
-  stale: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  failed: 'bg-red-500/10 text-red-600 border-red-500/20',
+  up_to_date: 'bg-pro-success/10 text-pro-success border-pro-success/20',
+  synthesizing: 'bg-pro-accent/10 text-pro-accent border-pro-accent/20',
+  stale: 'bg-pro-warning/10 text-pro-warning border-pro-warning/20',
+  failed: 'bg-pro-urgent/10 text-pro-urgent border-pro-urgent/20',
   inactive: 'bg-pro-bg text-pro-text-muted border-pro-border',
 };
 
@@ -89,10 +89,10 @@ const TRUST_STYLES: Record<
   ReturnType<typeof getTrustStatusMeta>['tone'],
   string
 > = {
-  success: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+  success: 'border-pro-success/20 bg-pro-success/10 text-pro-success',
   accent: 'border-pro-accent/20 bg-pro-accent/10 text-pro-accent',
-  warning: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-  danger: 'border-red-500/20 bg-red-500/10 text-red-500',
+  warning: 'border-pro-warning/20 bg-pro-warning/10 text-pro-warning',
+  danger: 'border-pro-urgent/20 bg-pro-urgent/10 text-pro-urgent',
   muted: 'border-pro-border bg-pro-bg text-pro-text-muted',
 };
 
@@ -101,16 +101,16 @@ const ATTENTION_STYLES: Record<
   { badge: string; rail: string }
 > = {
   critical: {
-    badge: 'border-red-500/20 bg-red-500/10 text-red-500',
-    rail: 'border-l-red-500/60',
+    badge: 'border-pro-urgent/20 bg-pro-urgent/10 text-pro-urgent',
+    rail: 'border-l-pro-urgent/60',
   },
   watch: {
-    badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-    rail: 'border-l-amber-500/60',
+    badge: 'border-pro-warning/20 bg-pro-warning/10 text-pro-warning',
+    rail: 'border-l-pro-warning/60',
   },
   steady: {
-    badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-    rail: 'border-l-emerald-500/50',
+    badge: 'border-pro-success/20 bg-pro-success/10 text-pro-success',
+    rail: 'border-l-pro-success/50',
   },
 };
 
@@ -423,7 +423,7 @@ const CurrentRead = ({
       <div className="flex flex-col gap-4 border-b border-pro-border pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {needsRetry && hasReliableRead ? (
-            <span className="inline-flex items-center rounded border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold text-amber-500">
+            <span className="inline-flex items-center rounded border border-pro-warning/20 bg-pro-warning/10 px-2.5 py-1 text-[10px] font-semibold text-pro-warning">
               Last reliable read
             </span>
           ) : (
@@ -483,14 +483,14 @@ const CurrentRead = ({
         </h1>
 
         {selectedDoc.status === 'failed' && !hasReliableRead && (
-          <p className="mt-4 text-xs font-semibold text-red-500">
+          <p className="mt-4 text-xs font-semibold text-pro-urgent">
             Pluto could not compile a reliable current read. Retry synthesis to
             rebuild it.
           </p>
         )}
 
         {selectedDoc.status === 'synthesizing' && (
-          <p className="mt-4 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-500">
+          <p className="mt-4 rounded-lg border border-pro-accent/20 bg-pro-accent/10 px-3 py-2 text-xs font-semibold text-pro-accent">
             {synthesisIsLongRunning
               ? 'The local model has been working for a while. You can wait, or retry synthesis if this looks stale.'
               : hasPartialContext
@@ -500,7 +500,7 @@ const CurrentRead = ({
         )}
 
         {evidenceIsThin && (
-          <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-600">
+          <p className="mt-4 rounded-lg border border-pro-warning/20 bg-pro-warning/10 px-3 py-2 text-xs font-semibold text-pro-warning">
             Pluto indexed this scope, but the synthesized evidence is still too
             thin to call it a complete current read.
           </p>
