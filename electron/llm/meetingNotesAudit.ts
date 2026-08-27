@@ -165,6 +165,36 @@ export const parseNotesAudit = (raw: string): NotesAudit => {
   ) {
     throw new MeetingNotesError('notes_audit_invalid');
   }
+  const invalidChange = parsed.changes.some(
+    (change) =>
+      !isRecord(change) ||
+      !['replace', 'remove', 'insert', 'insert_section'].includes(
+        String(change.op),
+      ),
+  );
+  const invalidVerdict = parsed.verdicts.some(
+    (verdict) =>
+      !isRecord(verdict) ||
+      !isSafeId(verdict.target) ||
+      !['supported', 'uncertain', 'unsupported'].includes(
+        String(verdict.status),
+      ) ||
+      !Array.isArray(verdict.sources) ||
+      verdict.sources.some((source) => parseSpan(source) === null),
+  );
+  const invalidDisposition = parsed.dispositions.some(
+    (disposition) =>
+      !isRecord(disposition) ||
+      !isSafeId(disposition.target) ||
+      !['deduplicated', 'cancelled', 'superseded'].includes(
+        String(disposition.kind),
+      ) ||
+      !Array.isArray(disposition.sources) ||
+      disposition.sources.some((source) => parseSpan(source) === null),
+  );
+  if (invalidChange || invalidVerdict || invalidDisposition) {
+    throw new MeetingNotesError('notes_audit_invalid');
+  }
   return parsed as unknown as NotesAudit;
 };
 

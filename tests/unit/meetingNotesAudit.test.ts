@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   applyNotesAudit,
+  parseNotesAudit,
   parseNotesDraft,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
@@ -60,6 +61,19 @@ it('adds a source-backed commitment omitted by the writer', () => {
       evidence: 'I will send the outline.',
     }),
   ]);
+});
+
+it('rejects malformed nested audit operations before they can reach application', () => {
+  expect(() =>
+    parseNotesAudit(
+      JSON.stringify({
+        changes: [null],
+        verdicts: [],
+        dispositions: [],
+        terminology: [],
+      }),
+    ),
+  ).toThrow('notes_audit_invalid');
 });
 
 it('assigns deterministic block ids instead of trusting writer object paths', () => {
