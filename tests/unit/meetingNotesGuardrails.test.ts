@@ -281,6 +281,59 @@ describe('source-grounded notes guardrails', () => {
     expect(findNotesGuardrailIssues(f.source, f.draft())).toEqual([]);
   });
 
+  it('does not count a heading alone as visible cancellation context', () => {
+    const f = fixture(
+      'I will send the outline.',
+      "I'm withdrawing my promise to send the outline; the review was cancelled.",
+    );
+    const draft = f.draft();
+    draft.sections[0]!.title.sources = [f.spans[1]!];
+    expect(findNotesGuardrailIssues(f.source, draft)).toEqual([
+      { code: 'missing_cancellation_context', sources: f.spans },
+    ]);
+  });
+
+  it('allows reviewed cancellation context in an overview without duplicating a point', () => {
+    const f = fixture(
+      'I will send the outline.',
+      "I'm withdrawing my outline promise.",
+    );
+    const draft = f.draft();
+    draft.overview = {
+      id: 'overview',
+      text: 'Rae withdrew the outline delivery.',
+      sources: [f.spans[1]!],
+    };
+    expect(findNotesGuardrailIssues(f.source, draft)).toEqual([]);
+  });
+
+  it('allows a source-backed withdrawal decision without a duplicate discussion point', () => {
+    const f = fixture(
+      'I will send the outline.',
+      "I'm withdrawing my promise to send the outline.",
+    );
+    expect(
+      findNotesGuardrailIssues(
+        f.source,
+        f.draft(
+          f.item('Cancel the outline delivery.', 'decision', [f.spans[1]!]),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    'I will not send the report to Maya.',
+    'I will not send the report without legal approval.',
+    "I'm withdrawing my promise to send the report to Maya.",
+  ])(
+    'does not impose a new context requirement for ambiguous narrower cancellation: %s',
+    (withdrawal) => {
+      const f = fixture('I will send the report.', withdrawal);
+      expect(findNotesGuardrailIssues(f.source, f.draft())).toEqual([]);
+    },
+  );
+
   it('recognizes renewal with a changed deadline as the same task', () => {
     const f = fixture(
       'I will send the checklist to Ben by Friday.',

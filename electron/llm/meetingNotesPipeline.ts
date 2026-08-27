@@ -288,7 +288,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v1:source-labels:guardrails-v2:schema-v1',
+        'writer-audit-v1:source-labels:guardrails-v3:schema-v1',
       ]),
     )
     .digest('hex');

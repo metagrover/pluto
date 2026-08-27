@@ -152,7 +152,7 @@ export const buildNotesAuditPrompt = ({
     ...(inherited?.length
       ? []
       : [
-          'This is a direct source audit: dispositions must be []. To remove a withdrawn commitment, use changes.remove on the commitment, not on the statement withdrawing it. Do not insert it again.',
+          'This is a direct source audit: dispositions must be []. Keep source-backed withdrawals and their reasons as point items. If a withdrawn task is still an active action, correct its kind and wording; preserve the discussion explaining the withdrawal.',
         ]),
   ].join('\n');
 

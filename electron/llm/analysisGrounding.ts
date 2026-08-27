@@ -838,6 +838,51 @@ const decisionCopyPredicate = (value: string) =>
     value.replace(/^\s*(?:the decision is|decision)\s+/i, ''),
   );
 
+/** A copied offer cannot borrow acceptance from a neighboring settlement.
+ * Match the entire offered task, including its prerequisite and recipient.
+ * Other audited actions/paraphrases are outside this narrow rejection guard. */
+const isUnacceptedSourceOffer = (
+  text: string,
+  owner: string | null,
+  resolved: ResolvedTranscriptEvidence,
+): boolean => {
+  const predicate = (value: string) =>
+    normalizeTranscriptEvidence(
+      canonicalizeActionText(
+        value.replace(/^\s*(?:yes|sure|agreed)[,.!\s]+/i, ''),
+        owner ?? undefined,
+      ),
+    );
+  const lines = resolved.sourceLines.map(transcriptLineContent);
+  const offeredLine = lines.findIndex((line) => {
+    const offer = /^i (could|can)\s+([^.!?;]+)[.!]?$/i.exec(line.trim());
+    return (
+      offer &&
+      (offer[1]!.toLowerCase() === 'could' || /\bif\b/i.test(offer[2]!)) &&
+      normalizeTranscriptEvidence(offer[2]!) === predicate(text)
+    );
+  });
+  if (offeredLine < 0) return false;
+  if (
+    lines.some((line) =>
+      (line.match(/[^.?!;]+[.?!;]?/g) ?? []).some(
+        (clause) =>
+          hasExplicitResolutionCue(clause) &&
+          !clause.includes('?') &&
+          predicate(clause.trim()) === predicate(text),
+      ),
+    )
+  )
+    return false;
+  return !(
+    offeredLine === 0 &&
+    lines.length === 2 &&
+    /^(?:(?:yes|sure|agreed)(?: (?:please(?: do)?|(?:i|we) (?:will|can) do (?:that|it)))?|(?:i|we) will do (?:that|it)|will do)$/.test(
+      normalizeTranscriptEvidence(lines[1]!),
+    )
+  );
+};
+
 export const groundSourceReviewedItem = (
   item: {
     text: string;
@@ -901,6 +946,8 @@ export const groundSourceReviewedItem = (
     numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
     (conditional.test(evidence) && !conditional.test(item.text)) ||
     isUnacceptedRequest(evidence) ||
+    (item.kind === 'action' &&
+      isUnacceptedSourceOffer(item.text, item.owner, resolved)) ||
     (/\b(?:may|might|could|should|maybe|perhaps)\b/i.test(evidence) &&
       !hasExplicitResolutionCue(evidence) &&
       !exactDecisionCopy) ||

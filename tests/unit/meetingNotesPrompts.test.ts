@@ -90,6 +90,25 @@ it('explicitly retains material non-commitment discussion across all stages', ()
   }
 });
 
+it('preserves attributed personal context without inventing feelings or consequences', () => {
+  for (const prompt of stagePrompts()) {
+    expect(prompt).toContain(
+      'Preserve who experienced what, their explicit feelings and reasons; do not infer emotions or consequences.',
+    );
+  }
+});
+
+it('tells the auditor positively to retain withdrawal discussion and correct only an active-action misclassification', () => {
+  const prompt = buildNotesAuditPrompt(input);
+  expect(prompt).toContain(
+    'Keep source-backed withdrawals and their reasons as point items.',
+  );
+  expect(prompt).toContain(
+    'If a withdrawn task is still an active action, correct its kind and wording; preserve the discussion explaining the withdrawal.',
+  );
+  expect(prompt).not.toContain('Do not insert it again.');
+});
+
 it('lets the auditor correct an action to a decision instead of forcing every correction to a point', () => {
   const prompt = buildNotesAuditPrompt(input);
   const kindReview = prompt

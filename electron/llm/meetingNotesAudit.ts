@@ -344,6 +344,31 @@ const transcriptForSource = (source: NotesSource): string =>
     .map((segment) => `${segment.speaker ?? 'Speaker'}: ${segment.text}`)
     .join('\n');
 
+const overviewForDraft = (draft: NotesDraft): SupportedText | null => {
+  if (draft.overview) return draft.overview;
+  // Sample across topics before adding detail. Prefer each topic's first
+  // reviewed outcome over an earlier offer, keeping narrative-only topics.
+  const firstItems = draft.sections.flatMap((section) => {
+    const first =
+      section.items.find(
+        (item) => item.kind === 'decision' || item.kind === 'action',
+      ) ?? section.items[0];
+    return first ? [first] : [];
+  });
+  const selectedIds = new Set(firstItems.map((item) => item.id));
+  const remainingItems = draft.sections.flatMap((section) =>
+    section.items.filter((item) => !selectedIds.has(item.id)),
+  );
+  const items = [...firstItems, ...remainingItems].slice(0, 3);
+  return items.length
+    ? {
+        id: 'derived-overview',
+        text: items.map((item) => item.text).join(' '),
+        sources: items.flatMap((item) => item.sources),
+      }
+    : null;
+};
+
 const sourceMetadata = (draft: NotesDraft) => {
   const blocks: Record<
     string,
@@ -373,20 +398,8 @@ const sourceMetadata = (draft: NotesDraft) => {
     }
   };
 
-  if (draft.overview) add('overview', draft.overview);
-  else {
-    const points = draft.sections
-      .flatMap((section) =>
-        section.items.filter((item) => item.kind === 'point'),
-      )
-      .slice(0, 3);
-    if (points.length)
-      add('overview', {
-        id: 'derived-overview',
-        text: points.map((point) => point.text).join(' '),
-        sources: points.flatMap((point) => point.sources),
-      });
-  }
+  const overview = overviewForDraft(draft);
+  if (overview) add('overview', overview);
   if (draft.recentWin) {
     add('recent_win:win', draft.recentWin.win);
     add('recent_win:why_it_counts', draft.recentWin.impact);
@@ -927,16 +940,7 @@ export const projectAuditedNotes = (
       };
     });
   const overview =
-    audited.draft.overview?.text ??
-    (topics
-      .flatMap((topic) => [
-        topic.summary,
-        ...topic.key_points.map((point) => point.text),
-      ])
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(' ') ||
-      'Conversation captured.');
+    overviewForDraft(audited.draft)?.text ?? 'Conversation captured.';
   const analysis: AnalysisDocumentV3 = {
     analysis_schema_version: 3,
     overview,

@@ -120,7 +120,7 @@ describe('guardrail task scope and explicit withdrawal', () => {
           text: `${prefix} replace the camera equipment list.`,
         },
       ]),
-    ).toEqual([]);
+    ).toEqual([{ code: 'missing_cancellation_context', segments: [0, 1] }]);
   });
 
   it.each([

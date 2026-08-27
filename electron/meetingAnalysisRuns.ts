@@ -400,14 +400,27 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     const settings = await dependencies.getSettings();
     const provider = await dependencies.getProvider(settings);
     if (input.reason === 'secondary') {
+      // Provider initialization can yield while another run publishes. Read the
+      // document and run together so secondary work never inherits an old body.
+      const publishedMeeting = dependencies.db.getMeeting(meetingId);
+      if (!publishedMeeting) throw new Error('meeting_not_found');
+      const publishedRevisions =
+        dependencies.db.getMeetingAnalysisPublicationRevisions(
+          publishedMeeting,
+        );
+      if (!isEligibleMeetingSource(publishedMeeting) || !publishedRevisions)
+        throw new Error('meeting_notes_source_ineligible');
       const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
-      if (persisted?.notes_status !== 'published' || !meeting.analysis_json)
+      if (
+        persisted?.notes_status !== 'published' ||
+        !publishedMeeting.analysis_json
+      )
         throw new Error('meeting_notes_not_published');
       const identity = {
         meetingId,
         runId: persisted.run_id,
         inputRevision: persisted.input_revision,
-        ...revisions,
+        ...publishedRevisions,
       };
       if (
         !dependencies.db.isMeetingAnalysisRunCurrent({
@@ -422,9 +435,11 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           {
             ...identity,
             transcript: buildAnalysisTranscriptFromJson(
-              meeting.transcript_json,
+              publishedMeeting.transcript_json,
             ),
-            analysis: JSON.parse(meeting.analysis_json) as AnalysisDocumentV3,
+            analysis: JSON.parse(
+              publishedMeeting.analysis_json,
+            ) as AnalysisDocumentV3,
             provider,
             signal: controller.signal,
             canCommit: () =>

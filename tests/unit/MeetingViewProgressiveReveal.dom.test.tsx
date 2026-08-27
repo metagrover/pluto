@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react';
+import { StrictMode, act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -82,6 +82,36 @@ const analyzedMeeting: Meeting = {
   }),
 };
 
+const EditableMeetingView = ({
+  meeting,
+  fetchMeetings,
+  visible = true,
+}: {
+  meeting: Meeting;
+  fetchMeetings: () => void;
+  visible?: boolean;
+}) => {
+  const [editingTitle, setEditingTitle] = useState(true);
+  const [titleValue, setTitleValue] = useState('My manual title');
+  if (!visible) return null;
+  return (
+    <MeetingView
+      selectedMeeting={meeting}
+      editingTitle={editingTitle}
+      setEditingTitle={setEditingTitle}
+      titleValue={titleValue}
+      setTitleValue={setTitleValue}
+      fetchMeetings={fetchMeetings}
+      handleCopySummary={vi.fn()}
+      copySuccess={false}
+      handleDeleteMeeting={vi.fn()}
+      highlightEntities={(text) => text}
+      transcriptVisible={false}
+      setTranscriptVisible={vi.fn()}
+    />
+  );
+};
+
 describe('MeetingView progressive reveal', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
@@ -92,7 +122,11 @@ describe('MeetingView progressive reveal', () => {
     root = createRoot(container);
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
-      value: { invoke: vi.fn(async () => null) },
+      value: {
+        invoke: vi.fn(async (channel: string) =>
+          channel === 'UPDATE_MEETING_TITLE_IF_CURRENT' ? 'updated' : null,
+        ),
+      },
     });
   });
 
@@ -118,6 +152,569 @@ describe('MeetingView progressive reveal', () => {
         setTranscriptVisible={vi.fn()}
       />,
     );
+
+  it('saves a title without sending a stale notes or edit snapshot', async () => {
+    const fetchMeetings = vi.fn();
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={analyzedMeeting}
+          editingTitle={true}
+          setEditingTitle={vi.fn()}
+          titleValue="Updated title"
+          setTitleValue={vi.fn()}
+          fetchMeetings={fetchMeetings}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_TITLE_IF_CURRENT',
+      {
+        meetingId: analyzedMeeting.id,
+        expectedTitle: analyzedMeeting.title,
+        title: 'Updated title',
+      },
+    );
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'SAVE_MEETING',
+      expect.anything(),
+    );
+    expect(fetchMeetings).toHaveBeenCalled();
+  });
+
+  it('keeps a conflicting manual title unsaved until deliberate retry against the refreshed title', async () => {
+    const refreshed = { ...analyzedMeeting, title: 'Published title' };
+    const fetchMeetings = vi.fn();
+    const invoke = vi.mocked(window.ipcRenderer.invoke);
+    invoke.mockImplementation(async (channel) =>
+      channel === 'GET_MEETING' ? refreshed : 'conflict',
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(title.value).toBe('My manual title');
+    expect(
+      container.querySelector('[data-meeting-title-save-error]')?.textContent,
+    ).toContain('Published title');
+    expect(
+      container.querySelector('[data-meeting-title-save-error]')?.textContent,
+    ).toContain('not saved');
+    expect(
+      invoke.mock.calls.filter(
+        ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+      ),
+    ).toHaveLength(1);
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(
+      invoke.mock.calls.filter(
+        ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+      ),
+    ).toHaveLength(1);
+
+    invoke.mockImplementation(async (channel) =>
+      channel === 'GET_MEETING' ? refreshed : 'updated',
+    );
+    const retry = container.querySelector<HTMLButtonElement>(
+      '[data-meeting-title-save-error] button',
+    )!;
+    await act(async () => retry.click());
+    expect(invoke).toHaveBeenLastCalledWith('UPDATE_MEETING_TITLE_IF_CURRENT', {
+      meetingId: analyzedMeeting.id,
+      expectedTitle: 'Published title',
+      title: 'My manual title',
+    });
+    expect(
+      container.querySelector('[data-meeting-title-save-error]'),
+    ).toBeNull();
+    expect(fetchMeetings).toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'rejected'])(
+    'keeps the typed title and surfaces a %s save without an unhandled failure',
+    async (outcome) => {
+      vi.mocked(window.ipcRenderer.invoke).mockImplementation(async () => {
+        if (outcome === 'rejected') throw new Error('IPC unavailable');
+        return outcome;
+      });
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            meeting={analyzedMeeting}
+            fetchMeetings={vi.fn()}
+          />,
+        ),
+      );
+      const title = container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Meeting title"]',
+      )!;
+      await act(async () =>
+        title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      expect(title.value).toBe('My manual title');
+      expect(
+        container.querySelector('[data-meeting-title-save-error]')?.textContent,
+      ).toContain('not saved');
+      expect(
+        container.querySelector('[data-meeting-title-save-error]')?.textContent,
+      ).toContain(outcome === 'missing' ? 'no longer available' : 'Try again');
+    },
+  );
+
+  it('cancels to the latest published title on Escape without saving the discarded draft', async () => {
+    const fetchMeetings = vi.fn();
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={{ ...analyzedMeeting, title: 'Published title' }}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () => {
+      title.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(title.value).toBe('Published title');
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'UPDATE_MEETING_TITLE_IF_CURRENT',
+      expect.anything(),
+    );
+  });
+
+  it('keeps the original comparison title when publication refreshes the props during editing', async () => {
+    const fetchMeetings = vi.fn();
+    const refreshed = { ...analyzedMeeting, title: 'Published title' };
+    vi.mocked(window.ipcRenderer.invoke).mockImplementation(async (channel) =>
+      channel === 'GET_MEETING' ? refreshed : 'conflict',
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={refreshed}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_TITLE_IF_CURRENT',
+      {
+        meetingId: analyzedMeeting.id,
+        expectedTitle: analyzedMeeting.title,
+        title: 'My manual title',
+      },
+    );
+    expect(title.value).toBe('My manual title');
+  });
+
+  it('uses the freshly read conflicting title on Escape even before list props refresh', async () => {
+    vi.mocked(window.ipcRenderer.invoke).mockImplementation(async (channel) =>
+      channel === 'GET_MEETING'
+        ? { ...analyzedMeeting, title: 'Published title' }
+        : 'conflict',
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={vi.fn()}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    await act(async () => {
+      title.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(title.value).toBe('Published title');
+    expect(
+      container.querySelector('[data-meeting-title-save-error]'),
+    ).toBeNull();
+    expect(
+      vi
+        .mocked(window.ipcRenderer.invoke)
+        .mock.calls.filter(
+          ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('does not submit twice while a title save is pending', async () => {
+    let resolveSave!: (value: string) => void;
+    vi.mocked(window.ipcRenderer.invoke).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={vi.fn()}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () => {
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(1);
+    expect(title.readOnly).toBe(true);
+    expect(title.value).toBe('My manual title');
+    await act(async () => resolveSave('updated'));
+    expect(title.readOnly).toBe(false);
+    expect(title.value).toBe('My manual title');
+  });
+
+  it.each(['conflict', 'pending'])(
+    'does not carry a %s title draft into another meeting',
+    async (outcome) => {
+      let resolveSave: ((value: string) => void) | undefined;
+      const invoke = vi.mocked(window.ipcRenderer.invoke);
+      invoke.mockImplementation(async (channel) => {
+        if (channel === 'GET_MEETING')
+          return { ...analyzedMeeting, title: 'Published title' };
+        if (outcome === 'pending')
+          return new Promise<string>((resolve) => {
+            resolveSave = resolve;
+          });
+        return 'conflict';
+      });
+      const fetchMeetings = vi.fn();
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            meeting={analyzedMeeting}
+            fetchMeetings={fetchMeetings}
+          />,
+        ),
+      );
+      await act(async () =>
+        container
+          .querySelector<HTMLTextAreaElement>('[aria-label="Meeting title"]')!
+          .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      const secondMeeting = {
+        ...analyzedMeeting,
+        id: 'second-meeting',
+        title: 'Second meeting',
+      };
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            meeting={secondMeeting}
+            fetchMeetings={fetchMeetings}
+          />,
+        ),
+      );
+      const title = container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Meeting title"]',
+      )!;
+      expect(title.value).toBe('Second meeting');
+      expect(
+        container.querySelector('[data-meeting-title-save-error]'),
+      ).toBeNull();
+      await act(async () =>
+        title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      expect(
+        invoke.mock.calls.filter(
+          ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+        ),
+      ).toHaveLength(1);
+      if (resolveSave) await act(async () => resolveSave!('updated'));
+      expect(title.value).toBe('Second meeting');
+    },
+  );
+
+  it('ignores an earlier visit save when returning to the same meeting and saving a new draft', async () => {
+    const pending: Array<(value: string) => void> = [];
+    vi.mocked(window.ipcRenderer.invoke).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const fetchMeetings = vi.fn();
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      container
+        .querySelector<HTMLTextAreaElement>('[aria-label="Meeting title"]')!
+        .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={{
+            ...analyzedMeeting,
+            id: 'second-meeting',
+            title: 'Second meeting',
+          }}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusin', { bubbles: true })),
+    );
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!.call(title, 'Second manual title');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(pending).toHaveLength(2);
+    await act(async () => pending[0]!('updated'));
+    expect(title.value).toBe('Second manual title');
+    expect(title.readOnly).toBe(true);
+    expect(fetchMeetings).not.toHaveBeenCalled();
+    await act(async () => pending[1]!('updated'));
+    expect(title.value).toBe('Second manual title');
+    expect(title.readOnly).toBe(false);
+    expect(fetchMeetings).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['conflict', 'pending'])(
+    'clears a %s draft when the view unmounts while its parent stays mounted',
+    async (outcome) => {
+      let resolveSave: ((value: string) => void) | undefined;
+      vi.mocked(window.ipcRenderer.invoke).mockImplementation(
+        async (channel) => {
+          if (channel === 'GET_MEETING')
+            return { ...analyzedMeeting, title: 'Published title' };
+          if (outcome === 'pending')
+            return new Promise<string>((resolve) => {
+              resolveSave = resolve;
+            });
+          return 'conflict';
+        },
+      );
+      const fetchMeetings = vi.fn();
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            meeting={analyzedMeeting}
+            fetchMeetings={fetchMeetings}
+          />,
+        ),
+      );
+      await act(async () =>
+        container
+          .querySelector<HTMLTextAreaElement>('[aria-label="Meeting title"]')!
+          .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            visible={false}
+            meeting={analyzedMeeting}
+            fetchMeetings={fetchMeetings}
+          />,
+        ),
+      );
+      const secondMeeting = {
+        ...analyzedMeeting,
+        id: 'second-meeting',
+        title: 'Second meeting',
+      };
+      await act(async () =>
+        root.render(
+          <EditableMeetingView
+            meeting={secondMeeting}
+            fetchMeetings={fetchMeetings}
+          />,
+        ),
+      );
+      const title = container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Meeting title"]',
+      )!;
+      expect(title.value).toBe('Second meeting');
+      await act(async () =>
+        title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      expect(
+        vi
+          .mocked(window.ipcRenderer.invoke)
+          .mock.calls.filter(
+            ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+          ),
+      ).toHaveLength(1);
+      if (resolveSave) await act(async () => resolveSave!('updated'));
+    },
+  );
+
+  it('does not let an unmounted save close a new meeting title editor', async () => {
+    let resolveSave!: (value: string) => void;
+    vi.mocked(window.ipcRenderer.invoke).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const fetchMeetings = vi.fn();
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      container
+        .querySelector<HTMLTextAreaElement>('[aria-label="Meeting title"]')!
+        .dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          visible={false}
+          meeting={analyzedMeeting}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <EditableMeetingView
+          meeting={{
+            ...analyzedMeeting,
+            id: 'second-meeting',
+            title: 'Second meeting',
+          }}
+          fetchMeetings={fetchMeetings}
+        />,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusin', { bubbles: true })),
+    );
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!.call(title, 'Second manual title');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => resolveSave('updated'));
+    expect(title.value).toBe('Second manual title');
+    expect(fetchMeetings).not.toHaveBeenCalled();
+  });
+
+  it('preserves an initial edited title through Strict Mode setup and cleanup', async () => {
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <EditableMeetingView
+            meeting={analyzedMeeting}
+            fetchMeetings={vi.fn()}
+          />
+        </StrictMode>,
+      ),
+    );
+    const title = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Meeting title"]',
+    )!;
+    expect(title.value).toBe('My manual title');
+    await act(async () =>
+      title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+    );
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_TITLE_IF_CURRENT',
+      {
+        meetingId: analyzedMeeting.id,
+        expectedTitle: analyzedMeeting.title,
+        title: 'My manual title',
+      },
+    );
+  });
 
   it('retries only related insights while leaving the published notes visible', async () => {
     await act(async () =>
@@ -411,6 +1008,7 @@ describe('MeetingView progressive reveal', () => {
     await act(async () =>
       renderMeeting({
         ...analyzedMeeting,
+        analysis_run_json: JSON.stringify({ notes_status: 'failed' }),
         transcript_integrity_json: JSON.stringify({
           schemaVersion: 2,
           state: 'validated',
@@ -447,6 +1045,9 @@ describe('MeetingView progressive reveal', () => {
     expect(notice?.textContent).toContain('Try again');
     expect(notice?.textContent).not.toContain('Verify LLM provider');
     expect(container.textContent).toContain('The analysis arrived in place.');
+    expect(container.textContent).not.toContain(
+      'Couldn’t update notes. Your previous notes are still here.',
+    );
 
     await act(async () =>
       container
@@ -456,6 +1057,9 @@ describe('MeetingView progressive reveal', () => {
         ?.click(),
     );
     expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain(
+      'Couldn’t update notes. Your previous notes are still here.',
+    );
   });
 
   it('restores through the dedicated notes transaction instead of a broad save', async () => {

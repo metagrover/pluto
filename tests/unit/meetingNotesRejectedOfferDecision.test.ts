@@ -230,18 +230,179 @@ describe('settled decision with a rejected conditional offer', () => {
     },
   );
 
-  it.fails(
-    'known pre-existing action bug: a declined conditional offer borrows an unrelated settled cue',
-    () => {
+  it('does not promote a declined conditional offer by borrowing a settled cue', () => {
+    expect(
+      review(
+        'Animate the introduction if useful.',
+        [`Marin: ${offer}`, `Cleo: ${choice}`],
+        { kind: 'action', owner: 'Marin' },
+      ),
+    ).toBeNull();
+  });
+
+  it.each([
+    'We decided to keep the report plain.',
+    'I will send the report tomorrow.',
+    'Yes, I will send the report tomorrow.',
+  ])(
+    'does not accept an offer using unrelated settlement: %s',
+    (settlement) => {
       expect(
         review(
           'Animate the introduction if useful.',
-          [`Marin: ${offer}`, `Cleo: ${choice}`],
+          [`Marin: ${offer}`, `Cleo: ${settlement}`],
           { kind: 'action', owner: 'Marin' },
         ),
       ).toBeNull();
     },
   );
+
+  it('does not accept conditional willingness using another task commitment', () => {
+    expect(
+      review(
+        'Animate the introduction if useful.',
+        [
+          'Marin: I can animate the introduction if useful.',
+          'Cleo: I will send the report tomorrow.',
+        ],
+        { kind: 'action', owner: 'Marin' },
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps a source-linked accepted request, including an audited paraphrase', () => {
+    expect(
+      review(
+        'Share the outline with reviewers.',
+        [
+          'Nira: Could you send the outline to the reviewers?',
+          'Milo: Yes, I will do that.',
+        ],
+        { kind: 'action', owner: 'Milo' },
+      ),
+    ).toEqual({
+      text: 'Share the outline with reviewers.',
+      owner: 'Milo',
+      due: null,
+    });
+  });
+
+  it('keeps a promise that explicitly commits to the offered task and prerequisite', () => {
+    expect(
+      review(
+        'Animate the introduction if useful.',
+        [
+          `Marin: ${offer}`,
+          'Marin: Yes, I will animate the introduction if useful.',
+        ],
+        { kind: 'action', owner: 'Marin' },
+      ),
+    ).toEqual({
+      text: 'Animate the introduction if useful.',
+      owner: 'Marin',
+      due: null,
+    });
+  });
+
+  it.each([
+    'Yes.',
+    'Sure.',
+    'Agreed.',
+    'Yes, please.',
+    'Yes, please do.',
+    'Yes. Please do.',
+  ])(
+    'keeps a sole offer accepted by a brief reply without inventing an owner: %s',
+    (acceptance) => {
+      expect(
+        review(
+          'Animate the introduction if useful.',
+          [`Marin: ${offer}`, `Cleo: ${acceptance}`],
+          { kind: 'action', owner: 'Marin' },
+        ),
+      ).toEqual({
+        text: 'Animate the introduction if useful.',
+        owner: null,
+        due: null,
+      });
+    },
+  );
+
+  it.each([
+    'Yes, but only if legal approves.',
+    'Yes, please do the report instead.',
+    'Yes, please do not animate the introduction.',
+  ])(
+    'does not treat a qualified reply as acceptance of the copied offer: %s',
+    (reply) => {
+      expect(
+        review(
+          'Animate the introduction if useful.',
+          [`Marin: ${offer}`, `Cleo: ${reply}`],
+          { kind: 'action', owner: 'Marin' },
+        ),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    'Yes, I will animate the introduction for Theo if useful.',
+    'Yes, I will animate the introduction if legal approves.',
+    'Yes, I will not animate the introduction for Rina if useful.',
+  ])('does not borrow a changed commitment: %s', (commitment) => {
+    expect(
+      review(
+        'Animate the introduction for Rina if useful.',
+        [
+          'Marin: I could animate the introduction for Rina if useful.',
+          `Marin: ${commitment}`,
+        ],
+        { kind: 'action', owner: 'Marin' },
+      ),
+    ).toBeNull();
+  });
+
+  it('keeps a true conditional promise', () => {
+    expect(
+      review(
+        'Animate the introduction once legal approves.',
+        ['Marin: I will animate the introduction once legal approves.'],
+        { kind: 'action', owner: 'Marin' },
+      ),
+    ).toEqual({
+      text: 'Animate the introduction once legal approves.',
+      owner: 'Marin',
+      due: null,
+    });
+  });
+
+  it('keeps a separate explicit promise beside an unrelated offer', () => {
+    expect(
+      review(
+        'Send the report if useful.',
+        [`Marin: ${offer}`, 'Cleo: I will send the report if useful.'],
+        { kind: 'action', owner: 'Cleo' },
+      ),
+    ).toEqual({
+      text: 'Send the report if useful.',
+      owner: 'Cleo',
+      due: null,
+    });
+  });
+
+  it('keeps an audited paraphrase of a real promise beside an unrelated offer', () => {
+    expect(
+      review(
+        'Share the report if useful.',
+        [`Marin: ${offer}`, 'Cleo: I will send the report if useful.'],
+        { kind: 'action', owner: 'Cleo' },
+      ),
+    ).toEqual({
+      text: 'Share the report if useful.',
+      owner: 'Cleo',
+      due: null,
+    });
+  });
 
   it('never applies rejected-offer decision scoping to an unrelated conditional action', () => {
     expect(

@@ -1,7 +1,11 @@
 import type { NotesDraft, NotesSource, SourceSpan } from './meetingNotesTypes';
 
 export type NotesGuardrailIssue = {
-  code: 'missing_action' | 'missing_condition' | 'conflicting_action';
+  code:
+    | 'missing_action'
+    | 'missing_condition'
+    | 'conflicting_action'
+    | 'missing_cancellation_context';
   sources: SourceSpan[];
 };
 
@@ -305,6 +309,28 @@ function cancels(
   );
 }
 
+function requiresWithdrawalContext(
+  entry: Sentence,
+  candidate: Candidate,
+): boolean {
+  if (!candidate.speaker || entry.speaker !== candidate.speaker) return false;
+  const clause = entry.text.split(/[;,]|\s+(?:and|but)\s+/i)[0]!;
+  const explicitTask =
+    /^i(?:['’]m| am) withdrawing my (?:earlier )?(?:promise|commitment) to (.+)/i.exec(
+      clause,
+    );
+  if (explicitTask) {
+    // Existing cancellation detection is one-way; a narrower recipient or date
+    // must not introduce a new requirement to narrate a whole-task withdrawal.
+    return matchesTask(explicitTask[1]!, candidate.task);
+  }
+  // The caller already proved this noun-only withdrawal identifies one prior
+  // task of the same speaker. Do not extend this to ambiguous "will not" text.
+  return /^(?:i take back my (?:earlier )?|i(?:['’]m| am) withdrawing my )(.+?) (?:commitment|promise)[.;!]/i.test(
+    entry.text,
+  );
+}
+
 export function findNotesGuardrailIssues(
   source: NotesSource,
   draft: NotesDraft,
@@ -314,6 +340,14 @@ export function findNotesGuardrailIssues(
   const actions = draft.sections
     .flatMap((section) => section.items)
     .filter((item) => item.kind === 'action');
+  const context = [
+    ...(draft.overview ? [draft.overview] : []),
+    ...draft.sections.flatMap((section) =>
+      section.items.filter(
+        (item) => item.kind === 'point' || item.kind === 'decision',
+      ),
+    ),
+  ];
   const issues = new Map<string, NotesGuardrailIssue>();
   const sourceCandidates = candidates(entries);
   // Exact repeats may cite either occurrence. Keep deadlines and recipients in
@@ -374,6 +408,16 @@ export function findNotesGuardrailIssues(
     let code: NotesGuardrailIssue['code'] | null = null;
     if (cancellation) {
       if (matching.length) code = 'conflicting_action';
+      else if (
+        requiresWithdrawalContext(cancellation, candidate) &&
+        !context.some((block) =>
+          block.sources.some((span) => overlaps(span, cancellation.span)),
+        )
+      ) {
+        // Coverage diagnostic only: citations do not prove the wording or the
+        // reason is faithful. The source audit and semantic acceptance still do.
+        code = 'missing_cancellation_context';
+      }
     } else if (!matching.length) {
       code = 'missing_action';
     } else if (

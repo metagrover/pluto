@@ -188,8 +188,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions the schema-constrained writer and audit as notes-v16', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v16');
+  it('versions the source-fidelity corrections as notes-v22', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v22');
   });
 
   beforeEach(() => {

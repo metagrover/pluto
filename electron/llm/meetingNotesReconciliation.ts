@@ -32,7 +32,7 @@ export type ReconciledSource = {
 
 export const buildSourceReconciliationPrompt = (sourceText: string): string =>
   [
-    'Reconcile original source, not finished meeting notes. Attribute facts where relevant; put discussion in facts. Do not invent ids, headings, overview or filler.',
+    'Reconcile original source, not meeting notes. Attribute facts where relevant; put discussion in facts. Do not invent ids, headings, overview or filler.',
     notesContentGuidance,
     notesSourceGuidance,
     'Return compact JSON with exactly four arrays: {facts: Text[], actions: Action[], decisions: Decision[], questions: Text[]}. Empty shape: {"facts":[],"actions":[],"decisions":[],"questions":[]}.',

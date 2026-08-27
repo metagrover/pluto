@@ -1,8 +1,8 @@
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v16';
-export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v17';
+export const NOTES_PROMPT_VERSION = 'notes-v22';
+export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v23';
 
 export type SourceSpan = {
   segment: number;
