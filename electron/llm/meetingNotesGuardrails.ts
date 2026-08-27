@@ -83,7 +83,26 @@ function matchesTask(
   text: string,
   allowCompression = false,
 ): boolean {
-  const parts = taskParts(task);
+  // A repeated, explicit recipient can explain why a delivery matters without
+  // making that purpose a second task. Preserve every core object/date token
+  // and the recipient relation when using this narrowly scoped allowance.
+  const purpose =
+    /\s+so\s+([\p{L}][\p{L}'’-]*(?:\s+[\p{L}][\p{L}'’-]*){0,2})\s+can\s+(.+?)[.!]?$/iu.exec(
+      task,
+    );
+  const recipientPattern = purpose
+    ? new RegExp(
+        `\\bto\\s+${purpose[1]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+        'i',
+      )
+    : null;
+  const scopedPurpose =
+    purpose &&
+    recipientPattern?.test(task.slice(0, purpose.index)) &&
+    !CONDITION.test(purpose[2]!) &&
+    !TASK_BOUNDARY.test(purpose[2]!);
+  if (scopedPurpose && !recipientPattern!.test(text)) return false;
+  const parts = taskParts(scopedPurpose ? task.slice(0, purpose.index) : task);
   if (!parts) return false;
   const words = new Set(tokens(text));
   // Permit common delivery paraphrases without treating different work on the
@@ -96,6 +115,7 @@ function matchesTask(
     verbs.some((verb) => tokens(verb).every((word) => words.has(word))) &&
     (shared === parts.objects.length ||
       (allowCompression &&
+        !scopedPurpose &&
         shared >= 2 &&
         shared / parts.objects.length >= 2 / 3))
   );
@@ -228,6 +248,11 @@ function cancellationTask(text: string, sameSpeaker: boolean): string | null {
   const clause = text
     .replace(/^actually,\s*/i, 'Actually ')
     .split(/[;,]|\s+(?:and|but)\s+/i)[0]!;
+  const ownWithdrawal =
+    /^i(?:['’]m| am) withdrawing my (?:earlier )?(?:promise|commitment) to (.+)/i.exec(
+      clause,
+    );
+  if (ownWithdrawal) return sameSpeaker ? ownWithdrawal[1]! : null;
   const direct =
     /^(?:actually[, ]+)?i (?:won['’]t|will not|will no longer)\s+(.+)/i.exec(
       clause,

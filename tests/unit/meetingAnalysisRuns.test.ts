@@ -88,7 +88,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v14',
+            promptVersion: 'notes-v16',
           }),
           'utf8',
         )

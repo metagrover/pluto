@@ -1,0 +1,34 @@
+{
+  "source": {
+    "revision": "a45bcf1d5e44b8ca4c69e7773025acfa9580acfaa665f56aa36bafed077c40db",
+    "segments": [
+      {
+        "index": 0,
+        "speaker": "Cleo",
+        "text": "I will replace the product screenshots today."
+      },
+      {
+        "index": 1,
+        "speaker": "Marin",
+        "text": "I could animate the introduction if useful."
+      },
+      {
+        "index": 2,
+        "speaker": "Cleo",
+        "text": "We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+      },
+      {
+        "index": 3,
+        "speaker": "Cleo",
+        "text": "I'm withdrawing my screenshot replacement promise; the images are still accurate."
+      },
+      {
+        "index": 4,
+        "speaker": "Cleo",
+        "text": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday."
+      }
+    ]
+  },
+  "writerRaw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Intro Animation\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team decided to keep the introduction static because animation distracts from the instructions, declining the offer to animate.\",\n          \"sources\": [\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Marin offered to animate the introduction if useful.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Content Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo withdrew the promise to replace product screenshots because the images are still accurate.\",\n          \"sources\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Publishing\",\n        \"sources\": [\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo publishes the captioned demonstration on the support portal by Wednesday once the accessibility review passes.\",\n          \"sources\": [\n            \"R4\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Cleo\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+  "repairedAuditRaw": "{\"changes\":[],\"verdicts\":[{\"target\":\"s0:title\",\"status\":\"supported\",\"sources\":[\"R1\",\"R2\"]},{\"target\":\"s0:item:0\",\"status\":\"supported\",\"sources\":[\"R1\",\"R2\"]},{\"target\":\"s0:item:1\",\"status\":\"supported\",\"sources\":[\"R1\"]},{\"target\":\"s1:title\",\"status\":\"supported\",\"sources\":[\"R0\",\"R3\"]},{\"target\":\"s1:item:0\",\"status\":\"supported\",\"sources\":[\"R0\",\"R3\"]},{\"target\":\"s2:title\",\"status\":\"supported\",\"sources\":[\"R4\"]},{\"target\":\"s2:item:0\",\"status\":\"supported\",\"sources\":[\"R4\"]}],\"dispositions\":[],\"terminology\":[]}"
+}

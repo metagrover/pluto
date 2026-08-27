@@ -762,6 +762,69 @@ const explicitDispositionClause = (
   return undefined;
 };
 
+/** A rejected offer is not a prerequisite on a separately settled choice.
+ * Scope only an adjacent, unambiguous offer/rejection pair whose complete
+ * choice predicate (including rationale and conditions) is copied faithfully.
+ * This local view never replaces the caller's original evidence or citations. */
+const rejectedOfferDecisionClause = (
+  claim: string,
+  resolved: ResolvedTranscriptEvidence,
+): string | undefined => {
+  if (resolved.sourceLines.length !== 2) return undefined;
+  const decision = transcriptLineContent(resolved.sourceLines[1]!);
+  const sourceChoice = /^we(?: have)? (?:decided|agreed)\s+(.+)$/i.exec(
+    decision,
+  );
+  const claimedChoice =
+    /^(?:we|the (?:team|group))(?: have)? (?:decided|agreed)\s+(.+)$/i.exec(
+      claim,
+    );
+  if (!sourceChoice || !claimedChoice) return undefined;
+  const rejected =
+    /^(.*?),\s*(?:so\s+)?we\s+(?:will\s+not\s+take\s+up|declined|rejected)\s+(?:that|the)\s+offer[.!]?$/i.exec(
+      sourceChoice[1]!,
+    );
+  const claimedRejection =
+    /^(.*?),\s*(?:and\s+)?(?:declining|declined|rejecting|rejected)\s+(?:the|that)\s+offer(?:\s+to\s+(.+?))?[.!]?$/i.exec(
+      claimedChoice[1]!,
+    );
+  if (
+    !rejected ||
+    !claimedRejection ||
+    normalizeTranscriptEvidence(rejected[1]!) !==
+      normalizeTranscriptEvidence(claimedRejection[1]!)
+  )
+    return undefined;
+  const offer = transcriptLineContent(resolved.sourceLines[0]!);
+  const offered = /^i (?:could|can)\s+(.+?)[.!]?$/i.exec(offer);
+  if (!offered || /[.?!;]/.test(offered[1]!)) return undefined;
+  const conditionIndex = offered[1]!.search(DECISION_PREREQUISITE);
+  const offeredTask = normalizeTranscriptEvidence(
+    conditionIndex < 0 ? offered[1]! : offered[1]!.slice(0, conditionIndex),
+  );
+  const claimedTask = normalizeTranscriptEvidence(claimedRejection[2] ?? '');
+  const omittedObject = offeredTask.slice(claimedTask.length).trim();
+  const repeatedDirectObject =
+    offeredTask.startsWith(`${claimedTask} `) &&
+    !/\b(?:to|for|from|with|without|and|or|by|via|on|in|at|using)\b/.test(
+      omittedObject,
+    ) &&
+    ` ${normalizeTranscriptEvidence(claimedRejection[1]!)} `.includes(
+      ` ${omittedObject} `,
+    );
+  if (
+    !offeredTask ||
+    (claimedTask && offeredTask !== claimedTask && !repeatedDirectObject)
+  )
+    return undefined;
+  return decision;
+};
+
+const decisionCopyPredicate = (value: string) =>
+  normalizeTranscriptEvidence(
+    value.replace(/^\s*(?:the decision is|decision)\s+/i, ''),
+  );
+
 export const groundSourceReviewedItem = (
   item: {
     text: string;
@@ -775,7 +838,11 @@ export const groundSourceReviewedItem = (
     item.kind === 'decision'
       ? explicitDispositionClause(item.text, resolved)
       : undefined;
-  const evidence = disposition?.evidence ?? resolved.evidence;
+  const rejectedChoice =
+    item.kind === 'decision'
+      ? rejectedOfferDecisionClause(item.text, resolved)
+      : undefined;
+  const evidence = disposition?.evidence ?? rejectedChoice ?? resolved.evidence;
   // An explicit settled choice copied in full can use "may" as permission.
   // This exception never borrows a neighboring cue or relaxes other modalities.
   const exactDecisionCopy =
@@ -787,10 +854,12 @@ export const groundSourceReviewedItem = (
     !/\b(?:the decision|but it)\s+is\s+(?:pending\b|not\s+(?:yet\s+)?final(?:ized|ised)?\b)/i.test(
       evidence,
     ) &&
-    normalizeTranscriptEvidence(item.text) ===
-      normalizeTranscriptEvidence(evidence);
+    decisionCopyPredicate(item.text) === decisionCopyPredicate(evidence);
   const conditional =
     /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
+  // Only a proven refusal object gets refusal morphology; declining prices or
+  // sales are not negation. Exact choice matching also protects prerequisites.
+  const normalizeDecline = Boolean(rejectedChoice);
   const numbers = (value: string): string[] =>
     value.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
   if (
@@ -807,7 +876,14 @@ export const groundSourceReviewedItem = (
       !/\b(?:agreed|decided|approved|selected|will use|we will|proceed|the decision is)\b/i.test(
         evidence,
       )) ||
-    !hasMatchingScopedPolarity(item.text, evidence) ||
+    !hasMatchingScopedPolarity(
+      normalizeDecline
+        ? item.text.replace(/\bdeclining\b/gi, 'declined')
+        : item.text,
+      normalizeDecline
+        ? evidence.replace(/\bdeclining\b/gi, 'declined')
+        : evidence,
+    ) ||
     hasLexicalContradiction(item.text, evidence) ||
     numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
     (conditional.test(evidence) && !conditional.test(item.text)) ||
