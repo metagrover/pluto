@@ -276,7 +276,7 @@ it('documents valid hierarchy cancellation and deduplication contracts', () => {
     inherited: draft.sections[0]!.items,
   });
   expect(prompt).toContain(
-    '"kind":"deduplicated","replacementId":"kept inherited id"',
+    'for deduplicated, replacementId is the retained inherited id',
   );
   expect(prompt).toContain(
     'Preserve the id of each retained inherited commitment',

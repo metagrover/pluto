@@ -464,7 +464,8 @@ it('builds a short source-only prompt compatible with the exact-source wire code
   expect(prompt).toMatch(/unaccepted/i);
   expect(prompt).toMatch(/personal.*interview.*brainstorm/i);
   expect(prompt).not.toContain('BEGIN DRAFT');
-  expect(prompt.length - sourceText.length).toBeLessThan(2200);
+  // Includes the shared content policy and three non-evidentiary contrasts.
+  expect(prompt.length - sourceText.length).toBeLessThan(3000);
   const wire = createNotesWireRequest(prompt, spans);
   const encoded = JSON.stringify({
     ...empty(),
