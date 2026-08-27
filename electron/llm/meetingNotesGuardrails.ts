@@ -36,6 +36,7 @@ type Sentence = {
 };
 type Candidate = {
   task: string;
+  exactTask: string;
   condition: string | null;
   sources: SourceSpan[];
   order: number;
@@ -206,12 +207,12 @@ function candidates(entries: Sentence[]): Candidate[] {
     if (parts.condition && TASK_BOUNDARY.test(entry.text)) continue;
     const tasks = parts.task.split(TASK_BOUNDARY);
     for (const text of tasks) {
-      const task = text
-        .replace(/^(?:i['’]ll|i will)\s+/i, '')
-        .replace(DUE_PHRASE, '');
+      const exactTask = text.replace(/^(?:i['’]ll|i will)\s+/i, '');
+      const task = exactTask.replace(DUE_PHRASE, '');
       if (taskParts(task))
         result.push({
           task,
+          exactTask,
           condition: parts.condition,
           sources,
           order: acceptance && request ? acceptance.order : entry.order,
@@ -289,11 +290,36 @@ export function findNotesGuardrailIssues(
     .filter((item) => item.kind === 'action');
   const issues = new Map<string, NotesGuardrailIssue>();
   const sourceCandidates = candidates(entries);
+  // Exact repeats may cite either occurrence. Keep deadlines and recipients in
+  // this identity, and never share evidence across a cancellation/renewal.
+  const repeatedSources = new Map<Candidate, SourceSpan[]>();
+  const previousRepeats = new Map<string, Candidate>();
+  for (const candidate of sourceCandidates) {
+    const key = JSON.stringify([
+      candidate.speaker,
+      candidate.exactTask,
+      candidate.condition,
+    ]);
+    const previous = candidate.speaker ? previousRepeats.get(key) : undefined;
+    const sources =
+      previous &&
+      !entries.some(
+        (entry) =>
+          entry.order > previous.order &&
+          entry.order < candidate.order &&
+          cancels(entry, previous, sourceCandidates),
+      )
+        ? repeatedSources.get(previous)!
+        : [];
+    sources.push(...candidate.sources);
+    repeatedSources.set(candidate, sources);
+    previousRepeats.set(key, candidate);
+  }
   for (const candidate of sourceCandidates) {
     const matching = actions.flatMap((item) =>
-      candidate.sources.some((span) =>
-        item.sources.some((ref) => overlaps(span, ref)),
-      )
+      repeatedSources
+        .get(candidate)!
+        .some((span) => item.sources.some((ref) => overlaps(span, ref)))
         ? item.text
             .split(TASK_BOUNDARY)
             .filter((clause) =>

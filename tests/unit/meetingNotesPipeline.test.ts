@@ -119,6 +119,47 @@ it('uses one writer and one complete-document editor without segmentation or a t
 });
 
 it.each(['audit', 'editor'] as const)(
+  'publishes one action for exact repeated promises without repair in %s review',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    fixture.source = makeSyntheticNotesSource([
+      { speaker: 'Milo', text: 'I will send the outline.' },
+      { speaker: 'Milo', text: 'I will send the outline.' },
+    ]);
+    const span = { segment: 1, start: 0, end: 24 };
+    fixture.draft.sections[0]!.title.sources = [span];
+    fixture.draft.sections[0]!.items[0]!.sources = [span];
+    fixture.audit.verdicts.forEach((verdict) => {
+      verdict.sources = [span];
+    });
+    const generate = vi.fn(async (request: NotesRequest) =>
+      JSON.stringify(
+        request.task === 'notesWriter' || reviewProtocol === 'editor'
+          ? fixture.draft
+          : fixture.audit,
+      ),
+    );
+    const result = await generateMeetingNotes({
+      reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    expect(result.all_action_items).toEqual([
+      expect.objectContaining(fixture.expectedAction),
+    ]);
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesAudit',
+    ]);
+    expect(result.quality.retry_count).toBe(0);
+  },
+);
+
+it.each(['audit', 'editor'] as const)(
   'repairs a dropped source promise once in the %s review protocol',
   async (reviewProtocol) => {
     const fixture = makeDirectNotesFixture();

@@ -48,6 +48,120 @@ function fixture(...turns: string[]) {
 }
 
 describe('source-grounded notes guardrails', () => {
+  it.each([0, 1])(
+    'covers an exact repeated promise with one action citing occurrence %s',
+    (occurrence) => {
+      const f = fixture(
+        'I will send the outline to Ben by Friday after legal approves.',
+        'I will send the outline to Ben by Friday after legal approves.',
+      );
+      expect(
+        findNotesGuardrailIssues(
+          f.source,
+          f.draft(
+            f.item(
+              'Send the outline to Ben by Friday after legal approves.',
+              'action',
+              [f.spans[occurrence]!],
+            ),
+          ),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    [
+      'deadline',
+      'I will send the outline to Ben by Monday after legal approves.',
+    ],
+    [
+      'condition',
+      'I will send the outline to Ben by Friday after finance approves.',
+    ],
+    [
+      'recipient',
+      'I will send the outline to Lee by Friday after legal approves.',
+    ],
+  ])('does not merge repeated tasks with a different %s', (_field, other) => {
+    const f = fixture(
+      'I will send the outline to Ben by Friday after legal approves.',
+      other,
+    );
+    expect(
+      findNotesGuardrailIssues(
+        f.source,
+        f.draft(
+          f.item('Send the outline to Ben by Friday after legal approves.'),
+        ),
+      ),
+    ).toEqual([{ code: 'missing_action', sources: [f.spans[1]] }]);
+  });
+
+  it.each(['Lee', null])(
+    'does not combine repeated promises with a different or unknown speaker: %s',
+    (speaker) => {
+      const f = fixture('I will send the outline.', 'I will send the outline.');
+      const source = {
+        ...f.source,
+        segments: f.source.segments.map((segment, index) => ({
+          ...segment,
+          speaker: index ? speaker : 'Rae',
+        })),
+      };
+      expect(
+        findNotesGuardrailIssues(source, f.draft(f.item('Send the outline.'))),
+      ).toEqual([{ code: 'missing_action', sources: [f.spans[1]] }]);
+    },
+  );
+
+  it('does not borrow a repeated promise citation across a cancellation and renewal', () => {
+    const f = fixture(
+      'I will send the outline.',
+      'I will not send the outline.',
+      'I will send the outline.',
+      'I will send the outline.',
+    );
+    expect(
+      findNotesGuardrailIssues(f.source, f.draft(f.item('Send the outline.'))),
+    ).toEqual([
+      { code: 'missing_action', sources: [f.spans[2]] },
+      { code: 'missing_action', sources: [f.spans[3]] },
+    ]);
+    expect(
+      findNotesGuardrailIssues(
+        f.source,
+        f.draft(f.item('Send the outline.', 'action', [f.spans[2]!])),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    'I am withdrawing my outline promise.',
+    'I take back my earlier outline commitment.',
+  ])(
+    'separates repeated promises after a noun-only withdrawal: %s',
+    (withdrawal) => {
+      const f = fixture(
+        'I will send the outline.',
+        withdrawal,
+        'I will send the outline.',
+      );
+      expect(
+        findNotesGuardrailIssues(
+          f.source,
+          f.draft(f.item('Send the outline.')),
+        ),
+      ).toEqual([{ code: 'missing_action', sources: [f.spans[2]] }]);
+      expect(
+        findNotesGuardrailIssues(
+          f.source,
+          f.draft(f.item('Send the outline.', 'action', [f.spans[2]!])),
+        ),
+      ).toEqual([]);
+    },
+  );
+
   it.each([
     [
       'I will send the outline if legal approves, and I will update the dashboard.',
