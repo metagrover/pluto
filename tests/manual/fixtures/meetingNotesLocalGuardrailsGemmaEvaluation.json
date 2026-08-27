@@ -1,0 +1,774 @@
+{
+  "date": "2026-08-27",
+  "codeCommit": "832cd111e",
+  "scope": "Fresh synthetic default audit pipeline before final supported-decision preservation fix; no production mutation or promotion",
+  "runtime": "Ollama 0.32.15",
+  "model": "gemma4:12b",
+  "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "request": {
+    "seed": 41,
+    "temperature": 0.1,
+    "thinking": false,
+    "num_thread": 8,
+    "contextTokens": 16384,
+    "outputTokens": "recorded per attempt",
+    "keep_alive": "1h",
+    "format": "json",
+    "top_k": 64,
+    "top_p": 0.95
+  },
+  "samplingNote": "temperature overrides model default 1; top_k/top_p inherited from installed model parameters verified via api/show",
+  "timingCaveat": "Shared live runtime had competing generation/model loads. These are non-isolated observations, not latency benchmarks.",
+  "harness": "tests/manual/meetingNotesLocalGuardrailsAcceptance.test.ts",
+  "harnessSha256": "8f2c50405f8ce7bfc5effe54a572f0298af63c13a8bdc9da0d7fbcf1279df541",
+  "fixtureSha256": "fb39208abaf0b20d82f7c9bb7c44781d3ccb46c457529909ff13b5daaf1ee27f",
+  "guardrailsSha256": "e3beef8d8a1aea8fe16dae1c2342c7a642fb6f7a1a3b80457cb67af637574c26",
+  "review": "Mechanical checks and semantic source fidelity are separate. See the local-notes-guardrails-evaluation report for independent raw/final review. No historical gates were changed.",
+  "summary": [
+    {
+      "case": "personal",
+      "event": "final",
+      "latencyMs": 140754,
+      "stages": ["notesWriter", "notesAudit"],
+      "mechanicalChecks": "passed",
+      "returnedDocument": true
+    },
+    {
+      "case": "qualified-publication",
+      "event": "failure",
+      "latencyMs": 172822,
+      "stages": ["notesWriter", "notesWriter"],
+      "mechanicalChecks": "not_run",
+      "returnedDocument": false,
+      "error": "MeetingNotesError: notes_writer_invalid"
+    },
+    {
+      "case": "accepted-request-privacy",
+      "event": "failure",
+      "latencyMs": 107553,
+      "stages": ["notesWriter", "notesAudit"],
+      "mechanicalChecks": "failed",
+      "returnedDocument": true,
+      "error": "AssertionError: Mechanical decision count minimum: expected 0 to be greater than or equal to 1"
+    }
+  ],
+  "events": [
+    {
+      "event": "start",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "aa5ef43a37beaa8270e206b58d10edd3b6333ec5b420819f26c7f34a12aeeeb9",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Jun",
+            "text": "My first sourdough was flat, but the second rose. That felt satisfying."
+          },
+          {
+            "index": 1,
+            "speaker": "Esme",
+            "text": "I have been restoring an old radio. The persistent hum is frustrating."
+          },
+          {
+            "index": 2,
+            "speaker": "Jun",
+            "text": "I enjoy experimenting, even when the results are not perfect."
+          },
+          {
+            "index": 3,
+            "speaker": "Esme",
+            "text": "We are just comparing our evenings, not asking each other for help."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 0,
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0
+      },
+      "reviewCriteria": [
+        "Attribute sourdough to Jun: the first was flat, the second rose, and the progress felt satisfying; retain Jun's enjoyment of imperfect experimentation.",
+        "Attribute the old-radio restoration and frustrating persistent hum to Esme.",
+        "Retain the personal exchange without fabricating help tasks, decisions, open questions, or gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "model_metrics",
+      "case": "personal",
+      "task": "notesWriter",
+      "inputTokens": 912,
+      "outputTokens": 396,
+      "promptMs": 6595.706,
+      "outputMs": 27688.84,
+      "loadMs": 26586.164917,
+      "elapsedMs": 60925
+    },
+    {
+      "event": "raw_attempt",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "latencyMs": 60949,
+      "raw": "{\n  \"meetingType\": \"one_on_one\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Personal Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R1\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Jun's sourdough baking progress, noting the first was flat but the second rose.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Esme's experience restoring an old radio, currently hindered by a persistent hum.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Reflections\",\n        \"sources\": [\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Jun's enjoyment of experimenting despite imperfect results.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Observation that they are comparing evenings rather than asking for help.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "29f6fcae6ab077d8a8e7433771238846ea9306b93353dd0da505458ec9378261"
+    },
+    {
+      "event": "model_metrics",
+      "case": "personal",
+      "task": "notesAudit",
+      "inputTokens": 1598,
+      "outputTokens": 293,
+      "promptMs": 11483.118,
+      "outputMs": 20150.404,
+      "loadMs": 48081.949083,
+      "elapsedMs": 79758
+    },
+    {
+      "event": "raw_attempt",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "latencyMs": 79764,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\",\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}",
+      "rawSha256": "640cdde3c02e81bafb9e5b3faba2fa8ae7fd87b403e1b4a8ea9dccd0a1a28406"
+    },
+    {
+      "event": "final",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "latencyMs": 140754,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 0,
+        "topicActions": 0,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Jun's sourdough baking progress, noting the first was flat but the second rose. Esme's experience restoring an old radio, currently hindered by a persistent hum. Jun's enjoyment of experimenting despite imperfect results.",
+        "topics": [
+          {
+            "title": "Personal Updates",
+            "summary": "Jun's sourdough baking progress, noting the first was flat but the second rose.",
+            "key_points": [
+              {
+                "text": "Esme's experience restoring an old radio, currently hindered by a persistent hum."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Reflections",
+            "summary": "Jun's enjoyment of experimenting despite imperfect results.",
+            "key_points": [
+              {
+                "text": "Observation that they are comparing evenings rather than asking for help."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [],
+        "all_decisions": [],
+        "meeting_type": "one_on_one",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v12",
+          "generated_at": "2026-08-27T19:56:43.661Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "aa5ef43a37beaa8270e206b58d10edd3b6333ec5b420819f26c7f34a12aeeeb9",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s1:title",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  }
+                ]
+              },
+              "native_continuations:topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  }
+                ]
+              },
+              "topic:1:point:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "native_continuations:topic:1:point:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "a45bcf1d5e44b8ca4c69e7773025acfa9580acfaa665f56aa36bafed077c40db",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Cleo",
+            "text": "I will replace the product screenshots today."
+          },
+          {
+            "index": 1,
+            "speaker": "Marin",
+            "text": "I could animate the introduction if useful."
+          },
+          {
+            "index": 2,
+            "speaker": "Cleo",
+            "text": "We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+          },
+          {
+            "index": 3,
+            "speaker": "Cleo",
+            "text": "I'm withdrawing my screenshot replacement promise; the images are still accurate."
+          },
+          {
+            "index": 4,
+            "speaker": "Cleo",
+            "text": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Cleo",
+        "actionDue": "Wednesday"
+      },
+      "reviewCriteria": [
+        "Exactly one active action: Cleo publishes the captioned demonstration on the support portal by Wednesday, only once accessibility review passes. The prerequisite, destination, and due date must attach to that action.",
+        "Retain Marin's animation offer as declined, the settled static-introduction choice, and the rationale that animation distracts from instructions.",
+        "Retain screenshot replacement only as an explicitly withdrawn promise, with the reason that existing images are accurate; no active screenshot or animation task.",
+        "One or two decisions are legitimate only if the second is the distinct screenshot cancellation, not a duplicate of declining animation. The static-introduction choice is required."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "model_metrics",
+      "case": "qualified-publication",
+      "task": "notesWriter",
+      "inputTokens": 952,
+      "outputTokens": 464,
+      "promptMs": 6799.796,
+      "outputMs": 34060.069,
+      "loadMs": 41003.35875,
+      "elapsedMs": 81919
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "latencyMs": 81927,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Intro Animation\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team decided to keep the introduction static because animation distracts from the instructions, declining the offer to animate.\",\n          \"source\": [\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Marin offered to animate the introduction if useful.\",\n          \"source\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Content Updates\",\n        \"source\": [\n          \"R0\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo withdrew the promise to replace screenshots because the images are still accurate.\",\n          \"source\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Support Portal\",\n        \"source\": [\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Publish the captioned demonstration on the support portal by Wednesday once the accessibility review passes.\",\n          \"source\": [\n            \"R4\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Cleo\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "c98177b4d95ed803190e02624f92354782237004106e1a5a1516298bb5d554d4"
+    },
+    {
+      "event": "model_metrics",
+      "case": "qualified-publication",
+      "task": "notesWriter",
+      "inputTokens": 1299,
+      "outputTokens": 464,
+      "promptMs": 9607.417,
+      "outputMs": 34317.061999,
+      "loadMs": 46900.056333,
+      "elapsedMs": 90870
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesWriter",
+      "stages": ["notesWriter", "notesWriter"],
+      "outputTokens": 2048,
+      "latencyMs": 90879,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Intro Animation\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team decided to keep the introduction static because animation distracts from the instructions, so they will not take up the offer to animate.\",\n          \"source\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Marin offered to animate the introduction if useful.\",\n          \"source\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Content Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo is withdrawing the promise to replace screenshots because the images are still accurate.\",\n          \"source\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Support Portal\",\n        \"sources\": [\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Publish the captioned demonstration on the support portal by Wednesday once the accessibility review passes.\",\n          \"source\": [\n            \"R4\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Cleo\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "ed641c986b7bdb5d31411015594e7bb2325411d947a70cd0eef1764c27270f5d"
+    },
+    {
+      "event": "failure",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "latencyMs": 172822,
+      "stages": ["notesWriter", "notesWriter"],
+      "phase": "generation",
+      "counts": null,
+      "analysis": null,
+      "mechanicalChecks": "not_run",
+      "sourceFidelity": "requires_independent_review",
+      "error": "MeetingNotesError: notes_writer_invalid"
+    },
+    {
+      "event": "start",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Tariq",
+            "text": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko?"
+          },
+          {
+            "index": 1,
+            "speaker": "Niko",
+            "text": "I'll be using the table. Bea is preparing and uploading it, not me."
+          },
+          {
+            "index": 2,
+            "speaker": "Bea",
+            "text": "Yes, I accept that task. I'll have the anonymized table there by Monday."
+          },
+          {
+            "index": 3,
+            "speaker": "Tariq",
+            "text": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Bea",
+        "actionDue": "Monday"
+      },
+      "reviewCriteria": [
+        "Exactly one action: Bea accepts preparing and uploading the anonymized survey table to the research workspace by Monday for Niko. Niko is the intended user, not owner; Tariq is the requester.",
+        "Retain the settled policy against publishing individual responses, allowing aggregate counts only, and the participants' confidentiality rationale.",
+        "One combined or two complementary privacy decision records are legitimate; do not create an aggregate-publication task or a question from the already-accepted request."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "model_metrics",
+      "case": "accepted-request-privacy",
+      "task": "notesWriter",
+      "inputTokens": 938,
+      "outputTokens": 230,
+      "promptMs": 8354.03,
+      "outputMs": 16366.075,
+      "loadMs": 25375.518416,
+      "elapsedMs": 50171
+    },
+    {
+      "event": "raw_attempt",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "latencyMs": 50179,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Survey Data Management\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Bea will upload the anonymized survey table to the research workspace for Niko by Monday.\",\n          \"sources\": [\n            \"R0\",\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Bea\",\n          \"due\": \"Monday\"\n        },\n        {\n          \"text\": \"The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "50b8ebcd5430c608596c86176600bec64f32f34cd6b8adedf1577c7c1a33ecae"
+    },
+    {
+      "event": "model_metrics",
+      "case": "accepted-request-privacy",
+      "task": "notesAudit",
+      "inputTokens": 1497,
+      "outputTokens": 163,
+      "promptMs": 11609.334,
+      "outputMs": 12094.256,
+      "loadMs": 33573.579583,
+      "elapsedMs": 57322
+    },
+    {
+      "event": "raw_attempt",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "latencyMs": 57331,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}",
+      "rawSha256": "647b477ac22f26d3648cb04dc4ab6bf902005dbdd66c2f72983d5aaebcf5f1c6"
+    },
+    {
+      "event": "failure",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "latencyMs": 107553,
+      "stages": ["notesWriter", "notesAudit"],
+      "phase": "mechanical_checks",
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Conversation captured.",
+        "topics": [
+          {
+            "title": "Survey Data Management",
+            "summary": "",
+            "key_points": [],
+            "decisions": [],
+            "action_items": [
+              {
+                "text": "Upload the anonymized survey table to the research workspace for Niko by Monday.",
+                "assignee": "Bea",
+                "due": "Monday",
+                "evidence": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko? Yes, I accept that task. I'll have the anonymized table there by Monday."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Upload the anonymized survey table to the research workspace for Niko by Monday.",
+            "assignee": "Bea",
+            "due": "Monday",
+            "evidence": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko? Yes, I accept that task. I'll have the anonymized table there by Monday.",
+            "topic": "Survey Data Management"
+          }
+        ],
+        "all_decisions": [],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v12",
+          "generated_at": "2026-08-27T20:01:24.060Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+            "blocks": {
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  }
+                ]
+              },
+              "topic:0:action:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "failed",
+      "sourceFidelity": "requires_independent_review",
+      "error": "AssertionError: Mechanical decision count minimum: expected 0 to be greater than or equal to 1"
+    }
+  ],
+  "abortedEarlierRun": {
+    "log": "/tmp/pluto-674-final-gemma-audit-aborted-before-output-41.log",
+    "status": "controller_aborted_before_model_output",
+    "reason": "Final code review found repeated-promise coverage bug; no score, server/app untouched"
+  }
+}

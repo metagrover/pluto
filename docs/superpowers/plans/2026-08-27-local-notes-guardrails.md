@@ -8,14 +8,16 @@
 
 **Tech Stack:** TypeScript, Vitest, existing local Ollama provider and exact-source codec.
 
+**Checkpoint (2026-08-27):** All four scoped tasks are complete through `fab6005a3`, including independent reviews and a bounded local evaluation. Production acceptance is not met: schema/coverage gaps remain and the post-fix live audit timed out. Final evidence and boundaries are in `2026-08-27-local-notes-guardrails-evaluation.md`.
+
 ## Task 1: Compact shared guidance
 
 Files: new `electron/llm/meetingNotesGuidance.ts`; prompt portions of `meetingNotesPrompts.ts`, `meetingNotesEditor.ts`, `meetingNotesReconciliation.ts`; corresponding prompt tests.
 
-- [ ] Add failing tests for shared guidance appearing once per prompt, three labelled non-evidence examples, no dummy text values such as `fact` or `claim`, retained optional-win/terminology/source contracts and a bounded content-policy length.
-- [ ] Run `pnpm exec vitest run tests/unit/meetingNotesPrompts.test.ts tests/unit/meetingNotesEditor.test.ts tests/unit/meetingNotesReconciliation.test.ts` and observe the new failures.
-- [ ] Export `notesContentGuidance: string` and a concise textual `notesDraftSchema` shape definition. Reuse guidance from writer/audit/editor/merge/reconciler without repeated semantic paragraphs. Preserve all parser field requirements, stage identifiers and allowed-source rules. Examples use room booking, sending notes and cancellation, not evaluation names or objects.
-- [ ] Re-run focused tests; update tests tied to superseded exact wording only when the equivalent contract is explicitly covered. Obtain spec then quality review.
+- [x] Add failing tests for shared guidance appearing once per prompt, three labelled non-evidence examples, no dummy text values such as `fact` or `claim`, retained optional-win/terminology/source contracts and a bounded content-policy length.
+- [x] Run `pnpm exec vitest run tests/unit/meetingNotesPrompts.test.ts tests/unit/meetingNotesEditor.test.ts tests/unit/meetingNotesReconciliation.test.ts` and observe the new failures.
+- [x] Export `notesContentGuidance: string` and a concise textual `notesDraftSchema` shape definition. Reuse guidance from writer/audit/editor/merge/reconciler without repeated semantic paragraphs. Preserve all parser field requirements, stage identifiers and allowed-source rules. Examples use room booking, sending notes and cancellation, not evaluation names or objects.
+- [x] Re-run focused tests; update tests tied to superseded exact wording only when the equivalent contract is explicitly covered. Obtain spec then quality review.
 
 ## Task 2: Pure source guardrails
 
@@ -36,19 +38,19 @@ export function findNotesGuardrailIssues(
 ): NotesGuardrailIssue[];
 ```
 
-- [ ] TDD high-confidence first-person promises and accepted requests absent from action output; prerequisite omitted from the action; earlier promise retained after a supported withdrawal. Candidate/issue identification never mutates source or adds output claims.
-- [ ] Add negative controls: can/could willingness, completed/reported/quoted promises, negated promises, unrelated cancellation, a qualified action already present, an explicit source-backed cancellation retained as a point, personal discussion, and evidence outside `allowedSpans`.
-- [ ] Implement narrowly anchored candidate recognition and source-overlap checks, not a general semantic classifier. Require source linkage and content support for a cancellation/condition; arbitrary points citing everything cannot satisfy action recall. Return unique bounded diagnostics with exact original source references. Ambiguity is not permission to assign an owner or delete a task.
-- [ ] Run `pnpm exec vitest run tests/unit/meetingNotesGuardrails.test.ts`; inspect counterexamples and complete spec/quality review before integration.
+- [x] TDD high-confidence first-person promises and accepted requests absent from action output; prerequisite omitted from the action; earlier promise retained after a supported withdrawal. Candidate/issue identification never mutates source or adds output claims.
+- [x] Add negative controls: can/could willingness, completed/reported/quoted promises, negated promises, unrelated cancellation, a qualified action already present, an explicit source-backed cancellation retained as a point, personal discussion, and evidence outside `allowedSpans`.
+- [x] Implement narrowly anchored candidate recognition and source-overlap checks, not a general semantic classifier. Require source linkage and content support for a cancellation/condition; arbitrary points citing everything cannot satisfy action recall. Return unique bounded diagnostics with exact original source references. Ambiguity is not permission to assign an owner or delete a task.
+- [x] Run `pnpm exec vitest run tests/unit/meetingNotesGuardrails.test.ts`; inspect counterexamples and complete spec/quality review before integration.
 
 ## Task 3: Repair and pipeline integration
 
 Files: `meetingNotesPipeline.ts`, reconciliation parsing, focused pipeline/reconciliation/guardrail tests; relevant version/cache definitions if identity changes.
 
-- [ ] Add failing pipeline tests: reviewer drops a valid promise; repair returns empty output; prerequisite absent; later withdrawal; source-based corrected retry succeeds; second invalid retry fails; no third attempt. Preserve already-grounded title/edit/history behavior.
-- [ ] Use `findNotesGuardrailIssues` against the proposed final draft and applicable source window inside existing audit parsing. Raise `MeetingNotesError` with privacy-safe code/source diagnostics, not transcript prose. Apply the same check to source-only reconciliation parsing. Root/full-source checks must not silently allow leaf omissions; respect bounded original-source context.
-- [ ] Keep existing hierarchy conservation; verify protected commitments cannot lose owner/due/condition during composition. Replace generic repair instructions permitting default deletion with targeted original-source correction, then revalidate. Preserve original request cancellation and existing one-repair budget.
-- [ ] Run pipeline, audit, reconciliation, hierarchy, transport and provider-routing suites. Update generation/cache identity when needed to prevent stale prompt/check outputs being reused; retain legacy readers.
+- [x] Add failing pipeline tests: reviewer drops a valid promise; repair returns empty output; prerequisite absent; later withdrawal; source-based corrected retry succeeds; second invalid retry fails; no third attempt. Preserve already-grounded title/edit/history behavior.
+- [x] Use `findNotesGuardrailIssues` against the proposed final draft and applicable source window inside existing audit parsing. Raise `MeetingNotesError` with privacy-safe code/source diagnostics, not transcript prose. Apply the same check to source-only reconciliation parsing. Root/full-source checks must not silently allow leaf omissions; respect bounded original-source context.
+- [x] Keep existing hierarchy conservation; verify protected commitments cannot lose owner/due/condition during composition. Replace generic repair instructions permitting default deletion with targeted original-source correction, then revalidate. Preserve original request cancellation and existing one-repair budget.
+- [x] Run pipeline, audit, reconciliation, hierarchy, transport and provider-routing suites. Update generation/cache identity when needed to prevent stale prompt/check outputs being reused; retain legacy readers.
 
 ### Decision contract correction within task 3
 
@@ -58,7 +60,7 @@ The saved Rina decision cites a settled no-summary clause followed by an unrelat
 
 ## Task 4: Local verification and checkpoint
 
-- [ ] Define the new explicit negative-decision contract in fresh fixture assertions before inference; keep prior raw outputs and historic gates unchanged. Add new task objects/names and paraphrases absent from prompt examples.
-- [ ] Run sequential opt-in local-model cases using already-installed Gemma and Qwen only, thinking disabled initially. Record raw output separately from repair, request counts, exact model/configuration, latency and source-level accuracy. Do not run production meetings or change defaults. Expand if evidence justifies it; do not loop on one fixture until it happens to pass.
-- [ ] Independently review actual output and final diff. Run full unit/DOM suite, typecheck, scoped Biome, diff and changelog checks. Restore Electron SQLite ABI after Node tests and verify an in-memory open.
-- [ ] Update #674, decisions and the existing changelog fragment. Commit scoped work locally without merge/push. Report any remaining semantic or app-acceptance boundary explicitly.
+- [x] Define the new explicit negative-decision contract in fresh fixture assertions before inference; keep prior raw outputs and historic gates unchanged. Add new task objects/names and paraphrases absent from prompt examples.
+- [x] Run sequential opt-in local-model cases using already-installed Gemma and Qwen only, thinking disabled initially. Record raw output separately from repair, request counts, exact model/configuration, latency and source-level accuracy. Do not run production meetings or change defaults. Expand if evidence justifies it; do not loop on one fixture until it happens to pass.
+- [x] Independently review actual output and final diff. Run full unit/DOM suite, typecheck, scoped Biome, diff and changelog checks. Restore Electron SQLite ABI after Node tests and verify an in-memory open.
+- [x] Update #674, decisions and the existing changelog fragment. Commit scoped work locally without merge/push. Report any remaining semantic or app-acceptance boundary explicitly.

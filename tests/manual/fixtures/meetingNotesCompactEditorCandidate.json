@@ -1,0 +1,309 @@
+{
+  "date": "2026-08-27",
+  "commit": "76b555887",
+  "scope": "Integrated candidate before decision-predicate review fixes and final explicit point-label clarification; synthetic only",
+  "model": "gemma4:12b",
+  "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "runtime": "0.32.15",
+  "request": {
+    "contextTokens": 16384,
+    "outputTokens": 2048,
+    "temperature": 0.1,
+    "thinking": false,
+    "seed": 41,
+    "caseTimeoutMs": 270000
+  },
+  "harness": "tests/manual/meetingNotesEditorAcceptance.test.ts",
+  "cases": [
+    {
+      "case": "conditional-promise-and-willingness",
+      "requests": [
+        {
+          "seed": 41,
+          "task": "notesWriter",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Budget and Announcements\",\n        \"sources\": [\n          \"R0\",\n          \"R1\",\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Ava will send the revised budget to Nora by Thursday if finance approves.\",\n          \"sources\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Ava\",\n          \"due\": \"Thursday\"\n        },\n        {\n          \"text\": \"The announcement is left unassigned for now.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": false,
+          "metrics": {
+            "task": "notesWriter",
+            "inputTokens": 900,
+            "outputTokens": 233,
+            "promptMs": 9324.361,
+            "outputMs": 18467.383,
+            "loadMs": 24.760375,
+            "elapsedMs": 32713
+          },
+          "sha256": "aa4ade92b221d97d37fd97b8f7a657d7f387d88c481c7cdbe3f3619c99286ad1"
+        },
+        {
+          "seed": 41,
+          "task": "notesAudit",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"id\": \"s0\",\n      \"title\": {\n        \"text\": \"Budget and Announcements\",\n        \"sources\": [\n          \"R0\",\n          \"R1\",\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Ava will send the revised budget to Nora by Thursday if finance approves.\",\n          \"sources\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Ava\",\n          \"due\": \"Thursday\"\n        },\n        {\n          \"text\": \"The announcement is left unassigned for now.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": false,
+          "metrics": {
+            "task": "notesAudit",
+            "inputTokens": 1164,
+            "outputTokens": 242,
+            "promptMs": 9611.163,
+            "outputMs": 18449.092,
+            "loadMs": 23.1065,
+            "elapsedMs": 29798
+          },
+          "sha256": "630fc860e1723a50b41e36019b19a108e662c400f7411076921138cdefdd84c2"
+        },
+        {
+          "seed": 41,
+          "task": "notesAudit",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"id\": \"s0\",\n      \"title\": {\n        \"text\": \"Budget and Announcements\",\n        \"sources\": [\n          \"R0\",\n          \"R1\",\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Ava will send the revised budget to Nora by Thursday if finance approves.\",\n          \"sources\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Ava\",\n          \"due\": \"Thursday\"\n        },\n        {\n          \"text\": \"The announcement is left unassigned for now.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": true,
+          "metrics": {
+            "task": "notesAudit",
+            "inputTokens": 1430,
+            "outputTokens": 242,
+            "promptMs": 11640.505,
+            "outputMs": 18811.179,
+            "loadMs": 27.5095,
+            "elapsedMs": 31747
+          },
+          "sha256": "630fc860e1723a50b41e36019b19a108e662c400f7411076921138cdefdd84c2"
+        }
+      ],
+      "gatePass": false,
+      "error": "notes_audit_invalid",
+      "finalDocument": false,
+      "review": "Writer and editor now use flat fields. Ava action correct; left-unassigned decision hits a conservative guard false positive. Ben offer discussion absent from every version. One editor repair, no final document."
+    },
+    {
+      "case": "accepted-request-owner",
+      "requests": [
+        {
+          "seed": 41,
+          "task": "notesWriter",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Accessibility Report\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Mateo sends the accessibility report to Jules by Tuesday.\",\n          \"sources\": [\n            \"R0\",\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Mateo\",\n          \"due\": \"Tuesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": false,
+          "metrics": {
+            "task": "notesWriter",
+            "inputTokens": 907,
+            "outputTokens": 161,
+            "promptMs": 4663.014,
+            "outputMs": 14552.096,
+            "loadMs": 24.717417,
+            "elapsedMs": 22443
+          },
+          "sha256": "12ecd22b9cf6eb69846233fe8b4bfb70a8cecc032f20f0590586d285eb6e812e"
+        },
+        {
+          "seed": 41,
+          "task": "notesAudit",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"id\": \"s0\",\n      \"title\": {\n        \"id\": \"s0:title\",\n        \"text\": \"Accessibility Report\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"id\": \"s0:item:0\",\n          \"text\": \"Mateo sends the accessibility report to Jules by Tuesday.\",\n          \"sources\": [\n            \"R0\",\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Mateo\",\n          \"due\": \"Tuesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": false,
+          "metrics": {
+            "task": "notesAudit",
+            "inputTokens": 1125,
+            "outputTokens": 194,
+            "promptMs": 5562.289,
+            "outputMs": 17037.793,
+            "loadMs": 30.158791,
+            "elapsedMs": 28093
+          },
+          "sha256": "f8fdc95c705e67f8b4d84b8971488639783b9489f1a587601c503c4dac646fa2"
+        }
+      ],
+      "gatePass": false,
+      "error": "independent narrative coverage scorer",
+      "finalDocument": true,
+      "review": "Correct sole Mateo action, Jules recipient, Tuesday, citations. Final overview is Conversation captured; no summary or key points. Existing narrative scorer excludes action/evidence text and fails. Two requests, no repairs.",
+      "result": {
+        "seed": 41,
+        "latencyMs": 50675,
+        "stages": ["notesWriter", "notesAudit"],
+        "analysis": {
+          "analysis_schema_version": 3,
+          "overview": "Conversation captured.",
+          "topics": [
+            {
+              "title": "Accessibility Report",
+              "summary": "",
+              "key_points": [],
+              "decisions": [],
+              "action_items": [
+                {
+                  "text": "Mateo sends the accessibility report to Jules by Tuesday.",
+                  "assignee": "Mateo",
+                  "due": "Tuesday",
+                  "evidence": "Mateo, could you send the accessibility report to Jules by Tuesday? Tuesday works for receiving it. I am the recipient, not the person preparing or sending it. Yes, I will take that on and send it by Tuesday."
+                }
+              ],
+              "open_questions": []
+            }
+          ],
+          "all_action_items": [
+            {
+              "text": "Mateo sends the accessibility report to Jules by Tuesday.",
+              "assignee": "Mateo",
+              "due": "Tuesday",
+              "evidence": "Mateo, could you send the accessibility report to Jules by Tuesday? Tuesday works for receiving it. I am the recipient, not the person preparing or sending it. Yes, I will take that on and send it by Tuesday.",
+              "topic": "Accessibility Report"
+            }
+          ],
+          "all_decisions": [],
+          "meeting_type": "team_sync",
+          "quality": {
+            "format_pass": true,
+            "retry_count": 0,
+            "fallback_used": false,
+            "issues": []
+          },
+          "generation_metadata": {
+            "provider": "ollama",
+            "model": "gemma4:12b",
+            "generation_path": "single_pass",
+            "prompt_version": "notes-v13",
+            "generated_at": "2026-08-27T19:23:11.399Z",
+            "error_categories": [],
+            "pipeline_version": "writer-editor-v1",
+            "mode": "direct",
+            "audit_status": "complete",
+            "audit_change_count": 0,
+            "source_provenance": {
+              "schema_version": 1,
+              "source_revision": "52ce279cc5301ddd3455d39cd134578d95d25640c4a79b09d01dde86830e9932",
+              "blocks": {
+                "topic:0:title": {
+                  "id": "document:s0:title",
+                  "sources": [
+                    {
+                      "segment": 0,
+                      "start": 0,
+                      "end": 67
+                    }
+                  ]
+                },
+                "topic:0:action:0": {
+                  "id": "document:s0:item:0",
+                  "sources": [
+                    {
+                      "segment": 0,
+                      "start": 0,
+                      "end": 67
+                    },
+                    {
+                      "segment": 1,
+                      "start": 0,
+                      "end": 91
+                    },
+                    {
+                      "segment": 2,
+                      "start": 0,
+                      "end": 48
+                    }
+                  ]
+                },
+                "all_action_items:0": {
+                  "id": "document:s0:item:0",
+                  "sources": [
+                    {
+                      "segment": 0,
+                      "start": 0,
+                      "end": 67
+                    },
+                    {
+                      "segment": 1,
+                      "start": 0,
+                      "end": 91
+                    },
+                    {
+                      "segment": 2,
+                      "start": 0,
+                      "end": 48
+                    }
+                  ]
+                },
+                "native_continuations:all_action_items:0": {
+                  "id": "document:s0:item:0",
+                  "sources": [
+                    {
+                      "segment": 0,
+                      "start": 0,
+                      "end": 67
+                    },
+                    {
+                      "segment": 1,
+                      "start": 0,
+                      "end": 91
+                    },
+                    {
+                      "segment": 2,
+                      "start": 0,
+                      "end": 48
+                    }
+                  ]
+                },
+                "completion:all_action_items:0": {
+                  "id": "document:s0:item:0",
+                  "sources": [
+                    {
+                      "segment": 0,
+                      "start": 0,
+                      "end": 67
+                    },
+                    {
+                      "segment": 1,
+                      "start": 0,
+                      "end": 91
+                    },
+                    {
+                      "segment": 2,
+                      "start": 0,
+                      "end": 48
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "case": "withdrawal-and-qualified-promise",
+      "requests": [
+        {
+          "seed": 41,
+          "task": "notesWriter",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Integration and Announcements\",\n        \"sources\": [\n          \"R0\",\n          \"R1\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Ava's commitment to send the integration checklist to Ben by Friday is withdrawn because the source data is incomplete.\",\n          \"sources\": [\n            \"R0\",\n            \"R4\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Ben can draft the announcement if legal approves.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Migration and Research\",\n        \"sources\": [\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team may explore a migration next quarter, but it is not a current commitment.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The research discussion has no assignments or decisions today.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"FAQ Publication\",\n        \"sources\": [\n          \"R5\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Dana publishes the reviewed FAQ to Elena by Wednesday after the final audit.\",\n          \"sources\": [\n            \"R5\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Dana\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": false,
+          "metrics": {
+            "task": "notesWriter",
+            "inputTokens": 964,
+            "outputTokens": 517,
+            "promptMs": 7414.332,
+            "outputMs": 40738.53,
+            "loadMs": 40.584,
+            "elapsedMs": 57211
+          },
+          "sha256": "d0a87dd668e73ab8a2b0778f8319c879beb47c11b94e7a34b0bb9851ca1579e1"
+        },
+        {
+          "seed": 41,
+          "task": "notesWriter",
+          "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Integration and Announcements\",\n        \"sources\": [\n          \"R0\",\n          \"R1\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Ava's commitment to send the integration checklist to Ben by Friday is withdrawn because the source data is incomplete.\",\n          \"sources\": [\n            \"R0\",\n            \"R4\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Ben can draft the announcement if legal approves.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Migration and Research\",\n        \"sources\": [\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team may explore a migration next quarter, but it is not a current commitment.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The research discussion has no assignments or decisions today.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"discussion\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"FAQ Publication\",\n        \"sources\": [\n          \"R5\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Dana publishes the reviewed FAQ to Elena by Wednesday after the final audit.\",\n          \"sources\": [\n            \"R5\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Dana\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+          "repair": true,
+          "metrics": {
+            "task": "notesWriter",
+            "inputTokens": 1339,
+            "outputTokens": 517,
+            "promptMs": 11511.443,
+            "outputMs": 38389.484,
+            "loadMs": 21.5345,
+            "elapsedMs": 53312
+          },
+          "sha256": "d0a87dd668e73ab8a2b0778f8319c879beb47c11b94e7a34b0bb9851ca1579e1"
+        }
+      ],
+      "gatePass": false,
+      "error": "notes_writer_invalid",
+      "finalDocument": false,
+      "review": "Flat text fixed, but four discussion items still use invalid kind discussion instead of point. Repair repeats it; editor not reached. Raw cancellation/reason, offer, uncertainty and Dana qualified action preserved."
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "date": "2026-08-27",
+  "codeCommit": "fab6005a3",
+  "scope": "Single post-preservation-fix synthetic privacy rerun; unchanged prompt/model/seed; no production mutation",
+  "runtime": "Ollama 0.32.15",
+  "model": "gemma4:12b",
+  "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "request": {
+    "seed": 41,
+    "temperature": 0.1,
+    "thinking": false,
+    "num_thread": 8,
+    "contextTokens": 16384,
+    "outputTokens": "recorded per attempt",
+    "keep_alive": "1h",
+    "format": "json",
+    "top_k": 64,
+    "top_p": 0.95
+  },
+  "samplingNote": "temperature overrides model default 1; top_k/top_p inherited from installed model parameters verified via api/show",
+  "timingCaveat": "Shared live runtime had competing generation/model loads. These are non-isolated observations, not latency benchmarks.",
+  "harness": "tests/manual/meetingNotesLocalGuardrailsAcceptance.test.ts",
+  "harnessSha256": "8f2c50405f8ce7bfc5effe54a572f0298af63c13a8bdc9da0d7fbcf1279df541",
+  "fixtureSha256": "fb39208abaf0b20d82f7c9bb7c44781d3ccb46c457529909ff13b5daaf1ee27f",
+  "guardrailsSha256": "e3beef8d8a1aea8fe16dae1c2342c7a642fb6f7a1a3b80457cb67af637574c26",
+  "review": "Mechanical checks and semantic source fidelity are separate. See the local-notes-guardrails-evaluation report for independent raw/final review. No historical gates were changed.",
+  "summary": [
+    {
+      "case": "accepted-request-privacy",
+      "event": "failure",
+      "latencyMs": 270076,
+      "stages": ["notesWriter", "notesAudit"],
+      "mechanicalChecks": "not_run",
+      "returnedDocument": false,
+      "error": "AbortError: This operation was aborted"
+    }
+  ],
+  "events": [
+    {
+      "event": "start",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Tariq",
+            "text": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko?"
+          },
+          {
+            "index": 1,
+            "speaker": "Niko",
+            "text": "I'll be using the table. Bea is preparing and uploading it, not me."
+          },
+          {
+            "index": 2,
+            "speaker": "Bea",
+            "text": "Yes, I accept that task. I'll have the anonymized table there by Monday."
+          },
+          {
+            "index": 3,
+            "speaker": "Tariq",
+            "text": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Bea",
+        "actionDue": "Monday"
+      },
+      "reviewCriteria": [
+        "Exactly one action: Bea accepts preparing and uploading the anonymized survey table to the research workspace by Monday for Niko. Niko is the intended user, not owner; Tariq is the requester.",
+        "Retain the settled policy against publishing individual responses, allowing aggregate counts only, and the participants' confidentiality rationale.",
+        "One combined or two complementary privacy decision records are legitimate; do not create an aggregate-publication task or a question from the already-accepted request."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "model_metrics",
+      "case": "accepted-request-privacy",
+      "task": "notesWriter",
+      "inputTokens": 938,
+      "outputTokens": 230,
+      "promptMs": 7314.15,
+      "outputMs": 22713.597,
+      "loadMs": 82785.074084,
+      "elapsedMs": 112915
+    },
+    {
+      "event": "raw_attempt",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "latencyMs": 112984,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Survey Data Management\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Bea will upload the anonymized survey table to the research workspace for Niko by Monday.\",\n          \"sources\": [\n            \"R0\",\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Bea\",\n          \"due\": \"Monday\"\n        },\n        {\n          \"text\": \"The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "50b8ebcd5430c608596c86176600bec64f32f34cd6b8adedf1577c7c1a33ecae"
+    },
+    {
+      "event": "attempt_failure",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "latencyMs": 157069,
+      "phase": "transport",
+      "raw": null,
+      "error": "AbortError: This operation was aborted"
+    },
+    {
+      "event": "failure",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "timeoutMs": 270000,
+      "latencyMs": 270076,
+      "stages": ["notesWriter", "notesAudit"],
+      "phase": "generation",
+      "counts": null,
+      "analysis": null,
+      "mechanicalChecks": "not_run",
+      "sourceFidelity": "requires_independent_review",
+      "error": "AbortError: This operation was aborted"
+    }
+  ],
+  "groundingSha256": "11639e748553b015ceffe513b6d104af2b68a0e706368956f55d149af5e2de51",
+  "auditSha256": "5eb6e4cf67f97a6ce9d35e55eb42ca88de28b68c9441833b43d702836f2f7797",
+  "comparison": {
+    "writerBytesIdenticalToPreFix": true,
+    "writerRawSha256": "50b8ebcd5430c608596c86176600bec64f32f34cd6b8adedf1577c7c1a33ecae",
+    "conclusion": "Runtime replay inconclusive: case timeout during audit transport before any audit response or final document. Captured-response unit replay, not this live run, verifies preservation."
+  }
+}
