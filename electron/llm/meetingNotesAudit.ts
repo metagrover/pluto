@@ -826,7 +826,10 @@ export const acceptEditedNotes = ({
     for (const item of section.items) {
       if (item.kind !== 'action' && item.kind !== 'decision') continue;
       const evidence = sourceText(source, item.sources);
-      if (isUnacceptedConditionalWillingness(evidence)) {
+      if (
+        item.kind === 'action' &&
+        isUnacceptedConditionalWillingness(evidence)
+      ) {
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
         );
@@ -958,7 +961,7 @@ export const projectAuditedNotes = (
       provider: 'ollama',
       model: 'source-grounded',
       generation_path: 'single_pass',
-      prompt_version: 'notes-v10',
+      prompt_version: 'notes-v12',
       generated_at: new Date().toISOString(),
       error_categories: [],
       pipeline_version: 'writer-audit-v1',

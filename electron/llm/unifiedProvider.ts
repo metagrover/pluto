@@ -47,7 +47,7 @@ const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
-export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v10';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v12';
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
   /context_length_exceeded|context[_ ](?:window|length|size).*(?:exceed|overflow|too (?:large|long))|(?:exceed|overflow).*(?:context|input.*tokens)|(?:prompt|input) (?:is )?too long/i.test(

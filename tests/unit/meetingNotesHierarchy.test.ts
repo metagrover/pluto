@@ -90,6 +90,29 @@ it('cannot deduplicate commitments with different deadlines', () => {
   ).toThrow('notes_merge_dropped_commitment');
 });
 
+it.each([
+  { owner: null },
+  { due: null },
+  { text: 'Send the outline' },
+  { kind: 'decision' as const },
+  { sources: [{ segment: 1, start: 0, end: 30 }] },
+])(
+  'does not silently lose inherited metadata, conditions, kind or sources: %j',
+  (change) => {
+    const item = {
+      id: 'promise',
+      text: 'Send the outline if legal approves',
+      kind: 'action' as const,
+      owner: 'Milo',
+      due: 'Friday',
+      sources: [{ segment: 0, start: 0, end: 30 }],
+    };
+    expect(() =>
+      validateInheritedItems([item], [{ ...item, ...change }], []),
+    ).toThrow('notes_merge_dropped_commitment');
+  },
+);
+
 it('does not deduplicate identical task words owned by different speakers', () => {
   expect(() =>
     validateInheritedItems(

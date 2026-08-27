@@ -115,7 +115,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
         ([request]) => (request as { task: string }).task,
       ),
     ).toEqual(['notesWriter', 'notesAudit']);
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v10');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v12');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );

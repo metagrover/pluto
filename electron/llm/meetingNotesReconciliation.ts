@@ -1,4 +1,5 @@
 import { acceptEditedNotes, parseNotesDraft } from './meetingNotesAudit';
+import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
   notesContentGuidance,
   notesSourceGuidance,
@@ -35,7 +36,7 @@ export const buildSourceReconciliationPrompt = (sourceText: string): string =>
     notesContentGuidance,
     notesSourceGuidance,
     'Return compact JSON with exactly four arrays: {facts: Text[], actions: Action[], decisions: Decision[], questions: Text[]}. Empty shape: {"facts":[],"actions":[],"decisions":[],"questions":[]}.',
-    'Field definitions, not content: Text = {text: nonempty string, sources: copied source descriptor[]}; Action = Text + {owner: string | null, due: string | null}; Decision = Text + {owner: string | null}. Use null for unknown metadata.',
+    'Field definitions, not content: Text = {text: nonempty string, sources: copied source descriptor[]}; Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}; Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}. Use null for unknown metadata.',
     'BEGIN SOURCE DATA',
     sourceText,
     'END SOURCE DATA',
@@ -117,13 +118,18 @@ export const parseReconciledSource = (
     ]),
   ) as unknown as ReconciledSource;
 
-  // These guards verify shape, exact provenance and existing commitment rules,
-  // not semantic truth/completeness of narrative or resolution across turns.
+  // Validate the mechanical draft, not the normalized/owner-filled review copy.
+  // Source checks are narrow commitment safeguards, not general semantic truth.
   // Discard the reviewed copy: it can normalize prose or infer missing owners.
+  const draft = reconciliationDraft(result);
   acceptEditedNotes({
     source,
-    draft: parseNotesDraft(JSON.stringify(reconciliationDraft(result))),
+    draft: parseNotesDraft(JSON.stringify(draft)),
   });
+  const issues = findNotesGuardrailIssues(source, draft);
+  if (issues.length) {
+    throw new MeetingNotesError(`notes_guardrail:${JSON.stringify(issues)}`);
+  }
   for (const entries of Object.values(result)) {
     for (const entry of entries) {
       for (const span of entry.sources) Object.freeze(span);

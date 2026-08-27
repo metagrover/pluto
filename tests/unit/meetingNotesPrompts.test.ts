@@ -27,6 +27,23 @@ const stagePrompts = () => [
   buildSourceReconciliationPrompt(''),
 ];
 
+it('spells out flat item and reconciliation fields without Text inheritance notation', () => {
+  for (const prompt of stagePrompts().slice(0, 4)) {
+    expect(prompt).toContain(
+      'Item = {text: nonempty string, sources: copied source descriptor[], kind: "point" | "action" | "decision" | "question", owner: string | null, due: string | null}',
+    );
+    expect(prompt).not.toContain('Text +');
+  }
+  const prompt = buildSourceReconciliationPrompt('');
+  expect(prompt).toContain(
+    'Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}',
+  );
+  expect(prompt).toContain(
+    'Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}',
+  );
+  expect(prompt).not.toContain('Text +');
+});
+
 it('shares one bounded content policy across all five stages', () => {
   const cores = stagePrompts().map((prompt) => {
     expect(prompt.match(/BEGIN NOTES CONTENT GUIDANCE/g)).toHaveLength(1);
@@ -105,7 +122,9 @@ it('preserves draft, audit and optional editor field contracts without example c
   );
   expect(writer).toContain('overview: Text | null');
   expect(writer).toContain('recentWin: {win: Text, impact: Text} | null');
-  expect(writer).toContain('kind: point | action | decision | question');
+  expect(writer).toContain(
+    'kind: "point" | "action" | "decision" | "question"',
+  );
   expect(writer).toContain('owner: string | null, due: string | null');
   const audit = buildNotesAuditPrompt(input);
   expect(audit).toContain('replace: {op, target, value: Text | Item}');

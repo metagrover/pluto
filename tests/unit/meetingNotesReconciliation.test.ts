@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as guardrails from '../../electron/llm/meetingNotesGuardrails';
 import {
   buildSourceReconciliationPrompt,
   parseReconciledSource,
@@ -96,6 +97,28 @@ describe('source reconciliation contract', () => {
     expect(result.actions[0]).toMatchObject(action);
   });
 
+  it('checks the raw mechanical draft before any prose or metadata normalization', () => {
+    const { source, raw } = fixture();
+    const action = {
+      ...raw.actions[0]!,
+      text: '  I will send the report by Friday if legal approves.  ',
+      owner: null,
+      due: null,
+    };
+    const check = vi.spyOn(guardrails, 'findNotesGuardrailIssues');
+    try {
+      parseReconciledSource(
+        JSON.stringify({ ...empty(), actions: [action] }),
+        source,
+      );
+      expect(check.mock.calls[0]![1].sections[0]!.items[0]).toMatchObject(
+        action,
+      );
+    } finally {
+      check.mockRestore();
+    }
+  });
+
   it('freezes returned evidence and never modifies the original source', () => {
     const { source, raw } = fixture();
     const original = JSON.stringify(source);
@@ -137,7 +160,9 @@ describe('source reconciliation contract', () => {
   });
 
   it('allows no substantive content without manufacturing a section or prose', () => {
-    const { source } = fixture();
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Mira', text: 'Nice weather today.' }]),
+    );
     const result = parseReconciledSource(JSON.stringify(empty()), source);
     expect(result).toEqual(empty());
     expect(reconciliationDraft(result)).toEqual({
@@ -146,6 +171,101 @@ describe('source reconciliation contract', () => {
       sections: [],
     });
   });
+
+  it('rejects empty reconciliation when original source contains a clear promise', () => {
+    expect(() =>
+      parseReconciledSource(JSON.stringify(empty()), fixture().source),
+    ).toThrow(/missing_action/);
+  });
+
+  it.each([
+    [
+      'Rina',
+      'No need for that summary. Could you instead email the raw responses to Amara on Monday?',
+      'No summary is needed.',
+    ],
+    [
+      'Nora',
+      'Thanks, Ben, but let us leave the announcement unassigned for now.',
+      'Leave the announcement unassigned for now.',
+    ],
+    [
+      'Nora',
+      'If legal approves, I can draft the announcement. Let us leave the announcement unassigned for now.',
+      'Leave the announcement unassigned for now.',
+    ],
+  ])(
+    'accepts %s explicit negative decision without borrowing a neighboring request or offer',
+    (speaker, text, decision) => {
+      const source = createNotesSource(JSON.stringify([{ speaker, text }]));
+      const item = {
+        text: decision,
+        owner: speaker,
+        sources: [{ segment: 0, start: 0, end: text.length }],
+      };
+      const result = parseReconciledSource(
+        JSON.stringify({ ...empty(), decisions: [item] }),
+        source,
+      );
+      expect(result.decisions[0]).toMatchObject(item);
+      expect(result.actions).toEqual([]);
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            decisions: [{ ...item, owner: 'Ben' }],
+          }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    },
+  );
+
+  it.each([
+    ['Maybe no need for that summary.', 'No summary is needed.'],
+    [
+      'Should we leave the announcement unassigned?',
+      'Leave the announcement unassigned.',
+    ],
+    ['Could we skip the summary?', 'Skip the summary.'],
+    [
+      "Let's consider leaving the announcement unassigned.",
+      'Leave the announcement unassigned.',
+    ],
+    ['No summary assignment.', 'No summary assignment.'],
+    ['The report is not ready.', 'The report is not ready.'],
+    [
+      'The program is not being proposed.',
+      'The program is not being proposed.',
+    ],
+    [
+      'No need for that summary. Could we cancel the launch?',
+      'The launch is cancelled.',
+    ],
+    ['No need for that summary if legal approves.', 'No summary is needed.'],
+  ])(
+    'rejects non-decisions, unrelated choices, and lost conditions: %s',
+    (text, decision) => {
+      const source = createNotesSource(
+        JSON.stringify([{ speaker: 'Rina', text }]),
+      );
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            decisions: [
+              {
+                text: decision,
+                owner: null,
+                sources: [{ segment: 0, start: 0, end: text.length }],
+              },
+            ],
+          }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    },
+  );
 
   it.each(['facts', 'actions', 'decisions', 'questions'])(
     'requires the %s array',
@@ -468,7 +588,10 @@ it('builds a short source-only prompt compatible with the exact-source wire code
   expect(prompt.length - sourceText.length).toBeLessThan(3000);
   const wire = createNotesWireRequest(prompt, spans);
   const encoded = JSON.stringify({
-    ...empty(),
+    ...raw,
+    actions: raw.actions.map((item) => ({ ...item, sources: ['R1'] })),
+    decisions: raw.decisions.map((item) => ({ ...item, sources: ['R2'] })),
+    questions: raw.questions.map((item) => ({ ...item, sources: ['R3'] })),
     facts: [{ ...raw.facts[0], sources: ['R0'] }],
   });
   expect(wire.prompt).toContain('"descriptor":"R0"');

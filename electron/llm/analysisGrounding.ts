@@ -669,6 +669,55 @@ export const isUnacceptedConditionalWillingness = (evidence: string): boolean =>
   /\bi can\b/i.test(evidence) &&
   !/\b(?:agreed|yes|will|commit)\b/i.test(evidence);
 
+const negativeDecisionDisposition = (text: string) =>
+  /\bno\b.*\bneed(?:ed)?\b|\bnot\s+needed\b/i.test(text)
+    ? 'not_needed'
+    : /\bunassigned\b/i.test(text)
+      ? 'unassigned'
+      : undefined;
+const DECISION_DISPOSITION_FRAMING = new Set(
+  'a an the that this is are be for to we us let leave remains remain needed need no not assigned unassigned'.split(
+    ' ',
+  ),
+);
+
+/** A narrow decision-only escape from whole-turn question/offer checks. The
+ * explicit disposition must support this target, not just a neighboring topic.
+ * Original evidence and citations remain untouched outside this local check. */
+const explicitDispositionClause = (
+  claim: string,
+  resolved: ResolvedTranscriptEvidence,
+): { evidence: string; speaker?: string } | undefined => {
+  if (!/\b(?:need|needed|assigned|unassigned)\b/i.test(claim)) return undefined;
+  const contentTokens = (text: string) =>
+    normalizeTranscriptEvidence(text)
+      .split(' ')
+      .filter((token) => !DECISION_DISPOSITION_FRAMING.has(token));
+  const target = contentTokens(claim);
+  if (!target.length) return undefined;
+  for (const line of resolved.sourceLines) {
+    for (const part of transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ??
+      []) {
+      const clause = part.trim();
+      if (
+        (!/^(?:no need\b|(?:thanks(?:,?\s+[^,]+)?,?\s+but\s+)?(?:let us|let['’]s)\s+leave\b.*\bunassigned\b)/i.test(
+          clause,
+        ) &&
+          !/\b(?:agreed|decided|the decision is)\b/i.test(clause)) ||
+        clause.includes('?') ||
+        isUnsettledProposal(clause) ||
+        !negativeDecisionDisposition(clause)
+      )
+        continue;
+      const words = new Set(contentTokens(clause));
+      if (target.every((token) => words.has(token))) {
+        return { evidence: clause, speaker: transcriptLineSpeaker(line) };
+      }
+    }
+  }
+  return undefined;
+};
+
 export const groundSourceReviewedItem = (
   item: {
     text: string;
@@ -678,12 +727,29 @@ export const groundSourceReviewedItem = (
   },
   resolved: ResolvedTranscriptEvidence,
 ): { text: string; owner: string | null; due: string | null } | null => {
-  const evidence = resolved.evidence;
+  const disposition =
+    item.kind === 'decision'
+      ? explicitDispositionClause(item.text, resolved)
+      : undefined;
+  const evidence = disposition?.evidence ?? resolved.evidence;
   const conditional =
     /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
   const numbers = (value: string): string[] =>
     value.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
   if (
+    (disposition &&
+      negativeDecisionDisposition(item.text) !==
+        negativeDecisionDisposition(disposition.evidence)) ||
+    (item.kind === 'decision' &&
+      negativeDecisionDisposition(item.text) &&
+      !disposition) ||
+    (item.kind === 'decision' &&
+      !disposition &&
+      (isUnsettledProposal(evidence) ||
+        /\b(?:no|not|unassigned)\b/i.test(item.text)) &&
+      !/\b(?:agreed|decided|approved|selected|will use|we will|proceed|the decision is)\b/i.test(
+        evidence,
+      )) ||
     !hasMatchingScopedPolarity(item.text, evidence) ||
     hasLexicalContradiction(item.text, evidence) ||
     numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
@@ -702,7 +768,10 @@ export const groundSourceReviewedItem = (
     item.kind === 'action'
       ? (ownership?.assignee ?? null)
       : item.owner &&
-          settledFieldSupportedByTurn(item.owner, resolved, 'decision')
+          (disposition
+            ? normalizeTranscriptEvidence(item.owner) ===
+              normalizeTranscriptEvidence(disposition.speaker ?? '')
+            : settledFieldSupportedByTurn(item.owner, resolved, 'decision'))
         ? item.owner
         : null;
   const due =

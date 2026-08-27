@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
+import * as hierarchy from '../../electron/llm/meetingNotesHierarchy';
 import {
   NOTES_HIERARCHY_LIMITS,
   generateMeetingNotes,
@@ -7,7 +8,9 @@ import {
 import {
   MeetingNotesError,
   type NotesDraft,
+  type NotesRequest,
 } from '../../electron/llm/meetingNotesTypes';
+import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import {
   makeDirectNotesFixture,
   makeNotesContext,
@@ -109,11 +112,347 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v11',
+    prompt_version: 'notes-v13',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
 });
+
+it.each(['audit', 'editor'] as const)(
+  'repairs a dropped source promise once in the %s review protocol',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    fixture.source = makeSyntheticNotesSource([
+      {
+        speaker: 'Milo',
+        text: 'I will send the outline. We discussed its format.',
+      },
+    ]);
+    const span = {
+      segment: 0,
+      start: 0,
+      end: fixture.source.segments[0]!.text.length,
+    };
+    fixture.draft.sections[0]!.title.sources = [span];
+    fixture.draft.sections[0]!.items[0]!.sources = [span];
+    fixture.audit.verdicts.forEach((verdict) => {
+      verdict.sources = [span];
+    });
+    const dropped = structuredClone(fixture.draft);
+    dropped.sections[0]!.items = [];
+    const badAudit = structuredClone(fixture.audit);
+    badAudit.verdicts[1]!.status = 'unsupported';
+    const good = JSON.stringify(
+      reviewProtocol === 'editor' ? fixture.draft : fixture.audit,
+    );
+    const bad = JSON.stringify(
+      reviewProtocol === 'editor' ? dropped : badAudit,
+    );
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValueOnce(bad)
+      .mockResolvedValueOnce(good);
+    const result = await generateMeetingNotes({
+      reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(result.all_action_items).toEqual([
+      expect.objectContaining(fixture.expectedAction),
+    ]);
+    expect(result.quality.retry_count).toBe(1);
+    const repair = generate.mock.calls[2]![0].prompt;
+    expect(repair).toContain('missing_action');
+    expect(repair).toContain('Restore supported missing content');
+    expect(repair).toContain('retain unaffected material and metadata');
+    expect(repair).not.toContain('do not add new claims');
+    const diagnostic = repair
+      .split('\n')
+      .find((line: string) => line.startsWith('Parser error:'))!;
+    expect(diagnostic).toContain(JSON.stringify(span));
+    expect(diagnostic).not.toContain('send the outline');
+    const wireDiagnostic = createNotesWireRequest(repair, [span])
+      .prompt.split('\n')
+      .find((line) => line.startsWith('Parser error:'))!;
+    expect(wireDiagnostic).toContain('"sources":["R0"]');
+    expect(wireDiagnostic).not.toContain('"start"');
+  },
+);
+
+it.each(['audit', 'editor'] as const)(
+  'fails safely after a second invalid %s review without a third attempt',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    const empty = { meetingType: 'general', overview: null, sections: [] };
+    const badAudit = structuredClone(fixture.audit);
+    badAudit.verdicts.forEach((verdict) => {
+      verdict.status = 'unsupported';
+    });
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValue(
+        JSON.stringify(reviewProtocol === 'editor' ? empty : badAudit),
+      );
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+        source: fixture.source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'test',
+        contextTokens: 16384,
+      }),
+    ).rejects.toThrow('notes_audit_invalid');
+    expect(generate).toHaveBeenCalledTimes(3);
+  },
+);
+
+it.each(['audit', 'editor'] as const)(
+  'restores a condition dropped from the writer in %s review using original source',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    fixture.source = makeSyntheticNotesSource([
+      { speaker: 'Milo', text: 'I will send the outline if legal approves.' },
+    ]);
+    const span = {
+      segment: 0,
+      start: 0,
+      end: fixture.source.segments[0]!.text.length,
+    };
+    fixture.draft.sections[0]!.title.sources = [span];
+    const action = fixture.draft.sections[0]!.items[0]!;
+    action.sources = [span];
+    fixture.audit.verdicts.forEach((verdict) => {
+      verdict.sources = [span];
+    });
+    const corrected = structuredClone(fixture.draft);
+    corrected.sections[0]!.items[0]!.text =
+      'Send the outline if legal approves.';
+    const correctedAudit = {
+      ...fixture.audit,
+      changes: [
+        {
+          op: 'replace',
+          target: action.id,
+          value: corrected.sections[0]!.items[0],
+        },
+      ],
+    };
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValueOnce(
+        JSON.stringify(
+          reviewProtocol === 'editor' ? fixture.draft : fixture.audit,
+        ),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify(
+          reviewProtocol === 'editor' ? corrected : correctedAudit,
+        ),
+      );
+    const result = await generateMeetingNotes({
+      reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(result.all_action_items[0]!.text).toContain('if legal approves');
+  },
+);
+
+it.each(['audit', 'editor'] as const)(
+  'repairs a stale action after a later withdrawal in %s review',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    fixture.source = makeSyntheticNotesSource([
+      { speaker: 'Milo', text: 'I will send the outline.' },
+      { speaker: 'Milo', text: 'I will not send the outline.' },
+    ]);
+    const span = {
+      segment: 1,
+      start: 0,
+      end: fixture.source.segments[1]!.text.length,
+    };
+    const corrected = structuredClone(fixture.draft);
+    const action = corrected.sections[0]!.items[0]!;
+    Object.assign(action, {
+      kind: 'point',
+      text: 'Milo will not send the outline.',
+      owner: null,
+      sources: [span],
+    });
+    const audit = structuredClone(fixture.audit);
+    audit.changes = [{ op: 'replace', target: action.id, value: action }];
+    audit.verdicts[1]!.sources = [span];
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValueOnce(
+        JSON.stringify(
+          reviewProtocol === 'editor' ? fixture.draft : fixture.audit,
+        ),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify(reviewProtocol === 'editor' ? corrected : audit),
+      );
+    const result = await generateMeetingNotes({
+      reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(generate.mock.calls[2]![0].prompt).toContain('conflicting_action');
+    expect(result.all_action_items).toEqual([]);
+    expect(result.topics[0]!.summary).toContain('will not send');
+  },
+);
+
+it('checks the entire original source at the hierarchy root even when no leaf retained its split promise', async () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: `I will send the ${'detailed '.repeat(6500)}outline.`,
+    },
+  ]);
+  const generate = vi.fn(async (_request: NotesRequest) =>
+    JSON.stringify({ meetingType: 'general', overview: null, sections: [] }),
+  );
+  await expect(
+    generateMeetingNotes({
+      reviewProtocol: 'editor',
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    }),
+  ).rejects.toThrow('notes_audit_invalid');
+  expect(
+    generate.mock.calls.filter(([request]) => request.task === 'notesWriter')
+      .length,
+  ).toBeGreaterThan(1);
+  const repairs = generate.mock.calls.filter(([request]) =>
+    request.prompt.startsWith('Repair the prior'),
+  );
+  expect(repairs).toHaveLength(1);
+  expect(repairs[0]![0].prompt).toContain('missing_action');
+  expect(repairs[0]![0].prompt).toContain('"sources":[],"segments":[0]');
+}, 15_000);
+
+it.each(['owner', 'due', 'condition'] as const)(
+  'preserves inherited %s through source grounding or the same audit repair budget',
+  async (field) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Milo',
+        text: 'Milo will send the outline by Friday if legal approves.',
+      },
+      { speaker: 'Nira', text: 'We discussed the background.' },
+    ]);
+    const spans = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+      source.segments.map((segment, index) => ({
+        primarySpans: [spans[index]!],
+        overlapSpans: [],
+        primaryText: segment.text,
+        sourceText: segment.text,
+        sourceRevision: source.revision,
+      })),
+    );
+    const original = {
+      id: 'a',
+      kind: 'action' as const,
+      text: 'Send the outline by Friday if legal approves.',
+      owner: 'Milo',
+      due: 'Friday',
+      sources: [spans[0]!],
+    };
+    let mergeAuditCalls = 0;
+    const generate = vi.fn(async (request) => {
+      if (generate.mock.calls.length === 1)
+        throw new MeetingNotesError('notes_input_overflow');
+      const supplied = sourceDescriptors(request.prompt);
+      const draft: NotesDraft = {
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            id: 's',
+            title: {
+              id: 't',
+              text: 'Outline',
+              sources: [supplied[0]!.descriptor],
+            },
+            items: supplied.some((entry) => entry.descriptor.segment === 0)
+              ? [structuredClone(original)]
+              : [],
+          },
+        ],
+      };
+      if (request.task !== 'notesAudit') return JSON.stringify(draft);
+      const reviewed = auditDraft(request.prompt);
+      const inherited = inheritedFromAudit(request.prompt);
+      if (inherited.length) {
+        mergeAuditCalls++;
+        if (mergeAuditCalls === 1) {
+          const item = reviewed.sections[0]!.items[0]!;
+          if (field === 'condition') item.text = 'Send the outline by Friday.';
+          else item[field] = null;
+        }
+      }
+      return JSON.stringify(reviewed);
+    });
+    try {
+      const result = await generateMeetingNotes({
+        reviewProtocol: 'editor',
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'test',
+        contextTokens: 16384,
+      });
+      // Explicit named-source ownership is recovered by existing grounding;
+      // absent due/condition cannot be filled by it and must use the one repair.
+      expect(mergeAuditCalls).toBe(field === 'owner' ? 1 : 2);
+      expect(result.quality.retry_count).toBe(field === 'owner' ? 0 : 1);
+      expect(result.all_action_items[0]).toMatchObject({
+        text: original.text,
+        assignee: 'Milo',
+        due: 'Friday',
+      });
+      expect(
+        generate.mock.calls.filter(
+          ([request]) => request.task === 'notesMerge',
+        ),
+      ).toHaveLength(1);
+    } finally {
+      plan.mockRestore();
+    }
+  },
+);
 
 it('repartitions original source after reported input overflow instead of repairing or truncating it', async () => {
   const fixture = makeDirectNotesFixture();

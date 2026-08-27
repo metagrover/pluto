@@ -164,7 +164,7 @@ type ActiveRun = {
   promise: Promise<PublishedMeetingNotes>;
 };
 
-const NOTES_PROMPT_VERSION = 'notes-v10';
+const NOTES_PROMPT_VERSION = 'notes-v12';
 const NOTES_CONTEXT_TOKENS = 16_384;
 
 const hashFingerprint = (value: unknown): string =>

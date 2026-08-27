@@ -2,10 +2,116 @@ import { describe, expect, it } from 'vitest';
 
 import {
   groundAnalysisDocument,
+  groundSourceReviewedItem,
   normalizeTranscriptEvidence,
   resolveTranscriptEvidence,
 } from '../../electron/llm/analysisGrounding';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+
+describe('source-reviewed explicit negative decisions', () => {
+  const review = (
+    text: string,
+    evidence: string,
+    owner: string | null = 'Rina',
+  ) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind: 'decision', owner, due: null },
+      resolved,
+    );
+    expect(resolved).toEqual(snapshot);
+    return result;
+  };
+  it('grounds the speaking owner of the target clause and keeps full original evidence untouched', () => {
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary. Could you instead email the raw responses to Amara on Monday?',
+      ),
+    ).toEqual({ text: 'No summary is needed.', owner: 'Rina', due: null });
+    expect(
+      review('No summary is needed.', 'No need for that summary.', 'Amara')
+        ?.owner,
+    ).toBeNull();
+  });
+  it('preserves a condition on the explicit choice', () => {
+    expect(
+      review(
+        'No summary is needed if legal approves.',
+        'No need for that summary if legal approves.',
+      ),
+    ).not.toBeNull();
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary if legal approves.',
+      ),
+    ).toBeNull();
+  });
+  it('cannot borrow a neighboring settled choice for a different negative target', () => {
+    expect(
+      review(
+        'No launch is needed.',
+        'No need for that summary. We decided to review the launch.',
+      ),
+    ).toBeNull();
+    expect(
+      review(
+        'Leave the report unassigned.',
+        'Let us leave the announcement unassigned. We decided to review the report.',
+      ),
+    ).toBeNull();
+  });
+  it('does not poison an existing positive imperative with a neighboring negative fact', () => {
+    expect(
+      review(
+        'Use the source-grounded flow.',
+        'Use the source-grounded flow. The report is not ready.',
+        null,
+      ),
+    ).not.toBeNull();
+  });
+  it.each([
+    ['The summary is needed.', 'No need for that summary.'],
+    [
+      'Leave the announcement assigned.',
+      'Let us leave the announcement unassigned.',
+    ],
+  ])(
+    'does not invert an explicit negative disposition: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+  it('does not make a declined offer into an action', () => {
+    const evidence =
+      'If legal approves, I can draft the announcement. Let us leave the announcement unassigned for now.';
+    expect(
+      groundSourceReviewedItem(
+        {
+          text: 'Draft the announcement if legal approves.',
+          kind: 'action',
+          owner: 'Rina',
+          due: null,
+        },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Rina: ${evidence}`,
+          sourceLines: [`Rina: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
+});
 
 const document = (): AnalysisDocumentV3 => ({
   analysis_schema_version: 3,

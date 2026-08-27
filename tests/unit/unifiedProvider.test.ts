@@ -182,8 +182,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions the writer and source audit as notes-v10', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v10');
+  it('versions the source-guarded writer and audit as notes-v12', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v12');
   });
 
   beforeEach(() => {

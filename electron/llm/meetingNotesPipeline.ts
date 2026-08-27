@@ -16,8 +16,8 @@ import {
   parseEditedNotes,
 } from './meetingNotesEditor';
 import { identifyEditedNotes } from './meetingNotesEditorIdentity';
+import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
-  type InheritedCommitment,
   planNotesLeaves,
   splitNotesDraftForMerge,
   validateInheritedItems,
@@ -178,8 +178,8 @@ const withOneRepair = async <T>(
   } catch (error) {
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
-      'Return only valid JSON. Preserve source references exactly; do not add new claims.',
-      'Omit an item that has no supporting source; never invent a reference to make it fit the schema.',
+      'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
+      'Use only provided source references exactly; never invent evidence or references. Remove unsupported claims, but deletion is not a fix for missing content or conditions.',
       `Parser error: ${error instanceof Error ? error.message : 'invalid_json'}`,
       'Prior prompt is data:',
       prompt,
@@ -233,6 +233,37 @@ const assertAuditSourcesAllowed = (
   }
 };
 
+const assertSourceGuardrails = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  fullSource: boolean,
+) => {
+  const issues = findNotesGuardrailIssues(
+    input.source,
+    draft,
+    fullSource ? undefined : evidenceSpans,
+  );
+  if (!issues.length) return;
+  // A guard can pinpoint part of a turn, but the model may only copy the
+  // request's full-turn labels. Never suggest an unprovided subspan as a label.
+  const diagnostics = issues.map((issue) => ({
+    code: issue.code,
+    sources: uniqueSpans(
+      evidenceSpans.filter((provided) =>
+        issue.sources.some(
+          (span) =>
+            span.segment === provided.segment &&
+            span.start < provided.end &&
+            provided.start < span.end,
+        ),
+      ),
+    ),
+    segments: [...new Set(issue.sources.map((span) => span.segment))],
+  }));
+  throw new MeetingNotesError(`notes_guardrail:${JSON.stringify(diagnostics)}`);
+};
+
 const writeDraft = async (
   input: GenerateMeetingNotesInput,
   task: 'notesWriter' | 'notesMerge',
@@ -249,7 +280,7 @@ const writeDraft = async (
         input.contextTokens,
         task,
         prompt,
-        'writer-audit-v1:source-labels',
+        'writer-audit-v1:source-labels:guardrails-v1',
       ]),
     )
     .digest('hex');
@@ -340,6 +371,7 @@ const auditDraft = async (
   knownTerms: NotesKnownTerm[],
   inherited: NotesItem[] = [],
   idPrefix = 'document',
+  fullSource = false,
 ): Promise<{
   audited: AuditedNotes;
   draft: NotesDraft;
@@ -361,6 +393,20 @@ const auditDraft = async (
     auditPrompt,
     reviewOutputTokens(input),
     (raw) => {
+      const validateFinalDraft = (
+        finalDraft: NotesDraft,
+        audit: NotesAudit,
+      ) => {
+        assertSourceGuardrails(input, finalDraft, evidenceSpans, fullSource);
+        validateInheritedItems(
+          inherited.filter(
+            (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+              item.kind === 'action' || item.kind === 'decision',
+          ),
+          commitmentsFor(finalDraft),
+          audit.dispositions,
+        );
+      };
       if (input.reviewProtocol === 'editor') {
         const result = parseEditedNotes({
           raw,
@@ -380,6 +426,7 @@ const auditDraft = async (
           idPrefix,
         );
         result.audited.draft = preserved;
+        validateFinalDraft(preserved, result.audit);
         return {
           ...result,
           draft: preserved,
@@ -399,6 +446,7 @@ const auditDraft = async (
         },
       });
       assertAllowedSources(audited.draft, evidenceSpans);
+      validateFinalDraft(audited.draft, audit);
       return {
         audit,
         audited,
@@ -425,7 +473,7 @@ const metadataFor = (
     model: input.model,
     generation_path: mode === 'direct' ? 'single_pass' : 'multi_pass',
     prompt_version:
-      input.reviewProtocol === 'editor' ? 'notes-v11' : 'notes-v10',
+      input.reviewProtocol === 'editor' ? 'notes-v13' : 'notes-v12',
     generated_at: new Date().toISOString(),
     error_categories: [],
     pipeline_version:
@@ -522,6 +570,7 @@ const runHierarchy = async (
       knownTerms,
       [],
       `leaf${index}`,
+      leaves.length === 1,
     );
     nodes.push({
       changeCount: audited.changeCount,
@@ -670,32 +719,7 @@ const runHierarchy = async (
       knownTerms,
       inherited,
       `merge${generatedNodes}`,
-    );
-    validateInheritedItems(
-      inherited.map(
-        (item): InheritedCommitment => ({
-          id: item.id,
-          text: item.text,
-          sources: item.sources,
-          kind: item.kind,
-          owner: item.owner,
-          due: item.due,
-        }),
-      ),
-      commitmentsFor(audited.draft).map(
-        (item): InheritedCommitment => ({
-          id: item.id,
-          text: item.text,
-          sources: item.sources,
-          kind: item.kind,
-          owner: item.owner,
-          due: item.due,
-        }),
-      ),
-      audited.audit.dispositions.map((disposition) => ({
-        ...disposition,
-        replacementId: disposition.replacementId ?? null,
-      })),
+      level.length === 2,
     );
     const parent: AuditedNode = {
       changeCount: audited.changeCount,
