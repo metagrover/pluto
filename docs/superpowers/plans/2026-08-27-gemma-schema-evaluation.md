@@ -80,7 +80,7 @@ Independent specification review approved `d13e73212` after its own 318 passing 
 
 ## Delivery boundary
 
-The bounded implementation, frozen evaluation and single post-correction check are complete locally. Code is committed on `codex/674-source-grounded-notes`, not merged or pushed, and issue #674 remains open. No production meeting was regenerated; the original transcript, saved notes and configured model remain unchanged. Synthetic tests do not establish rendered-app, real-recording or hierarchical acceptance. Gemma remains a local evaluation candidate, not a promoted default.
+The bounded implementation, frozen evaluation and single post-correction check are complete. The code was local-only at the evaluation checkpoint and was subsequently pushed on `codex/674-source-grounded-notes` as [draft PR #676](https://github.com/metagrover/pluto/pull/676) at the user's request. It is not merged or shipped, and issue #674 remains open. No production meeting was regenerated; the original transcript, saved notes and configured model remain unchanged. Synthetic tests do not establish rendered-app, real-recording or hierarchical acceptance. Gemma remains a local evaluation candidate, not a promoted default.
 
 ## Single post-correction live check
 

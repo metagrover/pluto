@@ -1,7 +1,7 @@
 ### Implement source-grounded meeting notes on the local acceptance branch
 
 - **Issue:** [#674](https://github.com/metagrover/pluto/issues/674)
-- **PR:** Not opened; local implementation only, not shipped.
+- **PR:** [#676](https://github.com/metagrover/pluto/pull/676), draft for review; not merged or shipped.
 - **Changed:** Implemented the capacity-routed writer/audit pipeline, exact source-reference labels, bounded hierarchy and repair, terminology provenance checks, shared run ownership, atomic publication, title/edit/history protection, and separately retryable secondary intelligence.
 - **Why:** Mandatory local topic fragmentation, missed commitments, narrative factual errors, stale edit overlays, and secondary-task delays require a coordinated pipeline and publication change.
 - **Direction:** Accuracy and reliability are release gates; latency is measured, not a blocker. The approved editor and subsequent source-only reconciliation evaluation remain unpromoted prototypes because real-provider semantic acceptance fails. The source-only stage removes draft input and scores raw model output without inferred owners. Preserve the configured model and original transcript, and publish reviewed notes before secondary intelligence.
