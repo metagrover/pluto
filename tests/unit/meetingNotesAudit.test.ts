@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   applyNotesAudit,
+  parseNotesDraft,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
@@ -59,6 +60,43 @@ it('adds a source-backed commitment omitted by the writer', () => {
       evidence: 'I will send the outline.',
     }),
   ]);
+});
+
+it('assigns deterministic block ids instead of trusting writer object paths', () => {
+  const raw = JSON.stringify({
+    meetingType: 'general',
+    overview: null,
+    sections: [
+      {
+        id: '__proto__',
+        title: {
+          id: 'constructor',
+          text: 'Outline',
+          sources: [{ segment: 0, start: 0, end: 4 }],
+        },
+        items: [
+          {
+            id: 'prototype',
+            kind: 'point',
+            text: 'A point',
+            sources: [{ segment: 0, start: 0, end: 4 }],
+            owner: null,
+            due: null,
+          },
+        ],
+      },
+    ],
+  });
+
+  expect(parseNotesDraft(raw)).toMatchObject({
+    sections: [
+      {
+        id: 's0',
+        title: { id: 's0:title' },
+        items: [{ id: 's0:item:0' }],
+      },
+    ],
+  });
 });
 
 it('rejects an atomic audit when a change targets an unknown block', () => {
