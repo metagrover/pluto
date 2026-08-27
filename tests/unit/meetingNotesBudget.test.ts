@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import {
+  calculateNotesRequestBudget,
   estimateNotesTokens,
   partitionNotesSource,
   planNotesCapacity,
@@ -17,6 +18,24 @@ it('reserves the draft inside the audit input, not just the writer input', () =>
       safetyTokens: 512,
     }).mode,
   ).toBe('hierarchical');
+});
+
+it('keeps notes transport context and output inside the shared capacity policy', () => {
+  expect(
+    calculateNotesRequestBudget({
+      prompt: 'compact prompt',
+      contextTokens: 16384,
+      outputTokens: 2048,
+    }),
+  ).toEqual({ num_ctx: 16384, num_predict: 2048 });
+
+  expect(() =>
+    calculateNotesRequestBudget({
+      prompt: 'x'.repeat(20_000),
+      contextTokens: 1024,
+      outputTokens: 512,
+    }),
+  ).toThrow('notes_context_exhausted');
 });
 
 it('uses a conservative shared token estimate for dense and ordinary source text', () => {

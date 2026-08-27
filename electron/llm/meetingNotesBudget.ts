@@ -49,6 +49,28 @@ export const planNotesCapacity = (input: NotesCapacityInput) => {
   return { mode: writerFits && auditFits ? 'direct' : 'hierarchical' } as const;
 };
 
+export const calculateNotesRequestBudget = ({
+  prompt,
+  contextTokens,
+  outputTokens,
+}: {
+  prompt: string;
+  contextTokens: number;
+  outputTokens: number;
+}): { num_ctx: number; num_predict: number } => {
+  const safetyTokens = 512;
+  if (
+    !Number.isSafeInteger(contextTokens) ||
+    !Number.isSafeInteger(outputTokens) ||
+    contextTokens <= 0 ||
+    outputTokens <= 0 ||
+    estimateNotesTokens(prompt) + outputTokens + safetyTokens > contextTokens
+  ) {
+    throw new MeetingNotesError('notes_context_exhausted');
+  }
+  return { num_ctx: contextTokens, num_predict: outputTokens };
+};
+
 const isSurrogateBoundary = (text: string, offset: number): boolean => {
   if (offset <= 0 || offset >= text.length) return false;
   const before = text.charCodeAt(offset - 1);
