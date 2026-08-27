@@ -312,6 +312,100 @@ describe('source reconciliation contract', () => {
     );
   });
 
+  describe('equivalent conditional promises', () => {
+    const conditionalPromise = (text: string) => {
+      const source = createNotesSource(
+        JSON.stringify([
+          {
+            speaker: 'Ava',
+            text: 'If finance approves, I will send the revised budget to Nora by Thursday.',
+          },
+          {
+            speaker: 'Ava',
+            text: 'My budget promise still depends on finance approval; it is not an unconditional send.',
+          },
+        ]),
+      );
+      const action = {
+        text,
+        owner: 'Ava',
+        due: 'Thursday',
+        sources: source.segments.map((segment) => ({
+          segment: segment.index,
+          start: 0,
+          end: segment.text.length,
+        })),
+      };
+      return { source, action };
+    };
+
+    it.each([
+      'conditional on finance approval',
+      'contingent on finance approval',
+      'contingent upon finance approval',
+      'if finance approves',
+    ])('preserves a promise phrased as %s', (condition) => {
+      const { source, action } = conditionalPromise(
+        `Ava will send the revised budget to Nora by Thursday, ${condition}.`,
+      );
+      const original = JSON.stringify(source);
+      const result = parseReconciledSource(
+        JSON.stringify({ ...empty(), actions: [action] }),
+        source,
+      );
+      expect(result.actions[0]).toMatchObject(action);
+      expect(result.actions[0]!.text).toBe(action.text);
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+    it.each([
+      'Ava will send the revised budget to Nora by Thursday.',
+      'Ava will send the revised budget to Nora by Thursday if finance does not approve.',
+      'Ava will send the revised budget to Nora by Thursday, conditional on finance not approving.',
+    ])('rejects a dropped or negated prerequisite: %s', (text) => {
+      const { source, action } = conditionalPromise(text);
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({ ...empty(), actions: [action] }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    });
+
+    it('rejects reversing an explicit prerequisite ordering', () => {
+      const source = createNotesSource(
+        JSON.stringify([
+          {
+            speaker: 'Ava',
+            text: 'I will send the revised budget after finance approval.',
+          },
+        ]),
+      );
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            actions: [
+              {
+                text: 'Ava will send the revised budget before finance approval.',
+                owner: 'Ava',
+                due: null,
+                sources: [
+                  {
+                    segment: 0,
+                    start: 0,
+                    end: source.segments[0]!.text.length,
+                  },
+                ],
+              },
+            ],
+          }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    });
+  });
+
   it('rejects unaccepted conditional willingness as an action while retaining it as a fact', () => {
     const source = createNotesSource(
       JSON.stringify([

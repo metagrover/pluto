@@ -680,7 +680,7 @@ export const groundSourceReviewedItem = (
 ): { text: string; owner: string | null; due: string | null } | null => {
   const evidence = resolved.evidence;
   const conditional =
-    /\b(?:if|unless|until|once|after|when|pending|subject to|provided)\b/i;
+    /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
   const numbers = (value: string): string[] =>
     value.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
   if (

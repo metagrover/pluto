@@ -1,5 +1,7 @@
 # Source Reconciliation Evaluation and Integration Plan
 
+Continuation: the separately approved alternative-model comparison is recorded in `2026-08-27-meeting-model-evaluation.md`. The original results below remain unchanged; the later condition-vocabulary validator correction and its saved-output replay are documented there.
+
 > **For agentic workers:** Use `subagent-driven-development` and TDD; retain independent spec and quality reviews. This is the user-approved continuation of #674 after checkpoint `3388d6b51`.
 
 **Goal:** Prove that a focused source-only stage reliably resolves meeting facts and current commitments before integrating it into readable note composition.

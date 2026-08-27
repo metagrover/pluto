@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 import {
   buildSourceReconciliationPrompt,
@@ -17,7 +17,11 @@ const suite =
 const seeds = process.env.MEETING_NOTES_ACCEPTANCE_SEED
   ? [Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED)]
   : [41, 42, 43];
-const model = 'qwen3.5:9b';
+const model = process.env.OLLAMA_BENCHMARK_MODEL || 'qwen3.5:9b';
+// Opt-in diagnostic profile only; production settings and the baseline stay fixed.
+const thinking = process.env.MEETING_NOTES_RECONCILIATION_THINKING === '1';
+const outputTokens = thinking ? 8192 : 2048;
+const requestTimeoutMs = thinking ? 600_000 : 180_000;
 
 const run = async (
   segments: Array<{ speaker: string; text: string }>,
@@ -43,7 +47,7 @@ const run = async (
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: model,
     ollama_seed: seed,
-    ollama_structured_thinking: false,
+    ollama_structured_thinking: thinking,
   }) as unknown as {
     generateResumableAnalysisText(
       request: Record<string, unknown>,
@@ -55,12 +59,18 @@ const run = async (
     prompt: wire.prompt,
     task: 'notesWriter',
     jsonMode: true,
-    signal: AbortSignal.timeout(180_000),
-    notesBudget: { contextTokens: 16384, outputTokens: 2048 },
+    signal: AbortSignal.timeout(requestTimeoutMs),
+    notesBudget: { contextTokens: 16384, outputTokens },
   });
   console.log(
     JSON.stringify({
-      reconciliationAcceptance: { seed, latencyMs: Date.now() - started, raw },
+      reconciliationAcceptance: {
+        model,
+        thinking,
+        seed,
+        latencyMs: Date.now() - started,
+        raw,
+      },
     }),
   );
   const reconciled = parseReconciledSource(wire.decode(raw), source);
@@ -121,13 +131,55 @@ const run = async (
 };
 
 suite('source-only reconciliation real-provider acceptance', () => {
+  beforeAll(async () => {
+    const readJson = async (path: string, body?: unknown) => {
+      const response = await fetch(`http://127.0.0.1:11434/api/${path}`, {
+        ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok)
+        throw new Error(`benchmark_metadata_http_${response.status}`);
+      return response.json();
+    };
+    const [version, tags, details] = await Promise.all([
+      readJson('version'),
+      readJson('tags'),
+      readJson('show', { model }),
+    ]);
+    const installed = tags.models.find(
+      (entry: { name: string }) => entry.name === model,
+    );
+    if (!installed) throw new Error('benchmark_model_not_installed');
+    console.log(
+      JSON.stringify({
+        reconciliationBenchmark: {
+          model,
+          digest: installed.digest,
+          runtime: version.version,
+          details: details.details,
+          inheritedParameters: details.parameters ?? null,
+          request: {
+            endpoint: '/api/chat',
+            format: 'json',
+            contextTokens: 16384,
+            outputTokens,
+            temperature: 0.1,
+            thinking,
+            timeoutMs: requestTimeoutMs,
+            threads: 8,
+            seeds,
+          },
+        },
+      }),
+    );
+  });
   for (const fixture of meetingNotesEditorCases) {
     it.each(seeds)(
       `${fixture.id} (seed %i)`,
       async (seed) => {
         fixture.assertAnalysis(await run(fixture.segments, seed));
       },
-      210_000,
+      requestTimeoutMs + 30_000,
     );
   }
 
@@ -183,7 +235,7 @@ suite('source-only reconciliation real-provider acceptance', () => {
         /Ava will send the integration checklist/i,
       );
     },
-    210_000,
+    requestTimeoutMs + 30_000,
   );
 
   it.each(seeds)(
@@ -230,6 +282,6 @@ suite('source-only reconciliation real-provider acceptance', () => {
       expect(analysis.overview).toMatch(/Rina.*(?:uploaded|upload|shared)/i);
       expect(analysis.overview).toMatch(/summary/i);
     },
-    210_000,
+    requestTimeoutMs + 30_000,
   );
 });
