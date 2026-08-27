@@ -1,0 +1,74 @@
+import { expect, it } from 'vitest';
+import {
+  estimateNotesTokens,
+  partitionNotesSource,
+  planNotesCapacity,
+} from '../../electron/llm/meetingNotesBudget';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+
+it('reserves the draft inside the audit input, not just the writer input', () => {
+  expect(
+    planNotesCapacity({
+      contextTokens: 16384,
+      writerInputTokens: 13000,
+      auditBaseInputTokens: 14000,
+      writerOutputTokens: 2048,
+      auditOutputTokens: 1536,
+      safetyTokens: 512,
+    }).mode,
+  ).toBe('hierarchical');
+});
+
+it('uses a conservative shared token estimate for dense and ordinary source text', () => {
+  expect(estimateNotesTokens('abc')).toBe(2);
+  expect(estimateNotesTokens('東京')).toBe(Buffer.byteLength('東京'));
+  expect(estimateNotesTokens(`const ${'identifier'.repeat(8)} = 1`)).toBe(
+    Buffer.byteLength(`const ${'identifier'.repeat(8)} = 1`),
+  );
+});
+
+it('partitions every source turn exactly once as primary coverage without tail loss', () => {
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [
+        { speaker: 'Me', text: 'First turn.' },
+        { speaker: 'Them', text: 'Second turn.' },
+        { speaker: 'Me', text: 'Final commitment must remain covered.' },
+      ],
+    }),
+  );
+  const leaves = partitionNotesSource(source, (packet) => packet.length <= 80);
+
+  expect(leaves.flatMap((leaf) => leaf.primarySpans)).toEqual([
+    { segment: 0, start: 0, end: source.segments[0]?.text.length },
+    { segment: 1, start: 0, end: source.segments[1]?.text.length },
+    { segment: 2, start: 0, end: source.segments[2]?.text.length },
+  ]);
+  expect(leaves.at(-1)?.primaryText).toContain('Final commitment');
+});
+
+it('splits a long Unicode turn on code-point boundaries when one turn exceeds capacity', () => {
+  const text = 'Plan 👍 today and review tomorrow.';
+  const source = createNotesSource(
+    JSON.stringify({ segments: [{ speaker: 'Me', text }] }),
+  );
+  const leaves = partitionNotesSource(source, (packet) => packet.length <= 12);
+
+  expect(leaves.flatMap((leaf) => leaf.primarySpans)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ segment: 0, start: 0 }),
+      expect.objectContaining({ segment: 0, end: text.length }),
+    ]),
+  );
+  expect(leaves.every((leaf) => leaf.primaryText.length > 0)).toBe(true);
+});
+
+it('fails explicitly when fixed prompt content cannot fit any source window', () => {
+  const source = createNotesSource(
+    JSON.stringify({ segments: [{ speaker: 'Me', text: 'Keep this.' }] }),
+  );
+
+  expect(() => partitionNotesSource(source, () => false)).toThrow(
+    'notes_context_exhausted',
+  );
+});
