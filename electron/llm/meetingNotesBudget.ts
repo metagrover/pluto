@@ -25,8 +25,7 @@ const isTokenDense = (text: string): boolean => {
   if (!nonWhitespace) return false;
   const asciiLetters = (nonWhitespace.match(/[A-Za-z]/g) ?? []).length;
   return (
-    asciiLetters < nonWhitespace.length / 2 ||
-    nonWhitespace.split(/\s+/).some((token) => token.length > 64)
+    asciiLetters < nonWhitespace.length / 2 || /[\p{L}\p{N}_$]{65,}/u.test(text)
   );
 };
 
@@ -93,17 +92,28 @@ const primaryTextFor = (source: NotesSource, spans: SourceSpan[]): string =>
 const splitSegment = (
   source: NotesSource,
   segment: NotesSource['segments'][number],
-  fitsPrompt: (packet: string) => boolean,
+  fitsPrompt: (packet: string, spans?: SourceSpan[]) => boolean,
 ): SourceSpan[] => {
   const spans: SourceSpan[] = [];
   let start = 0;
   while (start < segment.text.length) {
     let chosenEnd = -1;
-    for (let end = start + 1; end <= segment.text.length; end += 1) {
-      if (isSurrogateBoundary(segment.text, end)) continue;
+    let low = start + 1;
+    let high = segment.text.length;
+    while (low <= high) {
+      let end = Math.floor((low + high) / 2);
+      if (isSurrogateBoundary(segment.text, end)) end -= 1;
+      if (end <= start) {
+        low = Math.floor((low + high) / 2) + 1;
+        continue;
+      }
       const span = { segment: segment.index, start, end };
-      if (!fitsPrompt(primaryTextFor(source, [span]))) break;
-      chosenEnd = end;
+      if (fitsPrompt(primaryTextFor(source, [span]), [span])) {
+        chosenEnd = end;
+        low = end + 1;
+      } else {
+        high = end - 1;
+      }
     }
 
     if (chosenEnd <= start)
@@ -117,7 +127,9 @@ const splitSegment = (
         start,
         end: whitespaceEnd,
       };
-      if (fitsPrompt(primaryTextFor(source, [whitespaceSpan]))) {
+      if (
+        fitsPrompt(primaryTextFor(source, [whitespaceSpan]), [whitespaceSpan])
+      ) {
         chosenEnd = whitespaceEnd;
       }
     }
@@ -129,9 +141,10 @@ const splitSegment = (
 
 export const partitionNotesSource = (
   source: NotesSource,
-  fitsPrompt: (packet: string) => boolean,
+  fitsPrompt: (packet: string, spans?: SourceSpan[]) => boolean,
 ): NotesSourceWindow[] => {
-  if (!fitsPrompt('')) throw new MeetingNotesError('notes_context_exhausted');
+  if (!fitsPrompt('', []))
+    throw new MeetingNotesError('notes_context_exhausted');
 
   const primarySpans = source.segments
     .filter((segment) => segment.text.trim())
@@ -141,7 +154,7 @@ export const partitionNotesSource = (
         start: 0,
         end: segment.text.length,
       };
-      return fitsPrompt(primaryTextFor(source, [full]))
+      return fitsPrompt(primaryTextFor(source, [full]), [full])
         ? [full]
         : splitSegment(source, segment, fitsPrompt);
     });
@@ -150,7 +163,10 @@ export const partitionNotesSource = (
   let current: SourceSpan[] = [];
   for (const span of primarySpans) {
     const candidate = [...current, span];
-    if (current.length > 0 && !fitsPrompt(primaryTextFor(source, candidate))) {
+    if (
+      current.length > 0 &&
+      !fitsPrompt(primaryTextFor(source, candidate), candidate)
+    ) {
       const primaryText = primaryTextFor(source, current);
       windows.push({
         primarySpans: current,
@@ -180,7 +196,10 @@ export const partitionNotesSource = (
     if (!priorSpan) return window;
     const overlapText = primaryTextFor(source, [priorSpan]);
     const sourceText = `${overlapText}\n${window.primaryText}`;
-    return fitsPrompt(sourceText)
+    return fitsPrompt(sourceText, [
+      ...window.overlapSpans,
+      ...window.primarySpans,
+    ])
       ? { ...window, overlapSpans: [priorSpan], sourceText }
       : window;
   });

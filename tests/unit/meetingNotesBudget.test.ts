@@ -39,6 +39,17 @@ it('keeps notes transport context and output inside the shared capacity policy',
 });
 
 it('uses a conservative shared token estimate for dense and ordinary source text', () => {
+  const prose =
+    'This is an ordinary conversation with many separate words. '.repeat(20);
+  expect(estimateNotesTokens(prose)).toBeLessThan(Buffer.byteLength(prose) / 2);
+  const compactJson = JSON.stringify({
+    descriptor: { segment: 0, start: 0, end: 30 },
+    speaker: 'Milo',
+    text: 'A normal conversation about the weekly review.',
+  });
+  expect(estimateNotesTokens(compactJson)).toBeLessThan(
+    Buffer.byteLength(compactJson) / 2,
+  );
   expect(estimateNotesTokens('abc')).toBe(2);
   expect(estimateNotesTokens('東京')).toBe(Buffer.byteLength('東京'));
   expect(estimateNotesTokens(`const ${'identifier'.repeat(8)} = 1`)).toBe(

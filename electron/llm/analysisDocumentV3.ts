@@ -203,6 +203,26 @@ const parseGenerationMetadata = (
 
   const terminology = parseTerminologyArtifact(record.terminology);
   const sourceProvenance = parseSourceProvenance(record.source_provenance);
+  const rawHierarchy =
+    record.hierarchy && typeof record.hierarchy === 'object'
+      ? (record.hierarchy as Record<string, unknown>)
+      : null;
+  const hierarchy =
+    rawHierarchy &&
+    ['depth', 'nodes', 'max_depth', 'max_nodes'].every(
+      (key) =>
+        Number.isSafeInteger(rawHierarchy[key]) &&
+        (rawHierarchy[key] as number) >= 0,
+    ) &&
+    (rawHierarchy.depth as number) <= (rawHierarchy.max_depth as number) &&
+    (rawHierarchy.nodes as number) <= (rawHierarchy.max_nodes as number)
+      ? {
+          depth: rawHierarchy.depth as number,
+          nodes: rawHierarchy.nodes as number,
+          max_depth: rawHierarchy.max_depth as number,
+          max_nodes: rawHierarchy.max_nodes as number,
+        }
+      : undefined;
   const rawGenerationOptions =
     record.generation_options && typeof record.generation_options === 'object'
       ? (record.generation_options as Record<string, unknown>)
@@ -245,6 +265,7 @@ const parseGenerationMetadata = (
       ? { audit_change_count: record.audit_change_count as number }
       : {}),
     ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
   };
 };
 

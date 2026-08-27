@@ -515,6 +515,14 @@ function App() {
     }
   };
 
+  useEffect(
+    () =>
+      window.ipcRenderer.on('MEETING_NOTES_UPDATED', () => {
+        void fetchMeetings();
+      }),
+    [],
+  );
+
   const handleRetryTranscriptValidation = async (
     meetingId: string | number | null = selectedMeetingId,
   ) => {

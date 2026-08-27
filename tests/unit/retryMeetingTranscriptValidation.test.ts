@@ -149,7 +149,21 @@ describe('retryMeetingTranscriptValidation', () => {
         current = { ...current, title: input.title };
         return 'updated';
       }
-      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') {
+        const lease = args[1] as { source?: unknown };
+        current = {
+          ...current,
+          downstream_processing_json: JSON.stringify(lease),
+        };
+        return true;
+      }
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return {
+          meetingId: 'synthetic-id',
+          runId: 'partial-notes-run',
+          status: 'published',
+        };
+      }
       if (channel === 'GENERATE_ANALYSIS_V2') {
         return {
           markdown: 'Partial synthetic analysis',
@@ -171,27 +185,29 @@ describe('retryMeetingTranscriptValidation', () => {
     await expect(
       retryMeetingTranscriptValidation('synthetic-id', invoke),
     ).resolves.toEqual({ status: 'needs_attention' });
-    expect(current.title).toBe('Recovered Planning Discussion');
+    expect(current.title).toBe('Recovered recording');
     expect(current.transcript_status).toBe('needs_attention');
     expect(invoke).toHaveBeenCalledWith(
-      'GENERATE_ANALYSIS_V2',
-      expect.anything(),
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ reason: 'automatic', template: 'auto' }),
     );
     expect(invoke).toHaveBeenCalledWith(
       'CLAIM_DOWNSTREAM_PROCESSING',
-      expect.anything(),
-      expect.anything(),
+      'synthetic-id',
+      expect.objectContaining({
+        schemaVersion: 2,
+        state: 'processing',
+        source: expect.objectContaining({
+          kind: 'partial_capture_gap',
+          captureJournalGeneration: 'journal-1',
+          transcriptSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          transcriptIntegritySha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+      }),
     );
-    expect(
-      JSON.parse(String(current.downstream_processing_json)),
-    ).toMatchObject({
-      schemaVersion: 2,
-      state: 'complete',
-      source: { kind: 'partial_capture_gap' },
-    });
   });
 
-  it('generates downstream artifacts exactly once after validation succeeds', async () => {
+  it('requests coordinator publication after each eligible validation retry', async () => {
     const responsiveness = {
       schemaVersion: 1,
       status: 'available',
@@ -264,39 +280,18 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(second.status).toBe('validated');
     expect(
       invoke.mock.calls.filter(
-        ([channel]) => channel === 'GENERATE_ANALYSIS_V2',
+        ([channel]) => channel === 'GENERATE_MEETING_NOTES',
       ),
-    ).toHaveLength(1);
-    expect(
-      invoke.mock.calls.filter(
-        ([channel]) => channel === 'EXTRACT_AND_PROCESS_ENTITIES',
-      ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       JSON.parse(String(current.transcript_json)).liveTranscriptResponsiveness,
     ).toEqual(responsiveness);
     expect(
       JSON.parse(String(current.transcript_json)).stopToValidatedLatency,
     ).toEqual(stopToValidatedLatency);
-    expect(
-      JSON.parse(String(current.downstream_processing_json)),
-    ).toMatchObject({ state: 'complete' });
-    expect(invoke).toHaveBeenCalledWith(
-      'EXTRACT_AND_PROCESS_ENTITIES',
-      expect.objectContaining({
-        expectedDownstreamRunId: expect.any(String),
-      }),
-    );
-    expect(invoke).toHaveBeenCalledWith(
-      'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
-      'synthetic-id',
-      expect.objectContaining({
-        expectedDownstreamRunId: expect.any(String),
-      }),
-    );
   });
 
-  it('does not duplicate downstream work when another durable owner is active', async () => {
+  it('leaves notes-run supersession to the coordinator', async () => {
     const current = {
       ...meeting,
       transcript_status: 'validated' as const,
@@ -319,18 +314,14 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(
       await retryMeetingTranscriptValidation('synthetic-id', invoke),
-    ).toEqual({ status: 'superseded' });
-    expect(invoke).not.toHaveBeenCalledWith(
-      'GENERATE_ANALYSIS_V2',
-      expect.anything(),
-    );
-    expect(invoke).not.toHaveBeenCalledWith(
-      'EXTRACT_AND_PROCESS_ENTITIES',
-      expect.anything(),
+    ).toEqual({ status: 'validated' });
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ meetingId: 'synthetic-id' }),
     );
   });
 
-  it('resumes at knowledge synthesis when analysis and MID are already durable', async () => {
+  it('delegates existing analysis and MID to the coordinator', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
       title: 'Synthetic meeting',
@@ -359,20 +350,13 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(
       await retryMeetingTranscriptValidation('synthetic-id', invoke),
     ).toEqual({ status: 'validated' });
-    expect(invoke).not.toHaveBeenCalledWith(
-      'EXTRACT_AND_PROCESS_ENTITIES',
-      expect.anything(),
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ meetingId: 'synthetic-id' }),
     );
-    expect(invoke).not.toHaveBeenCalledWith(
-      'GENERATE_ANALYSIS_V2',
-      expect.anything(),
-    );
-    expect(
-      JSON.parse(String(current.downstream_processing_json)),
-    ).toMatchObject({ state: 'complete' });
   });
 
-  it('repairs a generic title even when downstream artifacts are complete', async () => {
+  it('leaves generic-title repair to the coordinator', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
       title: 'Recovered recording',
@@ -409,7 +393,7 @@ describe('retryMeetingTranscriptValidation', () => {
     await expect(
       retryMeetingTranscriptValidation('synthetic-id', invoke),
     ).resolves.toEqual({ status: 'validated' });
-    expect(current.title).toBe('Persisted Analysis Review');
+    expect(current.title).toBe('Recovered recording');
     expect(invoke).not.toHaveBeenCalledWith(
       'GENERATE_TITLE',
       expect.anything(),
@@ -483,13 +467,14 @@ describe('retryMeetingTranscriptValidation', () => {
       'GENERATE_TITLE',
       expect.anything(),
     );
-    expect(current.title).toBe('Validated Transcript Review');
-    expect(
-      JSON.parse(String(current.downstream_processing_json)),
-    ).toMatchObject({ state: 'complete' });
+    expect(current.title).toBe('Meeting');
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ meetingId: 'synthetic-id' }),
+    );
   });
 
-  it('persists a truthful analysis failure when the stage deadline expires', async () => {
+  it('leaves the prior analysis state intact when coordinator publication is requested', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
       title: 'Synthetic planning review',
@@ -519,9 +504,7 @@ describe('retryMeetingTranscriptValidation', () => {
     });
 
     await expect(
-      retryMeetingTranscriptValidation('synthetic-id', invoke, {
-        downstreamStageTimeoutMs: { analysis: 5 },
-      }),
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
     ).resolves.toEqual({ status: 'validated' });
 
     expect(
@@ -529,7 +512,6 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toMatchObject({
       state: 'failed',
       stage: 'analysis',
-      failure: 'stage_timeout',
     });
   });
 
@@ -665,7 +647,7 @@ describe('retryMeetingTranscriptValidation', () => {
       'GENERATE_TITLE',
       expect.anything(),
     );
-    expect(current.title).toBe('Recovered Capture Review');
+    expect(current.title).toBe('Meeting');
     expect(invoke).toHaveBeenCalledWith(
       'TRANSCRIPTION_TRANSCRIBE_FINAL',
       expect.objectContaining({
@@ -792,7 +774,6 @@ describe('retryMeetingTranscriptValidation', () => {
   it('preserves user edits made while validation is running', async () => {
     let current: Record<string, unknown> = { ...meeting };
     let meetingReads = 0;
-    let analysisUserNotes: unknown;
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') {
         meetingReads += 1;
@@ -817,10 +798,6 @@ describe('retryMeetingTranscriptValidation', () => {
         return true;
       }
       if (channel === 'GENERATE_TITLE') return 'Generated title';
-      if (channel === 'GENERATE_ANALYSIS_V2') {
-        analysisUserNotes = (payload as { userNotes?: unknown }).userNotes;
-        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
-      }
       if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
       throw new Error(`Unexpected channel: ${channel}`);
     });
@@ -837,7 +814,10 @@ describe('retryMeetingTranscriptValidation', () => {
       is_favorite: true,
       transcript_status: 'validated',
     });
-    expect(analysisUserNotes).toBe('User edited notes');
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ meetingId: 'synthetic-id' }),
+    );
   });
 
   it('returns superseded when another retry wins the final save race', async () => {
@@ -906,8 +886,8 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(result.status).toBe('needs_attention');
     expect(invoke).not.toHaveBeenCalledWith(
-      'GENERATE_ANALYSIS_V2',
-      expect.anything(),
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ reason: 'automatic' }),
     );
   });
 
@@ -1043,8 +1023,8 @@ describe('retryMeetingTranscriptValidation', () => {
         .activityEvidenceSource,
     ).toBe('legacy_provisional_segments');
     expect(invoke).toHaveBeenCalledWith(
-      'GENERATE_ANALYSIS_V2',
-      expect.anything(),
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ reason: 'automatic' }),
     );
   });
 

@@ -294,7 +294,14 @@ export async function processExtractedEntities(
   meetingId: string,
   context?: EntityExtractionContext,
   transcriptForGrounding?: string,
+  options: { canCommit?: () => boolean } = {},
 ): Promise<ProcessedEntities> {
+  const ensureCurrent = () => {
+    if (options.canCommit && !options.canCommit()) {
+      throw new Error('entity_extraction_superseded');
+    }
+  };
+  ensureCurrent();
   let created = 0;
   let updated = 0;
   let linked = 0;
@@ -312,6 +319,7 @@ export async function processExtractedEntities(
 
   // 1. Process People
   for (const person of extracted.people) {
+    ensureCurrent();
     if (!person?.name || typeof person.name !== 'string') continue;
     // Try to find a match
     const similar = findSimilarEntity(
@@ -379,6 +387,7 @@ export async function processExtractedEntities(
 
   // 2. Process Topics
   for (const topic of extracted.topics) {
+    ensureCurrent();
     if (!topic?.name || typeof topic.name !== 'string') continue;
     const similar = findSimilarEntity(
       'topic',
@@ -418,6 +427,7 @@ export async function processExtractedEntities(
 
   // 3. Process Action Items
   for (const actionItem of extracted.action_items) {
+    ensureCurrent();
     if (!actionItem?.description || typeof actionItem.description !== 'string')
       continue;
     const dueDate = parseDueDate(actionItem.due_date || '');
@@ -524,6 +534,7 @@ export async function processExtractedEntities(
 
   // 4. Process Decisions
   for (const decision of extracted.decisions) {
+    ensureCurrent();
     if (!decision?.description || typeof decision.description !== 'string')
       continue;
     const entity = db.upsertEntity({
@@ -550,6 +561,7 @@ export async function processExtractedEntities(
   // 5. Process Projects
   if (extracted.projects) {
     for (const project of extracted.projects) {
+      ensureCurrent();
       if (!project?.name || typeof project.name !== 'string') continue;
       const similar = findSimilarEntity(
         'project',
@@ -594,6 +606,7 @@ export async function processExtractedEntities(
 
       // Link topics that might belong to this project (heuristic: same meeting)
       for (const topic of extracted.topics) {
+        ensureCurrent();
         // We need to find the specific topic entity we worked with/created above
         // We can't just findByName because we might have resolved it to a different name
         // So we search in our local 'entities' array or just re-resolve
@@ -626,6 +639,7 @@ export async function processExtractedEntities(
   // 6. Process Explicit Relationships
   if (extracted.relationships) {
     for (const rel of extracted.relationships) {
+      ensureCurrent();
       if (
         !rel ||
         typeof rel.source !== 'string' ||
@@ -777,5 +791,6 @@ export async function extractAndProcessEntities(
     meetingId,
     context,
     transcript,
+    options,
   );
 }

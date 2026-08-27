@@ -1,0 +1,168 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+const gemini = vi.hoisted(() => ({ model: vi.fn(), generate: vi.fn() }));
+vi.mock('@google/generative-ai', () => ({
+  GoogleGenerativeAI: class {
+    getGenerativeModel(config: unknown) {
+      gemini.model(config);
+      return { generateContent: gemini.generate };
+    }
+  },
+}));
+
+it('bounds Claude output and rejects max-token termination', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url, init) => {
+      expect(JSON.parse(init.body).max_tokens).toBe(2048);
+      return {
+        ok: true,
+        json: async () => ({
+          content: [{ text: '{}' }],
+          stop_reason: 'max_tokens',
+        }),
+      };
+    }),
+  );
+  const provider = new UnifiedLLMProvider('claude', {
+    claude_api_key: 'test',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).rejects.toThrow(
+    'notes_output_truncated',
+  );
+});
+
+it('passes cancellation to Gemini transport and bounds/rejects its truncated output', async () => {
+  const controller = new AbortController();
+  gemini.generate.mockResolvedValueOnce({
+    response: {
+      text: () => '{}',
+      candidates: [{ finishReason: 'MAX_TOKENS' }],
+    },
+  });
+  const provider = new UnifiedLLMProvider('gemini', {
+    gemini_api_key: 'test',
+  }) as unknown as Transport;
+  await expect(
+    provider.generateText({ ...request, signal: controller.signal }),
+  ).rejects.toThrow('notes_output_truncated');
+  expect(gemini.generate).toHaveBeenCalledWith('Return JSON', {
+    signal: controller.signal,
+  });
+  expect(gemini.model).toHaveBeenCalledWith(
+    expect.objectContaining({
+      generationConfig: {
+        responseMimeType: 'application/json',
+        maxOutputTokens: 2048,
+      },
+    }),
+  );
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+it('classifies reported provider input overflow without exposing error bodies', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: false,
+      statusText: 'Bad Request',
+      json: async () => ({
+        error: {
+          code: 'context_length_exceeded',
+          message: 'PRIVATE_MARKER maximum context length exceeded',
+        },
+      }),
+    })),
+  );
+  const provider = new UnifiedLLMProvider('openai', {
+    openai_api_key: 'test',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).rejects.toThrow(
+    /^notes_input_overflow$/,
+  );
+});
+
+it('rejects a stream that closes without a completion packet even if the JSON looks complete', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, text: async () => '{"response":"{}"}\n' })),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'qwen3.5:9b',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).rejects.toThrow(
+    'notes_output_incomplete',
+  );
+});
+type Transport = {
+  generateText(options: {
+    task: 'notesWriter';
+    prompt: string;
+    jsonMode: boolean;
+    notesBudget: { contextTokens: number; outputTokens: number };
+    signal?: AbortSignal;
+  }): Promise<string>;
+};
+const request = {
+  task: 'notesWriter' as const,
+  prompt: 'Return JSON',
+  jsonMode: true,
+  notesBudget: { contextTokens: 16384, outputTokens: 2048 },
+};
+
+it('forwards notes output limits to OpenAI and rejects length termination even for valid JSON', async () => {
+  const fetcher = vi.fn(async (_url, init) => {
+    expect(JSON.parse(init.body).max_completion_tokens).toBe(2048);
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{}' }, finish_reason: 'length' }],
+      }),
+    };
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const provider = new UnifiedLLMProvider('openai', {
+    openai_api_key: 'test',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).rejects.toThrow(
+    'notes_output_truncated',
+  );
+});
+
+it('rejects an oversized notes request before cloud transport', async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  const provider = new UnifiedLLMProvider('openai', {
+    openai_api_key: 'test',
+  }) as unknown as Transport;
+  await expect(
+    provider.generateText({ ...request, prompt: 'X'.repeat(50_000) }),
+  ).rejects.toThrow('notes_context_exhausted');
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('reads the final Ollama metrics-only packet and rejects a truncated stream', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/tags'))
+        return {
+          ok: true,
+          json: async () => ({ models: [{ name: 'qwen3.5:9b' }] }),
+        };
+      expect(JSON.parse(init.body).stream).toBe(true);
+      return {
+        ok: true,
+        text: async () =>
+          '{"response":"{}"}\n{"done":true,"done_reason":"length","eval_count":2048}\n',
+      };
+    }),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'qwen3.5:9b',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).rejects.toThrow(
+    'notes_output_truncated',
+  );
+});

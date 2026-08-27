@@ -81,6 +81,20 @@ export const createNotesSource = (raw: string): NotesSource => {
   };
 };
 
+/** Compatibility for callers with immutable rendered text, never for saved
+ * meetings which must retain their canonical segment indexes. */
+export const createNotesSourceFromText = (text: string): NotesSource =>
+  createNotesSource(
+    JSON.stringify(
+      text.split('\n').map((line) => {
+        const turn = /^([^:\n]{1,100}):\s?(.*)$/.exec(line);
+        return turn
+          ? { speaker: turn[1], text: turn[2] }
+          : { speaker: null, text: line };
+      }),
+    ),
+  );
+
 export const resolveSourceSpan = (
   source: NotesSource,
   span: SourceSpan,

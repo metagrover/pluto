@@ -1,5 +1,8 @@
-import { groundAnalysisDocument } from './analysisGrounding';
-import type { AnalysisDocumentV3 } from './analysisTypes';
+import { groundRecentWin, groundSourceReviewedItem } from './analysisGrounding';
+import type {
+  AnalysisDocumentV3,
+  MeetingTerminologyArtifactV1,
+} from './analysisTypes';
 import { resolveSourceSpan } from './meetingNotesSource';
 import {
   type AuditVerdict,
@@ -12,15 +15,23 @@ import {
   type SourceSpan,
   type SupportedText,
 } from './meetingNotesTypes';
+import {
+  type RawTerminologyProposal,
+  type TerminologyCandidateCluster,
+  createTerminologyArtifact,
+  getAppliedTerminologyAliases,
+} from './terminologyReconciliation';
 
 export type AuditedNotes = {
   source: NotesSource;
   draft: NotesDraft;
   verdicts: ReadonlyMap<string, AuditVerdict>;
   acceptedTerminology: NotesAudit['terminology'];
+  terminologyArtifact?: MeetingTerminologyArtifactV1;
 };
 
 type Block = SupportedText | NotesItem;
+const reviewedResults = new WeakSet<object>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -108,6 +119,13 @@ const parseWriterSection = (
   return { id, title, items: items as NotesItem[] };
 };
 
+const parseRecentWin = (value: unknown): NotesDraft['recentWin'] | null => {
+  if (!isRecord(value)) return null;
+  const win = parseSupportedText(value.win, 'recent-win');
+  const impact = parseSupportedText(value.impact, 'recent-win-impact');
+  return win && impact ? { win, impact } : null;
+};
+
 export const parseNotesDraft = (raw: string): NotesDraft => {
   let parsed: unknown;
   try {
@@ -135,8 +153,16 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
       ? null
       : parseSupportedText(parsed.overview, 'overview');
   const sections = parsed.sections.map(parseWriterSection);
+  const noRecentWin =
+    parsed.recentWin === undefined ||
+    parsed.recentWin === null ||
+    (isRecord(parsed.recentWin) &&
+      parsed.recentWin.win === null &&
+      parsed.recentWin.impact === null);
+  const recentWin = noRecentWin ? undefined : parseRecentWin(parsed.recentWin);
   if (
     (parsed.overview !== null && !overview) ||
+    (!noRecentWin && !recentWin) ||
     sections.some((section) => section === null) ||
     sections.length > 64
   ) {
@@ -146,6 +172,7 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
     meetingType: meetingType as NotesDraft['meetingType'],
     overview,
     sections: sections as NotesSection[],
+    ...(recentWin ? { recentWin } : {}),
   };
 };
 
@@ -189,7 +216,12 @@ export const parseNotesAudit = (raw: string): NotesAudit => {
       !['deduplicated', 'cancelled', 'superseded'].includes(
         String(disposition.kind),
       ) ||
+      (disposition.kind === 'deduplicated' &&
+        !isSafeId(disposition.replacementId)) ||
+      (disposition.replacementId !== null &&
+        !isSafeId(disposition.replacementId)) ||
       !Array.isArray(disposition.sources) ||
+      disposition.sources.length === 0 ||
       disposition.sources.some((source) => parseSpan(source) === null),
   );
   if (invalidChange || invalidVerdict || invalidDisposition) {
@@ -244,6 +276,14 @@ const replaceBlock = (
     draft.overview = value;
     return true;
   }
+  if (draft.recentWin?.win.id === target && !('kind' in value)) {
+    draft.recentWin.win = value;
+    return true;
+  }
+  if (draft.recentWin?.impact.id === target && !('kind' in value)) {
+    draft.recentWin.impact = value;
+    return true;
+  }
   for (const section of draft.sections) {
     if (section.title.id === target && !('kind' in value)) {
       section.title = value;
@@ -262,8 +302,18 @@ const replaceBlock = (
   return false;
 };
 
-const sourceText = (source: NotesSource, spans: SourceSpan[]): string =>
-  spans.map((span) => resolveSourceSpan(source, span)).join(' ');
+const sourceText = (source: NotesSource, spans: SourceSpan[]): string => {
+  const seen = new Set<string>();
+  return spans
+    .filter((span) => {
+      const key = `${span.segment}:${span.start}:${span.end}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((span) => resolveSourceSpan(source, span))
+    .join(' ');
+};
 
 const transcriptForSource = (source: NotesSource): string =>
   source.segments
@@ -271,22 +321,291 @@ const transcriptForSource = (source: NotesSource): string =>
     .map((segment) => `${segment.speaker ?? 'Speaker'}: ${segment.text}`)
     .join('\n');
 
-const sourceMetadata = (draft: NotesDraft) =>
-  Object.fromEntries(
-    blocksForDraft(draft).map((block) => [
-      block.id,
-      { id: block.id, sources: block.sources },
-    ]),
+const sourceMetadata = (draft: NotesDraft) => {
+  const blocks: Record<
+    string,
+    {
+      id: string;
+      sources: Array<{ segment: number; start: number; end: number }>;
+    }
+  > = {};
+  const add = (path: string, block: Block) => {
+    blocks[path] = { id: block.id, sources: block.sources };
+  };
+  const addEditable = (
+    path: string,
+    block: Block,
+    supportsCompletion = false,
+  ) => {
+    add(path, block);
+    blocks[`native_continuations:${path}`] = {
+      id: block.id,
+      sources: block.sources,
+    };
+    if (supportsCompletion) {
+      blocks[`completion:${path}`] = {
+        id: block.id,
+        sources: block.sources,
+      };
+    }
+  };
+
+  if (draft.overview) add('overview', draft.overview);
+  else {
+    const points = draft.sections
+      .flatMap((section) =>
+        section.items.filter((item) => item.kind === 'point'),
+      )
+      .slice(0, 3);
+    if (points.length)
+      add('overview', {
+        id: 'derived-overview',
+        text: points.map((point) => point.text).join(' '),
+        sources: points.flatMap((point) => point.sources),
+      });
+  }
+  if (draft.recentWin) {
+    add('recent_win:win', draft.recentWin.win);
+    add('recent_win:why_it_counts', draft.recentWin.impact);
+  }
+
+  let actionIndex = 0;
+  let decisionIndex = 0;
+  draft.sections.forEach((section, sectionIndex) => {
+    add(`topic:${sectionIndex}:title`, section.title);
+    let pointIndex = 0;
+    let questionIndex = 0;
+    let topicActionIndex = 0;
+    let topicDecisionIndex = 0;
+    for (const item of section.items) {
+      if (item.kind === 'point') {
+        const path =
+          pointIndex === 0
+            ? `topic:${sectionIndex}:summary`
+            : `topic:${sectionIndex}:point:${pointIndex - 1}`;
+        addEditable(path, item);
+        pointIndex += 1;
+        continue;
+      }
+      if (item.kind === 'question') {
+        addEditable(`topic:${sectionIndex}:question:${questionIndex}`, item);
+        questionIndex += 1;
+        continue;
+      }
+      if (item.kind === 'action') {
+        add(`topic:${sectionIndex}:action:${topicActionIndex}`, item);
+        addEditable(`all_action_items:${actionIndex}`, item, true);
+        topicActionIndex += 1;
+        actionIndex += 1;
+        continue;
+      }
+      add(`topic:${sectionIndex}:decision:${topicDecisionIndex}`, item);
+      addEditable(`all_decisions:${decisionIndex}`, item, true);
+      topicDecisionIndex += 1;
+      decisionIndex += 1;
+    }
+  });
+  return blocks;
+};
+
+type AuditTerminologyContext = {
+  trustedUserTerms: string[];
+  provider: string;
+  model: string;
+};
+
+const uniqueStrings = (values: string[]): string[] => [...new Set(values)];
+
+const terminologyCandidatesFor = (
+  source: NotesSource,
+  draft: NotesDraft,
+  audit: NotesAudit,
+): TerminologyCandidateCluster[] => {
+  const referencedSegments = new Set(
+    [...blocksForDraft(draft), ...audit.verdicts, ...audit.dispositions]
+      .flatMap((entry) => entry.sources)
+      .map((span) => span.segment),
   );
+  return audit.terminology.flatMap((proposal) => {
+    if (!isRecord(proposal)) return [];
+    const rawForms = Array.isArray(proposal.rawForms)
+      ? uniqueStrings(
+          proposal.rawForms.filter(
+            (form): form is string =>
+              typeof form === 'string' &&
+              form.trim().length >= 2 &&
+              form.trim().length <= 80 &&
+              !/[\r\n]/.test(form),
+          ),
+        )
+      : [];
+    const segmentIndexes = Array.isArray(proposal.segmentIndexes)
+      ? uniqueStrings(
+          proposal.segmentIndexes
+            .filter(
+              (index): index is number =>
+                Number.isInteger(index) && referencedSegments.has(index),
+            )
+            .map(String),
+        ).map(Number)
+      : [];
+    const segments = segmentIndexes
+      .map((index) =>
+        source.segments.find((segment) => segment.index === index),
+      )
+      .filter((segment): segment is NotesSource['segments'][number] =>
+        Boolean(segment),
+      );
+    if (
+      rawForms.length === 0 ||
+      segments.length === 0 ||
+      !rawForms.some((form) =>
+        segments.some((segment) =>
+          segment.text.toLocaleLowerCase().includes(form.toLocaleLowerCase()),
+        ),
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        rawForms,
+        segmentIndexes,
+        contexts: segments.map(
+          (segment) => `${segment.speaker ?? 'Speaker'}: ${segment.text}`,
+        ),
+        kind: 'domain_term' as const,
+        reasons: ['ambiguous' as const],
+      },
+    ];
+  });
+};
+
+const terminologyArtifactFor = (
+  source: NotesSource,
+  draft: NotesDraft,
+  audit: NotesAudit,
+  context: AuditTerminologyContext | undefined,
+): MeetingTerminologyArtifactV1 | undefined => {
+  if (!context || audit.terminology.length === 0) return undefined;
+  const candidates = terminologyCandidatesFor(source, draft, audit);
+  if (candidates.length === 0) return undefined;
+  const proposals: RawTerminologyProposal[] = audit.terminology.flatMap(
+    (proposal) =>
+      isRecord(proposal)
+        ? [
+            {
+              raw_forms: proposal.rawForms,
+              preferred_term: proposal.preferredTerm,
+              confidence: proposal.confidence,
+              signals: proposal.signals,
+            },
+          ]
+        : [],
+  );
+  return createTerminologyArtifact({
+    candidates,
+    proposals,
+    knownTerms: context.trustedUserTerms,
+    provider: context.provider,
+    model: context.model,
+    generatedAt: new Date().toISOString(),
+  });
+};
+
+const replaceTerminologyAliases = (
+  text: string,
+  aliases: Record<string, string[]>,
+): string => {
+  let result = text;
+  for (const [preferred, rawForms] of Object.entries(aliases)) {
+    for (const rawForm of [...rawForms].sort(
+      (left, right) => right.length - left.length,
+    )) {
+      const escaped = rawForm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`\\b${escaped}\\b`, 'giu'), preferred);
+    }
+  }
+  return result;
+};
+
+const applyTerminologyToProse = (
+  analysis: AnalysisDocumentV3,
+  artifact: MeetingTerminologyArtifactV1 | undefined,
+): AnalysisDocumentV3 => {
+  if (!artifact) return analysis;
+  const metadata = analysis.generation_metadata;
+  if (!metadata) return analysis;
+  const aliases = getAppliedTerminologyAliases(artifact);
+  if (Object.keys(aliases).length === 0) {
+    return {
+      ...analysis,
+      generation_metadata: {
+        ...metadata,
+        terminology: artifact,
+      },
+    };
+  }
+  const topics = analysis.topics.map((topic) => ({
+    ...topic,
+    title: replaceTerminologyAliases(topic.title, aliases),
+    summary: replaceTerminologyAliases(topic.summary, aliases),
+    key_points: topic.key_points.map((point) => ({
+      ...point,
+      text: replaceTerminologyAliases(point.text, aliases),
+    })),
+    decisions: topic.decisions.map((decision) => ({
+      ...decision,
+      text: replaceTerminologyAliases(decision.text, aliases),
+      ...(decision.rationale
+        ? { rationale: replaceTerminologyAliases(decision.rationale, aliases) }
+        : {}),
+    })),
+    action_items: topic.action_items.map((item) => ({
+      ...item,
+      text: replaceTerminologyAliases(item.text, aliases),
+    })),
+    open_questions: topic.open_questions.map((question) =>
+      replaceTerminologyAliases(question, aliases),
+    ),
+  }));
+  return {
+    ...analysis,
+    overview: replaceTerminologyAliases(analysis.overview, aliases),
+    topics,
+    all_action_items: topics.flatMap((topic) =>
+      topic.action_items.map((item) => ({ ...item, topic: topic.title })),
+    ),
+    all_decisions: topics.flatMap((topic) => topic.decisions),
+    ...(analysis.recent_win
+      ? {
+          recent_win: {
+            ...analysis.recent_win,
+            win: replaceTerminologyAliases(analysis.recent_win.win, aliases),
+            why_it_counts: replaceTerminologyAliases(
+              analysis.recent_win.why_it_counts,
+              aliases,
+            ),
+          },
+        }
+      : {}),
+    generation_metadata: {
+      ...metadata,
+      terminology: artifact,
+    },
+  };
+};
 
 export const applyNotesAudit = ({
   source,
   draft,
   audit,
+  terminology,
 }: {
   source: NotesSource;
   draft: NotesDraft;
   audit: NotesAudit;
+  terminology?: AuditTerminologyContext;
 }): AuditedNotes => {
   const next = structuredClone(draft);
   const initialIds = new Set(blocksForDraft(next).map((block) => block.id));
@@ -326,7 +645,9 @@ export const applyNotesAudit = ({
       continue;
     }
     if (change.op === 'replace') {
-      const value = parseItem(change.value) ?? parseSupportedText(change.value);
+      const value =
+        parseItem(change.value, change.target) ??
+        parseSupportedText(change.value, change.target);
       if (
         !isSafeId(change.target) ||
         changedTargets.has(change.target) ||
@@ -379,7 +700,9 @@ export const applyNotesAudit = ({
 
   for (const block of blocksForDraft(next)) {
     const verdict = verdicts.get(block.id);
-    if (!verdict) throw new MeetingNotesError('invalid_notes_audit');
+    if (!verdict)
+      throw new MeetingNotesError(`notes_audit_missing_verdict:${block.id}`);
+    block.sources = structuredClone(verdict.sources);
     if (verdict.status === 'unsupported') {
       removeBlock(next, block.id);
     } else if (
@@ -388,22 +711,62 @@ export const applyNotesAudit = ({
       (block.kind === 'action' || block.kind === 'decision')
     ) {
       removeBlock(next, block.id);
+    } else if (verdict.status === 'uncertain') {
+      block.text = `Unconfirmed: ${block.text}`;
     }
   }
 
-  return {
+  for (const section of next.sections) {
+    section.items = section.items.flatMap((item) => {
+      if (item.kind !== 'action' && item.kind !== 'decision') return [item];
+      const evidence = sourceText(source, item.sources);
+      const sourceLines = item.sources.map((span) => {
+        const segment = source.segments.find(
+          (entry) => entry.index === span.segment,
+        )!;
+        return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
+      });
+      const checked = groundSourceReviewedItem(
+        { ...item, kind: item.kind },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLines,
+          sourceLine: sourceLines.join(' '),
+          lineIndex: item.sources[0]!.segment,
+        },
+      );
+      return checked ? [{ ...item, ...checked }] : [];
+    });
+  }
+
+  const result: AuditedNotes = {
     source,
     draft: next,
     verdicts,
     acceptedTerminology: structuredClone(audit.terminology),
+    ...(terminology
+      ? {
+          terminologyArtifact: terminologyArtifactFor(
+            source,
+            next,
+            audit,
+            terminology,
+          ),
+        }
+      : {}),
   };
+  reviewedResults.add(result);
+  return result;
 };
 
 export const projectAuditedNotes = (
   audited: AuditedNotes,
 ): AnalysisDocumentV3 => {
+  if (!reviewedResults.has(audited))
+    throw new MeetingNotesError('notes_unreviewed_projection');
   const topics = audited.draft.sections
-    .filter((section) => section.items.length > 0 || section.title.text)
+    .filter((section) => section.items.length > 0)
     .map((section) => {
       const points = section.items.filter((item) => item.kind === 'point');
       const actions = section.items
@@ -451,6 +814,18 @@ export const projectAuditedNotes = (
       topic.action_items.map((item) => ({ ...item, topic: topic.title })),
     ),
     all_decisions: topics.flatMap((topic) => topic.decisions),
+    ...(audited.draft.recentWin
+      ? {
+          recent_win: {
+            win: audited.draft.recentWin.win.text,
+            why_it_counts: audited.draft.recentWin.impact.text,
+            evidence: sourceText(audited.source, [
+              ...audited.draft.recentWin.win.sources,
+              ...audited.draft.recentWin.impact.sources,
+            ]),
+          },
+        }
+      : {}),
     meeting_type: audited.draft.meetingType,
     quality: {
       format_pass: true,
@@ -472,53 +847,19 @@ export const projectAuditedNotes = (
       source_provenance: {
         schema_version: 1,
         source_revision: audited.source.revision,
-        blocks: sourceMetadata(audited.draft),
+        blocks: sourceMetadata({
+          ...audited.draft,
+          sections: audited.draft.sections.filter(
+            (section) => section.items.length > 0,
+          ),
+        }),
       },
     },
   };
-  const grounded = groundAnalysisDocument(
-    analysis,
+  analysis.recent_win = groundRecentWin(
+    analysis.recent_win,
     transcriptForSource(audited.source),
-  ).analysis;
-  for (const section of audited.draft.sections) {
-    const topic = grounded.topics.find(
-      (entry) => entry.title === section.title.text,
-    );
-    if (!topic) continue;
-    for (const item of section.items.filter(
-      (entry) => entry.kind === 'action',
-    )) {
-      const verdict = audited.verdicts.get(item.id);
-      const ownerIsExplicit =
-        !item.owner ||
-        item.sources.some((span) => {
-          const segment = audited.source.segments.find(
-            (entry) => entry.index === span.segment,
-          );
-          return (
-            segment?.speaker === item.owner &&
-            /\b(?:i will|i['’]ll|yes[,!]?\s+i will|will do)\b/i.test(
-              segment.text,
-            )
-          );
-        });
-      if (
-        verdict?.status !== 'supported' ||
-        !ownerIsExplicit ||
-        topic.action_items.some((entry) => entry.text === item.text)
-      ) {
-        continue;
-      }
-      topic.action_items.push({
-        text: item.text,
-        ...(item.owner ? { assignee: item.owner } : {}),
-        ...(item.due ? { due: item.due } : {}),
-        evidence: sourceText(audited.source, item.sources),
-      });
-    }
-  }
-  grounded.all_action_items = grounded.topics.flatMap((topic) =>
-    topic.action_items.map((item) => ({ ...item, topic: topic.title })),
+    {},
   );
-  return grounded;
+  return applyTerminologyToProse(analysis, audited.terminologyArtifact);
 };

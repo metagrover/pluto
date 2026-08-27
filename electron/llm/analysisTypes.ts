@@ -114,6 +114,12 @@ export interface AnalysisGenerationMetadata {
   audit_status?: NotesPipelineMetadata['audit_status'];
   audit_change_count?: number;
   source_provenance?: NotesPipelineMetadata['source_provenance'];
+  hierarchy?: {
+    depth: number;
+    nodes: number;
+    max_depth: number;
+    max_nodes: number;
+  };
 }
 
 export interface TopicPoint {

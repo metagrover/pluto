@@ -208,6 +208,8 @@ export interface Meeting {
   analysis_generated_at?: string;
   analysis_error_categories_json?: string;
   user_edits_json?: string;
+  analysis_edit_conflicts_json?: string;
+  analysis_run_json?: string | null;
   transcript_status?: TranscriptLifecycleStatus;
   transcript_integrity_json?: string;
   system_audio_path?: string;

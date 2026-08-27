@@ -52,6 +52,17 @@ const baseMeeting: Meeting = {
 const analyzedMeeting: Meeting = {
   ...baseMeeting,
   transcript_status: 'validated',
+  transcript_json: JSON.stringify({
+    lifecycleStatus: 'validated',
+    segments: [
+      {
+        speaker: 'Me',
+        text: 'The transcript is ready first.',
+        startTime: 0,
+        endTime: 2,
+      },
+    ],
+  }),
   transcript_validated_at: '2026-08-17T18:05:00.000Z',
   audio_path: '/tmp/mic.wav',
   system_audio_path: '/tmp/system.wav',
@@ -108,6 +119,57 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
+  it('retries only related insights while leaving the published notes visible', async () => {
+    await act(async () =>
+      renderMeeting({
+        ...analyzedMeeting,
+        transcript_integrity_json: JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          causes: [],
+          evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+          validationProof: {
+            gateVersion: 'canonical_integrity_v1',
+            validatedAt: analyzedMeeting.transcript_validated_at,
+          },
+        }),
+        analysis_run_json: JSON.stringify({
+          notes_status: 'published',
+          secondary_status: 'failed',
+        }),
+      }),
+    );
+    expect(
+      container.querySelector('[data-meeting-artifact="analysis"]')
+        ?.textContent,
+    ).toContain('The analysis arrived in place.');
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry insights',
+    );
+    expect(retry).toBeTruthy();
+    await act(async () => retry!.click());
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ reason: 'secondary' }),
+    );
+  });
+
+  it('shows a failed regeneration beside the previous notes after reopening the meeting', async () => {
+    await act(async () =>
+      renderMeeting({
+        ...analyzedMeeting,
+        analysis_run_json: JSON.stringify({ notes_status: 'failed' }),
+      }),
+    );
+    expect(container.textContent).toContain(
+      'Your previous notes are still here.',
+    );
+    expect(
+      container.querySelector('[data-meeting-artifact="analysis"]')
+        ?.textContent,
+    ).toContain('The analysis arrived in place.');
+  });
+
   it('replaces the analysis skeleton in place when analysis arrives', async () => {
     await act(async () => renderMeeting(baseMeeting));
 
@@ -147,6 +209,59 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-meeting-artifact="transcript"]'),
     ).toBeNull();
+  });
+
+  it('renders preserved conflicts as text and copies the saved edit on request', async () => {
+    const copy = vi.fn();
+    const conflictingMeeting: Meeting = {
+      ...analyzedMeeting,
+      analysis_edit_conflicts_json: JSON.stringify([
+        {
+          path: 'overview',
+          original: '<b>Old generated wording</b>',
+          edited: '<img src=x onerror=alert(1)>Saved wording',
+          edited_at: '2026-08-26T00:00:00.000Z',
+          previousSourceKey: 'overview-source',
+        },
+      ]),
+    };
+
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={conflictingMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={conflictingMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={copy}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+
+    const conflicts = container.querySelector<HTMLDetailsElement>(
+      '[data-meeting-edit-conflicts]',
+    );
+    expect(conflicts?.textContent).toContain('Saved edits from previous notes');
+    expect(conflicts?.querySelector('img')).toBeNull();
+    expect(conflicts?.textContent).toContain('<img src=x onerror=alert(1)>');
+
+    await act(async () =>
+      conflicts
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label="Copy saved edit"]',
+        )
+        ?.click(),
+    );
+    expect(copy).toHaveBeenCalledWith(
+      '<img src=x onerror=alert(1)>Saved wording',
+    );
   });
 
   it('renders timestamps from canonical transcript timing fields', async () => {
@@ -284,25 +399,8 @@ describe('MeetingView progressive reveal', () => {
 
   it('keeps existing notes visible and offers recovery when regeneration fails', async () => {
     const invoke = vi.fn(async (channel: string) => {
-      if (channel === 'GENERATE_ANALYSIS_V2') {
-        return {
-          analysis: {
-            analysis_schema_version: 3,
-            overview: 'Fallback analysis',
-            topics: [],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'general',
-            quality: {
-              format_pass: false,
-              retry_count: 1,
-              fallback_used: true,
-              issues: ['All per-topic analysis passes failed'],
-            },
-          },
-          signals: {},
-        };
-      }
+      if (channel === 'GENERATE_MEETING_NOTES')
+        throw new Error('generation failed');
       return null;
     });
     Object.defineProperty(window, 'ipcRenderer', {
@@ -358,5 +456,150 @@ describe('MeetingView progressive reveal', () => {
         ?.click(),
     );
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('restores through the dedicated notes transaction instead of a broad save', async () => {
+    const fetchMeetings = vi.fn();
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'RESTORE_MEETING_NOTES') {
+        return { meetingId: analyzedMeeting.id, status: 'restored' };
+      }
+      throw new Error(`unexpected channel: ${channel}`);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={{
+            ...analyzedMeeting,
+            user_edits_json: JSON.stringify({
+              __previous_generated_notes__: {
+                original: 'Previous notes',
+                edited: '{"analysis_schema_version":3,"overview":"Previous"}',
+                edited_at: '2026-08-27T00:00:00.000Z',
+              },
+            }),
+          }}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={analyzedMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={fetchMeetings}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Restore previous generated notes"]',
+        )
+        ?.click(),
+    );
+
+    expect(invoke).toHaveBeenCalledWith('RESTORE_MEETING_NOTES', {
+      meetingId: analyzedMeeting.id,
+    });
+    expect(invoke).not.toHaveBeenCalledWith('SAVE_MEETING', expect.anything());
+    expect(fetchMeetings).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes published notes immediately without renderer-side analysis work', async () => {
+    const fetchMeetings = vi.fn();
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return {
+          meetingId: analyzedMeeting.id,
+          runId: 'notes-run',
+          status: 'published',
+        };
+      }
+      if (channel === 'GET_MEETING') return analyzedMeeting;
+      throw new Error(`unexpected channel: ${channel}`);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+
+    const regenerableMeeting: Meeting = {
+      ...analyzedMeeting,
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+        evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+        validationProof: {
+          gateVersion: 'canonical_integrity_v1',
+          validatedAt: analyzedMeeting.transcript_validated_at,
+        },
+      }),
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [
+          {
+            speaker: 'Me',
+            text: 'The transcript is ready for regeneration.',
+            startTime: 0,
+            endTime: 2,
+          },
+        ],
+      }),
+    };
+
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={regenerableMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={regenerableMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={fetchMeetings}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+
+    const regenerate = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Regenerate Enhanced Notes"]',
+    );
+    await act(async () => regenerate?.click());
+
+    expect(invoke).toHaveBeenCalledWith('GENERATE_MEETING_NOTES', {
+      meetingId: analyzedMeeting.id,
+      requestId: expect.any(String),
+      template: 'auto',
+      reason: 'manual',
+    });
+    expect(invoke).toHaveBeenCalledWith('GET_MEETING', analyzedMeeting.id);
+    expect(fetchMeetings).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_TITLE',
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith('SAVE_MEETING', expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      'EXTRACT_AND_PROCESS_ENTITIES',
+      expect.anything(),
+    );
   });
 });

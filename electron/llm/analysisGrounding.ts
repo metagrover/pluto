@@ -630,7 +630,7 @@ const pushCategory = (
 const POSITIVE_OUTCOME_SIGNAL =
   /\b(?:prais(?:e|ed|ing)|recogniz(?:e|ed|ing)|kudos|compliment(?:ed|s)?|great job|excellent work|impressed|delivered|shipped|launched|released|completed|finished|went live|hit (?:the )?(?:target|milestone|goal)|exceeded (?:the )?(?:target|goal)|resolved (?:the )?blocker|revenue|bookings?)\b|\b(?:closed|won|signed)\b.{0,60}\b(?:deal|account|contract|renewal|sale|customer)\b/i;
 
-const groundRecentWin = (
+export const groundRecentWin = (
   recentWin: RecentWinV3 | undefined,
   transcript: string,
   options: AnalysisGroundingOptions,
@@ -659,6 +659,68 @@ const groundRecentWin = (
     return undefined;
   }
   return { ...recentWin, evidence: resolved.evidence };
+};
+
+/** Field/polarity checks for a claim already reviewed against exact canonical
+ * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
+ * Never select this path from persisted metadata or a model confidence flag. */
+export const groundSourceReviewedItem = (
+  item: {
+    text: string;
+    kind: 'action' | 'decision';
+    owner: string | null;
+    due: string | null;
+  },
+  resolved: ResolvedTranscriptEvidence,
+): { text: string; owner: string | null; due: string | null } | null => {
+  const evidence = resolved.evidence;
+  const conditional =
+    /\b(?:if|unless|until|once|after|when|pending|subject to|provided)\b/i;
+  const numbers = (value: string): string[] =>
+    value.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
+  if (
+    !hasMatchingScopedPolarity(item.text, evidence) ||
+    hasLexicalContradiction(item.text, evidence) ||
+    numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
+    (conditional.test(evidence) && !conditional.test(item.text)) ||
+    isUnacceptedRequest(evidence) ||
+    (/\b(?:may|might|could|should|maybe|perhaps)\b/i.test(evidence) &&
+      !hasExplicitResolutionCue(evidence)) ||
+    (/\bif\b/i.test(evidence) &&
+      /\bi can\b/i.test(evidence) &&
+      !/\b(?:agreed|yes|will|commit)\b/i.test(evidence))
+  )
+    return null;
+  const ownership =
+    item.kind === 'action'
+      ? resolveActionAssignee(item.owner ?? undefined, resolved)
+      : null;
+  const owner =
+    item.kind === 'action'
+      ? (ownership?.assignee ?? null)
+      : item.owner &&
+          settledFieldSupportedByTurn(item.owner, resolved, 'decision')
+        ? item.owner
+        : null;
+  const due =
+    item.due &&
+    isSettledDueValue(item.due) &&
+    fieldSupportedBySource(item.due, evidence) &&
+    !fieldExplicitlySuperseded(item.due, evidence) &&
+    new RegExp(
+      `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?${item.due.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      'i',
+    ).test(evidence)
+      ? item.due
+      : null;
+  return {
+    text:
+      item.kind === 'action'
+        ? canonicalizeActionText(item.text, owner ?? undefined)
+        : item.text,
+    owner,
+    due,
+  };
 };
 
 export const groundAnalysisDocument = (

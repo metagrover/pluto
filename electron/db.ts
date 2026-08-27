@@ -28,6 +28,21 @@ import {
   getCommitmentState,
   mergeCommitmentReview,
 } from '../src/utils/actionCommitment';
+import {
+  getAnalysisEditBlocks,
+  parseAnalysisDocumentV3Json,
+  parseAnalysisEditConflictsJson,
+  parseUserEditsJson,
+} from '../src/utils/analysisDocument';
+import {
+  type PreservedEditConflict,
+  rebaseMeetingNotesEdits,
+} from '../src/utils/meetingNotesEditRebase';
+import {
+  ANALYSIS_SNAPSHOT_PATH,
+  createAnalysisSnapshot,
+  restoreAnalysisSnapshot,
+} from '../src/utils/meetingNotesHistory';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -42,6 +57,9 @@ import type {
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
+import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
+import type { AnalysisDocumentV3 } from './llm/analysisTypes';
+import { createNotesSource } from './llm/meetingNotesSource';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { createSecureSettingsManager } from './secureSettings';
 
@@ -123,6 +141,7 @@ export interface PersistedMeeting {
   end_reason?: string | null;
   mid_json?: string | null;
   user_edits_json?: string | null;
+  analysis_edit_conflicts_json?: string | null;
   transcript_status?: TranscriptLifecycleStatus | null;
   transcript_integrity_json?: string | null;
   system_audio_path?: string | null;
@@ -248,6 +267,8 @@ const initDb = () => {
         finalization_error_category TEXT,
         downstream_processing_json TEXT,
         capture_journal_generation TEXT,
+        user_edits_json TEXT,
+        analysis_edit_conflicts_json TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -591,6 +612,14 @@ const initDb = () => {
     if (!meetingColumns.some((col) => col.name === 'user_edits_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN user_edits_json TEXT');
       console.log('[DB] Added meetings.user_edits_json column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'analysis_edit_conflicts_json')
+    ) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN analysis_edit_conflicts_json TEXT',
+      );
+      console.log('[DB] Added meetings.analysis_edit_conflicts_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'follow_up_drafts_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN follow_up_drafts_json TEXT');
@@ -1670,6 +1699,7 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.is_favorite ? 1 : 0,
     meeting.end_reason || 'manual',
     meeting.user_edits_json || null,
+    meeting.analysis_edit_conflicts_json || null,
     meeting.transcript_status || 'provisional',
     meeting.transcript_integrity_json || null,
     meeting.system_audio_path || null,
@@ -2667,6 +2697,369 @@ export const updateMeetingAnalysisRunStatus = (input: {
   return result.changes === 1;
 };
 
+const hashMeetingAnalysisValue = (value: string | null | undefined): string =>
+  createHash('sha256')
+    .update(value ?? '', 'utf8')
+    .digest('hex');
+
+export type MeetingAnalysisPublicationRevisions = {
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+};
+
+const meetingEditConflictKey = (conflict: PreservedEditConflict): string =>
+  JSON.stringify([
+    conflict.path,
+    conflict.original,
+    conflict.edited,
+    conflict.edited_at,
+    conflict.previousSourceKey,
+  ]);
+
+const mergeMeetingEditConflicts = (
+  existing: PreservedEditConflict[],
+  next: PreservedEditConflict[],
+): PreservedEditConflict[] => {
+  const seen = new Set<string>();
+  return [...existing, ...next].filter((conflict) => {
+    const key = meetingEditConflictKey(conflict);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+/**
+ * Derives the exact persisted inputs a notes run is allowed to publish against.
+ * Invalid or empty transcript payloads are intentionally ineligible instead of
+ * being represented by a synthetic revision.
+ */
+export const getMeetingAnalysisPublicationRevisions = (
+  meeting: PersistedMeeting | null | undefined,
+): MeetingAnalysisPublicationRevisions | null => {
+  if (!meeting?.transcript_json) return null;
+  try {
+    const source = createNotesSource(meeting.transcript_json);
+    const partialLease = readDownstreamProcessingLease(
+      meeting.downstream_processing_json,
+    );
+    const eligibilityRevision = hashMeetingAnalysisValue(
+      JSON.stringify({
+        transcriptStatus: meeting.transcript_status ?? null,
+        transcriptIntegrityJson: meeting.transcript_integrity_json ?? null,
+        finalizationStatus: meeting.finalization_status ?? null,
+        captureJournalGeneration: meeting.capture_journal_generation ?? null,
+        partialCaptureAuthorization:
+          meeting.transcript_status === 'needs_attention' &&
+          partialLease?.schemaVersion === 2
+            ? partialLease.source
+            : null,
+      }),
+    );
+    return {
+      sourceRevision: source.revision,
+      eligibilityRevision,
+      userNotesHash: hashMeetingAnalysisValue(meeting.user_notes),
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Restores the persisted generated-notes snapshot without accepting a stale
+ * renderer meeting object. The transaction changes only analysis-owned fields.
+ */
+export const restoreMeetingNotesSnapshot = (
+  meetingId: string | number,
+): boolean =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const restored = restoreAnalysisSnapshot(current);
+    if (!restored) return false;
+    const analysis = parseAnalysisDocumentV3Json(restored.analysis_json);
+    const metadata = analysis?.generation_metadata;
+    const quality = analysis?.quality;
+    const result = db
+      .prepare(
+        `UPDATE meetings
+         SET enhanced_notes = ?,
+             analysis_json = ?,
+             analysis_schema_version = ?,
+             analysis_format_pass = ?,
+             analysis_retry_count = ?,
+             analysis_fallback_used = ?,
+             analysis_provider = ?,
+             analysis_model = ?,
+             analysis_generation_path = ?,
+             analysis_prompt_version = ?,
+             analysis_generated_at = ?,
+             analysis_error_categories_json = ?,
+             user_edits_json = ?,
+             analysis_edit_conflicts_json = ?
+         WHERE id = ?`,
+      )
+      .run(
+        restored.enhanced_notes ?? null,
+        restored.analysis_json ?? null,
+        restored.analysis_schema_version ?? null,
+        quality?.format_pass === undefined ? null : Number(quality.format_pass),
+        quality?.retry_count ?? null,
+        quality?.fallback_used === undefined
+          ? null
+          : Number(quality.fallback_used),
+        metadata?.provider ?? null,
+        metadata?.model ?? null,
+        metadata?.generation_path ?? null,
+        metadata?.prompt_version ?? null,
+        metadata?.generated_at ?? null,
+        metadata ? JSON.stringify(metadata.error_categories) : null,
+        restored.user_edits_json ?? null,
+        restored.analysis_edit_conflicts_json ?? null,
+        String(meetingId),
+      );
+    if (result.changes !== 1) return false;
+    db.prepare(
+      `UPDATE meeting_analysis_runs SET notes_status = 'cancelled', secondary_status = 'superseded', stage = 'restored', error_code = 'notes_superseded', updated_at = ? WHERE meeting_id = ?`,
+    ).run(new Date().toISOString(), String(meetingId));
+    const updated = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (updated) refreshMeetingFts(updated);
+    return true;
+  })();
+
+export const publishMeetingNotesIfCurrent = (input: {
+  meetingId: string | number;
+  runId: string;
+  inputRevision: string;
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+  analysis: AnalysisDocumentV3;
+}): boolean => {
+  const analysisJson = JSON.stringify(input.analysis);
+  if (typeof analysisJson !== 'string') {
+    throw new Error('invalid_meeting_analysis_document');
+  }
+
+  const metadata = input.analysis.generation_metadata;
+  const enhancedNotes = analysisDocumentV3ToMarkdown(input.analysis);
+  return db.transaction(() => {
+    const meetingId = String(input.meetingId);
+    const current = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+
+    const currentRevisions = getMeetingAnalysisPublicationRevisions(current);
+    if (
+      !currentRevisions ||
+      currentRevisions.sourceRevision !== input.sourceRevision ||
+      currentRevisions.eligibilityRevision !== input.eligibilityRevision ||
+      currentRevisions.userNotesHash !== input.userNotesHash
+    ) {
+      return false;
+    }
+
+    const run = db
+      .prepare(
+        `SELECT * FROM meeting_analysis_runs
+         WHERE meeting_id = ?
+           AND run_id = ?
+           AND input_revision = ?
+           AND source_revision = ?
+           AND eligibility_revision = ?
+           AND user_notes_hash = ?
+           AND notes_status = 'running'`,
+      )
+      .get(
+        meetingId,
+        input.runId,
+        input.inputRevision,
+        input.sourceRevision,
+        input.eligibilityRevision,
+        input.userNotesHash,
+      ) as MeetingAnalysisRun | undefined;
+    if (!run) return false;
+
+    const currentEdits = parseUserEditsJson(current.user_edits_json);
+    delete currentEdits[ANALYSIS_SNAPSHOT_PATH];
+    const rebased = rebaseMeetingNotesEdits({
+      edits: currentEdits,
+      previousBlocks: getAnalysisEditBlocks(
+        parseAnalysisDocumentV3Json(current.analysis_json),
+      ),
+      nextBlocks: getAnalysisEditBlocks(input.analysis),
+    });
+    const mergedConflicts = mergeMeetingEditConflicts(
+      parseAnalysisEditConflictsJson(current.analysis_edit_conflicts_json),
+      rebased.conflicts,
+    );
+    if (current.analysis_json || current.enhanced_notes)
+      rebased.edits[ANALYSIS_SNAPSHOT_PATH] =
+        createAnalysisSnapshot(current)[ANALYSIS_SNAPSHOT_PATH];
+
+    const genericTitle =
+      !current.title?.trim() ||
+      ['New Meeting', 'Meeting', 'Meeting (Mic Only)'].includes(current.title);
+    const nextTitle = genericTitle
+      ? (input.analysis.topics
+          .map((topic) => topic.title.trim())
+          .find((title) => title.length > 0 && title.length <= 120) ??
+        current.title)
+      : current.title;
+
+    const meetingUpdate = db
+      .prepare(
+        `UPDATE meetings
+         SET title = ?, enhanced_notes = ?,
+             analysis_json = ?,
+             analysis_schema_version = ?,
+             analysis_format_pass = 1,
+             analysis_retry_count = ?,
+             analysis_fallback_used = 0,
+             analysis_provider = ?,
+             analysis_model = ?,
+             analysis_generation_path = ?,
+             analysis_prompt_version = ?,
+             analysis_generated_at = ?,
+             analysis_error_categories_json = ?,
+             user_edits_json = ?,
+             analysis_edit_conflicts_json = ?
+         WHERE id = ?`,
+      )
+      .run(
+        nextTitle,
+        enhancedNotes,
+        analysisJson,
+        input.analysis.analysis_schema_version,
+        input.analysis.quality.retry_count,
+        metadata?.provider ?? null,
+        metadata?.model ?? null,
+        metadata?.generation_path ?? null,
+        metadata?.prompt_version ?? null,
+        metadata?.generated_at ?? null,
+        JSON.stringify(metadata?.error_categories ?? []),
+        JSON.stringify(rebased.edits),
+        JSON.stringify(mergedConflicts),
+        meetingId,
+      );
+    if (meetingUpdate.changes !== 1) {
+      throw new Error('meeting_analysis_publication_update_failed');
+    }
+
+    const runUpdate = db
+      .prepare(
+        `UPDATE meeting_analysis_runs
+         SET notes_status = 'published', stage = 'published', updated_at = ?
+         WHERE meeting_id = ? AND run_id = ? AND notes_status = 'running'`,
+      )
+      .run(new Date().toISOString(), meetingId, input.runId);
+    if (runUpdate.changes !== 1) {
+      throw new Error('meeting_analysis_publication_run_update_failed');
+    }
+
+    const updated = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(meetingId) as PersistedMeeting | undefined;
+    if (!updated) throw new Error('meeting_analysis_publication_missing');
+    refreshMeetingFts(updated);
+    return true;
+  })();
+};
+
+/** Invoke once at application startup, before accepting notes requests. */
+export const recoverInterruptedMeetingAnalysisRuns = (): void => {
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE meeting_analysis_runs SET notes_status = 'failed', stage = 'interrupted', error_code = 'notes_interrupted', updated_at = ? WHERE notes_status = 'running'`,
+    ).run(now);
+    db.prepare(
+      `UPDATE meeting_analysis_runs SET secondary_status = 'failed', stage = 'secondary_interrupted', error_code = 'secondary_interrupted', updated_at = ? WHERE notes_status = 'published' AND secondary_status IN ('pending', 'running')`,
+    ).run(now);
+  })();
+};
+
+export const isMeetingAnalysisRunCurrent = (input: {
+  meetingId: string | number;
+  runId: string;
+  inputRevision: string;
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+  requirePublished?: boolean;
+}): boolean => {
+  const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+  const revisions = getMeetingAnalysisPublicationRevisions(current);
+  if (
+    !revisions ||
+    revisions.sourceRevision !== input.sourceRevision ||
+    revisions.eligibilityRevision !== input.eligibilityRevision ||
+    revisions.userNotesHash !== input.userNotesHash
+  ) {
+    return false;
+  }
+  const run = getMeetingAnalysisRun(input.meetingId);
+  return Boolean(
+    run &&
+      run.run_id === input.runId &&
+      run.input_revision === input.inputRevision &&
+      run.source_revision === input.sourceRevision &&
+      run.eligibility_revision === input.eligibilityRevision &&
+      run.user_notes_hash === input.userNotesHash &&
+      (!input.requirePublished || run.notes_status === 'published'),
+  );
+};
+
+export const updateMeetingAnalysisRunStatusIfCurrent = (input: {
+  meetingId: string | number;
+  runId: string;
+  inputRevision: string;
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+  notesStatus: MeetingAnalysisRunStatus;
+  secondaryStatus: MeetingAnalysisSecondaryStatus;
+  stage: string;
+  errorCode?: string | null;
+}): boolean => {
+  if (!isMeetingAnalysisRunCurrent(input)) return false;
+  return updateMeetingAnalysisRunStatus(input);
+};
+
+export const saveMeetingAnalysisSecondaryFieldsIfCurrent = (input: {
+  meetingId: string | number;
+  runId: string;
+  inputRevision: string;
+  sourceRevision: string;
+  eligibilityRevision: string;
+  userNotesHash: string;
+  valueSignalsJson?: string | null;
+  midJson?: string | null;
+}): boolean =>
+  db.transaction(() => {
+    if (!isMeetingAnalysisRunCurrent({ ...input, requirePublished: true })) {
+      return false;
+    }
+    const updates: string[] = [];
+    const values: Array<string | null> = [];
+    if (input.valueSignalsJson !== undefined) {
+      updates.push('value_signals_json = ?');
+      values.push(input.valueSignalsJson);
+    }
+    if (input.midJson !== undefined) {
+      updates.push('mid_json = ?');
+      values.push(input.midJson);
+    }
+    if (updates.length === 0) return true;
+    const result = db
+      .prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE id = ?`)
+      .run(...values, String(input.meetingId));
+    return result.changes === 1;
+  })();
+
 export const getAnalysisQualityStats = () => {
   const rows = db
     .prepare(`
@@ -2777,6 +3170,12 @@ export const deleteMeeting = (id: string | number) => {
   // 4. Delete the meeting itself
   // meeting_entities will be deleted by CASCADE
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
+
+  if (result.changes === 1) {
+    db.prepare('DELETE FROM meeting_analysis_runs WHERE meeting_id = ?').run(
+      safeId,
+    );
+  }
 
   console.log(`[DB] Deleted meeting: ${safeId}`);
 

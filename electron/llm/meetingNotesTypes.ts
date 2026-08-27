@@ -80,6 +80,7 @@ export type NotesRequest = {
   outputTokens: number;
   contextTokens: number;
   signal?: AbortSignal;
+  sourceSpans?: SourceSpan[];
 };
 
 export type GenerateNotesText = (request: NotesRequest) => Promise<string>;
@@ -99,6 +100,10 @@ export type GenerateMeetingNotesInput = {
   model: string;
   contextTokens: number;
   signal?: AbortSignal;
+  onRepair?: (task: NotesTask) => void;
+  onStage?: (task: NotesTask) => void;
+  stageCache?: import('./meetingNotesStageCache').NotesStageCache;
+  cacheKey?: string;
 };
 
 export class MeetingNotesError extends Error {

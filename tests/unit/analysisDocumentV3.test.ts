@@ -59,6 +59,23 @@ const validV3: AnalysisDocumentV3 = {
   },
 };
 
+it('round-trips bounded hierarchy measurements and rejects malformed counters', () => {
+  const hierarchy = { depth: 3, nodes: 15, max_depth: 8, max_nodes: 128 };
+  const doc = {
+    ...validV3,
+    generation_metadata: { ...validV3.generation_metadata, hierarchy },
+  };
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toEqual(hierarchy);
+  doc.generation_metadata.hierarchy.nodes = -1;
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toBeUndefined();
+});
+
 describe('parseAnalysisDocumentV3', () => {
   it('preserves a structured recent win with verbatim evidence', () => {
     const result = parseAnalysisDocumentV3(

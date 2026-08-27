@@ -1,0 +1,243 @@
+{
+  "fixture": "synthetic-local-provider-failure",
+  "seed": 41,
+  "model": "qwen3.5:9b",
+  "failure": "notes_writer_invalid",
+  "writerCalls": [
+    {
+      "meetingType": "team_sync",
+      "overview": {
+        "text": "The team discussed an integration checklist that was retracted due to incomplete data, a potential future migration not yet committed, and a FAQ publication plan pending final audit.",
+        "sources": [
+          { "segment": 0, "start": 0, "end": 55 },
+          { "segment": 1, "start": 0, "end": 48 },
+          { "segment": 2, "start": 0, "end": 84 },
+          { "segment": 3, "start": 0, "end": 62 },
+          { "segment": 4, "start": 0, "end": 108 },
+          { "segment": 5, "start": 0, "end": 77 }
+        ]
+      },
+      "recentWin": { "win": null, "impact": null },
+      "sections": [
+        {
+          "id": "s0",
+          "title": {
+            "text": "Integration Checklist Status",
+            "sources": [
+              { "segment": 0, "start": 0, "end": 55 },
+              { "segment": 4, "start": 0, "end": 108 }
+            ]
+          },
+          "items": [
+            {
+              "kind": "action",
+              "text": "Ava will send the integration checklist to Ben by Friday.",
+              "sources": [{ "segment": 0, "start": 0, "end": 55 }],
+              "owner": "Ava",
+              "due": "Friday"
+            },
+            {
+              "kind": "point",
+              "text": "Ava takes back the earlier checklist commitment because the source data is incomplete.",
+              "sources": [{ "segment": 4, "start": 0, "end": 108 }],
+              "owner": "Ava",
+              "due": null
+            },
+            {
+              "kind": "point",
+              "text": "No one should send the checklist Friday due to incomplete source data.",
+              "sources": [{ "segment": 4, "start": 0, "end": 108 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s1",
+          "title": {
+            "text": "Announcement Drafting",
+            "sources": [{ "segment": 1, "start": 0, "end": 48 }]
+          },
+          "items": [
+            {
+              "kind": "point",
+              "text": "Ben can draft the announcement if legal approves.",
+              "sources": [{ "segment": 1, "start": 0, "end": 48 }],
+              "owner": "Ben",
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "title": {
+            "text": "Future Migration Exploration",
+            "sources": [{ "segment": 2, "start": 0, "end": 84 }]
+          },
+          "items": [
+            {
+              "kind": "point",
+              "text": "The team may explore a migration next quarter.",
+              "sources": [{ "segment": 2, "start": 0, "end": 84 }],
+              "owner": null,
+              "due": null
+            },
+            {
+              "kind": "point",
+              "text": "Migration exploration is not a current commitment.",
+              "sources": [{ "segment": 2, "start": 0, "end": 84 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "title": {
+            "text": "Research Discussion",
+            "sources": [{ "segment": 3, "start": 0, "end": 62 }]
+          },
+          "items": [
+            {
+              "kind": "point",
+              "text": "The research discussion has no assignments or decisions today.",
+              "sources": [{ "segment": 3, "start": 0, "end": 62 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "title": {
+            "text": "FAQ Publication Plan",
+            "sources": [{ "segment": 5, "start": 0, "end": 77 }]
+          },
+          "items": [
+            {
+              "kind": "action",
+              "text": "Dana will publish the reviewed FAQ to Elena by Wednesday after the final audit.",
+              "sources": [{ "segment": 5, "start": 0, "end": 77 }],
+              "owner": "Dana",
+              "due": "Wednesday"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "meetingType": "team_sync",
+      "overview": {
+        "text": "The team clarified that the integration checklist is not being sent Friday due to incomplete data, legal approval is required for the announcement draft, a migration may be explored next quarter but is not committed, and the reviewed FAQ will be published after the final audit.",
+        "sources": [
+          { "segment": 0, "start": 0, "end": 55 },
+          { "segment": 1, "start": 0, "end": 48 },
+          { "segment": 2, "start": 0, "end": 84 },
+          { "segment": 3, "start": 0, "end": 62 },
+          { "segment": 4, "start": 0, "end": 108 },
+          { "segment": 5, "start": 0, "end": 77 }
+        ]
+      },
+      "recentWin": { "win": null, "impact": null },
+      "sections": [
+        {
+          "id": "s0",
+          "title": {
+            "text": "Integration Checklist Status",
+            "sources": [
+              { "segment": 0, "start": 0, "end": 55 },
+              { "segment": 4, "start": 0, "end": 108 }
+            ]
+          },
+          "items": [
+            {
+              "kind": "action",
+              "text": "Ava will send the integration checklist to Ben by Friday.",
+              "sources": [{ "segment": 0, "start": 0, "end": 55 }],
+              "owner": "Ava",
+              "due": "Friday"
+            },
+            {
+              "kind": "action",
+              "text": "No one should send the checklist Friday because the source data is incomplete.",
+              "sources": [{ "segment": 4, "start": 0, "end": 108 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s1",
+          "title": {
+            "text": "Announcement Drafting",
+            "sources": [{ "segment": 1, "start": 0, "end": 48 }]
+          },
+          "items": [
+            {
+              "kind": "action",
+              "text": "Ben can draft the announcement if legal approves.",
+              "sources": [{ "segment": 1, "start": 0, "end": 48 }],
+              "owner": "Ben",
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s2",
+          "title": {
+            "text": "Migration Exploration",
+            "sources": [{ "segment": 2, "start": 0, "end": 84 }]
+          },
+          "items": [
+            {
+              "kind": "point",
+              "text": "The team may explore a migration next quarter.",
+              "sources": [{ "segment": 2, "start": 0, "end": 84 }],
+              "owner": null,
+              "due": null
+            },
+            {
+              "kind": "point",
+              "text": "Migration is not a current commitment.",
+              "sources": [{ "segment": 2, "start": 0, "end": 84 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s3",
+          "title": {
+            "text": "Research Discussion",
+            "sources": [{ "segment": 3, "start": 0, "end": 62 }]
+          },
+          "items": [
+            {
+              "kind": "point",
+              "text": "The research discussion has no assignments or decisions today.",
+              "sources": [{ "segment": 3, "start": 0, "end": 62 }],
+              "owner": null,
+              "due": null
+            }
+          ]
+        },
+        {
+          "id": "s4",
+          "title": {
+            "text": "FAQ Publication",
+            "sources": [{ "segment": 5, "start": 0, "end": 77 }]
+          },
+          "items": [
+            {
+              "kind": "action",
+              "text": "Dana will publish the reviewed FAQ to Elena by Wednesday after the final audit.",
+              "sources": [{ "segment": 5, "start": 0, "end": 77 }],
+              "owner": "Dana",
+              "due": "Wednesday"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

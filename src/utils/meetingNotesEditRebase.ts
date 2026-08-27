@@ -17,6 +17,11 @@ export type PreservedEditConflict = {
 const normalizeNoOpEdit = (value: string): string =>
   value.replace(/\r\n?/g, '\n').trim();
 
+export const isNoOpMeetingNotesEdit = (
+  original: string,
+  edited: string,
+): boolean => normalizeNoOpEdit(original) === normalizeNoOpEdit(edited);
+
 export const rebaseMeetingNotesEdits = ({
   edits,
   previousBlocks,
@@ -32,12 +37,14 @@ export const rebaseMeetingNotesEdits = ({
   const rebased: UserEditsMap = {};
   const conflicts: PreservedEditConflict[] = [];
   for (const [path, edit] of Object.entries(edits)) {
-    if (normalizeNoOpEdit(edit.original) === normalizeNoOpEdit(edit.edited)) {
+    if (isNoOpMeetingNotesEdit(edit.original, edit.edited)) {
       continue;
     }
-    const previous = previousBlocks.find(
+    const matchingPreviousBlocks = previousBlocks.filter(
       (block) => block.path === path && block.text === edit.original,
     );
+    const previous =
+      matchingPreviousBlocks.length === 1 ? matchingPreviousBlocks[0] : null;
     const candidates = previous
       ? nextBlocks.filter(
           (block) =>
