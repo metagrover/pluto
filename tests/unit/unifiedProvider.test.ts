@@ -23,6 +23,7 @@ vi.mock('@google/generative-ai', () => {
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
+  STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
   calculateOllamaContextBudget,
   deduplicateExtractedItems,
@@ -109,6 +110,10 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('versions commitment ownership reconciliation as notes-v9', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v9');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     geminiGetGenerativeModelMock.mockReset();
@@ -1833,6 +1838,7 @@ describe('UnifiedLLMProvider', () => {
     expect(analysis.all_action_items).toEqual([
       {
         text: 'Send rollout email',
+        assignee: 'Sarah',
         evidence: "I'll send the rollout email.",
         topic: 'API migration',
       },

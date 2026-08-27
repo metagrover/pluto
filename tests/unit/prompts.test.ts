@@ -146,6 +146,10 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).toContain('name the distinctive system');
       expect(prompt).toContain('exact speaker label');
       expect(prompt).toContain(
+        "set assignee to that evidence turn's exact speaker label",
+      );
+      expect(prompt).toContain('Never use "team" as a fallback owner');
+      expect(prompt).toContain(
         "Reuse the evidence clause's distinctive nouns and verbs",
       );
       expect(prompt).toContain(

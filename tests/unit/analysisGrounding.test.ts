@@ -56,6 +56,141 @@ const document = (): AnalysisDocumentV3 => ({
 });
 
 describe('analysis grounding', () => {
+  it('derives a first-person action owner from the evidence speaker and removes team framing', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will set up those filters',
+        evidence: "I'll set up those filters.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Ayush: I'll set up those filters.",
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Set up those filters',
+        assignee: 'Ayush',
+        evidence: "I'll set up those filters.",
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('keeps a named third-person assignment while removing the owner from action text', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Nira will prepare the launch checklist',
+        assignee: 'Nira',
+        evidence: 'Nira will prepare the launch checklist.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: Nira will prepare the launch checklist.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Prepare the launch checklist',
+        assignee: 'Nira',
+        evidence: 'Nira will prepare the launch checklist.',
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('retains collective ownership only for an explicit group commitment', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will publish the rollout notes',
+        assignee: 'Team',
+        evidence: 'We will publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We will publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Publish the rollout notes',
+        assignee: 'Group',
+        evidence: 'We will publish the rollout notes.',
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('canonicalizes contracted first-person action framing', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: "I'll speak with Adam",
+        evidence: "I'll speak with Adam.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Deepak: I'll speak with Adam.",
+    );
+
+    expect(result.analysis.all_action_items[0]).toMatchObject({
+      text: 'Speak with Adam',
+      assignee: 'Deepak',
+      evidence: "I'll speak with Adam.",
+    });
+  });
+
+  it('replaces a claimed individual owner when the evidence commits collectively', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: "We'll publish the rollout notes",
+        assignee: 'Milo',
+        evidence: 'We will publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We will publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items[0]).toMatchObject({
+      text: 'Publish the rollout notes',
+      assignee: 'Group',
+    });
+    expect(result.errorCategories).toContain('unsupported_action_item_owner');
+  });
+
+  it('rejects generic team action prose backed only by a suggestion', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will publish the rollout notes',
+        evidence: 'We should publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We should publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
+  });
+
   it('keeps a positive recent win only when its evidence is in the transcript', () => {
     const input = document();
     input.recent_win = {
@@ -693,6 +828,7 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_action_items).toEqual([
       {
         text: 'Prepare the checklist',
+        assignee: 'Milo',
         evidence: "I'll prepare the checklist.",
         topic: 'Synthetic rollout',
       },
@@ -795,7 +931,7 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_action_items).toHaveLength(1);
   });
 
-  it('does not assign a commitment to the speaker who only made the request', () => {
+  it('assigns an accepted request to the speaker who explicitly commits', () => {
     const input = document();
     input.topics[0].action_items = [
       {
@@ -815,11 +951,11 @@ describe('analysis grounding', () => {
     );
 
     expect(result.analysis.all_action_items).toHaveLength(1);
-    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+    expect(result.analysis.all_action_items[0].assignee).toBe('Milo');
     expect(result.errorCategories).toContain('unsupported_action_item_owner');
   });
 
-  it('does not assign the speaker when their turn names another owner', () => {
+  it('derives the named third-person owner instead of assigning the speaker', () => {
     const input = document();
     input.topics[0].action_items = [
       {
@@ -835,7 +971,8 @@ describe('analysis grounding', () => {
     );
 
     expect(result.analysis.all_action_items).toHaveLength(1);
-    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+    expect(result.analysis.all_action_items[0].assignee).toBe('Bob');
+    expect(result.errorCategories).toContain('unsupported_action_item_owner');
   });
 
   it('does not promote passive needed work with no owner to a commitment', () => {
