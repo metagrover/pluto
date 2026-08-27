@@ -1,4 +1,9 @@
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import type {
+  NotesAudit,
+  NotesContext,
+  NotesDraft,
+} from '../../electron/llm/meetingNotesTypes';
 
 const segment = (speaker: string, text: string) => ({ speaker, text });
 
@@ -67,3 +72,55 @@ export const expectedCorrectedPropositions = {
 export const makeSyntheticNotesSource = (
   segments: ReadonlyArray<{ speaker: string; text: string }>,
 ) => createNotesSource(JSON.stringify({ segments }));
+
+export const makeNotesContext = (): NotesContext => ({
+  userNotes: '',
+  template: 'auto',
+  trustedUserTerms: [],
+  entityHints: [],
+});
+
+export const makeDirectNotesFixture = () => {
+  const text = 'I will send the outline.';
+  const source = makeSyntheticNotesSource([segment('Milo', text)]);
+  const span = { segment: 0, start: 0, end: text.length };
+  const draft: NotesDraft = {
+    meetingType: 'general',
+    overview: null,
+    sections: [
+      {
+        id: 's0',
+        title: {
+          id: 's0:title',
+          text: 'Outline',
+          sources: [span],
+        },
+        items: [
+          {
+            id: 's0:item:0',
+            kind: 'action',
+            text: 'Send the outline',
+            sources: [span],
+            owner: 'Milo',
+            due: null,
+          },
+        ],
+      },
+    ],
+  };
+  const audit: NotesAudit = {
+    changes: [],
+    verdicts: [
+      { target: 's0:title', status: 'supported', sources: [span] },
+      { target: 's0:item:0', status: 'supported', sources: [span] },
+    ],
+    dispositions: [],
+    terminology: [],
+  };
+  return {
+    source,
+    draft,
+    audit,
+    expectedAction: { text: 'Send the outline', assignee: 'Milo' },
+  };
+};
