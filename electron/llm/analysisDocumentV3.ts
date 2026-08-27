@@ -15,6 +15,7 @@ import type {
   DecisionV3,
   MeetingTerminologyArtifactV1,
   MeetingType,
+  NotesSourceProvenance,
   RecentWinV3,
   TopicPoint,
   TopicSection,
@@ -113,6 +114,73 @@ const parseTerminologyArtifact = (
   };
 };
 
+const parseSourceProvenance = (
+  raw: unknown,
+): NotesSourceProvenance | undefined => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (
+    record.schema_version !== 1 ||
+    !asString(record.source_revision) ||
+    !record.blocks ||
+    typeof record.blocks !== 'object' ||
+    Array.isArray(record.blocks)
+  ) {
+    return undefined;
+  }
+  const blocks = Object.entries(
+    record.blocks as Record<string, unknown>,
+  ).flatMap(([path, rawBlock]) => {
+    if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock)) {
+      return [];
+    }
+    const block = rawBlock as Record<string, unknown>;
+    if (
+      !asString(block.id) ||
+      !Array.isArray(block.sources) ||
+      block.sources.length === 0
+    ) {
+      return [];
+    }
+    const sources = block.sources.flatMap((rawSource) => {
+      if (
+        !rawSource ||
+        typeof rawSource !== 'object' ||
+        Array.isArray(rawSource)
+      ) {
+        return [];
+      }
+      const source = rawSource as Record<string, unknown>;
+      if (
+        !Number.isInteger(source.segment) ||
+        !Number.isInteger(source.start) ||
+        !Number.isInteger(source.end) ||
+        (source.start as number) < 0 ||
+        (source.end as number) <= (source.start as number)
+      ) {
+        return [];
+      }
+      return [
+        {
+          segment: source.segment as number,
+          start: source.start as number,
+          end: source.end as number,
+        },
+      ];
+    });
+    return sources.length === block.sources.length
+      ? [[path, { id: asString(block.id), sources }] as const]
+      : [];
+  });
+  return blocks.length === Object.keys(record.blocks).length
+    ? {
+        schema_version: 1,
+        source_revision: asString(record.source_revision),
+        blocks: Object.fromEntries(blocks),
+      }
+    : undefined;
+};
+
 const parseGenerationMetadata = (
   raw: unknown,
 ): AnalysisGenerationMetadata | undefined => {
@@ -134,6 +202,7 @@ const parseGenerationMetadata = (
   }
 
   const terminology = parseTerminologyArtifact(record.terminology);
+  const sourceProvenance = parseSourceProvenance(record.source_provenance);
   const rawGenerationOptions =
     record.generation_options && typeof record.generation_options === 'object'
       ? (record.generation_options as Record<string, unknown>)
@@ -162,6 +231,20 @@ const parseGenerationMetadata = (
       ? { generation_options: generationOptions }
       : {}),
     ...(terminology ? { terminology } : {}),
+    ...(record.pipeline_version === 'writer-audit-v1'
+      ? { pipeline_version: 'writer-audit-v1' as const }
+      : {}),
+    ...(record.mode === 'direct' || record.mode === 'hierarchical'
+      ? { mode: record.mode }
+      : {}),
+    ...(record.audit_status === 'complete'
+      ? { audit_status: 'complete' as const }
+      : {}),
+    ...(Number.isSafeInteger(record.audit_change_count) &&
+    (record.audit_change_count as number) >= 0
+      ? { audit_change_count: record.audit_change_count as number }
+      : {}),
+    ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
   };
 };
 

@@ -142,6 +142,21 @@ export interface AnalysisGenerationMetadata {
       status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
     }>;
   };
+  pipeline_version?: 'writer-audit-v1';
+  mode?: 'direct' | 'hierarchical';
+  audit_status?: 'complete';
+  audit_change_count?: number;
+  source_provenance?: {
+    schema_version: 1;
+    source_revision: string;
+    blocks: Record<
+      string,
+      {
+        id: string;
+        sources: Array<{ segment: number; start: number; end: number }>;
+      }
+    >;
+  };
 }
 
 export interface AnalysisDocumentV3 {

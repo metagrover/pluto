@@ -77,6 +77,26 @@ export interface AnalysisQualityV3 {
   issues: string[];
 }
 
+export interface NotesSourceProvenance {
+  schema_version: 1;
+  source_revision: string;
+  blocks: Record<
+    string,
+    {
+      id: string;
+      sources: Array<{ segment: number; start: number; end: number }>;
+    }
+  >;
+}
+
+export interface NotesPipelineMetadata {
+  pipeline_version: 'writer-audit-v1';
+  mode: 'direct' | 'hierarchical';
+  audit_status: 'complete';
+  audit_change_count: number;
+  source_provenance: NotesSourceProvenance;
+}
+
 export interface AnalysisGenerationMetadata {
   provider: AnalysisProvider;
   model: string;
@@ -89,6 +109,11 @@ export interface AnalysisGenerationMetadata {
     seed?: number;
   };
   terminology?: MeetingTerminologyArtifactV1;
+  pipeline_version?: NotesPipelineMetadata['pipeline_version'];
+  mode?: NotesPipelineMetadata['mode'];
+  audit_status?: NotesPipelineMetadata['audit_status'];
+  audit_change_count?: number;
+  source_provenance?: NotesPipelineMetadata['source_provenance'];
 }
 
 export interface TopicPoint {
