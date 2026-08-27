@@ -1,0 +1,109 @@
+import type { AnalysisProvider, MeetingType } from './analysisTypes';
+
+export type SourceSpan = {
+  segment: number;
+  start: number;
+  end: number;
+};
+
+export type SourceSegment = {
+  index: number;
+  speaker: string | null;
+  text: string;
+};
+
+export type NotesSource = {
+  revision: string;
+  segments: readonly SourceSegment[];
+};
+
+export type SupportedText = {
+  id: string;
+  text: string;
+  sources: SourceSpan[];
+};
+
+export type NotesItem = SupportedText & {
+  kind: 'point' | 'action' | 'decision' | 'question';
+  owner: string | null;
+  due: string | null;
+};
+
+export type NotesSection = {
+  id: string;
+  title: SupportedText;
+  items: NotesItem[];
+};
+
+export type NotesDraft = {
+  meetingType: MeetingType;
+  overview: SupportedText | null;
+  sections: NotesSection[];
+  recentWin?: { win: SupportedText; impact: SupportedText };
+};
+
+export type AuditChange =
+  | { op: 'replace'; target: string; value: SupportedText | NotesItem }
+  | { op: 'remove'; target: string }
+  | { op: 'insert'; section: string; value: NotesItem }
+  | { op: 'insert_section'; value: NotesSection };
+
+export type AuditVerdict = {
+  target: string;
+  status: 'supported' | 'uncertain' | 'unsupported';
+  sources: SourceSpan[];
+};
+
+export type NotesAudit = {
+  changes: AuditChange[];
+  verdicts: AuditVerdict[];
+  dispositions: Array<{
+    target: string;
+    kind: 'deduplicated' | 'cancelled' | 'superseded';
+    replacementId: string | null;
+    sources: SourceSpan[];
+  }>;
+  terminology: Array<{
+    rawForms: string[];
+    preferredTerm: string | null;
+    segmentIndexes: number[];
+    confidence: 'high' | 'medium' | 'low';
+    signals: string[];
+  }>;
+};
+
+export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
+
+export type NotesRequest = {
+  task: NotesTask;
+  prompt: string;
+  outputTokens: number;
+  contextTokens: number;
+  signal?: AbortSignal;
+};
+
+export type GenerateNotesText = (request: NotesRequest) => Promise<string>;
+
+export type NotesContext = {
+  userNotes: string;
+  template: import('./prompts').MeetingNotesTemplate;
+  trustedUserTerms: string[];
+  entityHints: string[];
+};
+
+export type GenerateMeetingNotesInput = {
+  source: NotesSource;
+  context: NotesContext;
+  generate: GenerateNotesText;
+  provider: AnalysisProvider;
+  model: string;
+  contextTokens: number;
+  signal?: AbortSignal;
+};
+
+export class MeetingNotesError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = 'MeetingNotesError';
+  }
+}
