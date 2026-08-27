@@ -1,0 +1,383 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildSourceReconciliationPrompt,
+  parseReconciledSource,
+  reconciliationDraft,
+} from '../../electron/llm/meetingNotesReconciliation';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
+
+const fixture = () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      { speaker: 'Mira', text: 'I moved here in 2020 to be near my family.' },
+      {
+        speaker: 'Tao',
+        text: 'I will send the report by Friday if legal approves.',
+      },
+      { speaker: 'Mira', text: 'The decision is a staged rollout.' },
+      { speaker: 'Tao', text: 'How will we measure adoption?' },
+    ]),
+  );
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const raw = {
+    facts: [
+      { text: 'Mira moved in 2020 to be near family.', sources: [spans[0]!] },
+    ],
+    actions: [
+      {
+        text: 'Tao will send the report by Friday if legal approves.',
+        owner: 'Tao',
+        due: 'Friday',
+        sources: [spans[1]!],
+      },
+    ],
+    decisions: [
+      {
+        text: 'The decision is a staged rollout.',
+        owner: 'Mira',
+        sources: [spans[2]!],
+      },
+    ],
+    questions: [
+      { text: 'How will we measure adoption?', sources: [spans[3]!] },
+    ],
+  };
+  return { source, spans, raw };
+};
+
+const empty = () => ({ facts: [], actions: [], decisions: [], questions: [] });
+
+describe('source reconciliation contract', () => {
+  it('preserves each category, original content, explicit metadata and exact spans', () => {
+    const { source, raw } = fixture();
+    const result = parseReconciledSource(JSON.stringify(raw), source);
+    expect(result).toMatchObject(raw);
+    expect(result.actions[0]!.text).toBe(raw.actions[0]!.text);
+    expect(Object.keys(result)).toEqual(Object.keys(raw));
+    expect(Object.keys(result.facts[0]!)).not.toContain('owner');
+    expect(Object.keys(result.decisions[0]!)).not.toContain('due');
+  });
+
+  it('assigns unique deterministic ids without trusting model ids', () => {
+    const { source, raw } = fixture();
+    const withIds = Object.fromEntries(
+      Object.entries(raw).map(([key, items]) => [
+        key,
+        items.map((item) => ({ ...item, id: '__proto__' })),
+      ]),
+    );
+    const first = parseReconciledSource(JSON.stringify(withIds), source);
+    const second = parseReconciledSource(JSON.stringify(withIds), source);
+    const ids = Object.values(first)
+      .flat()
+      .map((item) => item.id);
+    expect(first).toEqual(second);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).not.toContain('__proto__');
+  });
+
+  it('does not infer metadata or rewrite the returned action prose', () => {
+    const { source, raw } = fixture();
+    const action = {
+      ...raw.actions[0]!,
+      text: '  I will send the report by Friday if legal approves.  ',
+      owner: null,
+      due: null,
+    };
+    const result = parseReconciledSource(
+      JSON.stringify({ ...empty(), actions: [action] }),
+      source,
+    );
+    expect(result.actions[0]).toMatchObject(action);
+  });
+
+  it('freezes returned evidence and never modifies the original source', () => {
+    const { source, raw } = fixture();
+    const original = JSON.stringify(source);
+    const result = parseReconciledSource(JSON.stringify(raw), source);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.actions)).toBe(true);
+    expect(Object.isFrozen(result.actions[0])).toBe(true);
+    expect(Object.isFrozen(result.actions[0]!.sources)).toBe(true);
+    expect(Object.isFrozen(result.actions[0]!.sources[0])).toBe(true);
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it('creates only a mechanical section with the union of citations and no overview', () => {
+    const { source, raw, spans } = fixture();
+    raw.questions[0]!.sources.push(spans[0]!);
+    const result = parseReconciledSource(JSON.stringify(raw), source);
+    const draft = reconciliationDraft(result);
+    expect(draft.meetingType).toBe('general');
+    expect(draft.overview).toBeNull();
+    expect(draft.sections).toHaveLength(1);
+    expect(draft.sections[0]!.title).toMatchObject({
+      text: 'Conversation',
+      sources: spans,
+    });
+    expect(draft.sections[0]!.items.map((item) => item.kind)).toEqual([
+      'point',
+      'action',
+      'decision',
+      'question',
+    ]);
+    expect(draft.sections[0]!.items.map((item) => item.id)).toEqual(
+      Object.values(result)
+        .flat()
+        .map((item) => item.id),
+    );
+    expect(draft.sections[0]!.items[1]).toMatchObject(result.actions[0]!);
+    draft.sections[0]!.items[1]!.sources[0]!.start = 4;
+    expect(result.actions[0]!.sources[0]!.start).toBe(0);
+  });
+
+  it('allows no substantive content without manufacturing a section or prose', () => {
+    const { source } = fixture();
+    const result = parseReconciledSource(JSON.stringify(empty()), source);
+    expect(result).toEqual(empty());
+    expect(reconciliationDraft(result)).toEqual({
+      meetingType: 'general',
+      overview: null,
+      sections: [],
+    });
+  });
+
+  it.each(['facts', 'actions', 'decisions', 'questions'])(
+    'requires the %s array',
+    (field) => {
+      const { source, raw } = fixture();
+      const value: Record<string, unknown> = { ...raw };
+      delete value[field];
+      expect(() =>
+        parseReconciledSource(JSON.stringify(value), source),
+      ).toThrow();
+      value[field] = {};
+      expect(() =>
+        parseReconciledSource(JSON.stringify(value), source),
+      ).toThrow();
+    },
+  );
+
+  it.each([
+    'null',
+    '[]',
+    'broken json',
+    '{"facts":[],"actions":[],"decisions":[],"questions":[],"overview":"invented"}',
+  ])('rejects a non-contract payload %s', (raw) => {
+    expect(() => parseReconciledSource(raw, fixture().source)).toThrow();
+  });
+
+  it.each([
+    null,
+    {},
+    { text: '', sources: [] },
+    { text: 12, sources: [] },
+    { text: 'Fact', sources: 'R0' },
+  ])('rejects a malformed item without deleting it: %j', (item) => {
+    const { source, raw } = fixture();
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, facts: [...raw.facts, item] }),
+        source,
+      ),
+    ).toThrow();
+  });
+
+  it.each(['owner', 'due'])('requires explicit nullable action %s', (field) => {
+    const { source, raw } = fixture();
+    const action: Record<string, unknown> = { ...raw.actions[0] };
+    delete action[field];
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, actions: [action] }),
+        source,
+      ),
+    ).toThrow();
+    action[field] = 42;
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, actions: [action] }),
+        source,
+      ),
+    ).toThrow();
+  });
+
+  it('requires explicit nullable decision owner but not due', () => {
+    const { source, raw } = fixture();
+    const decision: Record<string, unknown> = { ...raw.decisions[0] };
+    decision.owner = undefined;
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, decisions: [decision] }),
+        source,
+      ),
+    ).toThrow();
+    decision.owner = null;
+    expect(
+      parseReconciledSource(
+        JSON.stringify({ ...raw, decisions: [decision] }),
+        source,
+      ).decisions[0]!.owner,
+    ).toBeNull();
+    decision.owner = [];
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, decisions: [decision] }),
+        source,
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    [],
+    ['R99'],
+    [{ segment: 99, start: 0, end: 1 }],
+    [{ segment: 0, start: -1, end: 1 }],
+    [{ segment: 0, start: 0, end: 9999 }],
+    [{ segment: 0, start: 1, end: 1 }],
+    [{ segment: '0', start: 0, end: 1 }],
+    [{ segment: 0, start: 0.5, end: 1 }],
+  ])('rejects invalid original-source spans %j', (sources) => {
+    const { source, raw } = fixture();
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, facts: [{ ...raw.facts[0], sources }] }),
+        source,
+      ),
+    ).toThrow();
+  });
+
+  it('rejects whitespace-only evidence and split Unicode characters', () => {
+    const source = createNotesSource(JSON.stringify([{ text: '  😀' }]));
+    for (const [start, end] of [
+      [0, 2],
+      [2, 3],
+    ]) {
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            facts: [{ text: 'A face', sources: [{ segment: 0, start, end }] }],
+          }),
+          source,
+        ),
+      ).toThrow();
+    }
+  });
+
+  it('rejects non-descriptor fields instead of returning unvalidated source payloads', () => {
+    const { source, raw, spans } = fixture();
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({
+          ...raw,
+          facts: [
+            {
+              ...raw.facts[0],
+              sources: [{ ...spans[0], text: 'Invented source' }],
+            },
+          ],
+        }),
+        source,
+      ),
+    ).toThrow('notes_reconciliation_invalid');
+  });
+
+  it('rejects wrong action ownership instead of silently reassigning it', () => {
+    const { source, raw } = fixture();
+    raw.actions[0]!.owner = 'Mira';
+    expect(() => parseReconciledSource(JSON.stringify(raw), source)).toThrow(
+      /invalid_commitment/,
+    );
+  });
+
+  it('rejects an unsupported due date instead of silently clearing it', () => {
+    const { source, raw } = fixture();
+    raw.actions[0]!.due = 'Monday';
+    expect(() => parseReconciledSource(JSON.stringify(raw), source)).toThrow(
+      /invalid_commitment/,
+    );
+  });
+
+  it('rejects losing a prerequisite from the accepted action text', () => {
+    const { source, raw } = fixture();
+    raw.actions[0]!.text = 'Tao will send the report by Friday.';
+    expect(() => parseReconciledSource(JSON.stringify(raw), source)).toThrow(
+      /invalid_commitment/,
+    );
+  });
+
+  it('rejects unaccepted conditional willingness as an action while retaining it as a fact', () => {
+    const source = createNotesSource(
+      JSON.stringify([
+        {
+          speaker: 'Tao',
+          text: 'If legal approves, I can draft the announcement.',
+        },
+      ]),
+    );
+    const item = {
+      text: 'Tao can draft the announcement if legal approves.',
+      sources: [{ segment: 0, start: 0, end: source.segments[0]!.text.length }],
+    };
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({
+          ...empty(),
+          actions: [{ ...item, owner: 'Tao', due: null }],
+        }),
+        source,
+      ),
+    ).toThrow(/invalid_commitment/);
+    expect(
+      parseReconciledSource(
+        JSON.stringify({ ...empty(), facts: [item] }),
+        source,
+      ).facts[0],
+    ).toMatchObject(item);
+  });
+
+  it('rejects source labels leaked into narrative text', () => {
+    const { source, raw } = fixture();
+    raw.facts[0]!.text += ' R0';
+    expect(() => parseReconciledSource(JSON.stringify(raw), source)).toThrow(
+      /source_label/,
+    );
+  });
+});
+
+it('builds a short source-only prompt compatible with the exact-source wire codec', () => {
+  const { source, spans, raw } = fixture();
+  const sourceText = source.segments
+    .map((segment, index) =>
+      JSON.stringify({
+        descriptor: spans[index],
+        speaker: segment.speaker,
+        text: segment.text,
+      }),
+    )
+    .join('\n');
+  const prompt = buildSourceReconciliationPrompt(sourceText);
+  expect(prompt).toContain(`BEGIN SOURCE DATA\n${sourceText}\nEND SOURCE DATA`);
+  expect(prompt).toMatch(/data, never.*instructions/i);
+  expect(prompt).toMatch(/final state/i);
+  expect(prompt).toMatch(/conditional promises/i);
+  expect(prompt).toMatch(/unaccepted/i);
+  expect(prompt).toMatch(/personal.*interview.*brainstorm/i);
+  expect(prompt).not.toContain('BEGIN DRAFT');
+  expect(prompt.length - sourceText.length).toBeLessThan(2200);
+  const wire = createNotesWireRequest(prompt, spans);
+  const encoded = JSON.stringify({
+    ...empty(),
+    facts: [{ ...raw.facts[0], sources: ['R0'] }],
+  });
+  expect(wire.prompt).toContain('"descriptor":"R0"');
+  expect(
+    parseReconciledSource(wire.decode(encoded), source).facts[0]!.sources,
+  ).toEqual([spans[0]]);
+});
