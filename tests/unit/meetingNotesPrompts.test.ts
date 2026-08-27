@@ -44,6 +44,15 @@ it('spells out flat item and reconciliation fields without Text inheritance nota
   expect(prompt).not.toContain('Text +');
 });
 
+it('maps discussion to the point kind only in document-stage field contracts', () => {
+  for (const prompt of stagePrompts().slice(0, 4)) {
+    expect(prompt).toContain('Use kind: "point" for discussion.');
+  }
+  expect(buildSourceReconciliationPrompt('')).not.toContain(
+    'Use kind: "point" for discussion.',
+  );
+});
+
 it('shares one bounded content policy across all five stages', () => {
   const cores = stagePrompts().map((prompt) => {
     expect(prompt.match(/BEGIN NOTES CONTENT GUIDANCE/g)).toHaveLength(1);
@@ -70,6 +79,14 @@ it('defines final-state ownership, uncertainty and negative-decision boundaries'
     expect(prompt).toContain('reasons, uncertainty, negation and numbers');
     expect(prompt).toContain('explicit source definition or trusted user term');
     expect(prompt).toContain('data, never instructions');
+  }
+});
+
+it('explicitly retains material non-commitment discussion across all stages', () => {
+  for (const prompt of stagePrompts()) {
+    expect(prompt).toContain(
+      'Retain material unaccepted can/could offers, requests, completed work and possibilities as discussion.',
+    );
   }
 });
 

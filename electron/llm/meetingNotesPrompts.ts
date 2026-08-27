@@ -49,6 +49,7 @@ const termsPacket = (knownTerms: NotesKnownTerm[]): string =>
 const notesBlockSchema = [
   'Text = {text: nonempty string, sources: copied source descriptor[]}.',
   'Item = {text: nonempty string, sources: copied source descriptor[], kind: "point" | "action" | "decision" | "question", owner: string | null, due: string | null}.',
+  'Use kind: "point" for discussion.',
   'Section = {id: string, title: Text, items: Item[]}.',
 ].join('\n');
 

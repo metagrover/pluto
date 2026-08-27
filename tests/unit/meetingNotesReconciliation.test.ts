@@ -267,6 +267,185 @@ describe('source reconciliation contract', () => {
     },
   );
 
+  it.each([
+    [
+      'No need to cancel the report. Could you instead email the raw responses to Amara on Monday?',
+      'No report is needed.',
+    ],
+    ['No need to leave the report unassigned.', 'No report is needed.'],
+    [
+      'No need to send the report to us. Could you send it to Amara?',
+      'No need to send the report.',
+    ],
+    ['No need for that summary for us.', 'No summary is needed.'],
+    ['No need to send the report to us.', 'No need to send the report for us.'],
+    [
+      'No need for the summary if legal approves and Amara signs off.',
+      'No summary is needed if legal approves.',
+    ],
+    [
+      'No need for the summary if legal approves and Amara signs off.',
+      'No summary is needed if legal approves or Amara signs off.',
+    ],
+  ])(
+    'rejects a negative decision that loses its predicate or part of its prerequisite: %s',
+    (text, decision) => {
+      const source = createNotesSource(
+        JSON.stringify([{ speaker: 'Rina', text }]),
+      );
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            decisions: [
+              {
+                text: decision,
+                owner: 'Rina',
+                sources: [{ segment: 0, start: 0, end: text.length }],
+              },
+            ],
+          }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    },
+  );
+
+  it.each([
+    [
+      'No need to cancel the report. Could you instead email the raw responses to Amara on Monday?',
+      'No need to cancel the report.',
+    ],
+    [
+      'No need to leave the report unassigned.',
+      'No need to leave the report unassigned.',
+    ],
+    [
+      'No need to send the report to us. Could you send it to Amara?',
+      'No need to send the report to us.',
+    ],
+    ['No need for that summary for us.', 'No summary is needed for us.'],
+    [
+      'No need for the summary if legal approves and Amara signs off.',
+      'No summary is needed if legal approves and Amara signs off.',
+    ],
+  ])(
+    'preserves a complete negative-decision predicate and prerequisite: %s',
+    (text, decision) => {
+      const source = createNotesSource(
+        JSON.stringify([{ speaker: 'Rina', text }]),
+      );
+      const item = {
+        text: decision,
+        owner: 'Rina',
+        sources: [{ segment: 0, start: 0, end: text.length }],
+      };
+      expect(
+        parseReconciledSource(
+          JSON.stringify({ ...empty(), decisions: [item] }),
+          source,
+        ).decisions[0],
+      ).toMatchObject(item);
+    },
+  );
+
+  it.each([false, true])(
+    'preserves the saved launch-announcement choice with offer-context citation=%s',
+    (includeOffer) => {
+      const source = createNotesSource(
+        JSON.stringify([
+          {
+            speaker: 'Ben',
+            text: 'If legal approves, I can draft the launch announcement.',
+          },
+          {
+            speaker: 'Nora',
+            text: 'Thanks, Ben, but let us leave the announcement unassigned for now.',
+          },
+        ]),
+      );
+      const sources = source.segments
+        .filter((segment) => includeOffer || segment.index === 1)
+        .map((segment) => ({
+          segment: segment.index,
+          start: 0,
+          end: segment.text.length,
+        }));
+      const item = {
+        text: 'The launch announcement is to remain unassigned for now.',
+        owner: 'Nora',
+        sources,
+      };
+      const parseQualified = () =>
+        parseReconciledSource(
+          JSON.stringify({ ...empty(), decisions: [item] }),
+          source,
+        );
+      if (includeOffer)
+        expect(parseQualified().decisions[0]).toMatchObject(item);
+      else expect(parseQualified).toThrow(/invalid_commitment/);
+      const pastTense = {
+        ...item,
+        text: 'The announcement is left unassigned for now.',
+        owner: null,
+      };
+      expect(
+        parseReconciledSource(
+          JSON.stringify({ ...empty(), decisions: [pastTense] }),
+          source,
+        ).decisions[0],
+      ).toMatchObject(pastTense);
+      for (const text of [
+        'The launch report is to remain unassigned for now.',
+        'The launch announcement and report are to remain unassigned for now.',
+        'Leave another announcement unassigned for now.',
+        'Leave other announcement unassigned for now.',
+        'The cancellation announcement is left unassigned for now.',
+      ]) {
+        expect(() =>
+          parseReconciledSource(
+            JSON.stringify({ ...empty(), decisions: [{ ...item, text }] }),
+            source,
+          ),
+        ).toThrow(/invalid_commitment/);
+      }
+    },
+  );
+
+  it('does not use a qualifier from an unrelated cited phrase or a target-changing determiner', () => {
+    const source = createNotesSource(
+      JSON.stringify([
+        {
+          speaker: 'Ben',
+          text: 'The cancellation was discussed. I can draft another announcement.',
+        },
+        {
+          speaker: 'Nora',
+          text: 'Let us leave the announcement unassigned for now.',
+        },
+      ]),
+    );
+    const sources = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    for (const text of [
+      'Leave the cancellation announcement unassigned for now.',
+      'Leave another announcement unassigned for now.',
+    ]) {
+      expect(() =>
+        parseReconciledSource(
+          JSON.stringify({
+            ...empty(),
+            decisions: [{ text, owner: 'Nora', sources }],
+          }),
+          source,
+        ),
+      ).toThrow(/invalid_commitment/);
+    }
+  });
+
   it.each(['facts', 'actions', 'decisions', 'questions'])(
     'requires the %s array',
     (field) => {

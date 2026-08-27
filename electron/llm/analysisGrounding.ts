@@ -676,10 +676,10 @@ const negativeDecisionDisposition = (text: string) =>
       ? 'unassigned'
       : undefined;
 const DECISION_DISPOSITION_FRAMING = new Set(
-  'a an the that this is are be for to we us let leave remains remain needed need no not assigned unassigned'.split(
-    ' ',
-  ),
+  'a an the that this is are be needed need no not'.split(' '),
 );
+const DECISION_PREREQUISITE =
+  /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
 
 /** A narrow decision-only escape from whole-turn question/offer checks. The
  * explicit disposition must support this target, not just a neighboring topic.
@@ -690,10 +690,30 @@ const explicitDispositionClause = (
 ): { evidence: string; speaker?: string } | undefined => {
   if (!/\b(?:need|needed|assigned|unassigned)\b/i.test(claim)) return undefined;
   const contentTokens = (text: string) =>
-    normalizeTranscriptEvidence(text)
+    normalizeTranscriptEvidence(
+      negativeDecisionDisposition(text) === 'unassigned' ||
+        (/\bassigned\b/i.test(text) && !negativeDecisionDisposition(text))
+        ? text
+            .replace(/\b(?:is|are)\s+to\s+(?:remain|be left)\b/gi, '')
+            .replace(
+              /\b(?:let us|let['’]s|leave|left|remains|remain|assigned|unassigned)\b/gi,
+              '',
+            )
+        : // Only the leading disposition uses for/to as framing. A later
+          // "to us" or "for us" is recipient/scope and must stay in the claim.
+          text.replace(/^\s*no need\s+(?:for|to)\s+/i, ''),
+    )
       .split(' ')
       .filter((token) => !DECISION_DISPOSITION_FRAMING.has(token));
-  const target = contentTokens(claim);
+  const prerequisite = (text: string) => {
+    const index = text.search(DECISION_PREREQUISITE);
+    return index < 0 ? '' : normalizeTranscriptEvidence(text.slice(index));
+  };
+  const withoutPrerequisite = (text: string) => {
+    const index = text.search(DECISION_PREREQUISITE);
+    return index < 0 ? text : text.slice(0, index);
+  };
+  const target = contentTokens(withoutPrerequisite(claim));
   if (!target.length) return undefined;
   for (const line of resolved.sourceLines) {
     for (const part of transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ??
@@ -709,8 +729,32 @@ const explicitDispositionClause = (
         !negativeDecisionDisposition(clause)
       )
         continue;
-      const words = new Set(contentTokens(clause));
-      if (target.every((token) => words.has(token))) {
+      // Strip only speech framing. The complete source predicate must survive:
+      // "no need to cancel the report" does not mean "no report is needed".
+      const subject = withoutPrerequisite(clause)
+        .replace(/^thanks(?:,?\s+[^,]+)?,?\s+but\s+/i, '')
+        .replace(
+          /^(?:(?:we|i)\s+)?(?:agreed|decided)(?:\s+that)?\s+|^the decision is\s+/i,
+          '',
+        );
+      const sourceTokens = contentTokens(subject);
+      const sameContent = target.join(' ') === sourceTokens.join(' ');
+      // A single leading modifier must qualify this same target in provided
+      // context ("launch announcement"), not merely occur elsewhere in it.
+      const qualifiedTarget =
+        negativeDecisionDisposition(clause) === 'unassigned' &&
+        target.length === sourceTokens.length + 1 &&
+        target.slice(1).join(' ') === sourceTokens.join(' ') &&
+        !/^(?:and|or|not|no|another|other)$/.test(target[0]!) &&
+        resolved.sourceLines.some((context) =>
+          ` ${normalizeTranscriptEvidence(transcriptLineContent(context))} `.includes(
+            ` ${target[0]} ${sourceTokens[0]} `,
+          ),
+        );
+      if (
+        (sameContent || qualifiedTarget) &&
+        prerequisite(claim) === prerequisite(clause)
+      ) {
         return { evidence: clause, speaker: transcriptLineSpeaker(line) };
       }
     }
