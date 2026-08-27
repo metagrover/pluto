@@ -84,9 +84,31 @@ The user approved the architecture and initially selected Terra for implementati
 
 These are genuine acceptance failures, not test flakiness to waive. Runtime contention explains load/wait time, **not** semantic omissions. No new model download, settings change, relaxed two-request gate, extra retry loop, or unsupported deterministic commitment synthesis was used. All test processes have completed; no provider test is left running. Controlled idle-runtime performance, large hierarchy and rendered verification still require permission to stop/pause the running app or launch an isolated app session. That permission was requested, not assumed. No claim of full implementation acceptance or completion of #674 is made.
 
+#### Controlled idle-runtime verification — 2026-08-27 02:25 PDT
+
+The user approved isolated runtime verification and stopped the running Pluto app. No Pluto process or other provider test was present when this batch began. The committed implementation (`003063f42`, including `ecc4f7670`) and prompts were unchanged throughout. Same local `qwen3.5:9b`, thinking disabled, context 16,384, synthetic six-turn source and seeds 41/42/43; no production meeting or model setting was changed.
+
+Command: `RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 CAPTURE_MEETING_NOTES_ACCEPTANCE_FAILURE=1 pnpm exec vitest run --disableConsoleIntercept --config vitest.manual.config.ts tests/manual/meetingNotesV10Acceptance.test.ts -t 'seed'`.
+
+**Result: 0/3 semantic passes.** Suite duration 132.97 seconds. The large test remained opted out.
+
+| Seed | Test wall time | Requests / repairs | Result |
+|---|---:|---:|---|
+| 41 | 61,527 ms | 3 / 1 | Audit initially omitted required arrays; repair still marked the heading unsupported while supporting children. Correctly rejected as `notes_audit_invalid`; no accepted notes. |
+| 42 | 24,515 ms | 2 / 0 | Required FAQ commitment, owner, due date and condition survived. Checklist withdrawal and conditional announcement were wrongly classified as actions and approved by the audit, then removed by deterministic commitment guards. Visible narrative coverage failed. |
+| 43 | 46,247 ms | 3 / 1 | Heading inconsistency triggered repair; repaired audit still lacked complete retained-block verdicts. Rejected as `notes_audit_invalid`; writer omission of the retained FAQ action was not recovered. |
+
+Mean attempt time was **44.1 seconds**, versus 127.9 seconds in the earlier contended batch. This is substantially faster execution but **not** a passing 30-second average, an accepted-publication latency, or a clean code-identical A/B: the earlier batch predates the heading safeguard. The first writer loaded in 4,942 ms; subsequent loads were approximately 3–19 ms. None of the requests waited materially at the application gate. Removing live-app competition did not fix the semantic failures.
+
+The failure is now isolated at two contract boundaries: the model does not consistently fulfill the complete audit/repair schema, and deterministic rejection of an incorrectly classified action also loses the underlying valid discussion when the audit does not reclassify it. More repeated generations or prompt clauses are not evidence of a solution. Following the debugging stop rule, no further prompt/model/architecture changes were attempted during this comparison. The larger hierarchy run was not used to distract from failing short-source acceptance.
+
+An isolated Electron session was attempted from this worktree after restoring its SQLite Electron ABI. A standalone Electron probe verified `app.getPath('userData')` resolves to the temporary profile, and `lsof` verified the running app opened only that profile's `pluto.db`. Only synthetic notes, title, no-op edit and saved-conflict fixtures were inserted there. **No rendered notes/IPC regeneration pass was achieved:** the window remained blank during inspection; logs reported `parakeet_process_error` and missing `resources/bin/audiocap`. Those messages do not establish the cause of the blank window. No model/recording helper was downloaded, and no claim about title/edit/failure behavior is made from this attempt. The isolated instance and Vite server were stopped; the production app remains stopped as the user left it.
+
+Synthetic diagnostics and the isolated fixture profile are retained at `/tmp/pluto-674-isolated.MBJfWb/` (`idle-baseline.log`, `seed.sql`, `profile/pluto.db`). No production DB was copied or written. Product code and prompts were unchanged; only this evidence record was updated. Worktree SQLite bindings were restored for Electron; the main checkout's dependencies were not touched.
+
 #### Remaining delivery boundary
 
-Do not mark #674 complete on code/test evidence alone. Finish current-prompt semantic seeds and the larger synthetic hierarchy case, measure publication separately from secondary work, and obtain a live rendered notes/conflict/status pass. A controlled idle-runtime test or app launch requires separate permission to pause/restart the running app; stored meeting regeneration, merge, and push remain unauthorized. Any remaining model-quality failure must be reported separately from runtime contention, not explained away by it.
+Do not mark #674 complete on code/test evidence alone. The now-authorized idle-runtime seeds are complete and failed acceptance; reconcile the demonstrated contract failures before another implementation revision. Large synthetic hierarchy, accepted-publication timing and live rendered notes/conflict/status verification remain open. Isolated app verification was authorized; stored production meeting regeneration, restarting the production app, merge, and push remain unauthorized. Model-quality failures must be reported separately from runtime contention, not explained away by it.
 
 Read `AGENTS.md`, `.agent/skills/executing-plans/SKILL.md`, `.agent/skills/test-driven-development/SKILL.md`, and the approved design before implementation. Use `.agent/skills/verification-before-completion/SKILL.md` before delivery. For the narrowly scoped conflict/error UI in Task 10, read the applicable UI skill before editing that surface. Do not introduce a new design direction.
 
