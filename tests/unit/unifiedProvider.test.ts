@@ -21,6 +21,7 @@ vi.mock('@google/generative-ai', () => {
 });
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
   STRUCTURED_ANALYSIS_PROMPT_VERSION,
@@ -110,6 +111,77 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('routes an indexed source through exactly one writer and one audit with the configured model', async () => {
+    const sourceText = 'I will send the outline.';
+    const source = createNotesSource(
+      JSON.stringify({ segments: [{ speaker: 'Milo', text: sourceText }] }),
+    );
+    const span = { segment: 0, start: 0, end: sourceText.length };
+    const responses = [
+      {
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources: [span] },
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                sources: [span],
+                owner: 'Milo',
+                due: null,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        changes: [],
+        verdicts: [
+          { target: 's0:title', status: 'supported', sources: [span] },
+          { target: 's0:item:0', status: 'supported', sources: [span] },
+        ],
+        dispositions: [],
+        terminology: [],
+      },
+    ];
+    const fetchMock = installFetchMock((_url, init) =>
+      jsonResponse({
+        choices: [{ message: { content: JSON.stringify(responses.shift()) } }],
+      }),
+    );
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+      openai_model: 'configured-analysis-model',
+    });
+
+    const analysis = await provider.generateStructuredAnalysis(
+      'Milo: I will send the outline.',
+      '',
+      'auto',
+      { source, contextTokens: 16384 },
+    );
+
+    expect(analysis.all_action_items).toEqual([
+      expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.map(([, init]) => parseRequestBody(init).model),
+    ).toEqual(['configured-analysis-model', 'configured-analysis-model']);
+    expect(
+      fetchMock.mock.calls.map(
+        ([, init]) =>
+          (parseRequestBody(init).messages as Array<{ content: string }>)[0]
+            ?.content,
+      ),
+    ).toEqual([
+      'You are a source-grounded meeting notes writer. Always respond with valid JSON only.',
+      'You are a source-grounded meeting notes auditor. Always respond with valid JSON only.',
+    ]);
+  });
+
   it('versions commitment ownership reconciliation as notes-v9', () => {
     expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v9');
   });

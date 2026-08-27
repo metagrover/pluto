@@ -111,7 +111,14 @@ export interface LLMProvider {
     transcript: string,
     userNotes?: string,
     template?: import('./prompts').MeetingNotesTemplate,
-    options?: { signal?: AbortSignal; knownTerms?: string[] },
+    options?: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+    },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateSummary(transcript: string, userNotes?: string): Promise<string>;

@@ -28,6 +28,8 @@ import type {
   RecentWinV3,
   TopicSection,
 } from './analysisTypes';
+import { calculateNotesRequestBudget } from './meetingNotesBudget';
+import { generateMeetingNotes } from './meetingNotesPipeline';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
 import {
@@ -477,6 +479,9 @@ type LLMTask =
   | 'summary'
   | 'summaryRepair'
   | 'structuredAnalysis'
+  | 'notesWriter'
+  | 'notesAudit'
+  | 'notesMerge'
   | 'analysisEditorial'
   | 'topicSegmentation'
   | 'terminologyReconciliation'
@@ -547,6 +552,7 @@ interface TextGenerationOptions {
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
+  notesBudget?: { contextTokens: number; outputTokens: number };
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
@@ -598,8 +604,42 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
-    options: { signal?: AbortSignal; knownTerms?: string[] } = {},
+    options: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+    } = {},
   ): Promise<AnalysisDocumentV3> {
+    if (options.source) {
+      return generateMeetingNotes({
+        source: options.source,
+        context: {
+          userNotes: userNotes ?? '',
+          template,
+          trustedUserTerms:
+            options.trustedUserTerms ?? options.knownTerms ?? [],
+          entityHints: options.entityHints ?? [],
+        },
+        generate: (request) =>
+          this.generateText({
+            prompt: request.prompt,
+            task: request.task,
+            jsonMode: true,
+            signal: request.signal,
+            notesBudget: {
+              contextTokens: request.contextTokens,
+              outputTokens: request.outputTokens,
+            },
+          }),
+        provider: this.providerType,
+        model: this.getConfiguredAnalysisModel(),
+        contextTokens: options.contextTokens ?? 16_384,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    }
     if (this.providerType === 'ollama') {
       return this.generateStructuredAnalysisMultiPass(
         transcript,
@@ -615,6 +655,19 @@ export class UnifiedLLMProvider implements LLMProvider {
       template,
       options.signal,
     );
+  }
+
+  private getConfiguredAnalysisModel(): string {
+    switch (this.providerType) {
+      case 'ollama':
+        return this.settings.ollama_model || OLLAMA_DEFAULT_MODEL;
+      case 'openai':
+        return this.settings.openai_model || 'gpt-4o-mini';
+      case 'claude':
+        return this.settings.claude_model || 'claude-3-haiku-20240307';
+      case 'gemini':
+        return this.settings.gemini_model || 'gemini-1.5-flash';
+    }
   }
 
   private async generateStructuredAnalysisSinglePass(
@@ -1683,6 +1736,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     jsonMode,
     signal,
     onToken,
+    notesBudget,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel(task);
     const activeModel = process.versions.electron
@@ -1693,7 +1747,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
     this.activeOllamaModel = model;
     if (process.versions.electron) electronActiveOllamaModel = model;
-    const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
+    const { num_ctx, num_predict } = notesBudget
+      ? calculateNotesRequestBudget({
+          prompt,
+          contextTokens: notesBudget.contextTokens,
+          outputTokens: notesBudget.outputTokens,
+        })
+      : calculateOllamaContextBudget(prompt, task);
     const progressAware = usesProgressAwareOllamaDeadline(task);
     const shouldStream = Boolean(onToken) || progressAware;
 
@@ -2010,6 +2070,15 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getSystemInstruction(task: LLMTask): string {
+    if (task === 'notesWriter') {
+      return 'You are a source-grounded meeting notes writer. Always respond with valid JSON only.';
+    }
+    if (task === 'notesAudit') {
+      return 'You are a source-grounded meeting notes auditor. Always respond with valid JSON only.';
+    }
+    if (task === 'notesMerge') {
+      return 'You are a source-grounded meeting notes merger. Always respond with valid JSON only.';
+    }
     if (task === 'analysisEditorial') {
       return 'You are a rigorous global meeting-notes editor. Always respond with valid JSON only.';
     }
@@ -2053,6 +2122,12 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getTemperature(task: LLMTask): number {
+    if (
+      task === 'notesWriter' ||
+      task === 'notesAudit' ||
+      task === 'notesMerge'
+    )
+      return 0.1;
     if (task === 'analysisEditorial') return 0.1;
     if (task === 'structuredAnalysis') return 0.7;
     if (task === 'topicSegmentation') return 0.1;
@@ -2069,6 +2144,9 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getClaudeMaxTokens(task: LLMTask): number {
+    if (task === 'notesWriter') return 2048;
+    if (task === 'notesAudit') return 1536;
+    if (task === 'notesMerge') return 2048;
     if (task === 'analysisEditorial') return OLLAMA_EDITORIAL_OUTPUT_TOKENS;
     if (task === 'structuredAnalysis') return 4096;
     if (task === 'topicSegmentation') return 512;
