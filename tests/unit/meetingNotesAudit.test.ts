@@ -24,6 +24,14 @@ it('omits an empty section after its last claim is rejected', () => {
   ).toEqual([]);
 });
 
+it('does not let an unsupported heading silently discard supported child claims', () => {
+  const fixture = makeDirectNotesFixture();
+  fixture.audit.verdicts[0]!.status = 'unsupported';
+  expect(() => applyNotesAudit(fixture)).toThrow(
+    'notes_audit_unsupported_title',
+  );
+});
+
 it('labels uncertain discussion rather than publishing it as an unqualified fact', () => {
   const fixture = makeDirectNotesFixture();
   fixture.draft.sections[0]!.items[0]!.kind = 'point';

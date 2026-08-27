@@ -703,6 +703,20 @@ export const applyNotesAudit = ({
     throw new MeetingNotesError('invalid_notes_audit');
   }
 
+  for (const section of next.sections) {
+    if (
+      verdicts.get(section.title.id)?.status === 'unsupported' &&
+      section.items.some(
+        (item) => verdicts.get(item.id)?.status !== 'unsupported',
+      )
+    ) {
+      // Reject an incoherent audit instead of losing supported content as a side
+      // effect of deleting its heading. The bounded repair must correct the title.
+      throw new MeetingNotesError(
+        `notes_audit_unsupported_title:${section.title.id}:replace_heading_or_review_children`,
+      );
+    }
+  }
   for (const block of blocksForDraft(next)) {
     const verdict = verdicts.get(block.id);
     if (!verdict)

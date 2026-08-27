@@ -196,10 +196,7 @@ export const partitionNotesSource = (
     if (!priorSpan) return window;
     const overlapText = primaryTextFor(source, [priorSpan]);
     const sourceText = `${overlapText}\n${window.primaryText}`;
-    return fitsPrompt(sourceText, [
-      ...window.overlapSpans,
-      ...window.primarySpans,
-    ])
+    return fitsPrompt(sourceText, [priorSpan, ...window.primarySpans])
       ? { ...window, overlapSpans: [priorSpan], sourceText }
       : window;
   });

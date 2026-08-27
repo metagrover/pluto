@@ -7,6 +7,18 @@ import {
 } from '../../electron/llm/meetingNotesBudget';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 
+it('includes supplemental spans when checking the actual indexed prompt budget', () => {
+  const source = createNotesSource(
+    JSON.stringify({ segments: [{ text: 'First.' }, { text: 'Second.' }] }),
+  );
+  const leaves = partitionNotesSource(
+    source,
+    (_packet, spans = []) => spans.length <= 1,
+  );
+  expect(leaves).toHaveLength(2);
+  expect(leaves[1]!.overlapSpans).toEqual([]);
+});
+
 it('reserves the draft inside the audit input, not just the writer input', () => {
   expect(
     planNotesCapacity({
