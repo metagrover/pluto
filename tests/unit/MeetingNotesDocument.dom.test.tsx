@@ -213,11 +213,9 @@ describe('MeetingNotesDocument', () => {
       ),
     );
 
-    const notice = container.querySelector('[data-analysis-quality-notice]');
-    expect(notice?.tagName).toBe('OUTPUT');
-    expect(notice?.textContent).toContain(
-      'Some details may be missing. Pluto kept only transcript-backed actions and decisions.',
-    );
+    expect(
+      container.querySelector('[data-analysis-quality-notice]'),
+    ).toBeNull();
     expect(container.textContent).toContain('Documentation architecture');
   });
 

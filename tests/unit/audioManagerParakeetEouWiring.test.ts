@@ -23,8 +23,10 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
-  it('publishes tentative EOU text in the primary transcript immediately', () => {
-    expect(source).toContain('onLiveTranscript?.(segments)');
+  it('publishes the reconciled reading projection while retaining raw EOU text', () => {
+    expect(source).toContain('processedMicSegmentsRef.current = segments');
+    expect(source).toContain('reconcileLiveTranscriptSegments({');
+    expect(source).toContain('onLiveTranscript?.(readingSegments)');
     expect(source).toContain("onInterimTranscript?.('')");
     expect(source).not.toContain(
       'const stable = segments.filter((segment) => segment.confirmed)',

@@ -1,0 +1,412 @@
+{
+  "schemaVersion": 1,
+  "evaluation": "gemma-schema-reliability-post-correction",
+  "codeCommit": "d13e7321246700ee8bd3a3a18703269c7c769afb",
+  "model": "gemma4:12b",
+  "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "ollamaVersion": "0.32.15",
+  "seed": 41,
+  "sampling": {
+    "temperature": 0.1,
+    "top_k": 64,
+    "top_p": 0.95,
+    "num_thread": 8,
+    "thinking": false
+  },
+  "responseFormat": "json_schema",
+  "logPath": "/tmp/pluto-674-gemma-schema-postfix.log",
+  "logSha256": "1eb10b4256de030d9cf56d620082bedd8cdd1ca321afc90ee2c767fa1828ef99",
+  "timingCaveat": "Shared Ollama server with unrelated Qwen requests; not an isolated latency benchmark.",
+  "fileHashes": {
+    "electron/llm/meetingNotesSchema.ts": "9daed8fe383715139b8b058171408228de2156ab8b5fdba263c46d2d1d721730",
+    "electron/llm/meetingNotesTypes.ts": "4c83b81a1c38483b291081d1b745940b3a16fe6a075596e3cfb17d2d6be01fd1",
+    "electron/llm/meetingNotesWire.ts": "87f5d3e2f8ec8b494c1b6f926d19e7e751682b0a1976c2fa584d3969796f15a8",
+    "electron/llm/meetingNotesPipeline.ts": "e4fcd9896db6a3dfbdb3536c35e470ce05c88a016b7bf728bcf25b45f92ea9f4",
+    "electron/llm/meetingNotesGuidance.ts": "183b3e8fd3b64cab683c27666d58674113cc8dafc36138382bc4db7208ac891a",
+    "electron/llm/meetingNotesPrompts.ts": "ac6f790ac5e2325c2f0eeccb4728ebdccc619359bfd0d01442af6ed1cbe9fe75",
+    "electron/llm/meetingNotesGuardrails.ts": "1df0ea71ad47c77aea2ebe4125cccd4200fa15db52f70d221f01a50273b07045",
+    "electron/llm/meetingNotesAudit.ts": "bc8ee8992017fc32535d4af384e1410dc6e045a547f3ca78563e79ce7f6e73c6",
+    "electron/llm/analysisGrounding.ts": "fdf5ae7d21b93b5de291e036c8fa2bdf1ae231bc950607a97ee056c51df07859",
+    "electron/llm/unifiedProvider.ts": "f0f7b9d15313826e872ab94d1126bdeb5b7ed80b3a98e3e71c04b0ea71c0d2d8",
+    "tests/manual/meetingNotesLocalGuardrailsAcceptance.test.ts": "f015fdd715678d01be81a245631296a86c8c75696a019cc06ad7a2d08c7ef4e3",
+    "tests/manual/fixtures/meetingNotesGemmaReliabilityCases.ts": "cd3786727dc8205e9a146430544264efb6e62da4938f698ce1e0076fc058e95b",
+    "tests/manual/fixtures/meetingNotesLocalGuardrailsCases.ts": "fb39208abaf0b20d82f7c9bb7c44781d3ccb46c457529909ff13b5daaf1ee27f"
+  },
+  "events": [
+    {
+      "event": "start",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "a45bcf1d5e44b8ca4c69e7773025acfa9580acfaa665f56aa36bafed077c40db",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Cleo",
+            "text": "I will replace the product screenshots today."
+          },
+          {
+            "index": 1,
+            "speaker": "Marin",
+            "text": "I could animate the introduction if useful."
+          },
+          {
+            "index": 2,
+            "speaker": "Cleo",
+            "text": "We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+          },
+          {
+            "index": 3,
+            "speaker": "Cleo",
+            "text": "I'm withdrawing my screenshot replacement promise; the images are still accurate."
+          },
+          {
+            "index": 4,
+            "speaker": "Cleo",
+            "text": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Cleo",
+        "actionDue": "Wednesday"
+      },
+      "reviewCriteria": [
+        "Exactly one active action: Cleo publishes the captioned demonstration on the support portal by Wednesday, only once accessibility review passes. The prerequisite, destination, and due date must attach to that action.",
+        "Retain Marin's animation offer as declined, the settled static-introduction choice, and the rationale that animation distracts from instructions.",
+        "Retain screenshot replacement only as an explicitly withdrawn promise, with the reason that existing images are accurate; no active screenshot or animation task.",
+        "One or two decisions are legitimate only if the second is the distinct screenshot cancellation, not a duplicate of declining animation. The static-introduction choice is required."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "model_metrics",
+      "task": "notesWriter",
+      "inputTokens": 952,
+      "outputTokens": 473,
+      "promptMs": 16359.496,
+      "outputMs": 34845.86,
+      "loadMs": 25.627375,
+      "elapsedMs": 58204
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "315904b109dee8b4bd48f6067f6a9ceed8e1c2e7ddb25ff21286d4d56f96fab8",
+      "schemaSha256": "dcfe9d716531c5c5cd64864f0947526f387daa60c5c55e4c871e38ff7be7736b",
+      "latencyMs": 58221,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Intro Animation\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team decided to keep the introduction static because animation distracts from the instructions, declining the offer to animate.\",\n          \"sources\": [\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Marin offered to animate the introduction if useful.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Content Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo withdrew the promise to replace product screenshots because the images are still accurate.\",\n          \"sources\": [\n            \"R0\",\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Publishing\",\n        \"sources\": [\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo publishes the captioned demonstration on the support portal by Wednesday once the accessibility review passes.\",\n          \"sources\": [\n            \"R4\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Cleo\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+      "rawSha256": "650f80fef7e0a23468c68b60ddd896f0ec9d32b14233017f893fa66e4923b4c6"
+    },
+    {
+      "event": "model_metrics",
+      "task": "notesAudit",
+      "inputTokens": 1686,
+      "outputTokens": 327,
+      "promptMs": 13034.849,
+      "outputMs": 36692.226,
+      "loadMs": 14.504291,
+      "elapsedMs": 52833
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "04d249524b9ab83f89f36e3bab693b167cda03178981537ba9c17bfe34abdfe6",
+      "schemaSha256": "698030a361d2c0b6b30d1333279ee612eec74e5675bfd96891f2fff0a0348890",
+      "latencyMs": 52851,
+      "raw": "{\n  \"changes\": [\n    {\n      \"op\": \"remove\",\n      \"target\": \"s1:item:0\"\n    }\n  ],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s2:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R4\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R4\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}",
+      "rawSha256": "b222e7abedbed83f68d6dcc19fb36f977ca84a0473890fef7c1ac41b478ef5af"
+    },
+    {
+      "event": "final",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 111148,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 1,
+        "topicDecisions": 1,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Marin offered to animate the introduction if useful.",
+        "topics": [
+          {
+            "title": "Intro Animation",
+            "summary": "Marin offered to animate the introduction if useful.",
+            "key_points": [],
+            "decisions": [
+              {
+                "text": "The team decided to keep the introduction static because animation distracts from the instructions, declining the offer to animate.",
+                "evidence": "I could animate the introduction if useful. We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+              }
+            ],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Publishing",
+            "summary": "",
+            "key_points": [],
+            "decisions": [],
+            "action_items": [
+              {
+                "text": "Cleo publishes the captioned demonstration on the support portal by Wednesday once the accessibility review passes.",
+                "assignee": "Cleo",
+                "due": "Wednesday",
+                "evidence": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Cleo publishes the captioned demonstration on the support portal by Wednesday once the accessibility review passes.",
+            "assignee": "Cleo",
+            "due": "Wednesday",
+            "evidence": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday.",
+            "topic": "Publishing"
+          }
+        ],
+        "all_decisions": [
+          {
+            "text": "The team decided to keep the introduction static because animation distracts from the instructions, declining the offer to animate.",
+            "evidence": "I could animate the introduction if useful. We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+          }
+        ],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v16",
+          "generated_at": "2026-08-27T21:28:33.686Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 1,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "a45bcf1d5e44b8ca4c69e7773025acfa9580acfaa665f56aa36bafed077c40db",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 133
+                  }
+                ]
+              },
+              "topic:0:decision:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 133
+                  }
+                ]
+              },
+              "all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 133
+                  }
+                ]
+              },
+              "native_continuations:all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 133
+                  }
+                ]
+              },
+              "completion:all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 133
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 43
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s2:title",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 116
+                  }
+                ]
+              },
+              "topic:1:action:0": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 116
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 116
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 116
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 116
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    }
+  ]
+}

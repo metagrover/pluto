@@ -1,0 +1,180 @@
+{
+  "fixture": "synthetic-source-label-kind-correction",
+  "seed": 42,
+  "model": "qwen3.5:9b",
+  "segments": [
+    {
+      "speaker": "Ava",
+      "text": "I will send the integration checklist to Ben by Friday."
+    },
+    {
+      "speaker": "Ben",
+      "text": "If legal approves, I can draft the announcement."
+    },
+    {
+      "speaker": "Casey",
+      "text": "Next quarter the team may explore a migration, but that is not a current commitment."
+    },
+    {
+      "speaker": "Dana",
+      "text": "The research discussion has no assignments or decisions today."
+    },
+    {
+      "speaker": "Ava",
+      "text": "I take back my earlier checklist commitment. The source data is incomplete, so no one should send it Friday."
+    },
+    {
+      "speaker": "Dana",
+      "text": "After the final audit, I will publish the reviewed FAQ to Elena by Wednesday."
+    }
+  ],
+  "writer": {
+    "meetingType": "team_sync",
+    "overview": {
+      "text": "The team clarified immediate deliverables while noting that future migration plans and research discussions remain non-binding for today.",
+      "sources": ["R0", "R1", "R2", "R3"]
+    },
+    "recentWin": null,
+    "sections": [
+      {
+        "id": "s0",
+        "title": {
+          "text": "Immediate Deliverables and Revisions",
+          "sources": ["R0", "R4", "R5"]
+        },
+        "items": [
+          {
+            "kind": "point",
+            "text": "Ava will send the integration checklist to Ben by Friday.",
+            "sources": ["R0"],
+            "owner": "Ava",
+            "due": "Friday"
+          },
+          {
+            "kind": "action",
+            "text": "Withdraw the commitment to send the integration checklist by Friday due to incomplete source data.",
+            "sources": ["R4"],
+            "owner": "Ava",
+            "due": null
+          },
+          {
+            "kind": "action",
+            "text": "Draft the announcement if legal approves.",
+            "sources": ["R1"],
+            "owner": "Ben",
+            "due": null
+          },
+          {
+            "kind": "point",
+            "text": "The team may explore a migration next quarter, but this is not a current commitment.",
+            "sources": ["R2"],
+            "owner": null,
+            "due": null
+          },
+          {
+            "kind": "point",
+            "text": "The research discussion has no assignments or decisions today.",
+            "sources": ["R3"],
+            "owner": null,
+            "due": null
+          },
+          {
+            "kind": "action",
+            "text": "Publish the reviewed FAQ to Elena by Wednesday after the final audit.",
+            "sources": ["R5"],
+            "owner": "Dana",
+            "due": "Wednesday"
+          }
+        ]
+      }
+    ]
+  },
+  "audit": {
+    "changes": [
+      {
+        "op": "remove",
+        "target": "s0:item:0"
+      },
+      {
+        "op": "replace",
+        "target": "s0:item:1",
+        "value": {
+          "id": "s0:item:1",
+          "kind": "point",
+          "text": "Ava withdraws the commitment to send the integration checklist by Friday due to incomplete source data.",
+          "sources": ["R4"],
+          "owner": "Ava",
+          "due": null
+        }
+      },
+      {
+        "op": "replace",
+        "target": "s0:item:2",
+        "value": {
+          "id": "s0:item:2",
+          "kind": "point",
+          "text": "Ben can draft the announcement if legal approves.",
+          "sources": ["R1"],
+          "owner": "Ben",
+          "due": null
+        }
+      },
+      {
+        "op": "replace",
+        "target": "s0:item:5",
+        "value": {
+          "id": "s0:item:5",
+          "kind": "action",
+          "text": "Dana will publish the reviewed FAQ to Elena by Wednesday after the final audit.",
+          "sources": ["R5"],
+          "owner": "Dana",
+          "due": "Wednesday"
+        }
+      }
+    ],
+    "verdicts": [
+      {
+        "target": "overview",
+        "status": "supported",
+        "sources": ["R0", "R1", "R2", "R3"]
+      },
+      {
+        "target": "s0:title",
+        "status": "supported",
+        "sources": ["R0", "R4", "R5"]
+      },
+      {
+        "target": "s0:item:0",
+        "status": "unsupported",
+        "sources": ["R4"]
+      },
+      {
+        "target": "s0:item:1",
+        "status": "supported",
+        "sources": ["R4"]
+      },
+      {
+        "target": "s0:item:2",
+        "status": "supported",
+        "sources": ["R1"]
+      },
+      {
+        "target": "s0:item:3",
+        "status": "supported",
+        "sources": ["R2"]
+      },
+      {
+        "target": "s0:item:4",
+        "status": "supported",
+        "sources": ["R3"]
+      },
+      {
+        "target": "s0:item:5",
+        "status": "supported",
+        "sources": ["R5"]
+      }
+    ],
+    "dispositions": [],
+    "terminology": []
+  }
+}

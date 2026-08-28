@@ -162,4 +162,29 @@ describe('ollamaHttpFetch', () => {
     await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
     await vi.waitFor(() => expect(upstreamClosed).toBe(true));
   });
+
+  it('retains bounded HTTP error bodies without delivering them as generated chunks', async () => {
+    const body = JSON.stringify({ error: 'PRIVATE_MARKER input too long' });
+    const server = createServer((_request, response) => {
+      response.writeHead(400, { 'content-type': 'application/json' });
+      response.end(body);
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no address');
+    const onChunk = vi.fn();
+    const url = `http://127.0.0.1:${address.port}/api/chat`;
+    await expect(ollamaHttpStream(url, {}, onChunk)).resolves.toMatchObject({
+      ok: false,
+      status: 400,
+      errorBody: body,
+    });
+    expect(onChunk).not.toHaveBeenCalled();
+    await expect(ollamaHttpStream(url, {}, onChunk, 16)).rejects.toThrow(
+      'response exceeded',
+    );
+  });
 });

@@ -287,6 +287,7 @@ app.on('activate', () => {
   }
 });
 
+import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -367,6 +368,10 @@ import type {
   InternalSignalDocument,
 } from './llm/provider';
 import {
+  type MeetingAnalysisRunCoordinatorDb,
+  createMeetingAnalysisRunCoordinator,
+} from './meetingAnalysisRuns';
+import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
@@ -376,6 +381,140 @@ import {
   shouldCleanupTranscriptOnSave,
 } from './transcriptCleanup';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
+
+const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
+  db: db as unknown as MeetingAnalysisRunCoordinatorDb,
+  getSettings: () => getAllSettings(db),
+  getProvider,
+  onUpdated: (meetingId) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed())
+        win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+    }
+  },
+  runSecondary: async (input) => {
+    if (
+      !input.provider.extractValueSignals ||
+      !input.provider.extractEntities
+    ) {
+      throw new Error('value_signals_failed');
+    }
+    const signals = await input.provider.extractValueSignals(
+      input.transcript,
+      input.analysis.overview,
+      { signal: input.signal },
+    );
+    if (!input.canCommit()) return;
+    if (
+      !db.saveMeetingAnalysisSecondaryFieldsIfCurrent({
+        meetingId: input.meetingId,
+        runId: input.runId,
+        inputRevision: input.inputRevision,
+        sourceRevision: input.sourceRevision,
+        eligibilityRevision: input.eligibilityRevision,
+        userNotesHash: input.userNotesHash,
+        valueSignalsJson: JSON.stringify(signals),
+      })
+    ) {
+      return;
+    }
+    db.updateMeetingAnalysisRunStatusIfCurrent({
+      meetingId: input.meetingId,
+      runId: input.runId,
+      inputRevision: input.inputRevision,
+      sourceRevision: input.sourceRevision,
+      eligibilityRevision: input.eligibilityRevision,
+      userNotesHash: input.userNotesHash,
+      notesStatus: 'published',
+      secondaryStatus: 'running',
+      stage: 'entities',
+    });
+
+    const auditedEntities = await input.provider.extractEntities(
+      input.transcript,
+      {
+        summary: input.analysis.overview,
+        valueSignals: signals,
+      },
+      { signal: input.signal },
+    );
+    if (!input.canCommit()) return;
+    await extractAndProcessEntities(
+      {
+        extractEntities: async () => ({
+          ...auditedEntities,
+          action_items: input.analysis.all_action_items.map((item) => ({
+            description: item.text,
+            assignee: item.assignee,
+            due_date: item.due,
+          })),
+          decisions: input.analysis.all_decisions.map((decision) => ({
+            description: decision.text,
+            rationale: decision.rationale,
+          })),
+        }),
+      },
+      input.transcript,
+      input.meetingId,
+      {
+        summary: input.analysis.overview,
+        valueSignals: signals,
+      },
+      { canCommit: input.canCommit },
+    );
+    if (!input.canCommit()) return;
+    db.updateMeetingAnalysisRunStatusIfCurrent({
+      meetingId: input.meetingId,
+      runId: input.runId,
+      inputRevision: input.inputRevision,
+      sourceRevision: input.sourceRevision,
+      eligibilityRevision: input.eligibilityRevision,
+      userNotesHash: input.userNotesHash,
+      notesStatus: 'published',
+      secondaryStatus: 'running',
+      stage: 'mid',
+    });
+    const meeting = db.getMeeting(input.meetingId) as
+      | db.PersistedMeeting
+      | undefined;
+    if (!meeting || !input.canCommit()) return;
+    const mid = generateMid({
+      meeting_id: input.meetingId,
+      title: meeting.title,
+      occurred_at: meeting.started_at || meeting.created_at || null,
+      duration_seconds: meeting.duration_seconds || 0,
+      analysis: input.analysis,
+      signals,
+      meeting_entities: db.getMeetingEntities(input.meetingId),
+      transcript_segments: input.transcript
+        .split('\n')
+        .filter(Boolean)
+        .map((text) => ({ text })),
+    });
+    if (
+      !db.saveMeetingAnalysisSecondaryFieldsIfCurrent({
+        meetingId: input.meetingId,
+        runId: input.runId,
+        inputRevision: input.inputRevision,
+        sourceRevision: input.sourceRevision,
+        eligibilityRevision: input.eligibilityRevision,
+        userNotesHash: input.userNotesHash,
+        midJson: JSON.stringify(mid),
+      })
+    ) {
+      return;
+    }
+    if (input.canCommit()) {
+      try {
+        await refreshKnowledgeDocsForMeetingNow(input.meetingId, {
+          canCommit: input.canCommit,
+        });
+      } catch {
+        throw new Error('knowledge_synthesis_failed');
+      }
+    }
+  },
+});
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -502,6 +641,7 @@ app.on('before-quit', async () => {
 });
 
 app.whenReady().then(async () => {
+  db.recoverInterruptedMeetingAnalysisRuns();
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -1744,6 +1884,29 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('SAVE_MEETING', (_event, meeting, options) => {
     try {
+      const persisted =
+        meeting &&
+        (typeof meeting.id === 'string' || typeof meeting.id === 'number')
+          ? (db.getMeeting(String(meeting.id)) as
+              | db.PersistedMeeting
+              | undefined)
+          : undefined;
+      if (
+        persisted?.analysis_json !== meeting?.analysis_json &&
+        typeof persisted?.user_edits_json === 'string'
+      ) {
+        try {
+          const edits = JSON.parse(persisted.user_edits_json) as Record<
+            string,
+            unknown
+          >;
+          if (edits.__previous_generated_notes__) {
+            meetingNotesRunCoordinator.supersedeMeetingNotes(meeting.id);
+          }
+        } catch {
+          // A malformed historical overlay cannot be treated as a restore.
+        }
+      }
       if (shouldCleanupTranscriptOnSave(meeting)) {
         const cleanup = cleanupTranscriptJson(meeting?.transcript_json);
         if (cleanup) {
@@ -1916,6 +2079,16 @@ app.whenReady().then(async () => {
         if (!meeting) {
           throw new Error(`Meeting ${meetingId} not found`);
         }
+        if (
+          typeof path !== 'string' ||
+          typeof original !== 'string' ||
+          typeof edited !== 'string'
+        ) {
+          throw new Error('invalid_user_edit');
+        }
+        if (isNoOpMeetingNotesEdit(original, edited)) {
+          return { success: true };
+        }
         let editsMap: Record<
           string,
           { original: string; edited: string; edited_at: string }
@@ -1972,8 +2145,36 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('GET_MEETINGS', () => db.getMeetings());
-  ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id));
+  const withNotesRun = (value: unknown) => {
+    const meeting = value as db.PersistedMeeting | undefined;
+    return meeting
+      ? {
+          ...meeting,
+          analysis_run_json: JSON.stringify(
+            db.getMeetingAnalysisRun(meeting.id),
+          ),
+        }
+      : meeting;
+  };
+  ipcMain.handle('GET_MEETINGS', () => db.getMeetings().map(withNotesRun));
+  ipcMain.handle('GET_MEETING', (_event, id) =>
+    withNotesRun(db.getMeeting(id)),
+  );
+  ipcMain.handle('RESTORE_MEETING_NOTES', (_event, input) => {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      (typeof input.meetingId !== 'string' &&
+        typeof input.meetingId !== 'number')
+    ) {
+      throw new Error('invalid_meeting_notes_restore_request');
+    }
+    meetingNotesRunCoordinator.supersedeMeetingNotes(input.meetingId);
+    if (!db.restoreMeetingNotesSnapshot(input.meetingId)) {
+      throw new Error('meeting_notes_restore_unavailable');
+    }
+    return { meetingId: String(input.meetingId), status: 'restored' };
+  });
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
     db.searchMeetings(query),
   );
@@ -1992,6 +2193,7 @@ app.whenReady().then(async () => {
 
       // Abort any active background tasks for this meeting
       abortMeetingTasks(meetingId);
+      meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
 
       const result = db.deleteMeeting(id);
       if (downstreamActivity.runId) {
@@ -2400,20 +2602,42 @@ app.whenReady().then(async () => {
     signals: emptyValueSignals(),
   });
 
-  const fallbackAnalysisV3 = (): AnalysisDocumentV3 => ({
-    analysis_schema_version: 3,
-    overview:
-      'Conversation captured. Key themes and follow-ups are summarized below.',
-    topics: [],
-    all_action_items: [],
-    all_decisions: [],
-    meeting_type: 'general',
-    quality: {
-      format_pass: false,
-      retry_count: 1,
-      fallback_used: true,
-      issues: ['Analysis generation failed in main-process fallback.'],
-    },
+  ipcMain.handle('GENERATE_MEETING_NOTES', async (_event, input) => {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      (typeof input.meetingId !== 'string' &&
+        typeof input.meetingId !== 'number') ||
+      typeof input.requestId !== 'string' ||
+      !input.requestId.trim() ||
+      (input.reason !== 'automatic' &&
+        input.reason !== 'manual' &&
+        input.reason !== 'secondary')
+    ) {
+      throw new Error('invalid_meeting_notes_request');
+    }
+    return await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
+      meetingId: input.meetingId,
+      requestId: input.requestId,
+      template: input.template === undefined ? 'auto' : input.template,
+      reason: input.reason,
+    });
+  });
+
+  ipcMain.handle('CANCEL_MEETING_NOTES', async (_event, input) => {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      (typeof input.meetingId !== 'string' &&
+        typeof input.meetingId !== 'number') ||
+      typeof input.requestId !== 'string'
+    ) {
+      return { cancelled: false };
+    }
+    return await meetingNotesRunCoordinator.cancelMeetingNotes({
+      meetingId: input.meetingId,
+      requestId: input.requestId,
+    });
   });
 
   ipcMain.handle(
@@ -2426,10 +2650,7 @@ app.whenReady().then(async () => {
       const controller = new AbortController();
       const generation = (async () => {
         if (!transcript || !transcript.trim()) {
-          return {
-            analysis: fallbackAnalysisV3(),
-            signals: emptyValueSignals(),
-          };
+          throw new Error('meeting_notes_source_missing');
         }
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
@@ -2440,20 +2661,23 @@ app.whenReady().then(async () => {
           transcript,
           userNotes,
           template,
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            knownTerms: db
+              .getAllEntities()
+              .filter(
+                (entity) =>
+                  entity.type === 'person' || entity.type === 'project',
+              )
+              .map((entity) => entity.name)
+              .filter(Boolean)
+              .slice(0, 24),
+          },
         );
         if (normalizedRequestId && analysis.quality.fallback_used) {
           throw new Error('analysis_generation_failed');
         }
-        const signals = await provider.extractValueSignals(
-          transcript,
-          analysis.overview,
-          { signal: controller.signal },
-        );
-        return {
-          analysis,
-          signals: normalizeValueSignals(signals),
-        };
+        return { analysis };
       })();
       const settled = generation.then(
         () => undefined,
@@ -2467,13 +2691,6 @@ app.whenReady().then(async () => {
       }
       try {
         return await generation;
-      } catch (error) {
-        if (controller.signal.aborted || normalizedRequestId) throw error;
-        console.error('[LLM] v3 analysis generation failed:', error);
-        return {
-          analysis: fallbackAnalysisV3(),
-          signals: emptyValueSignals(),
-        };
       } finally {
         if (
           normalizedRequestId &&
@@ -2539,7 +2756,7 @@ app.whenReady().then(async () => {
         return normalizeValueSignals(signals);
       } catch (error) {
         console.error('[LLM] Value signal extraction failed:', error);
-        return emptyValueSignals();
+        throw error;
       }
     },
   );
@@ -2580,14 +2797,7 @@ app.whenReady().then(async () => {
         });
       } catch (error) {
         console.error('[LLM] Entity extraction failed:', error);
-        return {
-          people: [],
-          topics: [],
-          action_items: [],
-          decisions: [],
-          projects: [],
-          relationships: [],
-        };
+        throw error;
       }
     },
   );

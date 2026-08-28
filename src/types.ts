@@ -52,6 +52,7 @@ export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
 export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
 
 export type AnalysisErrorCategory =
+  | 'notes_quality_warning'
   | 'invalid_json'
   | 'repair_succeeded'
   | 'repair_failed'
@@ -62,7 +63,16 @@ export type AnalysisErrorCategory =
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
   | 'unsupported_action_item_due'
-  | 'unsupported_recent_win';
+  | 'unsupported_recent_win'
+  | 'unsupported_decision_decider'
+  | 'unsupported_decision_rationale'
+  | 'unsupported_key_point_speaker'
+  | 'editorial_invalid_json'
+  | 'editorial_input_too_large'
+  | 'editorial_dropped_settled_item'
+  | 'editorial_failed'
+  | 'terminology_invalid_json'
+  | 'terminology_failed';
 
 export interface TopicPoint {
   text: string;
@@ -108,6 +118,46 @@ export interface AnalysisGenerationMetadata {
   prompt_version: string;
   generated_at: string;
   error_categories: AnalysisErrorCategory[];
+  generation_options?: {
+    structured_thinking?: boolean;
+    seed?: number;
+  };
+  terminology?: {
+    schemaVersion: 1;
+    generatedAt: string;
+    provider: string;
+    model: string;
+    policyVersion: string;
+    proposals: Array<{
+      rawForms: string[];
+      preferredTerm: string | null;
+      segmentIndexes: number[];
+      confidence: 'high' | 'medium' | 'low';
+      signals: Array<
+        | 'repeated_context'
+        | 'known_person'
+        | 'known_entity'
+        | 'spoken_definition'
+        | 'variant_consistency'
+      >;
+      status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
+    }>;
+  };
+  pipeline_version?: 'writer-audit-v1' | 'writer-editor-v1';
+  mode?: 'direct' | 'hierarchical';
+  audit_status?: 'complete' | 'complete_with_warnings';
+  audit_change_count?: number;
+  source_provenance?: {
+    schema_version: 1;
+    source_revision: string;
+    blocks: Record<
+      string,
+      {
+        id: string;
+        sources: Array<{ segment: number; start: number; end: number }>;
+      }
+    >;
+  };
 }
 
 export interface AnalysisDocumentV3 {
@@ -159,6 +209,8 @@ export interface Meeting {
   analysis_generated_at?: string;
   analysis_error_categories_json?: string;
   user_edits_json?: string;
+  analysis_edit_conflicts_json?: string;
+  analysis_run_json?: string | null;
   transcript_status?: TranscriptLifecycleStatus;
   transcript_integrity_json?: string;
   system_audio_path?: string;

@@ -5,11 +5,9 @@ import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 
 import { resolveTranscriptEvidence } from '../../electron/llm/analysisGrounding';
-import { getStructuredAnalysisPrompt } from '../../electron/llm/prompts';
 import {
   STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
-  calculateOllamaContextBudget,
 } from '../../electron/llm/unifiedProvider';
 import { scoreMeetingNotesQuality } from '../../scripts/lib/meeting_notes_quality.js';
 
@@ -257,7 +255,7 @@ suite('real-provider meeting notes quality benchmark', () => {
           )
           .map(({ fixture, analysis }) => [
             fixture.case_id ?? 'unlabeled_synthetic_case',
-            analysis.quality.error_categories,
+            analysis.generation_metadata?.error_categories ?? [],
           ]),
       );
       const reviewedScores = runs
@@ -293,12 +291,6 @@ suite('real-provider meeting notes quality benchmark', () => {
         }
         return counts;
       }, {});
-      const contextBudgets = fixtures.map((fixture) =>
-        calculateOllamaContextBudget(
-          getStructuredAnalysisPrompt(fixture.transcript.join('\n')),
-          'structuredAnalysis',
-        ),
-      );
       const report = {
         schema_version: 1,
         provider: 'ollama',
@@ -316,7 +308,7 @@ suite('real-provider meeting notes quality benchmark', () => {
         generation: {
           structured_thinking: structuredThinking,
           seed_start: seedStart,
-          topic_temperature: 0.1,
+          notes_temperature: 0.1,
         },
         cases: fixtures.length,
         runs: runs.length,
@@ -353,9 +345,10 @@ suite('real-provider meeting notes quality benchmark', () => {
             ]),
         ),
         token_budget: {
-          context_min: Math.min(...contextBudgets.map((item) => item.num_ctx)),
-          context_max: Math.max(...contextBudgets.map((item) => item.num_ctx)),
-          output: Math.max(...contextBudgets.map((item) => item.num_predict)),
+          context_min: 16384,
+          context_max: 16384,
+          output: 2048,
+          audit_output: 1536,
         },
         latency_ms: {
           total: Math.round(runs.reduce((sum, run) => sum + run.latencyMs, 0)),

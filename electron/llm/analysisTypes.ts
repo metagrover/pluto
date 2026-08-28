@@ -17,6 +17,7 @@ export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
 export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
 
 export type AnalysisErrorCategory =
+  | 'notes_quality_warning'
   | 'invalid_json'
   | 'repair_succeeded'
   | 'repair_failed'
@@ -34,13 +35,67 @@ export type AnalysisErrorCategory =
   | 'editorial_invalid_json'
   | 'editorial_input_too_large'
   | 'editorial_dropped_settled_item'
-  | 'editorial_failed';
+  | 'editorial_failed'
+  | 'terminology_invalid_json'
+  | 'terminology_failed';
+
+export type TerminologyConfidence = 'high' | 'medium' | 'low';
+export type TerminologySignal =
+  | 'repeated_context'
+  | 'known_person'
+  | 'known_entity'
+  | 'spoken_definition'
+  | 'variant_consistency';
+export type TerminologyStatus =
+  | 'applied'
+  | 'proposed'
+  | 'confirmed'
+  | 'rejected'
+  | 'preserved';
+
+export interface MeetingTerminologyProposalV1 {
+  rawForms: string[];
+  preferredTerm: string | null;
+  segmentIndexes: number[];
+  confidence: TerminologyConfidence;
+  signals: TerminologySignal[];
+  status: TerminologyStatus;
+}
+
+export interface MeetingTerminologyArtifactV1 {
+  schemaVersion: 1;
+  generatedAt: string;
+  provider: string;
+  model: string;
+  policyVersion: string;
+  proposals: MeetingTerminologyProposalV1[];
+}
 
 export interface AnalysisQualityV3 {
   format_pass: boolean;
   retry_count: number;
   fallback_used: boolean;
   issues: string[];
+}
+
+export interface NotesSourceProvenance {
+  schema_version: 1;
+  source_revision: string;
+  blocks: Record<
+    string,
+    {
+      id: string;
+      sources: Array<{ segment: number; start: number; end: number }>;
+    }
+  >;
+}
+
+export interface NotesPipelineMetadata {
+  pipeline_version: 'writer-audit-v1' | 'writer-editor-v1';
+  mode: 'direct' | 'hierarchical';
+  audit_status: 'complete' | 'complete_with_warnings';
+  audit_change_count: number;
+  source_provenance: NotesSourceProvenance;
 }
 
 export interface AnalysisGenerationMetadata {
@@ -53,6 +108,18 @@ export interface AnalysisGenerationMetadata {
   generation_options?: {
     structured_thinking?: boolean;
     seed?: number;
+  };
+  terminology?: MeetingTerminologyArtifactV1;
+  pipeline_version?: NotesPipelineMetadata['pipeline_version'];
+  mode?: NotesPipelineMetadata['mode'];
+  audit_status?: NotesPipelineMetadata['audit_status'];
+  audit_change_count?: number;
+  source_provenance?: NotesPipelineMetadata['source_provenance'];
+  hierarchy?: {
+    depth: number;
+    nodes: number;
+    max_depth: number;
+    max_nodes: number;
   };
 }
 

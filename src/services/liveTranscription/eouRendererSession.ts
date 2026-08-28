@@ -38,6 +38,7 @@ export function createEouRendererSession(options: {
   generation: number;
   sampleRates: Record<LiveSource, number | (() => number)>;
   transport: EouRendererTransport;
+  nowSeconds?: () => number;
   onSegments(segments: LiveTranscriptSegment[]): void;
   onUnavailable(code: string): void;
 }) {
@@ -57,6 +58,10 @@ export function createEouRendererSession(options: {
   const dispatch: Record<LiveSource, SourceDispatch> = {
     mic: { outstanding: 0, tail: Promise.resolve() },
     system: { outstanding: 0, tail: Promise.resolve() },
+  };
+  const sourceOffsetsSeconds: Record<LiveSource, number | null> = {
+    mic: null,
+    system: null,
   };
 
   const fail = (code: string): void => {
@@ -121,7 +126,12 @@ export function createEouRendererSession(options: {
     )
       return;
     try {
-      options.onSegments(projection.apply(payload.event));
+      options.onSegments(
+        projection.apply(
+          payload.event,
+          sourceOffsetsSeconds[payload.event.source] ?? 0,
+        ),
+      );
     } catch (error) {
       fail(
         error instanceof Error && error.message === 'parakeet_prefix_mutated'
@@ -161,6 +171,23 @@ export function createEouRendererSession(options: {
     append(source: LiveSource, samples: Float32Array): void {
       if (!accepting || currentStatus !== 'ready') return;
       try {
+        if (sourceOffsetsSeconds[source] === null) {
+          const nowSeconds = options.nowSeconds?.() ?? 0;
+          const configuredSampleRate = options.sampleRates[source];
+          const sampleRate =
+            typeof configuredSampleRate === 'function'
+              ? configuredSampleRate()
+              : configuredSampleRate;
+          const offset = Math.max(0, nowSeconds - samples.length / sampleRate);
+          if (
+            !Number.isFinite(nowSeconds) ||
+            nowSeconds < 0 ||
+            !Number.isFinite(offset)
+          ) {
+            throw new Error('parakeet_request_invalid');
+          }
+          sourceOffsetsSeconds[source] = offset;
+        }
         chunkerFor(source).append(samples);
       } catch {
         fail('parakeet_request_invalid');

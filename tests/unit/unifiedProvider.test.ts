@@ -21,8 +21,10 @@ vi.mock('@google/generative-ai', () => {
 });
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
+  STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
   calculateOllamaContextBudget,
   deduplicateExtractedItems,
@@ -109,6 +111,87 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('routes an indexed source through exactly one writer and one audit with the configured model', async () => {
+    const sourceText = 'I will send the outline.';
+    const source = createNotesSource(
+      JSON.stringify({ segments: [{ speaker: 'Milo', text: sourceText }] }),
+    );
+    const span = { segment: 0, start: 0, end: sourceText.length };
+    const responses = [
+      {
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources: [span] },
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                sources: [span],
+                owner: 'Milo',
+                due: null,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        changes: [],
+        verdicts: [
+          { target: 's0:title', status: 'supported', sources: [span] },
+          { target: 's0:item:0', status: 'supported', sources: [span] },
+        ],
+        dispositions: [],
+        terminology: [],
+      },
+    ];
+    const fetchMock = installFetchMock((_url, init) =>
+      jsonResponse({
+        choices: [{ message: { content: JSON.stringify(responses.shift()) } }],
+      }),
+    );
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+      openai_model: 'configured-analysis-model',
+    });
+
+    const analysis = await provider.generateStructuredAnalysis(
+      'Milo: I will send the outline.',
+      '',
+      'auto',
+      { source, contextTokens: 16384 },
+    );
+
+    expect(analysis.all_action_items).toEqual([
+      expect.objectContaining({ text: 'Send the outline', assignee: 'Milo' }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(parseRequestBody(init).response_format).toEqual({
+        type: 'json_object',
+      });
+      expect(parseRequestBody(init).format).toBeUndefined();
+    }
+    expect(
+      fetchMock.mock.calls.map(([, init]) => parseRequestBody(init).model),
+    ).toEqual(['configured-analysis-model', 'configured-analysis-model']);
+    expect(
+      fetchMock.mock.calls.map(
+        ([, init]) =>
+          (parseRequestBody(init).messages as Array<{ content: string }>)[0]
+            ?.content,
+      ),
+    ).toEqual([
+      'You are a source-grounded meeting notes writer. Always respond with valid JSON only.',
+      'You are a source-grounded meeting notes auditor. Always respond with valid JSON only.',
+    ]);
+  });
+
+  it('versions recoverable local notes as notes-v28', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v28');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     geminiGetGenerativeModelMock.mockReset();
@@ -117,6 +200,12 @@ describe('UnifiedLLMProvider', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('budgets enough output for the bounded terminology proposal list', () => {
+    expect(
+      calculateOllamaContextBudget('', 'terminologyReconciliation').num_predict,
+    ).toBe(2048);
   });
 
   it('uses configured ollama model directly', async () => {
@@ -155,31 +244,6 @@ describe('UnifiedLLMProvider', () => {
 
     expect(options.num_predict).toBe(4096);
     expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
-  });
-
-  it('uses explicit structured-thinking and seed capabilities without model-name checks', async () => {
-    const requestBodies: Array<Record<string, unknown>> = [];
-    installFetchMock((_url, init) => {
-      requestBodies.push(parseRequestBody(init));
-      return jsonResponse({
-        response: JSON.stringify({
-          topics: [{ title: 'Synthetic', start_segment: 0, end_segment: 0 }],
-        }),
-      });
-    });
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'synthetic-model:latest',
-      ollama_structured_thinking: false,
-      ollama_seed: 42,
-    });
-
-    await provider.generateStructuredAnalysis('Nira: Synthetic update.');
-
-    expect(requestBodies.length).toBeGreaterThan(0);
-    for (const body of requestBodies) {
-      expect(body.think).toBe(false);
-      expect(body.options).toMatchObject({ seed: 42 });
-    }
   });
 
   it('keeps synchronous Ask Pluto visible while preserving the larger Deep budget', async () => {
@@ -351,52 +415,6 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('lets Ask Pluto preempt and then resume an active topic-analysis pass', async () => {
-    let generationCalls = 0;
-    const fetchMock = installFetchMock((_url, init) => {
-      generationCalls += 1;
-      if (generationCalls === 1) {
-        return new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            'abort',
-            () => reject(init.signal?.reason),
-            { once: true },
-          );
-        });
-      }
-      const body = parseRequestBody(init);
-      if (String(body.prompt).includes('Question:')) {
-        return jsonResponse({ response: 'The meeting covered pricing.' });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          title: 'Pricing',
-          summary: 'The meeting covered pricing.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-
-    const analysis = provider.generateStructuredAnalysis(
-      '[Sam] (0s): We discussed pricing.',
-    );
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const answer = provider.answerAskPluto('Question: What did we discuss?');
-
-    await expect(answer).resolves.toBe('The meeting covered pricing.');
-    await expect(analysis).resolves.toMatchObject({
-      quality: { fallback_used: false },
-      topics: [{ summary: 'The meeting covered pricing.' }],
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
   it('uses Qwen as the single default across meeting-intelligence tasks', async () => {
     const selectedModels: string[] = [];
     installFetchMock((url, init) => {
@@ -448,40 +466,6 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b', 'qwen3.5:9b']);
   });
 
-  it('prefers promoted Qwen for structured meeting analysis', async () => {
-    const selectedModels: string[] = [];
-    const streamModes: unknown[] = [];
-    installFetchMock((url, init) => {
-      if (url.endsWith('/api/tags')) {
-        return jsonResponse({
-          models: [{ name: 'phi4-mini:3.8b' }, { name: 'qwen3.5:9b' }],
-        });
-      }
-      const body = parseRequestBody(init);
-      selectedModels.push(String(body.model));
-      streamModes.push(body.stream);
-      return jsonResponse({
-        response: JSON.stringify({
-          title: 'Synthetic update',
-          summary: 'Synthetic summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {});
-    const analysis = await provider.generateStructuredAnalysis(
-      'Nira: Synthetic update.',
-    );
-
-    expect(analysis.generation_metadata?.model).toBe('qwen3.5:9b');
-    expect(selectedModels).toEqual(['qwen3.5:9b']);
-    expect(streamModes).toEqual([true]);
-  });
-
   it('avoids embedding-only ollama models during auto-detection', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
@@ -507,679 +491,6 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModel).toBe('kimike:latest');
   });
 
-  it('analyzes only the transcript lines assigned to each Ollama topic', async () => {
-    const topicPrompts: string[] = [];
-    let segmentationTemperature: number | undefined;
-    const topicTemperatures: number[] = [];
-    installFetchMock((url, init) => {
-      expect(url).toContain('/api/generate');
-      const body = parseRequestBody(init);
-      const prompt = String(body.prompt || '');
-      const options = body.options as Record<string, unknown>;
-      if (prompt.includes('meeting topic segmenter')) {
-        segmentationTemperature = Number(options.temperature);
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
-              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            overview: 'Edited summary.',
-            topics: [
-              {
-                title: 'Combined topic',
-                summary: 'Combined summary.',
-                key_points: [],
-                decisions: [],
-                action_items: [],
-                open_questions: [],
-              },
-            ],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'general',
-          }),
-        });
-      }
-      topicPrompts.push(prompt);
-      topicTemperatures.push(Number(options.temperature));
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'Grounded summary',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'phi4-mini:3.8b',
-    });
-    await provider.generateStructuredAnalysis(
-      [
-        'Me: alpha-only detail',
-        'Them: beta-only detail',
-        'Me: neutral detail two',
-        'Them: neutral detail three',
-        'Me: neutral detail four',
-        'Them: neutral detail five',
-        'Me: neutral detail six',
-        'Them: neutral detail seven',
-        'Me: neutral detail eight',
-      ].join('\n'),
-    );
-
-    expect(topicPrompts).toHaveLength(2);
-    expect(topicPrompts[0]).toContain('alpha-only detail');
-    expect(topicPrompts[0]).not.toContain('beta-only detail');
-    expect(topicPrompts[1]).toContain('beta-only detail');
-    expect(topicPrompts[1]).not.toContain('alpha-only detail');
-    expect(segmentationTemperature).toBe(0.1);
-    expect(topicTemperatures).toEqual([0.1, 0.1]);
-  });
-
-  it('covers transcript lines omitted between Ollama topic ranges exactly once', async () => {
-    const topicPrompts: string[] = [];
-    installFetchMock((_url, init) => {
-      const body = parseRequestBody(init);
-      const prompt = String(body.prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Opening', start_segment: 0, end_segment: 0 },
-              { title: 'Closing', start_segment: 3, end_segment: 3 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            overview: 'Edited summary.',
-            topics: [
-              {
-                title: 'Combined topic',
-                summary: 'Combined summary.',
-                key_points: [],
-                decisions: [],
-                action_items: [],
-                open_questions: [],
-              },
-            ],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'general',
-          }),
-        });
-      }
-      topicPrompts.push(prompt);
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'Grounded summary',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'phi4-mini:3.8b',
-    });
-    await provider.generateStructuredAnalysis(
-      [
-        'Me: detail-zero',
-        'Me: detail-one',
-        'Me: detail-two',
-        'Me: detail-three',
-      ].join('\n'),
-    );
-
-    const combinedPrompts = topicPrompts.join('\n');
-    for (const detail of [
-      'detail-zero',
-      'detail-one',
-      'detail-two',
-      'detail-three',
-    ]) {
-      expect(combinedPrompts.split(detail)).toHaveLength(2);
-    }
-  });
-
-  it('globally edits multi-topic Ollama analysis once', async () => {
-    const prompts: string[] = [];
-    installFetchMock((_url, init) => {
-      const body = parseRequestBody(init);
-      const prompt = String(body.prompt || '');
-      prompts.push(prompt);
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Cloud-code access', start_segment: 0, end_segment: 0 },
-              { title: 'Tooling access', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        expect(prompt).toContain('Cloud Code is available');
-        expect(prompt).toContain('Cloud-code access');
-        return jsonResponse({
-          response: JSON.stringify({
-            overview: 'The edited executive summary.',
-            topics: [
-              {
-                title: 'Cloud Code access',
-                summary: 'Access remains constrained.',
-                key_points: [],
-                decisions: [],
-                action_items: [],
-                open_questions: [],
-                transcript_range: [0, 1],
-              },
-            ],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'team_sync',
-          }),
-        });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          title: prompt.includes('Cloud-code access')
-            ? 'Cloud-code access'
-            : 'Tooling access',
-          summary: 'A local topic summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      [
-        'Me: Cloud Code is available in the workspace.',
-        'Them: Tooling access remains constrained.',
-        'Me: Access will be reviewed after provisioning.',
-        'Them: The workspace owner is reviewing access.',
-        'Me: Provisioning is still in progress.',
-        'Them: The team needs one consistent tool name.',
-        'Me: The access policy applies across projects.',
-        'Them: No exception has been approved.',
-        'Me: We will revisit this after provisioning.',
-      ].join('\n'),
-    );
-
-    expect(
-      prompts.filter((prompt) =>
-        prompt.includes('global meeting-notes editor'),
-      ),
-    ).toHaveLength(1);
-    expect(analysis.overview).toBe('The edited executive summary.');
-    expect(analysis.topics).toHaveLength(1);
-    expect(analysis.topics[0].title).toBe('Cloud Code access');
-  });
-
-  it('skips global editing for a two-segment transcript', async () => {
-    const prompts: string[] = [];
-    installFetchMock((_url, init) => {
-      const body = parseRequestBody(init);
-      const prompt = String(body.prompt || '');
-      prompts.push(prompt);
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Request', start_segment: 0, end_segment: 0 },
-              { title: 'Response', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          title: 'Launch memo request',
-          summary: 'A local topic summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      ['Nira: Could someone prepare a memo?', 'Milo: Leave that open.'].join(
-        '\n',
-      ),
-    );
-
-    expect(
-      prompts.filter((prompt) =>
-        prompt.includes('global meeting-notes editor'),
-      ),
-    ).toHaveLength(0);
-    expect(
-      prompts.filter((prompt) =>
-        prompt.includes('Analyze this transcript slice'),
-      ),
-    ).toHaveLength(1);
-    expect(analysis.topics).toHaveLength(1);
-    expect(analysis.topics[0].title).toBe('Launch memo request');
-  });
-
-  it('falls back to the local draft when global editing returns invalid JSON', async () => {
-    installFetchMock((_url, init) => {
-      const body = parseRequestBody(init);
-      const prompt = String(body.prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
-              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return jsonResponse({ response: '{invalid json' });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'A grounded local summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      [
-        'Me: Alpha detail.',
-        'Them: Beta detail.',
-        'Me: Both topics need review.',
-        'Them: Alpha remains separate.',
-        'Me: Beta remains separate.',
-        'Them: The local draft covers both.',
-        'Me: The editor should consolidate them.',
-        'Them: Evidence must remain exact.',
-        'Me: Invalid editor output should fall back.',
-      ].join('\n'),
-    );
-
-    expect(analysis.topics.map((topic) => topic.title)).toEqual([
-      'Alpha topic',
-      'Beta topic',
-    ]);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_invalid_json',
-    );
-  });
-
-  it('rejects an editorial result that drops a grounded settled item', async () => {
-    installFetchMock((_url, init) => {
-      const prompt = String(parseRequestBody(init).prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Rollout', start_segment: 0, end_segment: 3 },
-              { title: 'Follow-up', start_segment: 4, end_segment: 8 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            overview: 'A partial edited summary.',
-            topics: [
-              {
-                title: 'Rollout',
-                summary: 'The editor omitted the settled decision.',
-                key_points: [],
-                decisions: [
-                  {
-                    text: 'Proceed with REST for rollout',
-                    evidence:
-                      'We will use REST for rollout, send the rollout email, and update rollout docs.',
-                  },
-                ],
-                action_items: [
-                  {
-                    text: 'Send the rollout email',
-                    evidence:
-                      'We will use REST for rollout, send the rollout email, and update rollout docs.',
-                  },
-                ],
-                open_questions: [],
-              },
-            ],
-            meeting_type: 'general',
-          }),
-        });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'The rollout uses REST.',
-          key_points: [{ text: 'The migration remains staged.' }],
-          decisions: [
-            {
-              text: 'Use REST for rollout',
-              evidence:
-                'We will use REST for rollout, send the rollout email, and update rollout docs.',
-            },
-          ],
-          action_items: [
-            {
-              text: 'Send the rollout email',
-              evidence:
-                'We will use REST for rollout, send the rollout email, and update rollout docs.',
-            },
-            {
-              text: 'Update rollout docs',
-              evidence:
-                'We will use REST for rollout, send the rollout email, and update rollout docs.',
-            },
-          ],
-          open_questions: ['When will the legacy endpoint be removed?'],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      [
-        'Nira: We will use REST for rollout, send the rollout email, and update rollout docs.',
-        'Milo: The rollout begins next week.',
-        'Nira: The migration remains staged.',
-        'Milo: The legacy endpoint stays available.',
-        'Nira: Documentation needs review.',
-        'Milo: Monitoring remains unchanged.',
-        'Nira: The follow-up is separate.',
-        'Milo: The rollout owner is confirmed.',
-        'Nira: The meeting covered both topics.',
-      ].join('\n'),
-    );
-
-    expect(analysis.all_decisions).toHaveLength(1);
-    expect(analysis.all_action_items).toHaveLength(2);
-    expect(
-      analysis.topics.flatMap((topic) =>
-        topic.key_points.map((point) => point.text),
-      ),
-    ).toContain('The migration remains staged.');
-    expect(
-      analysis.topics.flatMap((topic) => topic.open_questions),
-    ).not.toContain('When will the legacy endpoint be removed?');
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_dropped_settled_item',
-    );
-  });
-
-  it('falls back to the local draft when global editing fails', async () => {
-    installFetchMock((_url, init) => {
-      const prompt = String(parseRequestBody(init).prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
-              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return jsonResponse({}, false, 'editor unavailable');
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'A grounded local summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      Array.from({ length: 9 }, (_, index) => `Me: Detail ${index}.`).join(
-        '\n',
-      ),
-    );
-
-    expect(analysis.topics.map((topic) => topic.title)).toEqual([
-      'Alpha topic',
-      'Beta topic',
-    ]);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_failed',
-    );
-  });
-
-  it('keeps the local draft when global editing times out', async () => {
-    installFetchMock((_url, init) => {
-      const prompt = String(parseRequestBody(init).prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
-              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        return Promise.reject(new DOMException('timed out', 'AbortError'));
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          summary: 'A grounded local summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      Array.from({ length: 9 }, (_, index) => `Me: Detail ${index}.`).join(
-        '\n',
-      ),
-    );
-
-    expect(analysis.topics.map((topic) => topic.title)).toEqual([
-      'Alpha topic',
-      'Beta topic',
-    ]);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_failed',
-    );
-  });
-
-  it('deterministically caps oversized meetings instead of returning every window topic', async () => {
-    let transcriptEditorCount = 0;
-    installFetchMock((_url, init) => {
-      const prompt = String(parseRequestBody(init).prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: Array.from({ length: 48 }, (_, index) => ({
-              title: index === 0 ? 'Screen sharing' : `Topic ${index}`,
-              start_segment: index,
-              end_segment: index,
-            })),
-          }),
-        });
-      }
-      if (prompt.includes('global meeting-notes editor')) {
-        transcriptEditorCount += 1;
-        return jsonResponse({
-          response: JSON.stringify({
-            overview: `Batch ${transcriptEditorCount} consolidated.`,
-            topics: [
-              {
-                title: `Batch theme ${transcriptEditorCount}`,
-                summary: `Batch ${transcriptEditorCount} consolidated.`,
-                key_points: [],
-                decisions: [],
-                action_items: [],
-                open_questions: [],
-              },
-            ],
-            all_action_items: [],
-            all_decisions: [],
-            meeting_type: 'team_sync',
-          }),
-        });
-      }
-      const localTitle = prompt.match(/topic "([^"]+)"/)?.[1];
-      return jsonResponse({
-        response: JSON.stringify({
-          title: localTitle,
-          summary: 'A grounded local summary.',
-          key_points: [],
-          decisions: [],
-          action_items: [],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      Array.from(
-        { length: 48 },
-        (_, index) =>
-          `Me: ${index === 0 ? 'Screen sharing' : `Topic ${index}`} ${'detail '.repeat(100)}`,
-      ).join('\n'),
-    );
-
-    expect(transcriptEditorCount).toBe(0);
-    expect(analysis.topics).toHaveLength(6);
-    expect(
-      analysis.topics.some((topic) => /screen sharing/i.test(topic.title)),
-    ).toBe(false);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_input_too_large',
-    );
-    expect(analysis.quality.issues).toContain(
-      'Meeting-wide consolidation was limited by local context capacity.',
-    );
-  });
-
-  it('preserves grounded settled items when oversized input already has few topics', async () => {
-    installFetchMock((_url, init) => {
-      const prompt = String(parseRequestBody(init).prompt || '');
-      if (prompt.includes('meeting topic segmenter')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [
-              { title: 'Decision', start_segment: 0, end_segment: 3 },
-              { title: 'Follow-up', start_segment: 4, end_segment: 8 },
-            ],
-          }),
-        });
-      }
-      if (prompt.includes('topic "Decision"')) {
-        return jsonResponse({
-          response: JSON.stringify({
-            title: 'Decision',
-            summary: 'REST was selected.',
-            key_points: [{ text: 'Local decision detail.' }],
-            decisions: [
-              {
-                text: 'Use REST',
-                evidence: 'We will use REST.',
-              },
-            ],
-            action_items: [],
-            open_questions: [],
-          }),
-        });
-      }
-      return jsonResponse({
-        response: JSON.stringify({
-          title: 'Follow-up',
-          summary: 'The rollout email has an owner.',
-          key_points: [{ text: 'Local follow-up detail.' }],
-          decisions: [],
-          action_items: [
-            {
-              text: 'Send rollout email',
-              assignee: 'Milo',
-              evidence: 'I will send rollout email.',
-            },
-          ],
-          open_questions: [],
-        }),
-      });
-    });
-
-    const lines = Array.from(
-      { length: 9 },
-      (_, index) => `Nira: ${index} ${'detail '.repeat(1_000)}`,
-    );
-    lines[0] = `Nira: We will use REST. ${'detail '.repeat(1_000)}`;
-    lines[4] = `Milo: I will send rollout email. ${'detail '.repeat(1_000)}`;
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      lines.join('\n'),
-    );
-
-    expect(analysis.topics).toHaveLength(2);
-    expect(analysis.all_decisions.map((item) => item.text)).toEqual([
-      'Use REST',
-    ]);
-    expect(analysis.all_action_items).toEqual([
-      expect.objectContaining({ text: 'Send rollout email', assignee: 'Milo' }),
-    ]);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'editorial_input_too_large',
-    );
-  });
-
   it('falls back to default ollama model when model listing fails', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
@@ -1198,50 +509,6 @@ describe('UnifiedLLMProvider', () => {
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
     expect(selectedModel).toBe('qwen3.5:9b');
-  });
-
-  it('stops the multi-pass pipeline after a local model timeout', async () => {
-    const fetchMock = installFetchMock(() =>
-      Promise.reject(new DOMException('aborted', 'AbortError')),
-    );
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'phi4-mini:3.8b',
-    });
-
-    await expect(
-      provider.generateStructuredAnalysis('Me: status update'),
-    ).rejects.toMatchObject({ name: 'AbortError' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('propagates caller cancellation to the active Ollama request', async () => {
-    let requestSignal: AbortSignal | null = null;
-    installFetchMock((_url, init) => {
-      requestSignal = init?.signal as AbortSignal;
-      return new Promise((_resolve, reject) => {
-        requestSignal?.addEventListener(
-          'abort',
-          () => reject(new DOMException('cancelled', 'AbortError')),
-          { once: true },
-        );
-      });
-    });
-    const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'phi4-mini:3.8b',
-    });
-    const controller = new AbortController();
-
-    const generation = provider.generateStructuredAnalysis(
-      'Me: status update',
-      undefined,
-      'auto',
-      { signal: controller.signal },
-    );
-    await vi.waitFor(() => expect(requestSignal).not.toBeNull());
-    controller.abort(new DOMException('cancelled', 'AbortError'));
-
-    await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
-    expect(requestSignal?.aborted).toBe(true);
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {
@@ -1431,146 +698,6 @@ describe('UnifiedLLMProvider', () => {
       model: 'gemini-2.0-flash',
       generationConfig: { responseMimeType: 'application/json' },
     });
-  });
-
-  it('retries structured analysis once before succeeding on repaired JSON', async () => {
-    let structuredCalls = 0;
-    installFetchMock((url, init) => {
-      expect(url).toContain('/chat/completions');
-      const body = parseRequestBody(init);
-      const messages = Array.isArray(body.messages)
-        ? (body.messages as Array<{ role: string; content: string }>)
-        : [];
-
-      if (
-        messages.some((m) =>
-          m.content?.includes('Repair this meeting analysis JSON'),
-        )
-      ) {
-        return jsonResponse({
-          choices: [
-            { message: { content: JSON.stringify(validStructuredAnalysis) } },
-          ],
-        });
-      }
-
-      structuredCalls += 1;
-      return jsonResponse({
-        choices: [{ message: { content: '{invalid json' } }],
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('openai', {
-      openai_api_key: 'test-key',
-      openai_model: 'gpt-4.1-mini',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      [
-        'Sarah: We discussed GraphQL but did not decide on it.',
-        'Deepak: Agreed, we will use REST for the rollout.',
-        "Sarah: I'll send the rollout email by Friday.",
-      ].join('\n'),
-    );
-
-    expect(structuredCalls).toBe(1);
-    expect(analysis.quality.retry_count).toBe(1);
-    expect(analysis.generation_metadata?.error_categories).toContain(
-      'repair_succeeded',
-    );
-    expect(analysis.generation_metadata?.provider).toBe('openai');
-  });
-
-  it('drops unsupported decisions and clears unsupported action item owner and due fields', async () => {
-    installFetchMock((url) => {
-      expect(url).toContain('/chat/completions');
-      return jsonResponse({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                ...validStructuredAnalysis,
-                topics: [
-                  {
-                    ...validStructuredAnalysis.topics[0],
-                    decisions: [
-                      {
-                        text: 'Use GraphQL for the rollout',
-                        evidence: 'We discussed GraphQL as one option.',
-                      },
-                      {
-                        text: 'Use REST for the rollout',
-                        evidence: 'Agreed, we will use REST for the rollout.',
-                      },
-                    ],
-                    action_items: [
-                      {
-                        text: 'Send rollout email',
-                        assignee: 'Bob',
-                        due: 'next Tuesday',
-                        evidence: "I'll send the rollout email.",
-                      },
-                    ],
-                  },
-                ],
-                all_decisions: [
-                  {
-                    text: 'Use GraphQL for the rollout',
-                    evidence: 'We discussed GraphQL as one option.',
-                  },
-                  {
-                    text: 'Use REST for the rollout',
-                    evidence: 'Agreed, we will use REST for the rollout.',
-                  },
-                ],
-                all_action_items: [
-                  {
-                    text: 'Send rollout email',
-                    assignee: 'Bob',
-                    due: 'next Tuesday',
-                    evidence: "I'll send the rollout email.",
-                  },
-                ],
-              }),
-            },
-          },
-        ],
-      });
-    });
-
-    const provider = new UnifiedLLMProvider('openai', {
-      openai_api_key: 'test-key',
-    });
-    const analysis = await provider.generateStructuredAnalysis(
-      [
-        'Sarah: We discussed GraphQL as one option.',
-        'Deepak: Agreed, we will use REST for the rollout.',
-        "Sarah: I'll send the rollout email.",
-      ].join('\n'),
-    );
-
-    expect(analysis.all_decisions).toEqual([
-      {
-        text: 'Use REST for the rollout',
-        evidence: 'Agreed, we will use REST for the rollout.',
-      },
-    ]);
-    expect(analysis.all_action_items).toEqual([
-      {
-        text: 'Send rollout email',
-        evidence: "I'll send the rollout email.",
-        topic: 'API migration',
-      },
-    ]);
-    expect(analysis.generation_metadata?.error_categories).toEqual(
-      expect.arrayContaining([
-        'unsupported_decision',
-        'unsupported_action_item_owner',
-        'unsupported_action_item_due',
-      ]),
-    );
-    expect(analysis.quality.issues).toContain(
-      'Some generated actions or decisions could not be verified against transcript evidence and were omitted.',
-    );
   });
 });
 

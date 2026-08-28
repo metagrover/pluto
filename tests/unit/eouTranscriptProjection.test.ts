@@ -51,6 +51,45 @@ describe('EOU transcript projection', () => {
     ]);
   });
 
+  it('uses committed token pauses for word-preserving punctuation', () => {
+    const projection = createEouTranscriptProjection();
+
+    const [segment] = projection.apply(
+      update({
+        committedText: 'hello everyone how are you',
+        tentativeText: '',
+        processedAudioSeconds: 2,
+        tokens: [
+          { text: 'hello', startSeconds: 0, endSeconds: 0.2, committed: true },
+          {
+            text: 'everyone',
+            startSeconds: 0.22,
+            endSeconds: 0.5,
+            committed: true,
+          },
+          { text: 'how', startSeconds: 1.4, endSeconds: 1.55, committed: true },
+          { text: 'are', startSeconds: 1.57, endSeconds: 1.7, committed: true },
+          { text: 'you', startSeconds: 1.72, endSeconds: 1.9, committed: true },
+        ],
+      }),
+    );
+
+    expect(segment.text).toBe('Hello everyone. How are you?');
+    expect(segment.rawText).toBe('hello everyone how are you');
+    expect(segment.text.toLowerCase().match(/[a-z]+/g)).toEqual(
+      segment.rawText.match(/[a-z]+/g),
+    );
+  });
+
+  it('projects source-local token times onto the shared meeting clock', () => {
+    const projection = createEouTranscriptProjection();
+
+    const [segment] = projection.apply(update({ tentativeText: '' }), 2.25);
+
+    expect(segment.timestampMs).toBe(2_250);
+    expect(segment.endTimestampMs).toBe(2_650);
+  });
+
   it('replaces tentative text without changing the committed row', () => {
     const projection = createEouTranscriptProjection();
     const first = projection.apply(update());

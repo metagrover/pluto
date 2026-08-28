@@ -1,0 +1,29 @@
+{
+  "source": {
+    "revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+    "segments": [
+      {
+        "index": 0,
+        "speaker": "Tariq",
+        "text": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko?"
+      },
+      {
+        "index": 1,
+        "speaker": "Niko",
+        "text": "I'll be using the table. Bea is preparing and uploading it, not me."
+      },
+      {
+        "index": 2,
+        "speaker": "Bea",
+        "text": "Yes, I accept that task. I'll have the anonymized table there by Monday."
+      },
+      {
+        "index": 3,
+        "speaker": "Tariq",
+        "text": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+      }
+    ]
+  },
+  "writerRaw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Survey Data Management\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Bea to upload the anonymized survey table to the research workspace for Niko.\",\n          \"sources\": [\n            \"R0\",\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Bea\",\n          \"due\": \"Monday\"\n        },\n        {\n          \"text\": \"Decision not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}",
+  "auditRaw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+}

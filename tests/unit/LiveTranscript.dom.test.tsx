@@ -9,6 +9,7 @@ import { LiveTranscript } from '../../src/components/features/LiveTranscript';
 const liveSegment = {
   id: 'new-turn',
   speaker: 'Me' as const,
+  source: 'mic' as const,
   text: 'Shipping today works.',
   timestampMs: 12_000,
   confirmed: true,
@@ -25,15 +26,15 @@ const otherSpeakerSegment = {
   ...liveSegment,
   id: 'other-speaker',
   speaker: 'Them' as const,
+  source: 'system' as const,
   text: 'Now another person responds.',
   timestampMs: 18_000,
 };
 
-describe('LiveTranscript word reveal', () => {
+describe('LiveTranscript reading experience', () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    vi.useFakeTimers();
     container = document.createElement('div');
     document.body.append(container);
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,53 +42,10 @@ describe('LiveTranscript word reveal', () => {
 
   afterEach(() => {
     container.remove();
-    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  const setReducedMotion = (matches: boolean) => {
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn(() => ({
-        matches,
-        media: '(prefers-reduced-motion: reduce)',
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    );
-  };
-
-  it('reveals newly accepted speech one word per timer tick', () => {
-    setReducedMotion(false);
-    const root = createRoot(container);
-    act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
-    act(() =>
-      root.render(<LiveTranscript segments={[liveSegment]} interimText="" />),
-    );
-
-    const visualText = container.querySelector('.transcript-revealed-text');
-    expect(visualText?.textContent).toBe('');
-    expect(
-      container.querySelector('.transcript-typewriter-caret'),
-    ).not.toBeNull();
-
-    act(() => vi.advanceTimersByTime(85));
-    expect(visualText?.textContent).toBe('Shipping ');
-
-    act(() => vi.advanceTimersByTime(85));
-    act(() => vi.advanceTimersByTime(85));
-    expect(visualText?.textContent).toBe('Shipping today works.');
-    expect(container.querySelector('.transcript-typewriter-caret')).toBeNull();
-
-    act(() => root.unmount());
-  });
-
-  it('shows new speech immediately when reduced motion is requested', () => {
-    setReducedMotion(true);
+  it('shows newly accepted speech immediately without a typewriter effect', () => {
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
     act(() =>
@@ -95,15 +53,34 @@ describe('LiveTranscript word reveal', () => {
     );
 
     expect(
-      container.querySelector('.transcript-revealed-text')?.textContent,
+      container.querySelector('.transcript-paragraph-part')?.textContent,
     ).toBe('Shipping today works.');
     expect(container.querySelector('.transcript-typewriter-caret')).toBeNull();
 
     act(() => root.unmount());
   });
 
-  it('reports preview and fully validated live state quietly in the header', () => {
-    setReducedMotion(true);
+  it('labels microphone and system audio as You and Call', () => {
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[liveSegment, otherSpeakerSegment]}
+          interimText=""
+        />,
+      ),
+    );
+
+    expect(
+      [...container.querySelectorAll('.transcript-speaker strong')].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['You', 'Call']);
+
+    act(() => root.unmount());
+  });
+
+  it('distinguishes the tentative tail and reports truthful live status', () => {
     const root = createRoot(container);
     act(() =>
       root.render(
@@ -115,18 +92,33 @@ describe('LiveTranscript word reveal', () => {
     );
     expect(
       container.querySelector('.live-transcript-heading span')?.textContent,
-    ).toBe('Refining live');
+    ).toBe('Refining');
+    expect(
+      container.querySelector('.transcript-paragraph-part--tentative')
+        ?.textContent,
+    ).toBe('Shipping today works.');
     act(() =>
       root.render(<LiveTranscript segments={[liveSegment]} interimText="" />),
     );
     expect(
       container.querySelector('.live-transcript-heading span')?.textContent,
-    ).toBe('Validated live');
+    ).toBe('Caught up');
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[liveSegment]}
+          interimText=""
+          integrity="lagging"
+        />,
+      ),
+    );
+    expect(
+      container.querySelector('.live-transcript-heading span')?.textContent,
+    ).toBe('Falling behind');
     act(() => root.unmount());
   });
 
   it('renders consecutive same-speaker segments as one stable reading turn', () => {
-    setReducedMotion(false);
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
     act(() =>
@@ -143,24 +135,21 @@ describe('LiveTranscript word reveal', () => {
       [...container.querySelectorAll('.transcript-speaker strong')].map(
         (label) => label.textContent,
       ),
-    ).toEqual(['Me', 'Them']);
+    ).toEqual(['You', 'Call']);
     expect(
-      container.querySelectorAll('.transcript-revealed-text'),
-    ).toHaveLength(3);
-    expect(
-      container.querySelectorAll('.transcript-typewriter-caret'),
-    ).toHaveLength(1);
-    expect(
-      [...container.querySelectorAll('.transcript-revealed-text')].map(
+      [...container.querySelectorAll('.transcript-paragraph-part')].map(
         (node) => node.textContent,
       ),
-    ).toEqual(['Shipping today works.', 'The same thought continues.', '']);
+    ).toEqual([
+      'Shipping today works.',
+      'The same thought continues.',
+      'Now another person responds.',
+    ]);
 
     act(() => root.unmount());
   });
 
-  it('keeps a long confirmed history visible while only the live edge reveals', () => {
-    setReducedMotion(false);
+  it('keeps a long confirmed history stable when the live edge advances', () => {
     const root = createRoot(container);
     const history = Array.from({ length: 300 }, (_, index) => ({
       ...liveSegment,
@@ -172,7 +161,7 @@ describe('LiveTranscript word reveal', () => {
       root.render(<LiveTranscript segments={history} interimText="" />),
     );
 
-    const firstText = container.querySelector('.transcript-revealed-text');
+    const firstText = container.querySelector('.transcript-paragraph-part');
     expect(firstText?.textContent).toBe('Confirmed synthetic phrase 0.');
 
     act(() =>
@@ -180,19 +169,17 @@ describe('LiveTranscript word reveal', () => {
         <LiveTranscript segments={[...history, liveSegment]} interimText="" />,
       ),
     );
-    const texts = container.querySelectorAll('.transcript-revealed-text');
+    const texts = container.querySelectorAll('.transcript-paragraph-part');
     expect(texts.item(0)).toBe(firstText);
-    expect(texts.item(texts.length - 1).textContent).toBe('');
-
-    act(() => vi.advanceTimersByTime(85));
     expect(texts.item(0).textContent).toBe('Confirmed synthetic phrase 0.');
-    expect(texts.item(texts.length - 1).textContent).toBe('Shipping ');
+    expect(texts.item(texts.length - 1).textContent).toBe(
+      'Shipping today works.',
+    );
 
     act(() => root.unmount());
   });
 
   it('follows new speech until the user scrolls away and returns on request', () => {
-    setReducedMotion(true);
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
 
@@ -246,7 +233,6 @@ describe('LiveTranscript word reveal', () => {
   });
 
   it('restores follow mode when the user manually reaches the live edge', () => {
-    setReducedMotion(true);
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
 

@@ -59,6 +59,23 @@ const validV3: AnalysisDocumentV3 = {
   },
 };
 
+it('round-trips bounded hierarchy measurements and rejects malformed counters', () => {
+  const hierarchy = { depth: 3, nodes: 15, max_depth: 8, max_nodes: 128 };
+  const doc = {
+    ...validV3,
+    generation_metadata: { ...validV3.generation_metadata, hierarchy },
+  };
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toEqual(hierarchy);
+  doc.generation_metadata.hierarchy.nodes = -1;
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toBeUndefined();
+});
+
 describe('parseAnalysisDocumentV3', () => {
   it('preserves a structured recent win with verbatim evidence', () => {
     const result = parseAnalysisDocumentV3(
@@ -152,6 +169,91 @@ describe('parseAnalysisDocumentV3', () => {
     const result = parseAnalysisDocumentV3(JSON.stringify(validV3));
     expect(result).not.toBeNull();
     expect(result?.generation_metadata).toEqual(validV3.generation_metadata);
+  });
+
+  it('preserves bounded local generation options', () => {
+    const result = parseAnalysisDocumentV3(
+      JSON.stringify({
+        ...validV3,
+        generation_metadata: {
+          ...validV3.generation_metadata,
+          generation_options: { structured_thinking: false, seed: 42 },
+        },
+      }),
+    );
+
+    expect(result?.generation_metadata?.generation_options).toEqual({
+      structured_thinking: false,
+      seed: 42,
+    });
+  });
+
+  it.each(['writer-audit-v1', 'writer-editor-v1'])(
+    'round-trips additive %s provenance metadata',
+    (pipelineVersion) => {
+      const source_provenance = {
+        schema_version: 1 as const,
+        source_revision: 'synthetic-revision',
+        blocks: {
+          overview: {
+            id: 'overview',
+            sources: [{ segment: 0, start: 0, end: 12 }],
+          },
+        },
+      };
+      const result = parseAnalysisDocumentV3(
+        JSON.stringify({
+          ...validV3,
+          generation_metadata: {
+            ...validV3.generation_metadata,
+            pipeline_version: pipelineVersion,
+            mode: 'direct',
+            audit_status: 'complete',
+            audit_change_count: 1,
+            source_provenance,
+          },
+        }),
+      );
+
+      expect(result?.generation_metadata).toMatchObject({
+        pipeline_version: pipelineVersion,
+        mode: 'direct',
+        audit_status: 'complete',
+        audit_change_count: 1,
+        source_provenance,
+      });
+    },
+  );
+
+  it('round-trips a valid meeting-scoped terminology artifact', () => {
+    const terminology = {
+      schemaVersion: 1 as const,
+      generatedAt: '2026-08-26T00:00:00.000Z',
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      policyVersion: 'terminology-v1',
+      proposals: [
+        {
+          rawForms: ['Raw form'],
+          preferredTerm: 'Preferred Form',
+          segmentIndexes: [2, 7],
+          confidence: 'high' as const,
+          signals: ['known_entity' as const],
+          status: 'applied' as const,
+        },
+      ],
+    };
+    const result = parseAnalysisDocumentV3(
+      JSON.stringify({
+        ...validV3,
+        generation_metadata: {
+          ...validV3.generation_metadata,
+          terminology,
+        },
+      }),
+    );
+
+    expect(result?.generation_metadata?.terminology).toEqual(terminology);
   });
 
   it('strips invalid topic points', () => {

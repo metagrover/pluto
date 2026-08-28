@@ -15,6 +15,12 @@ export type LiveTranscriptSegment = {
   timestampMs: number;
   endTimestampMs?: number;
   confirmed: boolean;
+  presentation?: {
+    visibility: 'suppressed_echo';
+    matchedSegmentId: string;
+    confidence: number;
+    reason: 'cross_channel_echo';
+  };
 };
 
 export type RecordingWorkspaceInput = {
@@ -70,6 +76,14 @@ export const buildRecordingWorkspaceModel = (
   const systemAudioWarning = input.systemAudio !== 'healthy';
   const durabilityWarning = input.captureDurability !== 'healthy';
   const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
+  const visibleTranscript = input.segments.filter(
+    (segment) =>
+      segment.text.trim() &&
+      segment.presentation?.visibility !== 'suppressed_echo',
+  );
+  const newestTentativeId = visibleTranscript
+    .filter((segment) => !segment.confirmed)
+    .at(-1)?.id;
   return {
     status: input.isStarting
       ? ('starting' as const)
@@ -100,7 +114,9 @@ export const buildRecordingWorkspaceModel = (
               : input.isProcessing
                 ? 'Finalizing notes. Keep Pluto open.'
                 : 'Capture is healthy',
-    transcript: input.segments.filter((segment) => segment.text.trim()),
+    transcript: visibleTranscript.filter(
+      (segment) => segment.confirmed || segment.id === newestTentativeId,
+    ),
     interimText: input.interimText.trim(),
   };
 };

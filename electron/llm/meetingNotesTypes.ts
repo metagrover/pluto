@@ -1,0 +1,123 @@
+import type { AnalysisProvider, MeetingType } from './analysisTypes';
+
+// Shared by generation metadata and persistent run/cache identity.
+export const NOTES_PROMPT_VERSION = 'notes-v28';
+export const NOTES_OLLAMA_MODEL = 'gemma4:12b';
+export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v27';
+
+export type SourceSpan = {
+  segment: number;
+  start: number;
+  end: number;
+};
+
+export type SourceSegment = {
+  index: number;
+  speaker: string | null;
+  text: string;
+};
+
+export type NotesSource = {
+  revision: string;
+  segments: readonly SourceSegment[];
+};
+
+export type SupportedText = {
+  id: string;
+  text: string;
+  sources: SourceSpan[];
+};
+
+export type NotesItem = SupportedText & {
+  kind: 'point' | 'action' | 'decision' | 'question';
+  owner: string | null;
+  due: string | null;
+};
+
+export type NotesSection = {
+  id: string;
+  title: SupportedText;
+  items: NotesItem[];
+};
+
+export type NotesDraft = {
+  meetingType: MeetingType;
+  overview: SupportedText | null;
+  sections: NotesSection[];
+  recentWin?: { win: SupportedText; impact: SupportedText };
+};
+
+export type AuditChange =
+  | { op: 'replace'; target: string; value: SupportedText | NotesItem }
+  | { op: 'remove'; target: string }
+  | { op: 'insert'; section: string; value: NotesItem }
+  | { op: 'insert_section'; value: NotesSection };
+
+export type AuditVerdict = {
+  target: string;
+  status: 'supported' | 'uncertain' | 'unsupported';
+  sources: SourceSpan[];
+};
+
+export type NotesAudit = {
+  changes: AuditChange[];
+  verdicts: AuditVerdict[];
+  dispositions: Array<{
+    target: string;
+    kind: 'deduplicated' | 'cancelled' | 'superseded';
+    replacementId: string | null;
+    sources: SourceSpan[];
+  }>;
+  terminology: Array<{
+    rawForms: string[];
+    preferredTerm: string | null;
+    segmentIndexes: number[];
+    confidence: 'high' | 'medium' | 'low';
+    signals: string[];
+  }>;
+};
+
+export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
+export type NotesResponseContract = 'draft' | 'audit' | 'editor';
+
+export type NotesRequest = {
+  task: NotesTask;
+  responseContract: NotesResponseContract;
+  prompt: string;
+  outputTokens: number;
+  contextTokens: number;
+  signal?: AbortSignal;
+  sourceSpans?: SourceSpan[];
+};
+
+export type GenerateNotesText = (request: NotesRequest) => Promise<string>;
+
+export type NotesContext = {
+  userNotes: string;
+  template: import('./prompts').MeetingNotesTemplate;
+  trustedUserTerms: string[];
+  entityHints: string[];
+};
+
+export type GenerateMeetingNotesInput = {
+  /** Internal acceptance route, removed when the editor is promoted. */
+  reviewProtocol?: 'editor';
+  source: NotesSource;
+  context: NotesContext;
+  generate: GenerateNotesText;
+  provider: AnalysisProvider;
+  model: string;
+  contextTokens: number;
+  signal?: AbortSignal;
+  onRepair?: (task: NotesTask) => void;
+  onStage?: (task: NotesTask) => void;
+  stageCache?: import('./meetingNotesStageCache').NotesStageCache;
+  cacheKey?: string;
+};
+
+export class MeetingNotesError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = 'MeetingNotesError';
+  }
+}

@@ -65,6 +65,20 @@ describe('analysis topic compaction', () => {
     ).toBe(false);
   });
 
+  it('drops generic filler disclaimers emitted by a local topic pass', () => {
+    const collapsed = collapseOversizedTopics([
+      topic(
+        'No substantive content available in transcript slice',
+        'The provided transcript slice contains only filler and no factual data, decisions, or commitments.',
+      ),
+      topic('Release planning', 'The release target remains tentative.'),
+    ]);
+
+    expect(collapsed).toEqual([
+      expect.objectContaining({ title: 'Release planning' }),
+    ]);
+  });
+
   it('keeps grounded commitments even when a topic has a generic summary', () => {
     const collapsed = collapseOversizedTopics([
       {

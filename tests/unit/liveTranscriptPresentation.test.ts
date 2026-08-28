@@ -24,8 +24,26 @@ describe('live transcript presentation', () => {
       {
         id: 'one',
         speaker: 'Me',
+        source: undefined,
         timestampMs: 1_000,
         segments: [first, second],
+        paragraphs: [
+          {
+            id: 'one:part:0',
+            parts: [
+              {
+                id: 'one:part:0',
+                text: 'This sentence',
+                confirmed: true,
+              },
+              {
+                id: 'two:part:0',
+                text: 'continues here.',
+                confirmed: true,
+              },
+            ],
+          },
+        ],
       },
     ]);
     expect(first.text).toBe('This sentence');
@@ -62,5 +80,29 @@ describe('live transcript presentation', () => {
           turn.segments.map((item) => item.text).join(' ').length <= 420,
       ),
     ).toBe(true);
+  });
+
+  it('splits one oversized source segment into readable presentation paragraphs', () => {
+    const original = segment(
+      'monologue',
+      'Them',
+      Array.from(
+        { length: 14 },
+        (_, index) => `Sentence ${index} explains one bounded idea clearly.`,
+      ).join(' '),
+      1_000,
+    );
+
+    const [turn] = buildLiveTranscriptTurns([original]);
+
+    expect(turn.segments).toEqual([original]);
+    expect(turn.paragraphs.length).toBeGreaterThan(1);
+    expect(
+      turn.paragraphs.every(
+        (paragraph) =>
+          paragraph.parts.map((part) => part.text).join(' ').length <= 320,
+      ),
+    ).toBe(true);
+    expect(original.text).toContain('Sentence 13');
   });
 });

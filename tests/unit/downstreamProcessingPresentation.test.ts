@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import { getDownstreamProcessingPresentation } from '../../src/components/features/downstreamProcessingPresentation';
 
+it('retains published notes and a durable failed-regeneration status after navigation', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_json: '{}',
+      analysis_run_json: JSON.stringify({ notes_status: 'failed' }),
+    }),
+  ).toEqual({ state: 'ready', notesUpdateFailed: true });
+});
+
+it('keeps notes visible while reporting independently retryable secondary failure', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_json: '{}',
+      analysis_run_json: JSON.stringify({
+        notes_status: 'published',
+        secondary_status: 'failed',
+      }),
+    }),
+  ).toEqual({ state: 'ready', secondaryStatus: 'failed' });
+});
+
+it('reports an interrupted notes run rather than preparing forever', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'failed',
+        error_code: 'notes_interrupted',
+      }),
+    }),
+  ).toMatchObject({ state: 'failed' });
+});
+
 describe('downstream processing presentation', () => {
   it('maps persisted stages to truthful loading copy', () => {
     expect(

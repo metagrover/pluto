@@ -1,0 +1,16 @@
+import { expect, it } from 'vitest';
+import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
+import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
+
+it('expires and bounds completed parsed drafts and never exposes mutable cached data', () => {
+  let now = 0;
+  const cache = new NotesStageCache(() => now);
+  const draft = makeDirectNotesFixture().draft;
+  cache.set('first', draft);
+  cache.get('first')!.sections[0]!.title.text = 'Mutated';
+  expect(cache.get('first')!.sections[0]!.title.text).toBe('Outline');
+  for (let i = 0; i < 4; i++) cache.set(`next${i}`, draft);
+  expect(cache.get('first')).toBeUndefined();
+  now = 15 * 60 * 1000;
+  expect(cache.get('next3')).toBeUndefined();
+});

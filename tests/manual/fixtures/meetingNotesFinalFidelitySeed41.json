@@ -1,0 +1,1663 @@
+{
+  "checkpoint": "PR 676 final-fidelity safe checkpoint, notes-v24, seed 41, original fixed cases",
+  "date": "2026-08-27",
+  "baseCommit": "0fc35b2bd67b68917f39134eda36889f56c20400",
+  "scope": "Synthetic local-only evaluation. Unsafe withdrawal witness removed; strict guardrails-v3 unchanged. No production regeneration or model promotion. Exact raw outputs retained; mechanical results are not source fidelity.",
+  "modelDigest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "temperature": 0.1,
+  "events": [
+    {
+      "event": "start",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "aa5ef43a37beaa8270e206b58d10edd3b6333ec5b420819f26c7f34a12aeeeb9",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Jun",
+            "text": "My first sourdough was flat, but the second rose. That felt satisfying."
+          },
+          {
+            "index": 1,
+            "speaker": "Esme",
+            "text": "I have been restoring an old radio. The persistent hum is frustrating."
+          },
+          {
+            "index": 2,
+            "speaker": "Jun",
+            "text": "I enjoy experimenting, even when the results are not perfect."
+          },
+          {
+            "index": 3,
+            "speaker": "Esme",
+            "text": "We are just comparing our evenings, not asking each other for help."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 0,
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0
+      },
+      "reviewCriteria": [
+        "Attribute sourdough to Jun: the first was flat, the second rose, and the progress felt satisfying; retain Jun's enjoyment of imperfect experimentation.",
+        "Attribute the old-radio restoration and frustrating persistent hum to Esme.",
+        "Retain the personal exchange without fabricating help tasks, decisions, open questions, or gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "87ae1a6881cb796c7b7d510cc0747a6b81db452b113246e0ec2ceebe49504ad6",
+      "schemaSha256": "f3af34b10af97cd4dcf68caa564a03153061a5abcd345038567ecd7446bc2055",
+      "latencyMs": 44510,
+      "raw": "{\n  \"meetingType\": \"one_on_one\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Personal Experiences\",\n        \"sources\": [\n          \"R0\",\n          \"R1\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Jun's first sourdough was flat, but the second rose, which felt satisfying.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Esme is restoring an old radio; the persistent hum is frustrating.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Reflections and Dynamics\",\n        \"sources\": [\n          \"R2\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Jun enjoys experimenting, even when the results are not perfect.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The participants are comparing their evenings, not asking each other for help.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "359c6666bd5c65d81c0f7607c62e99aa3ca8c70009864ce0fe8649dde5052768",
+      "schemaSha256": "e4353d4cac04f05eea367b13262fb25b1edadb813e0b60a5f7eca330418ff82b",
+      "latencyMs": 22814,
+      "raw": "{\"changes\":[],\"verdicts\":[{\"target\":\"s0:title\",\"status\":\"supported\",\"sources\":[\"R0\",\"R1\"]},{\"target\":\"s0:item:0\",\"status\":\"supported\",\"sources\":[\"R0\"]},{\"target\":\"s0:item:1\",\"status\":\"supported\",\"sources\":[\"R1\"]},{\"target\":\"s1:title\",\"status\":\"supported\",\"sources\":[\"R2\",\"R3\"]},{\"target\":\"s1:item:0\",\"status\":\"supported\",\"sources\":[\"R2\"]},{\"target\":\"s1:item:1\",\"status\":\"supported\",\"sources\":[\"R3\"]}],\"dispositions\":[],\"terminology\":[]}"
+    },
+    {
+      "event": "final",
+      "case": "personal",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 67359,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 0,
+        "topicActions": 0,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Jun's first sourdough was flat, but the second rose, which felt satisfying. Jun enjoys experimenting, even when the results are not perfect. Esme is restoring an old radio; the persistent hum is frustrating.",
+        "topics": [
+          {
+            "title": "Personal Experiences",
+            "summary": "Jun's first sourdough was flat, but the second rose, which felt satisfying.",
+            "key_points": [
+              {
+                "text": "Esme is restoring an old radio; the persistent hum is frustrating."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Reflections and Dynamics",
+            "summary": "Jun enjoys experimenting, even when the results are not perfect.",
+            "key_points": [
+              {
+                "text": "The participants are comparing their evenings, not asking each other for help."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [],
+        "all_decisions": [],
+        "meeting_type": "one_on_one",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:02:25.638Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "aa5ef43a37beaa8270e206b58d10edd3b6333ec5b420819f26c7f34a12aeeeb9",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 70
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s1:title",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  }
+                ]
+              },
+              "native_continuations:topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 61
+                  }
+                ]
+              },
+              "topic:1:point:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "native_continuations:topic:1:point:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "a45bcf1d5e44b8ca4c69e7773025acfa9580acfaa665f56aa36bafed077c40db",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Cleo",
+            "text": "I will replace the product screenshots today."
+          },
+          {
+            "index": 1,
+            "speaker": "Marin",
+            "text": "I could animate the introduction if useful."
+          },
+          {
+            "index": 2,
+            "speaker": "Cleo",
+            "text": "We have decided to keep the introduction static because animation distracts from the instructions, so we will not take up that offer."
+          },
+          {
+            "index": 3,
+            "speaker": "Cleo",
+            "text": "I'm withdrawing my screenshot replacement promise; the images are still accurate."
+          },
+          {
+            "index": 4,
+            "speaker": "Cleo",
+            "text": "Once the accessibility review passes, I will publish the captioned demonstration on the support portal by Wednesday."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Cleo",
+        "actionDue": "Wednesday"
+      },
+      "reviewCriteria": [
+        "Exactly one active action: Cleo publishes the captioned demonstration on the support portal by Wednesday, only once accessibility review passes. The prerequisite, destination, and due date must attach to that action.",
+        "Retain Marin's animation offer as declined, the settled static-introduction choice, and the rationale that animation distracts from instructions.",
+        "Retain screenshot replacement only as an explicitly withdrawn promise, with the reason that existing images are accurate; no active screenshot or animation task.",
+        "One or two decisions are legitimate only if the second is the distinct screenshot cancellation, not a duplicate of declining animation. The static-introduction choice is required."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "89e64dd680655cc4df5ab70f691c645950db20f4d25db2b74a3007f9f276379d",
+      "schemaSha256": "dcfe9d716531c5c5cd64864f0947526f387daa60c5c55e4c871e38ff7be7736b",
+      "latencyMs": 38264,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Intro Animation\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Marin offered to animate the introduction if useful.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Keep the introduction static because animation distracts from the instructions.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Content Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Cleo is withdrawing the promise to replace screenshots because the images are still accurate.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Publishing\",\n        \"sources\": [\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Publish the captioned demonstration on the support portal.\",\n          \"sources\": [\n            \"R4\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Cleo\",\n          \"due\": \"Wednesday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "ca3e05eb5fb40a86b8bc941025d69abe94202ddccc75e1a7c642cbc64078e1b4",
+      "schemaSha256": "698030a361d2c0b6b30d1333279ee612eec74e5675bfd96891f2fff0a0348890",
+      "latencyMs": 45101,
+      "raw": "{\n  \"changes\": [\n    {\n      \"op\": \"replace\",\n      \"target\": \"s1:title\",\n      \"value\": {\n        \"text\": \"Content Updates\",\n        \"sources\": [\n          \"R0\",\n          \"R3\"\n        ]\n      }\n    }\n  ],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s2:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R4\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R4\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 3,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "98a3d2755fe15a73a0d76607ee533082373f98bd6bdafb6a7be35fbd20f17314",
+      "schemaSha256": "698030a361d2c0b6b30d1333279ee612eec74e5675bfd96891f2fff0a0348890",
+      "latencyMs": 30609,
+      "raw": "{\"changes\":[{\"op\":\"replace\",\"target\":\"s1:item:0\",\"value\":{\"text\":\"Cleo is withdrawing the promise to replace screenshots because the images are still accurate.\",\"sources\":[\"R3\"],\"kind\":\"point\",\"owner\":null,\"due\":null}}],\"verdicts\":[{\"target\":\"s0:title\",\"status\":\"supported\",\"sources\":[\"R1\",\"R2\"]},{\"target\":\"s0:item:0\",\"status\":\"supported\",\"sources\":[\"R1\"]},{\"target\":\"s0:item:1\",\"status\":\"supported\",\"sources\":[\"R2\"]},{\"target\":\"s1:title\",\"status\":\"supported\",\"sources\":[\"R0\",\"R3\"]},{\"target\":\"s1:item:0\",\"status\":\"supported\",\"sources\":[\"R3\"]},{\"target\":\"s2:title\",\"status\":\"supported\",\"sources\":[\"R4\"]},{\"target\":\"s2:item:0\",\"status\":\"supported\",\"sources\":[\"R4\"]}],\"dispositions\":[],\"terminology\":[]}"
+    },
+    {
+      "event": "failure",
+      "case": "qualified-publication",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 113999,
+      "stages": ["notesWriter", "notesAudit", "notesAudit"],
+      "phase": "generation",
+      "counts": null,
+      "analysis": null,
+      "mechanicalChecks": "not_run",
+      "sourceFidelity": "requires_independent_review",
+      "error": "MeetingNotesError: notes_audit_invalid"
+    },
+    {
+      "event": "start",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Tariq",
+            "text": "Bea, would you upload the anonymized survey table to the research workspace by Monday for Niko?"
+          },
+          {
+            "index": 1,
+            "speaker": "Niko",
+            "text": "I'll be using the table. Bea is preparing and uploading it, not me."
+          },
+          {
+            "index": 2,
+            "speaker": "Bea",
+            "text": "Yes, I accept that task. I'll have the anonymized table there by Monday."
+          },
+          {
+            "index": 3,
+            "speaker": "Tariq",
+            "text": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Bea",
+        "actionDue": "Monday"
+      },
+      "reviewCriteria": [
+        "Exactly one action: Bea accepts preparing and uploading the anonymized survey table to the research workspace by Monday for Niko. Niko is the intended user, not owner; Tariq is the requester.",
+        "Retain the settled policy against publishing individual responses, allowing aggregate counts only, and the participants' confidentiality rationale.",
+        "One combined or two complementary privacy decision records are legitimate; do not create an aggregate-publication task or a question from the already-accepted request."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "f895f088489db93624dc811d19dcd08f93dd1c2c5f69e2536ef5036790f6f45d",
+      "schemaSha256": "f3af34b10af97cd4dcf68caa564a03153061a5abcd345038567ecd7446bc2055",
+      "latencyMs": 26592,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Survey Data Management\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Bea is preparing and uploading the anonymized survey table for Niko.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Upload the anonymized survey table to the research workspace for Niko.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Bea\",\n          \"due\": \"Monday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "a3647acc0bff844beaa826659cb962d7a88fc94441ef2d3a44fff3b34d9de70c",
+      "schemaSha256": "e4353d4cac04f05eea367b13262fb25b1edadb813e0b60a5f7eca330418ff82b",
+      "latencyMs": 30643,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "accepted-request-privacy",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 57307,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 1,
+        "topicDecisions": 1,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality. Bea is preparing and uploading the anonymized survey table for Niko. Upload the anonymized survey table to the research workspace for Niko.",
+        "topics": [
+          {
+            "title": "Survey Data Management",
+            "summary": "Bea is preparing and uploading the anonymized survey table for Niko.",
+            "key_points": [],
+            "decisions": [
+              {
+                "text": "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.",
+                "evidence": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+              }
+            ],
+            "action_items": [
+              {
+                "text": "Upload the anonymized survey table to the research workspace for Niko.",
+                "assignee": "Bea",
+                "due": "Monday",
+                "evidence": "Yes, I accept that task. I'll have the anonymized table there by Monday."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Upload the anonymized survey table to the research workspace for Niko.",
+            "assignee": "Bea",
+            "due": "Monday",
+            "evidence": "Yes, I accept that task. I'll have the anonymized table there by Monday.",
+            "topic": "Survey Data Management"
+          }
+        ],
+        "all_decisions": [
+          {
+            "text": "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.",
+            "evidence": "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality."
+          }
+        ],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:05:16.962Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "31063499694e31e899fe6d26382294254f99a9e8818321477cb81dd1b0178e1f",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 134
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 67
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 95
+                  }
+                ]
+              },
+              "topic:0:decision:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 134
+                  }
+                ]
+              },
+              "all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 134
+                  }
+                ]
+              },
+              "native_continuations:all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 134
+                  }
+                ]
+              },
+              "completion:all_decisions:0": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 134
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 67
+                  }
+                ]
+              },
+              "topic:0:action:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "long-exhibition-planning",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 600000,
+      "source": {
+        "revision": "0ec48cbd933d4ee8cc3be298ab6ccb3bb907fa0b15c45956dce7259f2aee5c46",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Priya",
+            "text": "Once the insurance certificate is approved, I will book the artwork courier by Thursday. The approval is a prerequisite, not just a useful document. The courier carries the framed pieces from storage to the gallery. Nothing in this discussion should turn that into an unconditional booking."
+          },
+          {
+            "index": 1,
+            "speaker": "Omar",
+            "text": "The gallery inspection happened yesterday. The loading door is wide enough for the largest crate, and the lift worked during our visit. We have already measured the route from the street. Those are completed checks, not jobs that need to be assigned again in these notes."
+          },
+          {
+            "index": 2,
+            "speaker": "Lena",
+            "text": "I was relieved by the lift result because carrying the pieces up the stairs had worried me. The lighting looked softer in the afternoon than in the morning photographs. That is an observation from the visit, not a request to buy new lighting or to change the installation."
+          },
+          {
+            "index": 3,
+            "speaker": "Priya",
+            "text": "I will replace the camera equipment list this afternoon. I thought the older list still included the broken tripod. Let me compare the version in the folder with the printed sheet while we talk through the visitor experience. I do not want duplicate equipment requests going to the venue."
+          },
+          {
+            "index": 4,
+            "speaker": "Omar",
+            "text": "I could record a narrated audio tour if that would be useful. I am offering an option, not taking on a task at this point. It would describe the materials rather than interpret the artists. No one has asked me to record anything or accepted this offer yet."
+          },
+          {
+            "index": 5,
+            "speaker": "Lena",
+            "text": "The visitors in the small trial liked having space to look without a running commentary. One person preferred to read, while another enjoyed discussing the work with a friend. These observations do not tell us what every visitor will want. We should not present three informal reactions as a survey result."
+          },
+          {
+            "index": 6,
+            "speaker": "Priya",
+            "text": "The artists have already supplied short descriptions for their own works. They are intentionally different in tone. One artist describes the tools, another describes a childhood memory. I would like the notes to preserve that variety rather than imply the artists agreed on a single interpretation of the exhibition."
+          },
+          {
+            "index": 7,
+            "speaker": "Omar",
+            "text": "The print estimate arrived this morning. A large catalogue run costs more than our remaining print budget. A hundred copies fit the budget, and visitors can also read the catalogue on their phones. The estimate is for the catalogue only; it says nothing about delivery insurance or the courier price."
+          },
+          {
+            "index": 8,
+            "speaker": "Lena",
+            "text": "We have decided to limit the printed catalogue to 100 copies and offer a QR link for additional readers because the larger print run exceeds the budget. That is our settled catalogue decision. This is not an instruction to limit entry to one hundred visitors, and it does not change the artwork count."
+          },
+          {
+            "index": 9,
+            "speaker": "Priya",
+            "text": "The catalogue PDF and its QR link already exist. The link opened correctly on both phones we tried. We are discussing how people access the catalogue, not asking someone to create a website or a new PDF. The printed copies and the existing digital copy contain the same artist descriptions."
+          },
+          {
+            "index": 10,
+            "speaker": "Omar",
+            "text": "The entrance has a bench beside the coat hooks. During the trial, an older visitor sat there before looking around. I mention that because the room felt welcoming, not because the bench needs to be moved or replaced. The access inspection already covered the doorway and the route around it."
+          },
+          {
+            "index": 11,
+            "speaker": "Lena",
+            "text": "I enjoyed hearing the artists compare their first attempts with the finished work. Some sounded proud and some were still unsure about how it would be received. Both reactions belong in our understanding of the exhibition. The uncertainty is not evidence that any artist has withdrawn a piece."
+          },
+          {
+            "index": 12,
+            "speaker": "Priya",
+            "text": "I am withdrawing my promise to replace the camera equipment list. The folder already contains the corrected list and the broken tripod has been removed. My earlier concern came from reading the obsolete printed sheet. There is no remaining equipment-list replacement task, and no one else is taking it over."
+          },
+          {
+            "index": 13,
+            "speaker": "Omar",
+            "text": "That correction concerns the camera list only. The artwork courier still depends on the insurance certificate being approved. A corrected equipment list is not a substitute for that approval. I am restating the distinction to avoid mixing two unrelated documents, not making another courier commitment myself."
+          },
+          {
+            "index": 14,
+            "speaker": "Lena",
+            "text": "The installation photographs are useful records of yesterday, but they are not a floor plan. From the images alone, it is hard to judge the distances between the freestanding pieces. I would use the actual floor plan when discussing the layout with visitors who ask about the route through the room."
+          },
+          {
+            "index": 15,
+            "speaker": "Priya",
+            "text": "The floor plan is in the shared folder. It shows the bench and both exits. The photographs make the entrance look narrower than it is because they were taken at an angle. We do not need to infer a new access problem from that perspective; the measured inspection has already been completed."
+          },
+          {
+            "index": 16,
+            "speaker": "Omar",
+            "text": "To clarify the audio idea, my offer remains unaccepted. There is no recording deadline and no agreement to include narration in this exhibition. I am comfortable leaving it as a possibility for another conversation. It should not be turned into an action simply because I said I could do it."
+          },
+          {
+            "index": 17,
+            "speaker": "Lena",
+            "text": "The preview conversation was encouraging, especially when visitors noticed details the artists had not expected anyone to notice. We do not have attendance numbers for the public opening yet. Please distinguish the small completed preview from the future opening rather than treating those reactions as a forecast of turnout."
+          },
+          {
+            "index": 18,
+            "speaker": "Priya",
+            "text": "I will send the existing floor plan to Lena by Thursday so Lena can use it in visitor conversations. This is a separate commitment from booking the courier and does not depend on insurance approval. I am sending the current document, not promising to redesign the layout or draw a replacement plan."
+          },
+          {
+            "index": 19,
+            "speaker": "Lena",
+            "text": "I am the recipient of the floor plan, not the person sending it. The existing document is enough for those conversations. We have not set a date for another planning meeting, and I am not asking anyone to schedule one here. That covers the distinction I wanted to make before we finish."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 2,
+        "decisions": {
+          "min": 1,
+          "max": 2
+        },
+        "questions": 0,
+        "actionOwner": "Priya",
+        "actionDue": "Thursday"
+      },
+      "reviewCriteria": [
+        "Preserve both distinct current Priya commitments: book the artwork courier by Thursday only after insurance certificate approval; send the existing floor plan to Lena by Thursday without that prerequisite. Lena is a recipient, not sender.",
+        "Retain cancellation of the camera-list replacement and the reason: the corrected list already exists. No active camera-list replacement, takeover, audio recording, inspection, catalogue creation or scheduling task.",
+        "Preserve the settled 100-copy printed catalogue limit, existing QR alternative and print-budget rationale. Do not apply the number to attendance, artworks or courier costs. An additional decision may describe only the distinct camera-list cancellation.",
+        "Retain Omar's audio-tour offer as unaccepted, not rejected or commissioned; completed access checks; Lena's relief and observations from the preview; artists' varied descriptions and mixed pride/uncertainty. Avoid invented gender or universal conclusions from informal visitor reactions.",
+        "Compress repetition into readable topics without losing early commitment conditions, late recipient ownership or distinct cancellation scope. No unsupported open questions or attendance forecast."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "long-exhibition-planning",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 600000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "a4142292157e022abda55b0c15dfc4ae53ec3f7ba0b41de602684d25ea8a794f",
+      "schemaSha256": "95da763ac811796b2405dd3e9e397f493fb722f8f4e1250fdd7ea3e78d41aac9",
+      "latencyMs": 126525,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Logistics and Site Preparation\",\n        \"sources\": [\n          \"R1\",\n          \"R10\",\n          \"R15\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The gallery inspection confirmed the loading door is wide enough for the largest crate and the lift is functional.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The entrance includes a bench beside the coat hooks; the room felt welcoming during the trial.\",\n          \"sources\": [\n            \"R10\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The floor plan shows the bench and both exits; photographs made the entrance look narrower than it is, but the measured inspection is complete.\",\n          \"sources\": [\n            \"R15\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Artwork and Documentation\",\n        \"sources\": [\n          \"R0\",\n          \"R7\",\n          \"R8\",\n          \"R9\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Priya will book the artwork courier by Thursday once the insurance certificate is approved.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Priya\",\n          \"due\": \"Thursday\"\n        },\n        {\n          \"text\": \"The print estimate for a large catalogue exceeds the budget; the team decided to limit the printed catalogue to 100 copies and provide a QR link for others.\",\n          \"sources\": [\n            \"R7\",\n            \"R8\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The catalogue PDF and QR link already exist and function correctly; the printed and digital copies contain the same artist descriptions.\",\n          \"sources\": [\n            \"R9\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Visitor Experience and Artist Input\",\n        \"sources\": [\n          \"R2\",\n          \"R5\",\n          \"R6\",\n          \"R11\",\n          \"R17\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Lena noted the lighting was softer in the afternoon than in morning photographs.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Trial visitors showed varied preferences, such as reading alone or discussing work with friends.\",\n          \"sources\": [\n            \"R5\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Artists provided varied descriptions for their works, differing in tone and focus.\",\n          \"sources\": [\n            \"R6\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Artists expressed a range of emotions, from pride to uncertainty, regarding their work's reception.\",\n          \"sources\": [\n            \"R11\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The preview was encouraging as visitors noticed details the artists had not expected others to notice.\",\n          \"sources\": [\n            \"R17\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Internal Coordination and Offers\",\n        \"sources\": [\n          \"R3\",\n          \"R4\",\n          \"R12\",\n          \"R13\",\n          \"R16\",\n          \"R18\",\n          \"R19\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Omar offered to record a narrated audio tour; the offer remains unaccepted and is not a current task.\",\n          \"sources\": [\n            \"R4\",\n            \"R16\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Priya's previous commitment to replace the camera equipment list is withdrawn as the folder already contains the corrected list.\",\n          \"sources\": [\n            \"R12\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Priya will send the existing floor plan to Lena by Thursday for use in visitor conversations.\",\n          \"sources\": [\n            \"R18\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Priya\",\n          \"due\": \"Thursday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": {\n    \"win\": {\n      \"text\": \"The gallery inspection confirmed the loading door is wide enough for the largest crate and the lift worked during the visit.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    \"impact\": {\n      \"text\": \"The access inspection successfully covered the doorway and the route around it.\",\n      \"sources\": [\n        \"R10\"\n      ]\n    }\n  }\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "long-exhibition-planning",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 600000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "ddf31e4f0dcca14dbbdb424349bb06c07428577cc40ed3b447cc976c1e618b4b",
+      "schemaSha256": "a2fb8d559b64c1c23ffd86acb2da2951046e8eeb52b7de64d9c8e66b241dc51d",
+      "latencyMs": 107117,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R10\",\n        \"R15\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R10\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R15\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R7\",\n        \"R8\",\n        \"R9\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R7\",\n        \"R8\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R9\"\n      ]\n    },\n    {\n      \"target\": \"s2:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\",\n        \"R5\",\n        \"R6\",\n        \"R11\",\n        \"R17\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R5\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R6\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:3\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R11\"\n      ]\n    },\n    {\n      \"target\": \"s2:item:4\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R17\"\n      ]\n    },\n    {\n      \"target\": \"s3:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\",\n        \"R4\",\n        \"R12\",\n        \"R13\",\n        \"R16\",\n        \"R18\",\n        \"R19\"\n      ]\n    },\n    {\n      \"target\": \"s3:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R4\",\n        \"R16\"\n      ]\n    },\n    {\n      \"target\": \"s3:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R12\"\n      ]\n    },\n    {\n      \"target\": \"s3:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R18\"\n      ]\n    },\n    {\n      \"target\": \"recent-win\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"recent-win-impact\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R10\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "long-exhibition-planning",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 600000,
+      "latencyMs": 233692,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 2,
+        "topicActions": 2,
+        "aggregateDecisions": 2,
+        "topicDecisions": 2,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "The gallery inspection confirmed the loading door is wide enough for the largest crate and the lift is functional. Book the artwork courier by Thursday once the insurance certificate is approved. Lena noted the lighting was softer in the afternoon than in morning photographs.",
+        "topics": [
+          {
+            "title": "Logistics and Site Preparation",
+            "summary": "The gallery inspection confirmed the loading door is wide enough for the largest crate and the lift is functional.",
+            "key_points": [
+              {
+                "text": "The entrance includes a bench beside the coat hooks; the room felt welcoming during the trial."
+              },
+              {
+                "text": "The floor plan shows the bench and both exits; photographs made the entrance look narrower than it is, but the measured inspection is complete."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Artwork and Documentation",
+            "summary": "The catalogue PDF and QR link already exist and function correctly; the printed and digital copies contain the same artist descriptions.",
+            "key_points": [],
+            "decisions": [
+              {
+                "text": "The print estimate for a large catalogue exceeds the budget; the team decided to limit the printed catalogue to 100 copies and provide a QR link for others.",
+                "evidence": "The print estimate arrived this morning. A large catalogue run costs more than our remaining print budget. A hundred copies fit the budget, and visitors can also read the catalogue on their phones. The estimate is for the catalogue only; it says nothing about delivery insurance or the courier price. We have decided to limit the printed catalogue to 100 copies and offer a QR link for additional readers because the larger print run exceeds the budget. That is our settled catalogue decision. This is not an instruction to limit entry to one hundred visitors, and it does not change the artwork count."
+              }
+            ],
+            "action_items": [
+              {
+                "text": "Book the artwork courier by Thursday once the insurance certificate is approved.",
+                "assignee": "Priya",
+                "due": "Thursday",
+                "evidence": "Once the insurance certificate is approved, I will book the artwork courier by Thursday. The approval is a prerequisite, not just a useful document. The courier carries the framed pieces from storage to the gallery. Nothing in this discussion should turn that into an unconditional booking."
+              }
+            ],
+            "open_questions": []
+          },
+          {
+            "title": "Visitor Experience and Artist Input",
+            "summary": "Lena noted the lighting was softer in the afternoon than in morning photographs.",
+            "key_points": [
+              {
+                "text": "Trial visitors showed varied preferences, such as reading alone or discussing work with friends."
+              },
+              {
+                "text": "Artists provided varied descriptions for their works, differing in tone and focus."
+              },
+              {
+                "text": "Artists expressed a range of emotions, from pride to uncertainty, regarding their work's reception."
+              },
+              {
+                "text": "The preview was encouraging as visitors noticed details the artists had not expected others to notice."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Internal Coordination and Offers",
+            "summary": "Omar offered to record a narrated audio tour; the offer remains unaccepted and is not a current task.",
+            "key_points": [],
+            "decisions": [
+              {
+                "text": "Priya's previous commitment to replace the camera equipment list is withdrawn as the folder already contains the corrected list.",
+                "evidence": "I am withdrawing my promise to replace the camera equipment list. The folder already contains the corrected list and the broken tripod has been removed. My earlier concern came from reading the obsolete printed sheet. There is no remaining equipment-list replacement task, and no one else is taking it over."
+              }
+            ],
+            "action_items": [
+              {
+                "text": "Send the existing floor plan to Lena by Thursday for use in visitor conversations.",
+                "assignee": "Priya",
+                "due": "Thursday",
+                "evidence": "I will send the existing floor plan to Lena by Thursday so Lena can use it in visitor conversations. This is a separate commitment from booking the courier and does not depend on insurance approval. I am sending the current document, not promising to redesign the layout or draw a replacement plan."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Book the artwork courier by Thursday once the insurance certificate is approved.",
+            "assignee": "Priya",
+            "due": "Thursday",
+            "evidence": "Once the insurance certificate is approved, I will book the artwork courier by Thursday. The approval is a prerequisite, not just a useful document. The courier carries the framed pieces from storage to the gallery. Nothing in this discussion should turn that into an unconditional booking.",
+            "topic": "Artwork and Documentation"
+          },
+          {
+            "text": "Send the existing floor plan to Lena by Thursday for use in visitor conversations.",
+            "assignee": "Priya",
+            "due": "Thursday",
+            "evidence": "I will send the existing floor plan to Lena by Thursday so Lena can use it in visitor conversations. This is a separate commitment from booking the courier and does not depend on insurance approval. I am sending the current document, not promising to redesign the layout or draw a replacement plan.",
+            "topic": "Internal Coordination and Offers"
+          }
+        ],
+        "all_decisions": [
+          {
+            "text": "The print estimate for a large catalogue exceeds the budget; the team decided to limit the printed catalogue to 100 copies and provide a QR link for others.",
+            "evidence": "The print estimate arrived this morning. A large catalogue run costs more than our remaining print budget. A hundred copies fit the budget, and visitors can also read the catalogue on their phones. The estimate is for the catalogue only; it says nothing about delivery insurance or the courier price. We have decided to limit the printed catalogue to 100 copies and offer a QR link for additional readers because the larger print run exceeds the budget. That is our settled catalogue decision. This is not an instruction to limit entry to one hundred visitors, and it does not change the artwork count."
+          },
+          {
+            "text": "Priya's previous commitment to replace the camera equipment list is withdrawn as the folder already contains the corrected list.",
+            "evidence": "I am withdrawing my promise to replace the camera equipment list. The folder already contains the corrected list and the broken tripod has been removed. My earlier concern came from reading the obsolete printed sheet. There is no remaining equipment-list replacement task, and no one else is taking it over."
+          }
+        ],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:09:10.666Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "0ec48cbd933d4ee8cc3be298ab6ccb3bb907fa0b15c45956dce7259f2aee5c46",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 271
+                  },
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 272
+                  }
+                ]
+              },
+              "recent_win:win": {
+                "id": "recent-win",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 271
+                  }
+                ]
+              },
+              "recent_win:why_it_counts": {
+                "id": "recent-win-impact",
+                "sources": [
+                  {
+                    "segment": 10,
+                    "start": 0,
+                    "end": 291
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 271
+                  },
+                  {
+                    "segment": 10,
+                    "start": 0,
+                    "end": 291
+                  },
+                  {
+                    "segment": 15,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 271
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 271
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 10,
+                    "start": 0,
+                    "end": 291
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 10,
+                    "start": 0,
+                    "end": 291
+                  }
+                ]
+              },
+              "topic:0:point:1": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 15,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:1": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 15,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s1:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  },
+                  {
+                    "segment": 7,
+                    "start": 0,
+                    "end": 300
+                  },
+                  {
+                    "segment": 8,
+                    "start": 0,
+                    "end": 301
+                  },
+                  {
+                    "segment": 9,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "topic:1:action:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "topic:1:decision:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 7,
+                    "start": 0,
+                    "end": 300
+                  },
+                  {
+                    "segment": 8,
+                    "start": 0,
+                    "end": 301
+                  }
+                ]
+              },
+              "all_decisions:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 7,
+                    "start": 0,
+                    "end": 300
+                  },
+                  {
+                    "segment": 8,
+                    "start": 0,
+                    "end": 301
+                  }
+                ]
+              },
+              "native_continuations:all_decisions:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 7,
+                    "start": 0,
+                    "end": 300
+                  },
+                  {
+                    "segment": 8,
+                    "start": 0,
+                    "end": 301
+                  }
+                ]
+              },
+              "completion:all_decisions:0": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 7,
+                    "start": 0,
+                    "end": 300
+                  },
+                  {
+                    "segment": 8,
+                    "start": 0,
+                    "end": 301
+                  }
+                ]
+              },
+              "topic:1:summary": {
+                "id": "s1:item:2",
+                "sources": [
+                  {
+                    "segment": 9,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "native_continuations:topic:1:summary": {
+                "id": "s1:item:2",
+                "sources": [
+                  {
+                    "segment": 9,
+                    "start": 0,
+                    "end": 290
+                  }
+                ]
+              },
+              "topic:2:title": {
+                "id": "s2:title",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 272
+                  },
+                  {
+                    "segment": 5,
+                    "start": 0,
+                    "end": 306
+                  },
+                  {
+                    "segment": 6,
+                    "start": 0,
+                    "end": 316
+                  },
+                  {
+                    "segment": 11,
+                    "start": 0,
+                    "end": 293
+                  },
+                  {
+                    "segment": 17,
+                    "start": 0,
+                    "end": 325
+                  }
+                ]
+              },
+              "topic:2:summary": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 272
+                  }
+                ]
+              },
+              "native_continuations:topic:2:summary": {
+                "id": "s2:item:0",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 272
+                  }
+                ]
+              },
+              "topic:2:point:0": {
+                "id": "s2:item:1",
+                "sources": [
+                  {
+                    "segment": 5,
+                    "start": 0,
+                    "end": 306
+                  }
+                ]
+              },
+              "native_continuations:topic:2:point:0": {
+                "id": "s2:item:1",
+                "sources": [
+                  {
+                    "segment": 5,
+                    "start": 0,
+                    "end": 306
+                  }
+                ]
+              },
+              "topic:2:point:1": {
+                "id": "s2:item:2",
+                "sources": [
+                  {
+                    "segment": 6,
+                    "start": 0,
+                    "end": 316
+                  }
+                ]
+              },
+              "native_continuations:topic:2:point:1": {
+                "id": "s2:item:2",
+                "sources": [
+                  {
+                    "segment": 6,
+                    "start": 0,
+                    "end": 316
+                  }
+                ]
+              },
+              "topic:2:point:2": {
+                "id": "s2:item:3",
+                "sources": [
+                  {
+                    "segment": 11,
+                    "start": 0,
+                    "end": 293
+                  }
+                ]
+              },
+              "native_continuations:topic:2:point:2": {
+                "id": "s2:item:3",
+                "sources": [
+                  {
+                    "segment": 11,
+                    "start": 0,
+                    "end": 293
+                  }
+                ]
+              },
+              "topic:2:point:3": {
+                "id": "s2:item:4",
+                "sources": [
+                  {
+                    "segment": 17,
+                    "start": 0,
+                    "end": 325
+                  }
+                ]
+              },
+              "native_continuations:topic:2:point:3": {
+                "id": "s2:item:4",
+                "sources": [
+                  {
+                    "segment": 17,
+                    "start": 0,
+                    "end": 325
+                  }
+                ]
+              },
+              "topic:3:title": {
+                "id": "s3:title",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 288
+                  },
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 256
+                  },
+                  {
+                    "segment": 12,
+                    "start": 0,
+                    "end": 307
+                  },
+                  {
+                    "segment": 13,
+                    "start": 0,
+                    "end": 309
+                  },
+                  {
+                    "segment": 16,
+                    "start": 0,
+                    "end": 291
+                  },
+                  {
+                    "segment": 18,
+                    "start": 0,
+                    "end": 298
+                  },
+                  {
+                    "segment": 19,
+                    "start": 0,
+                    "end": 286
+                  }
+                ]
+              },
+              "topic:3:summary": {
+                "id": "s3:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 256
+                  },
+                  {
+                    "segment": 16,
+                    "start": 0,
+                    "end": 291
+                  }
+                ]
+              },
+              "native_continuations:topic:3:summary": {
+                "id": "s3:item:0",
+                "sources": [
+                  {
+                    "segment": 4,
+                    "start": 0,
+                    "end": 256
+                  },
+                  {
+                    "segment": 16,
+                    "start": 0,
+                    "end": 291
+                  }
+                ]
+              },
+              "topic:3:decision:0": {
+                "id": "s3:item:1",
+                "sources": [
+                  {
+                    "segment": 12,
+                    "start": 0,
+                    "end": 307
+                  }
+                ]
+              },
+              "all_decisions:1": {
+                "id": "s3:item:1",
+                "sources": [
+                  {
+                    "segment": 12,
+                    "start": 0,
+                    "end": 307
+                  }
+                ]
+              },
+              "native_continuations:all_decisions:1": {
+                "id": "s3:item:1",
+                "sources": [
+                  {
+                    "segment": 12,
+                    "start": 0,
+                    "end": 307
+                  }
+                ]
+              },
+              "completion:all_decisions:1": {
+                "id": "s3:item:1",
+                "sources": [
+                  {
+                    "segment": 12,
+                    "start": 0,
+                    "end": 307
+                  }
+                ]
+              },
+              "topic:3:action:0": {
+                "id": "s3:item:2",
+                "sources": [
+                  {
+                    "segment": 18,
+                    "start": 0,
+                    "end": 298
+                  }
+                ]
+              },
+              "all_action_items:1": {
+                "id": "s3:item:2",
+                "sources": [
+                  {
+                    "segment": 18,
+                    "start": 0,
+                    "end": 298
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:1": {
+                "id": "s3:item:2",
+                "sources": [
+                  {
+                    "segment": 18,
+                    "start": 0,
+                    "end": 298
+                  }
+                ]
+              },
+              "completion:all_action_items:1": {
+                "id": "s3:item:2",
+                "sources": [
+                  {
+                    "segment": 18,
+                    "start": 0,
+                    "end": 298
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    }
+  ],
+  "codeSha256": [
+    "8ccec22b1b4d4985c9cae36c2d14982b10b6ef581dae07f9885ea3f838255a11  electron/llm/analysisGrounding.ts",
+    "042e06d7e218aa91aeff3c43b5973cd5e4c577de253a4d6b16dd31962d1747e7  electron/llm/meetingNotesAudit.ts",
+    "a7c204b06966327a5354c6aff23d7dfc33c8b39a36218b6da1222f3fef9309bb  electron/llm/meetingNotesGuardrails.ts",
+    "9076606fb35e12c668f676981e35ee178219b68c362e00470540df0f7443a0b0  electron/llm/meetingNotesBudget.ts",
+    "023de580ed8f68b06fba25490fbc8083ed95241064468ac4d4926fb11cf423a9  electron/llm/meetingNotesGuidance.ts",
+    "7edc842e01a7753eb5b43fc1d88cfb08e646bc61ae845b1b6dff373fd576fbae  electron/llm/meetingNotesPrompts.ts",
+    "5a4c4725d5ca8ad33a3ee7dc0a92d886b23e0c8d66961e7b139dd909dd94590e  electron/llm/meetingNotesPipeline.ts",
+    "5b4986a9ce561d9737904eba005fa97261484509a87258090592639d43853330  electron/llm/meetingNotesTypes.ts",
+    "4d4cb2f8e2e7baf309028b892480afa4c201fa06a487f765202c03b6652adbe9  electron/llm/unifiedProvider.ts",
+    "3acc8e6fc3626d2fc80bbc242478344b9e8e5376b33fc17d7ce1b2be2952f61a  electron/llm/ollamaHttpTransport.ts",
+    "a33f676a677f52fa68b5a26c8c2cdd6546576065def92f9990e63215aec2e4e6  tests/manual/meetingNotesLocalGuardrailsAcceptance.test.ts",
+    "cd3786727dc8205e9a146430544264efb6e62da4938f698ce1e0076fc058e95b  tests/manual/fixtures/meetingNotesGemmaReliabilityCases.ts",
+    "dffabc725a0941b214913bfcb310bd60d38be5b4d1d0bcbc4cff550647389fc1  tests/manual/fixtures/meetingNotesLocalGuardrailsCases.ts",
+    "f88b7c01c41af1b7b06c33e265e99896504c363bf2ced11f55c144e39f556a67  tests/manual/fixtures/meetingNotesFidelityHoldoutCases.ts"
+  ]
+}

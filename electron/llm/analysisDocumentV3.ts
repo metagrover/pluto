@@ -13,7 +13,9 @@ import type {
   AnalysisGenerationMetadata,
   AnalysisQualityV3,
   DecisionV3,
+  MeetingTerminologyArtifactV1,
   MeetingType,
+  NotesSourceProvenance,
   RecentWinV3,
   TopicPoint,
   TopicSection,
@@ -45,6 +47,140 @@ const parseErrorCategories = (value: unknown): AnalysisErrorCategory[] => {
   );
 };
 
+const parseTerminologyArtifact = (
+  raw: unknown,
+): MeetingTerminologyArtifactV1 | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  if (
+    record.schemaVersion !== 1 ||
+    !asString(record.generatedAt) ||
+    !asString(record.provider) ||
+    !asString(record.model) ||
+    !asString(record.policyVersion) ||
+    !Array.isArray(record.proposals)
+  ) {
+    return undefined;
+  }
+  const proposals = record.proposals.flatMap((rawProposal) => {
+    if (!rawProposal || typeof rawProposal !== 'object') return [];
+    const proposal = rawProposal as Record<string, unknown>;
+    const confidence = asString(proposal.confidence);
+    const status = asString(proposal.status);
+    if (
+      !['high', 'medium', 'low'].includes(confidence) ||
+      !['applied', 'proposed', 'confirmed', 'rejected', 'preserved'].includes(
+        status,
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        rawForms: asStringArray(proposal.rawForms),
+        preferredTerm:
+          typeof proposal.preferredTerm === 'string'
+            ? proposal.preferredTerm.trim() || null
+            : null,
+        segmentIndexes: Array.isArray(proposal.segmentIndexes)
+          ? proposal.segmentIndexes.filter(
+              (value): value is number =>
+                Number.isInteger(value) && Number(value) >= 0,
+            )
+          : [],
+        confidence:
+          confidence as MeetingTerminologyArtifactV1['proposals'][number]['confidence'],
+        signals: asStringArray(proposal.signals).filter((signal) =>
+          [
+            'repeated_context',
+            'known_person',
+            'known_entity',
+            'spoken_definition',
+            'variant_consistency',
+          ].includes(signal),
+        ) as MeetingTerminologyArtifactV1['proposals'][number]['signals'],
+        status:
+          status as MeetingTerminologyArtifactV1['proposals'][number]['status'],
+      },
+    ];
+  });
+  return {
+    schemaVersion: 1,
+    generatedAt: asString(record.generatedAt),
+    provider: asString(record.provider),
+    model: asString(record.model),
+    policyVersion: asString(record.policyVersion),
+    proposals,
+  };
+};
+
+const parseSourceProvenance = (
+  raw: unknown,
+): NotesSourceProvenance | undefined => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (
+    record.schema_version !== 1 ||
+    !asString(record.source_revision) ||
+    !record.blocks ||
+    typeof record.blocks !== 'object' ||
+    Array.isArray(record.blocks)
+  ) {
+    return undefined;
+  }
+  const blocks = Object.entries(
+    record.blocks as Record<string, unknown>,
+  ).flatMap(([path, rawBlock]) => {
+    if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock)) {
+      return [];
+    }
+    const block = rawBlock as Record<string, unknown>;
+    if (
+      !asString(block.id) ||
+      !Array.isArray(block.sources) ||
+      block.sources.length === 0
+    ) {
+      return [];
+    }
+    const sources = block.sources.flatMap((rawSource) => {
+      if (
+        !rawSource ||
+        typeof rawSource !== 'object' ||
+        Array.isArray(rawSource)
+      ) {
+        return [];
+      }
+      const source = rawSource as Record<string, unknown>;
+      if (
+        !Number.isInteger(source.segment) ||
+        !Number.isInteger(source.start) ||
+        !Number.isInteger(source.end) ||
+        (source.start as number) < 0 ||
+        (source.end as number) <= (source.start as number)
+      ) {
+        return [];
+      }
+      return [
+        {
+          segment: source.segment as number,
+          start: source.start as number,
+          end: source.end as number,
+        },
+      ];
+    });
+    return sources.length === block.sources.length
+      ? [[path, { id: asString(block.id), sources }] as const]
+      : [];
+  });
+  return blocks.length === Object.keys(record.blocks).length
+    ? {
+        schema_version: 1,
+        source_revision: asString(record.source_revision),
+        blocks: Object.fromEntries(blocks),
+      }
+    : undefined;
+};
+
 const parseGenerationMetadata = (
   raw: unknown,
 ): AnalysisGenerationMetadata | undefined => {
@@ -65,6 +201,44 @@ const parseGenerationMetadata = (
     return undefined;
   }
 
+  const terminology = parseTerminologyArtifact(record.terminology);
+  const sourceProvenance = parseSourceProvenance(record.source_provenance);
+  const rawHierarchy =
+    record.hierarchy && typeof record.hierarchy === 'object'
+      ? (record.hierarchy as Record<string, unknown>)
+      : null;
+  const hierarchy =
+    rawHierarchy &&
+    ['depth', 'nodes', 'max_depth', 'max_nodes'].every(
+      (key) =>
+        Number.isSafeInteger(rawHierarchy[key]) &&
+        (rawHierarchy[key] as number) >= 0,
+    ) &&
+    (rawHierarchy.depth as number) <= (rawHierarchy.max_depth as number) &&
+    (rawHierarchy.nodes as number) <= (rawHierarchy.max_nodes as number)
+      ? {
+          depth: rawHierarchy.depth as number,
+          nodes: rawHierarchy.nodes as number,
+          max_depth: rawHierarchy.max_depth as number,
+          max_nodes: rawHierarchy.max_nodes as number,
+        }
+      : undefined;
+  const rawGenerationOptions =
+    record.generation_options && typeof record.generation_options === 'object'
+      ? (record.generation_options as Record<string, unknown>)
+      : null;
+  const generationOptions = rawGenerationOptions
+    ? {
+        ...(typeof rawGenerationOptions.structured_thinking === 'boolean'
+          ? {
+              structured_thinking: rawGenerationOptions.structured_thinking,
+            }
+          : {}),
+        ...(Number.isSafeInteger(rawGenerationOptions.seed)
+          ? { seed: rawGenerationOptions.seed as number }
+          : {}),
+      }
+    : null;
   return {
     provider: provider as AnalysisGenerationMetadata['provider'],
     model,
@@ -73,6 +247,26 @@ const parseGenerationMetadata = (
     prompt_version: promptVersion,
     generated_at: generatedAt,
     error_categories: parseErrorCategories(record.error_categories),
+    ...(generationOptions && Object.keys(generationOptions).length > 0
+      ? { generation_options: generationOptions }
+      : {}),
+    ...(terminology ? { terminology } : {}),
+    ...(record.pipeline_version === 'writer-audit-v1' ||
+    record.pipeline_version === 'writer-editor-v1'
+      ? { pipeline_version: record.pipeline_version }
+      : {}),
+    ...(record.mode === 'direct' || record.mode === 'hierarchical'
+      ? { mode: record.mode }
+      : {}),
+    ...(record.audit_status === 'complete'
+      ? { audit_status: 'complete' as const }
+      : {}),
+    ...(Number.isSafeInteger(record.audit_change_count) &&
+    (record.audit_change_count as number) >= 0
+      ? { audit_change_count: record.audit_change_count as number }
+      : {}),
+    ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
   };
 };
 

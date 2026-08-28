@@ -65,6 +65,19 @@ export interface InternalSignalDocument {
   extra_tags: InternalSignalTag[];
 }
 
+export class SecondaryExtractionError extends Error {
+  readonly code: 'value_signals_failed' | 'entity_extraction_failed';
+
+  constructor(
+    code: 'value_signals_failed' | 'entity_extraction_failed',
+    cause?: unknown,
+  ) {
+    super(code, { cause });
+    this.name = 'SecondaryExtractionError';
+    this.code = code;
+  }
+}
+
 export interface AnalysisQuality {
   format_pass: boolean;
   retry_count: number;
@@ -111,7 +124,17 @@ export interface LLMProvider {
     transcript: string,
     userNotes?: string,
     template?: import('./prompts').MeetingNotesTemplate,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+      stageCache?: import('./meetingNotesStageCache').NotesStageCache;
+      cacheKey?: string;
+      onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+    },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateSummary(transcript: string, userNotes?: string): Promise<string>;
@@ -156,6 +179,7 @@ export interface LLMProvider {
   extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
+    options?: { signal?: AbortSignal },
   ): Promise<ExtractedEntities>;
 }
 

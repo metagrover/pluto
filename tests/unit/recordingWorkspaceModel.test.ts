@@ -53,6 +53,82 @@ describe('buildRecordingWorkspaceModel', () => {
     expect(model.transcript).toHaveLength(1);
   });
 
+  it('keeps raw echo candidates in input while hiding suppressed presentation rows', () => {
+    const suppressed = {
+      id: 'mic-echo',
+      speaker: 'Speaker' as const,
+      source: 'mic' as const,
+      text: 'Please request Docker.',
+      timestampMs: 12_000,
+      confirmed: true,
+      presentation: {
+        visibility: 'suppressed_echo' as const,
+        matchedSegmentId: 'system-1',
+        confidence: 1,
+        reason: 'cross_channel_echo' as const,
+      },
+    };
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 15_000,
+      isStarting: false,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [
+        suppressed,
+        {
+          ...suppressed,
+          id: 'system-1',
+          source: 'system',
+          presentation: undefined,
+        },
+      ],
+      interimText: '',
+    });
+
+    expect(model.transcript.map((segment) => segment.id)).toEqual(['system-1']);
+    expect(suppressed.presentation.visibility).toBe('suppressed_echo');
+  });
+
+  it('shows only the newest tentative source tail', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 15_000,
+      isStarting: false,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [
+        {
+          id: 'mic-tentative',
+          speaker: 'Speaker',
+          source: 'mic',
+          text: 'older tail',
+          timestampMs: 12_000,
+          confirmed: false,
+        },
+        {
+          id: 'system-tentative',
+          speaker: 'Speaker',
+          source: 'system',
+          text: 'newest tail',
+          timestampMs: 13_000,
+          confirmed: false,
+        },
+      ],
+      interimText: '',
+    });
+
+    expect(model.transcript.map((segment) => segment.id)).toEqual([
+      'system-tentative',
+    ]);
+  });
+
   it('names the input that needs attention', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,

@@ -1,0 +1,92 @@
+{
+  "date": "2026-08-27",
+  "model": "qwen3.5:9b",
+  "modelDigest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "source": "Synthetic fixtures only; no production meetings",
+  "contextTokens": 16384,
+  "outputTokens": 2048,
+  "thinking": false,
+  "baseline": {
+    "explicitSampling": {
+      "temperature": 0.1,
+      "num_thread": 8,
+      "seed": 41
+    },
+    "results": [
+      {
+        "case": "conditional-promise-and-willingness",
+        "seed": 41,
+        "latencyMs": 28273,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"If finance approves, Ava will send the revised budget to Nora by Thursday.\",\n      \"sources\": [\"R0\"]\n    },\n    {\n      \"text\": \"Ben offered to draft the launch announcement if it would help.\",\n      \"sources\": [\"R1\"]\n    },\n    {\n      \"text\": \"Nora declined Ben's offer and decided to leave the launch announcement unassigned for now.\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Ava clarified that her promise to send the budget is conditional on finance approval and is not unconditional.\",\n      \"sources\": [\"R3\"]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Ben will draft the launch announcement if it would help.\",\n      \"owner\": \"Ben\",\n      \"due\": null,\n      \"sources\": [\"R1\"]\n    },\n    {\n      \"text\": \"Ava will send the revised budget to Nora by Thursday, pending finance approval.\",\n      \"owner\": \"Ava\",\n      \"due\": \"Thursday\",\n      \"sources\": [\"R0\"]\n    }\n  ],\n  \"decisions\": [\n    {\n      \"text\": \"The launch announcement is left unassigned for now.\",\n      \"owner\": \"Nora\",\n      \"sources\": [\"R2\"]\n    }\n  ],\n  \"questions\": [\n    {\n      \"text\": \"Has finance approved the revised budget?\",\n      \"sources\": [\"R0\", \"R3\"]\n    },\n    {\n      \"text\": \"Would Ben's offer to draft the launch announcement help?\",\n      \"sources\": [\"R1\"]\n    }\n  ]\n}"
+      },
+      {
+        "case": "withdrawal-and-qualified-promise",
+        "seed": 41,
+        "latencyMs": 25948,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Ava will send the integration checklist to Ben by Friday.\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"Ben can draft the announcement if legal approves.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"The team may explore a migration next quarter, but this is not a current commitment.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"text\": \"The research discussion has no assignments or decisions today.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    },\n    {\n      \"text\": \"Ava withdraws her earlier commitment to send the integration checklist by Friday due to incomplete source data; therefore, no one should send it on Friday.\",\n      \"sources\": [\n        \"R4\"\n      ]\n    },\n    {\n      \"text\": \"After the final audit, Dana will publish the reviewed FAQ to Elena by Wednesday.\",\n      \"sources\": [\n        \"R5\"\n      ]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Ava sends the integration checklist to Ben by Friday.\",\n      \"owner\": \"Ava\",\n      \"due\": \"Friday\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"Ben drafts the announcement upon legal approval.\",\n      \"owner\": \"Ben\",\n      \"due\": null,\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"Dana publishes the reviewed FAQ to Elena after the final audit.\",\n      \"owner\": \"Dana\",\n      \"due\": \"Wednesday\",\n      \"sources\": [\n        \"R5\"\n      ]\n    }\n  ],\n  \"decisions\": [],\n  \"questions\": []\n}"
+      },
+      {
+        "case": "reassigned-task-and-past-work",
+        "seed": 41,
+        "latencyMs": 22698,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Rina uploaded the old survey results yesterday.\",\n      \"sources\": [\"R0\"]\n    },\n    {\n      \"text\": \"Sol offered to prepare a fresh summary if needed.\",\n      \"sources\": [\"R1\"]\n    },\n    {\n      \"text\": \"Rina declined the need for a fresh summary.\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Amara is receiving the raw responses, not sending them, and there is no summary assignment.\",\n      \"sources\": [\"R4\"]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Sol will email the raw responses to Amara on Monday, provided the consent check passes.\",\n      \"owner\": \"Sol\",\n      \"due\": \"Monday\",\n      \"sources\": [\"R3\"]\n    },\n    {\n      \"text\": \"Rina requested Sol to email the raw responses to Amara on Monday.\",\n      \"owner\": \"Sol\",\n      \"due\": \"Monday\",\n      \"sources\": [\"R2\"]\n    }\n  ],\n  \"decisions\": [\n    {\n      \"text\": \"No fresh summary is needed.\",\n      \"owner\": \"Rina\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Sol will not prepare a fresh summary unless explicitly requested later.\",\n      \"owner\": \"Sol\",\n      \"sources\": [\"R1\", \"R2\"]\n    }\n  ],\n  \"questions\": [\n    {\n      \"text\": \"Has the consent check passed for emailing the raw responses to Amara?\",\n      \"sources\": [\"R3\"]\n    }\n  ]\n}"
+      }
+    ]
+  },
+  "noJsonGrammar": {
+    "onlyRequestChange": "Removed format field; all other request fields and prompt unchanged",
+    "results": [
+      {
+        "case": "conditional-promise-and-willingness",
+        "latencyMs": 20528,
+        "identicalToBaseline": true,
+        "sha256": "c0e0cfdeaad528d5cd1b1b1687ddcb1bdd11cf44f8faa5cecb74155484e3de9f"
+      },
+      {
+        "case": "withdrawal-and-qualified-promise",
+        "latencyMs": 24148,
+        "identicalToBaseline": true,
+        "sha256": "2b2d2b158def510762588afa83d250b174872bcc2f70ecbdcc5528aaac8c4a79"
+      },
+      {
+        "case": "reassigned-task-and-past-work",
+        "latencyMs": 20556,
+        "identicalToBaseline": true,
+        "sha256": "aa9c3298aca3bc937e29fb046be7eff8a7a7f8a90fab1d0883306192364e7f38"
+      }
+    ]
+  },
+  "qwenRecommendedSampling": {
+    "source": "https://huggingface.co/Qwen/Qwen3.5-9B",
+    "explicitSampling": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0,
+      "presence_penalty": 1.5,
+      "repeat_penalty": 1,
+      "num_thread": 8,
+      "seed": 41
+    },
+    "results": [
+      {
+        "case": "conditional-promise-and-willingness",
+        "seed": 41,
+        "latencyMs": 17130,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"If finance approves, Ava will send the revised budget to Nora by Thursday.\",\n      \"sources\": [\"R0\", \"R3\"]\n    },\n    {\n      \"text\": \"Ben offered to draft the launch announcement if it would help.\",\n      \"sources\": [\"R1\"]\n    },\n    {\n      \"text\": \"Nora declined Ben's offer and decided to leave the launch announcement unassigned for now.\",\n      \"sources\": [\"R2\"]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Ava will send the revised budget to Nora by Thursday, conditional on finance approval.\",\n      \"owner\": \"Ava\",\n      \"due\": \"Thursday\",\n      \"sources\": [\"R0\", \"R3\"]\n    }\n  ],\n  \"decisions\": [\n    {\n      \"text\": \"The launch announcement is unassigned for now.\",\n      \"owner\": \"Nora\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Ben's offer to draft the launch announcement was not accepted.\",\n      \"owner\": null,\n      \"sources\": [\"R1\", \"R2\"]\n    }\n  ],\n  \"questions\": [\n    {\n      \"text\": \"Has finance approved the revised budget?\",\n      \"sources\": [\"R0\", \"R3\"]\n    }\n  ]\n}"
+      },
+      {
+        "case": "withdrawal-and-qualified-promise",
+        "seed": 41,
+        "latencyMs": 15058,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Ava takes back her earlier commitment to send the integration checklist to Ben by Friday because the source data is incomplete.\",\n      \"sources\": [\n        \"R4\"\n      ]\n    },\n    {\n      \"text\": \"The research discussion has no assignments or decisions today.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Ava will send the integration checklist to Ben by Friday.\",\n      \"owner\": null,\n      \"due\": null,\n      \"sources\": [\n        \"R0\",\n        \"R4\"\n      ]\n    },\n    {\n      \"text\": \"Ben can draft the announcement if legal approves.\",\n      \"owner\": null,\n      \"due\": null,\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"After the final audit, Dana will publish the reviewed FAQ to Elena by Wednesday.\",\n      \"owner\": null,\n      \"due\": null,\n      \"sources\": [\n        \"R5\"\n      ]\n    }\n  ],\n  \"decisions\": [],\n  \"questions\": []\n}"
+      },
+      {
+        "case": "reassigned-task-and-past-work",
+        "seed": 41,
+        "latencyMs": 20009,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Rina uploaded the old survey results yesterday.\",\n      \"sources\": [\"R0\"]\n    },\n    {\n      \"text\": \"Sol can prepare a fresh summary if needed.\",\n      \"sources\": [\"R1\"]\n    },\n    {\n      \"text\": \"No summary is needed.\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Amara is receiving the raw responses, not sending them.\",\n      \"sources\": [\"R4\"]\n    },\n    {\n      \"text\": \"There is no summary assignment.\",\n      \"sources\": [\"R4\"]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Sol will email the raw responses to Amara on Monday, provided the consent check passes.\",\n      \"owner\": \"Sol\",\n      \"due\": \"Monday\",\n      \"sources\": [\"R3\"]\n    },\n    {\n      \"text\": \"Amara will receive the raw responses.\",\n      \"owner\": null,\n      \"due\": null,\n      \"sources\": [\"R4\"]\n    }\n  ],\n  \"decisions\": [\n    {\n      \"text\": \"Sol will not prepare a fresh summary.\",\n      \"owner\": \"Sol\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"No summary assignment exists.\",\n      \"owner\": null,\n      \"sources\": [\"R4\"]\n    }\n  ],\n  \"questions\": [\n    {\n      \"text\": \"Will the consent check pass in time for Monday?\",\n      \"sources\": [\"R3\"]\n    }\n  ]\n}"
+      }
+    ]
+  }
+}

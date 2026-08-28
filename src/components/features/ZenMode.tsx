@@ -117,6 +117,7 @@ export const ZenMode = ({
         <LiveTranscript
           segments={model.transcript}
           interimText={model.interimText}
+          integrity={liveTranscriptIntegrity}
         />
       </div>
     </main>

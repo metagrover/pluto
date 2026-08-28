@@ -5,10 +5,17 @@ export const MEETING_INSERT_SQL = `
     analysis_format_pass, analysis_retry_count, analysis_fallback_used, analysis_provider, analysis_model,
     analysis_generation_path, analysis_prompt_version, analysis_generated_at, analysis_error_categories_json,
     value_signals_json, follow_up_drafts_json, folder_id, is_favorite, end_reason, user_edits_json,
+    analysis_edit_conflicts_json,
     transcript_status, transcript_integrity_json, system_audio_path, mixed_audio_path, transcript_validated_at,
     finalization_status, finalization_error_category, downstream_processing_json, capture_journal_generation,
     mid_json, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?,
+    COALESCE(?, CURRENT_TIMESTAMP)
+  )
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     meeting_type = excluded.meeting_type,
@@ -36,6 +43,7 @@ export const MEETING_INSERT_SQL = `
     is_favorite = excluded.is_favorite,
     end_reason = excluded.end_reason,
     user_edits_json = excluded.user_edits_json,
+    analysis_edit_conflicts_json = excluded.analysis_edit_conflicts_json,
     transcript_status = excluded.transcript_status,
     transcript_integrity_json = excluded.transcript_integrity_json,
     system_audio_path = excluded.system_audio_path,

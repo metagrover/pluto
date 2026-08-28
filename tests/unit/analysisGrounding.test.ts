@@ -2,10 +2,210 @@ import { describe, expect, it } from 'vitest';
 
 import {
   groundAnalysisDocument,
+  groundSourceReviewedItem,
   normalizeTranscriptEvidence,
   resolveTranscriptEvidence,
 } from '../../electron/llm/analysisGrounding';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+
+describe('source-reviewed explicit negative decisions', () => {
+  const review = (
+    text: string,
+    evidence: string,
+    owner: string | null = 'Rina',
+  ) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind: 'decision', owner, due: null },
+      resolved,
+    );
+    expect(resolved).toEqual(snapshot);
+    return result;
+  };
+  it('grounds the speaking owner of the target clause and keeps full original evidence untouched', () => {
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary. Could you instead email the raw responses to Amara on Monday?',
+      ),
+    ).toEqual({ text: 'No summary is needed.', owner: 'Rina', due: null });
+    expect(
+      review('No summary is needed.', 'No need for that summary.', 'Amara')
+        ?.owner,
+    ).toBeNull();
+  });
+  it('preserves a condition on the explicit choice', () => {
+    expect(
+      review(
+        'No summary is needed if legal approves.',
+        'No need for that summary if legal approves.',
+      ),
+    ).not.toBeNull();
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary if legal approves.',
+      ),
+    ).toBeNull();
+  });
+  it('cannot borrow a neighboring settled choice for a different negative target', () => {
+    expect(
+      review(
+        'No launch is needed.',
+        'No need for that summary. We decided to review the launch.',
+      ),
+    ).toBeNull();
+    expect(
+      review(
+        'Leave the report unassigned.',
+        'Let us leave the announcement unassigned. We decided to review the report.',
+      ),
+    ).toBeNull();
+  });
+  it('does not poison an existing positive imperative with a neighboring negative fact', () => {
+    expect(
+      review(
+        'Use the source-grounded flow.',
+        'Use the source-grounded flow. The report is not ready.',
+        null,
+      ),
+    ).not.toBeNull();
+  });
+  it.each([
+    ['The summary is needed.', 'No need for that summary.'],
+    [
+      'Leave the announcement assigned.',
+      'Let us leave the announcement unassigned.',
+    ],
+  ])(
+    'does not invert an explicit negative disposition: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+  it('does not make a declined offer into an action', () => {
+    const evidence =
+      'If legal approves, I can draft the announcement. Let us leave the announcement unassigned for now.';
+    expect(
+      groundSourceReviewedItem(
+        {
+          text: 'Draft the announcement if legal approves.',
+          kind: 'action',
+          owner: 'Rina',
+          due: null,
+        },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Rina: ${evidence}`,
+          sourceLines: [`Rina: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves a full source-copy explicit policy decision containing may without changing qualifiers', () => {
+    const evidence =
+      "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality.";
+    const text =
+      "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.";
+    expect(review(text, evidence, null)).toEqual({
+      text,
+      owner: null,
+      due: null,
+    });
+  });
+
+  it.each([
+    'The decision is not final; aggregate counts may be published.',
+    'The decision is pending approval; aggregate counts may be published.',
+    'The decision is that aggregate counts may be published, but it is not finalized.',
+  ])(
+    'does not treat an explicitly unfinished decision status as settled: %s',
+    (text) => {
+      expect(review(text, text, null)).toBeNull();
+    },
+  );
+
+  it.each([
+    'The decision is that aggregate counts may be published once legal approves.',
+    'The decision is that aggregate counts may be published pending legal approval.',
+  ])(
+    'retains a settled policy with its publication prerequisite: %s',
+    (text) => {
+      expect(review(text, text, null)).toEqual({
+        text,
+        owner: null,
+        due: null,
+      });
+    },
+  );
+
+  it.each([
+    [
+      'Individual responses may not be published.',
+      'Individual responses may not be published.',
+    ],
+    [
+      'The decision is not to publish individual responses; aggregate counts will be published.',
+      'The decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is to publish aggregate counts.',
+      'The decision is not to publish individual responses. Aggregate counts may be published.',
+    ],
+    [
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+    ],
+    [
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+    ],
+  ])(
+    'does not relax modal guards for an unsupported or qualified decision: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+
+  it('does not use the explicit policy-copy allowance for actions', () => {
+    const evidence =
+      'The decision is not to publish individual responses; aggregate counts may be published.';
+    expect(
+      groundSourceReviewedItem(
+        { text: evidence, kind: 'action', owner: null, due: null },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Tariq: ${evidence}`,
+          sourceLines: [`Tariq: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
+});
 
 const document = (): AnalysisDocumentV3 => ({
   analysis_schema_version: 3,
@@ -56,6 +256,141 @@ const document = (): AnalysisDocumentV3 => ({
 });
 
 describe('analysis grounding', () => {
+  it('derives a first-person action owner from the evidence speaker and removes team framing', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will set up those filters',
+        evidence: "I'll set up those filters.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Ayush: I'll set up those filters.",
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Set up those filters',
+        assignee: 'Ayush',
+        evidence: "I'll set up those filters.",
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('keeps a named third-person assignment while removing the owner from action text', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Nira will prepare the launch checklist',
+        assignee: 'Nira',
+        evidence: 'Nira will prepare the launch checklist.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: Nira will prepare the launch checklist.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Prepare the launch checklist',
+        assignee: 'Nira',
+        evidence: 'Nira will prepare the launch checklist.',
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('retains collective ownership only for an explicit group commitment', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will publish the rollout notes',
+        assignee: 'Team',
+        evidence: 'We will publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We will publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Publish the rollout notes',
+        assignee: 'Group',
+        evidence: 'We will publish the rollout notes.',
+        topic: 'Synthetic rollout',
+      },
+    ]);
+  });
+
+  it('canonicalizes contracted first-person action framing', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: "I'll speak with Adam",
+        evidence: "I'll speak with Adam.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Deepak: I'll speak with Adam.",
+    );
+
+    expect(result.analysis.all_action_items[0]).toMatchObject({
+      text: 'Speak with Adam',
+      assignee: 'Deepak',
+      evidence: "I'll speak with Adam.",
+    });
+  });
+
+  it('replaces a claimed individual owner when the evidence commits collectively', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: "We'll publish the rollout notes",
+        assignee: 'Milo',
+        evidence: 'We will publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We will publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items[0]).toMatchObject({
+      text: 'Publish the rollout notes',
+      assignee: 'Group',
+    });
+    expect(result.errorCategories).toContain('unsupported_action_item_owner');
+  });
+
+  it('rejects generic team action prose backed only by a suggestion', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'The team will publish the rollout notes',
+        evidence: 'We should publish the rollout notes.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: We should publish the rollout notes.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
+  });
+
   it('keeps a positive recent win only when its evidence is in the transcript', () => {
     const input = document();
     input.recent_win = {
@@ -246,6 +581,40 @@ describe('analysis grounding', () => {
     );
 
     expect(result.analysis.all_decisions).toHaveLength(1);
+  });
+
+  it('uses applied term aliases for claim support while keeping raw evidence verbatim', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use Ogletree',
+        evidence: 'We will use Ovaltree.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will use Ovaltree.',
+      { terminologyAliases: { Ogletree: ['Ovaltree'] } },
+    );
+
+    expect(result.analysis.all_decisions).toEqual([
+      expect.objectContaining({
+        text: 'Use Ogletree',
+        evidence: 'We will use Ovaltree.',
+      }),
+    ]);
+  });
+
+  it('uses applied term aliases when validating a key-point speaker', () => {
+    const input = document();
+    input.topics[0].key_points = [{ text: 'Use Ogletree', speaker: 'Nira' }];
+
+    const result = groundAnalysisDocument(input, 'Nira: Use Ovaltree.', {
+      terminologyAliases: { Ogletree: ['Ovaltree'] },
+    });
+
+    expect(result.analysis.topics[0].key_points[0].speaker).toBe('Nira');
   });
 
   it('does not combine negation from one option with another option', () => {
@@ -659,6 +1028,7 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_action_items).toEqual([
       {
         text: 'Prepare the checklist',
+        assignee: 'Milo',
         evidence: "I'll prepare the checklist.",
         topic: 'Synthetic rollout',
       },
@@ -761,7 +1131,7 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_action_items).toHaveLength(1);
   });
 
-  it('does not assign a commitment to the speaker who only made the request', () => {
+  it('assigns an accepted request to the speaker who explicitly commits', () => {
     const input = document();
     input.topics[0].action_items = [
       {
@@ -781,11 +1151,11 @@ describe('analysis grounding', () => {
     );
 
     expect(result.analysis.all_action_items).toHaveLength(1);
-    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+    expect(result.analysis.all_action_items[0].assignee).toBe('Milo');
     expect(result.errorCategories).toContain('unsupported_action_item_owner');
   });
 
-  it('does not assign the speaker when their turn names another owner', () => {
+  it('derives the named third-person owner instead of assigning the speaker', () => {
     const input = document();
     input.topics[0].action_items = [
       {
@@ -801,7 +1171,8 @@ describe('analysis grounding', () => {
     );
 
     expect(result.analysis.all_action_items).toHaveLength(1);
-    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+    expect(result.analysis.all_action_items[0].assignee).toBe('Bob');
+    expect(result.errorCategories).toContain('unsupported_action_item_owner');
   });
 
   it('does not promote passive needed work with no owner to a commitment', () => {

@@ -1,0 +1,315 @@
+{
+  "date": "2026-08-27",
+  "source": "Synthetic fixtures only; no production meetings",
+  "scope": "Alternative source-only reconciliation models, not final note composition or production promotion",
+  "baseCommit": "ff07ed7c8",
+  "runtime": "Ollama 0.32.15",
+  "request": {
+    "contextTokens": 16384,
+    "outputTokens": 2048,
+    "temperature": 0.1,
+    "thinking": false,
+    "num_thread": 8,
+    "seeds": [41],
+    "retries": 0
+  },
+  "harness": "tests/manual/meetingNotesReconciliationAcceptance.test.ts",
+  "guardVersionBoundary": "These Phi and Qwen2.5 runs preceded the conditional on / contingent on/upon vocabulary correction. Their first failures are unrelated to that correction. Later runs use the corrected guard; prompts and semantic fixture assertions remain unchanged.",
+  "runs": [
+    {
+      "model": "phi4-mini:3.8b",
+      "digest": "78fad5d182a7c33065e153a5f8ba210754207ba9d91973f57dffa7f487363753",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "phi3",
+        "families": ["phi3"],
+        "parameter_size": "3.8B",
+        "quantization_level": "Q4_K_M"
+      },
+      "inheritedParameters": null,
+      "results": [
+        {
+          "case": "conditional-promise-and-willingness",
+          "model": "phi4-mini:3.8b",
+          "seed": 41,
+          "latencyMs": 10633,
+          "raw": "{\n  \"facts\": [\n    {\"text\": \"Ava will send the revised budget to Nora by Thursday if finance approves.\", \"sources\": [\"R0\"]},\n    {\"text\": \"Ben can draft the launch announcement if that would help.\", \"sources\": [\"R1\"]},\n    {\"text\": \"Nora decided to leave the announcement unassigned for now.\", \"sources\": [\"R2\"]},\n    {\"text\": \"Ava's promise to send the revised budget depends on finance approval.\", \"sources\": [\"R3\"]}\n  ],\n  \"actions\": [\n    {\"text\": \"Ava will send the revised budget to Nora by Thursday if finance approves.\", \"owner\": \"Ava\", \"due\": \"Thursday\", \"sources\": [\"R0\"]}\n  ],\n  \"decisions\": [\n    {\"text\": \"Nora decided to leave the announcement unassigned for now.\", \"owner\": \"Nora\", \"sources\": [\"R2\"]}\n  ],\n  \"questions\": [\n    {\"text\": \"Is finance approval pending for Ava's revised budget?\", \"sources\": [\"R0\"]}\n  ]\n}",
+          "sha256": "d39f578ebd1fe75cc2c79cfa33f72fc2bd300308d9843cde512a8107276112b9",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "production_guard",
+            "error": "notes_editor_invalid_commitment:s0:item:5",
+            "semantic": [
+              "Ava qualified action correctly retained; Ben offer not promoted."
+            ],
+            "caveats": [
+              "Grounded leave-unassigned choice fails decision guard and zero-decision fixture taxonomy; do not label it an invented Ben action.",
+              "Finance question inferred from prerequisite, not explicitly asked."
+            ]
+          }
+        },
+        {
+          "case": "withdrawal-and-qualified-promise",
+          "model": "phi4-mini:3.8b",
+          "seed": 41,
+          "latencyMs": 5873,
+          "raw": "{\n  \"facts\": [\n    {\"text\": \"fact\", \"sources\": [\"R0\"]},\n    {\"text\": \"fact\", \"sources\": [\"R1\"]},\n    {\"text\": \"fact\", \"sources\": [\"R2\"]},\n    {\"text\": \"fact\", \"sources\": [\"R3\"]},\n    {\"text\": \"fact\", \"sources\": [\"R4\"]},\n    {\"text\": \"fact\", \"sources\": [\"R5\"]}\n  ],\n  \"actions\": [\n    {\"text\": \"accepted commitment\", \"owner\": null, \"due\": null, \"sources\": [\"R0\"]}\n  ],\n  \"decisions\": [\n    {\"text\": \"settled choice\", \"owner\": null, \"sources\": [\"R1\"]}\n  ],\n  \"questions\": [\n    {\"text\": \"unresolved question\", \"sources\": [\"R4\"]}\n  ]\n}",
+          "sha256": "8c495116e9d86cf76fbebade1c9a21a65e9e31ae16ca542bf2d118fa9475c95e",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "production_guard",
+            "error": "notes_editor_invalid_commitment:s0:item:7",
+            "semantic": [
+              "Copies schema example strings as content; misses withdrawal and Dana qualified promise/ownership."
+            ]
+          }
+        },
+        {
+          "case": "reassigned-task-and-past-work",
+          "model": "phi4-mini:3.8b",
+          "seed": 41,
+          "latencyMs": 6213,
+          "raw": "{\n  \"facts\": [\n    {\"text\": \"Rina uploaded the old survey results yesterday.\"},\n    {\"text\": \"Sol can prepare a fresh summary if someone needs it.\"},\n    {\"text\": \"There is no need for the summary. Amara will receive the raw responses.\"},\n    {\"text\": \"Sol will email the raw responses to Amara on Monday, provided the consent check passes.\"},\n    {\"text\": \"Amara is receiving the raw responses.\"}\n  ],\n  \"actions\": [\n    {\"text\": \"Sol will email the raw responses to Amara on Monday, provided the consent check passes.\"},\n    {\"text\": \"Amara will receive the raw responses.\"}\n  ],\n  \"decisions\": [\n    {\"text\": \"There is no summary assignment.\"}\n  ],\n  \"questions\": [\n    {\"text\": \"Is the consent check for Amara's receiving the raw responses passed?\"}\n  ]\n}",
+          "sha256": "35079965e251a7e857e179e2b0d9c3b04175e77418ebdd5ff20703741735ebce",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "schema",
+            "error": "notes_reconciliation_invalid",
+            "semantic": [
+              "Sources missing throughout; action owner/due fields absent.",
+              "Adds recipient Amara receiving responses as a second action."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "model": "qwen2.5-coder:7b",
+      "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": ["qwen2"],
+        "parameter_size": "7.6B",
+        "quantization_level": "Q4_K_M"
+      },
+      "inheritedParameters": null,
+      "results": [
+        {
+          "case": "conditional-promise-and-willingness",
+          "model": "qwen2.5-coder:7b",
+          "seed": 41,
+          "latencyMs": 12287,
+          "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"If finance approves, I will send the revised budget to Nora by Thursday.\",\n      \"sources\": [\"R0\"]\n    },\n    {\n      \"text\": \"My budget promise still depends on finance approval; it is not an unconditional send.\",\n      \"sources\": [\"R3\"]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": [\n    {\n      \"text\": \"What is the status of finance approval for the revised budget?\",\n      \"sources\": [\"R0\", \"R3\"]\n    }\n  ]\n}",
+          "sha256": "47275fd925664d256d80650ceba15e29567d5878b8d87898131fb0ca34a4f65c",
+          "gatePass": false,
+          "independentScorerReached": true,
+          "review": {
+            "stage": "independent_scorer",
+            "error": "expected action count 1; received 0",
+            "semantic": [
+              "Ava promise only appears as a fact; no structured action.",
+              "Omits Ben offer/rejection and unassigned status."
+            ]
+          }
+        },
+        {
+          "case": "withdrawal-and-qualified-promise",
+          "model": "qwen2.5-coder:7b",
+          "seed": 41,
+          "latencyMs": 9725,
+          "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"The integration checklist commitment was taken back by Ava.\",\n      \"sources\": [\"R4\"]\n    },\n    {\n      \"text\": \"The research discussion has no assignments or decisions today.\",\n      \"sources\": [\"R3\"]\n    },\n    {\n      \"text\": \"After the final audit, the reviewed FAQ will be published to Elena by Wednesday.\",\n      \"sources\": [\"R5\"]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": [\n    {\n      \"text\": \"The source data is incomplete, so no one should send the integration checklist Friday.\",\n      \"sources\": [\"R4\"]\n    }\n  ]\n}",
+          "sha256": "61ca2431ce6565dcf677c52015458c73517ab19edf2882c5e10d0a3c31d310be",
+          "gatePass": false,
+          "independentScorerReached": true,
+          "review": {
+            "stage": "independent_scorer",
+            "error": "expected action count 1; received 0",
+            "semantic": [
+              "Ava withdrawal retained, but Dana qualified promise has no action or explicit ownership.",
+              "Omits Ben/legal discussion and future migration possibility."
+            ]
+          }
+        },
+        {
+          "case": "reassigned-task-and-past-work",
+          "model": "qwen2.5-coder:7b",
+          "seed": 41,
+          "latencyMs": 11087,
+          "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"I already uploaded the old survey results yesterday.\",\n      \"sources\": [\"R0\"]\n    },\n    {\n      \"text\": \"No need for that summary. Could you instead email the raw responses to Amara on Monday?\",\n      \"sources\": [\"R2\"]\n    },\n    {\n      \"text\": \"Yes, I will email those responses to Amara on Monday, provided the consent check passes.\",\n      \"sources\": [\"R3\"]\n    },\n    {\n      \"text\": \"I am receiving them, not sending them. There is no summary assignment.\",\n      \"sources\": [\"R4\"]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": [\n    {\n      \"text\": \"What is the status of the consent check for the raw responses?\",\n      \"sources\": [\"R3\", \"R4\"]\n    }\n  ]\n}",
+          "sha256": "2c5c23cc5bfd9ee225f9ea562b1730b1aeeabd884dbcb1fd3587a54e4696c670",
+          "gatePass": false,
+          "independentScorerReached": true,
+          "review": {
+            "stage": "independent_scorer",
+            "error": "expected action count 1; received 0",
+            "semantic": [
+              "Sol qualified promise only appears as a fact; structured action/owner/deadline missing.",
+              "First-person historical prose loses explicit Rina attribution."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "model": "gemma4:12b",
+      "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+      "runtime": "0.32.15",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gemma4",
+        "families": ["gemma4"],
+        "parameter_size": "11.9B",
+        "quantization_level": "Q4_K_M"
+      },
+      "inheritedParameters": "temperature                    1\ntop_k                          64\ntop_p                          0.95",
+      "request": {
+        "endpoint": "/api/chat",
+        "format": "json",
+        "contextTokens": 16384,
+        "outputTokens": 2048,
+        "temperature": 0.1,
+        "thinking": false,
+        "threads": 8,
+        "seeds": [41]
+      },
+      "observedRuntime": {
+        "loadedBytes": 8058788903,
+        "gpuBytes": 8058788903,
+        "contextTokens": 16384
+      },
+      "results": [
+        {
+          "case": "conditional-promise-and-willingness",
+          "model": "gemma4:12b",
+          "seed": 41,
+          "latencyMs": 20634,
+          "raw": "{\"facts\":[{\"text\":\"Ava's budget promise depends on finance approval and is not an unconditional send.\",\"sources\":[\"R3\"]}],\"actions\":[{\"text\":\"send the revised budget to Nora by Thursday\",\"owner\":\"Ava\",\"due\":\"Thursday\",\"sources\":[\"R0\"]}],\"decisions\":[{\"text\":\"leave the announcement unassigned for now\",\"owner\":\"Nora\",\"sources\":[\"R2\"]}],\"questions\":[{\"text\":\"None\",\"sources\":[]}]}",
+          "sha256": "17505b730b3eeec67ec48d11a0c9b29f04f9e5814366fc6761df736bec689437",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "draft_source_validation",
+            "error": "notes_writer_invalid:s0:item:3:missing_source",
+            "semantic": [
+              "Question text None has empty sources instead of an empty questions array.",
+              "Ava action drops finance prerequisite; condition elsewhere does not repair action wording.",
+              "Ben offer discussion omitted."
+            ],
+            "caveats": [
+              "Grounded unassigned-announcement decision is a separate taxonomy mismatch."
+            ]
+          }
+        },
+        {
+          "case": "withdrawal-and-qualified-promise",
+          "model": "gemma4:12b",
+          "seed": 41,
+          "latencyMs": 15033,
+          "raw": "{\"facts\":[{\"text\":\"The team may explore a migration next quarter, but it is not a current commitment.\",\"sources\":[\"R2\"]},{\"text\":\"The research discussion has no assignments or decisions today.\",\"sources\":[\"R3\"]},{\"text\":\"Ava's earlier commitment to send the integration checklist to Ben by Friday is withdrawn because the source data is incomplete.\",\"sources\":[\"R0\",\"R4\"]}],\"actions\":[{\"text\":\"Draft the announcement if legal approves.\",\"owner\":\"Ben\",\"due\":null,\"sources\":[\"R1\"]},{\"text\":\"Publish the reviewed FAQ to Elena by Wednesday after the final audit.\",\"owner\":\"Dana\",\"due\":\"Wednesday\",\"sources\":[\"R5\"]}],\"decisions\":[],\"questions\":[]}",
+          "sha256": "2a2938b528fbf52d03ed9798e9b31795ed275a26becf35bba0c68b4705e5c3b6",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "production_guard",
+            "error": "notes_editor_invalid_commitment:s0:item:3:conditional_willingness_is_not_accepted",
+            "semantic": [
+              "Promotes Ben conditional willingness to an accepted action.",
+              "Ava withdrawal correctly resolved; Dana action preserves owner, due, recipient and prerequisite."
+            ]
+          }
+        },
+        {
+          "case": "reassigned-task-and-past-work",
+          "model": "gemma4:12b",
+          "seed": 41,
+          "latencyMs": 12651,
+          "raw": "{\"facts\":[{\"text\":\"Rina uploaded the old survey results yesterday.\",\"sources\":[\"R0\"]},{\"text\":\"Amara is receiving the raw responses, not sending them.\",\"sources\":[\"R4\"]},{\"text\":\"There is no summary assignment.\",\"sources\":[\"R4\"]}],\"actions\":[{\"text\":\"email the raw responses to Amara on Monday, provided the consent check passes.\",\"owner\":\"Sol\",\"due\":\"Monday\",\"sources\":[\"R3\"]}],\"decisions\":[{\"text\":\"No need for a fresh summary.\",\"owner\":\"Rina\",\"sources\":[\"R2\"]}],\"questions\":[]}",
+          "sha256": "9ebf377193b3cddccb7dcb49f1b716e99e1b8003a9ee4de914c2622c51f504df",
+          "gatePass": false,
+          "independentScorerReached": false,
+          "review": {
+            "stage": "production_guard",
+            "error": "notes_editor_invalid_commitment:s0:item:4:correct_wording_kind_owner_or_due_from_source",
+            "semantic": [
+              "Sol single action correctly preserves ownership, deadline, recipient and prerequisite; past work and recipient role are correct."
+            ],
+            "caveats": [
+              "Remaining observed failure is grounded no-summary content classified as a decision; no duplicate-action or withdrawal error is observed.",
+              "Unchanged zero-decision fixture would still fail."
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "diagnosticProfiles": [
+    {
+      "model": "gemma4:12b",
+      "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+      "runtime": "0.32.15",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gemma4",
+        "families": ["gemma4"],
+        "parameter_size": "11.9B",
+        "quantization_level": "Q4_K_M"
+      },
+      "inheritedParameters": "temperature                    1\ntop_k                          64\ntop_p                          0.95",
+      "request": {
+        "endpoint": "/api/chat",
+        "format": "json",
+        "contextTokens": 16384,
+        "outputTokens": 8192,
+        "temperature": 0.1,
+        "thinking": true,
+        "timeoutMs": 600000,
+        "threads": 8,
+        "seeds": [41]
+      },
+      "changesFromBaseline": [
+        "thinking enabled",
+        "output budget increased from 2048 to 8192",
+        "caller timeout increased from 180000 to 600000 milliseconds"
+      ],
+      "results": [
+        {
+          "case": "withdrawal-and-qualified-promise",
+          "seed": 41,
+          "gatePass": false,
+          "independentScorerReached": false,
+          "completedFinalResponse": false,
+          "testDurationMs": 600042,
+          "stage": "provider_timeout",
+          "error": "TimeoutError: The operation was aborted due to timeout",
+          "raw": null,
+          "logSha256": "36e4af62ded46ad7f4d0cb38633dd13b800c71d028389b45d28f37fb44b603af",
+          "interpretation": "No completed final response returned before caller deadline; no semantic verdict is inferred from hidden reasoning or partial content. This profile is not reliable for promotion."
+        }
+      ]
+    }
+  ],
+  "outcome": {
+    "promoted": false,
+    "baselineGatePasses": 0,
+    "baselineAttempts": 9,
+    "diagnosticAttempts": 1,
+    "expandedSuiteRun": false,
+    "reasonNotExpanded": "Every tested baseline has a substantive failure or unresolved contract/guard failure; Gemma thinking diagnostic timed out. None qualifies for expanded acceptance.",
+    "productionSettingsChanged": false,
+    "productionMeetingsChanged": false,
+    "downloadedModels": ["gemma4:12b"],
+    "notEvaluated": [
+      "ministral-3:8b",
+      "hosted providers (no configured credentials)"
+    ],
+    "limitation": "These results reject only the tested configurations; they do not establish universal model incapability. Source-stage success would still require composition, long-source, persistence and rendered-app acceptance."
+  }
+}
