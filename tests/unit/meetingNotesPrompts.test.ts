@@ -275,6 +275,36 @@ it('asks the audit to find omissions even when the writer found no actions', () 
   );
 });
 
+it('gives only the audit actionable source-first correction guidance', () => {
+  const prompt = buildNotesAuditPrompt(input);
+  expect(prompt).toContain('BEGIN AUDIT CORRECTION GUIDANCE');
+  for (const requirement of [
+    'every accepted operation, prerequisite, deadline, owner and recipient',
+    'in the action itself',
+    'summary mention is insufficient',
+    'completed-work who/when',
+    'explicit personal feelings and reasons as points',
+    'settled decisions from task-scope clarifications',
+    'all similar errors, not only the first parser target',
+    'wording, kind and supporting sources together',
+    'antecedent task scope and acceptance',
+    'relevant exact descriptors',
+    'all permitted later turns for reversals',
+    'never narrow citations to hide contradictory evidence',
+    'actual replacements/insertions with matching verdicts',
+  ]) {
+    expect(prompt).toContain(requirement);
+  }
+  for (const otherPrompt of [
+    buildNotesWriterPrompt(input),
+    buildNotesEditorPrompt(input),
+    buildNotesMergePrompt(input),
+    buildSourceReconciliationPrompt(''),
+  ]) {
+    expect(otherPrompt).not.toContain('BEGIN AUDIT CORRECTION GUIDANCE');
+  }
+});
+
 it('does not ask the writer to generate duplicate rollups or a forced executive report', () => {
   const prompt = buildNotesWriterPrompt({
     sourceText: '[0] Me: An open question.',

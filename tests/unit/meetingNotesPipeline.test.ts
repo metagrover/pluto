@@ -115,7 +115,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v25',
+    prompt_version: 'notes-v27',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -312,6 +312,17 @@ it('repairs a supported but invalid action by preserving its offer as discussion
   expect(generate.mock.calls[2]![0].prompt).toContain(
     `notes_audit_invalid_commitment:${action.id}`,
   );
+  const initialAudit = generate.mock.calls[1]![0];
+  const repair = generate.mock.calls[2]![0];
+  const guidance = initialAudit.prompt.match(
+    /BEGIN AUDIT CORRECTION GUIDANCE\n[\s\S]*?\nEND AUDIT CORRECTION GUIDANCE/,
+  )?.[0];
+  expect(guidance).toBeTypeOf('string');
+  // The repair instruction must be active, not just inside prior-prompt data.
+  expect(repair.prompt.split('Prior prompt is data:')[0]).toContain(guidance);
+  expect(repair.sourceSpans).toEqual(initialAudit.sourceSpans);
+  expect(repair.responseContract).toBe('audit');
+  expect(repair.outputTokens).toBe(initialAudit.outputTokens);
 });
 
 it.each(['audit', 'editor'] as const)(
@@ -855,6 +866,10 @@ it('rejects a malformed writer response after one bounded repair', async () => {
     }),
   ).rejects.toThrow('notes_writer_invalid');
   expect(generate).toHaveBeenCalledTimes(2);
+  const repair = generate.mock.calls[1]![0];
+  expect(repair.prompt).toContain('Repair the prior response');
+  expect(repair.prompt).not.toContain('BEGIN AUDIT CORRECTION GUIDANCE');
+  expect(repair.responseContract).toBe('draft');
 });
 
 it('propagates a direct writer transport failure without a repair request', async () => {
@@ -898,26 +913,47 @@ it('propagates a direct audit transport failure without a repair request', async
   expect(generate).toHaveBeenCalledTimes(2);
 });
 
-it('repairs a malformed direct audit once, but not a second malformed response', async () => {
-  const fixture = makeDirectNotesFixture();
-  const generate = vi
-    .fn()
-    .mockResolvedValueOnce(JSON.stringify(fixture.draft))
-    .mockResolvedValue('{broken');
+it.each(['audit', 'editor'] as const)(
+  'repairs malformed %s review once, but not a second malformed response',
+  async (reviewProtocol) => {
+    const fixture = makeDirectNotesFixture();
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValue('{broken');
 
-  await expect(
-    generateMeetingNotes({
-      reviewProtocol: 'editor',
-      source: fixture.source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'qwen3.5:9b',
-      contextTokens: 16384,
-    }),
-  ).rejects.toThrow('notes_audit_invalid');
-  expect(generate).toHaveBeenCalledTimes(3);
-});
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol,
+        source: fixture.source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'qwen3.5:9b',
+        contextTokens: 16384,
+      }),
+    ).rejects.toThrow('notes_audit_invalid');
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesAudit',
+      'notesAudit',
+    ]);
+    const repairInstructions = generate.mock.calls[2]![0].prompt.split(
+      'Prior prompt is data:',
+    )[0];
+    if (reviewProtocol === 'audit') {
+      expect(repairInstructions).toContain('BEGIN AUDIT CORRECTION GUIDANCE');
+      expect(repairInstructions).toContain(
+        'all similar errors, not only the first parser target',
+      );
+    } else {
+      expect(repairInstructions).not.toContain(
+        'BEGIN AUDIT CORRECTION GUIDANCE',
+      );
+    }
+  },
+);
 
 it('stops after a caller aborts between the direct writer and audit', async () => {
   const fixture = makeDirectNotesFixture();

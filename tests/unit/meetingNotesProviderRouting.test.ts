@@ -191,7 +191,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v24');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v26');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );

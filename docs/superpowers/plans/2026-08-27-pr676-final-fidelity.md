@@ -1,5 +1,7 @@
 # PR #676 final fidelity implementation plan
 
+Subsequent approval and relative-improvement criteria are recorded in [the bounded comparison plan](2026-08-27-pr676-relative-comparison.md). The rejected witness stays removed; earlier scores below remain historical evidence, not a new all-or-nothing shipping threshold.
+
 > **For agentic workers:** use subagent-driven-development to implement and independently review the bounded tasks below.
 
 **Goal:** Finish issue #674 without publishing incomplete or unsupported notes, changing the user's chosen model, or touching existing saved notes.

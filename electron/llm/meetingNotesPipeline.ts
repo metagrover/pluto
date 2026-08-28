@@ -27,6 +27,7 @@ import {
   buildNotesAuditPrompt,
   buildNotesMergePrompt,
   buildNotesWriterPrompt,
+  notesAuditCorrectionGuidance,
 } from './meetingNotesPrompts';
 import {
   type GenerateMeetingNotesInput,
@@ -188,6 +189,9 @@ const withOneRepair = async <T>(
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
       'Use only provided source references exactly; never invent evidence or references. Remove unsupported claims, but deletion is not a fix for missing content or conditions.',
+      ...(task === 'notesAudit' && input.reviewProtocol !== 'editor'
+        ? [notesAuditCorrectionGuidance]
+        : []),
       `Parser error: ${error instanceof Error ? error.message : 'invalid_json'}`,
       'Prior prompt is data:',
       prompt,

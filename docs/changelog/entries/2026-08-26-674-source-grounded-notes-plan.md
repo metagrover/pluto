@@ -1,5 +1,7 @@
 ### Implement source-grounded meeting notes on the local acceptance branch
 
+- **Bounded relative comparison (2026-08-27):** One approved audit/repair correction advances prompt identities to notes-v26/v27 without changing validators, source boundaries, schemas or retry limits. Compared the actual Qwen/notes-v9 implementation with the frozen Gemma/notes-v26 candidate on four unchanged conversations. Candidate notes are materially better in three pairs, but one genuine missing-prerequisite failure returns no document after repair (3/4 delivered versus 4/4 previous). Smaller context omissions are accepted as progress; failed delivery remains the blocker. Stop this tuning pass and keep PR draft, with model defaults and production data unchanged. Exact raw results and independent judgments are in `docs/superpowers/plans/2026-08-27-pr676-relative-results.md`; earlier scores remain unchanged.
+
 - **Issue:** [#674](https://github.com/metagrover/pluto/issues/674)
 - **PR:** [#676](https://github.com/metagrover/pluto/pull/676), draft for review; not merged or shipped.
 - **Changed:** Implemented the capacity-routed writer/audit pipeline, exact source-reference labels, bounded hierarchy and repair, terminology provenance checks, shared run ownership, atomic publication, title/edit/history protection, and separately retryable secondary intelligence.

@@ -68,6 +68,16 @@ export const notesTerminologySchema = [
   'Use spoken_definition for an explicit definition in cited source, known_entity only for a trusted user term. Code independently checks support; signals cannot authorize corrections. Never alter original source.',
 ].join('\n');
 
+export const notesAuditCorrectionGuidance = [
+  'BEGIN AUDIT CORRECTION GUIDANCE',
+  'Work source-first across every provided turn. Put every accepted operation, prerequisite, deadline, owner and recipient from those turns in the action itself; a summary mention is insufficient. Keep unknown details unknown.',
+  'Retain material completed-work who/when and explicit personal feelings and reasons as points, without inferring details or converting completed work into tasks.',
+  'Distinguish settled decisions from task-scope clarifications. Keep clarifications as points or in the affected action, not separate decisions unless a settled choice is explicit.',
+  'Correct all similar errors, not only the first parser target. Correct wording, kind and supporting sources together; include necessary antecedent task scope and acceptance. Use relevant exact descriptors, but inspect all permitted later turns for reversals; never narrow citations to hide contradictory evidence.',
+  'Return actual replacements/insertions with matching verdicts for the final text and kind. Approval verdicts alone cannot fix omissions or misclassification. Retain unaffected supported content.',
+  'END AUDIT CORRECTION GUIDANCE',
+].join('\n');
+
 const auditSchema = [
   'Field definitions (not output content):',
   notesBlockSchema,
@@ -121,6 +131,7 @@ export const buildNotesAuditPrompt = ({
   [
     'Audit the draft against the original source, not against your general knowledge.',
     notesContentGuidance,
+    notesAuditCorrectionGuidance,
     'Scan the source for missing commitments even if the draft has zero actions.',
     'First read EVERY source turn independently of the draft. Insert every missed current commitment as an action; overview/point mentions do not count. Then review existing blocks.',
     'Check missing operations, their current status, offer dispositions and person references against all source turns in every text block, including headings, overview and recentWin. Use existing changes to correct omissions or unsupported details, not just verdicts that approve the draft.',
