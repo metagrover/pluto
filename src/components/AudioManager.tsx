@@ -11,6 +11,10 @@ import { registerFinalTranscriptionVocabulary } from '../services/finalTranscrip
 import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
 import { reconcileLiveTranscriptSegments } from '../services/liveTranscription/liveTranscriptReconciliation';
 import {
+  type ConfirmedSegmentIngestionSession,
+  createConfirmedSegmentIngestionSession,
+} from '../services/meetingContext/confirmedSegmentIngestionSession';
+import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
@@ -282,6 +286,8 @@ export const AudioManager = ({
   const eouSessionRef = useRef<ReturnType<
     typeof createEouRendererSession
   > | null>(null);
+  const meetingContextIngestionRef =
+    useRef<ConfirmedSegmentIngestionSession | null>(null);
   const startSessionActionRef = useRef<() => void>(() => undefined);
   const stopSessionActionRef = useRef<(endReason?: string) => void>(
     () => undefined,
@@ -485,6 +491,8 @@ export const AudioManager = ({
   const abortUnstartedCapture = async (meetingId: string) => {
     eouSessionRef.current?.cancel();
     eouSessionRef.current = null;
+    meetingContextIngestionRef.current?.close();
+    meetingContextIngestionRef.current = null;
     try {
       await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
         meetingId,
@@ -662,6 +670,22 @@ export const AudioManager = ({
         console.warn('[Pluto] Transcription vocabulary unavailable');
       }
 
+      const meetingContextIngestion = createConfirmedSegmentIngestionSession({
+        meetingId,
+        submit: async (request) =>
+          await window.ipcRenderer.invoke(
+            'MEETING_CONTEXT_INGEST_CONFIRMED',
+            request,
+          ),
+        onError: (error) => {
+          console.warn(
+            `[Pluto] Meeting context ingestion failed for ${meetingId}`,
+            error,
+          );
+        },
+      });
+      meetingContextIngestionRef.current?.close();
+      meetingContextIngestionRef.current = meetingContextIngestion;
       const eouGeneration = eouGenerationRef.current;
       const eouSession = createEouRendererSession({
         meetingId,
@@ -716,6 +740,7 @@ export const AudioManager = ({
               // transcript instead of hiding first text in the faint footer.
               onLiveTranscript?.(readingSegments);
               onInterimTranscript?.('');
+              meetingContextIngestion.accept(segments);
             },
           );
           onLiveTranscriptIntegrityChange?.('healthy');
@@ -1169,6 +1194,8 @@ export const AudioManager = ({
       console.error('[Pluto] Failed to start session', e);
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
+      meetingContextIngestionRef.current?.close();
+      meetingContextIngestionRef.current = null;
       const unstartedMeetingId = currentMeetingIdRef.current;
       if (
         unstartedMeetingId &&
@@ -1459,6 +1486,8 @@ export const AudioManager = ({
 
     const eouSessionAtStop = eouSessionRef.current;
     eouSessionRef.current = null;
+    const meetingContextIngestionAtStop = meetingContextIngestionRef.current;
+    meetingContextIngestionRef.current = null;
 
     let primaryAudioPath = '';
     let systemAudioPath = '';
@@ -1553,7 +1582,11 @@ export const AudioManager = ({
       setIsRecording(false);
 
       await captureActivitySessionRef.current?.drain();
-      await eouSessionAtStop?.finish();
+      try {
+        await eouSessionAtStop?.finish();
+      } finally {
+        meetingContextIngestionAtStop?.close();
+      }
       frozenLiveTranscriptResponsivenessRef.current =
         liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
       eouGenerationRef.current += 1;
@@ -1909,6 +1942,7 @@ export const AudioManager = ({
         setIsRecording(false);
       }
     } finally {
+      meetingContextIngestionAtStop?.close();
       if (!captureOwnershipReleased) {
         stopInFlightRef.current = false;
         stopToValidatedLatencyRef.current =
@@ -1964,6 +1998,8 @@ export const AudioManager = ({
         currentMeetingIdRef.current = null;
         eouSessionRef.current?.cancel();
         eouSessionRef.current = null;
+        meetingContextIngestionRef.current?.close();
+        meetingContextIngestionRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         stopInFlightRef.current = false;
@@ -1992,6 +2028,8 @@ export const AudioManager = ({
     return () => {
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
+      meetingContextIngestionRef.current?.close();
+      meetingContextIngestionRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);

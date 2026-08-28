@@ -339,6 +339,7 @@ import {
   normalizeMeetingAskPlutoTurns,
 } from './intelligence/meetingAskPluto';
 import { routeMeetingAskPlutoAssistance } from './intelligence/meetingAskPlutoAssistance';
+import { createMeetingContextProducer } from './intelligence/meetingContextProducer';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
@@ -846,6 +847,14 @@ app.whenReady().then(async () => {
     }
   };
 
+  const meetingContextProducer = createMeetingContextProducer({
+    getEventByKey: db.getMeetingContextEventByKey,
+    appendEvent: db.appendMeetingContextEvent,
+    listEvents: db.listMeetingContextEvents,
+    getLatestSnapshot: db.getLatestMeetingContextSnapshot,
+    saveSnapshot: db.saveMeetingContextSnapshot,
+  });
+
   ipcMain.handle('PARAKEET_EOU_START', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     const generation = Number(request.generation);
@@ -894,6 +903,15 @@ app.whenReady().then(async () => {
     });
     return {};
   });
+
+  ipcMain.handle(
+    'MEETING_CONTEXT_INGEST_CONFIRMED',
+    async (event, request = {}) => {
+      const meetingId = String(request.meetingId || '');
+      captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      return await meetingContextProducer.ingest(request);
+    },
+  );
 
   ipcMain.handle('PARAKEET_EOU_FINISH', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');

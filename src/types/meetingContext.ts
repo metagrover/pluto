@@ -71,3 +71,25 @@ export interface MeetingContextSnapshot {
   generatedAt: string;
   createdAt: string;
 }
+
+export interface MeetingContextIngestionSegment {
+  id: string;
+  speaker: string;
+  text: string;
+  timestampMs: number;
+  confirmed: boolean;
+}
+
+export interface MeetingContextIngestionRequest {
+  meetingId: string;
+  segments: MeetingContextIngestionSegment[];
+}
+
+export interface MeetingContextIngestionResult {
+  acceptedSegmentCount: number;
+  extractedEventCount: number;
+  createdEventCount: number;
+  reusedEventCount: number;
+  snapshotRevision: number | null;
+  snapshotChanged: boolean;
+}
