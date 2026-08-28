@@ -117,4 +117,32 @@ describe('Zen Ask Pluto dock styles', () => {
       'box-shadow': 'none',
     });
   });
+
+  it('restores readable Markdown hierarchy only inside Pluto answers', () => {
+    const [unorderedRule] = rulesFor(
+      '.meeting-ask-pluto-dock__message--assistant ul',
+    );
+    const [orderedRule] = rulesFor(
+      '.meeting-ask-pluto-dock__message--assistant ol',
+    );
+    const [itemRule] = rulesFor(
+      '.meeting-ask-pluto-dock__message--assistant li',
+    );
+    const [paragraphRule] = rulesFor(
+      '.meeting-ask-pluto-dock__message--assistant p',
+    );
+
+    expect(declarationsFor(unorderedRule)).toMatchObject({
+      'list-style': 'disc',
+    });
+    expect(declarationsFor(orderedRule)).toMatchObject({
+      'list-style': 'decimal',
+    });
+    expect(applyTokensFor(unorderedRule)).toContain('pl-5');
+    expect(applyTokensFor(orderedRule)).toContain('pl-5');
+    expect(applyTokensFor(itemRule)).toContain('my-1');
+    expect(applyTokensFor(paragraphRule)).toEqual(
+      expect.arrayContaining(['my-2', 'first:mt-0', 'last:mb-0']),
+    );
+  });
 });

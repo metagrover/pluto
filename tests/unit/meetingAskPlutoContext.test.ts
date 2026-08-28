@@ -282,7 +282,7 @@ describe('meeting-scoped Ask Pluto context', () => {
     ],
     [
       'fact',
-      'Answer the requested fact first',
+      'shortest complete answer',
       'Do not present a paraphrase as an exact quote',
     ],
     [
@@ -326,6 +326,16 @@ describe('meeting-scoped Ask Pluto context', () => {
       expect(prompt).toContain(
         'Say when live evidence is incomplete, provisional, or too noisy',
       );
+      if (recallKind === 'fact') {
+        expect(prompt).toContain('shortest complete answer');
+        expect(prompt).toContain('normally one sentence');
+        expect(prompt).toContain(
+          'Do not begin with evidence-policy narration',
+        );
+        expect(prompt).toContain(
+          'Do not discuss unrelated missing information',
+        );
+      }
     },
   );
 

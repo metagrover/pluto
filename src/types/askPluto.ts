@@ -45,6 +45,11 @@ export interface MeetingAskPlutoRequest {
   turns?: MeetingAskPlutoTurn[];
 }
 
+export interface MeetingAskPlutoAnswerDelta {
+  requestId: string;
+  delta: string;
+}
+
 export interface MeetingAskPlutoClaim {
   text: string;
   trustStatus: TrustStatus;

@@ -562,7 +562,7 @@ export const buildMeetingAskPlutoPrompt = ({
       ? {
           catch_up:
             'Prioritize the latest relevant evidence. Summarize the current discussion in one to three points, ordered from most recent or important. Do not dump transcript lines.',
-          fact: 'Answer the requested fact first. Do not present a paraphrase as an exact quote; quote wording only when the evidence contains those words.',
+          fact: 'Give the shortest complete answer and lead with the requested value, normally one sentence. Do not begin with evidence-policy narration or repeat the question. Do not discuss unrelated missing information. Add one brief caveat only when ambiguity or provisional evidence materially changes confidence. Do not present a paraphrase as an exact quote; quote wording only when the evidence contains those words.',
           decision:
             'Report an explicit agreement as a decision. Label unresolved discussion or proposal accurately instead of promoting it to a decision.',
           action:

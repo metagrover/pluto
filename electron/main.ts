@@ -339,6 +339,7 @@ import {
   normalizeMeetingAskPlutoTurns,
 } from './intelligence/meetingAskPluto';
 import { routeMeetingAskPlutoAssistance } from './intelligence/meetingAskPlutoAssistance';
+import { createMeetingAskPlutoVisibleStream } from './intelligence/meetingAskPlutoStream';
 import { createMeetingContextProducer } from './intelligence/meetingContextProducer';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
@@ -3785,7 +3786,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'intelligence:meeting-chat',
-    async (_event, request: MeetingAskPlutoRequest) => {
+    async (event, request: MeetingAskPlutoRequest) => {
       const startTime = Date.now();
       const query = request?.query?.trim() || '';
       const requestId = request?.requestId || `ask-pluto-${randomUUID()}`;
@@ -3881,9 +3882,17 @@ app.whenReady().then(async () => {
           elapsedMs: Date.now() - startTime,
         });
         let answerRaw = '';
+        const visibleStream = createMeetingAskPlutoVisibleStream((delta) => {
+          if (event.sender.isDestroyed()) return;
+          event.sender.send('intelligence:meeting-chat:delta', {
+            requestId,
+            delta,
+          });
+        });
         try {
           answerRaw = await provider.answerAskPluto(prompt, {
             live: context.scope.type === 'live_meeting',
+            onToken: (delta) => visibleStream.push(delta),
           });
         } catch (providerError) {
           console.warn(
@@ -3904,6 +3913,8 @@ app.whenReady().then(async () => {
             query,
             error: providerError,
           });
+        } finally {
+          visibleStream.flush();
         }
 
         console.info('[Pluto][Ask Pluto][main] provider-response', {

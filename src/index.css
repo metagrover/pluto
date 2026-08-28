@@ -185,6 +185,50 @@
   .meeting-ask-pluto-dock__message--assistant {
     @apply min-w-0 max-w-none border-0 bg-transparent p-0 pt-0.5 text-pro-text-main;
   }
+  .meeting-ask-pluto-dock__message--assistant p {
+    @apply my-2 first:mt-0 last:mb-0;
+  }
+  .meeting-ask-pluto-dock__message--assistant ul {
+    @apply my-2 pl-5;
+    list-style: disc;
+  }
+  .meeting-ask-pluto-dock__message--assistant ol {
+    @apply my-2 pl-5;
+    list-style: decimal;
+  }
+  .meeting-ask-pluto-dock__message--assistant li {
+    @apply my-1 pl-0.5;
+  }
+  .meeting-ask-pluto-dock__message--assistant li > p {
+    @apply my-0;
+  }
+  .meeting-ask-pluto-dock__message--assistant h1,
+  .meeting-ask-pluto-dock__message--assistant h2,
+  .meeting-ask-pluto-dock__message--assistant h3 {
+    @apply mb-1 mt-4 font-semibold leading-tight text-pro-text-main first:mt-0;
+  }
+  .meeting-ask-pluto-dock__message--assistant h1 {
+    @apply text-base;
+  }
+  .meeting-ask-pluto-dock__message--assistant h2,
+  .meeting-ask-pluto-dock__message--assistant h3 {
+    @apply text-sm;
+  }
+  .meeting-ask-pluto-dock__message--assistant a {
+    @apply font-medium text-pro-accent underline decoration-pro-accent/35 underline-offset-2 hover:decoration-pro-accent;
+  }
+  .meeting-ask-pluto-dock__message--assistant blockquote {
+    @apply my-2 border-l-2 border-pro-border pl-3 text-pro-text-muted;
+  }
+  .meeting-ask-pluto-dock__message--assistant code {
+    @apply rounded bg-pro-hover px-1 py-0.5 font-mono text-[0.85em];
+  }
+  .meeting-ask-pluto-dock__message--assistant pre {
+    @apply my-2 overflow-x-auto rounded-md bg-pro-hover p-3;
+  }
+  .meeting-ask-pluto-dock__message--assistant pre code {
+    @apply bg-transparent p-0;
+  }
   .meeting-ask-pluto-dock__loading {
     @apply flex items-center gap-2 px-3 py-2 text-xs font-bold text-pro-text-muted;
   }

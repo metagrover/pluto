@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Meeting } from '../../types';
 import type {
+  MeetingAskPlutoAnswerDelta,
   MeetingAskPlutoConversationMessage,
   MeetingAskPlutoLiveContext,
   MeetingAskPlutoRequest,
@@ -102,6 +103,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const messages = conversation ?? localMessages;
   const setMessages = onConversationChange ?? setLocalMessages;
   const [isAsking, setIsAsking] = useState(false);
+  const [streamingAnswer, setStreamingAnswer] = useState('');
   const [localIsMinimized, setLocalIsMinimized] = useState(false);
   const isMinimized = controlledIsMinimized ?? localIsMinimized;
   const setIsMinimized = useCallback(
@@ -119,6 +121,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const threadContentRef = useRef<HTMLDivElement>(null);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const shouldFollowLatestRef = useRef(true);
+  const activeRequestIdRef = useRef<string | null>(null);
   const scopeTitle = meeting?.title || liveContext?.title || 'Meeting';
   const calculatedRows = Math.max(
     1,
@@ -179,7 +182,31 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   useEffect(() => {
     if (!showsConversation) return;
     scrollToLatest();
-  }, [error, isAsking, messages, scrollToLatest, showsConversation]);
+  }, [
+    error,
+    isAsking,
+    messages,
+    scrollToLatest,
+    showsConversation,
+    streamingAnswer,
+  ]);
+
+  useEffect(
+    () =>
+      window.ipcRenderer.on(
+        'intelligence:meeting-chat:delta',
+        (_event, packet: MeetingAskPlutoAnswerDelta) => {
+          if (
+            packet.requestId !== activeRequestIdRef.current ||
+            !packet.delta
+          ) {
+            return;
+          }
+          setStreamingAnswer((current) => `${current}${packet.delta}`);
+        },
+      ),
+    [],
+  );
 
   useEffect(() => {
     if (
@@ -198,9 +225,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     const trimmed = value.trim();
     if (!trimmed || isAsking) return;
 
+    const requestId = createMeetingAskPlutoRequestId();
     const priorTurns = toTurns(messages);
     setError(null);
     setQuery('');
+    setStreamingAnswer('');
     setIsAsking(true);
     setIsMinimized(false);
     shouldFollowLatestRef.current = true;
@@ -212,9 +241,9 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         content: trimmed,
       },
     ]);
+    activeRequestIdRef.current = requestId;
 
     try {
-      const requestId = createMeetingAskPlutoRequestId();
       const requestStartedAt = Date.now();
       const request: MeetingAskPlutoRequest = meeting
         ? {
@@ -265,6 +294,10 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       console.error('Meeting Ask Pluto error:', submitError);
       setError('Pluto could not answer this meeting right now.');
     } finally {
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = null;
+        setStreamingAnswer('');
+      }
       setIsAsking(false);
     }
   };
@@ -341,7 +374,19 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                 </div>
               ),
             )}
-            {isAsking ? (
+            {streamingAnswer ? (
+              <div className="meeting-ask-pluto-dock__assistant-turn">
+                <span className="meeting-ask-pluto-dock__pluto-mark">
+                  <Logo size={18} variant="default" />
+                </span>
+                <div className="meeting-ask-pluto-dock__message meeting-ask-pluto-dock__message--assistant">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {streamingAnswer}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ) : null}
+            {isAsking && !streamingAnswer ? (
               <div className="meeting-ask-pluto-dock__loading">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {liveContext

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MeetingAskPlutoDock } from '../../src/components/features/MeetingAskPlutoDock';
 import type { Meeting } from '../../src/types';
 import type {
+  MeetingAskPlutoAnswerDelta,
   MeetingAskPlutoConversationMessage,
   MeetingAskPlutoLiveContext,
   MeetingAskPlutoResponse,
@@ -94,12 +95,27 @@ const typeInto = async (input: HTMLTextAreaElement, value: string) => {
 describe('MeetingAskPlutoDock', () => {
   let container: HTMLDivElement;
   let invoke: ReturnType<typeof vi.fn>;
+  let ipcListeners: Map<
+    string,
+    (event: unknown, packet: MeetingAskPlutoAnswerDelta) => void
+  >;
+  let on: ReturnType<typeof vi.fn>;
   let scrollIntoView: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     invoke = vi.fn(async () => response);
+    ipcListeners = new Map();
+    on = vi.fn(
+      (
+        channel: string,
+        listener: (event: unknown, packet: MeetingAskPlutoAnswerDelta) => void,
+      ) => {
+        ipcListeners.set(channel, listener);
+        return () => ipcListeners.delete(channel);
+      },
+    );
     scrollIntoView = vi.fn();
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
@@ -109,6 +125,7 @@ describe('MeetingAskPlutoDock', () => {
       configurable: true,
       value: {
         invoke,
+        on,
       },
     });
   });
@@ -165,6 +182,119 @@ describe('MeetingAskPlutoDock', () => {
     expect(container.textContent).toContain('Architecture Review');
     expect(container.textContent).not.toContain('Grounded');
     expect(container.textContent).not.toContain('We decided to use GraphQL.');
+
+    await act(async () => root.unmount());
+  });
+
+  it('streams only the active answer before replacing it with the final packet', async () => {
+    const root = createRoot(container);
+    let resolveResponse: (packet: MeetingAskPlutoResponse) => void = () => {};
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise<MeetingAskPlutoResponse>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+      await flushPromises();
+    });
+
+    expect(on).toHaveBeenCalledWith(
+      'intelligence:meeting-chat:delta',
+      expect.any(Function),
+    );
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Ask about this meeting"]',
+    );
+    await typeInto(input!, 'What did we decide?');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    const requestId = invoke.mock.calls[0]?.[1]?.requestId as string;
+    const emitDelta = ipcListeners.get('intelligence:meeting-chat:delta');
+    expect(emitDelta).toBeDefined();
+    scrollIntoView.mockClear();
+
+    await act(async () => {
+      emitDelta?.(null, {
+        requestId: 'stale-request',
+        delta: 'This must stay hidden.',
+      });
+      emitDelta?.(null, { requestId, delta: '**GraphQL** was selected' });
+      await flushPromises();
+    });
+
+    expect(container.textContent).not.toContain('This must stay hidden.');
+    expect(container.querySelector('strong')?.textContent).toBe('GraphQL');
+    expect(container.textContent).toContain('GraphQL was selected');
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__stream-caret'),
+    ).toBeNull();
+    expect(container.textContent).not.toContain('Reading live transcript');
+
+    await act(async () => {
+      resolveResponse(response);
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain(response.answer);
+    expect(container.textContent).not.toContain('GraphQL was selected');
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__stream-caret'),
+    ).toBeNull();
+
+    await act(async () => root.unmount());
+    expect(ipcListeners.has('intelligence:meeting-chat:delta')).toBe(false);
+  });
+
+  it('preserves structured Markdown in Pluto answers', async () => {
+    const root = createRoot(container);
+    const markdownAnswer = [
+      'Here is the update:',
+      '',
+      '- **Isha** owns the review.',
+      '- The transcript is live.',
+      '',
+      '1. Confirm the score.',
+      '2. Share the result.',
+      '',
+      '[Open the meeting](https://example.com/meeting).',
+    ].join('\n');
+
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          liveContext={liveContext}
+          conversation={[
+            {
+              id: 'assistant-markdown',
+              role: 'assistant',
+              content: markdownAnswer,
+              packet: { ...response, answer: markdownAnswer },
+            },
+          ]}
+        />,
+      );
+      await flushPromises();
+    });
+
+    const answer = container.querySelector(
+      '.meeting-ask-pluto-dock__message--assistant',
+    );
+    expect(answer?.querySelectorAll('p')).toHaveLength(2);
+    expect(answer?.querySelectorAll('ul > li')).toHaveLength(2);
+    expect(answer?.querySelectorAll('ol > li')).toHaveLength(2);
+    expect(answer?.querySelector('strong')?.textContent).toBe('Isha');
+    expect(answer?.querySelector('a')?.getAttribute('href')).toBe(
+      'https://example.com/meeting',
+    );
 
     await act(async () => root.unmount());
   });
