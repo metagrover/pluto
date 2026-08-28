@@ -59,6 +59,23 @@ const validV3: AnalysisDocumentV3 = {
   },
 };
 
+it('round-trips bounded hierarchy measurements and rejects malformed counters', () => {
+  const hierarchy = { depth: 3, nodes: 15, max_depth: 8, max_nodes: 128 };
+  const doc = {
+    ...validV3,
+    generation_metadata: { ...validV3.generation_metadata, hierarchy },
+  };
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toEqual(hierarchy);
+  doc.generation_metadata.hierarchy.nodes = -1;
+  expect(
+    parseAnalysisDocumentV3(JSON.stringify(doc))?.generation_metadata
+      ?.hierarchy,
+  ).toBeUndefined();
+});
+
 describe('parseAnalysisDocumentV3', () => {
   it('preserves a structured recent win with verbatim evidence', () => {
     const result = parseAnalysisDocumentV3(
@@ -170,6 +187,43 @@ describe('parseAnalysisDocumentV3', () => {
       seed: 42,
     });
   });
+
+  it.each(['writer-audit-v1', 'writer-editor-v1'])(
+    'round-trips additive %s provenance metadata',
+    (pipelineVersion) => {
+      const source_provenance = {
+        schema_version: 1 as const,
+        source_revision: 'synthetic-revision',
+        blocks: {
+          overview: {
+            id: 'overview',
+            sources: [{ segment: 0, start: 0, end: 12 }],
+          },
+        },
+      };
+      const result = parseAnalysisDocumentV3(
+        JSON.stringify({
+          ...validV3,
+          generation_metadata: {
+            ...validV3.generation_metadata,
+            pipeline_version: pipelineVersion,
+            mode: 'direct',
+            audit_status: 'complete',
+            audit_change_count: 1,
+            source_provenance,
+          },
+        }),
+      );
+
+      expect(result?.generation_metadata).toMatchObject({
+        pipeline_version: pipelineVersion,
+        mode: 'direct',
+        audit_status: 'complete',
+        audit_change_count: 1,
+        source_provenance,
+      });
+    },
+  );
 
   it('round-trips a valid meeting-scoped terminology artifact', () => {
     const terminology = {

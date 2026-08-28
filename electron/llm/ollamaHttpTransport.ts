@@ -77,7 +77,12 @@ export const ollamaHttpStream = (
   init: RequestInit,
   onChunk: (chunk: string) => void,
   maxResponseBytes = OLLAMA_MAX_RESPONSE_BYTES,
-): Promise<{ ok: boolean; status: number; statusText: string }> =>
+): Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  errorBody?: string;
+}> =>
   new Promise((resolve, reject) => {
     const url = new URL(input);
     const headers = Object.fromEntries(new Headers(init.headers).entries());
@@ -91,12 +96,18 @@ export const ollamaHttpStream = (
       (response) => {
         let receivedBytes = 0;
         const decoder = new StringDecoder('utf8');
+        let errorBody = '';
         const ok =
           response.statusCode !== undefined &&
           response.statusCode >= 200 &&
           response.statusCode < 300;
         const deliver = (chunk: string) => {
-          if (!ok || !chunk) return true;
+          if (!chunk) return true;
+          if (!ok) {
+            // Still subject to maxResponseBytes; never emit errors as tokens.
+            errorBody += chunk;
+            return true;
+          }
           try {
             onChunk(chunk);
             return true;
@@ -135,6 +146,7 @@ export const ollamaHttpStream = (
             ok,
             status: response.statusCode ?? 500,
             statusText: response.statusMessage || 'Unknown response',
+            ...(!ok ? { errorBody } : {}),
           });
         });
       },

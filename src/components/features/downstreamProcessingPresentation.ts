@@ -7,11 +7,21 @@ export type DownstreamProcessingPresentation =
       title: string;
       detail: string;
     }
-  | { state: 'ready' };
+  | {
+      state: 'ready';
+      secondaryStatus?: 'running' | 'failed';
+      notesUpdateFailed?: true;
+    };
 
 export const getDownstreamProcessingPresentation = (
   meeting: Partial<Meeting>,
 ): DownstreamProcessingPresentation => {
+  let run: { notes_status?: string; secondary_status?: string } = {};
+  try {
+    run = JSON.parse(meeting.analysis_run_json || '{}') || {};
+  } catch {
+    /* Legacy meetings have no run status. */
+  }
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: {
@@ -69,8 +79,24 @@ export const getDownstreamProcessingPresentation = (
     } catch {
       // ignore
     }
-    return { state: 'ready' };
+    return {
+      state: 'ready',
+      ...(run.notes_status === 'failed'
+        ? { notesUpdateFailed: true as const }
+        : {}),
+      ...(run.notes_status === 'published' &&
+      (run.secondary_status === 'failed' || run.secondary_status === 'running')
+        ? { secondaryStatus: run.secondary_status }
+        : {}),
+    };
   }
+
+  if (run.notes_status === 'failed' || run.notes_status === 'cancelled')
+    return {
+      state: 'failed',
+      title: 'Notes need another pass',
+      detail: 'Your transcript is ready. Try again to continue.',
+    };
 
   if (state === 'processing') {
     if (stage === 'analysis') {

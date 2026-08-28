@@ -52,6 +52,7 @@ export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
 export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
 
 export type AnalysisErrorCategory =
+  | 'notes_quality_warning'
   | 'invalid_json'
   | 'repair_succeeded'
   | 'repair_failed'
@@ -142,6 +143,21 @@ export interface AnalysisGenerationMetadata {
       status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
     }>;
   };
+  pipeline_version?: 'writer-audit-v1' | 'writer-editor-v1';
+  mode?: 'direct' | 'hierarchical';
+  audit_status?: 'complete' | 'complete_with_warnings';
+  audit_change_count?: number;
+  source_provenance?: {
+    schema_version: 1;
+    source_revision: string;
+    blocks: Record<
+      string,
+      {
+        id: string;
+        sources: Array<{ segment: number; start: number; end: number }>;
+      }
+    >;
+  };
 }
 
 export interface AnalysisDocumentV3 {
@@ -193,6 +209,8 @@ export interface Meeting {
   analysis_generated_at?: string;
   analysis_error_categories_json?: string;
   user_edits_json?: string;
+  analysis_edit_conflicts_json?: string;
+  analysis_run_json?: string | null;
   transcript_status?: TranscriptLifecycleStatus;
   transcript_integrity_json?: string;
   system_audio_path?: string;

@@ -1,0 +1,123 @@
+{
+  "date": "2026-08-27",
+  "scope": "Broader prompt-only source reconciliation; synthetic, seed41, no repairs, not final composition acceptance",
+  "commit": "f617358ab",
+  "harness": "tests/manual/meetingNotesReconciliationAcceptance.test.ts",
+  "policy": "Historical assertions unchanged; explicit negative choices allowed prospectively, absence alone not a choice.",
+  "timingCaveat": "Non-isolated local latency, not a performance benchmark.",
+  "run": {
+    "model": "gemma4:12b",
+    "digest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+    "runtime": "0.32.15",
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "gemma4",
+      "families": ["gemma4"],
+      "parameter_size": "11.9B",
+      "quantization_level": "Q4_K_M"
+    },
+    "inheritedParameters": "temperature                    1\ntop_k                          64\ntop_p                          0.95",
+    "request": {
+      "endpoint": "/api/chat",
+      "format": "json",
+      "contextTokens": 16384,
+      "outputTokens": 2048,
+      "temperature": 0.1,
+      "thinking": false,
+      "timeoutMs": 180000,
+      "threads": 8,
+      "seeds": [41]
+    },
+    "results": [
+      {
+        "case": "personal-no-tasks",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 28101,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Mira spent Saturday walking along the coast and enjoyed the quiet.\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"Leo went to the museum on Sunday and felt tired due to the crowds.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"Mira noted that being away from crowds was preferable.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"text\": \"Leo noted it was nice to compare weekends without anything to organize.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": []\n}",
+        "sha256": "f83c8f07626429b28d0fbe0b1c18baaa03ad811cef13d92dd93e4410c3d41a86",
+        "gatePass": true,
+        "stage": "pass",
+        "review": "Correct experiences and emotions; no invented commitments."
+      },
+      {
+        "case": "interview-no-assignments",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 17991,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Inez paired each new hire with a mentor at her former company, reducing onboarding time from ten days to four days.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"The mention of the mentoring program was an example of past work, not a proposal or assignment for the current team.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [\n    {\n      \"text\": \"The mentoring program is not being proposed for the current team.\",\n      \"owner\": null\n    }\n  ],\n  \"questions\": []\n}",
+        "sha256": "aa291abd57709f90d49315cef54afedc4fada4b5225aa6edaa16c2a67a63c4f7",
+        "gatePass": false,
+        "stage": "schema",
+        "error": "notes_reconciliation_invalid",
+        "review": "Decision lacks sources and misclassifies absence of proposal as a decision. Past result retained; unsupported her pronoun."
+      },
+      {
+        "case": "brainstorm-not-commitments",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 21462,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Tessa suggested a short tutorial video to make onboarding easier.\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"Raj suggested a guided tour inside the product as another possibility.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"The team discussed the tutorial video and guided tour as two ideas to explore rather than a decision on which to build.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"text\": \"The team agreed they are in a brainstorming phase and no assignments are being taken today.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": []\n}",
+        "sha256": "c38b63a0507d458cd3f63236740177d4c3bf7b724a935f7d81e1f32978797b8b",
+        "gatePass": false,
+        "stage": "independent_scorer",
+        "error": "non-selection regex misses rather than a decision",
+        "review": "Both possibilities and lack of assignments preserved, no invented actions or decisions; demonstrated scorer vocabulary false negative."
+      },
+      {
+        "case": "accepted-request-owner",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 17916,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Jules is the recipient of the accessibility report.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"The accessibility report is the only follow-up from this discussion.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Mateo sends the accessibility report to Jules by Tuesday.\",\n      \"sources\": [\n        \"R0\",\n        \"R2\"\n      ],\n      \"owner\": \"Mateo\",\n      \"due\": \"Tuesday\"\n    }\n  ],\n  \"decisions\": [],\n  \"questions\": []\n}",
+        "sha256": "2414dd64d891bd80fd840cc875c8212bd0fd725111b6afc60fcfcd9d1425f84a",
+        "gatePass": true,
+        "stage": "pass",
+        "review": "Single Mateo action; Jules recipient; Tuesday retained; cites request and acceptance."
+      },
+      {
+        "case": "withdrawal-replacement-deadline",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 27659,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"Owen initially planned to send a draft forecast on Friday, but Lila noted the inputs were incorrect and instructed him not to circulate it.\",\n      \"sources\": [\n        \"R0\",\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"Owen withdrew the Friday commitment and committed to sending a corrected forecast on Monday.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"text\": \"Lila confirmed the corrected Monday version replaces the old draft rather than being an additional delivery.\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"actions\": [\n    {\n      \"text\": \"Owen sends a corrected forecast on Monday.\",\n      \"sources\": [\n        \"R2\"\n      ],\n      \"owner\": \"Owen\",\n      \"due\": \"Monday\"\n    }\n  ],\n  \"decisions\": [\n    {\n      \"text\": \"The corrected Monday version replaces the old draft, not an additional delivery.\",\n      \"sources\": [\n        \"R3\"\n      ],\n      \"owner\": null\n    }\n  ],\n  \"questions\": []\n}",
+        "sha256": "5554cfbbf15d067eb4169481e8ab9686a11519db0575b2f54dd60da486526adb",
+        "gatePass": false,
+        "stage": "independent_scorer",
+        "error": "expected zero decisions, received one",
+        "review": "Correct replacement Monday action, owner, withdrawal reason; no stale Friday work. Additional decision repeats replacement clarification; not a distinct new decision."
+      },
+      {
+        "case": "decision-rejected-alternative",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 21177,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"The team discussed whether to release everything at once or in stages.\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"The team discussed the possibility of a staged rollout to limit the impact of failures.\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"text\": \"The team discussed that rollout work is not being assigned in this conversation.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [\n    {\n      \"text\": \"The release strategy is a staged rollout.\",\n      \"owner\": null\n    },\n    {\n      \"text\": \"The big-bang launch is rejected.\",\n      \"owner\": null\n    }\n  ],\n  \"questions\": []\n}",
+        "sha256": "091138910f724c963c3bde7c1a54804ac01299525fd799017dfa1d8bf5083127",
+        "gatePass": false,
+        "stage": "schema",
+        "error": "notes_reconciliation_invalid",
+        "review": "Both decisions lack sources; Nadia owner null; single choice split into two decisions. Rationale survives but narrative downgrades settled rollout to possibility."
+      },
+      {
+        "case": "source-defined-acronym",
+        "model": "gemma4:12b",
+        "thinking": false,
+        "seed": 41,
+        "latencyMs": 16556,
+        "raw": "{\n  \"facts\": [\n    {\n      \"text\": \"In this project RAG stands for Release Approval Gate.\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"text\": \"RAG is not retrieval-augmented generation.\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"text\": \"The Release Approval Gate requires two reviewers before a release can proceed.\",\n      \"sources\": [\n        \"R2\"\n      ]\n    }\n  ],\n  \"actions\": [],\n  \"decisions\": [],\n  \"questions\": []\n}",
+        "sha256": "09f1dabb761d1fca7dd0f0eca8bd214f0b7f007a02e3ae84647b3c1d609816ac",
+        "gatePass": true,
+        "stage": "pass",
+        "review": "Project-specific acronym expansion, excluded external meaning, and two-reviewer requirement preserved."
+      }
+    ]
+  }
+}

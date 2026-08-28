@@ -1,12 +1,10 @@
 import type { Meeting } from '../types.ts';
 import { parseLiveTranscriptResponsivenessSummary } from '../utils/liveTranscriptResponsiveness.ts';
-import { formatReadableTranscriptForAnalysis } from '../utils/readableTranscript.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
 import { parseStopToValidatedLatencySummary } from '../utils/stopToValidatedLatency.ts';
-import { buildAnalysisTranscriptFromJson } from '../utils/transcript.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
@@ -19,17 +17,9 @@ import {
   withTranscriptLifecycleStatus,
 } from '../utils/transcriptSchema.ts';
 import {
-  advanceDownstreamProcessingLease,
-  buildDownstreamProcessingLease,
   buildPartialCaptureGapProcessingLease,
-  completeDownstreamProcessing,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
-import {
-  DownstreamStageTimeoutError,
-  runDownstreamStageBeforeDeadline,
-  throwIfDownstreamStageAborted,
-} from './downstreamStageDeadline.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 import {
@@ -42,11 +32,17 @@ import {
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
-const DEFAULT_DOWNSTREAM_STAGE_TIMEOUT_MS = {
-  analysis: 15 * 60_000,
-  knowledge_extraction: 5 * 60_000,
-  knowledge_synthesis: 15 * 60_000,
-} as const;
+const requestMeetingNotesPublication = async (
+  meetingId: string | number,
+  invoke: Invoke,
+): Promise<void> => {
+  await invoke('GENERATE_MEETING_NOTES', {
+    meetingId,
+    requestId: crypto.randomUUID(),
+    template: 'auto',
+    reason: 'automatic',
+  });
+};
 
 const MAX_AUTOMATIC_ANALYSIS_ATTEMPTS = 2;
 
@@ -59,17 +55,6 @@ const readDownstreamAttempt = (value: string | null | undefined): number => {
       : 0;
   } catch {
     return 0;
-  }
-};
-
-const throwIfAnalysisFallback = (analysis: unknown): void => {
-  if (
-    analysis &&
-    typeof analysis === 'object' &&
-    (analysis as { quality?: { fallback_used?: unknown } }).quality
-      ?.fallback_used === true
-  ) {
-    throw new Error('analysis_generation_failed');
   }
 };
 
@@ -417,22 +402,9 @@ export const retryMeetingTranscriptValidation = async (
   options: {
     now?: () => number;
     validationTimeoutMs?: number;
-    downstreamStageTimeoutMs?: Partial<
-      Record<keyof typeof DEFAULT_DOWNSTREAM_STAGE_TIMEOUT_MS, number>
-    >;
   } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
-  const runDownstreamStage = <T>(
-    stage: keyof typeof DEFAULT_DOWNSTREAM_STAGE_TIMEOUT_MS,
-    operation: (signal: AbortSignal) => Promise<T>,
-  ) =>
-    runDownstreamStageBeforeDeadline(
-      stage,
-      operation,
-      options.downstreamStageTimeoutMs?.[stage] ??
-        DEFAULT_DOWNSTREAM_STAGE_TIMEOUT_MS[stage],
-    );
-  let meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
+  const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
   let hasCaptureGap = false;
   try {
@@ -444,27 +416,6 @@ export const retryMeetingTranscriptValidation = async (
     );
   } catch {
     hasCaptureGap = false;
-  }
-  if (
-    hasCaptureGap &&
-    meetingTitleNeedsGeneration(meeting.title) &&
-    hasTranscriptText(meeting.transcript_json)
-  ) {
-    const transcript = buildAnalysisTranscriptFromJson(meeting.transcript_json);
-    const generatedTitle = (await invoke('GENERATE_TITLE', {
-      transcript,
-    })) as string;
-    if (!meetingTitleNeedsGeneration(generatedTitle)) {
-      const titleOutcome = await invoke('UPDATE_MEETING_TITLE_IF_CURRENT', {
-        meetingId: String(meeting.id),
-        expectedTitle: meeting.title,
-        title: generatedTitle,
-      });
-      if (titleOutcome === 'conflict' || titleOutcome === 'missing') {
-        return { status: 'superseded' };
-      }
-      meeting = { ...meeting, title: generatedTitle };
-    }
   }
   const canProcessPartialCaptureGap =
     meeting.transcript_status === 'needs_attention' &&
@@ -494,201 +445,28 @@ export const retryMeetingTranscriptValidation = async (
       };
     }
 
-    let resumeStage = selectDownstreamResumeStage(meeting);
-    const downstreamLease = canProcessPartialCaptureGap
-      ? await buildPartialCaptureGapProcessingLease({
-          runId: crypto.randomUUID(),
-          transcriptJson: meeting.transcript_json || '',
-          transcriptIntegrityJson: meeting.transcript_integrity_json || '',
-          captureJournalGeneration: meeting.capture_journal_generation || '',
-          now: options.now?.(),
-          stage: resumeStage,
-          attempt:
-            readDownstreamAttempt(meeting.downstream_processing_json) + 1,
-        })
-      : buildDownstreamProcessingLease({
-          runId: crypto.randomUUID(),
-          transcriptValidatedAt: meeting.transcript_validated_at || '',
-          now: options.now?.(),
-          stage: resumeStage,
-          attempt:
-            readDownstreamAttempt(meeting.downstream_processing_json) + 1,
-        });
-    const claimed = await invoke(
-      'CLAIM_DOWNSTREAM_PROCESSING',
-      meetingId,
-      downstreamLease,
-    );
-    if (claimed !== true) return { status: 'superseded' };
+    if (canProcessPartialCaptureGap) {
+      const lease = await buildPartialCaptureGapProcessingLease({
+        runId: crypto.randomUUID(),
+        transcriptJson: meeting.transcript_json || '',
+        transcriptIntegrityJson: meeting.transcript_integrity_json || '',
+        captureJournalGeneration: meeting.capture_journal_generation || '',
+        now: options.now?.(),
+        stage: selectDownstreamResumeStage(meeting),
+        attempt: readDownstreamAttempt(meeting.downstream_processing_json) + 1,
+      });
+      const claimed = await invoke(
+        'CLAIM_DOWNSTREAM_PROCESSING',
+        meeting.id,
+        lease,
+      );
+      if (claimed !== true) return { status: 'superseded' };
+    }
 
-    const transcript = buildAnalysisTranscriptFromJson(meeting.transcript_json);
-    let downstreamStage = resumeStage;
-    const analysisRequestId = `${downstreamLease.runId}:analysis`;
     try {
-      let current = meeting;
-      if (resumeStage === 'analysis') {
-        current = await runDownstreamStage('analysis', async (signal) => {
-          const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
-            transcript,
-            userNotes: current.user_notes || '',
-            requestId: analysisRequestId,
-          })) as { markdown?: string; analysis?: unknown; signals?: unknown };
-          throwIfDownstreamStageAborted(signal);
-          throwIfAnalysisFallback(artifacts.analysis);
-          let analysisMeeting = current;
-          if (meetingTitleNeedsGeneration(analysisMeeting.title)) {
-            const analysisTitle = meetingTitleFromAnalysis(artifacts.analysis);
-            const generatedTitle =
-              analysisTitle ??
-              ((await invoke('GENERATE_TITLE', { transcript })) as string);
-            throwIfDownstreamStageAborted(signal);
-            analysisMeeting = { ...analysisMeeting, title: generatedTitle };
-          }
-          return {
-            ...analysisMeeting,
-            enhanced_notes: artifacts.markdown || '',
-            analysis_json: JSON.stringify(artifacts.analysis ?? null),
-            value_signals_json: JSON.stringify(artifacts.signals ?? null),
-          };
-        });
-        resumeStage = 'knowledge_extraction';
-        downstreamStage = resumeStage;
-      } else if (meetingTitleNeedsGeneration(current.title)) {
-        current = await runDownstreamStage('analysis', async (signal) => {
-          let analysisTitle: string | null = null;
-          try {
-            analysisTitle = meetingTitleFromAnalysis(
-              JSON.parse(current.analysis_json || 'null'),
-            );
-          } catch {
-            analysisTitle = null;
-          }
-          const generatedTitle =
-            analysisTitle ??
-            ((await invoke('GENERATE_TITLE', { transcript })) as string);
-          throwIfDownstreamStageAborted(signal);
-          return { ...current, title: generatedTitle };
-        });
-      }
-      const analysisSaved = await invoke(
-        'SAVE_MEETING',
-        {
-          ...current,
-          downstream_processing_json: JSON.stringify(
-            advanceDownstreamProcessingLease(downstreamLease, resumeStage),
-          ),
-        },
-        {
-          expectedDownstreamRunId: downstreamLease.runId,
-          expectedTitle: meeting.title,
-        },
-      );
-      if (analysisSaved === false) return { status: 'superseded' };
-      if (resumeStage === 'knowledge_extraction') {
-        await runDownstreamStage('knowledge_extraction', async (signal) => {
-          const result = await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
-            transcript,
-            meetingId: String(meeting.id),
-            summary: current.enhanced_notes || '',
-            valueSignals: current.value_signals_json
-              ? JSON.parse(current.value_signals_json)
-              : null,
-            awaitKnowledgeSynthesis: true,
-            expectedDownstreamRunId: downstreamLease.runId,
-          });
-          throwIfDownstreamStageAborted(signal);
-          return result;
-        });
-      }
-      downstreamStage = 'knowledge_synthesis';
-      const extractionComplete = (await invoke(
-        'GET_MEETING',
-        meetingId,
-      )) as Meeting;
-      const synthesisClaimed = await invoke(
-        'SAVE_MEETING',
-        {
-          ...extractionComplete,
-          downstream_processing_json: JSON.stringify(
-            advanceDownstreamProcessingLease(
-              downstreamLease,
-              'knowledge_synthesis',
-            ),
-          ),
-        },
-        { expectedDownstreamRunId: downstreamLease.runId },
-      );
-      if (synthesisClaimed === false) return { status: 'superseded' };
-      const knowledgeResult = await runDownstreamStage(
-        'knowledge_synthesis',
-        async (signal) => {
-          const result = (await invoke(
-            'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
-            String(meeting.id),
-            { expectedDownstreamRunId: downstreamLease.runId },
-          )) as { requested?: number; completed?: number };
-          throwIfDownstreamStageAborted(signal);
-          return result;
-        },
-      );
-      if (
-        !Number.isFinite(knowledgeResult?.requested) ||
-        knowledgeResult.completed !== knowledgeResult.requested
-      ) {
-        throw new Error('knowledge_synthesis_incomplete');
-      }
-      const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-      await invoke(
-        'SAVE_MEETING',
-        {
-          ...latest,
-          downstream_processing_json: JSON.stringify(
-            completeDownstreamProcessing(downstreamLease),
-          ),
-        },
-        { expectedDownstreamRunId: downstreamLease.runId },
-      );
+      await requestMeetingNotesPublication(meeting.id, invoke);
     } catch (error) {
-      console.error('[Pluto] Downstream intelligence resume failed', error);
-      if (
-        downstreamStage === 'analysis' &&
-        error instanceof DownstreamStageTimeoutError
-      ) {
-        await invoke('CANCEL_ANALYSIS_GENERATION', analysisRequestId).catch(
-          () => null,
-        );
-      }
-      const failure =
-        error instanceof DownstreamStageTimeoutError
-          ? 'stage_timeout'
-          : 'generation_failed';
-      const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-      await invoke(
-        'SAVE_MEETING',
-        {
-          ...latest,
-          downstream_processing_json: JSON.stringify(
-            downstreamLease.schemaVersion === 2
-              ? {
-                  schemaVersion: 2,
-                  state: 'failed',
-                  source: downstreamLease.source,
-                  stage: downstreamStage,
-                  failure,
-                  attempt: downstreamLease.attempt,
-                }
-              : {
-                  schemaVersion: 1,
-                  state: 'failed',
-                  transcriptValidatedAt: downstreamLease.transcriptValidatedAt,
-                  stage: downstreamStage,
-                  failure,
-                  attempt: downstreamLease.attempt,
-                },
-          ),
-        },
-        { expectedDownstreamRunId: downstreamLease.runId },
-      );
+      console.error('[Pluto] Retry notes publication request failed', error);
     }
     return {
       status: canProcessPartialCaptureGap ? 'needs_attention' : 'validated',
@@ -1015,15 +793,7 @@ export const retryMeetingTranscriptValidation = async (
   const current = (await invoke('GET_MEETING', meetingId)) as Meeting;
   if (readRunId(current) !== runId) return { status: 'superseded' };
 
-  const transcript = formatReadableTranscriptForAnalysis(validation.segments);
   const validatedAt = new Date().toISOString();
-  const downstreamRunId = crypto.randomUUID();
-  const downstreamLease = buildDownstreamProcessingLease({
-    runId: downstreamRunId,
-    transcriptValidatedAt: validatedAt,
-    stage: 'analysis',
-    attempt: 1,
-  });
   const validatedIntegrity = usesV2Trust
     ? {
         ...finishRetryLease(integrity),
@@ -1061,10 +831,6 @@ export const retryMeetingTranscriptValidation = async (
         integrity: { ...validation.evidence, reasons: validation.reasons },
       }),
     ),
-    enhanced_notes: null,
-    analysis_json: null,
-    value_signals_json: null,
-    downstream_processing_json: JSON.stringify(downstreamLease),
   };
   await invoke(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
@@ -1103,176 +869,13 @@ export const retryMeetingTranscriptValidation = async (
     return await failCurrentRetry('retry_failed');
   }
 
-  let downstreamStage:
-    | 'analysis'
-    | 'knowledge_extraction'
-    | 'knowledge_synthesis' = 'analysis';
-  const analysisRequestId = `${downstreamRunId}:analysis`;
   try {
-    const { generatedTitle, artifacts } = await runDownstreamStage(
-      'analysis',
-      async (signal) => {
-        const generatedArtifacts = (await invoke('GENERATE_ANALYSIS_V2', {
-          transcript,
-          userNotes: current.user_notes || '',
-          requestId: analysisRequestId,
-        })) as { markdown?: string; analysis?: unknown; signals?: unknown };
-        throwIfDownstreamStageAborted(signal);
-        throwIfAnalysisFallback(generatedArtifacts.analysis);
-        const analysisTitle = meetingTitleFromAnalysis(
-          generatedArtifacts.analysis,
-        );
-        const title = meetingTitleNeedsGeneration(current.title)
-          ? (analysisTitle ??
-            ((await invoke('GENERATE_TITLE', { transcript })) as string))
-          : current.title;
-        throwIfDownstreamStageAborted(signal);
-        return { generatedTitle: title, artifacts: generatedArtifacts };
-      },
-    );
-    const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-    if (
-      usesV2Trust
-        ? latest.transcript_validated_at !== validatedAt
-        : readRunId(latest) !== runId
-    ) {
-      return { status: 'superseded' };
-    }
-    const saved = await invoke(
-      'SAVE_MEETING',
-      {
-        ...latest,
-        title: latest.title === current.title ? generatedTitle : latest.title,
-        transcript_integrity_json: usesV2Trust
-          ? latest.transcript_integrity_json
-          : JSON.stringify(finishRetryLease(integrity)),
-        enhanced_notes: artifacts.markdown || '',
-        analysis_json: JSON.stringify(artifacts.analysis ?? null),
-        value_signals_json: JSON.stringify(artifacts.signals ?? null),
-        downstream_processing_json: JSON.stringify(
-          advanceDownstreamProcessingLease(
-            downstreamLease,
-            'knowledge_extraction',
-          ),
-        ),
-      },
-      {
-        expectedDownstreamRunId: downstreamRunId,
-        expectedTitle: current.title,
-      },
-    );
-    if (saved === false) return { status: 'superseded' };
-    downstreamStage = 'knowledge_extraction';
-    await runDownstreamStage('knowledge_extraction', async (signal) => {
-      const result = await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
-        transcript,
-        meetingId: String(meeting.id),
-        summary: artifacts.markdown || '',
-        valueSignals: artifacts.signals ?? null,
-        awaitKnowledgeSynthesis: true,
-        expectedDownstreamRunId: downstreamRunId,
-      });
-      throwIfDownstreamStageAborted(signal);
-      return result;
-    });
-    downstreamStage = 'knowledge_synthesis';
-    const extractionComplete = (await invoke(
-      'GET_MEETING',
-      meetingId,
-    )) as Meeting;
-    const synthesisClaimed = await invoke(
-      'SAVE_MEETING',
-      {
-        ...extractionComplete,
-        downstream_processing_json: JSON.stringify(
-          advanceDownstreamProcessingLease(
-            downstreamLease,
-            'knowledge_synthesis',
-          ),
-        ),
-      },
-      { expectedDownstreamRunId: downstreamRunId },
-    );
-    if (synthesisClaimed === false) return { status: 'superseded' };
-    const knowledgeResult = await runDownstreamStage(
-      'knowledge_synthesis',
-      async (signal) => {
-        const result = (await invoke(
-          'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
-          String(meeting.id),
-          { expectedDownstreamRunId: downstreamRunId },
-        )) as { requested?: number; completed?: number };
-        throwIfDownstreamStageAborted(signal);
-        return result;
-      },
-    );
-    if (
-      !Number.isFinite(knowledgeResult?.requested) ||
-      knowledgeResult.completed !== knowledgeResult.requested
-    ) {
-      throw new Error('knowledge_synthesis_incomplete');
-    }
-    const completed = (await invoke('GET_MEETING', meetingId)) as Meeting;
-    if (completed.transcript_validated_at !== validatedAt) {
-      return { status: 'superseded' };
-    }
-    await invoke(
-      'SAVE_MEETING',
-      {
-        ...completed,
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'complete',
-          transcriptValidatedAt: validatedAt,
-        }),
-      },
-      { expectedDownstreamRunId: downstreamRunId },
-    );
+    await requestMeetingNotesPublication(meetingId, invoke);
   } catch (error) {
-    console.error('[Pluto] Post-validation intelligence failed', error);
-    if (
-      downstreamStage === 'analysis' &&
-      error instanceof DownstreamStageTimeoutError
-    ) {
-      await invoke('CANCEL_ANALYSIS_GENERATION', analysisRequestId).catch(
-        () => null,
-      );
-    }
-    const failure =
-      error instanceof DownstreamStageTimeoutError
-        ? 'stage_timeout'
-        : 'generation_failed';
-    const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-    if (
-      usesV2Trust
-        ? latest.transcript_validated_at === validatedAt
-        : readRunId(latest) === runId
-    ) {
-      await invoke(
-        'SAVE_MEETING',
-        {
-          ...latest,
-          transcript_integrity_json: usesV2Trust
-            ? latest.transcript_integrity_json
-            : JSON.stringify(
-                finishRetryLease(
-                  parseIntegrityRecord(latest.transcript_integrity_json),
-                ),
-              ),
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'failed',
-            transcriptValidatedAt: validatedAt,
-            stage: downstreamStage,
-            failure,
-            attempt: downstreamLease.attempt,
-          }),
-        },
-        {
-          expectedDownstreamRunId: downstreamRunId,
-        },
-      );
-    }
+    console.error(
+      '[Pluto] Post-validation notes publication request failed',
+      error,
+    );
   }
   return { status: 'validated' };
 };

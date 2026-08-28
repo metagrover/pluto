@@ -343,7 +343,7 @@ const settledFieldSupportedByTurn = (
     if (normalizedSpeaker === normalizedValue) {
       return kind === 'action'
         ? /\b(?:i can|i will|i'll|i own|i'll own|will do)\b/i.test(content)
-        : /\b(?:i decided|i approved|i selected|we decided|we approved|we selected|we will|will use|proceed)\b/i.test(
+        : /\b(?:i decided|i approved|i selected|we decided|we approved|we selected|we will|will use|proceed|the decision is)\b/i.test(
             content,
           );
     }
@@ -630,7 +630,7 @@ const pushCategory = (
 const POSITIVE_OUTCOME_SIGNAL =
   /\b(?:prais(?:e|ed|ing)|recogniz(?:e|ed|ing)|kudos|compliment(?:ed|s)?|great job|excellent work|impressed|delivered|shipped|launched|released|completed|finished|went live|hit (?:the )?(?:target|milestone|goal)|exceeded (?:the )?(?:target|goal)|resolved (?:the )?blocker|revenue|bookings?)\b|\b(?:closed|won|signed)\b.{0,60}\b(?:deal|account|contract|renewal|sale|customer)\b/i;
 
-const groundRecentWin = (
+export const groundRecentWin = (
   recentWin: RecentWinV3 | undefined,
   transcript: string,
   options: AnalysisGroundingOptions,
@@ -659,6 +659,334 @@ const groundRecentWin = (
     return undefined;
   }
   return { ...recentWin, evidence: resolved.evidence };
+};
+
+/** Field/polarity checks for a claim already reviewed against exact canonical
+ * spans. Deliberately no lexical-overlap threshold: paraphrases are audited.
+ * Never select this path from persisted metadata or a model confidence flag. */
+export const isUnacceptedConditionalWillingness = (evidence: string): boolean =>
+  /\bif\b/i.test(evidence) &&
+  /\bi can\b/i.test(evidence) &&
+  !/\b(?:agreed|yes|will|commit)\b/i.test(evidence);
+
+const negativeDecisionDisposition = (text: string) =>
+  /\bno\b.*\bneed(?:ed)?\b|\bnot\s+needed\b/i.test(text)
+    ? 'not_needed'
+    : /\bunassigned\b/i.test(text)
+      ? 'unassigned'
+      : undefined;
+const DECISION_DISPOSITION_FRAMING = new Set(
+  'a an the that this is are be needed need no not'.split(' '),
+);
+const DECISION_PREREQUISITE =
+  /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
+
+/** A narrow decision-only escape from whole-turn question/offer checks. The
+ * explicit disposition must support this target, not just a neighboring topic.
+ * Original evidence and citations remain untouched outside this local check. */
+const explicitDispositionClause = (
+  claim: string,
+  resolved: ResolvedTranscriptEvidence,
+): { evidence: string; speaker?: string } | undefined => {
+  if (!/\b(?:need|needed|assigned|unassigned)\b/i.test(claim)) return undefined;
+  const contentTokens = (text: string) =>
+    normalizeTranscriptEvidence(
+      negativeDecisionDisposition(text) === 'unassigned' ||
+        (/\bassigned\b/i.test(text) && !negativeDecisionDisposition(text))
+        ? text
+            .replace(/\b(?:is|are)\s+to\s+(?:remain|be left)\b/gi, '')
+            .replace(
+              /\b(?:let us|let['’]s|leave|left|remains|remain|assigned|unassigned)\b/gi,
+              '',
+            )
+        : // Only the leading disposition uses for/to as framing. A later
+          // "to us" or "for us" is recipient/scope and must stay in the claim.
+          text.replace(/^\s*no need\s+(?:for|to)\s+/i, ''),
+    )
+      .split(' ')
+      .filter((token) => !DECISION_DISPOSITION_FRAMING.has(token));
+  const prerequisite = (text: string) => {
+    const index = text.search(DECISION_PREREQUISITE);
+    return index < 0 ? '' : normalizeTranscriptEvidence(text.slice(index));
+  };
+  const withoutPrerequisite = (text: string) => {
+    const index = text.search(DECISION_PREREQUISITE);
+    return index < 0 ? text : text.slice(0, index);
+  };
+  const target = contentTokens(withoutPrerequisite(claim));
+  if (!target.length) return undefined;
+  for (const line of resolved.sourceLines) {
+    for (const part of transcriptLineContent(line).match(/[^.?!;]+[.?!;]?/g) ??
+      []) {
+      const clause = part.trim();
+      if (
+        (!/^(?:no need\b|(?:thanks(?:,?\s+[^,]+)?,?\s+but\s+)?(?:let us|let['’]s)\s+leave\b.*\bunassigned\b)/i.test(
+          clause,
+        ) &&
+          !/\b(?:agreed|decided|the decision is)\b/i.test(clause)) ||
+        clause.includes('?') ||
+        isUnsettledProposal(clause) ||
+        !negativeDecisionDisposition(clause)
+      )
+        continue;
+      // Strip only speech framing. The complete source predicate must survive:
+      // "no need to cancel the report" does not mean "no report is needed".
+      const subject = withoutPrerequisite(clause)
+        .replace(/^thanks(?:,?\s+[^,]+)?,?\s+but\s+/i, '')
+        .replace(
+          /^(?:(?:we|i)\s+)?(?:agreed|decided)(?:\s+that)?\s+|^the decision is\s+/i,
+          '',
+        );
+      const sourceTokens = contentTokens(subject);
+      const sameContent = target.join(' ') === sourceTokens.join(' ');
+      // A single leading modifier must qualify this same target in provided
+      // context ("launch announcement"), not merely occur elsewhere in it.
+      const qualifiedTarget =
+        negativeDecisionDisposition(clause) === 'unassigned' &&
+        target.length === sourceTokens.length + 1 &&
+        target.slice(1).join(' ') === sourceTokens.join(' ') &&
+        !/^(?:and|or|not|no|another|other)$/.test(target[0]!) &&
+        resolved.sourceLines.some((context) =>
+          ` ${normalizeTranscriptEvidence(transcriptLineContent(context))} `.includes(
+            ` ${target[0]} ${sourceTokens[0]} `,
+          ),
+        );
+      if (
+        (sameContent || qualifiedTarget) &&
+        prerequisite(claim) === prerequisite(clause)
+      ) {
+        return { evidence: clause, speaker: transcriptLineSpeaker(line) };
+      }
+    }
+  }
+  return undefined;
+};
+
+/** A rejected offer is not a prerequisite on a separately settled choice.
+ * Scope only an adjacent, unambiguous offer/rejection pair whose complete
+ * choice predicate (including rationale and conditions) is copied faithfully.
+ * This local view never replaces the caller's original evidence or citations. */
+const rejectedOfferDecisionClause = (
+  claim: string,
+  resolved: ResolvedTranscriptEvidence,
+): string | undefined => {
+  if (resolved.sourceLines.length !== 2) return undefined;
+  const decision = transcriptLineContent(resolved.sourceLines[1]!);
+  const sourceChoice = /^we(?: have)? (?:decided|agreed)\s+(.+)$/i.exec(
+    decision,
+  );
+  const claimedChoice =
+    /^(?:we|the (?:team|group))(?: have)? (?:decided|agreed)\s+(.+)$/i.exec(
+      claim,
+    );
+  if (!sourceChoice || !claimedChoice) return undefined;
+  const rejected =
+    /^(.*?),\s*(?:so\s+)?we\s+(?:will\s+not\s+take\s+up|declined|rejected)\s+(?:that|the)\s+offer[.!]?$/i.exec(
+      sourceChoice[1]!,
+    );
+  const claimedRejection =
+    /^(.*?),\s*(?:and\s+)?(?:declining|declined|rejecting|rejected)\s+(?:the|that)\s+offer(?:\s+to\s+(.+?))?[.!]?$/i.exec(
+      claimedChoice[1]!,
+    );
+  if (
+    !rejected ||
+    !claimedRejection ||
+    normalizeTranscriptEvidence(rejected[1]!) !==
+      normalizeTranscriptEvidence(claimedRejection[1]!)
+  )
+    return undefined;
+  const offer = transcriptLineContent(resolved.sourceLines[0]!);
+  const offered = /^i (?:could|can)\s+(.+?)[.!]?$/i.exec(offer);
+  if (!offered || /[.?!;]/.test(offered[1]!)) return undefined;
+  const condition = DECISION_PREREQUISITE.exec(offered[1]!);
+  const conditionIndex = condition?.index ?? -1;
+  if (condition) {
+    const tail = offered[1]!.slice(condition.index + condition[0].length);
+    // A coordinated/modal tail or another prerequisite may introduce another
+    // offer. Never discard it and assume "that offer" names the first task.
+    if (
+      /[,:]|\b(?:and|or|but|can|could|would|might|will|shall|may)\b/i.test(
+        tail,
+      ) ||
+      DECISION_PREREQUISITE.test(tail)
+    )
+      return undefined;
+  }
+  const offeredTask = normalizeTranscriptEvidence(
+    conditionIndex < 0 ? offered[1]! : offered[1]!.slice(0, conditionIndex),
+  );
+  const claimedTask = normalizeTranscriptEvidence(claimedRejection[2] ?? '');
+  const omittedObject = offeredTask.slice(claimedTask.length).trim();
+  const repeatedDirectObject =
+    offeredTask.startsWith(`${claimedTask} `) &&
+    !/\b(?:to|for|from|with|without|and|or|by|via|on|in|at|using)\b/.test(
+      omittedObject,
+    ) &&
+    ` ${normalizeTranscriptEvidence(claimedRejection[1]!)} `.includes(
+      ` ${omittedObject} `,
+    );
+  if (
+    !offeredTask ||
+    (claimedTask && offeredTask !== claimedTask && !repeatedDirectObject)
+  )
+    return undefined;
+  return decision;
+};
+
+const decisionCopyPredicate = (value: string) =>
+  normalizeTranscriptEvidence(
+    value.replace(/^\s*(?:the decision is|decision)\s+/i, ''),
+  );
+
+/** A copied offer cannot borrow acceptance from a neighboring settlement.
+ * Match the entire offered task, including its prerequisite and recipient.
+ * Other audited actions/paraphrases are outside this narrow rejection guard. */
+const isUnacceptedSourceOffer = (
+  text: string,
+  owner: string | null,
+  resolved: ResolvedTranscriptEvidence,
+): boolean => {
+  const predicate = (value: string) =>
+    normalizeTranscriptEvidence(
+      canonicalizeActionText(
+        value.replace(/^\s*(?:yes|sure|agreed)[,.!\s]+/i, ''),
+        owner ?? undefined,
+      ),
+    );
+  const lines = resolved.sourceLines.map(transcriptLineContent);
+  const offeredLine = lines.findIndex((line) => {
+    const offer = /^i (could|can)\s+([^.!?;]+)[.!]?$/i.exec(line.trim());
+    return (
+      offer &&
+      (offer[1]!.toLowerCase() === 'could' || /\bif\b/i.test(offer[2]!)) &&
+      normalizeTranscriptEvidence(offer[2]!) === predicate(text)
+    );
+  });
+  if (offeredLine < 0) return false;
+  if (
+    lines.some((line) =>
+      (line.match(/[^.?!;]+[.?!;]?/g) ?? []).some(
+        (clause) =>
+          hasExplicitResolutionCue(clause) &&
+          !clause.includes('?') &&
+          predicate(clause.trim()) === predicate(text),
+      ),
+    )
+  )
+    return false;
+  return !(
+    offeredLine === 0 &&
+    lines.length === 2 &&
+    /^(?:(?:yes|sure|agreed)(?: (?:please(?: do)?|(?:i|we) (?:will|can) do (?:that|it)))?|(?:i|we) will do (?:that|it)|will do)$/.test(
+      normalizeTranscriptEvidence(lines[1]!),
+    )
+  );
+};
+
+export const groundSourceReviewedItem = (
+  item: {
+    text: string;
+    kind: 'action' | 'decision';
+    owner: string | null;
+    due: string | null;
+  },
+  resolved: ResolvedTranscriptEvidence,
+): { text: string; owner: string | null; due: string | null } | null => {
+  const disposition =
+    item.kind === 'decision'
+      ? explicitDispositionClause(item.text, resolved)
+      : undefined;
+  const rejectedChoice =
+    item.kind === 'decision'
+      ? rejectedOfferDecisionClause(item.text, resolved)
+      : undefined;
+  const evidence = disposition?.evidence ?? rejectedChoice ?? resolved.evidence;
+  // An explicit settled choice copied in full can use "may" as permission.
+  // This exception never borrows a neighboring cue or relaxes other modalities.
+  const exactDecisionCopy =
+    item.kind === 'decision' &&
+    /^\s*the decision is\b/i.test(evidence) &&
+    !isUnsettledProposal(evidence.replace(/\bmay\b/gi, '')) &&
+    !/\btentative(?:ly)?\b/i.test(evidence) &&
+    // Pending publication can be a condition; a pending decision is not settled.
+    !/\b(?:the decision|but it)\s+is\s+(?:pending\b|not\s+(?:yet\s+)?final(?:ized|ised)?\b)/i.test(
+      evidence,
+    ) &&
+    decisionCopyPredicate(item.text) === decisionCopyPredicate(evidence);
+  const conditional =
+    /\b(?:if|unless|until|once|after|when|pending|subject to|provided|conditional on|contingent (?:on|upon))\b/i;
+  // Only a proven refusal object gets refusal morphology; declining prices or
+  // sales are not negation. Exact choice matching also protects prerequisites.
+  const normalizeDecline = Boolean(rejectedChoice);
+  const numbers = (value: string): string[] =>
+    value.match(/\b\d+(?:[.,]\d+)*\b/g) ?? [];
+  if (
+    (disposition &&
+      negativeDecisionDisposition(item.text) !==
+        negativeDecisionDisposition(disposition.evidence)) ||
+    (item.kind === 'decision' &&
+      negativeDecisionDisposition(item.text) &&
+      !disposition) ||
+    (item.kind === 'decision' &&
+      !disposition &&
+      (isUnsettledProposal(evidence) ||
+        /\b(?:no|not|unassigned)\b/i.test(item.text)) &&
+      !/\b(?:agreed|decided|approved|selected|will use|we will|proceed|the decision is)\b/i.test(
+        evidence,
+      )) ||
+    !hasMatchingScopedPolarity(
+      normalizeDecline
+        ? item.text.replace(/\bdeclining\b/gi, 'declined')
+        : item.text,
+      normalizeDecline
+        ? evidence.replace(/\bdeclining\b/gi, 'declined')
+        : evidence,
+    ) ||
+    hasLexicalContradiction(item.text, evidence) ||
+    numbers(item.text).some((number) => !numbers(evidence).includes(number)) ||
+    (conditional.test(evidence) && !conditional.test(item.text)) ||
+    isUnacceptedRequest(evidence) ||
+    (item.kind === 'action' &&
+      isUnacceptedSourceOffer(item.text, item.owner, resolved)) ||
+    (/\b(?:may|might|could|should|maybe|perhaps)\b/i.test(evidence) &&
+      !hasExplicitResolutionCue(evidence) &&
+      !exactDecisionCopy) ||
+    isUnacceptedConditionalWillingness(evidence)
+  )
+    return null;
+  const ownership =
+    item.kind === 'action'
+      ? resolveActionAssignee(item.owner ?? undefined, resolved)
+      : null;
+  const owner =
+    item.kind === 'action'
+      ? (ownership?.assignee ?? null)
+      : item.owner &&
+          (disposition
+            ? normalizeTranscriptEvidence(item.owner) ===
+              normalizeTranscriptEvidence(disposition.speaker ?? '')
+            : settledFieldSupportedByTurn(item.owner, resolved, 'decision'))
+        ? item.owner
+        : null;
+  const due =
+    item.due &&
+    isSettledDueValue(item.due) &&
+    fieldSupportedBySource(item.due, evidence) &&
+    !fieldExplicitlySuperseded(item.due, evidence) &&
+    new RegExp(
+      `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?${item.due.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      'i',
+    ).test(evidence)
+      ? item.due
+      : null;
+  return {
+    text:
+      item.kind === 'action'
+        ? canonicalizeActionText(item.text, owner ?? undefined)
+        : item.text,
+    owner,
+    due,
+  };
 };
 
 export const groundAnalysisDocument = (

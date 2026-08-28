@@ -10,35 +10,23 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
-import {
-  type ValueGainSignals,
-  extractAndProcessEntities,
-} from '../../api/knowledgeGraph';
-import type {
-  AnalysisDocument,
-  AnalysisDocumentV3,
-  Meeting,
-  TranscriptSegment,
-} from '../../types';
+import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
   analysisDocumentV3ToMarkdown,
-  parseAnalysisDocumentJson,
-  parseAnalysisDocumentV3Json,
+  parseAnalysisEditConflictsJson,
   parseUserEditsJson,
   resolveMeetingAnalysis,
 } from '../../utils/analysisDocument';
 import { buildMeetingNotesDocument } from '../../utils/meetingNotesDocument';
 import {
   ANALYSIS_SNAPSHOT_PATH,
-  createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
 import {
-  buildAnalysisTranscriptFromJson,
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
 } from '../../utils/transcript';
@@ -50,13 +38,64 @@ import {
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
-import { buildRegeneratedAnalysisPersistence } from './meetingAnalysisPersistence';
 import {
   type MeetingRegenerationFailurePresentation,
   resolveMeetingFailurePresentation,
   resolveMeetingRegenerationFailurePresentation,
 } from './meetingFailurePresentation';
 import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
+
+const SavedEditConflicts = ({
+  conflicts,
+  onCopy,
+}: {
+  conflicts: ReturnType<typeof parseAnalysisEditConflictsJson>;
+  onCopy: (text: string) => void;
+}) => {
+  if (conflicts.length === 0) return null;
+  return (
+    <details
+      data-meeting-edit-conflicts
+      className="mx-auto mb-5 w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
+    >
+      <summary className="cursor-pointer select-none py-2 text-xs font-medium text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent">
+        Saved edits from previous notes
+      </summary>
+      <div className="mt-1 space-y-4 border-t border-pro-border/60 py-4">
+        <p className="max-w-[65ch] text-xs leading-5">
+          The current notes remain in place. These saved edits can be copied if
+          you want to reapply them.
+        </p>
+        {conflicts.map((conflict, index) => (
+          <section key={`${conflict.path}-${conflict.edited_at}-${index}`}>
+            <p className="text-xs font-medium text-pro-text-main">
+              Previous generated text
+            </p>
+            <pre className="mt-1 whitespace-pre-wrap font-sans text-xs leading-5 text-pro-text-muted">
+              {conflict.original}
+            </pre>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-medium text-pro-text-main">
+                Saved edit
+              </p>
+              <button
+                type="button"
+                onClick={() => onCopy(conflict.edited)}
+                className="rounded px-1.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                aria-label="Copy saved edit"
+              >
+                Copy
+              </button>
+            </div>
+            <pre className="mt-1 whitespace-pre-wrap font-sans text-xs leading-5 text-pro-text-main">
+              {conflict.edited}
+            </pre>
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+};
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -515,6 +554,7 @@ export const MeetingView = ({
   titleValue,
   setTitleValue,
   fetchMeetings,
+  handleCopySummary,
   handleDeleteMeeting,
   transcriptVisible,
   setTranscriptVisible,
@@ -528,12 +568,104 @@ export const MeetingView = ({
     useState<MeetingNotesTemplate>('auto');
   const [regenerateNotesError, setRegenerateNotesError] =
     useState<MeetingRegenerationFailurePresentation | null>(null);
+  const [latestTitle, setLatestTitle] = useState(selectedMeeting.title);
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [titleSaveError, setTitleSaveError] = useState<
+    'conflict' | 'missing' | 'failed' | null
+  >(null);
+  const titleEdit = useRef({
+    meetingId: selectedMeeting.id,
+    expectedTitle: selectedMeeting.title,
+    cancelled: false,
+    saving: false,
+  });
+
+  useEffect(() => {
+    setLatestTitle(selectedMeeting.title);
+  }, [selectedMeeting.id, selectedMeeting.title]);
+
+  useEffect(() => {
+    // Mirror cleanup during Strict Mode replay without discarding a draft
+    // supplied on initial mount. A real remount receives the cleared parent.
+    setEditingTitle(editingTitle);
+    setTitleValue(titleValue);
+    return () => {
+      titleEdit.current = { ...titleEdit.current };
+      setEditingTitle(false);
+      setTitleValue('');
+    };
+  }, []);
 
   useEffect(() => {
     setIsRegeneratingNotes(false);
     setIsRestoringNotes(false);
     setRegenerateNotesError(null);
+    setTitleSaveError(null);
+    setIsSavingTitle(false);
+    if (titleEdit.current.meetingId !== selectedMeeting.id) {
+      setEditingTitle(false);
+      setTitleValue(selectedMeeting.title || 'Untitled Session');
+    }
+    titleEdit.current = {
+      meetingId: selectedMeeting.id,
+      expectedTitle: selectedMeeting.title,
+      cancelled: false,
+      saving: false,
+    };
   }, [selectedMeeting.id]);
+
+  const saveTitle = async (expectedTitle = titleEdit.current.expectedTitle) => {
+    // Returning to the same meeting is a new visit, not the old pending edit.
+    const editSession = titleEdit.current;
+    if (editSession.saving) return;
+    const title = titleValue.trim();
+    if (!title || title === latestTitle) {
+      setTitleValue(latestTitle || 'Untitled Session');
+      setTitleSaveError(null);
+      setEditingTitle(false);
+      return;
+    }
+    const meetingId = selectedMeeting.id;
+    editSession.saving = true;
+    setIsSavingTitle(true);
+    try {
+      // Only update the title, never a stale notes/edit snapshot. Keep the
+      // edit's original title as the comparison until the user chooses retry.
+      const outcome = await window.ipcRenderer.invoke(
+        'UPDATE_MEETING_TITLE_IF_CURRENT',
+        { meetingId, expectedTitle, title },
+      );
+      if (titleEdit.current !== editSession) return;
+      if (outcome === 'updated' || outcome === 'already_current') {
+        setLatestTitle(title);
+        setTitleSaveError(null);
+        setEditingTitle(false);
+        await fetchMeetings();
+      } else if (outcome === 'conflict') {
+        const current = await window.ipcRenderer.invoke(
+          'GET_MEETING',
+          meetingId,
+        );
+        if (titleEdit.current !== editSession) return;
+        if (current && typeof current.title === 'string') {
+          setLatestTitle(current.title);
+          setTitleSaveError('conflict');
+          await fetchMeetings();
+        } else {
+          setTitleSaveError('missing');
+        }
+      } else {
+        setTitleSaveError(outcome === 'missing' ? 'missing' : 'failed');
+      }
+    } catch {
+      if (titleEdit.current === editSession) setTitleSaveError('failed');
+    } finally {
+      if (titleEdit.current === editSession) {
+        editSession.saving = false;
+        setIsSavingTitle(false);
+      }
+    }
+  };
 
   const { v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
   const downstreamPresentation =
@@ -541,6 +673,9 @@ export const MeetingView = ({
   const canRegenerateMeetingIntelligence =
     canGenerateMeetingIntelligence(selectedMeeting);
   const editsMap = parseUserEditsJson(selectedMeeting.user_edits_json);
+  const editConflicts = parseAnalysisEditConflictsJson(
+    selectedMeeting.analysis_edit_conflicts_json,
+  );
   let transcriptSegments: TranscriptSegment[] = [];
   try {
     transcriptSegments = parseTranscriptSegments(
@@ -587,7 +722,9 @@ export const MeetingView = ({
     return () => window.clearInterval(interval);
   }, [fetchMeetings, isMeetingProcessing]);
 
-  const regenerateEnhancedNotes = async () => {
+  const regenerateEnhancedNotes = async (
+    reason: 'manual' | 'secondary' = 'manual',
+  ) => {
     if (isRegeneratingNotes) return;
     if (!canGenerateMeetingIntelligence(selectedMeeting)) {
       setRegenerateNotesError(
@@ -600,186 +737,15 @@ export const MeetingView = ({
     }
 
     setRegenerateNotesError(null);
-    const transcript = buildAnalysisTranscriptFromJson(
-      selectedMeeting.transcript_json,
-    );
-    if (!transcript.trim()) {
-      setRegenerateNotesError(
-        resolveMeetingRegenerationFailurePresentation({
-          kind: 'missing_transcript',
-          hasExistingNotes: notesDocument.hasAnalysis,
-        }),
-      );
-      return;
-    }
-
     setIsRegeneratingNotes(true);
     try {
-      const [artifacts, newTitle] = await Promise.all([
-        window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
-          transcript,
-          userNotes: selectedMeeting.user_notes || '',
-          template: notesTemplate,
-        }) as Promise<{
-          markdown?: unknown;
-          analysis?: unknown;
-          signals?: unknown;
-        }>,
-        window.ipcRenderer
-          .invoke('GENERATE_TITLE', {
-            transcript,
-          })
-          .catch(() => null) as Promise<string | null>,
-      ]);
-
-      let normalizedAnalysis: AnalysisDocument | AnalysisDocumentV3 | null =
-        null;
-      if (artifacts?.analysis != null) {
-        const strAnalysis = JSON.stringify(artifacts.analysis);
-        normalizedAnalysis =
-          parseAnalysisDocumentV3Json(strAnalysis) ||
-          parseAnalysisDocumentJson(strAnalysis);
-      }
-
-      if (!normalizedAnalysis) {
-        setRegenerateNotesError(
-          resolveMeetingRegenerationFailurePresentation({
-            kind: 'invalid_response',
-            hasExistingNotes: notesDocument.hasAnalysis,
-          }),
-        );
-        return;
-      }
-      if (normalizedAnalysis.quality.fallback_used) {
-        setRegenerateNotesError(
-          resolveMeetingRegenerationFailurePresentation({
-            kind: 'generation_failed',
-            issues: normalizedAnalysis.quality.issues,
-            hasExistingNotes: notesDocument.hasAnalysis,
-          }),
-        );
-        return;
-      }
-      const enhancedNotes =
-        typeof artifacts?.markdown === 'string' && artifacts.markdown.trim()
-          ? artifacts.markdown
-          : normalizedAnalysis.analysis_schema_version === 3
-            ? analysisDocumentV3ToMarkdown(
-                normalizedAnalysis as AnalysisDocumentV3,
-              )
-            : analysisDocumentToMarkdown(
-                normalizedAnalysis as AnalysisDocument,
-              );
-      const normalizedSignals: ValueGainSignals | undefined =
-        artifacts?.signals != null &&
-        typeof artifacts.signals === 'object' &&
-        !Array.isArray(artifacts.signals)
-          ? {
-              analysis_schema_version:
-                typeof (
-                  artifacts.signals as { analysis_schema_version?: unknown }
-                ).analysis_schema_version === 'number'
-                  ? (artifacts.signals as { analysis_schema_version?: number })
-                      .analysis_schema_version
-                  : undefined,
-              continuity: Array.isArray(
-                (artifacts.signals as { continuity?: unknown }).continuity,
-              )
-                ? (artifacts.signals as { continuity?: string[] }).continuity ||
-                  []
-                : [],
-              accountability_risks: Array.isArray(
-                (artifacts.signals as { accountability_risks?: unknown })
-                  .accountability_risks,
-              )
-                ? (
-                    artifacts.signals as {
-                      accountability_risks?: string[];
-                    }
-                  ).accountability_risks || []
-                : [],
-              decision_impacts: Array.isArray(
-                (artifacts.signals as { decision_impacts?: unknown })
-                  .decision_impacts,
-              )
-                ? (artifacts.signals as { decision_impacts?: string[] })
-                    .decision_impacts || []
-                : [],
-              extra_tags: Array.isArray(
-                (artifacts.signals as { extra_tags?: unknown }).extra_tags,
-              )
-                ? (
-                    artifacts.signals as {
-                      extra_tags?: Array<{ tag: string; confidence: number }>;
-                    }
-                  ).extra_tags
-                : undefined,
-            }
-          : undefined;
-
-      await window.ipcRenderer.invoke('SAVE_MEETING', {
-        ...selectedMeeting,
-        ...buildRegeneratedAnalysisPersistence(
-          selectedMeeting,
-          normalizedAnalysis.analysis_schema_version === 3
-            ? (normalizedAnalysis as AnalysisDocumentV3).generation_metadata
-            : undefined,
-        ),
-        title:
-          newTitle && newTitle !== 'Meeting' && newTitle !== 'New Meeting'
-            ? newTitle
-            : selectedMeeting.title,
-        enhanced_notes: enhancedNotes,
-        analysis_json: JSON.stringify(normalizedAnalysis),
-        analysis_schema_version:
-          normalizedAnalysis.analysis_schema_version ??
-          selectedMeeting.analysis_schema_version ??
-          null,
-        analysis_format_pass: normalizedAnalysis.quality.format_pass,
-        analysis_retry_count: normalizedAnalysis.quality.retry_count,
-        analysis_fallback_used: normalizedAnalysis.quality.fallback_used,
-        value_signals_json:
-          artifacts?.signals != null
-            ? JSON.stringify(artifacts.signals)
-            : selectedMeeting.value_signals_json || null,
-        user_edits_json: JSON.stringify(
-          createAnalysisSnapshot(selectedMeeting),
-        ),
+      await window.ipcRenderer.invoke('GENERATE_MEETING_NOTES', {
+        meetingId: selectedMeeting.id,
+        requestId: crypto.randomUUID(),
+        template: notesTemplate,
+        reason,
       });
-      try {
-        window.dispatchEvent(
-          new CustomEvent('MEETING_ENTITIES_PROCESSING', {
-            detail: { meetingId: String(selectedMeeting.id), processing: true },
-          }),
-        );
-        await extractAndProcessEntities(
-          transcript,
-          String(selectedMeeting.id),
-          {
-            summary: enhancedNotes,
-            valueSignals: normalizedSignals,
-          },
-        );
-        window.dispatchEvent(
-          new CustomEvent('MEETING_ENTITIES_UPDATED', {
-            detail: { meetingId: String(selectedMeeting.id) },
-          }),
-        );
-      } catch (entityError) {
-        console.error(
-          'Regenerated notes saved, but entity extraction failed:',
-          entityError,
-        );
-      } finally {
-        window.dispatchEvent(
-          new CustomEvent('MEETING_ENTITIES_PROCESSING', {
-            detail: {
-              meetingId: String(selectedMeeting.id),
-              processing: false,
-            },
-          }),
-        );
-      }
+      await window.ipcRenderer.invoke('GET_MEETING', selectedMeeting.id);
       await fetchMeetings();
     } catch (error) {
       console.error('Failed to regenerate enhanced notes:', error);
@@ -797,13 +763,14 @@ export const MeetingView = ({
 
   const restorePreviousGeneratedNotes = async () => {
     if (isRestoringNotes) return;
-    const restored = restoreAnalysisSnapshot(selectedMeeting);
-    if (!restored) return;
+    if (!restoreAnalysisSnapshot(selectedMeeting)) return;
 
     setIsRestoringNotes(true);
     setRegenerateNotesError(null);
     try {
-      await window.ipcRenderer.invoke('SAVE_MEETING', restored);
+      await window.ipcRenderer.invoke('RESTORE_MEETING_NOTES', {
+        meetingId: selectedMeeting.id,
+      });
       await fetchMeetings();
     } catch (error) {
       console.error('Failed to restore previous generated notes:', error);
@@ -829,32 +796,24 @@ export const MeetingView = ({
         <header className="meeting-document-header">
           <TextareaAutosize
             value={
-              editingTitle
+              editingTitle || titleSaveError || isSavingTitle
                 ? titleValue
-                : selectedMeeting?.title || 'Untitled Session'
+                : latestTitle || 'Untitled Session'
             }
             onFocus={() => {
+              titleEdit.current.cancelled = false;
+              if (editingTitle || titleSaveError) return;
+              titleEdit.current.expectedTitle = latestTitle;
               setEditingTitle(true);
-              setTitleValue(selectedMeeting?.title || 'Untitled Session');
+              setTitleValue(latestTitle || 'Untitled Session');
             }}
             onChange={(e) => setTitleValue(e.target.value)}
-            onBlur={async () => {
-              setEditingTitle(false);
-              if (
-                titleValue.trim() &&
-                selectedMeeting &&
-                titleValue !== selectedMeeting.title
-              ) {
-                // Save to database
-                await window.ipcRenderer.invoke('SAVE_MEETING', {
-                  ...selectedMeeting,
-                  title: titleValue.trim(),
-                });
-                // Refresh meetings list
-                fetchMeetings();
-              } else if (!titleValue.trim()) {
-                setTitleValue(selectedMeeting?.title || 'Untitled Session');
+            onBlur={() => {
+              if (titleEdit.current.cancelled) {
+                titleEdit.current.cancelled = false;
+                return;
               }
+              if (!titleSaveError) void saveTitle();
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -862,14 +821,59 @@ export const MeetingView = ({
                 e.currentTarget.blur();
               }
               if (e.key === 'Escape') {
-                setTitleValue(selectedMeeting?.title || 'Untitled Session');
+                e.preventDefault();
+                if (titleEdit.current.saving) return;
+                titleEdit.current.cancelled = true;
+                setTitleValue(latestTitle || 'Untitled Session');
+                setTitleSaveError(null);
+                setEditingTitle(false);
                 e.currentTarget.blur();
               }
             }}
             className="meeting-document-title w-full bg-transparent outline-none resize-none mb-0 p-0 block overflow-hidden"
             spellCheck={false}
             aria-label="Meeting title"
+            aria-describedby={
+              titleSaveError ? 'meeting-title-save-error' : undefined
+            }
+            aria-busy={isSavingTitle}
+            readOnly={isSavingTitle}
           />
+          {titleSaveError ? (
+            <output
+              id="meeting-title-save-error"
+              data-meeting-title-save-error
+              className="mb-3 block text-xs leading-5 text-pro-text-muted"
+            >
+              <span className="block">
+                {titleSaveError === 'conflict'
+                  ? `Title not saved. The current title is “${latestTitle}”. Your edit is still here.`
+                  : titleSaveError === 'missing'
+                    ? 'Title not saved. This meeting is no longer available. Your edit is still here to copy.'
+                    : 'Title not saved. Your edit is still here.'}
+              </span>
+              {titleSaveError !== 'missing' ? (
+                <button
+                  type="button"
+                  disabled={isSavingTitle}
+                  onClick={() =>
+                    void saveTitle(
+                      titleSaveError === 'conflict'
+                        ? latestTitle
+                        : titleEdit.current.expectedTitle,
+                    )
+                  }
+                  className="rounded px-1.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50"
+                >
+                  {isSavingTitle
+                    ? 'Saving…'
+                    : titleSaveError === 'conflict'
+                      ? 'Save my title instead'
+                      : 'Try again'}
+                </button>
+              ) : null}
+            </output>
+          ) : null}
           <div className="flex w-full min-w-0 items-center justify-between gap-4">
             <div className="meeting-document-meta min-w-0">
               <span>
@@ -921,7 +925,7 @@ export const MeetingView = ({
               canRegenerateMeetingIntelligence ? (
                 <button
                   type="button"
-                  onClick={regenerateEnhancedNotes}
+                  onClick={() => void regenerateEnhancedNotes()}
                   disabled={isRegeneratingNotes}
                   className={`meeting-toolbar-button ${
                     isRegeneratingNotes
@@ -1122,6 +1126,38 @@ export const MeetingView = ({
         ) : null}
         {notesDocument.hasAnalysis ? (
           <div data-meeting-artifact="analysis" data-state="ready">
+            {downstreamPresentation.state === 'ready' &&
+            downstreamPresentation.notesUpdateFailed &&
+            !regenerateNotesError &&
+            !isRegeneratingNotes ? (
+              <output className="mx-auto mb-4 block w-full max-w-[760px] px-5 text-sm text-pro-text-muted md:px-8">
+                Couldn’t update notes. Your previous notes are still here.
+              </output>
+            ) : null}
+            {downstreamPresentation.state === 'ready' &&
+            downstreamPresentation.secondaryStatus ? (
+              <output className="mx-auto mb-4 flex w-full max-w-[760px] items-center gap-3 px-5 text-sm text-pro-text-muted md:px-8">
+                <span>
+                  {downstreamPresentation.secondaryStatus === 'failed'
+                    ? 'Notes are ready. Related insights could not finish.'
+                    : 'Notes are ready. Updating related insights…'}
+                </span>
+                {downstreamPresentation.secondaryStatus === 'failed' ? (
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 disabled:opacity-50"
+                    disabled={isRegeneratingNotes}
+                    onClick={() => void regenerateEnhancedNotes('secondary')}
+                  >
+                    {isRegeneratingNotes ? 'Retrying…' : 'Retry insights'}
+                  </button>
+                ) : null}
+              </output>
+            ) : null}
+            <SavedEditConflicts
+              conflicts={editConflicts}
+              onCopy={handleCopySummary}
+            />
             <MeetingNotesDocument
               meeting={selectedMeeting}
               model={notesDocument}

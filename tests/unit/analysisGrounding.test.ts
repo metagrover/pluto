@@ -2,10 +2,210 @@ import { describe, expect, it } from 'vitest';
 
 import {
   groundAnalysisDocument,
+  groundSourceReviewedItem,
   normalizeTranscriptEvidence,
   resolveTranscriptEvidence,
 } from '../../electron/llm/analysisGrounding';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+
+describe('source-reviewed explicit negative decisions', () => {
+  const review = (
+    text: string,
+    evidence: string,
+    owner: string | null = 'Rina',
+  ) => {
+    const resolved = {
+      evidence,
+      quotedEvidence: evidence,
+      sourceLine: `Rina: ${evidence}`,
+      sourceLines: [`Rina: ${evidence}`],
+      lineIndex: 0,
+    };
+    const snapshot = structuredClone(resolved);
+    const result = groundSourceReviewedItem(
+      { text, kind: 'decision', owner, due: null },
+      resolved,
+    );
+    expect(resolved).toEqual(snapshot);
+    return result;
+  };
+  it('grounds the speaking owner of the target clause and keeps full original evidence untouched', () => {
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary. Could you instead email the raw responses to Amara on Monday?',
+      ),
+    ).toEqual({ text: 'No summary is needed.', owner: 'Rina', due: null });
+    expect(
+      review('No summary is needed.', 'No need for that summary.', 'Amara')
+        ?.owner,
+    ).toBeNull();
+  });
+  it('preserves a condition on the explicit choice', () => {
+    expect(
+      review(
+        'No summary is needed if legal approves.',
+        'No need for that summary if legal approves.',
+      ),
+    ).not.toBeNull();
+    expect(
+      review(
+        'No summary is needed.',
+        'No need for that summary if legal approves.',
+      ),
+    ).toBeNull();
+  });
+  it('cannot borrow a neighboring settled choice for a different negative target', () => {
+    expect(
+      review(
+        'No launch is needed.',
+        'No need for that summary. We decided to review the launch.',
+      ),
+    ).toBeNull();
+    expect(
+      review(
+        'Leave the report unassigned.',
+        'Let us leave the announcement unassigned. We decided to review the report.',
+      ),
+    ).toBeNull();
+  });
+  it('does not poison an existing positive imperative with a neighboring negative fact', () => {
+    expect(
+      review(
+        'Use the source-grounded flow.',
+        'Use the source-grounded flow. The report is not ready.',
+        null,
+      ),
+    ).not.toBeNull();
+  });
+  it.each([
+    ['The summary is needed.', 'No need for that summary.'],
+    [
+      'Leave the announcement assigned.',
+      'Let us leave the announcement unassigned.',
+    ],
+  ])(
+    'does not invert an explicit negative disposition: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+  it('does not make a declined offer into an action', () => {
+    const evidence =
+      'If legal approves, I can draft the announcement. Let us leave the announcement unassigned for now.';
+    expect(
+      groundSourceReviewedItem(
+        {
+          text: 'Draft the announcement if legal approves.',
+          kind: 'action',
+          owner: 'Rina',
+          due: null,
+        },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Rina: ${evidence}`,
+          sourceLines: [`Rina: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves a full source-copy explicit policy decision containing may without changing qualifiers', () => {
+    const evidence =
+      "The decision is not to publish individual responses. Only aggregate counts may be published, to protect participants' confidentiality.";
+    const text =
+      "The decision is not to publish individual responses; only aggregate counts may be published to protect participants' confidentiality.";
+    expect(review(text, evidence, null)).toEqual({
+      text,
+      owner: null,
+      due: null,
+    });
+  });
+
+  it.each([
+    'The decision is not final; aggregate counts may be published.',
+    'The decision is pending approval; aggregate counts may be published.',
+    'The decision is that aggregate counts may be published, but it is not finalized.',
+  ])(
+    'does not treat an explicitly unfinished decision status as settled: %s',
+    (text) => {
+      expect(review(text, text, null)).toBeNull();
+    },
+  );
+
+  it.each([
+    'The decision is that aggregate counts may be published once legal approves.',
+    'The decision is that aggregate counts may be published pending legal approval.',
+  ])(
+    'retains a settled policy with its publication prerequisite: %s',
+    (text) => {
+      expect(review(text, text, null)).toEqual({
+        text,
+        owner: null,
+        due: null,
+      });
+    },
+  );
+
+  it.each([
+    [
+      'Individual responses may not be published.',
+      'Individual responses may not be published.',
+    ],
+    [
+      'The decision is not to publish individual responses; aggregate counts will be published.',
+      'The decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is to publish aggregate counts.',
+      'The decision is not to publish individual responses. Aggregate counts may be published.',
+    ],
+    [
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+      '"The decision is not to publish individual responses; aggregate counts may be published."',
+    ],
+    [
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+      'Tariq said the decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+      'The tentative decision is not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+      'The decision is perhaps not to publish individual responses; aggregate counts may be published.',
+    ],
+    [
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+      'The decision is tentatively not to publish individual responses; aggregate counts may be published.',
+    ],
+  ])(
+    'does not relax modal guards for an unsupported or qualified decision: %s',
+    (text, evidence) => {
+      expect(review(text, evidence, null)).toBeNull();
+    },
+  );
+
+  it('does not use the explicit policy-copy allowance for actions', () => {
+    const evidence =
+      'The decision is not to publish individual responses; aggregate counts may be published.';
+    expect(
+      groundSourceReviewedItem(
+        { text: evidence, kind: 'action', owner: null, due: null },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Tariq: ${evidence}`,
+          sourceLines: [`Tariq: ${evidence}`],
+          lineIndex: 0,
+        },
+      ),
+    ).toBeNull();
+  });
+});
 
 const document = (): AnalysisDocumentV3 => ({
   analysis_schema_version: 3,
