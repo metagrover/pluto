@@ -10,6 +10,7 @@ import {
   upsertEntity,
 } from '../../api/knowledgeGraph';
 import type { ActionCommitmentMetadata } from '../../utils/actionCommitment';
+import { ProjectDossier } from '../features/projects/ProjectDossier';
 import { PageHeader } from '../ui/PageHeader';
 
 export const buildQuickAddActionEntity = (value: string) => {
@@ -25,6 +26,36 @@ export const buildQuickAddActionEntity = (value: string) => {
       origin: 'user',
     } satisfies ActionCommitmentMetadata,
   };
+};
+
+// ─── Constants & Helpers ───────────────────────────────────────────
+export const AT_RISK_THRESHOLD_MS = 2 * 24 * 60 * 60 * 1000;
+export const MAX_INBOX_PREVIEW = 6;
+
+export const safeParseMetadata = (metadata: unknown): Record<string, any> => {
+  if (typeof metadata === 'object' && metadata !== null) {
+    return metadata as Record<string, any>;
+  }
+  if (typeof metadata !== 'string' || !metadata.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(metadata);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+export const isTaskOverdue = (
+  task: Entity,
+  now: number = Date.now(),
+): boolean => {
+  if (task.status === 'completed') return false;
+  return (
+    task.status === 'overdue' ||
+    Boolean(task.due_date && new Date(task.due_date).getTime() < now)
+  );
 };
 
 // ─── Health Logic ────────────────────────────────────────────────
@@ -72,11 +103,7 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
     (task) => task.status === 'active' || task.status === 'overdue',
   );
   const completed = tasks.filter((task) => task.status === 'completed');
-  const overdue = active.filter(
-    (task) =>
-      task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < now),
-  );
+  const overdue = active.filter((task) => isTaskOverdue(task, now));
   return {
     active,
     completed,
@@ -90,13 +117,11 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
 };
 
 export const countAtRiskTasks = (tasks: Entity[], now = Date.now()) => {
-  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-
   return tasks.filter((task) => {
     if (task.status !== 'active' || !task.due_date) return false;
 
     const dueAt = new Date(task.due_date).getTime();
-    return dueAt >= now && dueAt - now < twoDaysMs;
+    return dueAt >= now && dueAt - now < AT_RISK_THRESHOLD_MS;
   }).length;
 };
 
@@ -305,22 +330,17 @@ export const buildExecutionSummary = ({
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
-  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
   const activeTasks = tasks.filter(
     (t) => t.status === 'active' || t.status === 'overdue',
   );
 
-  const hasOverdue = activeTasks.some(
-    (t) =>
-      t.status === 'overdue' ||
-      (t.due_date && new Date(t.due_date).getTime() < now),
-  );
+  const hasOverdue = activeTasks.some((t) => isTaskOverdue(t, now));
   if (hasOverdue) return 'slipping';
 
   const hasAtRisk = activeTasks.some(
     (t) =>
       t.due_date &&
-      new Date(t.due_date).getTime() - now < twoDaysMs &&
+      new Date(t.due_date).getTime() - now < AT_RISK_THRESHOLD_MS &&
       new Date(t.due_date).getTime() >= now,
   );
   if (hasAtRisk) return 'at_risk';
@@ -333,12 +353,9 @@ const TaskRow: React.FC<{
   task: Entity;
   onToggle: (task: Entity) => void;
 }> = ({ task, onToggle }) => {
-  const metadata = JSON.parse(task.metadata || '{}');
+  const metadata = safeParseMetadata(task.metadata);
   const isCompleted = task.status === 'completed';
-  const isOverdue =
-    !isCompleted &&
-    (task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < Date.now()));
+  const isOverdue = isTaskOverdue(task);
 
   return (
     <div
@@ -486,7 +503,7 @@ export const ProjectHealthCard: React.FC<{
   const health = computeHealth(tasks);
   const healthInfo = HEALTH_CONFIG[health];
   const completedCount = briefing.completed.length;
-  const metadata = JSON.parse(project.metadata || '{}');
+  const metadata = safeParseMetadata(project.metadata);
   const summary = getProjectCardSummary({
     activeCount: briefing.active.length,
     overdueCount: briefing.overdue.length,
@@ -607,10 +624,17 @@ export const ProjectHealthCard: React.FC<{
 export const ProjectsExecutionTab: React.FC<{
   selectedProjectId?: string | null;
 }> = ({ selectedProjectId = null }) => {
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    selectedProjectId,
+  );
   const [projects, setProjects] = useState<Entity[]>([]);
   const [allTasks, setAllTasks] = useState<Entity[]>([]);
   const [taskLinks, setTaskLinks] = useState<EntityLink[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setActiveProjectId(selectedProjectId);
+  }, [selectedProjectId]);
 
   const formatProjectName = (name: string): string => {
     // LLMs often generate noisy identifiers like "foo-work-project".
@@ -691,7 +715,7 @@ export const ProjectsExecutionTab: React.FC<{
     return { groupedTasks: grouped, ungroupedTasks: ungrouped };
   }, [allTasks, taskLinks, projects]);
 
-  const { activeProjects, completedProjects } = useMemo(
+  const { activeProjects } = useMemo(
     () => partitionProjectsForDisplay(projects, groupedTasks),
     [projects, groupedTasks],
   );
@@ -701,26 +725,20 @@ export const ProjectsExecutionTab: React.FC<{
   const activeUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'active' || task.status === 'overdue',
   );
-  const overdueUngroupedTasks = activeUngroupedTasks.filter(
-    (task) =>
-      task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < Date.now()),
+  const overdueUngroupedTasks = activeUngroupedTasks.filter((task) =>
+    isTaskOverdue(task),
   );
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
 
   const activeTasks = useMemo(
-    () => allTasks.filter((t) => t.status === 'active' || t.status === 'overdue'),
+    () =>
+      allTasks.filter((t) => t.status === 'active' || t.status === 'overdue'),
     [allTasks],
   );
   const overdueTasks = useMemo(
-    () =>
-      activeTasks.filter(
-        (t) =>
-          t.status === 'overdue' ||
-          (t.due_date && new Date(t.due_date).getTime() < Date.now()),
-      ),
+    () => activeTasks.filter((t) => isTaskOverdue(t)),
     [activeTasks],
   );
   const executionSummary = useMemo(
@@ -739,7 +757,22 @@ export const ProjectsExecutionTab: React.FC<{
     ],
   );
 
-  if (loading && allTasks.length === 0) {
+  if (activeProjectId) {
+    const activeProject = projects.find((p) => p.id === activeProjectId);
+    return (
+      <ProjectDossier
+        projectId={activeProjectId}
+        projectName={
+          activeProject
+            ? formatProjectName(activeProject.name) || activeProject.name
+            : undefined
+        }
+        onBack={() => setActiveProjectId(null)}
+      />
+    );
+  }
+
+  if (loading && allTasks.length === 0 && projects.length === 0) {
     return (
       <div className="animate-pulse space-y-6">
         {[1, 2, 3].map((i) => (
@@ -771,33 +804,6 @@ export const ProjectsExecutionTab: React.FC<{
     );
   }
 
-  if (
-    activeProjects.length === 0 &&
-    completedProjects.length === 0 &&
-    ungroupedTasks.length === 0
-  ) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-        <div className="w-20 h-20 rounded-md bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-sm">
-          ✅
-        </div>
-        <div className="space-y-2">
-          <h3 className="text-xl font-semibold text-pro-text-main">
-            No tasks are linked to projects yet
-          </h3>
-          <p className="text-sm text-pro-text-muted max-w-md">
-            Your extracted action items aren&apos;t assigned to any project
-            entities. Add tasks from a meeting, or link an action item to a
-            project.
-          </p>
-        </div>
-        <div className="rounded-md border border-dashed border-pro-border/40 bg-pro-bg px-6 py-4">
-          <QuickAddTask onTaskAdded={fetchData} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-8" data-testid="projects-briefing">
       <div>
@@ -814,51 +820,71 @@ export const ProjectsExecutionTab: React.FC<{
 
       {/* Project Groups */}
       <div className="flex flex-col">
-        {activeProjects.map((project) => (
-          <ProjectHealthCard
-            key={project.id}
-            project={{
-              ...project,
-              name: formatProjectName(project.name) || project.name,
-            }}
-            tasks={groupedTasks[project.id] || []}
-            selected={selectedProjectId === project.id}
-            onToggleTask={toggleTask}
-            onTaskAdded={fetchData}
-          />
-        ))}
+        {projects.map((project) => {
+          const projectTasks =
+            (project as any).tasks || groupedTasks[project.id] || [];
+          const taskCount =
+            typeof (project as any).taskCount === 'number'
+              ? (project as any).taskCount
+              : projectTasks.length;
+          const meta = safeParseMetadata(project.metadata);
+          const peopleCountFromMeta =
+            typeof meta.people_count === 'number'
+              ? meta.people_count
+              : Array.isArray(meta.people)
+                ? meta.people.length
+                : 0;
+          const assigneesFromTasks = new Set(
+            projectTasks
+              .map(
+                (t: any) =>
+                  safeParseMetadata(t.metadata).assignee_name || t.assigned_to,
+              )
+              .filter(Boolean),
+          ).size;
+          const peopleCount =
+            typeof (project as any).peopleCount === 'number'
+              ? (project as any).peopleCount
+              : peopleCountFromMeta ||
+                assigneesFromTasks ||
+                (Array.isArray(meta.assignees) ? meta.assignees.length : 0);
+          const health = computeHealth(projectTasks);
+          const healthInfo = HEALTH_CONFIG[health];
+          const displayName =
+            ((project as any).title as string) ||
+            formatProjectName(project.name) ||
+            project.name;
+
+          return (
+            <div
+              key={project.id}
+              onClick={() => setActiveProjectId(project.id)}
+              className="flex items-start justify-between py-6 border-b border-pro-border/30 hover:bg-pro-hover cursor-pointer"
+              data-project-id={project.id}
+            >
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-pro-text-main">
+                  {displayName}
+                </h3>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-pro-text-muted">
+                <div>
+                  <span className="font-bold">{taskCount}</span> Tasks{' '}
+                  <span className="font-bold">{peopleCount}</span> People
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 ml-6">
+                <span
+                  className={`text-[10px] font-medium px-2.5 py-1 rounded-lg ${healthInfo.color} ${healthInfo.bg}`}
+                >
+                  {healthInfo.dot} {healthInfo.label}
+                </span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {completedProjects.length > 0 && (
-        <details
-          className="rounded-xl border border-pro-border bg-pro-surface overflow-hidden"
-          open={completedProjects.some(
-            (project) => project.id === selectedProjectId,
-          )}
-        >
-          <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-pro-text-muted">
-            Browse {completedProjects.length} completed project
-            {completedProjects.length === 1 ? '' : 's'}
-          </summary>
-          <div className="border-t border-pro-border/30">
-            {completedProjects.map((project) => (
-              <ProjectHealthCard
-                key={project.id}
-                project={{
-                  ...project,
-                  name: formatProjectName(project.name) || project.name,
-                }}
-                tasks={groupedTasks[project.id] || []}
-                selected={selectedProjectId === project.id}
-                onToggleTask={toggleTask}
-                onTaskAdded={fetchData}
-              />
-            ))}
-          </div>
-        </details>
-      )}
-
-      {/* Ungrouped / Inbox Tasks */}
       {ungroupedTasks.length > 0 && (
         <div className="rounded-xl border border-pro-border bg-pro-surface overflow-hidden">
           <div className="flex items-center gap-3 p-5 border-b border-pro-border/30">
@@ -881,12 +907,13 @@ export const ProjectsExecutionTab: React.FC<{
             </span>
           </div>
           <div className="flex flex-col gap-1.5 p-3">
-            {activeUngroupedTasks.slice(0, 6).map((task) => (
+            {activeUngroupedTasks.slice(0, MAX_INBOX_PREVIEW).map((task) => (
               <TaskRow key={task.id} task={task} onToggle={toggleTask} />
             ))}
-            {activeUngroupedTasks.length > 6 && (
+            {activeUngroupedTasks.length > MAX_INBOX_PREVIEW && (
               <p className="px-5 py-3 text-xs font-semibold text-pro-text-muted">
-                {activeUngroupedTasks.length - 6} more active items in the inbox
+                {activeUngroupedTasks.length - MAX_INBOX_PREVIEW} more active
+                items in the inbox
               </p>
             )}
             {completedUngroupedTasks.length > 0 && (
