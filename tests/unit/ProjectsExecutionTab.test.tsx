@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
+  AT_RISK_THRESHOLD_MS,
+  MAX_INBOX_PREVIEW,
   ProjectHealthCard,
   buildExecutionSummary,
   buildQuickAddActionEntity,
@@ -10,7 +12,9 @@ import {
   getInboxSummary,
   getNextTaskStatusForToggle,
   getProjectCardSummary,
+  isTaskOverdue,
   partitionProjectsForDisplay,
+  safeParseMetadata,
   sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
@@ -526,5 +530,104 @@ describe('sortExecutionTasksForDisplay', () => {
       'active-newer',
       'active-older',
     ]);
+  });
+});
+
+describe('safeParseMetadata', () => {
+  it('parses valid JSON string', () => {
+    expect(safeParseMetadata('{"key": "value"}')).toEqual({ key: 'value' });
+  });
+
+  it('handles already parsed objects', () => {
+    expect(safeParseMetadata({ key: 'value' })).toEqual({ key: 'value' });
+  });
+
+  it('safely falls back to empty object for invalid JSON without throwing', () => {
+    expect(safeParseMetadata('invalid json {')).toEqual({});
+    expect(safeParseMetadata('{ incomplete')).toEqual({});
+    expect(safeParseMetadata(null)).toEqual({});
+    expect(safeParseMetadata(undefined)).toEqual({});
+    expect(safeParseMetadata('')).toEqual({});
+    expect(safeParseMetadata('   ')).toEqual({});
+    expect(safeParseMetadata(123)).toEqual({});
+  });
+});
+
+describe('isTaskOverdue', () => {
+  const now = new Date('2026-07-15T12:00:00.000Z').getTime();
+
+  it('returns true when task status is explicitly overdue', () => {
+    const task = makeEntity({
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(true);
+  });
+
+  it('returns true when task due date is in the past and task is active', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: '2026-07-10T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(true);
+  });
+
+  it('returns false when task due date is in the future', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: '2026-07-20T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+
+  it('returns false when task has no due date and status is not overdue', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: null,
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+
+  it('returns false when task is completed even if due date is in the past', () => {
+    const task = makeEntity({
+      status: 'completed',
+      due_date: '2026-07-10T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+});
+
+describe('Constants', () => {
+  it('exports expected AT_RISK_THRESHOLD_MS and MAX_INBOX_PREVIEW', () => {
+    expect(AT_RISK_THRESHOLD_MS).toBe(2 * 24 * 60 * 60 * 1000);
+    expect(MAX_INBOX_PREVIEW).toBe(6);
+  });
+});
+
+describe('ProjectHealthCard metadata resilience', () => {
+  it('renders gracefully when project and tasks have malformed metadata JSON', () => {
+    const project = makeEntity({
+      id: 'project-malformed',
+      name: 'Resilient Project',
+      metadata: 'invalid-json-{broken',
+    });
+    const task = makeEntity({
+      id: 'task-malformed',
+      name: 'Resilient Task',
+      status: 'active',
+      metadata: '{{{not-json',
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[task]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Resilient Project');
+    expect(markup).toContain('Resilient Task');
   });
 });

@@ -27,6 +27,36 @@ export const buildQuickAddActionEntity = (value: string) => {
   };
 };
 
+// ─── Constants & Helpers ───────────────────────────────────────────
+export const AT_RISK_THRESHOLD_MS = 2 * 24 * 60 * 60 * 1000;
+export const MAX_INBOX_PREVIEW = 6;
+
+export const safeParseMetadata = (metadata: unknown): Record<string, any> => {
+  if (typeof metadata === 'object' && metadata !== null) {
+    return metadata as Record<string, any>;
+  }
+  if (typeof metadata !== 'string' || !metadata.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(metadata);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+export const isTaskOverdue = (
+  task: Entity,
+  now: number = Date.now(),
+): boolean => {
+  if (task.status === 'completed') return false;
+  return (
+    task.status === 'overdue' ||
+    Boolean(task.due_date && new Date(task.due_date).getTime() < now)
+  );
+};
+
 // ─── Health Logic ────────────────────────────────────────────────
 type HealthStatus = 'on_track' | 'at_risk' | 'slipping' | 'complete';
 
@@ -72,11 +102,7 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
     (task) => task.status === 'active' || task.status === 'overdue',
   );
   const completed = tasks.filter((task) => task.status === 'completed');
-  const overdue = active.filter(
-    (task) =>
-      task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < now),
-  );
+  const overdue = active.filter((task) => isTaskOverdue(task, now));
   return {
     active,
     completed,
@@ -90,13 +116,11 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
 };
 
 export const countAtRiskTasks = (tasks: Entity[], now = Date.now()) => {
-  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-
   return tasks.filter((task) => {
     if (task.status !== 'active' || !task.due_date) return false;
 
     const dueAt = new Date(task.due_date).getTime();
-    return dueAt >= now && dueAt - now < twoDaysMs;
+    return dueAt >= now && dueAt - now < AT_RISK_THRESHOLD_MS;
   }).length;
 };
 
@@ -305,22 +329,17 @@ export const buildExecutionSummary = ({
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
-  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
   const activeTasks = tasks.filter(
     (t) => t.status === 'active' || t.status === 'overdue',
   );
 
-  const hasOverdue = activeTasks.some(
-    (t) =>
-      t.status === 'overdue' ||
-      (t.due_date && new Date(t.due_date).getTime() < now),
-  );
+  const hasOverdue = activeTasks.some((t) => isTaskOverdue(t, now));
   if (hasOverdue) return 'slipping';
 
   const hasAtRisk = activeTasks.some(
     (t) =>
       t.due_date &&
-      new Date(t.due_date).getTime() - now < twoDaysMs &&
+      new Date(t.due_date).getTime() - now < AT_RISK_THRESHOLD_MS &&
       new Date(t.due_date).getTime() >= now,
   );
   if (hasAtRisk) return 'at_risk';
@@ -333,12 +352,9 @@ const TaskRow: React.FC<{
   task: Entity;
   onToggle: (task: Entity) => void;
 }> = ({ task, onToggle }) => {
-  const metadata = JSON.parse(task.metadata || '{}');
+  const metadata = safeParseMetadata(task.metadata);
   const isCompleted = task.status === 'completed';
-  const isOverdue =
-    !isCompleted &&
-    (task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < Date.now()));
+  const isOverdue = isTaskOverdue(task);
 
   return (
     <div
@@ -486,7 +502,7 @@ export const ProjectHealthCard: React.FC<{
   const health = computeHealth(tasks);
   const healthInfo = HEALTH_CONFIG[health];
   const completedCount = briefing.completed.length;
-  const metadata = JSON.parse(project.metadata || '{}');
+  const metadata = safeParseMetadata(project.metadata);
   const summary = getProjectCardSummary({
     activeCount: briefing.active.length,
     overdueCount: briefing.overdue.length,
@@ -701,26 +717,20 @@ export const ProjectsExecutionTab: React.FC<{
   const activeUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'active' || task.status === 'overdue',
   );
-  const overdueUngroupedTasks = activeUngroupedTasks.filter(
-    (task) =>
-      task.status === 'overdue' ||
-      (task.due_date && new Date(task.due_date).getTime() < Date.now()),
+  const overdueUngroupedTasks = activeUngroupedTasks.filter((task) =>
+    isTaskOverdue(task),
   );
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
 
   const activeTasks = useMemo(
-    () => allTasks.filter((t) => t.status === 'active' || t.status === 'overdue'),
+    () =>
+      allTasks.filter((t) => t.status === 'active' || t.status === 'overdue'),
     [allTasks],
   );
   const overdueTasks = useMemo(
-    () =>
-      activeTasks.filter(
-        (t) =>
-          t.status === 'overdue' ||
-          (t.due_date && new Date(t.due_date).getTime() < Date.now()),
-      ),
+    () => activeTasks.filter((t) => isTaskOverdue(t)),
     [activeTasks],
   );
   const executionSummary = useMemo(
@@ -858,7 +868,6 @@ export const ProjectsExecutionTab: React.FC<{
         </details>
       )}
 
-      {/* Ungrouped / Inbox Tasks */}
       {ungroupedTasks.length > 0 && (
         <div className="rounded-xl border border-pro-border bg-pro-surface overflow-hidden">
           <div className="flex items-center gap-3 p-5 border-b border-pro-border/30">
@@ -881,12 +890,13 @@ export const ProjectsExecutionTab: React.FC<{
             </span>
           </div>
           <div className="flex flex-col gap-1.5 p-3">
-            {activeUngroupedTasks.slice(0, 6).map((task) => (
+            {activeUngroupedTasks.slice(0, MAX_INBOX_PREVIEW).map((task) => (
               <TaskRow key={task.id} task={task} onToggle={toggleTask} />
             ))}
-            {activeUngroupedTasks.length > 6 && (
+            {activeUngroupedTasks.length > MAX_INBOX_PREVIEW && (
               <p className="px-5 py-3 text-xs font-semibold text-pro-text-muted">
-                {activeUngroupedTasks.length - 6} more active items in the inbox
+                {activeUngroupedTasks.length - MAX_INBOX_PREVIEW} more active
+                items in the inbox
               </p>
             )}
             {completedUngroupedTasks.length > 0 && (
