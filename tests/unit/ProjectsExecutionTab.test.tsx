@@ -1,11 +1,16 @@
+// @vitest-environment happy-dom
+
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   AT_RISK_THRESHOLD_MS,
   MAX_INBOX_PREVIEW,
   ProjectHealthCard,
+  ProjectsExecutionTab,
   buildExecutionSummary,
   buildQuickAddActionEntity,
   getExecutionBriefHeading,
@@ -17,6 +22,21 @@ import {
   safeParseMetadata,
   sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const getEntitiesByTypeMock = vi.hoisted(() => vi.fn());
+const getEntityLinksMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/api/knowledgeGraph')>();
+  return {
+    ...actual,
+    getEntitiesByType: getEntitiesByTypeMock,
+    getEntityLinks: getEntityLinksMock,
+  };
+});
 
 describe('buildQuickAddActionEntity', () => {
   it('creates an explicitly confirmed user commitment', () => {
@@ -629,5 +649,148 @@ describe('ProjectHealthCard metadata resilience', () => {
 
     expect(markup).toContain('Resilient Project');
     expect(markup).toContain('Resilient Task');
+  });
+});
+
+describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it('renders the borderless portfolio list when no project is selected', async () => {
+    const project = makeEntity({
+      id: 'project-1',
+      type: 'project',
+      name: 'Project Orion',
+      metadata: JSON.stringify({ people_count: 3 }),
+    });
+    const task = makeEntity({
+      id: 'task-1',
+      type: 'action_item',
+      name: 'Finalize architecture spec',
+      status: 'active',
+    });
+
+    getEntitiesByTypeMock.mockImplementation(async (type: string) => {
+      if (type === 'project') return [project];
+      if (type === 'action_item') return [task];
+      return [];
+    });
+
+    getEntityLinksMock.mockImplementation(async () => [
+      {
+        id: 'link-1',
+        source_entity_id: 'task-1',
+        target_entity_id: 'project-1',
+        relationship: 'belongs_to',
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<ProjectsExecutionTab selectedProjectId={null} />);
+    });
+
+    // Verify borderless portfolio row rendered with project title, tasks and people count
+    expect(container.textContent).toContain('Project Orion');
+    expect(container.textContent).toContain('Tasks');
+    expect(container.textContent).toContain('People');
+    expect(container.textContent).toContain('1 Tasks');
+    expect(container.textContent).toContain('3 People');
+
+    // Should not render dossier content initially
+    expect(container.textContent).not.toContain('Quick Overview');
+    expect(container.textContent).not.toContain("Pluto's Insights");
+
+    // Clicking the project row navigates to ProjectDossier
+    const projectRow = container.querySelector('[data-project-id="project-1"]');
+    expect(projectRow).not.toBeNull();
+
+    await act(async () => {
+      projectRow?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Now ProjectDossier should be rendered
+    expect(container.textContent).toContain('Quick Overview');
+    expect(container.textContent).toContain('Status Update');
+    expect(container.textContent).toContain("Pluto's Insights");
+
+    // Clicking back returns to the portfolio list
+    const backButton = Array.from(container.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('Back'),
+    );
+    expect(backButton).toBeDefined();
+
+    await act(async () => {
+      backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Returned to portfolio list
+    expect(container.textContent).toContain('Project Orion');
+    expect(container.textContent).toContain('Tasks');
+    expect(container.textContent).not.toContain('Quick Overview');
+  });
+
+  it('renders ProjectDossier directly when selectedProjectId is provided', async () => {
+    const project = makeEntity({
+      id: 'project-2',
+      type: 'project',
+      name: 'Project Nebula',
+    });
+
+    getEntitiesByTypeMock.mockImplementation(async (type: string) => {
+      if (type === 'project') return [project];
+      if (type === 'action_item') return [];
+      return [];
+    });
+
+    getEntityLinksMock.mockImplementation(async () => []);
+
+    await act(async () => {
+      root.render(<ProjectsExecutionTab selectedProjectId="project-2" />);
+    });
+
+    expect(container.textContent).toContain('Quick Overview');
+    expect(container.textContent).toContain('Status Update');
+    expect(container.textContent).toContain("Pluto's Insights");
+  });
+
+  it('syncs activeProjectId when selectedProjectId prop changes', async () => {
+    const project = makeEntity({
+      id: 'project-3',
+      type: 'project',
+      name: 'Project Sol',
+    });
+
+    getEntitiesByTypeMock.mockImplementation(async (type: string) => {
+      if (type === 'project') return [project];
+      if (type === 'action_item') return [];
+      return [];
+    });
+
+    getEntityLinksMock.mockImplementation(async () => []);
+
+    await act(async () => {
+      root.render(<ProjectsExecutionTab selectedProjectId={null} />);
+    });
+
+    expect(container.textContent).not.toContain('Quick Overview');
+
+    await act(async () => {
+      root.render(<ProjectsExecutionTab selectedProjectId="project-3" />);
+    });
+
+    expect(container.textContent).toContain('Quick Overview');
+    expect(container.textContent).toContain("Pluto's Insights");
   });
 });
