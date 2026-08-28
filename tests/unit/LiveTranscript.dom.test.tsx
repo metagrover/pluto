@@ -119,7 +119,6 @@ describe('LiveTranscript reading experience', () => {
   });
 
   it('marks accepted and interim transcript text as overflow-resistant', () => {
-    setReducedMotion(true);
     const root = createRoot(container);
     const longToken = 'supercalifragilistic'.repeat(12);
     act(() =>

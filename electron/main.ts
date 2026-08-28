@@ -288,8 +288,8 @@ app.on('activate', () => {
 });
 
 import type { MeetingAskPlutoRequest } from '../src/types/askPluto';
-import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { describeMeetingAskPlutoRequest } from '../src/utils/askPlutoDiagnostics';
+import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';

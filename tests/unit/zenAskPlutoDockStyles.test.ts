@@ -40,9 +40,7 @@ const applyTokensFor = (rule: Rule) =>
 
 describe('Zen Ask Pluto dock styles', () => {
   it('keeps the notes rail and transcript in the first grid row', () => {
-    const [railRule] = rulesFor(
-      '.recording-workspace-grid > .recording-rail',
-    );
+    const [railRule] = rulesFor('.recording-workspace-grid > .recording-rail');
     const [transcriptRule] = rulesFor(
       '.recording-workspace-grid > .live-transcript',
     );

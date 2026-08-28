@@ -1564,11 +1564,11 @@ export function calculateOllamaContextBudget(
               ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
               : task === 'terminologyReconciliation'
                 ? 2048
-              : task === 'knowledgeDoc' ||
-                  task === 'structuredAnalysis' ||
-                  task === 'summary'
-                ? 4096
-                : 2500;
+                : task === 'knowledgeDoc' ||
+                    task === 'structuredAnalysis' ||
+                    task === 'summary'
+                  ? 4096
+                  : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =

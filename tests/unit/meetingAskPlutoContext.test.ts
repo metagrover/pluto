@@ -329,9 +329,7 @@ describe('meeting-scoped Ask Pluto context', () => {
       if (recallKind === 'fact') {
         expect(prompt).toContain('shortest complete answer');
         expect(prompt).toContain('normally one sentence');
-        expect(prompt).toContain(
-          'Do not begin with evidence-policy narration',
-        );
+        expect(prompt).toContain('Do not begin with evidence-policy narration');
         expect(prompt).toContain(
           'Do not discuss unrelated missing information',
         );
