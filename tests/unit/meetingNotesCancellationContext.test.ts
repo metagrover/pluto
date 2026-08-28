@@ -46,9 +46,19 @@ it('repairs captured audit deletion of cancellation context instead of publishin
   );
 });
 
-it('fails after the one repair if the captured cancellation omission persists', async () => {
+it('records a quality warning after the one repair if the captured cancellation omission persists', async () => {
   const { generate, result } = replay(droppedContextAudit);
-  await expect(result).rejects.toThrow('notes_audit_invalid');
+  const analysis = await result;
+  expect(analysis.quality.fallback_used).toBe(false);
+  expect(analysis.quality.issues).toContain(
+    'notes_guardrail:missing_cancellation_context',
+  );
+  expect(analysis.generation_metadata?.audit_status).toBe(
+    'complete_with_warnings',
+  );
+  expect(JSON.stringify(analysis.all_action_items)).not.toContain(
+    'replace product screenshots',
+  );
   expect(generate).toHaveBeenCalledTimes(3);
   expect(generate.mock.calls[2]![0].prompt).toContain(
     'missing_cancellation_context',

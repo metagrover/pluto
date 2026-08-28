@@ -116,7 +116,7 @@ it.each(['secondary', 'automatic'] as const)(
             terms: [],
             template: 'auto',
             provider: 'ollama',
-            model: null,
+            model: 'gemma4:12b',
             thinking: null,
             seed: null,
             contextTokens: 16_384,

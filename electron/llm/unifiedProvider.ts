@@ -15,7 +15,7 @@ import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import { generateMeetingNotes } from './meetingNotesPipeline';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
-import { NOTES_PROMPT_VERSION } from './meetingNotesTypes';
+import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
@@ -476,7 +476,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private getConfiguredAnalysisModel(): string {
     switch (this.providerType) {
       case 'ollama':
-        return this.settings.ollama_model || OLLAMA_DEFAULT_MODEL;
+        return NOTES_OLLAMA_MODEL;
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
       case 'claude':
@@ -1222,6 +1222,12 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
+    if (
+      task === 'notesWriter' ||
+      task === 'notesAudit' ||
+      task === 'notesMerge'
+    )
+      return NOTES_OLLAMA_MODEL;
     const configuredFastModel = (this.settings.ollama_fast_model || '').trim();
     if (task === 'askPluto' && configuredFastModel) {
       return configuredFastModel;

@@ -35,6 +35,7 @@ export type AuditedNotes = {
   verdicts: ReadonlyMap<string, AuditVerdict>;
   acceptedTerminology: NotesAudit['terminology'];
   terminologyArtifact?: MeetingTerminologyArtifactV1;
+  issues?: string[];
 };
 
 type Block = SupportedText | NotesItem;
@@ -251,7 +252,27 @@ export const parseNotesAudit = (raw: string): NotesAudit => {
       disposition.sources.length === 0 ||
       disposition.sources.some((source) => parseSpan(source) === null),
   );
-  if (invalidChange || invalidVerdict || invalidDisposition) {
+  const invalidTerminology = parsed.terminology.some(
+    (proposal) =>
+      !isRecord(proposal) ||
+      !Array.isArray(proposal.rawForms) ||
+      proposal.rawForms.some((form) => typeof form !== 'string') ||
+      (proposal.preferredTerm !== null &&
+        typeof proposal.preferredTerm !== 'string') ||
+      !Array.isArray(proposal.segmentIndexes) ||
+      proposal.segmentIndexes.some(
+        (index) => !Number.isInteger(index) || index < 0,
+      ) ||
+      !['high', 'medium', 'low'].includes(String(proposal.confidence)) ||
+      !Array.isArray(proposal.signals) ||
+      proposal.signals.some((signal) => typeof signal !== 'string'),
+  );
+  if (
+    invalidChange ||
+    invalidVerdict ||
+    invalidDisposition ||
+    invalidTerminology
+  ) {
     throw new MeetingNotesError('notes_audit_invalid');
   }
   return parsed as unknown as NotesAudit;
@@ -637,19 +658,52 @@ export const applyNotesAudit = ({
   draft,
   audit,
   terminology,
+  qualityPolicy = 'strict',
+  allowedSources,
+  inherited = [],
 }: {
   source: NotesSource;
   draft: NotesDraft;
   audit: NotesAudit;
   terminology?: AuditTerminologyContext;
+  qualityPolicy?: 'strict' | 'advisory';
+  allowedSources?: SourceSpan[];
+  inherited?: NotesItem[];
 }): AuditedNotes => {
+  const issues: string[] = [];
+  const checkSources = (spans: SourceSpan[]) => {
+    validateSources(source, spans);
+    if (
+      allowedSources &&
+      spans.some(
+        (span) =>
+          !allowedSources.some(
+            (allowed) =>
+              allowed.segment === span.segment &&
+              allowed.start === span.start &&
+              allowed.end === span.end,
+          ),
+      )
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+  };
   const next = structuredClone(draft);
+  for (const proposal of allowedSources ? audit.terminology : []) {
+    if (
+      proposal.segmentIndexes.some(
+        (index) =>
+          !source.segments.some((segment) => segment.index === index) ||
+          (allowedSources &&
+            !allowedSources.some((span) => span.segment === index)),
+      )
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+  }
   const initialIds = new Set(blocksForDraft(next).map((block) => block.id));
   if (initialIds.size !== blocksForDraft(next).length) {
     throw new MeetingNotesError('invalid_notes_audit');
   }
-  for (const block of blocksForDraft(next))
-    validateSources(source, block.sources);
+  for (const block of blocksForDraft(next)) checkSources(block.sources);
 
   const verdicts = new Map<string, AuditVerdict>();
   for (const verdict of audit.verdicts) {
@@ -660,7 +714,7 @@ export const applyNotesAudit = ({
     ) {
       throw new MeetingNotesError('invalid_notes_audit');
     }
-    validateSources(source, verdict.sources);
+    checkSources(verdict.sources);
     verdicts.set(verdict.target, structuredClone(verdict));
   }
 
@@ -692,7 +746,7 @@ export const applyNotesAudit = ({
       ) {
         throw new MeetingNotesError('invalid_notes_audit');
       }
-      validateSources(source, value.sources);
+      checkSources(value.sources);
       changedTargets.add(change.target);
       continue;
     }
@@ -709,7 +763,7 @@ export const applyNotesAudit = ({
       ) {
         throw new MeetingNotesError('invalid_notes_audit');
       }
-      validateSources(source, value.sources);
+      checkSources(value.sources);
       section.items.push(value);
       continue;
     }
@@ -726,14 +780,43 @@ export const applyNotesAudit = ({
       ) {
         throw new MeetingNotesError('invalid_notes_audit');
       }
-      validateSources(source, section.title.sources);
-      section.items.forEach((item) => validateSources(source, item.sources));
+      checkSources(section.title.sources);
+      section.items.forEach((item) => checkSources(item.sources));
       next.sections.push(section);
       continue;
     }
     throw new MeetingNotesError('invalid_notes_audit');
   }
 
+  // Complete contract validation precedes semantic removal. In particular, a
+  // rejected heading must not hide a missing child verdict or invalid reference.
+  const finalBlocks = blocksForDraft(next);
+  const knownIds = new Set([
+    ...initialIds,
+    ...finalBlocks.map((block) => block.id),
+    ...inherited.map((item) => item.id),
+  ]);
+  for (const verdict of verdicts.values()) {
+    if (!knownIds.has(verdict.target))
+      throw new MeetingNotesError('invalid_notes_audit');
+  }
+  for (const block of finalBlocks) {
+    if (!verdicts.has(block.id))
+      throw new MeetingNotesError(`notes_audit_missing_verdict:${block.id}`);
+  }
+  const dispositionTargets = new Set<string>();
+  for (const disposition of audit.dispositions) {
+    checkSources(disposition.sources);
+    if (
+      !knownIds.has(disposition.target) ||
+      dispositionTargets.has(disposition.target) ||
+      (disposition.replacementId !== null &&
+        !finalBlocks.some((block) => block.id === disposition.replacementId))
+    ) {
+      throw new MeetingNotesError('invalid_notes_audit');
+    }
+    dispositionTargets.add(disposition.target);
+  }
   for (const section of next.sections) {
     if (
       verdicts.get(section.title.id)?.status === 'unsupported' &&
@@ -767,8 +850,8 @@ export const applyNotesAudit = ({
   }
 
   for (const section of next.sections) {
-    section.items = section.items.map((item) => {
-      if (item.kind !== 'action' && item.kind !== 'decision') return item;
+    section.items = section.items.flatMap((item) => {
+      if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
       const sourceLines = item.sources.map((span) => {
         const segment = source.segments.find(
@@ -788,11 +871,16 @@ export const applyNotesAudit = ({
       );
       // A supported verdict and a failed source check require repair, not a
       // clean publication with the disputed material silently deleted.
-      if (!checked)
+      if (!checked) {
+        if (qualityPolicy === 'advisory') {
+          issues.push(`notes_audit_invalid_commitment:${item.id}`);
+          return [];
+        }
         throw new MeetingNotesError(
           `notes_audit_invalid_commitment:${item.id}:correct_wording_or_kind_from_source`,
         );
-      return { ...item, ...checked };
+      }
+      return [{ ...item, ...checked }];
     });
   }
 
@@ -801,6 +889,7 @@ export const applyNotesAudit = ({
     draft: next,
     verdicts,
     acceptedTerminology: structuredClone(audit.terminology),
+    issues,
     ...(terminology
       ? {
           terminologyArtifact: terminologyArtifactFor(
@@ -966,7 +1055,7 @@ export const projectAuditedNotes = (
       format_pass: true,
       retry_count: 0,
       fallback_used: false,
-      issues: [],
+      issues: [...(audited.issues ?? [])],
     },
     generation_metadata: {
       provider: 'ollama',
@@ -974,10 +1063,12 @@ export const projectAuditedNotes = (
       generation_path: 'single_pass',
       prompt_version: NOTES_PROMPT_VERSION,
       generated_at: new Date().toISOString(),
-      error_categories: [],
+      error_categories: audited.issues?.length ? ['notes_quality_warning'] : [],
       pipeline_version: 'writer-audit-v1',
       mode: 'direct',
-      audit_status: 'complete',
+      audit_status: audited.issues?.length
+        ? 'complete_with_warnings'
+        : 'complete',
       audit_change_count: 0,
       source_provenance: {
         schema_version: 1,

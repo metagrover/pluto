@@ -159,7 +159,7 @@ const withOneRepair = async <T>(
   task: NotesTask,
   prompt: string,
   outputTokens: number,
-  parse: (raw: string) => T,
+  parse: (raw: string, repaired: boolean) => T,
   allowedSpans?: SourceSpan[],
 ): Promise<T> => {
   const failureCode =
@@ -182,8 +182,9 @@ const withOneRepair = async <T>(
     });
   };
   const raw = await run(prompt);
+  assertNotCancelled(input);
   try {
-    return parse(raw);
+    return parse(raw, false);
   } catch (error) {
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
@@ -202,8 +203,9 @@ const withOneRepair = async <T>(
     ].join('\n');
     input.onRepair?.(task);
     const repairedRaw = await run(repairPrompt);
+    assertNotCancelled(input);
     try {
-      return parse(repairedRaw);
+      return parse(repairedRaw, true);
     } catch {
       throw new MeetingNotesError(failureCode);
     }
@@ -404,20 +406,69 @@ const auditDraft = async (
     'notesAudit',
     auditPrompt,
     reviewOutputTokens(input),
-    (raw) => {
+    (raw, repaired) => {
       const validateFinalDraft = (
         finalDraft: NotesDraft,
         audit: NotesAudit,
+        audited?: AuditedNotes,
       ) => {
-        assertSourceGuardrails(input, finalDraft, evidenceSpans, fullSource);
-        validateInheritedItems(
-          inherited.filter(
-            (item): item is NotesItem & { kind: 'action' | 'decision' } =>
-              item.kind === 'action' || item.kind === 'decision',
-          ),
-          commitmentsFor(finalDraft),
-          audit.dispositions,
-        );
+        const advisory =
+          repaired &&
+          input.provider === 'ollama' &&
+          input.reviewProtocol !== 'editor';
+        if (advisory && audited) {
+          const allowed = fullSource ? undefined : evidenceSpans;
+          const issues = findNotesGuardrailIssues(
+            input.source,
+            finalDraft,
+            allowed,
+          );
+          audited.issues ??= [];
+          audited.issues.push(
+            ...issues.map((issue) => `notes_guardrail:${issue.code}`),
+          );
+          // Check each action alone: sharing a source turn with a disputed task
+          // must not remove unrelated, source-supported work from that turn.
+          for (const section of finalDraft.sections) {
+            section.items = section.items.filter((item) => {
+              if (item.kind !== 'action') return true;
+              const unsafe = findNotesGuardrailIssues(
+                input.source,
+                { ...finalDraft, sections: [{ ...section, items: [item] }] },
+                allowed,
+                ['missing_condition', 'conflicting_action'],
+              );
+              audited.issues!.push(
+                ...unsafe.map(
+                  (issue) => `notes_guardrail:${issue.code}:${item.id}`,
+                ),
+              );
+              return unsafe.length === 0;
+            });
+          }
+        } else {
+          assertSourceGuardrails(input, finalDraft, evidenceSpans, fullSource);
+        }
+        try {
+          validateInheritedItems(
+            inherited.filter(
+              (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+                item.kind === 'action' || item.kind === 'decision',
+            ),
+            commitmentsFor(finalDraft),
+            audit.dispositions,
+          );
+        } catch (error) {
+          if (
+            !advisory ||
+            !audited ||
+            !(error instanceof MeetingNotesError) ||
+            error.code !== 'notes_merge_dropped_commitment'
+          )
+            throw error;
+          audited.issues ??= [];
+          audited.issues.push(error.code);
+        }
       };
       if (input.reviewProtocol === 'editor') {
         const result = parseEditedNotes({
@@ -451,6 +502,10 @@ const auditDraft = async (
         source: input.source,
         draft,
         audit,
+        qualityPolicy:
+          repaired && input.provider === 'ollama' ? 'advisory' : 'strict',
+        allowedSources: evidenceSpans,
+        inherited,
         terminology: {
           trustedUserTerms: input.context.trustedUserTerms,
           provider: input.provider,
@@ -458,7 +513,7 @@ const auditDraft = async (
         },
       });
       assertAllowedSources(audited.draft, evidenceSpans);
-      validateFinalDraft(audited.draft, audit);
+      validateFinalDraft(audited.draft, audit, audited);
       return {
         audit,
         audited,
@@ -489,13 +544,15 @@ const metadataFor = (
         ? NOTES_EDITOR_PROMPT_VERSION
         : NOTES_PROMPT_VERSION,
     generated_at: new Date().toISOString(),
-    error_categories: [],
+    error_categories: document.generation_metadata?.error_categories ?? [],
     pipeline_version:
       input.reviewProtocol === 'editor'
         ? 'writer-editor-v1'
         : 'writer-audit-v1',
     mode,
-    audit_status: 'complete',
+    audit_status: document.quality.issues.length
+      ? 'complete_with_warnings'
+      : 'complete',
     audit_change_count: auditChangeCount,
     ...(hierarchy ? { hierarchy } : {}),
   };
@@ -552,6 +609,7 @@ const runHierarchy = async (
   }
 
   const nodes: AuditedNode[] = [];
+  const hierarchyIssues: string[] = [];
   for (const [index, leaf] of leaves.entries()) {
     assertNotCancelled(input);
     let evidenceSpans = uniqueSpans([
@@ -586,6 +644,7 @@ const runHierarchy = async (
       `leaf${index}`,
       leaves.length === 1,
     );
+    hierarchyIssues.push(...(audited.audited.issues ?? []));
     nodes.push({
       changeCount: audited.changeCount,
       draft: audited.draft,
@@ -735,6 +794,7 @@ const runHierarchy = async (
       `merge${generatedNodes}`,
       level.length === 2,
     );
+    hierarchyIssues.push(...(audited.audited.issues ?? []));
     const parent: AuditedNode = {
       changeCount: audited.changeCount,
       draft: audited.draft,
@@ -757,6 +817,7 @@ const runHierarchy = async (
 
   const root = level[0];
   if (!root) throw new MeetingNotesError('notes_context_exhausted');
+  root.audited.issues = [...new Set(hierarchyIssues)];
   const document = projectAuditedNotes(root.audited);
   return metadataFor(input, document, 'hierarchical', root.changeCount, {
     depth: root.depth,

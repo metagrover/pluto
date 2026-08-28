@@ -84,11 +84,11 @@ describe('meeting analysis run coordinator', () => {
             terms: ['Ogletree'],
             template: 'auto',
             provider: 'ollama',
-            model: null,
+            model: 'gemma4:12b',
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v26',
+            promptVersion: 'notes-v28',
           }),
           'utf8',
         )

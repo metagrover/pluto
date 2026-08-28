@@ -335,6 +335,7 @@ export function findNotesGuardrailIssues(
   source: NotesSource,
   draft: NotesDraft,
   allowedSpans?: readonly SourceSpan[],
+  diagnosticCodes?: readonly NotesGuardrailIssue['code'][],
 ): NotesGuardrailIssue[] {
   const entries = sentences(source, allowedSpans);
   const actions = draft.sections
@@ -439,7 +440,9 @@ export function findNotesGuardrailIssues(
     ) {
       code = 'missing_condition';
     }
-    if (code) {
+    // Filter before the bounded diagnostic collection: omission warnings must
+    // not hide a later unsafe action when checking an individual commitment.
+    if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
       const sources = [
         ...candidate.sources,
         ...(cancellation ? [cancellation.span] : []),

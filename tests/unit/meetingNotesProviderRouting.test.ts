@@ -78,14 +78,18 @@ it('forwards cancellation through entity extraction after publication', async ()
   );
 });
 
-it.each(['legacy', 'detected'] as const)(
-  'records the actual %s Ollama model in notes metadata',
+it.each(['legacy', 'detected', 'generic'] as const)(
+  'pins Gemma before %s Ollama settings or discovery',
   async (mode) => {
     const fixture = makeDirectNotesFixture();
     const model = 'installed-alternative:12b';
     const provider = new UnifiedLLMProvider(
       'ollama',
-      mode === 'legacy' ? { llm_model: model } : {},
+      mode === 'legacy'
+        ? { llm_model: model }
+        : mode === 'generic'
+          ? { ollama_model: model }
+          : {},
     );
     const fetcher = vi.fn(async () => ({
       ok: true,
@@ -98,13 +102,12 @@ it.each(['legacy', 'detected'] as const)(
     const result = await provider.generateStructuredAnalysis('', '', 'auto', {
       source: fixture.source,
     });
-    expect(result.generation_metadata?.model).toBe(model);
-    if (mode === 'legacy') expect(fetcher).not.toHaveBeenCalled();
-    else expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result.generation_metadata?.model).toBe('gemma4:12b');
+    expect(fetcher).not.toHaveBeenCalled();
   },
 );
 
-it('pins a fallback model across writer and audit even if later discovery would change', async () => {
+it('pins Gemma across writer and audit without model discovery', async () => {
   const fixture = makeDirectNotesFixture();
   const provider = new UnifiedLLMProvider('ollama', {});
   let tags = 0;
@@ -137,9 +140,9 @@ it('pins a fallback model across writer and audit even if later discovery would 
   const result = await provider.generateStructuredAnalysis('', '', 'auto', {
     source: fixture.source,
   });
-  expect(tags).toBe(1);
-  expect(requests).toEqual(['qwen3.5:9b', 'qwen3.5:9b']);
-  expect(result.generation_metadata?.model).toBe('qwen3.5:9b');
+  expect(tags).toBe(0);
+  expect(requests).toEqual(['gemma4:12b', 'gemma4:12b']);
+  expect(result.generation_metadata?.model).toBe('gemma4:12b');
 });
 
 it.each(['extractInternalSignals', 'extractEntities'] as const)(
@@ -191,7 +194,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v26');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v28');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -356,7 +359,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
     expect(urls.every((url) => url.endsWith('/api/chat'))).toBe(true);
     for (const request of requests)
       expect(request).toMatchObject({
-        model: 'configured-model',
+        model: 'gemma4:12b',
         think: false,
         stream: true,
         options: { seed: 42, num_ctx: 16384 },
@@ -364,7 +367,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
     expect(
       requests.map((r) => (r.options as { num_predict: number }).num_predict),
     ).toEqual([2048, 1536]);
-    expect(result.generation_metadata?.model).toBe('configured-model');
+    expect(result.generation_metadata?.model).toBe('gemma4:12b');
   } finally {
     vi.unstubAllGlobals();
   }
@@ -442,4 +445,51 @@ it('fails a schema-rejecting local transport without retrying as unconstrained J
     provider.generateStructuredAnalysis('', '', 'auto', { source: f.source }),
   ).rejects.toThrow('notes_provider_error');
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('fails missing Gemma normally without discovering, downloading, or falling back', async () => {
+  const f = makeDirectNotesFixture();
+  const fetcher = vi.fn(async () => ({
+    ok: false,
+    status: 404,
+    statusText: 'Not Found',
+    text: async () => JSON.stringify({ error: 'model not found' }),
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'installed-old-model',
+  });
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source: f.source }),
+  ).rejects.toThrow('notes_provider_error');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const [url, init] = fetcher.mock.calls[0] as unknown as [
+    string,
+    { body: string },
+  ];
+  expect(url).toMatch(/\/api\/chat$/);
+  expect(JSON.parse(init.body).model).toBe('gemma4:12b');
+});
+
+it.each([
+  'notesWriter',
+  'notesAudit',
+  'notesMerge',
+  'entities',
+  'askPluto',
+] as const)('isolates the notes model pin for %s', async (task) => {
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'generic-model',
+    ollama_fast_model: 'fast-model',
+  });
+  const resolver = provider as unknown as {
+    resolveOllamaModel(task: string): Promise<string>;
+  };
+  expect(await resolver.resolveOllamaModel(task)).toBe(
+    task.startsWith('notes')
+      ? 'gemma4:12b'
+      : task === 'askPluto'
+        ? 'fast-model'
+        : 'generic-model',
+  );
 });

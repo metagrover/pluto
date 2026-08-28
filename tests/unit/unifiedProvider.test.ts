@@ -188,8 +188,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions the source-first review correction as notes-v26', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v26');
+  it('versions recoverable local notes as notes-v28', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v28');
   });
 
   beforeEach(() => {

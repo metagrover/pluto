@@ -66,7 +66,16 @@ it.each([false, true])(
         }),
       );
     } else {
-      await expect(result).rejects.toThrow('notes_audit_invalid');
+      const analysis = await result;
+      expect(analysis.quality.fallback_used).toBe(false);
+      expect(analysis.quality.issues).toContain(
+        'notes_audit_invalid_commitment:s3:item:1',
+      );
+      expect(analysis.generation_metadata?.audit_status).toBe(
+        'complete_with_warnings',
+      );
+      expect(analysis.all_action_items).toHaveLength(2);
+      expect(analysis.all_decisions).toHaveLength(1);
     }
     expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
       'notesWriter',

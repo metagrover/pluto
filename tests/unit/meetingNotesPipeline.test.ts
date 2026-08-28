@@ -122,7 +122,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
 });
 
 it.each(['faithful', 'inverted'] as const)(
-  'conserves the real supported privacy decision or fails explicitly: %s',
+  'conserves the supported privacy decision or excludes its inversion with a warning: %s',
   async (wording) => {
     const source = makeSyntheticNotesSource([
       {
@@ -230,7 +230,15 @@ it.each(['faithful', 'inverted'] as const)(
         'notesAudit',
       ]);
     } else {
-      await expect(result).rejects.toThrow('notes_audit_invalid');
+      const document = await result;
+      expect(document.all_decisions).toEqual([]);
+      expect(document.all_action_items).toHaveLength(1);
+      expect(document.quality.issues).toContain(
+        'notes_audit_invalid_commitment:s0:item:1',
+      );
+      expect(document.generation_metadata?.audit_status).toBe(
+        'complete_with_warnings',
+      );
       expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
         'notesWriter',
         'notesAudit',
@@ -434,7 +442,7 @@ it.each(['audit', 'editor'] as const)(
 );
 
 it.each(['audit', 'editor'] as const)(
-  'fails safely after a second invalid %s review without a third attempt',
+  'bounds the second %s review, recovering only local audit quality omissions',
   async (reviewProtocol) => {
     const fixture = makeDirectNotesFixture();
     const empty = { meetingType: 'general', overview: null, sections: [] };
@@ -448,17 +456,27 @@ it.each(['audit', 'editor'] as const)(
       .mockResolvedValue(
         JSON.stringify(reviewProtocol === 'editor' ? empty : badAudit),
       );
-    await expect(
-      generateMeetingNotes({
-        reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
-        source: fixture.source,
-        context: makeNotesContext(),
-        generate,
-        provider: 'ollama',
-        model: 'test',
-        contextTokens: 16384,
-      }),
-    ).rejects.toThrow('notes_audit_invalid');
+    const result = generateMeetingNotes({
+      reviewProtocol: reviewProtocol === 'editor' ? 'editor' : undefined,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+    });
+    if (reviewProtocol === 'editor')
+      await expect(result).rejects.toThrow('notes_audit_invalid');
+    else {
+      const document = await result;
+      expect(document.all_action_items).toEqual([]);
+      expect(document.quality.issues).toContain(
+        'notes_guardrail:missing_action',
+      );
+      expect(document.generation_metadata?.audit_status).toBe(
+        'complete_with_warnings',
+      );
+    }
     expect(generate).toHaveBeenCalledTimes(3);
   },
 );

@@ -52,6 +52,7 @@ export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
 export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
 
 export type AnalysisErrorCategory =
+  | 'notes_quality_warning'
   | 'invalid_json'
   | 'repair_succeeded'
   | 'repair_failed'
@@ -144,7 +145,7 @@ export interface AnalysisGenerationMetadata {
   };
   pipeline_version?: 'writer-audit-v1' | 'writer-editor-v1';
   mode?: 'direct' | 'hierarchical';
-  audit_status?: 'complete';
+  audit_status?: 'complete' | 'complete_with_warnings';
   audit_change_count?: number;
   source_provenance?: {
     schema_version: 1;

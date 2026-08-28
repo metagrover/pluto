@@ -48,6 +48,27 @@ function fixture(...turns: string[]) {
 }
 
 describe('source-grounded notes guardrails', () => {
+  it('keeps the default diagnostic cap while selected unsafe kinds bypass unrelated omission diagnostics', () => {
+    const f = fixture(
+      ...Array.from({ length: 33 }, () => 'I will review the budget.'),
+      'I will send the outline after legal approves.',
+    );
+    const draft = f.draft(
+      f.item('Send the outline after approval', 'action', [f.spans[33]!]),
+    );
+    const defaults = findNotesGuardrailIssues(f.source, draft);
+    expect(defaults).toHaveLength(32);
+    expect(defaults.every((issue) => issue.code === 'missing_action')).toBe(
+      true,
+    );
+    expect(
+      findNotesGuardrailIssues(f.source, draft, undefined, [
+        'missing_condition',
+        'conflicting_action',
+      ]),
+    ).toEqual([{ code: 'missing_condition', sources: [f.spans[33]] }]);
+  });
+
   it.each([0, 1])(
     'covers an exact repeated promise with one action citing occurrence %s',
     (occurrence) => {

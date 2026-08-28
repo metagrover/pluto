@@ -4,7 +4,10 @@ import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import { NotesStageCache } from './llm/meetingNotesStageCache';
-import { NOTES_PROMPT_VERSION } from './llm/meetingNotesTypes';
+import {
+  NOTES_OLLAMA_MODEL,
+  NOTES_PROMPT_VERSION,
+} from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 
 type MeetingRecord = {
@@ -216,9 +219,7 @@ const configuredModel = (settings: SettingsRecord): string | null => {
   if (provider === 'openai') return stringSetting(settings.openai_model);
   if (provider === 'claude') return stringSetting(settings.claude_model);
   if (provider === 'gemini') return stringSetting(settings.gemini_model);
-  return (
-    stringSetting(settings.ollama_model) ?? stringSetting(settings.llm_model)
-  );
+  return NOTES_OLLAMA_MODEL;
 };
 
 const stringSetting = (value: unknown): string | null =>
