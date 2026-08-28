@@ -2,11 +2,13 @@ import type React from 'react';
 
 interface ProjectDossierProps {
   projectId: string;
+  projectName?: string;
   onBack: () => void;
 }
 
 export const ProjectDossier: React.FC<ProjectDossierProps> = ({
-  projectId,
+  projectId: _projectId,
+  projectName,
   onBack,
 }) => {
   return (
@@ -21,7 +23,7 @@ export const ProjectDossier: React.FC<ProjectDossierProps> = ({
           ← Back
         </button>
         <h2 className="text-2xl font-semibold text-pro-text-main">
-          Project {projectId}
+          {projectName || 'Loading project...'}
         </h2>
 
         <section>
@@ -36,7 +38,7 @@ export const ProjectDossier: React.FC<ProjectDossierProps> = ({
       </div>
 
       {/* Right Sidebar */}
-      <div className="w-80 border-l border-pro-border-subtle pl-8 space-y-8">
+      <div className="w-80 border-l border-pro-border/30 pl-8 space-y-8">
         <section>
           <h3 className="text-sm font-semibold uppercase tracking-wider text-pro-text-muted">
             Pluto's Insights

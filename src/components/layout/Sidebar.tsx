@@ -26,7 +26,6 @@ type ActiveTab =
   | 'hub'
   | 'people'
   | 'projects'
-  | 'wiki'
   | 'meetings'
   | 'chat'
   | 'settings';
