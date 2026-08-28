@@ -199,7 +199,7 @@ public actor StreamingEouAsrManager {
     // shift (samples) and the number of valid encoder output frames.
 
     // EOU Detection
-    /// Whether End-of-Utterance was detected in the last chunk processed
+    /// Whether EOU is confirmed for the current utterance, until new speech is decoded.
     public private(set) var eouDetected: Bool = false
     /// Optional callback invoked when EOU is detected
     private var eouCallback: EouCallback?
@@ -573,6 +573,12 @@ public actor StreamingEouAsrManager {
         let decodeResult = try rnntDecoder.decodeWithEOU(
             encoderOutput: encoded, timeOffset: processedChunks, skipFrames: 0,
             validOutLen: chunkSize.validOutputLen)
+        consumeDecodeResult(decodeResult, tokenizer: tokenizer)
+    }
+
+    /// Applies one decoder chunk without changing encoder or decoder state.
+    /// Keeping this separate from inference makes conversation timing and EOU lifecycle testable.
+    func consumeDecodeResult(_ decodeResult: DecodeResult, tokenizer: Tokenizer?) {
         accumulatedTokenIds.append(contentsOf: decodeResult.tokenIds)
 
         if let tokenizer, !decodeResult.tokenIds.isEmpty {
@@ -613,6 +619,11 @@ public actor StreamingEouAsrManager {
 
         // Handle EOU detection with debouncing
         // EOU requires sustained silence for eouDebounceMs before triggering
+        // Only new tokens re-arm EOU. Blank-only chunks can omit the model's EOU
+        // prediction during continued silence and must not create another boundary.
+        if !decodeResult.tokenIds.isEmpty {
+            eouDetected = false
+        }
         if decodeResult.eouDetected {
             // If new tokens were produced, speech is ongoing - reset debounce timer
             if !decodeResult.tokenIds.isEmpty {

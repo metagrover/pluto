@@ -15,8 +15,10 @@ because they are not required to build, test, attribute, or maintain the Swift p
 Modified upstream files:
 
 - `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/SlidingWindowAsrManager.swift`
+- `Sources/FluidAudio/ASR/Parakeet/Streaming/EOU/StreamingEouAsrManager.swift`
 - `Sources/FluidAudio/Shared/AppLogger.swift`
 - `Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/SlidingWindowAsrManagerTests.swift`
+- `Tests/FluidAudioTests/ASR/Parakeet/Streaming/StreamingEouAsrManagerTimestampTests.swift`
 
 Added files:
 
@@ -28,3 +30,10 @@ detailed deterministic finish reporting, finite failure reasons, ingestion-mode 
 generation-fenced finish/cancel/reset quiescence, and a thread-safe process-wide logging gate
 with cancelled-recognizer tail suppression. Logging defaults to disabled process-wide. Transcript
 text and vocabulary replacement values were removed from the sliding-window logger calls.
+
+For Pluto issue #670, streaming EOU detection re-arms when new speech tokens arrive,
+allowing each sustained-silence boundary to emit a callback during a continuous meeting.
+Blank-only chunks do not re-arm an already confirmed boundary. Decoder/encoder state,
+cumulative transcript tokens, and conversation-relative timestamps remain intact.
+The decoder-result ingestion path is separated from CoreML inference so model-free tests
+exercise repeated boundaries, debouncing, silence deduplication, and cumulative timing.
