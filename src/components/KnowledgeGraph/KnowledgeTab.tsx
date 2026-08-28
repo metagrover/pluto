@@ -12,15 +12,7 @@ import { FocusSheet } from './FocusSheet.tsx';
 import { MainStage } from './MainStage.tsx';
 import { knowledgeDocsNeedPolling } from './knowledgeDocument';
 
-interface KnowledgeTabProps {
-  onOpenMeeting?: (meetingId: string) => void;
-  onOpenProjectsTab?: () => void;
-}
-
-export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
-  onOpenMeeting: _onOpenMeeting,
-  onOpenProjectsTab: _onOpenProjectsTab,
-}) => {
+export const KnowledgeTab: React.FC = () => {
   const { clearSelection } = useKnowledgeStore();
   const queryClient = useQueryClient();
 
