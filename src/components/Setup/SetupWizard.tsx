@@ -19,6 +19,7 @@ import { ModelDownloadProgress } from '../ModelDownloadProgress';
 
 interface SetupWizardProps {
   onComplete: () => void;
+  forceSetup?: boolean;
 }
 
 const requirementTone = (ready: boolean, blocked = false) =>
@@ -28,7 +29,10 @@ const requirementTone = (ready: boolean, blocked = false) =>
       ? 'text-rose-700'
       : 'text-[oklch(0.53_0.12_255)]';
 
-export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
+export const SetupWizard = ({
+  onComplete,
+  forceSetup = false,
+}: SetupWizardProps) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -105,15 +109,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
         window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
       ]);
-      if (setupComplete === 'true') {
+      if (setupComplete === 'true' && !forceSetup) {
         onComplete();
         return;
       }
-      setStep(savedStep === '2' ? 2 : 1);
+      setStep(forceSetup || savedStep === '2' ? 2 : 1);
       setHydrated(true);
     };
     void load();
-  }, [onComplete]);
+  }, [forceSetup, onComplete]);
 
   useEffect(() => {
     if (!hydrated || step !== 2) return;

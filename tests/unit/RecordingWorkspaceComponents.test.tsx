@@ -172,6 +172,45 @@ describe('recording workspace components', () => {
     expect(html).not.toContain('Expand note');
   });
 
+  it('renders Ask Pluto in Zen View with live meeting context', () => {
+    const html = renderToStaticMarkup(
+      <ZenMode
+        isProcessing={false}
+        onEndMeeting={() => {}}
+        onBackHome={() => {}}
+        meetingTitle="Launch review"
+        setMeetingTitle={() => {}}
+        meetingParticipants={['Avery']}
+        setMeetingParticipants={() => {}}
+        participantInput=""
+        setParticipantInput={() => {}}
+        currentNotes="Remember to follow up on pricing."
+        setCurrentNotes={() => {}}
+        liveTranscript={[
+          {
+            id: 'segment-1',
+            speaker: 'Me',
+            text: 'We decided to launch on Friday.',
+            timestampMs: 4_000,
+            confirmed: true,
+          },
+        ]}
+        interimText="Riley will draft the announcement"
+        captureHealth={{
+          microphone: 'healthy',
+          systemAudio: 'healthy',
+          captureDurability: 'healthy',
+        }}
+        liveTranscriptIntegrity="healthy"
+        recordingStartedAtMs={Date.parse('2026-08-18T10:00:00.000Z')}
+      />,
+    );
+
+    expect(html).toContain('Ask Pluto');
+    expect(html).toContain('Ask about this meeting');
+    expect(html).toContain('Launch review');
+  });
+
   it('renders transcript entries as a continuous conversation', () => {
     const html = renderToStaticMarkup(
       <LiveTranscript

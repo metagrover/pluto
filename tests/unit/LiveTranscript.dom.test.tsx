@@ -118,6 +118,33 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('marks accepted and interim transcript text as overflow-resistant', () => {
+    setReducedMotion(true);
+    const root = createRoot(container);
+    const longToken = 'supercalifragilistic'.repeat(12);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[
+            {
+              ...liveSegment,
+              text: longToken,
+            },
+          ]}
+          interimText={longToken}
+        />,
+      ),
+    );
+
+    const transcriptText = container.querySelector('.transcript-turn p');
+    expect(transcriptText?.textContent).toContain(longToken);
+    expect(container.querySelector('.transcript-interim')?.className).toContain(
+      'transcript-interim',
+    );
+
+    act(() => root.unmount());
+  });
+
   it('renders consecutive same-speaker segments as one stable reading turn', () => {
     const root = createRoot(container);
     act(() => root.render(<LiveTranscript segments={[]} interimText="" />));

@@ -77,6 +77,7 @@ import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel'
 
 // Types
 import type { Meeting } from './types';
+import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
 import {
   isGrantedStatus,
   resolveMicrophoneStatus,
@@ -89,6 +90,7 @@ const meetingPreviewEnabled =
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
+  const [setupRecoveryRequested, setSetupRecoveryRequested] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
@@ -99,6 +101,10 @@ function App() {
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
+  const [meetingAskPlutoConversation, setMeetingAskPlutoConversation] =
+    useState<MeetingAskPlutoConversationMessage[]>([]);
+  const [meetingAskPlutoMinimized, setMeetingAskPlutoMinimized] =
+    useState(false);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isStartingRecording, setIsStartingRecording] = useState(false);
@@ -572,6 +578,7 @@ function App() {
       setMeetingTitle('');
       setMeetingParticipants([]);
       setParticipantInput('');
+      setMeetingAskPlutoConversation([]);
       setSelectedMeetingId(null);
     }
   };
@@ -820,7 +827,10 @@ function App() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    const handleReadinessFailed = () => setSetupNeeded(true);
+    const handleReadinessFailed = () => {
+      setSetupRecoveryRequested(true);
+      setSetupNeeded(true);
+    };
     window.addEventListener(
       'RECORDING_READINESS_FAILED' as any,
       handleReadinessFailed,
@@ -844,7 +854,15 @@ function App() {
       </div>
     );
   if (setupNeeded)
-    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
+    return (
+      <SetupWizard
+        forceSetup={setupRecoveryRequested}
+        onComplete={() => {
+          setSetupRecoveryRequested(false);
+          setSetupNeeded(false);
+        }}
+      />
+    );
 
   const workspace = (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
@@ -961,6 +979,10 @@ function App() {
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
+          askPlutoConversation={meetingAskPlutoConversation}
+          setAskPlutoConversation={setMeetingAskPlutoConversation}
+          askPlutoMinimized={meetingAskPlutoMinimized}
+          setAskPlutoMinimized={setMeetingAskPlutoMinimized}
         />
       ) : (
         <main

@@ -1,5 +1,8 @@
+import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
+import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
 import { RecordingCaptureBar } from './RecordingCaptureBar';
 import { RecordingMeetingRail } from './RecordingMeetingRail';
 import {
@@ -29,6 +32,12 @@ interface ZenModeProps {
   captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
+  askPlutoConversation?: MeetingAskPlutoConversationMessage[];
+  setAskPlutoConversation?: React.Dispatch<
+    React.SetStateAction<MeetingAskPlutoConversationMessage[]>
+  >;
+  askPlutoMinimized?: boolean;
+  setAskPlutoMinimized?: (isMinimized: boolean) => void;
 }
 
 export const ZenMode = ({
@@ -49,6 +58,10 @@ export const ZenMode = ({
   captureHealth,
   liveTranscriptIntegrity,
   recordingStartedAtMs,
+  askPlutoConversation,
+  setAskPlutoConversation,
+  askPlutoMinimized,
+  setAskPlutoMinimized,
 }: ZenModeProps) => {
   const [nowMs, setNowMs] = useState(Date.now());
   useEffect(() => {
@@ -120,6 +133,19 @@ export const ZenMode = ({
           integrity={liveTranscriptIntegrity}
         />
       </div>
+      <MeetingAskPlutoDock
+        conversation={askPlutoConversation}
+        onConversationChange={setAskPlutoConversation}
+        isMinimized={askPlutoMinimized}
+        onMinimizedChange={setAskPlutoMinimized}
+        liveContext={{
+          title: meetingTitle,
+          participants: meetingParticipants,
+          notes: currentNotes,
+          transcript: liveTranscript,
+          interimText,
+        }}
+      />
     </main>
   );
 };

@@ -287,7 +287,9 @@ app.on('activate', () => {
   }
 });
 
+import type { MeetingAskPlutoRequest } from '../src/types/askPluto';
 import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
+import { describeMeetingAskPlutoRequest } from '../src/utils/askPlutoDiagnostics';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -326,6 +328,17 @@ import {
   resolveCurrentMeeting,
   resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
+import {
+  buildLiveMeetingAskPlutoContext,
+  buildLiveMeetingFallbackResponse,
+  buildMeetingAskPlutoContext,
+  buildMeetingAskPlutoPrompt,
+  buildMeetingAskPlutoProviderUnavailableResponse,
+  buildMeetingAskPlutoResponseFromAnswer,
+  buildUnavailableMeetingAskPlutoResponse,
+  normalizeMeetingAskPlutoTurns,
+} from './intelligence/meetingAskPluto';
+import { routeMeetingAskPlutoAssistance } from './intelligence/meetingAskPlutoAssistance';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
@@ -3751,6 +3764,149 @@ app.whenReady().then(async () => {
     );
     return { cancelled: true };
   });
+
+  ipcMain.handle(
+    'intelligence:meeting-chat',
+    async (_event, request: MeetingAskPlutoRequest) => {
+      const startTime = Date.now();
+      const query = request?.query?.trim() || '';
+      const requestId = request?.requestId || `ask-pluto-${randomUUID()}`;
+
+      console.info('[Pluto][Ask Pluto][main] received', {
+        ...describeMeetingAskPlutoRequest({ ...request, requestId }),
+        receivedAt: new Date(startTime).toISOString(),
+      });
+
+      try {
+        if (!query || !request?.scope) {
+          return {
+            status: 'unavailable',
+            answer: '',
+            scope: {
+              type: 'meeting' as const,
+              meetingId: '',
+            },
+            trustStatus: 'needs_review',
+            claims: [],
+            citations: [],
+          };
+        }
+
+        const context =
+          request.scope.type === 'live_meeting'
+            ? buildLiveMeetingAskPlutoContext(request.scope)
+            : (() => {
+                const meetingId = request.scope.meetingId.trim();
+                const meeting = db.getMeeting(meetingId) as
+                  | db.PersistedMeeting
+                  | undefined;
+                if (!meeting) {
+                  throw new Error(`Meeting ${meetingId} was not found`);
+                }
+
+                const entities = db.getMeetingEntities(meetingId);
+                const attentionItems = db.listAttentionItems({
+                  meetingId,
+                  status: ['active', 'snoozed'],
+                  limit: 6,
+                });
+                return buildMeetingAskPlutoContext({
+                  meeting,
+                  entities,
+                  attentionItems,
+                });
+              })();
+
+        console.info('[Pluto][Ask Pluto][main] context-ready', {
+          requestId,
+          status: context.status,
+          trustStatus: context.trustStatus,
+          evidenceItems: context.evidenceItems.length,
+          elapsedMs: Date.now() - startTime,
+        });
+
+        if (context.status === 'unavailable') {
+          return buildUnavailableMeetingAskPlutoResponse(
+            {
+              id: context.scope.meetingId,
+              title: context.scope.title || 'Meeting',
+            },
+            query,
+          );
+        }
+
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        const turns = normalizeMeetingAskPlutoTurns(request.turns);
+        const assistanceRoute = routeMeetingAskPlutoAssistance(query);
+        const prompt = buildMeetingAskPlutoPrompt({
+          query,
+          context,
+          turns,
+          assistanceRoute,
+        });
+        console.info('[Pluto][Ask Pluto][main] provider-request', {
+          requestId,
+          assistanceRoute,
+          provider: settings.llm_provider,
+          configuredModel:
+            settings.llm_model ||
+            (settings.llm_provider === 'ollama'
+              ? settings.ollama_model
+              : settings.llm_provider === 'gemini'
+                ? settings.gemini_model
+                : settings.llm_provider === 'openai'
+                  ? settings.openai_model
+                  : settings.claude_model) ||
+            'default',
+          promptChars: prompt.length,
+          elapsedMs: Date.now() - startTime,
+        });
+        let answerRaw = '';
+        try {
+          answerRaw = await provider.answerAskPluto(prompt, {
+            live: context.scope.type === 'live_meeting',
+          });
+        } catch (providerError) {
+          console.warn(
+            `[Pluto][Ask Pluto][main] provider unavailable (${requestId}) after ${Date.now() - startTime}ms:`,
+            providerError,
+          );
+          const liveFallback = buildLiveMeetingFallbackResponse({ context });
+          if (liveFallback) {
+            console.info('[Pluto][Ask Pluto][main] live-snapshot-fallback', {
+              requestId,
+              citationCount: liveFallback.citations.length,
+              elapsedMs: Date.now() - startTime,
+            });
+            return liveFallback;
+          }
+          return buildMeetingAskPlutoProviderUnavailableResponse({
+            scope: context.scope,
+            query,
+            error: providerError,
+          });
+        }
+
+        console.info('[Pluto][Ask Pluto][main] provider-response', {
+          requestId,
+          answerChars: answerRaw.length,
+          elapsedMs: Date.now() - startTime,
+        });
+
+        return buildMeetingAskPlutoResponseFromAnswer({
+          answerRaw,
+          context,
+        });
+      } catch (e) {
+        console.error(
+          `[Pluto][Ask Pluto][main] failed (${requestId}) after ${Date.now() - startTime}ms:`,
+          e,
+        );
+        throw e;
+      }
+    },
+  );
 
   ipcMain.handle(
     'intelligence:query:debug',

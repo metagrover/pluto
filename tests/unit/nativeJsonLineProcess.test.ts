@@ -344,4 +344,27 @@ describe('NativeJsonLineProcess live events', () => {
     await expect(request).rejects.toThrow('parakeet_protocol_invalid');
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
   });
+
+  it('reports non-sensitive child process error diagnostics', async () => {
+    const child = new FakeChild();
+    const diagnostics: string[] = [];
+    const process = new NativeJsonLineProcess({
+      executablePath: '/app/parakeet-runtime',
+      args: [],
+      spawn: () => child,
+      requestTimeoutMs: 1_000,
+      diagnostic: (code) => diagnostics.push(code),
+    });
+    const request = process.request({ schemaVersion: 1, id: 'open-1' });
+    const error = new Error('spawn /private/path/parakeet-runtime EACCES') as
+      | Error
+      | (Error & { code: string });
+    (error as Error & { code: string }).code = 'EACCES';
+
+    child.emit('error', error);
+
+    await expect(request).rejects.toThrow('parakeet_process_error');
+    expect(diagnostics).toContain('parakeet_process_error:EACCES');
+    expect(diagnostics.join(' ')).not.toContain('/private/path');
+  });
 });

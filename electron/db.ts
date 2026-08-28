@@ -24,6 +24,14 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
+import type {
+  MeetingContextAttributeValue,
+  MeetingContextEvent,
+  MeetingContextEventInput,
+  MeetingContextEvidenceReference,
+  MeetingContextRollingStateV1,
+  MeetingContextSnapshot,
+} from '../src/types/meetingContext';
 import {
   getCommitmentState,
   mergeCommitmentReview,
@@ -110,6 +118,30 @@ type WorkingMemorySnapshotRow = {
   payload_json: string;
   generated_at: string;
   updated_at: string;
+};
+
+type MeetingContextEventRow = {
+  id: string;
+  meeting_id: string;
+  event_key: string;
+  kind: string;
+  summary: string;
+  evidence_json: string;
+  attributes_json: string | null;
+  supersedes_event_id: string | null;
+  observed_at_ms: number;
+  created_at: string;
+};
+
+type MeetingContextSnapshotRow = {
+  id: string;
+  meeting_id: string;
+  revision: number;
+  state_json: string;
+  last_segment_id: string | null;
+  last_segment_timestamp_ms: number | null;
+  generated_at: string;
+  created_at: string;
 };
 
 export interface PersistedMeeting {
@@ -375,6 +407,36 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_scope ON working_memory_snapshots(scope_type, scope_key);
       CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_generated_at ON working_memory_snapshots(generated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS meeting_context_events (
+        id TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        attributes_json TEXT,
+        supersedes_event_id TEXT,
+        observed_at_ms INTEGER NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE(meeting_id, event_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meeting_context_events_timeline
+        ON meeting_context_events(meeting_id, observed_at_ms, created_at);
+
+      CREATE TABLE IF NOT EXISTS meeting_context_snapshots (
+        id TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        state_json TEXT NOT NULL,
+        last_segment_id TEXT,
+        last_segment_timestamp_ms INTEGER,
+        generated_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE(meeting_id, revision)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meeting_context_snapshots_revision
+        ON meeting_context_snapshots(meeting_id, revision DESC);
 
       -- Relationships between entities
       CREATE TABLE IF NOT EXISTS entity_links (
@@ -1473,6 +1535,187 @@ export const upsertWorkingMemorySnapshot = (input: {
   return saved;
 };
 
+const requireMeetingContextText = (value: string, label: string): string => {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`Meeting context ${label} is required`);
+  return normalized;
+};
+
+const normalizeMeetingContextEvidence = (
+  evidence: MeetingContextEvidenceReference[],
+): MeetingContextEvidenceReference[] => {
+  const normalized = evidence
+    .map((reference) => ({
+      segmentId: reference.segmentId.trim(),
+      timestampMs: reference.timestampMs,
+      ...(reference.quote?.trim() ? { quote: reference.quote.trim() } : {}),
+    }))
+    .filter(
+      (reference) =>
+        reference.segmentId.length > 0 &&
+        Number.isFinite(reference.timestampMs) &&
+        reference.timestampMs >= 0,
+    );
+  if (normalized.length === 0) {
+    throw new Error('Meeting context event evidence is required');
+  }
+  return normalized;
+};
+
+export const getMeetingContextEventByKey = (
+  meetingId: string,
+  eventKey: string,
+): MeetingContextEvent | undefined => {
+  const normalizedMeetingId = meetingId.trim();
+  const normalizedEventKey = eventKey.trim();
+  if (!normalizedMeetingId || !normalizedEventKey) return undefined;
+  const row = db
+    .prepare(
+      `SELECT * FROM meeting_context_events
+       WHERE meeting_id = ? AND event_key = ?`,
+    )
+    .get(normalizedMeetingId, normalizedEventKey) as
+    | MeetingContextEventRow
+    | undefined;
+  return row ? mapMeetingContextEventRow(row) : undefined;
+};
+
+export const appendMeetingContextEvent = (
+  input: MeetingContextEventInput,
+): MeetingContextEvent => {
+  const meetingId = requireMeetingContextText(input.meetingId, 'meeting ID');
+  const eventKey = requireMeetingContextText(input.eventKey, 'event key');
+  const summary = requireMeetingContextText(input.summary, 'event summary');
+  if (!Number.isFinite(input.observedAtMs) || input.observedAtMs < 0) {
+    throw new Error('Meeting context observed timestamp must be non-negative');
+  }
+  const evidence = normalizeMeetingContextEvidence(input.evidence);
+  const attributes = input.attributes ?? {};
+  const supersedesEventId = input.supersedesEventId?.trim() || null;
+  const createdAt = new Date().toISOString();
+
+  db.prepare(`
+    INSERT OR IGNORE INTO meeting_context_events (
+      id, meeting_id, event_key, kind, summary, evidence_json, attributes_json,
+      supersedes_event_id, observed_at_ms, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    randomUUID(),
+    meetingId,
+    eventKey,
+    input.kind,
+    summary,
+    JSON.stringify(evidence),
+    JSON.stringify(attributes),
+    supersedesEventId,
+    input.observedAtMs,
+    createdAt,
+  );
+
+  const saved = getMeetingContextEventByKey(meetingId, eventKey);
+  if (!saved) {
+    throw new Error(`Failed to append meeting context event ${eventKey}`);
+  }
+  return saved;
+};
+
+export const listMeetingContextEvents = (
+  meetingId: string,
+): MeetingContextEvent[] => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return [];
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_context_events
+       WHERE meeting_id = ?
+       ORDER BY observed_at_ms ASC, created_at ASC`,
+    )
+    .all(normalizedMeetingId) as MeetingContextEventRow[];
+  return rows.map(mapMeetingContextEventRow);
+};
+
+export const getLatestMeetingContextSnapshot = (
+  meetingId: string,
+): MeetingContextSnapshot | undefined => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return undefined;
+  const row = db
+    .prepare(
+      `SELECT * FROM meeting_context_snapshots
+       WHERE meeting_id = ?
+       ORDER BY revision DESC
+       LIMIT 1`,
+    )
+    .get(normalizedMeetingId) as MeetingContextSnapshotRow | undefined;
+  return row ? mapMeetingContextSnapshotRow(row) : undefined;
+};
+
+export const listMeetingContextSnapshots = (
+  meetingId: string,
+  limit = 20,
+): MeetingContextSnapshot[] => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return [];
+  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_context_snapshots
+       WHERE meeting_id = ?
+       ORDER BY revision DESC
+       LIMIT ?`,
+    )
+    .all(normalizedMeetingId, boundedLimit) as MeetingContextSnapshotRow[];
+  return rows.map(mapMeetingContextSnapshotRow);
+};
+
+export const saveMeetingContextSnapshot = (
+  state: MeetingContextRollingStateV1,
+  options?: { generatedAt?: string },
+): MeetingContextSnapshot => {
+  const save = db.transaction(() => {
+    if (state.schemaVersion !== 1) {
+      throw new Error('Unsupported meeting context snapshot schema');
+    }
+    const meetingId = requireMeetingContextText(state.meetingId, 'meeting ID');
+    const normalizedState: MeetingContextRollingStateV1 = {
+      ...state,
+      meetingId,
+    };
+    const stateJson = JSON.stringify(normalizedState);
+    const latest = getLatestMeetingContextSnapshot(meetingId);
+    if (latest && JSON.stringify(latest.state) === stateJson) return latest;
+
+    const revision = (latest?.revision ?? 0) + 1;
+    const generatedAt = options?.generatedAt ?? new Date().toISOString();
+    const createdAt = generatedAt;
+    db.prepare(`
+      INSERT INTO meeting_context_snapshots (
+        id, meeting_id, revision, state_json, last_segment_id,
+        last_segment_timestamp_ms, generated_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      meetingId,
+      revision,
+      stateJson,
+      normalizedState.updatedThrough.segmentId,
+      normalizedState.updatedThrough.timestampMs,
+      generatedAt,
+      createdAt,
+    );
+
+    const saved = getLatestMeetingContextSnapshot(meetingId);
+    if (!saved || saved.revision !== revision) {
+      throw new Error(
+        `Failed to save meeting context snapshot ${meetingId}:${revision}`,
+      );
+    }
+    return saved;
+  });
+
+  return save();
+};
+
 /**
  * Meeting Management
  */
@@ -1598,10 +1841,48 @@ export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
 const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(meeting.id);
+  const preserved = db
+    .prepare(
+      `SELECT audio_path, transcript_json, transcript_status,
+              transcript_integrity_json, system_audio_path, mixed_audio_path,
+              transcript_validated_at
+         FROM meetings
+        WHERE id = ?`,
+    )
+    .get(id) as
+    | Pick<
+        PersistedMeeting,
+        | 'audio_path'
+        | 'transcript_json'
+        | 'transcript_status'
+        | 'transcript_integrity_json'
+        | 'system_audio_path'
+        | 'mixed_audio_path'
+        | 'transcript_validated_at'
+      >
+    | undefined;
+  const hasOwn = (field: keyof PersistedMeeting) =>
+    Object.prototype.hasOwnProperty.call(meeting, field);
+  const meetingForSave = preserved ? { ...meeting } : meeting;
+  if (preserved) {
+    for (const field of [
+      'audio_path',
+      'transcript_json',
+      'transcript_status',
+      'transcript_integrity_json',
+      'system_audio_path',
+      'mixed_audio_path',
+      'transcript_validated_at',
+    ] as const) {
+      if (!hasOwn(field)) {
+        meetingForSave[field] = preserved[field] as never;
+      }
+    }
+  }
 
   let payloadLifecycleStatus: TranscriptLifecycleStatus | null = null;
   try {
-    const payload = JSON.parse(meeting.transcript_json || '{}') as {
+    const payload = JSON.parse(meetingForSave.transcript_json || '{}') as {
       lifecycleStatus?: unknown;
     };
     payloadLifecycleStatus =
@@ -1611,13 +1892,15 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   } catch {
     payloadLifecycleStatus = null;
   }
-  const trustRecord = parseIntegrityRecord(meeting.transcript_integrity_json);
+  const trustRecord = parseIntegrityRecord(
+    meetingForSave.transcript_integrity_json,
+  );
   if (trustRecord.schemaVersion === 2) {
     const parsedTrust = parseTranscriptTrustEnvelope(
-      meeting.transcript_integrity_json,
+      meetingForSave.transcript_integrity_json,
       {
-        transcriptStatus: meeting.transcript_status,
-        transcriptValidatedAt: meeting.transcript_validated_at,
+        transcriptStatus: meetingForSave.transcript_status,
+        transcriptValidatedAt: meetingForSave.transcript_validated_at,
         payloadLifecycleStatus,
       },
     );
@@ -1647,73 +1930,73 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 
   const result = stmt.run(
     id,
-    meeting.title,
-    meeting.meeting_type || 'General',
-    meeting.started_at,
-    meeting.ended_at,
-    meeting.duration_seconds || 0,
-    meeting.audio_path,
-    meeting.transcript_json,
-    meeting.user_notes || '',
-    meeting.enhanced_notes || '',
-    meeting.analysis_json || null,
-    meeting.analysis_schema_version || null,
-    typeof meeting.analysis_format_pass === 'boolean'
-      ? meeting.analysis_format_pass
+    meetingForSave.title,
+    meetingForSave.meeting_type || 'General',
+    meetingForSave.started_at,
+    meetingForSave.ended_at,
+    meetingForSave.duration_seconds || 0,
+    meetingForSave.audio_path,
+    meetingForSave.transcript_json,
+    meetingForSave.user_notes || '',
+    meetingForSave.enhanced_notes || '',
+    meetingForSave.analysis_json || null,
+    meetingForSave.analysis_schema_version || null,
+    typeof meetingForSave.analysis_format_pass === 'boolean'
+      ? meetingForSave.analysis_format_pass
         ? 1
         : 0
       : null,
-    Number.isFinite(meeting.analysis_retry_count)
-      ? meeting.analysis_retry_count
+    Number.isFinite(meetingForSave.analysis_retry_count)
+      ? meetingForSave.analysis_retry_count
       : 0,
-    typeof meeting.analysis_fallback_used === 'boolean'
-      ? meeting.analysis_fallback_used
+    typeof meetingForSave.analysis_fallback_used === 'boolean'
+      ? meetingForSave.analysis_fallback_used
         ? 1
         : 0
       : 0,
-    meeting.analysis_provider ||
+    meetingForSave.analysis_provider ||
       (typeof metadataRecord.provider === 'string'
         ? metadataRecord.provider
         : null),
-    meeting.analysis_model ||
+    meetingForSave.analysis_model ||
       (typeof metadataRecord.model === 'string' ? metadataRecord.model : null),
-    meeting.analysis_generation_path ||
+    meetingForSave.analysis_generation_path ||
       (typeof metadataRecord.generation_path === 'string'
         ? metadataRecord.generation_path
         : null),
-    meeting.analysis_prompt_version ||
+    meetingForSave.analysis_prompt_version ||
       (typeof metadataRecord.prompt_version === 'string'
         ? metadataRecord.prompt_version
         : null),
-    meeting.analysis_generated_at ||
+    meetingForSave.analysis_generated_at ||
       (typeof metadataRecord.generated_at === 'string'
         ? metadataRecord.generated_at
         : null),
-    meeting.analysis_error_categories_json ||
+    meetingForSave.analysis_error_categories_json ||
       (Array.isArray(metadataRecord.error_categories)
         ? JSON.stringify(metadataRecord.error_categories)
         : null),
-    meeting.value_signals_json || null,
-    meeting.follow_up_drafts_json || null,
-    meeting.folder_id,
-    meeting.is_favorite ? 1 : 0,
-    meeting.end_reason || 'manual',
-    meeting.user_edits_json || null,
-    meeting.analysis_edit_conflicts_json || null,
-    meeting.transcript_status || 'provisional',
-    meeting.transcript_integrity_json || null,
-    meeting.system_audio_path || null,
-    meeting.mixed_audio_path || null,
-    meeting.transcript_validated_at || null,
-    meeting.finalization_status || 'finalized',
-    meeting.finalization_error_category || null,
-    meeting.downstream_processing_json || null,
-    meeting.capture_journal_generation || null,
-    meeting.mid_json || null,
-    meeting.created_at,
+    meetingForSave.value_signals_json || null,
+    meetingForSave.follow_up_drafts_json || null,
+    meetingForSave.folder_id,
+    meetingForSave.is_favorite ? 1 : 0,
+    meetingForSave.end_reason || 'manual',
+    meetingForSave.user_edits_json || null,
+    meetingForSave.analysis_edit_conflicts_json || null,
+    meetingForSave.transcript_status || 'provisional',
+    meetingForSave.transcript_integrity_json || null,
+    meetingForSave.system_audio_path || null,
+    meetingForSave.mixed_audio_path || null,
+    meetingForSave.transcript_validated_at || null,
+    meetingForSave.finalization_status || 'finalized',
+    meetingForSave.finalization_error_category || null,
+    meetingForSave.downstream_processing_json || null,
+    meetingForSave.capture_journal_generation || null,
+    meetingForSave.mid_json || null,
+    meetingForSave.created_at,
   );
 
-  refreshMeetingFts(meeting);
+  refreshMeetingFts(meetingForSave);
 
   console.log(`[DB] Save successful for meeting: ${id}`);
   return result;
@@ -3649,6 +3932,56 @@ const mapWorkingMemorySnapshotRow = (
   payload: parseWorkingMemoryPayload(row.payload_json),
   generated_at: row.generated_at,
   updated_at: row.updated_at,
+});
+
+const parseMeetingContextJson = <T>(value: string, label: string): T => {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new Error(`Invalid meeting context ${label}`);
+  }
+};
+
+const mapMeetingContextEventRow = (
+  row: MeetingContextEventRow,
+): MeetingContextEvent => ({
+  id: row.id,
+  meetingId: row.meeting_id,
+  eventKey: row.event_key,
+  kind: row.kind as MeetingContextEvent['kind'],
+  summary: row.summary,
+  evidence: parseMeetingContextJson<MeetingContextEvidenceReference[]>(
+    row.evidence_json,
+    'event evidence',
+  ),
+  attributes: row.attributes_json
+    ? parseMeetingContextJson<Record<string, MeetingContextAttributeValue>>(
+        row.attributes_json,
+        'event attributes',
+      )
+    : {},
+  supersedesEventId: row.supersedes_event_id,
+  observedAtMs: Number(row.observed_at_ms),
+  createdAt: row.created_at,
+});
+
+const mapMeetingContextSnapshotRow = (
+  row: MeetingContextSnapshotRow,
+): MeetingContextSnapshot => ({
+  id: row.id,
+  meetingId: row.meeting_id,
+  revision: Number(row.revision),
+  state: parseMeetingContextJson<MeetingContextRollingStateV1>(
+    row.state_json,
+    'snapshot state',
+  ),
+  lastSegmentId: row.last_segment_id,
+  lastSegmentTimestampMs:
+    row.last_segment_timestamp_ms === null
+      ? null
+      : Number(row.last_segment_timestamp_ms),
+  generatedAt: row.generated_at,
+  createdAt: row.created_at,
 });
 
 export interface KnowledgeGraphNode {

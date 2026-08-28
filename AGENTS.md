@@ -10,6 +10,15 @@ Intelligent meeting assistant and "second brain" application.
 - **Test:** `pnpm run test`
 - **Lint:** `pnpm run lint`
 
+### Commit Working Hours
+
+- Monday through Friday from 09:00 through 17:00 in the `Europe/Berlin`
+  timezone, agents may create commits as part of the normal development
+  workflow.
+- Outside that window, agents must not create a commit unless the user
+  explicitly requests it in the current conversation.
+- Editing, testing, and staging may continue outside the commit window.
+
 ## 🛠 Project Structure
 
 - `src/` - React/Electron source code

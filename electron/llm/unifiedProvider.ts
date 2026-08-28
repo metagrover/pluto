@@ -42,6 +42,7 @@ import type {
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
+const OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_GENERATION_IDLE_TIMEOUT_MS = 60_000;
 const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
@@ -290,6 +291,7 @@ type LLMTask =
   | 'knowledgeDoc'
   | 'askPluto'
   | 'askPlutoDeep'
+  | 'askPlutoLive'
   | 'queryClassification';
 
 const isAbortError = (error: unknown): boolean =>
@@ -308,16 +310,18 @@ const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
     ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-    : task === 'structuredAnalysis' ||
-        task === 'notesWriter' ||
-        task === 'notesAudit' ||
-        task === 'notesMerge' ||
-        task === 'analysisEditorial' ||
-        task === 'topicSegmentation' ||
-        task === 'terminologyReconciliation' ||
-        task === 'topicAnalysis'
-      ? OLLAMA_ANALYSIS_TIMEOUT_MS
-      : OLLAMA_TIMEOUT_MS;
+    : task === 'askPlutoLive'
+      ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
+      : task === 'structuredAnalysis' ||
+          task === 'notesWriter' ||
+          task === 'notesAudit' ||
+          task === 'notesMerge' ||
+          task === 'analysisEditorial' ||
+          task === 'topicSegmentation' ||
+          task === 'terminologyReconciliation' ||
+          task === 'topicAnalysis'
+        ? OLLAMA_ANALYSIS_TIMEOUT_MS
+        : OLLAMA_TIMEOUT_MS;
 
 const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
   task === 'notesWriter' ||
@@ -672,13 +676,18 @@ export class UnifiedLLMProvider implements LLMProvider {
     options: {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
+      live?: boolean;
       onStart?: () => void;
       onToken?: (delta: string) => void;
     } = {},
   ): Promise<string> {
     return this.generateText({
       prompt,
-      task: options.mode === 'deep' ? 'askPlutoDeep' : 'askPluto',
+      task: options.live
+        ? 'askPlutoLive'
+        : options.mode === 'deep'
+          ? 'askPlutoDeep'
+          : 'askPluto',
       signal: options.signal,
       onStart: options.onStart,
       onToken: options.onToken,
@@ -798,7 +807,9 @@ export class UnifiedLLMProvider implements LLMProvider {
             },
             options.task === 'knowledgeDoc'
               ? 0
-              : options.task === 'askPluto' || options.task === 'askPlutoDeep'
+              : options.task === 'askPluto' ||
+                  options.task === 'askPlutoDeep' ||
+                  options.task === 'askPlutoLive'
                 ? 20
                 : 10,
             {
@@ -1023,6 +1034,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       const options = requestBody.options as Record<string, unknown>;
       options.top_k = 40;
       options.top_p = 1;
+    }
+    if (task === 'askPlutoLive') {
+      requestBody.think = false;
     }
     if (Number.isSafeInteger(this.settings.ollama_seed)) {
       (requestBody.options as Record<string, unknown>).seed =
@@ -1411,7 +1425,11 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'speaker') {
       return 'You are a helpful assistant that extracts speaker information.';
     }
-    if (task === 'askPluto' || task === 'askPlutoDeep') {
+    if (
+      task === 'askPluto' ||
+      task === 'askPlutoDeep' ||
+      task === 'askPlutoLive'
+    ) {
       return 'You are an intelligent meeting assistant.';
     }
     if (task === 'queryClassification') {
@@ -1437,7 +1455,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') return 0.2;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
-    if (task === 'askPluto' || task === 'askPlutoDeep') return 0.2;
+    if (
+      task === 'askPluto' ||
+      task === 'askPlutoDeep' ||
+      task === 'askPlutoLive'
+    )
+      return 0.2;
     if (task === 'queryClassification') return 0.1;
     return 0.3;
   }
@@ -1458,6 +1481,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'knowledgeDoc') return 4096;
     if (task === 'askPluto') return 1024;
     if (task === 'askPlutoDeep') return 2048;
+    if (task === 'askPlutoLive') return 768;
     if (task === 'queryClassification') return 128;
     return 50;
   }
@@ -1530,14 +1554,16 @@ export function calculateOllamaContextBudget(
   const outputTokenBudget =
     task === 'queryClassification'
       ? 128
-      : task === 'askPluto'
-        ? 192
-        : task === 'askPlutoDeep'
-          ? 512
-          : task === 'analysisEditorial'
-            ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-            : task === 'terminologyReconciliation'
-              ? 2048
+      : task === 'askPlutoLive'
+        ? 768
+        : task === 'askPluto'
+          ? 192
+          : task === 'askPlutoDeep'
+            ? 512
+            : task === 'analysisEditorial'
+              ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
+              : task === 'terminologyReconciliation'
+                ? 2048
               : task === 'knowledgeDoc' ||
                   task === 'structuredAnalysis' ||
                   task === 'summary'
@@ -1546,19 +1572,23 @@ export function calculateOllamaContextBudget(
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
-    task === 'askPluto'
+    task === 'askPlutoLive'
       ? 8192
-      : task === 'askPlutoDeep'
-        ? 12288
-        : task === 'knowledgeDoc' || task === 'analysisEditorial'
-          ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
-          : 16384;
-  const minimumContext =
-    task === 'askPluto' || task === 'askPlutoDeep'
-      ? 4096
-      : task === 'title'
+      : task === 'askPluto'
         ? 8192
-        : 4096;
+        : task === 'askPlutoDeep'
+          ? 12288
+          : task === 'knowledgeDoc' || task === 'analysisEditorial'
+            ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
+            : 16384;
+  const minimumContext =
+    task === 'askPlutoLive'
+      ? 8192
+      : task === 'askPluto' || task === 'askPlutoDeep'
+        ? 4096
+        : task === 'title'
+          ? 8192
+          : 4096;
   const num_ctx = Math.min(
     maxCap,
     Math.max(minimumContext, Math.ceil(totalNeeded / 1024) * 1024),
