@@ -20,7 +20,7 @@ export const AutoEndToast = ({
   const detail = appName ? `${appName} — ${label}` : label;
 
   return (
-    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[2000] animate-in slide-in-from-bottom-4">
+    <div className="fixed top-8 right-8 z-[2000] animate-in slide-in-from-top-4">
       <div className="flex items-center gap-4 px-6 py-4 bg-white rounded-md border border-pro-border shadow-sm">
         <div className="w-10 h-10 rounded-md bg-pro-accent/10 flex items-center justify-center shrink-0">
           <svg
