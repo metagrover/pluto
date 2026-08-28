@@ -132,20 +132,20 @@ export const ZenMode = ({
           interimText={model.interimText}
           integrity={liveTranscriptIntegrity}
         />
+        <MeetingAskPlutoDock
+          conversation={askPlutoConversation}
+          onConversationChange={setAskPlutoConversation}
+          isMinimized={askPlutoMinimized}
+          onMinimizedChange={setAskPlutoMinimized}
+          liveContext={{
+            title: meetingTitle,
+            participants: meetingParticipants,
+            notes: currentNotes,
+            transcript: liveTranscript,
+            interimText,
+          }}
+        />
       </div>
-      <MeetingAskPlutoDock
-        conversation={askPlutoConversation}
-        onConversationChange={setAskPlutoConversation}
-        isMinimized={askPlutoMinimized}
-        onMinimizedChange={setAskPlutoMinimized}
-        liveContext={{
-          title: meetingTitle,
-          participants: meetingParticipants,
-          notes: currentNotes,
-          transcript: liveTranscript,
-          interimText,
-        }}
-      />
     </main>
   );
 };

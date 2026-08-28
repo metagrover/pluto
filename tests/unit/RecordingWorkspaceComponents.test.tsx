@@ -211,6 +211,42 @@ describe('recording workspace components', () => {
     expect(html).toContain('Launch review');
   });
 
+  it('places Ask Pluto in the live transcript grid cell', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToStaticMarkup(
+      <ZenMode
+        isStarting={false}
+        isProcessing={false}
+        onEndMeeting={() => {}}
+        onBackHome={() => {}}
+        meetingTitle="Launch review"
+        setMeetingTitle={() => {}}
+        meetingParticipants={['Avery']}
+        setMeetingParticipants={() => {}}
+        participantInput=""
+        setParticipantInput={() => {}}
+        currentNotes="Remember to follow up on pricing."
+        setCurrentNotes={() => {}}
+        liveTranscript={[]}
+        captureHealth={{
+          microphone: 'healthy',
+          systemAudio: 'healthy',
+          captureDurability: 'healthy',
+        }}
+        liveTranscriptIntegrity="healthy"
+        recordingStartedAtMs={null}
+      />,
+    );
+
+    const grid = container.querySelector('.recording-workspace-grid');
+    const transcript = grid?.querySelector(':scope > [data-live-transcript]');
+    const dock = grid?.querySelector(':scope > [aria-label="Ask Pluto"]');
+
+    expect(transcript).not.toBeNull();
+    expect(dock).not.toBeNull();
+    expect(dock?.previousElementSibling).toBe(transcript);
+  });
+
   it('renders transcript entries as a continuous conversation', () => {
     const html = renderToStaticMarkup(
       <LiveTranscript

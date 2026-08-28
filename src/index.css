@@ -1087,6 +1087,40 @@
   .recording-workspace-grid {
     @apply grid min-h-0 flex-1 grid-cols-[minmax(340px,0.82fr)_minmax(460px,1.18fr)];
   }
+  .recording-workspace-grid > .recording-rail {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .recording-workspace-grid > .live-transcript {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .recording-workspace-grid > .meeting-ask-pluto-dock {
+    @apply relative z-30 min-w-0 max-w-none self-end justify-self-stretch border-pro-border bg-pro-surface p-2 backdrop-blur-none;
+    grid-column: 2;
+    grid-row: 1;
+    inset: auto;
+    width: auto;
+    margin: 20px;
+    box-shadow: 0 8px 24px hsl(var(--pro-text-main) / 0.1);
+  }
+  .recording-workspace-grid
+    > .meeting-ask-pluto-dock
+    .meeting-ask-pluto-dock__header {
+    @apply px-2 py-1 text-xs font-medium normal-case tracking-normal text-pro-text-muted;
+  }
+  .recording-workspace-grid
+    > .meeting-ask-pluto-dock
+    .meeting-ask-pluto-dock__composer {
+    @apply border-pro-border bg-pro-bg shadow-none focus-within:border-pro-accent/55 focus-within:ring-2 focus-within:ring-pro-accent/15;
+    box-shadow: none;
+  }
+  .recording-workspace-grid
+    > .meeting-ask-pluto-dock
+    .meeting-ask-pluto-dock__composer
+    button {
+    @apply hover:scale-100;
+  }
   .live-transcript {
     @apply relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-pro-bg;
   }
@@ -1255,6 +1289,14 @@
   @media (max-width: 760px) {
     .recording-workspace-grid {
       @apply grid-cols-1;
+    }
+    .recording-workspace-grid > .meeting-ask-pluto-dock {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .recording-workspace-grid > .recording-rail {
+      grid-column: 1;
+      grid-row: 1;
     }
     .recording-rail {
       @apply block border-r-0;
