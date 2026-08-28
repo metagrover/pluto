@@ -379,7 +379,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     input: GenerateMeetingNotesInput,
   ): Promise<PublishedMeetingNotes> => {
     const meetingId = String(input.meetingId);
-    const meeting = dependencies.db.getMeeting(meetingId);
+    let meeting = dependencies.db.getMeeting(meetingId);
     if (!meeting) throw new Error('meeting_not_found');
     if (!isEligibleMeetingSource(meeting)) {
       throw new Error('meeting_notes_source_ineligible');
@@ -393,34 +393,36 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     } catch {
       throw new Error('meeting_notes_source_invalid');
     }
-    const revisions =
+    let revisions =
       dependencies.db.getMeetingAnalysisPublicationRevisions(meeting);
     if (!revisions) throw new Error('meeting_notes_source_ineligible');
 
     const settings = await dependencies.getSettings();
     const provider = await dependencies.getProvider(settings);
+    // All paths, including an automatic retry of secondary work, must pair
+    // the current document with its run after asynchronous initialization.
+    meeting = dependencies.db.getMeeting(meetingId);
+    if (!meeting) throw new Error('meeting_not_found');
+    if (!isEligibleMeetingSource(meeting))
+      throw new Error('meeting_notes_source_ineligible');
+    if (!meeting.transcript_json)
+      throw new Error('meeting_notes_source_missing');
+    try {
+      source = createNotesSource(meeting.transcript_json);
+    } catch {
+      throw new Error('meeting_notes_source_invalid');
+    }
+    revisions = dependencies.db.getMeetingAnalysisPublicationRevisions(meeting);
+    if (!revisions) throw new Error('meeting_notes_source_ineligible');
     if (input.reason === 'secondary') {
-      // Provider initialization can yield while another run publishes. Read the
-      // document and run together so secondary work never inherits an old body.
-      const publishedMeeting = dependencies.db.getMeeting(meetingId);
-      if (!publishedMeeting) throw new Error('meeting_not_found');
-      const publishedRevisions =
-        dependencies.db.getMeetingAnalysisPublicationRevisions(
-          publishedMeeting,
-        );
-      if (!isEligibleMeetingSource(publishedMeeting) || !publishedRevisions)
-        throw new Error('meeting_notes_source_ineligible');
       const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
-      if (
-        persisted?.notes_status !== 'published' ||
-        !publishedMeeting.analysis_json
-      )
+      if (persisted?.notes_status !== 'published' || !meeting.analysis_json)
         throw new Error('meeting_notes_not_published');
       const identity = {
         meetingId,
         runId: persisted.run_id,
         inputRevision: persisted.input_revision,
-        ...publishedRevisions,
+        ...revisions,
       };
       if (
         !dependencies.db.isMeetingAnalysisRunCurrent({
@@ -435,11 +437,9 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           {
             ...identity,
             transcript: buildAnalysisTranscriptFromJson(
-              publishedMeeting.transcript_json,
+              meeting.transcript_json,
             ),
-            analysis: JSON.parse(
-              publishedMeeting.analysis_json,
-            ) as AnalysisDocumentV3,
+            analysis: JSON.parse(meeting.analysis_json) as AnalysisDocumentV3,
             provider,
             signal: controller.signal,
             canCommit: () =>

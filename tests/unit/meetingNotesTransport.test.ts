@@ -61,6 +61,33 @@ it('passes cancellation to Gemini transport and bounds/rejects its truncated out
 
 afterEach(() => vi.unstubAllGlobals());
 
+it.each([
+  ['PRIVATE_MARKER input too long', 'notes_input_overflow'],
+  ['PRIVATE_MARKER model missing', 'notes_provider_error'],
+])(
+  'classifies Electron HTTP errors without leaking their bodies: %s',
+  async (body, code) => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const stream = vi
+      .spyOn(provider as never, 'ollamaStream')
+      .mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        errorBody: JSON.stringify({ error: body }),
+      });
+    try {
+      await expect(
+        (provider as unknown as Transport).generateText(request),
+      ).rejects.toThrow(new RegExp(`^${code}$`));
+    } finally {
+      stream.mockRestore();
+    }
+  },
+);
+
 it.each([true, false])(
   'uses Ollama chat for notes and returns only final content (thinking=%s)',
   async (thinking) => {

@@ -105,6 +105,43 @@ it('splits a long Unicode turn on code-point boundaries when one turn exceeds ca
   expect(leaves.every((leaf) => leaf.primaryText.length > 0)).toBe(true);
 });
 
+it.each([
+  { text: 'abc😀!', capacity: 4 },
+  { text: '😀😀😀!', capacity: 2 },
+  { text: 'a😀b🚀c👍!', capacity: 3 },
+  { text: 'abc😀!🚀👍', capacity: 4 },
+])(
+  'terminates and preserves Unicode source $text at capacity $capacity',
+  ({ text, capacity }) => {
+    const source = createNotesSource(JSON.stringify({ segments: [{ text }] }));
+    let budgetChecks = 0;
+    const leaves = partitionNotesSource(source, (packet) => {
+      // A synchronous loop cannot be stopped by Vitest's test timeout.
+      if (++budgetChecks > 1000)
+        throw new Error('Source partitioning did not terminate');
+      return packet.length <= capacity;
+    });
+
+    let covered = 0;
+    const fragments = leaves.flatMap((leaf) =>
+      leaf.primarySpans.map((span) => {
+        expect(span.segment).toBe(0);
+        expect(span.start).toBe(covered);
+        expect(span.end).toBeGreaterThan(span.start);
+        covered = span.end;
+        const fragment = text.slice(span.start, span.end);
+        expect(fragment).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);
+        return fragment;
+      }),
+    );
+    expect(fragments.join('')).toBe(text);
+    expect(covered).toBe(text.length);
+    expect(leaves.every((leaf) => leaf.sourceText.length <= capacity)).toBe(
+      true,
+    );
+  },
+);
+
 it('fails explicitly when fixed prompt content cannot fit any source window', () => {
   const source = createNotesSource(
     JSON.stringify({ segments: [{ speaker: 'Me', text: 'Keep this.' }] }),

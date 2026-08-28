@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import {
   applyNotesAudit,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
+import { NOTES_PROMPT_VERSION } from '../../electron/llm/meetingNotesTypes';
 import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
@@ -89,80 +91,103 @@ it('retries failed secondary work for a published revision without regenerating 
   expect(onUpdated).toHaveBeenCalled();
 });
 
-it('pairs secondary retry input with the current publication after provider initialization', async () => {
-  const fixture = makeDirectNotesFixture();
-  const analysis = projectAuditedNotes(applyNotesAudit(fixture));
-  let meeting = {
-    id: 'retry-race',
-    transcript_json: JSON.stringify(fixture.source.segments),
-    transcript_status: 'validated',
-    analysis_json: JSON.stringify({ ...analysis, overview: 'Earlier notes.' }),
-  };
-  let run = {
-    run_id: 'earlier-run',
-    input_revision: 'same-input',
-    notes_status: 'published',
-    secondary_status: 'failed',
-  };
-  const revisions = {
-    sourceRevision: fixture.source.revision,
-    eligibilityRevision: 'proof',
-    userNotesHash: 'notes',
-  };
-  const db = {
-    // SQLite reads return snapshots, not a mutable reference to the stored row.
-    getMeeting: () => ({ ...meeting }),
-    getMeetingAnalysisPublicationRevisions: () => revisions,
-    getMeetingAnalysisRun: () => ({ ...run }),
-    updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
-    isMeetingAnalysisRunCurrent: (input: {
-      runId: string;
-      inputRevision: string;
-    }) =>
-      input.runId === run.run_id &&
-      input.inputRevision === run.input_revision &&
-      run.notes_status === 'published',
-  } as unknown as MeetingAnalysisRunCoordinatorDb;
-  let finishInitialization = () => {};
-  const initialization = new Promise<void>((resolve) => {
-    finishInitialization = resolve;
-  });
-  const generateStructuredAnalysis = vi.fn();
-  const runSecondary = vi.fn().mockResolvedValue(undefined);
-  const coordinator = createMeetingAnalysisRunCoordinator({
-    db,
-    getSettings: async () => {
-      await initialization;
-      return {};
-    },
-    getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
-    runSecondary,
-  });
-  const retry = coordinator.generateAndPublishMeetingNotes({
-    meetingId: meeting.id,
-    requestId: 'retry-request',
-    reason: 'secondary',
-    template: 'auto',
-  });
+it.each(['secondary', 'automatic'] as const)(
+  'pairs %s retry input with the current publication after provider initialization',
+  async (reason) => {
+    const fixture = makeDirectNotesFixture();
+    const analysis = projectAuditedNotes(applyNotesAudit(fixture));
+    let meeting = {
+      id: 'retry-race',
+      transcript_json: JSON.stringify(fixture.source.segments),
+      transcript_status: 'validated',
+      analysis_json: JSON.stringify({
+        ...analysis,
+        overview: 'Earlier notes.',
+      }),
+    };
+    let run = {
+      run_id: 'earlier-run',
+      input_revision: createHash('sha256')
+        .update(
+          JSON.stringify({
+            sourceRevision: fixture.source.revision,
+            eligibilityRevision: 'proof',
+            userNotesHash: 'notes',
+            terms: [],
+            template: 'auto',
+            provider: 'ollama',
+            model: null,
+            thinking: null,
+            seed: null,
+            contextTokens: 16_384,
+            promptVersion: NOTES_PROMPT_VERSION,
+          }),
+        )
+        .digest('hex'),
+      notes_status: 'published',
+      secondary_status: 'failed',
+    };
+    const revisions = {
+      sourceRevision: fixture.source.revision,
+      eligibilityRevision: 'proof',
+      userNotesHash: 'notes',
+    };
+    const db = {
+      // SQLite reads return snapshots, not a mutable reference to the stored row.
+      getMeeting: () => ({ ...meeting }),
+      getAllEntities: () => [],
+      getMeetingAnalysisPublicationRevisions: () => revisions,
+      getMeetingAnalysisRun: () => ({ ...run }),
+      updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+      isMeetingAnalysisRunCurrent: (input: {
+        runId: string;
+        inputRevision: string;
+      }) =>
+        input.runId === run.run_id &&
+        input.inputRevision === run.input_revision &&
+        run.notes_status === 'published',
+    } as unknown as MeetingAnalysisRunCoordinatorDb;
+    let finishInitialization = () => {};
+    const initialization = new Promise<void>((resolve) => {
+      finishInitialization = resolve;
+    });
+    const generateStructuredAnalysis = vi.fn();
+    const runSecondary = vi.fn().mockResolvedValue(undefined);
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db,
+      getSettings: async () => {
+        await initialization;
+        return {};
+      },
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      runSecondary,
+    });
+    const retry = coordinator.generateAndPublishMeetingNotes({
+      meetingId: meeting.id,
+      requestId: 'retry-request',
+      reason,
+      template: 'auto',
+    });
 
-  meeting = {
-    ...meeting,
-    analysis_json: JSON.stringify({ ...analysis, overview: 'Latest notes.' }),
-  };
-  run = { ...run, run_id: 'latest-run' };
-  finishInitialization();
+    meeting = {
+      ...meeting,
+      analysis_json: JSON.stringify({ ...analysis, overview: 'Latest notes.' }),
+    };
+    run = { ...run, run_id: 'latest-run' };
+    finishInitialization();
 
-  await expect(retry).resolves.toMatchObject({ runId: 'latest-run' });
-  await vi.waitFor(() => expect(runSecondary).toHaveBeenCalledTimes(1));
-  expect(runSecondary).toHaveBeenCalledWith(
-    expect.objectContaining({
-      runId: 'latest-run',
-      analysis: expect.objectContaining({ overview: 'Latest notes.' }),
-    }),
-  );
-  const secondaryInput = runSecondary.mock.calls[0][0];
-  expect(secondaryInput.canCommit()).toBe(true);
-  run = { ...run, run_id: 'replacement-run' };
-  expect(secondaryInput.canCommit()).toBe(false);
-  expect(generateStructuredAnalysis).not.toHaveBeenCalled();
-});
+    await expect(retry).resolves.toMatchObject({ runId: 'latest-run' });
+    await vi.waitFor(() => expect(runSecondary).toHaveBeenCalledTimes(1));
+    expect(runSecondary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'latest-run',
+        analysis: expect.objectContaining({ overview: 'Latest notes.' }),
+      }),
+    );
+    const secondaryInput = runSecondary.mock.calls[0][0];
+    expect(secondaryInput.canCommit()).toBe(true);
+    run = { ...run, run_id: 'replacement-run' };
+    expect(secondaryInput.canCommit()).toBe(false);
+    expect(generateStructuredAnalysis).not.toHaveBeenCalled();
+  },
+);

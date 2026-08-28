@@ -1,0 +1,1537 @@
+{
+  "checkpoint": "PR 676 final-fidelity safe checkpoint, notes-v24, seed 41, prospective held-out cases",
+  "date": "2026-08-27",
+  "baseCommit": "0fc35b2bd67b68917f39134eda36889f56c20400",
+  "scope": "Synthetic local-only evaluation. Unsafe withdrawal witness removed; strict guardrails-v3 unchanged. No production regeneration or model promotion. Exact raw outputs retained; mechanical results are not source fidelity.",
+  "modelDigest": "4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c",
+  "temperature": 0.1,
+  "events": [
+    {
+      "event": "start",
+      "case": "heldout-log-operations",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "e04517b34787e7a18532e4dec874830c042cbdaae5b7f5288217a88dec7107eb",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Vesper",
+            "text": "Aren, can you import the service logs into the incident workspace for me by Friday?"
+          },
+          {
+            "index": 1,
+            "speaker": "Kes",
+            "text": "The files still contain customer identifiers. Aren is sanitizing and importing them; Vesper will read the result."
+          },
+          {
+            "index": 2,
+            "speaker": "Aren",
+            "text": "Yes, I accept both parts of that request. I will sanitize the service logs and import them into the incident workspace for Vesper by Friday."
+          },
+          {
+            "index": 3,
+            "speaker": "Kes",
+            "text": "The test import was completed yesterday using dummy records. It does not replace the sanitizing or import of the real service logs."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": {
+          "min": 1,
+          "max": 2
+        },
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0,
+        "actionOwner": "Aren",
+        "actionDue": "Friday"
+      },
+      "reviewCriteria": [
+        "Retain both accepted operations: sanitize customer identifiers from service logs and import those logs into the incident workspace. Aren owns both; Vesper is recipient; Friday is the deadline.",
+        "Keep the completed dummy-record import distinct from the still-future real-log work. Do not assign work to Kes or infer anyone's gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-log-operations",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "b48311b3bcecbcef6c7cc72bfedc3fa2c136c07ada456ab8a8df4b3070c1d4c8",
+      "schemaSha256": "f3af34b10af97cd4dcf68caa564a03153061a5abcd345038567ecd7446bc2055",
+      "latencyMs": 28889,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Service Log Import\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The files contain customer identifiers.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The test import was completed yesterday using dummy records. It does not replace the sanitizing or import of the real service logs.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Sanitize the service logs and import them into the incident workspace for Vesper.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Aren\",\n          \"due\": \"Friday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-log-operations",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "de30509274b0f7e533ea80f6324457c981c2a43fb123879ebb1c4dfd58863fb4",
+      "schemaSha256": "e4353d4cac04f05eea367b13262fb25b1edadb813e0b60a5f7eca330418ff82b",
+      "latencyMs": 27602,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "heldout-log-operations",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 56529,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Sanitize the service logs and import them into the incident workspace for Vesper. The files contain customer identifiers. The test import was completed yesterday using dummy records. It does not replace the sanitizing or import of the real service logs.",
+        "topics": [
+          {
+            "title": "Service Log Import",
+            "summary": "The files contain customer identifiers.",
+            "key_points": [
+              {
+                "text": "The test import was completed yesterday using dummy records. It does not replace the sanitizing or import of the real service logs."
+              }
+            ],
+            "decisions": [],
+            "action_items": [
+              {
+                "text": "Sanitize the service logs and import them into the incident workspace for Vesper.",
+                "assignee": "Aren",
+                "due": "Friday",
+                "evidence": "Yes, I accept both parts of that request. I will sanitize the service logs and import them into the incident workspace for Vesper by Friday."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Sanitize the service logs and import them into the incident workspace for Vesper.",
+            "assignee": "Aren",
+            "due": "Friday",
+            "evidence": "Yes, I accept both parts of that request. I will sanitize the service logs and import them into the incident workspace for Vesper by Friday.",
+            "topic": "Service Log Import"
+          }
+        ],
+        "all_decisions": [],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:10:24.498Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "e04517b34787e7a18532e4dec874830c042cbdaae5b7f5288217a88dec7107eb",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 140
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 113
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 131
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 83
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 113
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 113
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 131
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 131
+                  }
+                ]
+              },
+              "topic:0:action:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 140
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 140
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 140
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 140
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "heldout-completed-calibration",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "36bac9ef8b29a95372982d393b9a0fcb684ad866287faa7180d1b8204b839284",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Tavi",
+            "text": "The spectrometer is already calibrated. I finished the calibration yesterday and saved the signed certificate in its case."
+          },
+          {
+            "index": 1,
+            "speaker": "Noor",
+            "text": "I will ship the calibrated spectrometer to Eren by Friday. I am accepting shipment only; I am not promising another calibration."
+          },
+          {
+            "index": 2,
+            "speaker": "Eren",
+            "text": "That works. I will be receiving the instrument, not calibrating or shipping it. The certificate records the completed work."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0,
+        "actionOwner": "Noor",
+        "actionDue": "Friday"
+      },
+      "reviewCriteria": [
+        "Tavi completed calibration yesterday and saved its certificate. Keep this as completed context, never a new calibration task.",
+        "Noor has accepted shipment only, to Eren by Friday. Eren is recipient, not owner. Preserve the limited acceptance without inventing gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-completed-calibration",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "20aa80ce0f8ca2c0adcc1aa5d10db61db147962dcc97e22be32933e928bac77b",
+      "schemaSha256": "1cd6bf9ab0e15c6d30a12c24269f07b44c81968bd0af7c37f831080f0f5c17e9",
+      "latencyMs": 29699,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Spectrometer Status\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The spectrometer is already calibrated; the signed certificate is saved in its case.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Logistics\",\n        \"sources\": [\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Noor will ship the calibrated spectrometer to Eren by Friday.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Noor\",\n          \"due\": \"Friday\"\n        },\n        {\n          \"text\": \"Eren will be receiving the instrument; the certificate records the completed work.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-completed-calibration",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "815db1dcc63c3654db36aa0d4f2d1d088066981c615b818c44e76fee10af20cd",
+      "schemaSha256": "bb09726c91b362e6b93b2a6870662bc91e0dff891cfd34ddce765e161329f3f3",
+      "latencyMs": 31004,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "heldout-completed-calibration",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 60718,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "The spectrometer is already calibrated; the signed certificate is saved in its case. Ship the calibrated spectrometer to Eren by Friday. Eren will be receiving the instrument; the certificate records the completed work.",
+        "topics": [
+          {
+            "title": "Spectrometer Status",
+            "summary": "The spectrometer is already calibrated; the signed certificate is saved in its case.",
+            "key_points": [],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Logistics",
+            "summary": "Eren will be receiving the instrument; the certificate records the completed work.",
+            "key_points": [],
+            "decisions": [],
+            "action_items": [
+              {
+                "text": "Ship the calibrated spectrometer to Eren by Friday.",
+                "assignee": "Noor",
+                "due": "Friday",
+                "evidence": "I will ship the calibrated spectrometer to Eren by Friday. I am accepting shipment only; I am not promising another calibration."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Ship the calibrated spectrometer to Eren by Friday.",
+            "assignee": "Noor",
+            "due": "Friday",
+            "evidence": "I will ship the calibrated spectrometer to Eren by Friday. I am accepting shipment only; I am not promising another calibration.",
+            "topic": "Logistics"
+          }
+        ],
+        "all_decisions": [],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:11:25.220Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "36bac9ef8b29a95372982d393b9a0fcb684ad866287faa7180d1b8204b839284",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 122
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 123
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 122
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 122
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 122
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s1:title",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 123
+                  }
+                ]
+              },
+              "topic:1:action:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 128
+                  }
+                ]
+              },
+              "topic:1:summary": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 123
+                  }
+                ]
+              },
+              "native_continuations:topic:1:summary": {
+                "id": "s1:item:1",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 123
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "heldout-separate-preparation-owner",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "dd93b5d911f2663bd5bf2428de8a75675d2ffa38b2893d6804ffedc1f753507d",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Ilan",
+            "text": "I will submit the fellowship application to the foundation by Friday. I accept submission only, not proofreading."
+          },
+          {
+            "index": 1,
+            "speaker": "Maren",
+            "text": "The draft was proofread by Sora yesterday. Sora caught the missing reference number, and the correction is already in the file."
+          },
+          {
+            "index": 2,
+            "speaker": "Sora",
+            "text": "That describes my completed work. The file is ready for Ilan to submit. I am not submitting it or taking on more proofreading."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0,
+        "actionOwner": "Ilan",
+        "actionDue": "Friday"
+      },
+      "reviewCriteria": [
+        "Ilan owns only Friday submission of the fellowship application to the foundation. Do not move Sora's proofreading into Ilan's future task.",
+        "Retain Sora's completed proofreading and corrected missing reference number; no additional proofreading commitment or invented gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-separate-preparation-owner",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "385f50683de80d7e86fec63e0e8cdf8b9095698916fe351c18262e20c70eb4a7",
+      "schemaSha256": "1cd6bf9ab0e15c6d30a12c24269f07b44c81968bd0af7c37f831080f0f5c17e9",
+      "latencyMs": 35020,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Fellowship Application Status\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The draft was proofread by Sora, who corrected a missing reference number.\",\n          \"sources\": [\n            \"R1\",\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The file is ready for submission.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Ilan is not taking on more proofreading.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": \"Ilan\",\n          \"due\": null\n        },\n        {\n          \"text\": \"Sora is not submitting the application or taking on more proofreading.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": \"Sora\",\n          \"due\": null\n        },\n        {\n          \"text\": \"Submit the fellowship application to the foundation.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Ilan\",\n          \"due\": \"Friday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-separate-preparation-owner",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "a059a2da4517e6f5ab853357967f727c62ba2daecf841769f205057c0c5eee09",
+      "schemaSha256": "bb09726c91b362e6b93b2a6870662bc91e0dff891cfd34ddce765e161329f3f3",
+      "latencyMs": 34772,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:3\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:4\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-separate-preparation-owner",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 3,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "90dc57578eec27269849f73899248050fda2499f540355b6414ac352637bc65c",
+      "schemaSha256": "bb09726c91b362e6b93b2a6870662bc91e0dff891cfd34ddce765e161329f3f3",
+      "latencyMs": 28467,
+      "raw": "{\"changes\":[{\"op\":\"replace\",\"target\":\"s0:item:2\",\"value\":{\"text\":\"Ilan is not taking on more proofreading.\",\"sources\":[\"R0\"],\"kind\":\"point\",\"owner\":null,\"due\":null}}],\"verdicts\":[{\"target\":\"s0:title\",\"status\":\"supported\",\"sources\":[\"R0\"]},{\"target\":\"s0:item:0\",\"status\":\"supported\",\"sources\":[\"R1\",\"R2\"]},{\"target\":\"s0:item:1\",\"status\":\"supported\",\"sources\":[\"R2\"]},{\"target\":\"s0:item:2\",\"status\":\"supported\",\"sources\":[\"R0\"]},{\"target\":\"s0:item:3\",\"status\":\"supported\",\"sources\":[\"R2\"]},{\"target\":\"s0:item:4\",\"status\":\"supported\",\"sources\":[\"R0\"]}],\"dispositions\":[],\"terminology\":[]}"
+    },
+    {
+      "event": "failure",
+      "case": "heldout-separate-preparation-owner",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 98275,
+      "stages": ["notesWriter", "notesAudit", "notesAudit"],
+      "phase": "generation",
+      "counts": null,
+      "analysis": null,
+      "mechanicalChecks": "not_run",
+      "sourceFidelity": "requires_independent_review",
+      "error": "MeetingNotesError: notes_audit_invalid"
+    },
+    {
+      "event": "start",
+      "case": "heldout-offer-dispositions",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "2c63af7fda6f092528b7e3c51323dba19a0567560a133e22e7346ba6d1fddcc5",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Wren",
+            "text": "I could narrate the orientation recording if useful."
+          },
+          {
+            "index": 1,
+            "speaker": "Auden",
+            "text": "We have decided not to take up the narration offer because spoken commentary competes with the screen reader. We will keep the orientation text-only."
+          },
+          {
+            "index": 2,
+            "speaker": "Sol",
+            "text": "I could sketch a new map. That is just an offer; no one has accepted it."
+          },
+          {
+            "index": 3,
+            "speaker": "Auden",
+            "text": "If the accessibility test fails, we will decline the map offer. The test has not happened, so no decision on that offer has been made."
+          },
+          {
+            "index": 4,
+            "speaker": "Wren",
+            "text": "We also decided to keep the existing room names because visitors know them. That separate choice does not accept or reject the map offer."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 0,
+        "decisions": {
+          "min": 2,
+          "max": 3
+        },
+        "questions": 0
+      },
+      "reviewCriteria": [
+        "Explicitly label Wren's narration offer declined, with screen-reader competition as the reason and text-only orientation as the chosen alternative.",
+        "Sol's map offer remains unaccepted, not declined. Preserve the conditional possible refusal and pending accessibility test without inventing an assignment or open question.",
+        "Retain the independent settled choice of existing room names and visitor-familiarity reason. It is not a decision on the map."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-offer-dispositions",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "952a4c462727593f300b1ee736c8c9464a3af51885b1d0d33e22a0b120163408",
+      "schemaSha256": "dcfe9d716531c5c5cd64864f0947526f387daa60c5c55e4c871e38ff7be7736b",
+      "latencyMs": 37978,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Orientation Recording\",\n        \"sources\": [\n          \"R0\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The team decided not to take up the narration offer because spoken commentary competes with the screen reader; the orientation will remain text-only.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Map and Room Names\",\n        \"sources\": [\n          \"R2\",\n          \"R3\",\n          \"R4\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Sol offered to sketch a new map; no one has accepted the offer.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"If the accessibility test fails, the team will decline the map offer. The test has not happened, so no decision on that offer has been made.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The team decided to keep the existing room names because visitors know them.\",\n          \"sources\": [\n            \"R4\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "attempt_failure",
+      "case": "heldout-offer-dispositions",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "9d11a8380e3c7c5bd8db2ea47990753efffca8a25d0f769d7d32f796d3a2360f",
+      "schemaSha256": "698030a361d2c0b6b30d1333279ee612eec74e5675bfd96891f2fff0a0348890",
+      "latencyMs": 98770,
+      "phase": "transport",
+      "raw": null,
+      "error": "AbortError: Ollama generation aborted after idle timeout"
+    },
+    {
+      "event": "failure",
+      "case": "heldout-offer-dispositions",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 136774,
+      "stages": ["notesWriter", "notesAudit"],
+      "phase": "generation",
+      "counts": null,
+      "analysis": null,
+      "mechanicalChecks": "not_run",
+      "sourceFidelity": "requires_independent_review",
+      "error": "AbortError: Ollama generation aborted after idle timeout"
+    },
+    {
+      "event": "start",
+      "case": "heldout-person-references",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "5a37553d63cee8e2459c1478f7a31a5cd6e824c7c3510dd3526d13a666cd7603",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Deryn",
+            "text": "I use she and her. Repairing the garden gate was satisfying because it finally stopped scraping the path."
+          },
+          {
+            "index": 1,
+            "speaker": "Rumi",
+            "text": "I enjoyed making a small clay bowl, even though its rim came out uneven."
+          },
+          {
+            "index": 2,
+            "speaker": "Deryn",
+            "text": "My cousin uses he and him. My cousin enjoyed visiting the pottery studio, but did not make Rumi's bowl."
+          },
+          {
+            "index": 3,
+            "speaker": "Rumi",
+            "text": "The exercise sheet said \"Imagine she is a potter.\" That was a fictional character, not information about me. We are sharing experiences, not assigning each other tasks."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 0,
+        "decisions": {
+          "min": 0,
+          "max": 0
+        },
+        "questions": 0
+      },
+      "reviewCriteria": [
+        "Deryn repaired the gate; satisfaction came from stopping it scraping the path. Deryn's explicit she/her is supported, though using the name is also valid.",
+        "Rumi enjoyed making an uneven-rimmed clay bowl. Do not transfer the cousin's he/him or the fictional character's she to Rumi, including in titles, overview or Recent Win.",
+        "The cousin enjoyed the studio visit but did not make Rumi's bowl. No invented future tasks, decisions or questions."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-person-references",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "4f07f85765ecb81ea5961e6e79dbf6851f2c49978fe804a6a0d221c3b0ea743e",
+      "schemaSha256": "f3af34b10af97cd4dcf68caa564a03153061a5abcd345038567ecd7446bc2055",
+      "latencyMs": 44515,
+      "raw": "{\n  \"meetingType\": \"general\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Garden and Pottery Experiences\",\n        \"sources\": [\n          \"R0\",\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Deryn found repairing the garden gate satisfying because it stopped scraping the path.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Rumi enjoyed making a small clay bowl, despite an uneven rim.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Deryn's cousin enjoyed visiting the pottery studio but did not make Rumi's bowl.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    },\n    {\n      \"title\": {\n        \"text\": \"Clarification of Roles and Context\",\n        \"sources\": [\n          \"R3\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"The exercise sheet's mention of a potter was a fictional character, not information about Rumi; the participants are sharing experiences rather than assigning tasks.\",\n          \"sources\": [\n            \"R3\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-person-references",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "ced79bd066ab0eb8ad94a2e947924a10ae1beed6eed9eb616f9047a5ba7297cf",
+      "schemaSha256": "e4353d4cac04f05eea367b13262fb25b1edadb813e0b60a5f7eca330418ff82b",
+      "latencyMs": 39925,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s1:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    },\n    {\n      \"target\": \"s1:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R3\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "heldout-person-references",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 84475,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 0,
+        "topicActions": 0,
+        "aggregateDecisions": 0,
+        "topicDecisions": 0,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "Deryn found repairing the garden gate satisfying because it stopped scraping the path. The exercise sheet's mention of a potter was a fictional character, not information about Rumi; the participants are sharing experiences rather than assigning tasks. Rumi enjoyed making a small clay bowl, despite an uneven rim.",
+        "topics": [
+          {
+            "title": "Garden and Pottery Experiences",
+            "summary": "Deryn found repairing the garden gate satisfying because it stopped scraping the path.",
+            "key_points": [
+              {
+                "text": "Rumi enjoyed making a small clay bowl, despite an uneven rim."
+              },
+              {
+                "text": "Deryn's cousin enjoyed visiting the pottery studio but did not make Rumi's bowl."
+              }
+            ],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          },
+          {
+            "title": "Clarification of Roles and Context",
+            "summary": "The exercise sheet's mention of a potter was a fictional character, not information about Rumi; the participants are sharing experiences rather than assigning tasks.",
+            "key_points": [],
+            "decisions": [],
+            "action_items": [],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [],
+        "all_decisions": [],
+        "meeting_type": "general",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:16:44.808Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "5a37553d63cee8e2459c1478f7a31a5cd6e824c7c3510dd3526d13a666cd7603",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 105
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 168
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 105
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 72
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 103
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 105
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 105
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 72
+                  }
+                ]
+              },
+              "topic:0:point:1": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 103
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:1": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 103
+                  }
+                ]
+              },
+              "topic:1:title": {
+                "id": "s1:title",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 168
+                  }
+                ]
+              },
+              "topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 168
+                  }
+                ]
+              },
+              "native_continuations:topic:1:summary": {
+                "id": "s1:item:0",
+                "sources": [
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 168
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "start",
+      "case": "heldout-renewed-offer",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "source": {
+        "revision": "8d03938323d436ec9095e6a2acb377ba563134aee99411e697cb9548dddc550d",
+        "segments": [
+          {
+            "index": 0,
+            "speaker": "Elian",
+            "text": "I could record a pronunciation guide for the language workshop."
+          },
+          {
+            "index": 1,
+            "speaker": "Kiran",
+            "text": "We will not take up the recording offer while the script is unfinished."
+          },
+          {
+            "index": 2,
+            "speaker": "Kiran",
+            "text": "The script is now finished and approved. I am withdrawing that refusal. Elian, please record the pronunciation guide for the workshop by Friday."
+          },
+          {
+            "index": 3,
+            "speaker": "Elian",
+            "text": "I accept. I will record the approved pronunciation guide for the language workshop by Friday."
+          }
+        ]
+      },
+      "mechanicalContract": {
+        "actions": 1,
+        "decisions": {
+          "min": 0,
+          "max": 1
+        },
+        "questions": 0,
+        "actionOwner": "Elian",
+        "actionDue": "Friday"
+      },
+      "reviewCriteria": [
+        "Elian now has an accepted Friday recording commitment. The earlier refusal was explicitly withdrawn after script approval; do not leave the offer described as currently declined or merely unaccepted.",
+        "Script approval is completed, not a pending prerequisite or another task. Kiran is requester, not recording owner. Do not invent gender."
+      ],
+      "sourceFidelity": "requires_independent_review"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-renewed-offer",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 1,
+      "task": "notesWriter",
+      "stages": ["notesWriter"],
+      "outputTokens": 2048,
+      "responseContract": "draft",
+      "promptSha256": "d71a98f8b6afcc42e6e31925dcedca334991628d45f6d7c086f1818eb1e42242",
+      "schemaSha256": "f3af34b10af97cd4dcf68caa564a03153061a5abcd345038567ecd7446bc2055",
+      "latencyMs": 30270,
+      "raw": "{\n  \"meetingType\": \"team_sync\",\n  \"overview\": null,\n  \"sections\": [\n    {\n      \"title\": {\n        \"text\": \"Pronunciation Guide Recording\",\n        \"sources\": [\n          \"R0\",\n          \"R1\",\n          \"R2\"\n        ]\n      },\n      \"items\": [\n        {\n          \"text\": \"Elian offered to record a pronunciation guide for the language workshop.\",\n          \"sources\": [\n            \"R0\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The recording offer was initially not taken up while the script was unfinished.\",\n          \"sources\": [\n            \"R1\"\n          ],\n          \"kind\": \"point\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"The script is finished and approved; the previous refusal is withdrawn.\",\n          \"sources\": [\n            \"R2\"\n          ],\n          \"kind\": \"decision\",\n          \"owner\": null,\n          \"due\": null\n        },\n        {\n          \"text\": \"Record the approved pronunciation guide for the language workshop.\",\n          \"sources\": [\n            \"R2\",\n            \"R3\"\n          ],\n          \"kind\": \"action\",\n          \"owner\": \"Elian\",\n          \"due\": \"Friday\"\n        }\n      ]\n    }\n  ],\n  \"recentWin\": null\n}"
+    },
+    {
+      "event": "raw_attempt",
+      "case": "heldout-renewed-offer",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "attempt": 2,
+      "task": "notesAudit",
+      "stages": ["notesWriter", "notesAudit"],
+      "outputTokens": 1536,
+      "responseContract": "audit",
+      "promptSha256": "cc94e6a42fc66a0a87e20f1c0ee7745dedd3932cab07a0eb98e4520c91a04ae5",
+      "schemaSha256": "e4353d4cac04f05eea367b13262fb25b1edadb813e0b60a5f7eca330418ff82b",
+      "latencyMs": 32293,
+      "raw": "{\n  \"changes\": [],\n  \"verdicts\": [\n    {\n      \"target\": \"s0:title\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\",\n        \"R1\",\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:0\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R0\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:1\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R1\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:2\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\"\n      ]\n    },\n    {\n      \"target\": \"s0:item:3\",\n      \"status\": \"supported\",\n      \"sources\": [\n        \"R2\",\n        \"R3\"\n      ]\n    }\n  ],\n  \"dispositions\": [],\n  \"terminology\": []\n}"
+    },
+    {
+      "event": "final",
+      "case": "heldout-renewed-offer",
+      "provider": "ollama",
+      "model": "gemma4:12b",
+      "reviewProtocol": "audit",
+      "seed": 41,
+      "contextTokens": 16384,
+      "structuredThinking": false,
+      "responseFormat": "json_schema",
+      "timeoutMs": 270000,
+      "latencyMs": 62587,
+      "stages": ["notesWriter", "notesAudit"],
+      "counts": {
+        "aggregateActions": 1,
+        "topicActions": 1,
+        "aggregateDecisions": 1,
+        "topicDecisions": 1,
+        "questions": 0
+      },
+      "analysis": {
+        "analysis_schema_version": 3,
+        "overview": "The script is finished and approved; the previous refusal is withdrawn. Elian offered to record a pronunciation guide for the language workshop. The recording offer was initially not taken up while the script was unfinished.",
+        "topics": [
+          {
+            "title": "Pronunciation Guide Recording",
+            "summary": "Elian offered to record a pronunciation guide for the language workshop.",
+            "key_points": [
+              {
+                "text": "The recording offer was initially not taken up while the script was unfinished."
+              }
+            ],
+            "decisions": [
+              {
+                "text": "The script is finished and approved; the previous refusal is withdrawn.",
+                "evidence": "The script is now finished and approved. I am withdrawing that refusal. Elian, please record the pronunciation guide for the workshop by Friday."
+              }
+            ],
+            "action_items": [
+              {
+                "text": "Record the approved pronunciation guide for the language workshop.",
+                "assignee": "Elian",
+                "due": "Friday",
+                "evidence": "The script is now finished and approved. I am withdrawing that refusal. Elian, please record the pronunciation guide for the workshop by Friday. I accept. I will record the approved pronunciation guide for the language workshop by Friday."
+              }
+            ],
+            "open_questions": []
+          }
+        ],
+        "all_action_items": [
+          {
+            "text": "Record the approved pronunciation guide for the language workshop.",
+            "assignee": "Elian",
+            "due": "Friday",
+            "evidence": "The script is now finished and approved. I am withdrawing that refusal. Elian, please record the pronunciation guide for the workshop by Friday. I accept. I will record the approved pronunciation guide for the language workshop by Friday.",
+            "topic": "Pronunciation Guide Recording"
+          }
+        ],
+        "all_decisions": [
+          {
+            "text": "The script is finished and approved; the previous refusal is withdrawn.",
+            "evidence": "The script is now finished and approved. I am withdrawing that refusal. Elian, please record the pronunciation guide for the workshop by Friday."
+          }
+        ],
+        "meeting_type": "team_sync",
+        "quality": {
+          "format_pass": true,
+          "retry_count": 0,
+          "fallback_used": false,
+          "issues": []
+        },
+        "generation_metadata": {
+          "provider": "ollama",
+          "model": "gemma4:12b",
+          "generation_path": "single_pass",
+          "prompt_version": "notes-v24",
+          "generated_at": "2026-08-28T02:17:47.406Z",
+          "error_categories": [],
+          "pipeline_version": "writer-audit-v1",
+          "mode": "direct",
+          "audit_status": "complete",
+          "audit_change_count": 0,
+          "source_provenance": {
+            "schema_version": 1,
+            "source_revision": "8d03938323d436ec9095e6a2acb377ba563134aee99411e697cb9548dddc550d",
+            "blocks": {
+              "overview": {
+                "id": "derived-overview",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  },
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 63
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "topic:0:title": {
+                "id": "s0:title",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 63
+                  },
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 71
+                  },
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  }
+                ]
+              },
+              "topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 63
+                  }
+                ]
+              },
+              "native_continuations:topic:0:summary": {
+                "id": "s0:item:0",
+                "sources": [
+                  {
+                    "segment": 0,
+                    "start": 0,
+                    "end": 63
+                  }
+                ]
+              },
+              "topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "native_continuations:topic:0:point:0": {
+                "id": "s0:item:1",
+                "sources": [
+                  {
+                    "segment": 1,
+                    "start": 0,
+                    "end": 71
+                  }
+                ]
+              },
+              "topic:0:decision:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  }
+                ]
+              },
+              "all_decisions:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  }
+                ]
+              },
+              "native_continuations:all_decisions:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  }
+                ]
+              },
+              "completion:all_decisions:0": {
+                "id": "s0:item:2",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  }
+                ]
+              },
+              "topic:0:action:0": {
+                "id": "s0:item:3",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 93
+                  }
+                ]
+              },
+              "all_action_items:0": {
+                "id": "s0:item:3",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 93
+                  }
+                ]
+              },
+              "native_continuations:all_action_items:0": {
+                "id": "s0:item:3",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 93
+                  }
+                ]
+              },
+              "completion:all_action_items:0": {
+                "id": "s0:item:3",
+                "sources": [
+                  {
+                    "segment": 2,
+                    "start": 0,
+                    "end": 144
+                  },
+                  {
+                    "segment": 3,
+                    "start": 0,
+                    "end": 93
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "mechanicalChecks": "passed",
+      "sourceFidelity": "requires_independent_review"
+    }
+  ],
+  "codeSha256": [
+    "8ccec22b1b4d4985c9cae36c2d14982b10b6ef581dae07f9885ea3f838255a11  electron/llm/analysisGrounding.ts",
+    "042e06d7e218aa91aeff3c43b5973cd5e4c577de253a4d6b16dd31962d1747e7  electron/llm/meetingNotesAudit.ts",
+    "a7c204b06966327a5354c6aff23d7dfc33c8b39a36218b6da1222f3fef9309bb  electron/llm/meetingNotesGuardrails.ts",
+    "9076606fb35e12c668f676981e35ee178219b68c362e00470540df0f7443a0b0  electron/llm/meetingNotesBudget.ts",
+    "023de580ed8f68b06fba25490fbc8083ed95241064468ac4d4926fb11cf423a9  electron/llm/meetingNotesGuidance.ts",
+    "7edc842e01a7753eb5b43fc1d88cfb08e646bc61ae845b1b6dff373fd576fbae  electron/llm/meetingNotesPrompts.ts",
+    "5a4c4725d5ca8ad33a3ee7dc0a92d886b23e0c8d66961e7b139dd909dd94590e  electron/llm/meetingNotesPipeline.ts",
+    "5b4986a9ce561d9737904eba005fa97261484509a87258090592639d43853330  electron/llm/meetingNotesTypes.ts",
+    "4d4cb2f8e2e7baf309028b892480afa4c201fa06a487f765202c03b6652adbe9  electron/llm/unifiedProvider.ts",
+    "3acc8e6fc3626d2fc80bbc242478344b9e8e5376b33fc17d7ce1b2be2952f61a  electron/llm/ollamaHttpTransport.ts",
+    "a33f676a677f52fa68b5a26c8c2cdd6546576065def92f9990e63215aec2e4e6  tests/manual/meetingNotesLocalGuardrailsAcceptance.test.ts",
+    "cd3786727dc8205e9a146430544264efb6e62da4938f698ce1e0076fc058e95b  tests/manual/fixtures/meetingNotesGemmaReliabilityCases.ts",
+    "dffabc725a0941b214913bfcb310bd60d38be5b4d1d0bcbc4cff550647389fc1  tests/manual/fixtures/meetingNotesLocalGuardrailsCases.ts",
+    "f88b7c01c41af1b7b06c33e265e99896504c363bf2ced11f55c144e39f556a67  tests/manual/fixtures/meetingNotesFidelityHoldoutCases.ts"
+  ],
+  "fixtureSha256": "f88b7c01c41af1b7b06c33e265e99896504c363bf2ced11f55c144e39f556a67"
+}

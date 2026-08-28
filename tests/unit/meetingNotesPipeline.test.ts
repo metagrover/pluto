@@ -115,7 +115,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v23',
+    prompt_version: 'notes-v25',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });

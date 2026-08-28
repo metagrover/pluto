@@ -123,6 +123,7 @@ export const buildNotesAuditPrompt = ({
     notesContentGuidance,
     'Scan the source for missing commitments even if the draft has zero actions.',
     'First read EVERY source turn independently of the draft. Insert every missed current commitment as an action; overview/point mentions do not count. Then review existing blocks.',
+    'Check missing operations, their current status, offer dispositions and person references against all source turns in every text block, including headings, overview and recentWin. Use existing changes to correct omissions or unsupported details, not just verdicts that approve the draft.',
     'Check every title, overview sentence, point, action, decision, question, and both the win and why it counts when a recentWin is present.',
     'Review the item kind separately from the wording. Replace misclassified items with the correct kind: settled choices belong in decisions, unresolved questions in questions, and material discussion in points. An unchanged action verdict certifies its kind, owner, conditions and deadline as well as wording. Do not rewrite correct text for style.',
     'Return one verdict for EVERY retained target, including unchanged titles and overview. Missing verdicts invalidate the entire audit. Use the exact ids from the draft, not section ids or field paths. Removed blocks need no verdict. Every inserted block needs its own verdict.',

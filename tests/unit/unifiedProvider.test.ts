@@ -188,8 +188,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions the source-fidelity corrections as notes-v22', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v22');
+  it('versions the source-fidelity corrections as notes-v24', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v24');
   });
 
   beforeEach(() => {

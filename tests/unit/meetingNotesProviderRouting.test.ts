@@ -15,7 +15,12 @@ beforeEach(() => {
   unexpectedTransportAttempts = 0;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => {
+    vi.fn(async (url) => {
+      if (String(url).endsWith('/api/tags'))
+        return {
+          ok: true,
+          json: async () => ({ models: [{ name: 'qwen3.5:9b' }] }),
+        };
       unexpectedTransportAttempts += 1;
       throw new Error('unexpected_live_transport');
     }),
@@ -73,6 +78,70 @@ it('forwards cancellation through entity extraction after publication', async ()
   );
 });
 
+it.each(['legacy', 'detected'] as const)(
+  'records the actual %s Ollama model in notes metadata',
+  async (mode) => {
+    const fixture = makeDirectNotesFixture();
+    const model = 'installed-alternative:12b';
+    const provider = new UnifiedLLMProvider(
+      'ollama',
+      mode === 'legacy' ? { llm_model: model } : {},
+    );
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ models: [{ name: model }] }),
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    vi.spyOn(provider as never, 'generateText')
+      .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+      .mockResolvedValueOnce(JSON.stringify(fixture.audit));
+    const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+      source: fixture.source,
+    });
+    expect(result.generation_metadata?.model).toBe(model);
+    if (mode === 'legacy') expect(fetcher).not.toHaveBeenCalled();
+    else expect(fetcher).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('pins a fallback model across writer and audit even if later discovery would change', async () => {
+  const fixture = makeDirectNotesFixture();
+  const provider = new UnifiedLLMProvider('ollama', {});
+  let tags = 0;
+  const requests: string[] = [];
+  const responses = [fixture.draft, fixture.audit];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/tags')) {
+        tags += 1;
+        return tags === 1
+          ? { ok: false }
+          : {
+              ok: true,
+              json: async () => ({ models: [{ name: 'different-model:12b' }] }),
+            };
+      }
+      requests.push(JSON.parse(init.body).model);
+      return {
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            message: { content: JSON.stringify(responses.shift()) },
+            done: true,
+            done_reason: 'stop',
+          }),
+      };
+    }),
+  );
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source: fixture.source,
+  });
+  expect(tags).toBe(1);
+  expect(requests).toEqual(['qwen3.5:9b', 'qwen3.5:9b']);
+  expect(result.generation_metadata?.model).toBe('qwen3.5:9b');
+});
+
 it.each(['extractInternalSignals', 'extractEntities'] as const)(
   'does not log private malformed output from %s',
   async (method) => {
@@ -122,7 +191,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v22');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v24');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -213,6 +282,7 @@ it('rejects a cancelled caller before requesting any stage', async () => {
     }),
   ).rejects.toThrow('notes_cancelled');
   expect(generate).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 it('resumes a preempted writer without repairing it or rerunning a completed writer', async () => {
@@ -370,6 +440,6 @@ it('fails a schema-rejecting local transport without retrying as unconstrained J
   });
   await expect(
     provider.generateStructuredAnalysis('', '', 'auto', { source: f.source }),
-  ).rejects.toThrow('schema unsupported');
+  ).rejects.toThrow('notes_provider_error');
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });

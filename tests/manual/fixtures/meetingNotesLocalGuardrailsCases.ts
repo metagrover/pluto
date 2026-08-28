@@ -2,7 +2,7 @@ export interface MeetingNotesLocalGuardrailsCase {
   id: string;
   segments: Array<{ speaker: string; text: string }>;
   mechanicalContract: {
-    actions: number;
+    actions: number | { min: number; max: number };
     decisions: { min: number; max: number };
     questions: number;
     actionOwner?: string;

@@ -101,16 +101,18 @@ const splitSegment = (
     let low = start + 1;
     let high = segment.text.length;
     while (low <= high) {
-      let end = Math.floor((low + high) / 2);
+      const midpoint = Math.floor((low + high) / 2);
+      let end = midpoint;
       if (isSurrogateBoundary(segment.text, end)) end -= 1;
       if (end <= start) {
-        low = Math.floor((low + high) / 2) + 1;
+        low = midpoint + 1;
         continue;
       }
       const span = { segment: segment.index, start, end };
       if (fitsPrompt(primaryTextFor(source, [span]), [span])) {
         chosenEnd = end;
-        low = end + 1;
+        // Advance past the search midpoint even if the safe boundary moved back.
+        low = midpoint + 1;
       } else {
         high = end - 1;
       }

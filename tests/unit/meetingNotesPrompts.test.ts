@@ -98,6 +98,33 @@ it('preserves attributed personal context without inventing feelings or conseque
   }
 });
 
+it('retains complete work and explicit offer status without inventing future tasks or refusals', () => {
+  for (const prompt of stagePrompts()) {
+    expect(prompt).toContain(
+      'Retain all material operations and their current status across turns',
+    );
+    expect(prompt).toContain('completed work is not a future action');
+    expect(prompt).toContain(
+      "State retained offers' latest explicit disposition",
+    );
+    expect(prompt).toContain('silence is not rejection');
+  }
+});
+
+it('treats person references as evidence-backed claims across every text block', () => {
+  for (const prompt of stagePrompts()) {
+    expect(prompt).toContain('Use supported names or neutral wording');
+    expect(prompt).toContain('never infer pronouns from names');
+  }
+  const prompt = buildNotesAuditPrompt(input);
+  expect(prompt).toContain(
+    'Check missing operations, their current status, offer dispositions and person references against all source turns',
+  );
+  expect(prompt).toContain(
+    'in every text block, including headings, overview and recentWin',
+  );
+});
+
 it('tells the auditor positively to retain withdrawal discussion and correct only an active-action misclassification', () => {
   const prompt = buildNotesAuditPrompt(input);
   expect(prompt).toContain(

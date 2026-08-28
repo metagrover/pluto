@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 import { generateMeetingNotes } from '../../electron/llm/meetingNotesPipeline';
@@ -9,7 +10,9 @@ import {
 } from '../../electron/llm/meetingNotesSource';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+import { meetingNotesFidelityHoldoutCases } from './fixtures/meetingNotesFidelityHoldoutCases';
 import { meetingNotesGemmaReliabilityCases } from './fixtures/meetingNotesGemmaReliabilityCases';
+import type { MeetingNotesLocalGuardrailsCase } from './fixtures/meetingNotesLocalGuardrailsCases';
 
 const suite =
   process.env.RUN_MEETING_NOTES_PROVIDER_BENCHMARK === '1'
@@ -18,11 +21,29 @@ const suite =
 const model = process.env.OLLAMA_BENCHMARK_MODEL || 'qwen3.5:9b';
 const seed = Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED ?? 41);
 const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
+const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';
+if (!['fixed', 'heldout', 'private'].includes(caseSet))
+  throw new Error(
+    'MEETING_NOTES_ACCEPTANCE_CASE_SET must be fixed, heldout or private',
+  );
+// Private source stays outside the repository; redirect this suite's logs to
+// an untracked local path too. Never use production generation/publication IPC.
+const cases: MeetingNotesLocalGuardrailsCase[] =
+  caseSet === 'private'
+    ? JSON.parse(
+        readFileSync(
+          process.env.MEETING_NOTES_ACCEPTANCE_FIXTURE_PATH!,
+          'utf8',
+        ),
+      )
+    : caseSet === 'heldout'
+      ? meetingNotesFidelityHoldoutCases
+      : meetingNotesGemmaReliabilityCases;
 
 suite(
   'local guardrails mechanical acceptance (source fidelity reviewed separately)',
   () => {
-    for (const fixture of meetingNotesGemmaReliabilityCases) {
+    for (const fixture of cases) {
       const timeoutMs = fixture.id.startsWith('long-') ? 600_000 : 270_000;
       const testTimeoutMs = timeoutMs + 30_000;
       it(
@@ -183,16 +204,27 @@ suite(
             };
             const contract = fixture.mechanicalContract;
             for (const items of [analysis.all_action_items, topicActions]) {
-              expect(items, 'Mechanical action count').toHaveLength(
-                contract.actions,
-              );
+              const range =
+                typeof contract.actions === 'number'
+                  ? { min: contract.actions, max: contract.actions }
+                  : contract.actions;
+              expect(
+                items.length,
+                'Mechanical action count minimum',
+              ).toBeGreaterThanOrEqual(range.min);
+              expect(
+                items.length,
+                'Mechanical action count maximum',
+              ).toBeLessThanOrEqual(range.max);
               for (const item of items) {
-                expect(item.assignee, 'Mechanical owner field').toBe(
-                  contract.actionOwner,
-                );
-                expect(item.due, 'Mechanical deadline field').toMatch(
-                  new RegExp(`\\b${contract.actionDue}\\b`, 'i'),
-                );
+                if (contract.actionOwner !== undefined)
+                  expect(item.assignee, 'Mechanical owner field').toBe(
+                    contract.actionOwner,
+                  );
+                if (contract.actionDue !== undefined)
+                  expect(item.due, 'Mechanical deadline field').toMatch(
+                    new RegExp(`\\b${contract.actionDue}\\b`, 'i'),
+                  );
               }
             }
             for (const items of [analysis.all_decisions, topicDecisions]) {

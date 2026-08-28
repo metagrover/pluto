@@ -359,6 +359,7 @@ interface TextGenerationOptions {
   onStart?: () => void;
   onToken?: (delta: string) => void;
   notesBudget?: { contextTokens: number; outputTokens: number };
+  notesModel?: string;
   notesResponseSchema?: Record<string, unknown>;
 }
 
@@ -423,6 +424,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
     } = {},
   ): Promise<AnalysisDocumentV3> {
+    if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
+    const model =
+      this.providerType === 'ollama'
+        ? await this.resolveOllamaModel('notesWriter')
+        : this.getConfiguredAnalysisModel();
     return generateMeetingNotes({
       source: options.source ?? createNotesSourceFromText(transcript),
       context: {
@@ -456,11 +462,12 @@ export class UnifiedLLMProvider implements LLMProvider {
             contextTokens: request.contextTokens,
             outputTokens: request.outputTokens,
           },
+          notesModel: model,
         });
         return wire.decode(raw);
       },
       provider: this.providerType,
-      model: this.getConfiguredAnalysisModel(),
+      model,
       contextTokens: options.contextTokens ?? 16_384,
       ...(options.signal ? { signal: options.signal } : {}),
     });
@@ -967,8 +974,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     onToken,
     notesBudget,
     notesResponseSchema,
+    notesModel,
   }: TextGenerationOptions): Promise<string> {
-    const model = await this.resolveOllamaModel(task);
+    const model =
+      notesBudget && notesModel
+        ? notesModel
+        : await this.resolveOllamaModel(task);
     const activeModel = process.versions.electron
       ? electronActiveOllamaModel
       : this.activeOllamaModel;
@@ -1104,6 +1115,12 @@ export class UnifiedLLMProvider implements LLMProvider {
         );
         if (pending.trim()) consumeChunk('\n');
         if (!response.ok) {
+          if (notesBudget)
+            throw new MeetingNotesError(
+              reportsNotesInputOverflow(response.errorBody)
+                ? 'notes_input_overflow'
+                : 'notes_provider_error',
+            );
           throw new Error(`Ollama API error: ${response.statusText}`);
         }
         if (notesBudget && !completed)
@@ -1304,7 +1321,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     path: string,
     options: RequestInit,
     onChunk: (chunk: string) => void,
-  ): Promise<{ ok: boolean; status: number; statusText: string }> {
+  ): Promise<{
+    ok: boolean;
+    status: number;
+    statusText: string;
+    errorBody?: string;
+  }> {
     if (process.versions.electron) {
       return await ollamaHttpStream(
         `${this.ollamaBaseUrl}${path}`,
