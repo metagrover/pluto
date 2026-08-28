@@ -26,11 +26,17 @@ describe('ProjectDossier', () => {
   it('renders main execution column and intelligence sidebar', () => {
     const handleBack = vi.fn();
     act(() => {
-      root.render(<ProjectDossier projectId="proj-1" onBack={handleBack} />);
+      root.render(
+        <ProjectDossier
+          projectId="proj-1"
+          projectName="Project Aurora"
+          onBack={handleBack}
+        />,
+      );
     });
 
     // Main column elements
-    expect(container.textContent).toContain('Project proj-1');
+    expect(container.textContent).toContain('Project Aurora');
     expect(container.textContent).toContain('Quick Overview');
     expect(container.textContent).toContain('Status Update');
 
@@ -47,5 +53,13 @@ describe('ProjectDossier', () => {
       backButton?.click();
     });
     expect(handleBack).toHaveBeenCalledOnce();
+  });
+
+  it('renders fallback title when projectName is not provided', () => {
+    act(() => {
+      root.render(<ProjectDossier projectId="proj-1" onBack={vi.fn()} />);
+    });
+
+    expect(container.textContent).toContain('Loading project...');
   });
 });

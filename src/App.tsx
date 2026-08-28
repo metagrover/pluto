@@ -115,7 +115,7 @@ function App() {
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat' | 'settings'
+    'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings'
   >(
     window.__PLUTO_BROWSER_PREVIEW__ && !meetingPreviewEnabled
       ? 'projects'
