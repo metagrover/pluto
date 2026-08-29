@@ -286,6 +286,36 @@ export const getEntitiesByType = async (
   return invoke('GET_ENTITIES_BY_TYPE', type);
 };
 
+/** Read-only source summaries for the Projects overview. */
+export const getProjectPortfolio = async (): Promise<
+  import('../utils/projectPortfolio').ProjectPortfolioEntry[]
+> => invoke('GET_PROJECT_PORTFOLIO');
+
+/** Discover at most one source-grounded initiative from one conversation. */
+export const discoverProjectInitiative = async (
+  options: { retryFailed?: boolean } = {},
+): Promise<{
+  discovered: number;
+  remaining: number;
+  failed: number;
+  deferred: boolean;
+  attemptedSourceId?: string;
+  failedSourceId?: string;
+  discoveredProjectId?: string;
+}> => invoke('DISCOVER_PROJECT_INITIATIVE', options);
+
+/** Review one bounded batch of existing candidates against their source conversations. */
+export const reviewProjectScope = async (
+  options: { excludeProjectIds?: string[] } = {},
+): Promise<{
+  reviewed: number;
+  remaining: number;
+  deferred: boolean;
+  failedProjectId?: string;
+  unresolvedProjectId?: string;
+  attemptedProjectId?: string;
+}> => invoke('REVIEW_PROJECT_SCOPE', options);
+
 /**
  * Get all entities
  */

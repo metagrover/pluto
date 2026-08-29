@@ -44,6 +44,7 @@ import {
   createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../src/utils/meetingNotesHistory';
+import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -5983,6 +5984,46 @@ export const restoreCommitmentAlias = (extractionId: string): void => {
 /**
  * Get all entities of a specific type
  */
+/** Source summaries are independent of task membership and project qualification. */
+export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
+  return db
+    .prepare(`
+    WITH sources AS (
+      SELECT me.entity_id, me.context,
+        COALESCE(m.started_at, m.created_at, me.created_at) AS activity_at,
+        COUNT(*) OVER (PARTITION BY me.entity_id) AS meeting_count,
+        ROW_NUMBER() OVER (PARTITION BY me.entity_id ORDER BY
+          datetime(COALESCE(m.started_at, m.created_at, me.created_at)) DESC, m.id DESC) AS position
+      FROM meeting_entities me JOIN meetings m ON m.id = me.meeting_id
+    )
+    SELECT e.*, COALESCE(s.meeting_count, 0) AS meeting_count,
+      s.activity_at AS last_mentioned_at, s.context AS latest_context
+    FROM entities e LEFT JOIN sources s ON s.entity_id = e.id AND s.position = 1
+    WHERE e.type = 'project'
+    ORDER BY datetime(COALESCE(s.activity_at, e.updated_at)) DESC, e.name
+  `)
+    .all() as ProjectPortfolioEntry[];
+};
+
+/** Validated conversations that already contain extracted project material. */
+export const getProjectInitiativeDiscoverySources = (): Array<
+  PersistedMeeting & { project_count: number }
+> => {
+  return db
+    .prepare(`
+      SELECT m.*, COUNT(DISTINCT me.entity_id) AS project_count
+      FROM meetings m
+      JOIN meeting_entities me ON me.meeting_id = m.id
+      JOIN entities e ON e.id = me.entity_id AND e.type = 'project'
+      WHERE m.transcript_status = 'validated'
+      GROUP BY m.id
+      ORDER BY project_count DESC,
+        datetime(COALESCE(m.started_at, m.created_at)) DESC,
+        m.id
+    `)
+    .all() as Array<PersistedMeeting & { project_count: number }>;
+};
+
 export const getEntitiesByType = (type: EntityType): Entity[] => {
   return db
     .prepare(`SELECT * FROM entities WHERE type = ? AND NOT EXISTS

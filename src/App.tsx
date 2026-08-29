@@ -1058,7 +1058,10 @@ function App() {
               </div>
             ) : activeTab === 'projects' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
-                <ProjectsExecutionTab selectedProjectId={selectedProjectId} />
+                <ProjectsExecutionTab
+                  selectedProjectId={selectedProjectId}
+                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                />
               </div>
             ) : activeTab === 'meetings' ? (
               <AllMeetingsTab

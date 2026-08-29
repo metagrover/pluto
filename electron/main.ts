@@ -28,6 +28,7 @@ import type {
   AskPlutoRetrievalSummary,
   ResolvedAskPlutoScope,
 } from '../src/types/askPlutoQuery';
+import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
@@ -56,6 +57,14 @@ import {
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
+import {
+  type ProjectInitiativeDiscoveryState,
+  discoverProjectInitiative,
+} from './projectInitiativeDiscovery';
+import {
+  isProjectScopeReviewBusy,
+  reviewProjectScopeBatch,
+} from './projectScopeReview';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -2282,6 +2291,210 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>
     db.getEntitiesByType(type),
+  );
+  ipcMain.handle('GET_PROJECT_PORTFOLIO', () => db.getProjectPortfolio());
+  const projectInitiativeDiscoveryStateKey =
+    'project_initiative_discovery_state_v12';
+  const readProjectInitiativeDiscoveryStates = (): Record<
+    string,
+    ProjectInitiativeDiscoveryState
+  > => {
+    try {
+      const parsed = JSON.parse(
+        db.getSetting(projectInitiativeDiscoveryStateKey) || '{}',
+      );
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  };
+  let projectInitiativeDiscovery: Promise<
+    Awaited<ReturnType<typeof discoverProjectInitiative>>
+  > | null = null;
+  ipcMain.handle(
+    'DISCOVER_PROJECT_INITIATIVE',
+    (_event, options?: { retryFailed?: unknown }) => {
+      if (projectInitiativeDiscovery) return projectInitiativeDiscovery;
+      projectInitiativeDiscovery = discoverProjectInitiative(
+        {
+          listSources: () =>
+            db.getProjectInitiativeDiscoverySources().map((meeting) => {
+              const fullText = parseTranscriptSegments(meeting.transcript_json)
+                .map((segment) =>
+                  typeof segment.text === 'string' ? segment.text : '',
+                )
+                .join(' ');
+              return {
+                id: String(meeting.id),
+                title: meeting.title,
+                text: fullText,
+                fullText,
+                projectCount: meeting.project_count,
+                projectNames: db
+                  .getMeetingEntities(String(meeting.id))
+                  .filter((entity) => entity.type === 'project')
+                  .map((entity) => entity.name),
+                startedAt: meeting.started_at || meeting.created_at,
+              };
+            }),
+          getSource: (id) => {
+            const meeting = db.getMeeting(id) as
+              | db.PersistedMeeting
+              | undefined;
+            if (!meeting || meeting.transcript_status !== 'validated')
+              return null;
+            const projectCount = db
+              .getMeetingEntities(id)
+              .filter((entity) => entity.type === 'project').length;
+            if (!projectCount) return null;
+            const fullText = parseTranscriptSegments(meeting.transcript_json)
+              .map((segment) =>
+                typeof segment.text === 'string' ? segment.text : '',
+              )
+              .join(' ');
+            return {
+              id: String(meeting.id),
+              title: meeting.title,
+              text: fullText,
+              fullText,
+              projectCount,
+              projectNames: db
+                .getMeetingEntities(id)
+                .filter((entity) => entity.type === 'project')
+                .map((entity) => entity.name),
+              startedAt: meeting.started_at || meeting.created_at,
+            };
+          },
+          getState: (id) => readProjectInitiativeDiscoveryStates()[id],
+          saveState: (id, state) => {
+            const states = readProjectInitiativeDiscoveryStates();
+            states[id] = state;
+            db.setSetting(
+              projectInitiativeDiscoveryStateKey,
+              JSON.stringify(states),
+            );
+          },
+          getInitiative: db.getEntity,
+          saveInitiative: (initiative) => {
+            if (!db.getEntity(initiative.id))
+              db.upsertEntity({
+                id: initiative.id,
+                type: 'project',
+                name: initiative.name,
+                status: 'active',
+                metadata: initiative.metadata,
+                dedupe_by_name: false,
+              });
+            db.ensureMeetingEntity({
+              meeting_id: initiative.sourceMeetingId,
+              entity_id: initiative.id,
+              context: initiative.context,
+            });
+          },
+          generate: async (prompt, responseSchema) => {
+            const provider = await getProvider(await getAllSettings(db));
+            return provider.synthesizeKnowledgeDocument(prompt, {
+              purpose: 'projectScope',
+              responseSchema,
+              signal: AbortSignal.timeout(300_000),
+            });
+          },
+          isBusy: () =>
+            isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+        },
+        { retryFailed: options?.retryFailed === true },
+      ).finally(() => {
+        projectInitiativeDiscovery = null;
+      });
+      return projectInitiativeDiscovery;
+    },
+  );
+  let projectScopeReview: Promise<
+    Awaited<ReturnType<typeof reviewProjectScopeBatch>>
+  > | null = null;
+  ipcMain.handle(
+    'REVIEW_PROJECT_SCOPE',
+    (_event, options?: { excludeProjectIds?: unknown }) => {
+      const excludeProjectIds = Array.isArray(options?.excludeProjectIds)
+        ? options.excludeProjectIds
+            .filter((id): id is string => typeof id === 'string')
+            .slice(0, 1000)
+        : [];
+      if (projectScopeReview) return projectScopeReview;
+      projectScopeReview = reviewProjectScopeBatch(
+        {
+          listProjects: () =>
+            db
+              .getProjectPortfolio()
+              .sort((a, b) => b.meeting_count - a.meeting_count),
+          getProject: db.getEntity,
+          getSources: (id) => {
+            return db
+              .getEntityMeetings(id)
+              .filter((meeting) => meeting.transcript_status === 'validated')
+              .sort(
+                (a, b) =>
+                  Date.parse(b.started_at || b.created_at || '') -
+                  Date.parse(a.started_at || a.created_at || ''),
+              )
+              .map((meeting) => {
+                const fullText = parseTranscriptSegments(
+                  meeting.transcript_json,
+                )
+                  .map((segment) =>
+                    typeof segment.text === 'string' ? segment.text : '',
+                  )
+                  .join(' ');
+                return {
+                  id: String(meeting.id),
+                  fullText,
+                  text: fullText,
+                };
+              });
+          },
+          generate: async (prompt, responseSchema) => {
+            const provider = await getProvider(await getAllSettings(db));
+            return provider.synthesizeKnowledgeDocument(prompt, {
+              purpose: 'projectScope',
+              responseSchema,
+              signal: AbortSignal.timeout(300_000),
+            });
+          },
+          save: (id, metadata) => {
+            const entity = db.getEntity(id);
+            if (entity) db.upsertEntity({ ...entity, metadata });
+          },
+          saveAttempt: (id, attempt) => {
+            const entity = db.getEntity(id);
+            if (!entity) return;
+            let metadata: Record<string, unknown> = {};
+            try {
+              const parsed = JSON.parse(entity.metadata || '{}');
+              if (
+                parsed &&
+                typeof parsed === 'object' &&
+                !Array.isArray(parsed)
+              )
+                metadata = parsed;
+            } catch {
+              // Keep a malformed legacy metadata value from blocking retry state.
+            }
+            db.upsertEntity({
+              ...entity,
+              metadata: { ...metadata, projectScopeReviewAttempt: attempt },
+            });
+          },
+          isBusy: () =>
+            isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+        },
+        { excludeProjectIds },
+      ).finally(() => {
+        projectScopeReview = null;
+      });
+      return projectScopeReview;
+    },
   );
   ipcMain.handle('GET_ALL_ENTITIES', () => db.getAllEntities());
   ipcMain.handle('SEARCH_ENTITIES', (_event, query) =>
