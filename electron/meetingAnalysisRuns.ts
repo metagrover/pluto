@@ -9,6 +9,7 @@ import {
   NOTES_PROMPT_VERSION,
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
+import type { LLMProvider } from './llm/provider';
 
 type MeetingRecord = {
   id: string | number;
@@ -102,6 +103,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
 
 type NotesProvider = {
   name: string;
+  synthesizeKnowledgeDocument?: LLMProvider['synthesizeKnowledgeDocument'];
   generateStructuredAnalysis(
     transcript: string,
     userNotes?: string,

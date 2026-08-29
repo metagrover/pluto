@@ -21,9 +21,26 @@ import {
 } from '../../electron/db';
 import {
   extractAndProcessEntities,
-  processExtractedEntities,
+  processExtractedEntities as processWithIdentity,
 } from '../../electron/entityPipeline';
 import type { ExtractedEntities } from '../../electron/llm/provider';
+
+const processExtractedEntities = (
+  extracted: ExtractedEntities,
+  meetingId: string,
+) =>
+  processWithIdentity(extracted, meetingId, undefined, undefined, {
+    generate: async () =>
+      JSON.stringify({
+        status: 'unresolved',
+        personId: null,
+        speaker: null,
+        ownershipKind: 'ambiguous',
+        evidence: [],
+        identityEvidence: [],
+        reason: 'No source identity.',
+      }),
+  });
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
@@ -72,7 +89,7 @@ describe('extracted action idempotency', () => {
       );
 
       const replay = await processExtractedEntities(
-        extractedAction(' send the rollout note '),
+        extractedAction('Send   the rollout note.'),
         meetingId,
       );
 
@@ -112,7 +129,7 @@ describe('extracted action idempotency', () => {
     expect(first.entities[0].id).not.toBe(second.entities[0].id);
   });
 
-  it('does not adopt a changed assignee when replaying a preserved action', async () => {
+  it('preserves the old action and keeps an unresolved changed assignee separate', async () => {
     saveMeeting({ id: 'meeting-assignee', title: 'Assignee drift fixture' });
     const first = await processExtractedEntities(
       {
@@ -144,8 +161,13 @@ describe('extracted action idempotency', () => {
     );
     expect(assignmentLinks).toHaveLength(1);
     expect(getEntity(assignmentLinks[0].target_entity_id)?.name).toBe('Alex');
-    expect(
-      getEntitiesByType('person').map((person) => person.name),
-    ).not.toContain('Taylor');
+    expect(getEntitiesByType('person').map((person) => person.name)).toContain(
+      'Taylor',
+    );
+  });
+  it('requires a generator for every action-bearing processing path', async () => {
+    await expect(
+      processWithIdentity(extractedAction('Send note'), 'missing'),
+    ).rejects.toThrow('commitment_generator_required');
   });
 });
