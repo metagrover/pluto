@@ -1,8 +1,9 @@
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
 // Shared by generation metadata and persistent run/cache identity.
 export const NOTES_PROMPT_VERSION = 'notes-v28';
-export const NOTES_OLLAMA_MODEL = 'gemma4:12b';
+export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v27';
 
 export type SourceSpan = {

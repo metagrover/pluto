@@ -7,13 +7,14 @@ import {
 } from '../../electron/llm/meetingNotesSource';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import { meetingNotesEditorCases } from './fixtures/meetingNotesEditorCases';
 
 const suite =
   process.env.RUN_MEETING_NOTES_PROVIDER_BENCHMARK === '1'
     ? describe
     : describe.skip;
-const model = process.env.OLLAMA_BENCHMARK_MODEL || 'qwen3.5:9b';
+const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
 const seeds = process.env.MEETING_NOTES_ACCEPTANCE_SEED
   ? [Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED)]
   : [41, 42, 43];

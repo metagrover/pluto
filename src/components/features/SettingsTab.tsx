@@ -11,6 +11,10 @@ import {
   Zap,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+  OLLAMA_GENERAL_MODEL,
+  OLLAMA_QUICK_CHAT_MODEL,
+} from '../../utils/ollamaModels';
 import { PageHeader } from '../ui/PageHeader';
 import { IdentitySettings } from './IdentitySettings';
 
@@ -226,12 +230,12 @@ export const SettingsTab = ({
               <SettingsRow
                 htmlFor="ollama-model"
                 label="Local Analysis & Deep Model"
-                helper="Used for meeting preparation and deeper cross-meeting analysis. Leave blank to auto-detect."
+                helper={`Used for meeting preparation and deeper cross-meeting analysis. Leave blank to use ${OLLAMA_GENERAL_MODEL}.`}
               >
                 <Input
                   id="ollama-model"
                   type="text"
-                  placeholder="Auto-detect installed model"
+                  placeholder={`Default: ${OLLAMA_GENERAL_MODEL}`}
                   value={ollamaModel}
                   onChange={(e) => {
                     const value = e.target.value;
@@ -243,12 +247,12 @@ export const SettingsTab = ({
               <SettingsRow
                 htmlFor="ollama-fast-model"
                 label="Fast Chat Model"
-                helper="Optional smaller local model for everyday Ask Pluto answers. Deep questions continue to use the analysis model."
+                helper={`Quick Ask Pluto answers use ${OLLAMA_QUICK_CHAT_MODEL} by default. Deep questions continue to use the analysis model.`}
               >
                 <Input
                   id="ollama-fast-model"
                   type="text"
-                  placeholder="Use the analysis model"
+                  placeholder={`Default: ${OLLAMA_QUICK_CHAT_MODEL}`}
                   value={ollamaFastModel}
                   onChange={(e) => {
                     const value = e.target.value;

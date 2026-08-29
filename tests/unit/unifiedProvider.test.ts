@@ -304,13 +304,17 @@ describe('UnifiedLLMProvider', () => {
       return jsonResponse({ response: '{"intent":"factual"}' });
     });
     const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
+      ollama_model: 'gemma4:12b',
       ollama_structured_thinking: true,
     });
 
     await provider.classifyQueryIntent('Classify this query.');
 
-    expect(requestBody).toMatchObject({ think: false, format: 'json' });
+    expect(requestBody).toMatchObject({
+      model: 'phi4-mini:3.8b',
+      think: false,
+      format: 'json',
+    });
     expect(requestBody.options).toMatchObject({ num_predict: 128 });
   });
 
@@ -415,7 +419,7 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('uses Qwen as the single default across meeting-intelligence tasks', async () => {
+  it('uses Gemma 4 as the single default across general-purpose tasks', async () => {
     const selectedModels: string[] = [];
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -424,6 +428,7 @@ describe('UnifiedLLMProvider', () => {
             { name: 'kimike:latest' },
             { name: 'phi4-mini:3.8b:latest' },
             { name: 'qwen3.5:9b' },
+            { name: 'gemma4:12b' },
           ],
         });
       }
@@ -463,10 +468,41 @@ describe('UnifiedLLMProvider', () => {
     await provider.extractValueSignals('Speaker A: status update');
     await provider.extractEntities('Speaker A: status update');
 
-    expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b', 'qwen3.5:9b']);
+    expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
-  it('avoids embedding-only ollama models during auto-detection', async () => {
+  it('defaults Quick chat to Phi while Deep chat uses Gemma 4', async () => {
+    const selectedModels: string[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse({
+          models: [
+            { name: 'phi4-mini:3.8b' },
+            { name: 'qwen3.5:9b' },
+            { name: 'gemma4:12b' },
+          ],
+        });
+      }
+      if (url.endsWith('/api/generate')) {
+        const body = parseRequestBody(init);
+        selectedModels.push(String(body.model));
+        return jsonResponse({ response: 'Grounded answer' });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {});
+    await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
+    await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
+
+    expect(selectedModels).toEqual([
+      'phi4-mini:3.8b',
+      'phi4-mini:3.8b',
+      'gemma4:12b',
+    ]);
+  });
+
+  it('does not substitute an arbitrary installed model for Gemma 4', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -488,10 +524,10 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('kimike:latest');
+    expect(selectedModel).toBe('gemma4:12b');
   });
 
-  it('falls back to default ollama model when model listing fails', async () => {
+  it('uses Gemma 4 without a model-discovery dependency', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -508,7 +544,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('qwen3.5:9b');
+    expect(selectedModel).toBe('gemma4:12b');
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {

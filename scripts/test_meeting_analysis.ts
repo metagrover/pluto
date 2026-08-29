@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
+import { OLLAMA_GENERAL_MODEL } from '../src/utils/ollamaModels.ts';
 
 const dbPath = path.join(
   process.env.HOME || '',
@@ -69,11 +70,11 @@ async function main() {
   );
 
   const provider = new UnifiedLLMProvider('ollama', {
-    ollama_model: 'qwen3.5:9b',
+    ollama_model: OLLAMA_GENERAL_MODEL,
   });
 
   console.log(
-    '\n[Test Analysis] Running UnifiedLLMProvider analysis with qwen3.5:9b...',
+    `\n[Test Analysis] Running UnifiedLLMProvider analysis with ${OLLAMA_GENERAL_MODEL}...`,
   );
   const startTime = Date.now();
   const result = await provider.generateStructuredAnalysis(
