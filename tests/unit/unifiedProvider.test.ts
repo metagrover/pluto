@@ -444,6 +444,25 @@ describe('UnifiedLLMProvider', () => {
     });
   });
 
+  it('uses a bounded non-thinking Ollama request for live Ask Pluto', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      requestBody = parseRequestBody(init);
+      return jsonResponse({ response: 'Live answer' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    await provider.answerAskPluto('What are we discussing?', { live: true });
+
+    expect(requestBody.think).toBe(false);
+    expect(requestBody.options).toMatchObject({
+      num_ctx: 8192,
+      num_predict: 768,
+    });
+  });
+
   it('reports when an Ask Pluto request is admitted to the provider', async () => {
     installFetchMock(() => jsonResponse({ response: 'Grounded answer' }));
     const provider = new UnifiedLLMProvider('ollama', {
@@ -949,6 +968,16 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(getOllamaTimeoutMs('projectScopeReview')).toBe(180_000);
     expect(getOllamaActiveGenerationTimeoutMs(512)).toBe(376_000);
     expect(getOllamaActiveGenerationTimeoutMs(4_096)).toBe(1_200_000);
+    expect(getOllamaTimeoutMs('askPlutoLive')).toBe(20_000);
+  });
+
+  it('uses a compact context and output budget for live Ask Pluto', () => {
+    expect(
+      calculateOllamaContextBudget('a'.repeat(1_000), 'askPlutoLive'),
+    ).toEqual({
+      num_ctx: 8192,
+      num_predict: 768,
+    });
   });
 
   it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {

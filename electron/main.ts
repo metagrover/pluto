@@ -267,6 +267,22 @@ function createWindow() {
   win.webContents.on('will-prevent-unload', () => {
     console.warn('[CaptureLease] navigation prevented: capture_active');
   });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url === win?.webContents.getURL()) return;
+    event.preventDefault();
+    console.warn('[Security] Blocked renderer navigation', { url });
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (protocol === 'https:' || protocol === 'http:') {
+        void shell.openExternal(url);
+      }
+    } catch {
+      console.warn('[Security] Blocked malformed renderer URL');
+    }
+    return { action: 'deny' };
+  });
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
@@ -296,6 +312,8 @@ app.on('activate', () => {
   }
 });
 
+import { describeMeetingAskPlutoRequest } from '../src/utils/askPlutoDiagnostics';
+import { parseMeetingAskPlutoRequest } from '../src/utils/meetingAskPlutoRequest';
 import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
@@ -337,6 +355,19 @@ import {
   resolveCurrentMeeting,
   resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
+import {
+  buildLiveMeetingAskPlutoContext,
+  buildLiveMeetingFallbackResponse,
+  buildMeetingAskPlutoContext,
+  buildMeetingAskPlutoPrompt,
+  buildMeetingAskPlutoProviderUnavailableResponse,
+  buildMeetingAskPlutoResponseFromAnswer,
+  buildUnavailableMeetingAskPlutoResponse,
+  normalizeMeetingAskPlutoTurns,
+} from './intelligence/meetingAskPluto';
+import { routeMeetingAskPlutoAssistance } from './intelligence/meetingAskPlutoAssistance';
+import { createMeetingAskPlutoVisibleStream } from './intelligence/meetingAskPlutoStream';
+import { createMeetingContextProducer } from './intelligence/meetingContextProducer';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
@@ -540,6 +571,10 @@ const activeAnalysisGenerations = new Map<
 const activeAskPlutoQueries = new Map<
   string,
   { controller: AbortController; settled: Promise<void> }
+>();
+const activeMeetingAskPlutoQueries = new Map<
+  string,
+  { controller: AbortController; ownerId: number; settled: Promise<void> }
 >();
 const activeAskPlutoSessionOwners = new Set<number>();
 let activeTranscriptionCount = 0;
@@ -871,6 +906,14 @@ app.whenReady().then(async () => {
     }
   };
 
+  const meetingContextProducer = createMeetingContextProducer({
+    getEventByKey: db.getMeetingContextEventByKey,
+    appendEvent: db.appendMeetingContextEvent,
+    listEvents: db.listMeetingContextEvents,
+    getLatestSnapshot: db.getLatestMeetingContextSnapshot,
+    saveSnapshot: db.saveMeetingContextSnapshot,
+  });
+
   ipcMain.handle('PARAKEET_EOU_START', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     const generation = Number(request.generation);
@@ -919,6 +962,15 @@ app.whenReady().then(async () => {
     });
     return {};
   });
+
+  ipcMain.handle(
+    'MEETING_CONTEXT_INGEST_CONFIRMED',
+    async (event, request = {}) => {
+      const meetingId = String(request.meetingId || '');
+      captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      return await meetingContextProducer.ingest(request);
+    },
+  );
 
   ipcMain.handle('PARAKEET_EOU_FINISH', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
@@ -2236,6 +2288,7 @@ app.whenReady().then(async () => {
       // Abort any active background tasks for this meeting
       abortMeetingTasks(meetingId);
       meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
+      await meetingContextProducer.cancel(meetingId);
 
       const result = db.deleteMeeting(id);
       if (downstreamActivity.runId) {
@@ -4020,6 +4073,265 @@ app.whenReady().then(async () => {
     );
     return { cancelled: true };
   });
+
+  ipcMain.handle(
+    'intelligence:meeting-chat',
+    async (event, rawRequest: unknown) => {
+      const startTime = Date.now();
+      const parsedRequest = parseMeetingAskPlutoRequest(rawRequest);
+      if (!parsedRequest.ok) {
+        console.warn('[Pluto][Ask Pluto][main] invalid request', {
+          reason: parsedRequest.reason,
+          receivedAt: new Date(startTime).toISOString(),
+        });
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          scope: {
+            type: 'meeting' as const,
+            meetingId: '',
+          },
+          trustStatus: 'needs_review' as const,
+          claims: [],
+          citations: [],
+          rationale: 'The meeting question request was invalid.',
+        };
+      }
+      const request = parsedRequest.request;
+      const query = request.query.trim();
+      const requestId = request.requestId;
+
+      if (
+        request.scope.type === 'live_meeting' &&
+        !captureSessionLease.recordingForOwner(event.sender.id)
+      ) {
+        console.warn('[Pluto][Ask Pluto][main] rejected unowned live request', {
+          requestId,
+          senderId: event.sender.id,
+        });
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          scope: {
+            type: 'live_meeting' as const,
+            meetingId: '',
+            title: request.scope.title,
+          },
+          trustStatus: 'needs_review' as const,
+          claims: [],
+          citations: [],
+          rationale: 'The live recording is no longer active for this window.',
+        };
+      }
+
+      const replacedRequests: Promise<void>[] = [];
+      for (const active of activeMeetingAskPlutoQueries.values()) {
+        if (active.ownerId === event.sender.id) {
+          active.controller.abort(
+            new DOMException('Meeting chat request replaced', 'AbortError'),
+          );
+          replacedRequests.push(active.settled);
+        }
+      }
+      await Promise.all(replacedRequests);
+      const controller = new AbortController();
+      let markSettled: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        markSettled = resolve;
+      });
+      const activeRequestKey = `${event.sender.id}:${requestId}`;
+      activeMeetingAskPlutoQueries.set(activeRequestKey, {
+        controller,
+        ownerId: event.sender.id,
+        settled,
+      });
+      const abortForDestroyedOwner = () =>
+        controller.abort(
+          new DOMException('Meeting chat owner destroyed', 'AbortError'),
+        );
+      event.sender.once('destroyed', abortForDestroyedOwner);
+
+      console.info('[Pluto][Ask Pluto][main] received', {
+        ...describeMeetingAskPlutoRequest({ ...request, requestId }),
+        receivedAt: new Date(startTime).toISOString(),
+      });
+
+      try {
+        const context =
+          request.scope.type === 'live_meeting'
+            ? buildLiveMeetingAskPlutoContext(request.scope)
+            : (() => {
+                const meetingId = request.scope.meetingId.trim();
+                const meeting = db.getMeeting(meetingId) as
+                  | db.PersistedMeeting
+                  | undefined;
+                if (!meeting) {
+                  throw new Error(`Meeting ${meetingId} was not found`);
+                }
+
+                const entities = db.getMeetingEntities(meetingId);
+                const attentionItems = db.listAttentionItems({
+                  meetingId,
+                  status: ['active', 'snoozed'],
+                  limit: 6,
+                });
+                return buildMeetingAskPlutoContext({
+                  meeting,
+                  entities,
+                  attentionItems,
+                });
+              })();
+
+        console.info('[Pluto][Ask Pluto][main] context-ready', {
+          requestId,
+          status: context.status,
+          trustStatus: context.trustStatus,
+          evidenceItems: context.evidenceItems.length,
+          elapsedMs: Date.now() - startTime,
+        });
+
+        if (context.status === 'unavailable') {
+          return buildUnavailableMeetingAskPlutoResponse(
+            {
+              id: context.scope.meetingId,
+              title: context.scope.title || 'Meeting',
+            },
+            query,
+          );
+        }
+
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        const turns = normalizeMeetingAskPlutoTurns(request.turns);
+        const assistanceRoute = routeMeetingAskPlutoAssistance(query);
+        const prompt = buildMeetingAskPlutoPrompt({
+          query,
+          context,
+          turns,
+          assistanceRoute,
+        });
+        console.info('[Pluto][Ask Pluto][main] provider-request', {
+          requestId,
+          assistanceRoute,
+          provider: settings.llm_provider,
+          configuredModel:
+            settings.llm_model ||
+            (settings.llm_provider === 'ollama'
+              ? settings.ollama_model
+              : settings.llm_provider === 'gemini'
+                ? settings.gemini_model
+                : settings.llm_provider === 'openai'
+                  ? settings.openai_model
+                  : settings.claude_model) ||
+            'default',
+          promptChars: prompt.length,
+          elapsedMs: Date.now() - startTime,
+        });
+        let answerRaw = '';
+        const visibleStream = createMeetingAskPlutoVisibleStream((delta) => {
+          if (event.sender.isDestroyed()) return;
+          event.sender.send('intelligence:meeting-chat:delta', {
+            requestId,
+            delta,
+          });
+        });
+        try {
+          answerRaw = await provider.answerAskPluto(prompt, {
+            signal: controller.signal,
+            live: context.scope.type === 'live_meeting',
+            onToken: (delta) => visibleStream.push(delta),
+          });
+        } catch (providerError) {
+          if (controller.signal.aborted) throw providerError;
+          console.warn(
+            `[Pluto][Ask Pluto][main] provider unavailable (${requestId}) after ${Date.now() - startTime}ms:`,
+            providerError,
+          );
+          const liveFallback = buildLiveMeetingFallbackResponse({ context });
+          if (liveFallback) {
+            console.info('[Pluto][Ask Pluto][main] live-snapshot-fallback', {
+              requestId,
+              citationCount: liveFallback.citations.length,
+              elapsedMs: Date.now() - startTime,
+            });
+            return liveFallback;
+          }
+          return buildMeetingAskPlutoProviderUnavailableResponse({
+            scope: context.scope,
+            query,
+            error: providerError,
+          });
+        } finally {
+          visibleStream.flush();
+        }
+
+        console.info('[Pluto][Ask Pluto][main] provider-response', {
+          requestId,
+          answerChars: answerRaw.length,
+          elapsedMs: Date.now() - startTime,
+        });
+
+        return buildMeetingAskPlutoResponseFromAnswer({
+          answerRaw,
+          context,
+        });
+      } catch (e) {
+        if (controller.signal.aborted) {
+          return {
+            status: 'unavailable' as const,
+            answer: '',
+            scope:
+              request.scope.type === 'live_meeting'
+                ? {
+                    type: 'live_meeting' as const,
+                    meetingId: '',
+                    title: request.scope.title,
+                  }
+                : {
+                    type: 'meeting' as const,
+                    meetingId: request.scope.meetingId,
+                  },
+            trustStatus: 'needs_review' as const,
+            claims: [],
+            citations: [],
+            rationale: 'The meeting question was cancelled.',
+          };
+        }
+        console.error(
+          `[Pluto][Ask Pluto][main] failed (${requestId}) after ${Date.now() - startTime}ms:`,
+          e,
+        );
+        throw e;
+      } finally {
+        event.sender.removeListener('destroyed', abortForDestroyedOwner);
+        if (
+          activeMeetingAskPlutoQueries.get(activeRequestKey)?.controller ===
+          controller
+        ) {
+          activeMeetingAskPlutoQueries.delete(activeRequestKey);
+        }
+        markSettled();
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'intelligence:meeting-chat:cancel',
+    async (event, requestId: unknown) => {
+      if (typeof requestId !== 'string') return { cancelled: false };
+      const active = activeMeetingAskPlutoQueries.get(
+        `${event.sender.id}:${requestId}`,
+      );
+      if (!active) {
+        return { cancelled: false };
+      }
+      active.controller.abort(
+        new DOMException('Meeting chat request cancelled', 'AbortError'),
+      );
+      await active.settled;
+      return { cancelled: true };
+    },
+  );
 
   ipcMain.handle(
     'intelligence:query:debug',

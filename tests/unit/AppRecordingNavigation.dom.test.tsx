@@ -160,6 +160,20 @@ describe('App recording navigation', () => {
           }
           if (channel === 'GET_MEETING_ENTITIES') return [];
           if (channel === 'intelligence:alerts') return [];
+          if (channel === 'intelligence:meeting-chat') {
+            return {
+              status: 'answered',
+              answer: 'The team is reviewing launch pricing.',
+              scope: {
+                type: 'live_meeting',
+                meetingId: 'active-recording',
+                title: 'Meeting',
+              },
+              trustStatus: 'weak_evidence',
+              claims: [],
+              citations: [],
+            };
+          }
           if (channel === 'GET_MEETINGS') {
             return recordingCompleted
               ? [
@@ -245,6 +259,96 @@ describe('App recording navigation', () => {
     });
     expect(container.textContent).toContain('Back home');
     expect(container.textContent).toContain('Live transcript');
+
+    await act(async () => root.unmount());
+  });
+
+  it('preserves a minimized Ask Pluto dock when rejoining the same call', async () => {
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Ask about this meeting"]',
+    );
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(input, 'What did I miss?');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+      await flushPromises();
+      input?.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    const minimize = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Minimize Ask Pluto"]',
+    );
+    expect(minimize).not.toBeNull();
+    await act(async () => {
+      minimize?.click();
+      await flushPromises();
+      container
+        .querySelector<HTMLButtonElement>('button.recording-back-home')
+        ?.click();
+      await flushPromises();
+    });
+
+    const returnToRecording = Array.from(
+      container.querySelectorAll('button'),
+    ).find((button) => button.textContent?.includes('Return to recording'));
+    await act(async () => {
+      returnToRecording?.click();
+      await flushPromises();
+    });
+
+    expect(
+      container.querySelector(
+        'button[aria-label="Restore Ask Pluto conversation"]',
+      ),
+    ).not.toBeNull();
+    expect(container.textContent).not.toContain(
+      'The team is reviewing launch pricing.',
+    );
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Finish recording'))
+        ?.click();
+      await flushPromises();
+      completePendingStop?.();
+      await flushPromises();
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+
+    expect(
+      container.querySelector(
+        'button[aria-label="Restore Ask Pluto conversation"]',
+      ),
+    ).toBeNull();
+    expect(
+      container.querySelector('textarea[placeholder="Ask about this meeting"]'),
+    ).not.toBeNull();
 
     await act(async () => root.unmount());
   });

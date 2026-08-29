@@ -56,6 +56,40 @@ it('deletes source-scoped history even for unpublished actions, preserving anoth
   expect(db.identityStore.getCapture('delete-source').origin).toBe('unknown');
 });
 
+it('deletes transcript-derived meeting context with its source meeting', () => {
+  db.appendMeetingContextEvent({
+    meetingId: 'delete-source',
+    eventKey: 'decision:segment-1:private',
+    kind: 'decision',
+    summary: 'Private source summary',
+    evidence: [
+      {
+        segmentId: 'segment-1',
+        timestampMs: 1_000,
+        quote: 'Private source quote',
+      },
+    ],
+    observedAtMs: 1_000,
+  });
+  db.saveMeetingContextSnapshot({
+    schemaVersion: 1,
+    meetingId: 'delete-source',
+    updatedThrough: { segmentId: 'segment-1', timestampMs: 1_000 },
+    summary: 'Private rolling summary',
+    currentTopics: [],
+    proposals: [],
+    decisions: [],
+    actions: [],
+    openQuestions: [],
+    importantFacts: [],
+  });
+
+  db.deleteMeeting('delete-source');
+
+  expect(db.listMeetingContextEvents('delete-source')).toEqual([]);
+  expect(db.listMeetingContextSnapshots('delete-source')).toEqual([]);
+});
+
 it('preserves people referenced only by self selection or a surviving speaker/capture binding', () => {
   for (const id of ['self-person', 'bound-person', 'capture-person'])
     db.upsertEntity({ id, type: 'person', name: id, dedupe_by_name: false });
@@ -84,6 +118,14 @@ it('clears derived identity evidence and pre-meeting capture snapshots on knowle
     'delete-source',
   );
   db.identityStore.recordCapture('future-recording', 'imported');
+  db.appendMeetingContextEvent({
+    meetingId: 'delete-source',
+    eventKey: 'fact:segment-1:private',
+    kind: 'important_fact',
+    summary: 'Private source summary',
+    evidence: [{ segmentId: 'segment-1', timestampMs: 1_000 }],
+    observedAtMs: 1_000,
+  });
   db.resetKnowledge();
   expect(
     db.identityStore.getResolution('unpublished-action', 'old'),
@@ -92,6 +134,7 @@ it('clears derived identity evidence and pre-meeting capture snapshots on knowle
     'unknown',
   );
   expect(db.identityStore.getSelfPersonId()).toBeNull();
+  expect(db.listMeetingContextEvents('delete-source')).toEqual([]);
 });
 
 it.each([false, true])(

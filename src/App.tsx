@@ -77,6 +77,7 @@ import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel'
 
 // Types
 import type { Meeting } from './types';
+import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
 import {
   isGrantedStatus,
   resolveMicrophoneStatus,
@@ -99,6 +100,10 @@ function App() {
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
+  const [meetingAskPlutoConversation, setMeetingAskPlutoConversation] =
+    useState<MeetingAskPlutoConversationMessage[]>([]);
+  const [meetingAskPlutoMinimized, setMeetingAskPlutoMinimized] =
+    useState(false);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isStartingRecording, setIsStartingRecording] = useState(false);
@@ -574,6 +579,7 @@ function App() {
       setMeetingTitle('');
       setMeetingParticipants([]);
       setParticipantInput('');
+      setMeetingAskPlutoConversation([]);
       setSelectedMeetingId(null);
     }
   };
@@ -963,6 +969,10 @@ function App() {
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
+          askPlutoConversation={meetingAskPlutoConversation}
+          setAskPlutoConversation={setMeetingAskPlutoConversation}
+          askPlutoMinimized={meetingAskPlutoMinimized}
+          setAskPlutoMinimized={setMeetingAskPlutoMinimized}
         />
       ) : (
         <main

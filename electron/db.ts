@@ -24,6 +24,14 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
+import type {
+  MeetingContextAttributeValue,
+  MeetingContextEvent,
+  MeetingContextEventInput,
+  MeetingContextEvidenceReference,
+  MeetingContextRollingStateV1,
+  MeetingContextSnapshot,
+} from '../src/types/meetingContext';
 import {
   getCommitmentState,
   mergeCommitmentReview,
@@ -113,6 +121,30 @@ type WorkingMemorySnapshotRow = {
   payload_json: string;
   generated_at: string;
   updated_at: string;
+};
+
+type MeetingContextEventRow = {
+  id: string;
+  meeting_id: string;
+  event_key: string;
+  kind: string;
+  summary: string;
+  evidence_json: string;
+  attributes_json: string | null;
+  supersedes_event_id: string | null;
+  observed_at_ms: number;
+  created_at: string;
+};
+
+type MeetingContextSnapshotRow = {
+  id: string;
+  meeting_id: string;
+  revision: number;
+  state_json: string;
+  last_segment_id: string | null;
+  last_segment_timestamp_ms: number | null;
+  generated_at: string;
+  created_at: string;
 };
 
 export interface PersistedMeeting {
@@ -392,6 +424,36 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_scope ON working_memory_snapshots(scope_type, scope_key);
       CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_generated_at ON working_memory_snapshots(generated_at DESC);
 
+      CREATE TABLE IF NOT EXISTS meeting_context_events (
+        id TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        attributes_json TEXT,
+        supersedes_event_id TEXT,
+        observed_at_ms INTEGER NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE(meeting_id, event_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meeting_context_events_timeline
+        ON meeting_context_events(meeting_id, observed_at_ms, created_at);
+
+      CREATE TABLE IF NOT EXISTS meeting_context_snapshots (
+        id TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        state_json TEXT NOT NULL,
+        last_segment_id TEXT,
+        last_segment_timestamp_ms INTEGER,
+        generated_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE(meeting_id, revision)
+      );
+      CREATE INDEX IF NOT EXISTS idx_meeting_context_snapshots_revision
+        ON meeting_context_snapshots(meeting_id, revision DESC);
+
       -- Relationships between entities
       CREATE TABLE IF NOT EXISTS entity_links (
         id TEXT PRIMARY KEY,
@@ -549,6 +611,19 @@ const initDb = () => {
       SELECT name, id FROM entities 
       WHERE id NOT IN (SELECT entity_id FROM entities_fts);
     `);
+
+  // Remove transcript-derived context left behind by versions that did not
+  // delete these rows with their source meeting.
+  db.exec(`
+    DELETE FROM meeting_context_events
+    WHERE NOT EXISTS (
+      SELECT 1 FROM meetings WHERE meetings.id = meeting_context_events.meeting_id
+    );
+    DELETE FROM meeting_context_snapshots
+    WHERE NOT EXISTS (
+      SELECT 1 FROM meetings WHERE meetings.id = meeting_context_snapshots.meeting_id
+    );
+  `);
 
   // Additive migration for newer optional columns
   try {
@@ -1523,6 +1598,187 @@ export const upsertWorkingMemorySnapshot = (input: {
   }
 
   return saved;
+};
+
+const requireMeetingContextText = (value: string, label: string): string => {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`Meeting context ${label} is required`);
+  return normalized;
+};
+
+const normalizeMeetingContextEvidence = (
+  evidence: MeetingContextEvidenceReference[],
+): MeetingContextEvidenceReference[] => {
+  const normalized = evidence
+    .map((reference) => ({
+      segmentId: reference.segmentId.trim(),
+      timestampMs: reference.timestampMs,
+      ...(reference.quote?.trim() ? { quote: reference.quote.trim() } : {}),
+    }))
+    .filter(
+      (reference) =>
+        reference.segmentId.length > 0 &&
+        Number.isFinite(reference.timestampMs) &&
+        reference.timestampMs >= 0,
+    );
+  if (normalized.length === 0) {
+    throw new Error('Meeting context event evidence is required');
+  }
+  return normalized;
+};
+
+export const getMeetingContextEventByKey = (
+  meetingId: string,
+  eventKey: string,
+): MeetingContextEvent | undefined => {
+  const normalizedMeetingId = meetingId.trim();
+  const normalizedEventKey = eventKey.trim();
+  if (!normalizedMeetingId || !normalizedEventKey) return undefined;
+  const row = db
+    .prepare(
+      `SELECT * FROM meeting_context_events
+       WHERE meeting_id = ? AND event_key = ?`,
+    )
+    .get(normalizedMeetingId, normalizedEventKey) as
+    | MeetingContextEventRow
+    | undefined;
+  return row ? mapMeetingContextEventRow(row) : undefined;
+};
+
+export const appendMeetingContextEvent = (
+  input: MeetingContextEventInput,
+): MeetingContextEvent => {
+  const meetingId = requireMeetingContextText(input.meetingId, 'meeting ID');
+  const eventKey = requireMeetingContextText(input.eventKey, 'event key');
+  const summary = requireMeetingContextText(input.summary, 'event summary');
+  if (!Number.isFinite(input.observedAtMs) || input.observedAtMs < 0) {
+    throw new Error('Meeting context observed timestamp must be non-negative');
+  }
+  const evidence = normalizeMeetingContextEvidence(input.evidence);
+  const attributes = input.attributes ?? {};
+  const supersedesEventId = input.supersedesEventId?.trim() || null;
+  const createdAt = new Date().toISOString();
+
+  db.prepare(`
+    INSERT OR IGNORE INTO meeting_context_events (
+      id, meeting_id, event_key, kind, summary, evidence_json, attributes_json,
+      supersedes_event_id, observed_at_ms, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    randomUUID(),
+    meetingId,
+    eventKey,
+    input.kind,
+    summary,
+    JSON.stringify(evidence),
+    JSON.stringify(attributes),
+    supersedesEventId,
+    input.observedAtMs,
+    createdAt,
+  );
+
+  const saved = getMeetingContextEventByKey(meetingId, eventKey);
+  if (!saved) {
+    throw new Error(`Failed to append meeting context event ${eventKey}`);
+  }
+  return saved;
+};
+
+export const listMeetingContextEvents = (
+  meetingId: string,
+): MeetingContextEvent[] => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return [];
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_context_events
+       WHERE meeting_id = ?
+       ORDER BY observed_at_ms ASC, created_at ASC`,
+    )
+    .all(normalizedMeetingId) as MeetingContextEventRow[];
+  return rows.map(mapMeetingContextEventRow);
+};
+
+export const getLatestMeetingContextSnapshot = (
+  meetingId: string,
+): MeetingContextSnapshot | undefined => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return undefined;
+  const row = db
+    .prepare(
+      `SELECT * FROM meeting_context_snapshots
+       WHERE meeting_id = ?
+       ORDER BY revision DESC
+       LIMIT 1`,
+    )
+    .get(normalizedMeetingId) as MeetingContextSnapshotRow | undefined;
+  return row ? mapMeetingContextSnapshotRow(row) : undefined;
+};
+
+export const listMeetingContextSnapshots = (
+  meetingId: string,
+  limit = 20,
+): MeetingContextSnapshot[] => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return [];
+  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_context_snapshots
+       WHERE meeting_id = ?
+       ORDER BY revision DESC
+       LIMIT ?`,
+    )
+    .all(normalizedMeetingId, boundedLimit) as MeetingContextSnapshotRow[];
+  return rows.map(mapMeetingContextSnapshotRow);
+};
+
+export const saveMeetingContextSnapshot = (
+  state: MeetingContextRollingStateV1,
+  options?: { generatedAt?: string },
+): MeetingContextSnapshot => {
+  const save = db.transaction(() => {
+    if (state.schemaVersion !== 1) {
+      throw new Error('Unsupported meeting context snapshot schema');
+    }
+    const meetingId = requireMeetingContextText(state.meetingId, 'meeting ID');
+    const normalizedState: MeetingContextRollingStateV1 = {
+      ...state,
+      meetingId,
+    };
+    const stateJson = JSON.stringify(normalizedState);
+    const latest = getLatestMeetingContextSnapshot(meetingId);
+    if (latest && JSON.stringify(latest.state) === stateJson) return latest;
+
+    const revision = (latest?.revision ?? 0) + 1;
+    const generatedAt = options?.generatedAt ?? new Date().toISOString();
+    const createdAt = generatedAt;
+    db.prepare(`
+      INSERT INTO meeting_context_snapshots (
+        id, meeting_id, revision, state_json, last_segment_id,
+        last_segment_timestamp_ms, generated_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      meetingId,
+      revision,
+      stateJson,
+      normalizedState.updatedThrough.segmentId,
+      normalizedState.updatedThrough.timestampMs,
+      generatedAt,
+      createdAt,
+    );
+
+    const saved = getLatestMeetingContextSnapshot(meetingId);
+    if (!saved || saved.revision !== revision) {
+      throw new Error(
+        `Failed to save meeting context snapshot ${meetingId}:${revision}`,
+      );
+    }
+    return saved;
+  });
+
+  return save();
 };
 
 /**
@@ -3219,6 +3475,15 @@ export const deleteMeeting = (id: string | number) => {
   // 3. Delete from entity_links (ones specifically created for this meeting)
   db.prepare('DELETE FROM entity_links WHERE meeting_id = ?').run(safeId);
 
+  // Embedded context contains transcript-derived private evidence. Explicit
+  // deletion also protects databases created before these tables had FKs.
+  db.prepare('DELETE FROM meeting_context_events WHERE meeting_id = ?').run(
+    safeId,
+  );
+  db.prepare('DELETE FROM meeting_context_snapshots WHERE meeting_id = ?').run(
+    safeId,
+  );
+
   // 4. Delete the meeting itself
   // meeting_entities will be deleted by CASCADE
   for (const table of [
@@ -3712,6 +3977,56 @@ const mapWorkingMemorySnapshotRow = (
   payload: parseWorkingMemoryPayload(row.payload_json),
   generated_at: row.generated_at,
   updated_at: row.updated_at,
+});
+
+const parseMeetingContextJson = <T>(value: string, label: string): T => {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new Error(`Invalid meeting context ${label}`);
+  }
+};
+
+const mapMeetingContextEventRow = (
+  row: MeetingContextEventRow,
+): MeetingContextEvent => ({
+  id: row.id,
+  meetingId: row.meeting_id,
+  eventKey: row.event_key,
+  kind: row.kind as MeetingContextEvent['kind'],
+  summary: row.summary,
+  evidence: parseMeetingContextJson<MeetingContextEvidenceReference[]>(
+    row.evidence_json,
+    'event evidence',
+  ),
+  attributes: row.attributes_json
+    ? parseMeetingContextJson<Record<string, MeetingContextAttributeValue>>(
+        row.attributes_json,
+        'event attributes',
+      )
+    : {},
+  supersedesEventId: row.supersedes_event_id,
+  observedAtMs: Number(row.observed_at_ms),
+  createdAt: row.created_at,
+});
+
+const mapMeetingContextSnapshotRow = (
+  row: MeetingContextSnapshotRow,
+): MeetingContextSnapshot => ({
+  id: row.id,
+  meetingId: row.meeting_id,
+  revision: Number(row.revision),
+  state: parseMeetingContextJson<MeetingContextRollingStateV1>(
+    row.state_json,
+    'snapshot state',
+  ),
+  lastSegmentId: row.last_segment_id,
+  lastSegmentTimestampMs:
+    row.last_segment_timestamp_ms === null
+      ? null
+      : Number(row.last_segment_timestamp_ms),
+  generatedAt: row.generated_at,
+  createdAt: row.created_at,
 });
 
 export interface KnowledgeGraphNode {
@@ -6741,6 +7056,8 @@ export const resetKnowledge = () => {
     'knowledge_doc_versions',
     'knowledge_doc_sources',
     'knowledge_docs',
+    'meeting_context_events',
+    'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
     'entities',
