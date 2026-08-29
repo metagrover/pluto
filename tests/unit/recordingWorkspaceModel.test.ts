@@ -93,7 +93,7 @@ describe('buildRecordingWorkspaceModel', () => {
     expect(suppressed.presentation.visibility).toBe('suppressed_echo');
   });
 
-  it('shows only the newest tentative source tail', () => {
+  it('keeps distinct tentative speech from both sources visible', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,
       nowMs: 15_000,
@@ -125,6 +125,7 @@ describe('buildRecordingWorkspaceModel', () => {
     });
 
     expect(model.transcript.map((segment) => segment.id)).toEqual([
+      'mic-tentative',
       'system-tentative',
     ]);
   });

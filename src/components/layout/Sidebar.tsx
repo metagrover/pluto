@@ -1,5 +1,4 @@
 import {
-  BookText,
   FolderKanban,
   Home,
   Library,
@@ -27,7 +26,6 @@ type ActiveTab =
   | 'hub'
   | 'people'
   | 'projects'
-  | 'wiki'
   | 'meetings'
   | 'chat'
   | 'settings';
@@ -212,32 +210,24 @@ export const Sidebar = ({
               ⌘K
             </kbd>
           </button>
-          {(
-            [
-              { id: 'wiki', name: 'Knowledge', icon: BookText },
-              { id: 'people', name: 'People', icon: Users },
-            ] as const
-          ).map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              onClick={() => {
-                setActiveTab(item.id);
-                setSelectedMeetingId(null);
-              }}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === item.id && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
-            >
-              <item.icon
-                size={16}
-                className={
-                  activeTab === item.id && !selectedMeetingId
-                    ? 'text-pro-text-main'
-                    : ''
-                }
-              />
-              <span className="text-[14px]">{item.name}</span>
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('people');
+              setSelectedMeetingId(null);
+            }}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+          >
+            <Users
+              size={16}
+              className={
+                activeTab === 'people' && !selectedMeetingId
+                  ? 'text-pro-text-main'
+                  : ''
+              }
+            />
+            <span className="text-[14px]">People</span>
+          </button>
         </div>
 
         {/* All Meetings Section */}
