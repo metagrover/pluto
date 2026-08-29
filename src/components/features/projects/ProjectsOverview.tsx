@@ -209,7 +209,7 @@ export function ProjectsOverview({
         key={entry.id}
         data-project-id={entry.id}
         onClick={() => setActiveId(entry.id)}
-        className="group flex w-full items-start gap-5 border-b border-pro-border/30 py-5 text-left transition-colors duration-150 hover:bg-pro-hover/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-pro-accent"
+        className="group -mx-3 flex w-[calc(100%+1.5rem)] items-start gap-5 rounded-lg border-b border-pro-border/30 px-3 py-5 text-left transition-colors duration-150 hover:bg-pro-hover/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
       >
         <div className="min-w-0 flex-1">
           <h3

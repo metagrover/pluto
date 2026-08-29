@@ -16,6 +16,8 @@ const fieldClass =
   'w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2 text-[14px] text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50 disabled:opacity-50';
 const buttonClass =
   'rounded-lg border border-pro-border px-3 py-2 text-[13px] font-medium text-pro-text-main hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50';
+const primaryButtonClass =
+  'inline-flex min-h-10 items-center justify-center rounded-lg border border-transparent bg-pro-text-main px-4 py-2 text-[13px] font-semibold text-pro-bg shadow-sm transition-[background-color,color,transform,box-shadow] duration-200 ease-out hover:bg-pro-accent hover:text-[oklch(0.97_0.006_250)] hover:shadow-md active:translate-y-px active:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg disabled:cursor-wait disabled:opacity-50 disabled:transform-none disabled:hover:bg-pro-text-main disabled:hover:text-pro-bg disabled:hover:shadow-sm';
 const keyOf = (name: string) => name.normalize('NFC').toLocaleLowerCase();
 
 export const IdentityProfileForm = ({
@@ -342,18 +344,14 @@ export const IdentityProfileForm = ({
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="submit"
-          disabled={busy}
-          className={`${buttonClass} bg-pro-text-main !text-pro-bg hover:opacity-90`}
-        >
+        <button type="submit" disabled={busy} className={primaryButtonClass}>
           {busy
             ? 'Saving…'
             : clearing
               ? 'Clear identity and save'
               : onComplete
                 ? 'Save and continue'
-                : 'Save about you'}
+                : 'Save profile'}
         </button>
         {onComplete && (
           <button

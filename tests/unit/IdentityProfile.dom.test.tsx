@@ -116,7 +116,7 @@ describe('About you form and invitation', () => {
     await click('Study');
     await text('Role or field', 'Engineering');
     await text('Industry', 'Education');
-    await click('Save about you');
+    await click('Save profile');
     expect(invoke).toHaveBeenCalledWith('SAVE_IDENTITY_PROFILE', {
       preferredName: 'Morgan',
       aliases: ['Mo'],
@@ -304,7 +304,7 @@ describe('About you form and invitation', () => {
       container.querySelectorAll('button[aria-label="Remove Mo"]'),
     ).toHaveLength(1);
     await click('Remove Mo');
-    await click('Save about you');
+    await click('Save profile');
     expect(invoke).toHaveBeenCalledWith(
       'SAVE_IDENTITY_PROFILE',
       expect.objectContaining({ preferredName: '', aliases: [] }),
@@ -337,13 +337,13 @@ describe('About you form and invitation', () => {
     await text('Preferred name', 'Morgan');
     invoke.mockRejectedValueOnce(new Error('identity_revision_stale'));
     profileState = { ...initial(), revision: 9 };
-    await click('Save about you');
+    await click('Save profile');
     expect(
       container.querySelector<HTMLInputElement>(
         'input[aria-label="Preferred name"]',
       )?.value,
     ).toBe('Morgan');
-    await click('Save about you');
+    await click('Save profile');
     expect(invoke).toHaveBeenLastCalledWith(
       'SAVE_IDENTITY_PROFILE',
       expect.objectContaining({ preferredName: 'Morgan', expectedRevision: 9 }),
