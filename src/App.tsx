@@ -17,6 +17,7 @@ import type { Entity } from './api/knowledgeGraph';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
+import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
 import { MeetingView } from './components/features/MeetingView';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
@@ -1029,22 +1030,30 @@ function App() {
                 transcriptValidationRetrying={transcriptValidationRetrying}
               />
             ) : activeTab === 'hub' ? (
-              <Dashboard
-                model={dashboardHome.model}
-                loading={dashboardHome.loading}
-                isRecording={isRecording}
-                setSelectedMeetingId={setSelectedMeetingId}
-                setActiveTab={setActiveTab}
-                updatingTaskIds={updatingDashboardTaskIds}
-                actionError={dashboardActionError}
-                handleCompleteTask={handleCompleteTask}
-                handleReviewCommitment={handleReviewDashboardCommitment}
-                handleCreateCommitment={handleCreateDashboardCommitment}
-                handleSetDailyCommitments={handleSetDashboardDailyCommitments}
-                handleUpdateAttentionStatus={
-                  handleUpdateDashboardAttentionStatus
-                }
-              />
+              <>
+                <IdentityProfileInvitation
+                  onOpenSettings={() => {
+                    setActiveTab('settings');
+                    setSelectedMeetingId(null);
+                  }}
+                />
+                <Dashboard
+                  model={dashboardHome.model}
+                  loading={dashboardHome.loading}
+                  isRecording={isRecording}
+                  setSelectedMeetingId={setSelectedMeetingId}
+                  setActiveTab={setActiveTab}
+                  updatingTaskIds={updatingDashboardTaskIds}
+                  actionError={dashboardActionError}
+                  handleCompleteTask={handleCompleteTask}
+                  handleReviewCommitment={handleReviewDashboardCommitment}
+                  handleCreateCommitment={handleCreateDashboardCommitment}
+                  handleSetDailyCommitments={handleSetDashboardDailyCommitments}
+                  handleUpdateAttentionStatus={
+                    handleUpdateDashboardAttentionStatus
+                  }
+                />
+              </>
             ) : activeTab === 'people' ? (
               <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
                 <PeopleTab

@@ -7,7 +7,13 @@ import {
   Mic,
   MonitorSpeaker,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import { useModelDownloadProgress } from '../../hooks/useModelDownloadProgress';
 import {
@@ -16,6 +22,7 @@ import {
 } from '../../services/setupReadiness';
 import { Logo } from '../Brand/Logo';
 import { ModelDownloadProgress } from '../ModelDownloadProgress';
+import { IdentityProfileForm } from '../features/IdentityProfileForm';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -29,7 +36,8 @@ const requirementTone = (ready: boolean, blocked = false) =>
       : 'text-[oklch(0.53_0.12_255)]';
 
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [setupError, setSetupError] = useState('');
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
@@ -109,7 +117,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         onComplete();
         return;
       }
-      setStep(savedStep === '2' ? 2 : 1);
+      setStep(savedStep === '3' ? 3 : savedStep === '2' ? 2 : 1);
       setHydrated(true);
     };
     void load();
@@ -167,18 +175,29 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     );
   };
 
-  const finish = async () => {
+  const continueToProfile = async () => {
     if (!readiness.canComplete) return;
     setFinishing(true);
+    setSetupError('');
     try {
       await window.ipcRenderer.invoke('SET_SETTING', {
-        key: 'setup_complete',
-        value: 'true',
+        key: 'setup_step',
+        value: '3',
       });
-      onComplete();
+      setStep(3);
+    } catch {
+      setSetupError('Could not save setup progress. Please try again.');
     } finally {
       setFinishing(false);
     }
+  };
+
+  const finish = async () => {
+    await window.ipcRenderer.invoke('SET_SETTING', {
+      key: 'setup_complete',
+      value: 'true',
+    });
+    onComplete();
   };
 
   if (!hydrated) {
@@ -272,7 +291,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
           </section>
         </div>
-      ) : (
+      ) : step === 2 ? (
         <div className="grid min-h-full lg:grid-cols-[minmax(22rem,0.78fr)_minmax(32rem,1.22fr)]">
           <ObservatoryPanel
             eyebrow="Recording setup"
@@ -376,12 +395,47 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
               <button
                 type="button"
-                onClick={() => void finish()}
+                onClick={() => void continueToProfile()}
                 disabled={!readiness.canComplete || finishing}
                 className="mt-8 inline-flex min-h-12 min-w-48 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
               >
-                {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
+                {finishing ? 'Continuing…' : 'Continue'}
               </button>
+              {setupError && (
+                <p role="alert" className="mt-3 text-sm text-pro-text-muted">
+                  {setupError}
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
+          <ObservatoryPanel
+            eyebrow="Optional · About you"
+            title="A little context, in your own words."
+            description="Add the names people use for you, and the work or interests you bring to your conversations."
+            footer="You can change or clear this information anytime in Settings."
+          />
+          <section
+            aria-label="About you setup"
+            className="flex items-center bg-pro-bg px-7 py-12 text-pro-text-main sm:px-12 lg:px-16 xl:px-24"
+            style={
+              {
+                '--pro-bg': '45 25% 96%',
+                '--pro-surface': '45 22% 93%',
+                '--pro-text-main': '220 20% 20%',
+                '--pro-border': '45 12% 80%',
+                '--pro-accent': '212 80% 42%',
+                colorScheme: 'light',
+              } as CSSProperties
+            }
+          >
+            <div className="w-full max-w-xl">
+              <h2 className="mb-6 font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em]">
+                A little about you
+              </h2>
+              <IdentityProfileForm onComplete={finish} />
             </div>
           </section>
         </div>

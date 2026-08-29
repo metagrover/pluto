@@ -35,6 +35,7 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { MeetingIdentityControls } from './MeetingIdentityControls';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
@@ -1209,6 +1210,7 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
+            <MeetingIdentityControls meetingId={String(selectedMeeting.id)} />
             {hasTranscriptContent ? (
               transcriptTurns.map((turn) => {
                 const text = turn.segments

@@ -297,6 +297,8 @@ import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
+import { startIdentityReconciliation } from './identityReconciliation';
 import {
   describePreviousConversationFailure,
   inheritConversationScope,
@@ -395,7 +397,8 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   runSecondary: async (input) => {
     if (
       !input.provider.extractValueSignals ||
-      !input.provider.extractEntities
+      !input.provider.extractEntities ||
+      !input.provider.synthesizeKnowledgeDocument
     ) {
       throw new Error('value_signals_failed');
     }
@@ -441,12 +444,15 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     if (!input.canCommit()) return;
     await extractAndProcessEntities(
       {
+        synthesizeKnowledgeDocument:
+          input.provider.synthesizeKnowledgeDocument?.bind(input.provider),
         extractEntities: async () => ({
           ...auditedEntities,
           action_items: input.analysis.all_action_items.map((item) => ({
             description: item.text,
             assignee: item.assignee,
             due_date: item.due,
+            evidence: item.evidence,
           })),
           decisions: input.analysis.all_decisions.map((decision) => ({
             description: decision.text,
@@ -460,7 +466,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: input.analysis.overview,
         valueSignals: signals,
       },
-      { canCommit: input.canCommit },
+      { canCommit: input.canCommit, signal: input.signal },
     );
     if (!input.canCommit()) return;
     db.updateMeetingAnalysisRunStatusIfCurrent({
@@ -622,8 +628,10 @@ function abortMeetingTasks(meetingId: string) {
   }
 }
 
+let stopIdentityReconciliation: (() => void) | undefined;
 // Cleanup on quit
 app.on('before-quit', async () => {
+  stopIdentityReconciliation?.();
   console.log('[Pluto] Shutting down...');
   // Abort all active tasks
   for (const controller of activeMeetingTasks.values()) {
@@ -642,6 +650,27 @@ app.on('before-quit', async () => {
 
 app.whenReady().then(async () => {
   db.recoverInterruptedMeetingAnalysisRuns();
+  for (const channel of IDENTITY_CHANNELS) {
+    ipcMain.handle(channel, (_event, payload) =>
+      handleIdentityRequest(channel, payload),
+    );
+  }
+  stopIdentityReconciliation = startIdentityReconciliation({
+    pauseReasons: () => knowledgeSynthesisPause.snapshot(),
+    onChange: () => {
+      if (win && !win.isDestroyed())
+        win.webContents.send('MEETING_NOTES_UPDATED');
+    },
+    generate: async (prompt, responseSchema, signal) => {
+      const provider = await getProvider(await getAllSettings(db));
+      signal?.throwIfAborted();
+      return provider.synthesizeKnowledgeDocument(prompt, {
+        purpose: 'commitmentReconciliation',
+        responseSchema,
+        signal,
+      });
+    },
+  });
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -1014,6 +1043,10 @@ app.whenReady().then(async () => {
         knowledgeSynthesisPause,
         getMeetingArtifactsRootDir,
         startParakeetLiveRecording,
+        prepareCaptureIdentity: (id: string) => {
+          const self = db.identityStore.getSelfPersonId();
+          return () => db.identityStore.recordCapture(id, 'local', self);
+        },
       });
     },
   );
@@ -2229,7 +2262,15 @@ app.whenReady().then(async () => {
   // Entity operations
   ipcMain.handle('UPSERT_ENTITY', (_event, entity) => {
     try {
-      const saved = db.upsertEntity(entity);
+      const saved = db.withCommitmentTransaction(() => {
+        const previous = entity.id ? db.getEntity(entity.id) : undefined;
+        const result = db.upsertEntity(entity);
+        return result.type === 'action_item' &&
+          Object.hasOwn(entity, 'assigned_to') &&
+          entity.assigned_to !== previous?.assigned_to
+          ? db.correctActionOwner(result.id, entity.assigned_to)
+          : result;
+      });
       queueAllKnowledgeDocsRefresh();
       return saved;
     } catch (e) {
@@ -2857,7 +2898,7 @@ app.whenReady().then(async () => {
             valueSignals: normalizedSignals,
             priorityHints: mergedPriorityHints,
           },
-          { canCommit },
+          { canCommit, signal },
         );
 
         if (signal.aborted) {
@@ -2979,7 +3020,22 @@ app.whenReady().then(async () => {
         console.log(
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
-        const result = await processExtractedEntities(entities, meetingId);
+        const provider = await getProvider(await getAllSettings(db));
+        const result = await processExtractedEntities(
+          entities,
+          meetingId,
+          undefined,
+          undefined,
+          {
+            signal: getAbortSignalForMeeting(String(meetingId)),
+            generate: (prompt, responseSchema, signal) =>
+              provider.synthesizeKnowledgeDocument(prompt, {
+                purpose: 'commitmentReconciliation',
+                responseSchema,
+                signal,
+              }),
+          },
+        );
         queueKnowledgeDocsRefreshForMeeting(String(meetingId));
         return result;
       } catch (error) {

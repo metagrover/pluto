@@ -1,4 +1,7 @@
-import { createCaptureJournal } from './captureJournal';
+import {
+  createCaptureJournal,
+  readCaptureJournalManifest,
+} from './captureJournal';
 import { getRecordingReadinessStatus } from './recordingReadiness';
 
 type GetReadinessStatusParams = Parameters<
@@ -23,7 +26,12 @@ export async function handleAudioCaptureJournalStart(options: {
   getMeetingArtifactsRootDir: () => string;
   startParakeetLiveRecording: (sender: any, id: string) => Promise<void>;
   checkReadiness?: typeof getRecordingReadinessStatus;
+  /** Freeze profile state synchronously; the returned write runs only for a new successful journal. */
+  prepareCaptureIdentity?: (meetingId: string) => () => void;
 }) {
+  const normalizedMeetingId = String(options.meetingId || '');
+  const commitCaptureIdentity =
+    options.prepareCaptureIdentity?.(normalizedMeetingId);
   const check = options.checkReadiness || getRecordingReadinessStatus;
   const readiness = await check(options.readinessParams);
   if (!readiness.ready) {
@@ -34,7 +42,6 @@ export async function handleAudioCaptureJournalStart(options: {
     throw new Error('recording_not_ready');
   }
 
-  const normalizedMeetingId = String(options.meetingId || '');
   let acquisition: ReturnType<typeof options.captureSessionLease.acquire>;
   try {
     acquisition = options.captureSessionLease.acquire(
@@ -58,19 +65,27 @@ export async function handleAudioCaptureJournalStart(options: {
     options.knowledgeSynthesisPause.acquire('capture');
   }
   try {
-    const manifest = await createCaptureJournal(
-      options.getMeetingArtifactsRootDir(),
-      {
-        meetingId: normalizedMeetingId,
-        startedAtMs:
-          typeof options.startedAtMs === 'number'
-            ? options.startedAtMs
-            : Date.now(),
-        schemaVersion: 3,
-        expectedSources: options.expectedSources,
-        sourceAvailability: options.sourceAvailability,
-      },
-    );
+    const artifactsRoot = options.getMeetingArtifactsRootDir();
+    let newJournal = false;
+    if (commitCaptureIdentity && acquisition.status === 'acquired') {
+      try {
+        await readCaptureJournalManifest(artifactsRoot, normalizedMeetingId);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        newJournal = true;
+      }
+    }
+    const manifest = await createCaptureJournal(artifactsRoot, {
+      meetingId: normalizedMeetingId,
+      startedAtMs:
+        typeof options.startedAtMs === 'number'
+          ? options.startedAtMs
+          : Date.now(),
+      schemaVersion: 3,
+      expectedSources: options.expectedSources,
+      sourceAvailability: options.sourceAvailability,
+    });
+    if (newJournal) commitCaptureIdentity?.();
     await options
       .startParakeetLiveRecording(options.sender, normalizedMeetingId)
       .catch(() => console.warn('[Pluto] parakeet_shadow_start_failed'));

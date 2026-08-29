@@ -29,6 +29,7 @@ export interface ExtractedEntities {
     description: string;
     assignee?: string; // Name of person responsible
     due_date?: string; // Natural language date like "Friday", "next week"
+    evidence?: string; // Source quote retained for commitment reconciliation
   }>;
   decisions: Array<{
     description: string;
@@ -161,7 +162,11 @@ export interface LLMProvider {
   generateTitle(transcript: string): Promise<string>;
   synthesizeKnowledgeDocument(
     prompt: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      purpose?: 'commitmentReconciliation';
+      responseSchema?: Record<string, unknown>;
+    },
   ): Promise<string>;
   answerAskPluto(
     prompt: string,

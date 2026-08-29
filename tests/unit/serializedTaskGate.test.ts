@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSerializedTaskGate } from '../../electron/serializedTaskGate';
 
 describe('createSerializedTaskGate', () => {
+  it('cancels queued work before the active task finishes and permits retry', async () => {
+    const run = createSerializedTaskGate<string, string>();
+    let release!: () => void;
+    const active = run(
+      'active',
+      () =>
+        new Promise<string>((resolve) => {
+          release = () => resolve('done');
+        }),
+    );
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const controller = new AbortController();
+    const task = vi.fn(async () => 'expired');
+    const pending = run('review', task, 5, { signal: controller.signal });
+    const rejected = expect(pending).rejects.toThrow('deadline');
+    controller.abort(new Error('deadline'));
+    await rejected;
+    expect(task).not.toHaveBeenCalled();
+    const retry = run('review', async () => 'retry', 5);
+    release();
+    await active;
+    await expect(retry).resolves.toBe('retry');
+  });
+
   it('coalesces concurrent work for the same key and preserves the result', async () => {
     let release!: (value: string) => void;
     const task = vi.fn(

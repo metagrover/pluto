@@ -27,6 +27,7 @@ import type { MeetingFinalizationStatus } from '../src/types';
 import {
   getCommitmentState,
   mergeCommitmentReview,
+  parseActionMetadata,
 } from '../src/utils/actionCommitment';
 import {
   getAnalysisEditBlocks,
@@ -48,6 +49,7 @@ import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
+import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
   AttentionItem,
@@ -332,6 +334,19 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
       CREATE INDEX IF NOT EXISTS idx_entities_normalized_name ON entities(normalized_name);
       CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status);
+
+      CREATE TABLE IF NOT EXISTS commitment_aliases (
+        extraction_id TEXT PRIMARY KEY,
+        canonical_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        description TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        original_json TEXT,
+        association_inserted INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        restored_at TEXT
+      );
 
       CREATE TABLE IF NOT EXISTS attention_items (
         id TEXT PRIMARY KEY,
@@ -1139,9 +1154,45 @@ const initDb = () => {
   } catch (e) {
     console.warn('[DB] Meeting search index repair failed:', e);
   }
+  const aliasColumns = db
+    .prepare('PRAGMA table_info(commitment_aliases)')
+    .all() as TableInfoColumn[];
+  if (!aliasColumns.some((column) => column.name === 'original_json'))
+    db.exec('ALTER TABLE commitment_aliases ADD COLUMN original_json TEXT');
+  if (!aliasColumns.some((column) => column.name === 'association_inserted'))
+    db.exec(
+      'ALTER TABLE commitment_aliases ADD COLUMN association_inserted INTEGER NOT NULL DEFAULT 0',
+    );
 };
 
 initDb();
+export const identityStore = createIdentityStore(db);
+// Cheap invalidation lets the background scheduler avoid repeatedly reading
+// complete source text when nothing relevant has changed.
+db.exec(`CREATE TABLE IF NOT EXISTS identity_input_revision (singleton INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
+  INSERT OR IGNORE INTO identity_input_revision VALUES (1, 0);`);
+for (const table of ['entities', 'entity_links', 'meeting_entities']) {
+  for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
+    db.exec(`CREATE TRIGGER IF NOT EXISTS identity_input_${table}_${operation} AFTER ${operation} ON ${table}
+      BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;`);
+  }
+}
+db.exec(`CREATE TRIGGER IF NOT EXISTS identity_input_meetings_update AFTER UPDATE OF title, transcript_json, analysis_json, started_at ON meetings
+  WHEN OLD.title IS NOT NEW.title OR OLD.transcript_json IS NOT NEW.transcript_json OR OLD.analysis_json IS NOT NEW.analysis_json OR OLD.started_at IS NOT NEW.started_at
+  BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;
+  CREATE TRIGGER IF NOT EXISTS identity_input_meetings_insert AFTER INSERT ON meetings
+  BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;
+  CREATE TRIGGER IF NOT EXISTS identity_input_meetings_delete AFTER DELETE ON meetings
+  BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;`);
+
+export const getIdentityInputRevision = () =>
+  (
+    db
+      .prepare(
+        'SELECT revision FROM identity_input_revision WHERE singleton = 1',
+      )
+      .get() as { revision: number }
+  ).revision;
 
 /**
  * Settings Management
@@ -3169,6 +3220,13 @@ export const deleteMeeting = (id: string | number) => {
 
   // 4. Delete the meeting itself
   // meeting_entities will be deleted by CASCADE
+  for (const table of [
+    'identity_captures',
+    'identity_resolutions',
+    'identity_resolution_history',
+  ]) {
+    db.prepare(`DELETE FROM ${table} WHERE meeting_id = ?`).run(safeId);
+  }
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
@@ -3187,6 +3245,10 @@ export const deleteMeeting = (id: string | number) => {
       WHERE id NOT IN (SELECT entity_id FROM meeting_entities)
         AND id NOT IN (SELECT source_entity_id FROM entity_links)
         AND id NOT IN (SELECT target_entity_id FROM entity_links)
+        AND NOT EXISTS (SELECT 1 FROM identity_workspace w WHERE w.self_person_id = entities.id)
+        AND NOT EXISTS (SELECT 1 FROM identity_captures c WHERE c.self_person_id = entities.id)
+        AND NOT EXISTS (SELECT 1 FROM identity_bindings b WHERE json_extract(b.payload, '$.personId') = entities.id)
+        AND NOT EXISTS (SELECT 1 FROM identity_person_aliases a WHERE a.person_id = entities.id)
     `).run();
   } catch (e) {
     console.warn('[DB] Failed to clean up orphan entities:', e);
@@ -5092,6 +5154,23 @@ export const getKnowledgeGraph = (
     edges = [];
   }
 
+  // Project aliases only at the read boundary. Original edges remain intact
+  // so their source evidence and endpoints can be restored later.
+  edges = edges.flatMap((edge) => {
+    const source = resolveCommitmentIdentity(edge.source_entity_id);
+    const target = resolveCommitmentIdentity(edge.target_entity_id);
+    if (!source || !target || source.id === target.id) return [];
+    return [
+      {
+        ...edge,
+        source_entity_id: source.id,
+        target_entity_id: target.id,
+        source_label: source.name,
+        target_label: target.name,
+      },
+    ];
+  });
+
   const nodeIds = new Set<string>();
   for (const edge of edges) {
     nodeIds.add(edge.source_entity_id);
@@ -5141,6 +5220,8 @@ export const getKnowledgeGraph = (
           SELECT id
           FROM entities
           WHERE type IN ('project', 'person', 'topic', 'decision', 'action_item')
+            AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
+              WHERE a.extraction_id = entities.id AND a.active = 1)
           ORDER BY updated_at DESC
           LIMIT ?
         `,
@@ -5576,12 +5657,337 @@ export const getEntity = (id: string): Entity | undefined => {
     | undefined;
 };
 
+export interface CommitmentAliasInput {
+  extractionId: string;
+  canonicalId: string;
+  meetingId: string;
+  description: string;
+  reason: string;
+  original?: {
+    owner: string | null;
+    due: string | null;
+    evidence: string;
+    normalizedDue?: string | null;
+    sourceEvidence?: string | null;
+    identityProof?: {
+      ownerKey: string;
+      candidateFingerprint: string;
+      canonicalFingerprint: string;
+    };
+  };
+}
+
+// The full snapshot includes source revisions: an edit during model work must
+// invalidate the decision even when SQLite timestamps share one second.
+export const getCommitmentQueueRevision = (): string =>
+  createHash('sha256')
+    .update(
+      JSON.stringify([
+        identityStore.getRevision(),
+        db
+          .prepare(
+            "SELECT id, name FROM entities WHERE type IN ('person', 'project') ORDER BY id",
+          )
+          .all(),
+        db
+          .prepare(
+            "SELECT * FROM entities WHERE type = 'action_item' ORDER BY id",
+          )
+          .all(),
+        db
+          .prepare('SELECT * FROM commitment_aliases ORDER BY extraction_id')
+          .all(),
+        db
+          .prepare(`SELECT me.* FROM meeting_entities me JOIN entities e ON e.id = me.entity_id
+      WHERE e.type = 'action_item' ORDER BY me.meeting_id, me.entity_id`)
+          .all(),
+        db
+          .prepare(
+            'SELECT id, title, transcript_json, analysis_json, user_notes, started_at FROM meetings ORDER BY id',
+          )
+          .all(),
+        db
+          .prepare(`SELECT l.* FROM entity_links l WHERE l.source_entity_id IN
+      (SELECT id FROM entities WHERE type = 'action_item') OR l.target_entity_id IN
+      (SELECT id FROM entities WHERE type = 'action_item') ORDER BY l.id`)
+          .all(),
+      ]),
+    )
+    .digest('hex');
+
+export const resolveCommitmentIdentity = (id: string): Entity | undefined => {
+  const seen = new Set<string>();
+  let current = id;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const alias = db
+      .prepare(
+        'SELECT canonical_id FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
+      )
+      .get(current) as { canonical_id: string } | undefined;
+    if (!alias) return getEntity(current);
+    current = alias.canonical_id;
+  }
+  throw new Error('commitment_alias_cycle');
+};
+
+export const isRetiredCommitment = (id: string): boolean =>
+  !!db
+    .prepare(
+      'SELECT 1 FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
+    )
+    .get(id);
+
+export const wasCommitmentRestored = (id: string): boolean =>
+  !!db
+    .prepare(
+      'SELECT 1 FROM commitment_aliases WHERE extraction_id = ? AND active = 0',
+    )
+    .get(id);
+
+export const withCommitmentTransaction = <T>(operation: () => T): T =>
+  db.transaction(operation)();
+
+export const getIdentityReconciliationInputs = () => ({
+  actions: db
+    .prepare("SELECT * FROM entities WHERE type = 'action_item' ORDER BY id")
+    .all() as Entity[],
+  people: db
+    .prepare("SELECT id, name FROM entities WHERE type = 'person' ORDER BY id")
+    .all(),
+  projects: db
+    .prepare("SELECT id, name FROM entities WHERE type = 'project' ORDER BY id")
+    .all(),
+  links: db.prepare('SELECT * FROM entity_links ORDER BY id').all(),
+  associations: db
+    .prepare('SELECT * FROM meeting_entities ORDER BY meeting_id, entity_id')
+    .all(),
+  meetings: db
+    .prepare(
+      'SELECT id, title, transcript_json, analysis_json, started_at FROM meetings ORDER BY id',
+    )
+    .all() as PersistedMeeting[],
+});
+
+export const getActiveCommitmentAliases = (): CommitmentAliasInput[] =>
+  (
+    db
+      .prepare(
+        'SELECT * FROM commitment_aliases WHERE active = 1 ORDER BY extraction_id',
+      )
+      .all() as {
+      extraction_id: string;
+      canonical_id: string;
+      meeting_id: string;
+      description: string;
+      reason: string;
+      original_json: string | null;
+    }[]
+  ).map((row) => ({
+    extractionId: row.extraction_id,
+    canonicalId: row.canonical_id,
+    meetingId: row.meeting_id,
+    description: row.description,
+    reason: row.reason,
+    original: row.original_json ? JSON.parse(row.original_json) : undefined,
+  }));
+
+/** Evidence reads must never use the alias-family projections used by the UI. */
+export const getCommitmentSourceRelations = (id: string) => ({
+  projects: db
+    .prepare(`SELECT DISTINCT e.id, e.name FROM entity_links l JOIN entities e
+    ON e.id = CASE WHEN l.source_entity_id = ? THEN l.target_entity_id ELSE l.source_entity_id END
+    WHERE (l.source_entity_id = ? OR l.target_entity_id = ?) AND e.type = 'project' AND COALESCE(l.state, 'inferred') != 'rejected' ORDER BY e.id`)
+    .all(id, id, id) as { id: string; name: string }[],
+  meetings: db
+    .prepare(`SELECT m.*, me.context FROM meetings m JOIN meeting_entities me ON m.id = me.meeting_id
+    WHERE me.entity_id = ? AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.canonical_id = ?
+      AND a.meeting_id = me.meeting_id AND a.association_inserted = 1 AND me.context = a.description)
+    ORDER BY m.started_at DESC, m.id`)
+    .all(id, id) as (PersistedMeeting & { context: string | null })[],
+});
+
+export const refreshCommitmentIdentityProof = (
+  expectedRevision: string,
+  alias: CommitmentAliasInput,
+) => {
+  if (getCommitmentQueueRevision() !== expectedRevision)
+    throw new Error('commitment_reconciliation_stale');
+  db.prepare(
+    'UPDATE commitment_aliases SET original_json = ? WHERE extraction_id = ? AND active = 1',
+  ).run(JSON.stringify(alias.original), alias.extractionId);
+};
+
+/** Only the explicit user-edit boundary may promote assigned_to to authority. */
+export const correctActionOwner = (
+  id: string,
+  personId: string | null,
+): Entity =>
+  withCommitmentTransaction(() => {
+    const entity = getEntity(id);
+    if (!entity || entity.type !== 'action_item')
+      throw new Error('identity_action_invalid');
+    if (personId !== null && getEntity(personId)?.type !== 'person')
+      throw new Error('identity_person_invalid');
+    const metadata = parseActionMetadata(entity.metadata);
+    db.prepare(
+      'UPDATE entities SET assigned_to = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).run(personId, JSON.stringify({ ...metadata, owner_source: 'user' }), id);
+    const source =
+      typeof metadata.source_meeting_id === 'string'
+        ? metadata.source_meeting_id
+        : getEntityMeetings(id)[0]?.id;
+    if (source && getMeeting(source))
+      identityStore.enqueue(String(source), getCommitmentQueueRevision());
+    return getEntity(id)!;
+  });
+
+export const commitCommitmentAliases = (
+  expectedRevision: string,
+  aliases: CommitmentAliasInput[],
+): void => {
+  db.transaction(() => {
+    if (getCommitmentQueueRevision() !== expectedRevision)
+      throw new Error('commitment_reconciliation_stale');
+    for (const alias of aliases) {
+      const target = resolveCommitmentIdentity(alias.canonicalId);
+      const original = getEntity(alias.extractionId);
+      if (
+        !target ||
+        target.type !== 'action_item' ||
+        target.id === alias.extractionId ||
+        !alias.reason.trim() ||
+        !alias.description.trim()
+      )
+        throw new Error('commitment_alias_invalid');
+      if (wasCommitmentRestored(alias.extractionId))
+        throw new Error('commitment_alias_restored');
+      if (original) {
+        let metadata: Record<string, unknown> = {};
+        try {
+          metadata = JSON.parse(original.metadata || '{}');
+        } catch {
+          /* Cannot prove extraction ownership. */
+        }
+        if (
+          original.type !== 'action_item' ||
+          getCommitmentState(original.metadata) !== 'possible' ||
+          metadata.origin !== 'extraction' ||
+          original.status === 'completed'
+        )
+          throw new Error('commitment_alias_reviewed');
+      }
+      const existing = db
+        .prepare(
+          'SELECT canonical_id FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
+        )
+        .get(alias.extractionId) as { canonical_id: string } | undefined;
+      if (
+        existing &&
+        resolveCommitmentIdentity(existing.canonical_id)?.id !== target.id
+      )
+        throw new Error('commitment_alias_conflict');
+      const associationInserted = ensureMeetingEntity({
+        meeting_id: alias.meetingId,
+        entity_id: target.id,
+        context: alias.description,
+      });
+      db.prepare(`INSERT INTO commitment_aliases (extraction_id, canonical_id, meeting_id, description, reason, original_json, association_inserted)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(extraction_id) DO NOTHING`).run(
+        alias.extractionId,
+        target.id,
+        alias.meetingId,
+        alias.description,
+        alias.reason,
+        alias.original ? JSON.stringify(alias.original) : null,
+        associationInserted ? 1 : 0,
+      );
+    }
+  })();
+};
+
+export const restoreCommitmentAlias = (extractionId: string): void => {
+  // Original rows and source associations were never removed. Restoration is
+  // durable and excludes this record from subsequent automatic cleanup.
+  db.transaction(() => {
+    const alias = db
+      .prepare(
+        'SELECT * FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
+      )
+      .get(extractionId) as
+      | {
+          canonical_id: string;
+          meeting_id: string;
+          description: string;
+          original_json: string | null;
+          association_inserted: number;
+        }
+      | undefined;
+    if (!alias) return;
+    if (!getEntity(extractionId)) {
+      if (!alias.original_json)
+        throw new Error('commitment_alias_original_missing');
+      const original = JSON.parse(alias.original_json) as NonNullable<
+        CommitmentAliasInput['original']
+      >;
+      upsertEntity({
+        id: extractionId,
+        type: 'action_item',
+        name: alias.description.slice(0, 100),
+        status: 'active',
+        due_date: original.normalizedDue ?? null,
+        dedupe_by_name: false,
+        metadata: {
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: alias.meeting_id,
+          full_description: alias.description,
+          assignee_name: original.owner,
+          source_due_date: original.due,
+          source_evidence: original.sourceEvidence ?? original.evidence,
+        },
+      });
+      ensureMeetingEntity({
+        meeting_id: alias.meeting_id,
+        entity_id: extractionId,
+        context: alias.description,
+      });
+    }
+    db.prepare(
+      'UPDATE commitment_aliases SET active = 0, restored_at = CURRENT_TIMESTAMP WHERE extraction_id = ?',
+    ).run(extractionId);
+    const next = db
+      .prepare(
+        'SELECT extraction_id FROM commitment_aliases WHERE canonical_id = ? AND meeting_id = ? AND active = 1 LIMIT 1',
+      )
+      .get(alias.canonical_id, alias.meeting_id) as
+      | { extraction_id: string }
+      | undefined;
+    if (alias.association_inserted && next) {
+      // Transfer responsibility so restoring the last alias can undo the link.
+      db.prepare(
+        'UPDATE commitment_aliases SET association_inserted = 1 WHERE extraction_id = ?',
+      ).run(next.extraction_id);
+    } else if (alias.association_inserted) {
+      db.prepare(`DELETE FROM meeting_entities WHERE entity_id = ? AND meeting_id = ? AND mention_count = 1
+        AND context IN (SELECT description FROM commitment_aliases WHERE canonical_id = ? AND meeting_id = ? AND association_inserted = 1)`).run(
+        alias.canonical_id,
+        alias.meeting_id,
+        alias.canonical_id,
+        alias.meeting_id,
+      );
+    }
+  })();
+};
+
 /**
  * Get all entities of a specific type
  */
 export const getEntitiesByType = (type: EntityType): Entity[] => {
   return db
-    .prepare('SELECT * FROM entities WHERE type = ? ORDER BY updated_at DESC')
+    .prepare(`SELECT * FROM entities WHERE type = ? AND NOT EXISTS
+      (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      ORDER BY updated_at DESC`)
     .all(type) as Entity[];
 };
 
@@ -5590,7 +5996,9 @@ export const getEntitiesByType = (type: EntityType): Entity[] => {
  */
 export const getAllEntities = (): Entity[] => {
   return db
-    .prepare('SELECT * FROM entities ORDER BY type, updated_at DESC')
+    .prepare(`SELECT * FROM entities WHERE NOT EXISTS
+      (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      ORDER BY type, updated_at DESC`)
     .all() as Entity[];
 };
 
@@ -5605,6 +6013,8 @@ export const searchEntities = (query: string): Entity[] => {
     SELECT entities.* FROM entities
     JOIN entities_fts ON entities.id = entities_fts.entity_id
     WHERE entities_fts MATCH ?
+      AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
+        WHERE a.extraction_id = entities.id AND a.active = 1)
     ORDER BY rank
   `)
     .all(`${sanitized}*`) as Entity[];
@@ -5653,6 +6063,7 @@ export const updateActionCommitmentState = (
     if (entity.type !== 'action_item') {
       throw new Error(`Entity is not an action item: ${id}`);
     }
+    if (isRetiredCommitment(id)) throw new Error('commitment_superseded');
 
     const currentState = getCommitmentState(entity.metadata);
     if (currentState === commitmentState) return entity;
@@ -5799,14 +6210,33 @@ export const getEntityLinks = (
   options?: { includeRejected?: boolean },
 ): EntityLink[] => {
   const includeRejected = options?.includeRejected ?? false;
-  return db
+  const canonicalId = resolveCommitmentIdentity(entityId)?.id ?? entityId;
+  const links = db
     .prepare(`
-    SELECT * FROM entity_links 
-    WHERE source_entity_id = ? OR target_entity_id = ?
+    WITH RECURSIVE family(id) AS (
+      SELECT ? UNION
+      SELECT a.extraction_id FROM commitment_aliases a
+      JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
+    )
+    SELECT * FROM entity_links
+    WHERE (source_entity_id IN (SELECT id FROM family)
+      OR target_entity_id IN (SELECT id FROM family))
       ${includeRejected ? '' : "AND state != 'rejected'"}
     ORDER BY updated_at DESC, created_at DESC
   `)
-    .all(entityId, entityId) as EntityLink[];
+    .all(canonicalId) as EntityLink[];
+  // Keep original edges intact for restoration, but expose their current identity.
+  return links
+    .map((link) => ({
+      ...link,
+      source_entity_id:
+        resolveCommitmentIdentity(link.source_entity_id)?.id ??
+        link.source_entity_id,
+      target_entity_id:
+        resolveCommitmentIdentity(link.target_entity_id)?.id ??
+        link.target_entity_id,
+    }))
+    .filter((link) => link.source_entity_id !== link.target_entity_id);
 };
 
 /**
@@ -5823,7 +6253,8 @@ export const getRelatedEntities = (
   confidence: number;
   evidence_quote: string | null;
 })[] => {
-  const links = getEntityLinks(entityId, options);
+  const canonicalId = resolveCommitmentIdentity(entityId)?.id ?? entityId;
+  const links = getEntityLinks(canonicalId, options);
   const results: (Entity & {
     link_id: string;
     relationship: string;
@@ -5834,9 +6265,9 @@ export const getRelatedEntities = (
   })[] = [];
 
   for (const link of links) {
-    if (link.source_entity_id === entityId) {
+    if (link.source_entity_id === canonicalId) {
       const entity = getEntity(link.target_entity_id);
-      if (entity) {
+      if (entity && !isRetiredCommitment(entity.id)) {
         results.push({
           ...entity,
           link_id: link.id,
@@ -5849,7 +6280,7 @@ export const getRelatedEntities = (
       }
     } else {
       const entity = getEntity(link.source_entity_id);
-      if (entity) {
+      if (entity && !isRetiredCommitment(entity.id)) {
         results.push({
           ...entity,
           link_id: link.id,
@@ -5956,7 +6387,7 @@ export const ensureMeetingEntity = (meetingEntity: {
 export const getMeetingEntities = (
   meetingId: string,
 ): (Entity & { mention_count: number; context: string | null })[] => {
-  return db
+  const rows = db
     .prepare(`
     SELECT e.*, me.mention_count, me.context
     FROM entities e
@@ -5968,6 +6399,18 @@ export const getMeetingEntities = (
     mention_count: number;
     context: string | null;
   })[];
+  const canonicalRows = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const canonical =
+      row.type === 'action_item' ? resolveCommitmentIdentity(row.id) : row;
+    if (canonical && !canonicalRows.has(canonical.id))
+      canonicalRows.set(canonical.id, {
+        ...canonical,
+        mention_count: row.mention_count,
+        context: row.context,
+      });
+  }
+  return [...canonicalRows.values()];
 };
 
 /**
@@ -5981,10 +6424,14 @@ export const getEntityMeetings = (
 })[] => {
   return db
     .prepare(`
-    SELECT m.*, me.mention_count, me.context
+    WITH RECURSIVE family(id) AS (
+      SELECT ? UNION SELECT a.extraction_id FROM commitment_aliases a JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
+    )
+    SELECT m.*, SUM(me.mention_count) AS mention_count, GROUP_CONCAT(DISTINCT me.context) AS context
     FROM meetings m
     JOIN meeting_entities me ON m.id = me.meeting_id
-    WHERE me.entity_id = ?
+    JOIN family f ON f.id = me.entity_id
+    GROUP BY m.id
     ORDER BY m.started_at DESC
   `)
     .all(entityId) as (PersistedMeeting & {
@@ -6061,6 +6508,7 @@ export const getActionItemsByStatus = (status: EntityStatus): Entity[] => {
     .prepare(`
     SELECT * FROM entities 
     WHERE type = 'action_item' AND status = ?
+      AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
     ORDER BY due_date ASC, created_at DESC
   `)
     .all(status) as Entity[];
@@ -6077,6 +6525,7 @@ export const getOverdueActionItems = (): Entity[] => {
       AND status = 'active' 
       AND due_date IS NOT NULL 
       AND due_date < datetime('now')
+      AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
     ORDER BY due_date ASC
   `)
     .all() as Entity[];
@@ -6086,31 +6535,39 @@ export const getOverdueActionItems = (): Entity[] => {
  * Get active action items that are currently blocked by another linked entity.
  */
 export const getBlockedActionItems = (): BlockedActionItem[] => {
-  return db
-    .prepare(
-      `
-        SELECT
-          e.*,
-          blocker.id AS blocker_entity_id,
-          blocker.name AS blocker_name,
-          l.evidence_meeting_id AS blocker_meeting_id,
-          l.evidence_quote AS blocker_evidence_quote,
-          l.updated_at AS blocker_updated_at,
-          l.state AS blocker_relationship_state
-        FROM entities e
-        JOIN entity_links l
-          ON l.source_entity_id = e.id
-         AND l.relationship = 'blocked_by'
-         AND l.state != 'rejected'
-        JOIN entities blocker
-          ON blocker.id = l.target_entity_id
-        WHERE e.type = 'action_item'
-          AND e.status = 'active'
-          AND COALESCE(blocker.status, 'active') != 'completed'
-        ORDER BY l.updated_at DESC, l.created_at DESC
-      `,
+  const links = db
+    .prepare(`
+    SELECT * FROM entity_links
+    WHERE relationship = 'blocked_by' AND state != 'rejected'
+    ORDER BY updated_at DESC, created_at DESC
+  `)
+    .all() as EntityLink[];
+  // Resolve both endpoints before checking lifecycle state. Keep the stored
+  // edge unchanged so restoring either alias restores its original dependency.
+  return links.flatMap((link) => {
+    const action = resolveCommitmentIdentity(link.source_entity_id);
+    const blocker = resolveCommitmentIdentity(link.target_entity_id);
+    if (
+      !action ||
+      action.type !== 'action_item' ||
+      action.status !== 'active' ||
+      !blocker ||
+      blocker.status === 'completed' ||
+      action.id === blocker.id
     )
-    .all() as BlockedActionItem[];
+      return [];
+    return [
+      {
+        ...action,
+        blocker_entity_id: blocker.id,
+        blocker_name: blocker.name,
+        blocker_meeting_id: link.evidence_meeting_id,
+        blocker_evidence_quote: link.evidence_quote,
+        blocker_updated_at: link.updated_at,
+        blocker_relationship_state: link.state,
+      },
+    ];
+  });
 };
 
 /**
@@ -6121,6 +6578,7 @@ export const getStaleActionItems = (staleDays = 7): Entity[] => {
     .prepare(`
     SELECT e.* FROM entities e
     WHERE e.type = 'action_item' 
+      AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = e.id AND a.active = 1)
       AND e.status = 'active'
       AND e.updated_at < datetime('now', '-' || ? || ' days')
     ORDER BY e.updated_at ASC
@@ -6229,6 +6687,11 @@ export const resetKnowledge = () => {
 
   // 2. Clear tables within a transaction
   const tables = [
+    'identity_captures',
+    'identity_resolutions',
+    'identity_resolution_history',
+    'identity_bindings',
+    'identity_jobs',
     'auto_end_log',
     'attention_items',
     'knowledge_backlinks',
@@ -6246,6 +6709,7 @@ export const resetKnowledge = () => {
   ];
 
   const deleteTransaction = db.transaction(() => {
+    identityStore.setSelfPersonId(null);
     for (const table of tables) {
       db.prepare(`DELETE FROM ${table}`).run();
     }
@@ -6346,6 +6810,8 @@ export const searchEntitiesWithMeetingContext = (query: string) => {
     JOIN entities e ON f.entity_id = e.id
     LEFT JOIN meeting_entities c ON c.entity_id = e.id
     WHERE entities_fts MATCH ?
+      AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
+        WHERE a.extraction_id = e.id AND a.active = 1)
     ORDER BY rank
     LIMIT 20
   `)

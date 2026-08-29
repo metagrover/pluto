@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../ui/PageHeader';
+import { IdentitySettings } from './IdentitySettings';
 
 interface SettingsTabProps {
   llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
@@ -183,6 +184,7 @@ export const SettingsTab = ({
     <div className="max-w-3xl mx-auto w-full animate-in pb-32">
       <PageHeader title="Settings" />
       <div>
+        <IdentitySettings />
         <Section title="Analysis">
           <SettingsRow
             label="AI Provider"
