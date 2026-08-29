@@ -18,10 +18,11 @@ import type {
   IdentityContext,
   OwnerResolution,
 } from '../../src/types/identity';
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 
 const enabled = process.env.RUN_IDENTITY_RESOLUTION_ACCEPTANCE === '1';
 const suite = enabled ? describe : describe.skip;
-const model = process.env.IDENTITY_ACCEPTANCE_MODEL || 'qwen3.5:9b';
+const model = process.env.IDENTITY_ACCEPTANCE_MODEL || OLLAMA_GENERAL_MODEL;
 const extendedCapacity =
   process.env.IDENTITY_ACCEPTANCE_EXTENDED_CAPACITY === '1';
 const caseTimeoutMs = extendedCapacity ? 660_000 : 180_000;

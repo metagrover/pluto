@@ -79,7 +79,7 @@ it('forwards cancellation through entity extraction after publication', async ()
 });
 
 it.each(['legacy', 'detected', 'generic'] as const)(
-  'pins Gemma before %s Ollama settings or discovery',
+  'uses the configured general model or Gemma default for %s settings',
   async (mode) => {
     const fixture = makeDirectNotesFixture();
     const model = 'installed-alternative:12b';
@@ -102,7 +102,9 @@ it.each(['legacy', 'detected', 'generic'] as const)(
     const result = await provider.generateStructuredAnalysis('', '', 'auto', {
       source: fixture.source,
     });
-    expect(result.generation_metadata?.model).toBe('gemma4:12b');
+    expect(result.generation_metadata?.model).toBe(
+      mode === 'detected' ? 'gemma4:12b' : model,
+    );
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
@@ -359,7 +361,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
     expect(urls.every((url) => url.endsWith('/api/chat'))).toBe(true);
     for (const request of requests)
       expect(request).toMatchObject({
-        model: 'gemma4:12b',
+        model: 'configured-model',
         think: false,
         stream: true,
         options: { seed: 42, num_ctx: 16384 },
@@ -367,7 +369,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
     expect(
       requests.map((r) => (r.options as { num_predict: number }).num_predict),
     ).toEqual([2048, 1536]);
-    expect(result.generation_metadata?.model).toBe('gemma4:12b');
+    expect(result.generation_metadata?.model).toBe('configured-model');
   } finally {
     vi.unstubAllGlobals();
   }
@@ -447,7 +449,7 @@ it('fails a schema-rejecting local transport without retrying as unconstrained J
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it('fails missing Gemma normally without discovering, downloading, or falling back', async () => {
+it('fails a missing explicitly configured notes model without falling back', async () => {
   const f = makeDirectNotesFixture();
   const fetcher = vi.fn(async () => ({
     ok: false,
@@ -468,7 +470,7 @@ it('fails missing Gemma normally without discovering, downloading, or falling ba
     { body: string },
   ];
   expect(url).toMatch(/\/api\/chat$/);
-  expect(JSON.parse(init.body).model).toBe('gemma4:12b');
+  expect(JSON.parse(init.body).model).toBe('installed-old-model');
 });
 
 it.each([
@@ -477,19 +479,18 @@ it.each([
   'notesMerge',
   'entities',
   'askPluto',
-] as const)('isolates the notes model pin for %s', async (task) => {
-  const provider = new UnifiedLLMProvider('ollama', {
-    ollama_model: 'generic-model',
-    ollama_fast_model: 'fast-model',
-  });
-  const resolver = provider as unknown as {
-    resolveOllamaModel(task: string): Promise<string>;
-  };
-  expect(await resolver.resolveOllamaModel(task)).toBe(
-    task.startsWith('notes')
-      ? 'gemma4:12b'
-      : task === 'askPluto'
-        ? 'fast-model'
-        : 'generic-model',
-  );
-});
+] as const)(
+  'uses the configured general model except for Quick chat: %s',
+  async (task) => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'generic-model',
+      ollama_fast_model: 'fast-model',
+    });
+    const resolver = provider as unknown as {
+      resolveOllamaModel(task: string): Promise<string>;
+    };
+    expect(await resolver.resolveOllamaModel(task)).toBe(
+      task === 'askPluto' ? 'fast-model' : 'generic-model',
+    );
+  },
+);

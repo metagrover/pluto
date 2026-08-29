@@ -9,13 +9,21 @@ import {
   type AskPlutoBenchmarkSample,
   evaluateAskPlutoBenchmark,
 } from '../src/services/askPlutoBenchmark.ts';
+import {
+  OLLAMA_GENERAL_MODEL,
+  OLLAMA_QUICK_CHAT_MODEL,
+} from '../src/utils/ollamaModels.ts';
 
 const argumentValue = (name: string): string | undefined => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
 };
 
-const model = argumentValue('--model') || 'qwen3.5:9b';
+const sharedModel = argumentValue('--model');
+const fastModel =
+  argumentValue('--fast-model') || sharedModel || OLLAMA_QUICK_CHAT_MODEL;
+const deepModel =
+  argumentValue('--deep-model') || sharedModel || OLLAMA_GENERAL_MODEL;
 const runs = Math.max(1, Number.parseInt(argumentValue('--runs') || '5', 10));
 const deepTokens = Math.max(
   2048,
@@ -79,7 +87,7 @@ const generate = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model,
+      model: mode === 'fast' ? fastModel : deepModel,
       prompt: prompts[mode],
       stream: true,
       think: false,
@@ -147,7 +155,7 @@ const main = async () => {
   const report = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    model,
+    models: { fast: fastModel, deep: deepModel },
     runsPerMode: runs,
     deepTokens,
     environment: {

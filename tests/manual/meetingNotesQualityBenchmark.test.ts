@@ -10,6 +10,7 @@ import {
   UnifiedLLMProvider,
 } from '../../electron/llm/unifiedProvider';
 import { scoreMeetingNotesQuality } from '../../scripts/lib/meeting_notes_quality.js';
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 
 const COMPARISON_BASELINE_PROMPT_VERSION = 'notes-v6';
 
@@ -78,7 +79,8 @@ suite('real-provider meeting notes quality benchmark', () => {
   it(
     'runs production prompts and grounding with content-free reporting',
     async () => {
-      const model = process.env.OLLAMA_BENCHMARK_MODEL?.trim() || 'qwen3.5:9b';
+      const model =
+        process.env.OLLAMA_BENCHMARK_MODEL?.trim() || OLLAMA_GENERAL_MODEL;
       const repeats = Math.max(
         1,
         Number.parseInt(process.env.OLLAMA_BENCHMARK_REPEATS || '3', 10) || 3,

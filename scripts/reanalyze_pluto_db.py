@@ -10,7 +10,7 @@ DB_PATH = os.path.expanduser('~/Library/Application Support/pluto/pluto.db')
 if not os.path.exists(DB_PATH):
     DB_PATH = os.path.expanduser('~/Library/Application Support/Pluto/pluto.db')
 OLLAMA_URL = 'http://127.0.0.1:11434/api/generate'
-MODEL = 'qwen3.5:9b'
+MODEL = 'gemma4:12b'
 
 def ollama_generate(prompt: str, json_mode: bool = True, num_ctx: int = 16384) -> str:
     payload = {

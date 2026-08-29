@@ -1,4 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  OLLAMA_GENERAL_MODEL,
+  OLLAMA_QUICK_CHAT_MODEL,
+} from '../../src/utils/ollamaModels';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import {
   createSerializedTaskGate,
@@ -46,7 +50,6 @@ const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_GENERATION_IDLE_TIMEOUT_MS = 60_000;
 const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
 const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
-const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
@@ -464,7 +467,6 @@ export class UnifiedLLMProvider implements LLMProvider {
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
-  private cachedOllamaModels = new Map<string, string>();
   private activeOllamaModel: string | null = null;
 
   constructor(
@@ -569,7 +571,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   private getConfiguredAnalysisModel(): string {
     switch (this.providerType) {
       case 'ollama':
-        return NOTES_OLLAMA_MODEL;
+        return (
+          this.settings.ollama_model ||
+          this.settings.llm_model ||
+          NOTES_OLLAMA_MODEL
+        );
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
       case 'claude':
@@ -1379,15 +1385,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (
-      task === 'notesWriter' ||
-      task === 'notesAudit' ||
-      task === 'notesMerge'
-    )
-      return NOTES_OLLAMA_MODEL;
-    const configuredFastModel = (this.settings.ollama_fast_model || '').trim();
-    if (task === 'askPluto' && configuredFastModel) {
-      return configuredFastModel;
+    if (task === 'askPluto' || task === 'queryClassification') {
+      return (
+        (this.settings.ollama_fast_model || '').trim() ||
+        OLLAMA_QUICK_CHAT_MODEL
+      );
     }
     const configuredModel = (
       this.settings.ollama_model ||
@@ -1398,58 +1400,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       return configuredModel;
     }
 
-    const cachedModel = this.cachedOllamaModels.get(OLLAMA_DEFAULT_MODEL);
-    if (cachedModel) {
-      return cachedModel;
-    }
-
-    try {
-      const response = await this.ollamaFetch('/api/tags');
-      if (!response.ok) {
-        return OLLAMA_DEFAULT_MODEL;
-      }
-      const data = await response.json();
-      const models: string[] = Array.isArray(data.models)
-        ? data.models
-            .map((item: { name?: string }) => item?.name)
-            .filter(
-              (value: unknown): value is string =>
-                typeof value === 'string' && value.length > 0,
-            )
-        : [];
-
-      if (models.length > 0) {
-        const defaultCandidate = models.find(
-          (name) =>
-            name === OLLAMA_DEFAULT_MODEL ||
-            name.startsWith(`${OLLAMA_DEFAULT_MODEL}:`),
-        );
-        if (defaultCandidate) {
-          this.cachedOllamaModels.set(OLLAMA_DEFAULT_MODEL, defaultCandidate);
-          return defaultCandidate;
-        }
-
-        // Avoid obvious embedding-only models for text generation tasks.
-        const nonEmbeddingCandidate = models.find(
-          (name) =>
-            !/(^|[-_:])(embed|embedding|bge|e5|gte)([-_:]|$)/i.test(name),
-        );
-        if (nonEmbeddingCandidate) {
-          this.cachedOllamaModels.set(
-            OLLAMA_DEFAULT_MODEL,
-            nonEmbeddingCandidate,
-          );
-          return nonEmbeddingCandidate;
-        }
-
-        this.cachedOllamaModels.set(OLLAMA_DEFAULT_MODEL, models[0]);
-        return models[0];
-      }
-    } catch (e) {
-      console.warn('[Ollama] Failed to auto-detect model, using default:', e);
-    }
-
-    return OLLAMA_DEFAULT_MODEL;
+    return OLLAMA_GENERAL_MODEL;
   }
 
   private async ollamaFetch(
