@@ -1,7 +1,7 @@
 ### Recognize people and preserve commitment decisions across regenerated notes
 
 - **Issue:** [#679](https://github.com/metagrover/pluto/issues/679)
-- **PR:** Not created; local implementation.
+- **PR:** [#680](https://github.com/metagrover/pluto/pull/680)
 - **Changed:** Commitment extraction resolves source-grounded owner identity and compares obligation meaning against pending and reviewed history before publishing suggestions. Durable aliases retain source descriptions and reuse canonical commitments without resetting user decisions. Revisioned background reconciliation reacts to identity/source corrections and restores unsupported aliases. Optional About you onboarding and Settings capture preferred/alternate names and work/study context; existing users receive a dismissible invitation.
 - **Why:** Reworded suggestions bypassed description hashes and resurfaced after confirmation or dismissal.
 - **Replaced:** Text-normalization-only identity at the production extraction boundary.
