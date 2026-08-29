@@ -476,32 +476,4 @@ describe('App recording navigation', () => {
 
     await act(async () => root.unmount());
   });
-
-  it('keeps recording setup visible when a previously completed setup becomes unready', async () => {
-    const { default: App } = await import('../../src/App');
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(<App />);
-      await flushPromises();
-    });
-    expect(container.textContent).toContain('Dashboard');
-
-    await act(async () => {
-      window.dispatchEvent(
-        new CustomEvent('RECORDING_READINESS_FAILED', {
-          detail: {
-            ready: false,
-            blockers: ['parakeet_model_missing'],
-          },
-        }),
-      );
-      await flushPromises();
-    });
-
-    expect(container.textContent).toContain('Recording setup');
-    expect(container.textContent).toContain('Getting Pluto ready');
-
-    await act(async () => root.unmount());
-  });
 });

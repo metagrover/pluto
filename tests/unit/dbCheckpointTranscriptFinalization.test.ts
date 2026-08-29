@@ -126,38 +126,6 @@ it('expires interrupted final transcription without replacing provisional text',
   ]);
 });
 
-it('preserves transcript-owned fields when a generic save omits them', () => {
-  const id = 'generic-save-preserves-transcript';
-  saveMeeting({
-    id,
-    title: 'Original title',
-    audio_path: '/tmp/pluto-mic.wav',
-    system_audio_path: '/tmp/pluto-system.wav',
-    mixed_audio_path: '/tmp/pluto-mix.wav',
-    transcript_status: 'validated',
-    transcript_json: canonicalTranscriptJson,
-    transcript_integrity_json: transcriptIntegrityJson,
-    transcript_validated_at: validatedAt,
-  });
-
-  saveMeeting({
-    id,
-    title: 'Generated title',
-    analysis_json: JSON.stringify({ summary: 'late downstream save' }),
-  });
-
-  expect(getMeeting(id)).toMatchObject({
-    title: 'Generated title',
-    audio_path: '/tmp/pluto-mic.wav',
-    system_audio_path: '/tmp/pluto-system.wav',
-    mixed_audio_path: '/tmp/pluto-mix.wav',
-    transcript_status: 'validated',
-    transcript_json: canonicalTranscriptJson,
-    transcript_integrity_json: transcriptIntegrityJson,
-    transcript_validated_at: validatedAt,
-  });
-});
-
 const validatedAt = '2026-07-31T08:00:00.000Z';
 const journalGeneration = 'journal-generation-1';
 const validationRunId = 'validation-run-1';

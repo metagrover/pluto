@@ -62,8 +62,9 @@ export const createSerializedTaskGate = <Key, Result>() => {
     key: Key,
     task: (signal: AbortSignal) => Promise<Result>,
     priority = 0,
-    options: { preemptible?: boolean } = {},
+    options: { preemptible?: boolean; signal?: AbortSignal } = {},
   ): Promise<Result> => {
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason);
     const existing = inFlightByKey.get(key);
     if (existing) return existing;
 
@@ -84,6 +85,19 @@ export const createSerializedTaskGate = <Key, Result>() => {
       reject,
       promise,
     });
+    const abort = () => {
+      const index = queue.findIndex((entry) => entry.promise === promise);
+      if (index >= 0) {
+        queue.splice(index, 1);
+        if (inFlightByKey.get(key) === promise) inFlightByKey.delete(key);
+        reject(options.signal?.reason);
+      } else if (activeTask?.promise === promise) {
+        activeTask.controller.abort(options.signal?.reason);
+      }
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const cleanup = () => options.signal?.removeEventListener('abort', abort);
+    void promise.then(cleanup, cleanup);
     if (
       activeTask?.preemptible &&
       priority > activeTask.priority &&

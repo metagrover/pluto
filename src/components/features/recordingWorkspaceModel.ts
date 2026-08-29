@@ -81,9 +81,6 @@ export const buildRecordingWorkspaceModel = (
       segment.text.trim() &&
       segment.presentation?.visibility !== 'suppressed_echo',
   );
-  const newestTentativeId = visibleTranscript
-    .filter((segment) => !segment.confirmed)
-    .at(-1)?.id;
   return {
     status: input.isStarting
       ? ('starting' as const)
@@ -114,9 +111,7 @@ export const buildRecordingWorkspaceModel = (
               : input.isProcessing
                 ? 'Finalizing notes. Keep Pluto open.'
                 : 'Capture is healthy',
-    transcript: visibleTranscript.filter(
-      (segment) => segment.confirmed || segment.id === newestTentativeId,
-    ),
+    transcript: visibleTranscript,
     interimText: input.interimText.trim(),
   };
 };

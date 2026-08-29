@@ -1,4 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  OLLAMA_GENERAL_MODEL,
+  OLLAMA_QUICK_CHAT_MODEL,
+} from '../../src/utils/ollamaModels';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import {
   createSerializedTaskGate,
@@ -41,13 +45,13 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
+const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_GENERATION_IDLE_TIMEOUT_MS = 60_000;
 const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
 const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
-const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
@@ -76,6 +80,96 @@ const rejectNotesProviderResponse = async (
       : 'notes_provider_error',
   );
 };
+
+// llama.cpp rejects nested string repetitions at 2000 or above. Keep the
+// original schema and strict commitment/identity parsers authoritative, while
+// expressing those bounds as guidance on the Ollama wire only (upstream #25746).
+export function toOllamaCommitmentSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toOllamaCommitmentSchema);
+  if (!value || typeof value !== 'object') return value;
+  const wire = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      toOllamaCommitmentSchema(child),
+    ]),
+  );
+  if (
+    wire.type === 'string' &&
+    typeof wire.maxLength === 'number' &&
+    wire.maxLength >= 2000
+  ) {
+    wire.description = [
+      wire.description,
+      `Maximum length: ${wire.maxLength} characters.`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    wire.maxLength = undefined;
+  }
+  return wire;
+}
+
+// Claude supports a narrower wire schema. The caller retains the original
+// schema and strict response parser; constraints removed here remain guidance.
+function toClaudeResponseSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  const wire = { ...schema };
+  const constraints: string[] = [];
+  for (const key of [
+    'minLength',
+    'maxLength',
+    'minimum',
+    'maximum',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
+    'multipleOf',
+    'maxItems',
+    'uniqueItems',
+  ]) {
+    if (key in wire) {
+      constraints.push(`${key}: ${JSON.stringify(wire[key])}`);
+      delete wire[key];
+    }
+  }
+  if (typeof wire.minItems === 'number' && wire.minItems > 1) {
+    constraints.push(`minItems: ${wire.minItems}`);
+    wire.minItems = 1;
+  }
+  for (const key of ['properties', '$defs', 'definitions']) {
+    const children = wire[key];
+    if (children && typeof children === 'object' && !Array.isArray(children)) {
+      wire[key] = Object.fromEntries(
+        Object.entries(children).map(([name, child]) => [
+          name,
+          child && typeof child === 'object' && !Array.isArray(child)
+            ? toClaudeResponseSchema(child as Record<string, unknown>)
+            : child,
+        ]),
+      );
+    }
+  }
+  for (const key of ['items', 'anyOf', 'allOf', 'oneOf', 'prefixItems']) {
+    const child = wire[key];
+    const transform = (value: unknown) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? toClaudeResponseSchema(value as Record<string, unknown>)
+        : value;
+    if (child)
+      wire[key] = Array.isArray(child)
+        ? child.map(transform)
+        : transform(child);
+  }
+  if (constraints.length) {
+    wire.description = [
+      schema.description,
+      `Constraints: ${constraints.join('; ')}.`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+  return wire;
+}
 
 const mergeUniqueByKey = <T>(
   primary: T[],
@@ -289,6 +383,8 @@ type LLMTask =
   | 'entities'
   | 'valueSignals'
   | 'knowledgeDoc'
+  | 'projectScopeReview'
+  | 'commitmentReconciliation'
   | 'askPluto'
   | 'askPlutoDeep'
   | 'askPlutoLive'
@@ -310,20 +406,24 @@ const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
     ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-    : task === 'askPlutoLive'
-      ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
-      : task === 'structuredAnalysis' ||
-          task === 'notesWriter' ||
-          task === 'notesAudit' ||
-          task === 'notesMerge' ||
-          task === 'analysisEditorial' ||
-          task === 'topicSegmentation' ||
-          task === 'terminologyReconciliation' ||
-          task === 'topicAnalysis'
-        ? OLLAMA_ANALYSIS_TIMEOUT_MS
-        : OLLAMA_TIMEOUT_MS;
+    : task === 'projectScopeReview'
+      ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
+      : task === 'askPlutoLive'
+        ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
+        : task === 'structuredAnalysis' ||
+            task === 'notesWriter' ||
+            task === 'notesAudit' ||
+            task === 'notesMerge' ||
+            task === 'analysisEditorial' ||
+            task === 'topicSegmentation' ||
+            task === 'terminologyReconciliation' ||
+            task === 'topicAnalysis'
+          ? OLLAMA_ANALYSIS_TIMEOUT_MS
+          : OLLAMA_TIMEOUT_MS;
 
 const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
+  task === 'commitmentReconciliation' ||
+  task === 'projectScopeReview' ||
   task === 'notesWriter' ||
   task === 'notesAudit' ||
   task === 'notesMerge' ||
@@ -359,6 +459,7 @@ interface TextGenerationOptions {
   prompt: string;
   task: LLMTask;
   jsonMode?: boolean;
+  responseSchema?: Record<string, unknown>;
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
@@ -375,7 +476,6 @@ export class UnifiedLLMProvider implements LLMProvider {
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
-  private cachedOllamaModels = new Map<string, string>();
   private activeOllamaModel: string | null = null;
 
   constructor(
@@ -480,7 +580,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   private getConfiguredAnalysisModel(): string {
     switch (this.providerType) {
       case 'ollama':
-        return NOTES_OLLAMA_MODEL;
+        return (
+          this.settings.ollama_model ||
+          this.settings.llm_model ||
+          NOTES_OLLAMA_MODEL
+        );
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
       case 'claude':
@@ -661,12 +765,22 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async synthesizeKnowledgeDocument(
     prompt: string,
-    options: { signal?: AbortSignal } = {},
+    options: {
+      signal?: AbortSignal;
+      purpose?: 'projectScope' | 'commitmentReconciliation';
+      responseSchema?: Record<string, unknown>;
+    } = {},
   ): Promise<string> {
     return this.generateText({
       prompt,
-      task: 'knowledgeDoc',
+      task:
+        options.purpose === 'commitmentReconciliation'
+          ? 'commitmentReconciliation'
+          : options.purpose === 'projectScope'
+            ? 'projectScopeReview'
+            : 'knowledgeDoc',
       jsonMode: true,
+      responseSchema: options.responseSchema,
       signal: options.signal,
     });
   }
@@ -805,16 +919,22 @@ export class UnifiedLLMProvider implements LLMProvider {
                   : gateSignal,
               });
             },
-            options.task === 'knowledgeDoc'
+            options.task === 'knowledgeDoc' ||
+              options.task === 'commitmentReconciliation'
               ? 0
-              : options.task === 'askPluto' ||
-                  options.task === 'askPlutoDeep' ||
-                  options.task === 'askPlutoLive'
-                ? 20
-                : 10,
+              : options.task === 'projectScopeReview'
+                ? 15
+                : options.task === 'askPluto' ||
+                    options.task === 'askPlutoDeep' ||
+                    options.task === 'askPlutoLive'
+                  ? 20
+                  : 10,
             {
+              signal: options.signal,
               preemptible:
                 options.task === 'knowledgeDoc' ||
+                options.task === 'projectScopeReview' ||
+                options.task === 'commitmentReconciliation' ||
                 options.task === 'title' ||
                 isResumableMeetingAnalysisTask(options.task),
             },
@@ -858,6 +978,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt,
     task,
     jsonMode,
+    responseSchema,
     signal,
     notesBudget,
   }: TextGenerationOptions): Promise<string> {
@@ -878,7 +999,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     };
 
     if (jsonMode) {
-      body.response_format = { type: 'json_object' };
+      body.response_format = responseSchema
+        ? {
+            type: 'json_schema',
+            json_schema: { name: task, schema: responseSchema, strict: true },
+          }
+        : { type: 'json_object' };
     }
 
     const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
@@ -899,12 +1025,18 @@ export class UnifiedLLMProvider implements LLMProvider {
     const data = await response.json();
     if (notesBudget && data.choices?.[0]?.finish_reason === 'length')
       throw new MeetingNotesError('notes_output_truncated');
+    if (
+      task === 'commitmentReconciliation' &&
+      data.choices?.[0]?.finish_reason === 'length'
+    )
+      throw new Error('commitment_response_incomplete');
     return data.choices?.[0]?.message?.content ?? '';
   }
 
   private async generateWithClaude({
     prompt,
     task,
+    responseSchema,
     signal,
     notesBudget,
   }: TextGenerationOptions): Promise<string> {
@@ -923,6 +1055,16 @@ export class UnifiedLLMProvider implements LLMProvider {
         model: this.settings.claude_model || 'claude-3-haiku-20240307',
         max_tokens: notesBudget?.outputTokens ?? this.getClaudeMaxTokens(task),
         messages: [{ role: 'user', content: prompt }],
+        ...(responseSchema
+          ? {
+              output_config: {
+                format: {
+                  type: 'json_schema',
+                  schema: toClaudeResponseSchema(responseSchema),
+                },
+              },
+            }
+          : {}),
       }),
       signal,
     });
@@ -935,12 +1077,19 @@ export class UnifiedLLMProvider implements LLMProvider {
     const data = await response.json();
     if (notesBudget && data.stop_reason === 'max_tokens')
       throw new MeetingNotesError('notes_output_truncated');
+    if (
+      task === 'commitmentReconciliation' &&
+      data.stop_reason === 'max_tokens'
+    )
+      throw new Error('commitment_response_incomplete');
     return data.content?.[0]?.text ?? '';
   }
 
   private async generateWithGemini({
     prompt,
+    task,
     jsonMode,
+    responseSchema,
     notesBudget,
     signal,
   }: TextGenerationOptions): Promise<string> {
@@ -953,6 +1102,9 @@ export class UnifiedLLMProvider implements LLMProvider {
             model: modelName,
             generationConfig: {
               responseMimeType: 'application/json',
+              // The installed SDK forwards generationConfig unchanged. Use the
+              // API's JSON Schema field, not its narrower OpenAPI responseSchema.
+              ...(responseSchema ? { responseJsonSchema: responseSchema } : {}),
               ...(notesBudget
                 ? { maxOutputTokens: notesBudget.outputTokens }
                 : {}),
@@ -974,6 +1126,13 @@ export class UnifiedLLMProvider implements LLMProvider {
       )
     )
       throw new MeetingNotesError('notes_output_truncated');
+    if (
+      task === 'commitmentReconciliation' &&
+      response.candidates?.some(
+        (candidate) => candidate.finishReason === 'MAX_TOKENS',
+      )
+    )
+      throw new Error('commitment_response_incomplete');
     return response.text();
   }
 
@@ -981,6 +1140,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt,
     task,
     jsonMode,
+    responseSchema,
     signal,
     onToken,
     notesBudget,
@@ -1024,10 +1184,20 @@ export class UnifiedLLMProvider implements LLMProvider {
     };
 
     if (jsonMode) {
-      requestBody.format = notesResponseSchema ?? 'json';
+      requestBody.format =
+        notesResponseSchema ??
+        (task === 'commitmentReconciliation' && responseSchema
+          ? toOllamaCommitmentSchema(responseSchema)
+          : responseSchema) ??
+        'json';
       requestBody.think = this.settings.ollama_structured_thinking ?? false;
     }
-    if (task === 'queryClassification') requestBody.think = false;
+    if (
+      task === 'queryClassification' ||
+      task === 'projectScopeReview' ||
+      task === 'commitmentReconciliation'
+    )
+      requestBody.think = false;
     if (task === 'askPluto') requestBody.think = false;
     if (task === 'askPlutoDeep') {
       requestBody.think = false;
@@ -1086,6 +1256,16 @@ export class UnifiedLLMProvider implements LLMProvider {
         for (const line of lines) {
           if (!line.trim()) continue;
           const packet = JSON.parse(line) as Record<string, unknown>;
+          if (task === 'projectScopeReview' && packet.done === true) {
+            completed = true;
+            if (packet.done_reason === 'length')
+              throw new Error('project_scope_response_incomplete');
+          }
+          if (task === 'commitmentReconciliation' && packet.done === true) {
+            completed = true;
+            if (packet.done_reason === 'length')
+              throw new Error('commitment_response_incomplete');
+          }
           if (notesBudget && packet.done) {
             completed = true;
             console.log(
@@ -1139,6 +1319,10 @@ export class UnifiedLLMProvider implements LLMProvider {
         }
         if (notesBudget && !completed)
           throw new MeetingNotesError('notes_output_incomplete');
+        if (task === 'projectScopeReview' && !completed)
+          throw new Error('project_scope_response_incomplete');
+        if (task === 'commitmentReconciliation' && !completed)
+          throw new Error('commitment_response_incomplete');
         return answer;
       } catch (error) {
         const fastModel = (this.settings.ollama_fast_model || '').trim();
@@ -1236,15 +1420,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (
-      task === 'notesWriter' ||
-      task === 'notesAudit' ||
-      task === 'notesMerge'
-    )
-      return NOTES_OLLAMA_MODEL;
-    const configuredFastModel = (this.settings.ollama_fast_model || '').trim();
-    if (task === 'askPluto' && configuredFastModel) {
-      return configuredFastModel;
+    if (task === 'askPluto' || task === 'queryClassification') {
+      return (
+        (this.settings.ollama_fast_model || '').trim() ||
+        OLLAMA_QUICK_CHAT_MODEL
+      );
     }
     const configuredModel = (
       this.settings.ollama_model ||
@@ -1255,58 +1435,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       return configuredModel;
     }
 
-    const cachedModel = this.cachedOllamaModels.get(OLLAMA_DEFAULT_MODEL);
-    if (cachedModel) {
-      return cachedModel;
-    }
-
-    try {
-      const response = await this.ollamaFetch('/api/tags');
-      if (!response.ok) {
-        return OLLAMA_DEFAULT_MODEL;
-      }
-      const data = await response.json();
-      const models: string[] = Array.isArray(data.models)
-        ? data.models
-            .map((item: { name?: string }) => item?.name)
-            .filter(
-              (value: unknown): value is string =>
-                typeof value === 'string' && value.length > 0,
-            )
-        : [];
-
-      if (models.length > 0) {
-        const defaultCandidate = models.find(
-          (name) =>
-            name === OLLAMA_DEFAULT_MODEL ||
-            name.startsWith(`${OLLAMA_DEFAULT_MODEL}:`),
-        );
-        if (defaultCandidate) {
-          this.cachedOllamaModels.set(OLLAMA_DEFAULT_MODEL, defaultCandidate);
-          return defaultCandidate;
-        }
-
-        // Avoid obvious embedding-only models for text generation tasks.
-        const nonEmbeddingCandidate = models.find(
-          (name) =>
-            !/(^|[-_:])(embed|embedding|bge|e5|gte)([-_:]|$)/i.test(name),
-        );
-        if (nonEmbeddingCandidate) {
-          this.cachedOllamaModels.set(
-            OLLAMA_DEFAULT_MODEL,
-            nonEmbeddingCandidate,
-          );
-          return nonEmbeddingCandidate;
-        }
-
-        this.cachedOllamaModels.set(OLLAMA_DEFAULT_MODEL, models[0]);
-        return models[0];
-      }
-    } catch (e) {
-      console.warn('[Ollama] Failed to auto-detect model, using default:', e);
-    }
-
-    return OLLAMA_DEFAULT_MODEL;
+    return OLLAMA_GENERAL_MODEL;
   }
 
   private async ollamaFetch(
@@ -1413,6 +1542,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') {
       return 'You are an expert at classifying conversation value signals. Always respond with valid JSON only.';
     }
+    if (task === 'projectScopeReview') {
+      return 'You assess project scope conservatively against transcript evidence. Always respond with valid JSON only.';
+    }
+    if (task === 'commitmentReconciliation') {
+      return 'Compare commitments conservatively by meaning and source context. Same topic is not the same obligation. Return valid JSON only.';
+    }
     if (task === 'knowledgeDoc') {
       return 'You are an expert at generating strict citation-grounded knowledge documents. Always respond with valid JSON only.';
     }
@@ -1453,6 +1588,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;
+    if (task === 'projectScopeReview') return 0.1;
+    if (task === 'commitmentReconciliation') return 0;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
     if (
@@ -1478,6 +1615,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summaryRepair') return 1024;
     if (task === 'entities') return 2048;
     if (task === 'valueSignals') return 512;
+    if (task === 'projectScopeReview') return 2500;
+    if (task === 'commitmentReconciliation') return 2500;
     if (task === 'knowledgeDoc') return 4096;
     if (task === 'askPluto') return 1024;
     if (task === 'askPlutoDeep') return 2048;

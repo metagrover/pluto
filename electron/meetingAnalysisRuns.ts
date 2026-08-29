@@ -9,6 +9,7 @@ import {
   NOTES_PROMPT_VERSION,
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
+import type { LLMProvider } from './llm/provider';
 
 type MeetingRecord = {
   id: string | number;
@@ -102,6 +103,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
 
 type NotesProvider = {
   name: string;
+  synthesizeKnowledgeDocument?: LLMProvider['synthesizeKnowledgeDocument'];
   generateStructuredAnalysis(
     transcript: string,
     userNotes?: string,
@@ -219,7 +221,11 @@ const configuredModel = (settings: SettingsRecord): string | null => {
   if (provider === 'openai') return stringSetting(settings.openai_model);
   if (provider === 'claude') return stringSetting(settings.claude_model);
   if (provider === 'gemini') return stringSetting(settings.gemini_model);
-  return NOTES_OLLAMA_MODEL;
+  return (
+    stringSetting(settings.ollama_model) ??
+    stringSetting(settings.llm_model) ??
+    NOTES_OLLAMA_MODEL
+  );
 };
 
 const stringSetting = (value: unknown): string | null =>

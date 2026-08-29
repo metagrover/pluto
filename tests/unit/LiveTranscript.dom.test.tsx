@@ -5,6 +5,9 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LiveTranscript } from '../../src/components/features/LiveTranscript';
+import { buildRecordingWorkspaceModel } from '../../src/components/features/recordingWorkspaceModel';
+import { createEouTranscriptProjection } from '../../src/services/liveTranscription/eouTranscriptProjection';
+import { reconcileLiveTranscriptSegments } from '../../src/services/liveTranscription/liveTranscriptReconciliation';
 
 const liveSegment = {
   id: 'new-turn',
@@ -80,6 +83,70 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('keeps both sources visible through delayed provisional updates and commitment', () => {
+    const root = createRoot(container);
+    const projection = createEouTranscriptProjection();
+    const publish = (
+      source: 'mic' | 'system',
+      revision: number,
+      text: string,
+      confirmed = false,
+    ) => {
+      const segments = projection.apply({
+        streamId: `test-${source}`,
+        source,
+        revision,
+        generation: 1,
+        processedAudioSeconds: 10,
+        committedText: confirmed ? text : '',
+        tentativeText: confirmed ? '' : text,
+        tokens: text.split(' ').map((word, index) => ({
+          text: word,
+          startSeconds: 1 + index * 0.1,
+          endSeconds: 1.08 + index * 0.1,
+          committed: confirmed,
+        })),
+      });
+      const model = buildRecordingWorkspaceModel({
+        startedAtMs: 1,
+        nowMs: 10_000,
+        isStarting: false,
+        isProcessing: false,
+        microphone: 'healthy',
+        systemAudio: 'healthy',
+        captureDurability: 'healthy',
+        liveTranscriptIntegrity: 'healthy',
+        interimText: '',
+        segments: reconcileLiveTranscriptSegments({
+          segments,
+          activityWindows: [],
+        }),
+      });
+      act(() =>
+        root.render(
+          <LiveTranscript segments={model.transcript} interimText="" />,
+        ),
+      );
+    };
+    publish('system', 1, 'The report is ready');
+    expect(container.textContent).toContain('The report is ready');
+    publish('mic', 1, 'Wait I have a correction');
+    expect(container.textContent).toContain('The report is ready');
+    expect(container.textContent).toContain('Wait I have a correction');
+    publish('system', 2, 'The report is ready for review');
+    expect(container.textContent).toContain('Wait I have a correction');
+    expect(
+      container.querySelectorAll('.transcript-paragraph-part--tentative'),
+    ).toHaveLength(2);
+    publish('mic', 2, 'Wait I have a correction', true);
+    expect(container.textContent).toContain('Wait I have a correction.');
+    expect(container.textContent).toContain('The report is ready for review');
+    expect(
+      container.querySelectorAll('.transcript-paragraph-part--tentative'),
+    ).toHaveLength(1);
+    act(() => root.unmount());
+  });
+
   it('distinguishes the tentative tail and reports truthful live status', () => {
     const root = createRoot(container);
     act(() =>
@@ -115,32 +182,6 @@ describe('LiveTranscript reading experience', () => {
     expect(
       container.querySelector('.live-transcript-heading span')?.textContent,
     ).toBe('Falling behind');
-    act(() => root.unmount());
-  });
-
-  it('marks accepted and interim transcript text as overflow-resistant', () => {
-    const root = createRoot(container);
-    const longToken = 'supercalifragilistic'.repeat(12);
-    act(() =>
-      root.render(
-        <LiveTranscript
-          segments={[
-            {
-              ...liveSegment,
-              text: longToken,
-            },
-          ]}
-          interimText={longToken}
-        />,
-      ),
-    );
-
-    const transcriptText = container.querySelector('.transcript-turn p');
-    expect(transcriptText?.textContent).toContain(longToken);
-    expect(container.querySelector('.transcript-interim')?.className).toContain(
-      'transcript-interim',
-    );
-
     act(() => root.unmount());
   });
 

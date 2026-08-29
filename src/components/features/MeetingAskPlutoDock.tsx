@@ -22,6 +22,7 @@ import {
   createMeetingAskPlutoRequestId,
   describeMeetingAskPlutoRequest,
 } from '../../utils/askPlutoDiagnostics';
+import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
 
 type MeetingAskPlutoDockProps = {
@@ -43,11 +44,12 @@ type MeetingAskPlutoDockProps = {
     }
 );
 
-const LIVE_TRANSCRIPT_LIMIT = 24;
-const LIVE_TRANSCRIPT_SEGMENT_CHAR_LIMIT = 500;
-const LIVE_NOTES_CHAR_LIMIT = 1800;
-const LIVE_INTERIM_CHAR_LIMIT = 700;
-const LIVE_PARTICIPANT_LIMIT = 8;
+const LIVE_TRANSCRIPT_LIMIT = MEETING_ASK_PLUTO_LIMITS.transcriptSegments;
+const LIVE_TRANSCRIPT_SEGMENT_CHAR_LIMIT =
+  MEETING_ASK_PLUTO_LIMITS.transcriptSegmentChars;
+const LIVE_NOTES_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.notesChars;
+const LIVE_INTERIM_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.interimChars;
+const LIVE_PARTICIPANT_LIMIT = MEETING_ASK_PLUTO_LIMITS.participants;
 
 const trimToLimit = (value: string | undefined, limit: number) =>
   (value || '').trim().slice(0, limit);
@@ -122,6 +124,12 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   const threadEndRef = useRef<HTMLDivElement>(null);
   const shouldFollowLatestRef = useRef(true);
   const activeRequestIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const scopeKey = meeting
+    ? `meeting:${String(meeting.id)}`
+    : 'live:active-recording';
+  const scopeKeyRef = useRef(scopeKey);
+  scopeKeyRef.current = scopeKey;
   const scopeTitle = meeting?.title || liveContext?.title || 'Meeting';
   const calculatedRows = Math.max(
     1,
@@ -208,6 +216,21 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     [],
   );
 
+  useEffect(
+    () => () => {
+      const activeRequestId = activeRequestIdRef.current;
+      if (activeRequestId) {
+        void window.ipcRenderer.invoke(
+          'intelligence:meeting-chat:cancel',
+          activeRequestId,
+        );
+      }
+      mountedRef.current = false;
+      activeRequestIdRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (
       !showsConversation ||
@@ -226,6 +249,13 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     if (!trimmed || isAsking) return;
 
     const requestId = createMeetingAskPlutoRequestId();
+    const previousRequestId = activeRequestIdRef.current;
+    if (previousRequestId) {
+      void window.ipcRenderer.invoke(
+        'intelligence:meeting-chat:cancel',
+        previousRequestId,
+      );
+    }
     const priorTurns = toTurns(messages);
     setError(null);
     setQuery('');
@@ -242,6 +272,7 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       },
     ]);
     activeRequestIdRef.current = requestId;
+    const requestScopeKey = scopeKey;
 
     try {
       const requestStartedAt = Date.now();
@@ -258,7 +289,6 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         : {
             requestId,
             query: trimmed,
-            answerMode: 'quick',
             scope: {
               type: 'live_meeting',
               ...buildBoundedLiveContext(liveContext),
@@ -281,6 +311,14 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         elapsedMs: Date.now() - requestStartedAt,
       });
 
+      if (
+        !mountedRef.current ||
+        activeRequestIdRef.current !== requestId ||
+        scopeKeyRef.current !== requestScopeKey
+      ) {
+        return;
+      }
+
       setMessages((current) => [
         ...current,
         {
@@ -292,13 +330,15 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       ]);
     } catch (submitError) {
       console.error('Meeting Ask Pluto error:', submitError);
-      setError('Pluto could not answer this meeting right now.');
+      if (mountedRef.current && activeRequestIdRef.current === requestId) {
+        setError('Pluto could not answer this meeting right now.');
+      }
     } finally {
-      if (activeRequestIdRef.current === requestId) {
+      if (mountedRef.current && activeRequestIdRef.current === requestId) {
         activeRequestIdRef.current = null;
         setStreamingAnswer('');
+        setIsAsking(false);
       }
-      setIsAsking(false);
     }
   };
 
@@ -345,6 +385,9 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
           ref={threadRef}
           className="meeting-ask-pluto-dock__thread"
           onScroll={updateFollowMode}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
         >
           <div
             ref={threadContentRef}
@@ -367,7 +410,12 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     <Logo size={18} variant="default" />
                   </span>
                   <div className="meeting-ask-pluto-dock__message meeting-ask-pluto-dock__message--assistant">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ children }) => <span>{children}</span>,
+                      }}
+                    >
                       {message.content}
                     </ReactMarkdown>
                   </div>
@@ -380,19 +428,24 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                   <Logo size={18} variant="default" />
                 </span>
                 <div className="meeting-ask-pluto-dock__message meeting-ask-pluto-dock__message--assistant">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ children }) => <span>{children}</span>,
+                    }}
+                  >
                     {streamingAnswer}
                   </ReactMarkdown>
                 </div>
               </div>
             ) : null}
             {isAsking && !streamingAnswer ? (
-              <div className="meeting-ask-pluto-dock__loading">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <output className="meeting-ask-pluto-dock__loading">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 {liveContext
                   ? 'Reading live transcript'
                   : 'Reading this meeting'}
-              </div>
+              </output>
             ) : null}
             <div ref={threadEndRef} aria-hidden="true" />
           </div>
@@ -400,7 +453,9 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       ) : null}
 
       {showsConversation && error ? (
-        <p className="meeting-ask-pluto-dock__error">{error}</p>
+        <p className="meeting-ask-pluto-dock__error" role="alert">
+          {error}
+        </p>
       ) : null}
 
       {!isMinimized || !hasConversation ? (
@@ -422,13 +477,18 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
               }
             }}
             rows={calculatedRows}
+            maxLength={MEETING_ASK_PLUTO_LIMITS.queryChars}
             placeholder="Ask about this meeting"
           />
-          <button type="submit" disabled={!query.trim() || isAsking}>
+          <button
+            type="submit"
+            disabled={!query.trim() || isAsking}
+            aria-label={isAsking ? 'Ask Pluto is answering' : 'Send question'}
+          >
             {isAsking ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
-              <Send className="h-4 w-4" />
+              <Send className="h-4 w-4" aria-hidden="true" />
             )}
           </button>
         </form>

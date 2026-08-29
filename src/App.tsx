@@ -17,6 +17,7 @@ import type { Entity } from './api/knowledgeGraph';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
+import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
 import { MeetingView } from './components/features/MeetingView';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
@@ -64,7 +65,6 @@ import {
   upsertEntity,
 } from './api/knowledgeGraph';
 // Knowledge Graph
-import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 import { AllMeetingsTab } from './components/features/AllMeetingsTab';
@@ -90,7 +90,6 @@ const meetingPreviewEnabled =
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
-  const [setupRecoveryRequested, setSetupRecoveryRequested] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
@@ -122,9 +121,11 @@ function App() {
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat' | 'settings'
+    'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings'
   >(
-    window.__PLUTO_BROWSER_PREVIEW__ && !meetingPreviewEnabled ? 'wiki' : 'hub',
+    window.__PLUTO_BROWSER_PREVIEW__ && !meetingPreviewEnabled
+      ? 'projects'
+      : 'hub',
   );
   const [sidebarVisible, setSidebarVisible] = useState(
     (!window.__PLUTO_BROWSER_PREVIEW__ || meetingPreviewEnabled) &&
@@ -827,10 +828,7 @@ function App() {
   }, [permissionStatus]);
 
   useEffect(() => {
-    const handleReadinessFailed = () => {
-      setSetupRecoveryRequested(true);
-      setSetupNeeded(true);
-    };
+    const handleReadinessFailed = () => setSetupNeeded(true);
     window.addEventListener(
       'RECORDING_READINESS_FAILED' as any,
       handleReadinessFailed,
@@ -854,15 +852,7 @@ function App() {
       </div>
     );
   if (setupNeeded)
-    return (
-      <SetupWizard
-        forceSetup={setupRecoveryRequested}
-        onComplete={() => {
-          setSetupRecoveryRequested(false);
-          setSetupNeeded(false);
-        }}
-      />
-    );
+    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
 
   const workspace = (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
@@ -999,28 +989,22 @@ function App() {
           />
           <div
             ref={contentScrollRef}
-            className={`flex-1 flex flex-col scroll-smooth relative ${
-              activeTab === 'wiki' && !selectedMeetingId
-                ? 'overflow-hidden'
-                : 'overflow-y-scroll'
-            } ${
+            className={`flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
               selectedMeetingId
                 ? 'meeting-app-scroll'
-                : activeTab === 'wiki'
+                : activeTab === 'chat'
                   ? 'px-0 py-0'
-                  : activeTab === 'chat'
-                    ? 'px-0 py-0'
-                    : activeTab === 'settings'
-                      ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                      : !selectedMeetingId && activeTab === 'hub'
-                        ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
-                        : !selectedMeetingId && activeTab === 'people'
+                  : activeTab === 'settings'
+                    ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                    : !selectedMeetingId && activeTab === 'hub'
+                      ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                      : !selectedMeetingId && activeTab === 'people'
+                        ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
+                        : !selectedMeetingId && activeTab === 'projects'
                           ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                          : !selectedMeetingId && activeTab === 'projects'
+                          : !selectedMeetingId && activeTab === 'meetings'
                             ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                            : !selectedMeetingId && activeTab === 'meetings'
-                              ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
-                              : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                            : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <>
@@ -1051,22 +1035,30 @@ function App() {
                 transcriptValidationRetrying={transcriptValidationRetrying}
               />
             ) : activeTab === 'hub' ? (
-              <Dashboard
-                model={dashboardHome.model}
-                loading={dashboardHome.loading}
-                isRecording={isRecording}
-                setSelectedMeetingId={setSelectedMeetingId}
-                setActiveTab={setActiveTab}
-                updatingTaskIds={updatingDashboardTaskIds}
-                actionError={dashboardActionError}
-                handleCompleteTask={handleCompleteTask}
-                handleReviewCommitment={handleReviewDashboardCommitment}
-                handleCreateCommitment={handleCreateDashboardCommitment}
-                handleSetDailyCommitments={handleSetDashboardDailyCommitments}
-                handleUpdateAttentionStatus={
-                  handleUpdateDashboardAttentionStatus
-                }
-              />
+              <>
+                <IdentityProfileInvitation
+                  onOpenSettings={() => {
+                    setActiveTab('settings');
+                    setSelectedMeetingId(null);
+                  }}
+                />
+                <Dashboard
+                  model={dashboardHome.model}
+                  loading={dashboardHome.loading}
+                  isRecording={isRecording}
+                  setSelectedMeetingId={setSelectedMeetingId}
+                  setActiveTab={setActiveTab}
+                  updatingTaskIds={updatingDashboardTaskIds}
+                  actionError={dashboardActionError}
+                  handleCompleteTask={handleCompleteTask}
+                  handleReviewCommitment={handleReviewDashboardCommitment}
+                  handleCreateCommitment={handleCreateDashboardCommitment}
+                  handleSetDailyCommitments={handleSetDashboardDailyCommitments}
+                  handleUpdateAttentionStatus={
+                    handleUpdateDashboardAttentionStatus
+                  }
+                />
+              </>
             ) : activeTab === 'people' ? (
               <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
                 <PeopleTab
@@ -1076,16 +1068,9 @@ function App() {
               </div>
             ) : activeTab === 'projects' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
-                <ProjectsExecutionTab selectedProjectId={selectedProjectId} />
-              </div>
-            ) : activeTab === 'wiki' ? (
-              <div className="h-full w-full animate-in pb-10">
-                <KnowledgeTab
-                  onOpenMeeting={(meetingId) => {
-                    setSelectedMeetingId(meetingId);
-                    setActiveTab('hub');
-                  }}
-                  onOpenProjectsTab={() => setActiveTab('projects')}
+                <ProjectsExecutionTab
+                  selectedProjectId={selectedProjectId}
+                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
                 />
               </div>
             ) : activeTab === 'meetings' ? (
@@ -1146,13 +1131,11 @@ function App() {
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
                 <div className="w-32 h-32 rounded-lg bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-sm  group">
                   <span className="group-hover:rotate-12 transition-transform duration-500">
-                    {activeTab === 'people'
+                    {(activeTab as string) === 'people'
                       ? '👤'
-                      : activeTab === 'projects'
+                      : (activeTab as string) === 'projects'
                         ? '📁'
-                        : activeTab === 'wiki'
-                          ? '🧠'
-                          : '🎯'}
+                        : '🎯'}
                   </span>
                 </div>
                 <div className="space-y-6 relative z-10">

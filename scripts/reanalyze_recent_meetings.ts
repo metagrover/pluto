@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { analysisDocumentV3ToMarkdown } from '../electron/llm/analysisDocumentV3.ts';
 import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
+import { OLLAMA_GENERAL_MODEL } from '../src/utils/ollamaModels.ts';
 import {
   mergeAdjacentSpeakerSegments,
   scrubTranscriptArtifacts,
@@ -46,7 +47,7 @@ async function main() {
   console.log(`[Reanalyze] Found ${meetings.length} meetings to re-analyze.`);
 
   const provider = new UnifiedLLMProvider('ollama', {
-    ollama_model: 'qwen3.5:9b',
+    ollama_model: OLLAMA_GENERAL_MODEL,
   });
 
   const isAvailable = await provider.isAvailable();
@@ -137,7 +138,7 @@ async function main() {
       updateStmt.run(
         enhancedNotes,
         analysisJsonStr,
-        analysisDoc.generation_metadata?.model || 'qwen3.5:9b',
+        analysisDoc.generation_metadata?.model || OLLAMA_GENERAL_MODEL,
         analysisDoc.generation_metadata?.generation_path ||
           'adaptive_windowed_reanalysis',
         analysisDoc.generation_metadata?.prompt_version || 'notes-v6',

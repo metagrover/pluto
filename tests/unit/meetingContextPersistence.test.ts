@@ -254,6 +254,8 @@ describe('embedded meeting context persistence', () => {
     expect(schema).toContain('UNIQUE(meeting_id, revision)');
     expect(schema).toContain('idx_meeting_context_events_timeline');
     expect(schema).toContain('idx_meeting_context_snapshots_revision');
+    expect(schema).toContain('DELETE FROM meeting_context_events');
+    expect(schema).toContain('DELETE FROM meeting_context_snapshots');
   });
 
   it('appends a source-linked event and returns the original event on retry', () => {

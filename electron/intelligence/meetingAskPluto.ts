@@ -5,7 +5,6 @@ import type {
   MeetingAskPlutoScope,
   MeetingAskPlutoTurn,
 } from '../../src/types/askPluto';
-import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
@@ -16,6 +15,7 @@ export const MEETING_ASK_PLUTO_TURN_CHAR_LIMIT = 1200;
 const MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 18;
 const LIVE_MEETING_ASK_PLUTO_EVIDENCE_LIMIT = 34;
 const LIVE_MEETING_ASK_PLUTO_TRANSCRIPT_LIMIT = 24;
+const SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT = 5;
 
 export interface MeetingAskPlutoEvidenceItem {
   id: string;
@@ -192,20 +192,21 @@ export const buildMeetingAskPlutoContext = ({
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
   const mid = parseJsonObject<MidFrontmatter>(meeting.mid_json);
   const analysis = parseJsonObject<AnalysisV3Like>(meeting.analysis_json);
-
-  for (const segment of transcriptSegmentsFromJson(meeting.transcript_json)) {
-    addEvidence(evidenceItems, {
+  const transcriptEvidenceItems = transcriptSegmentsFromJson(
+    meeting.transcript_json,
+  )
+    .slice(-SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT)
+    .map((segment) => ({
       id: segment.id,
-      kind: 'transcript',
+      kind: 'transcript' as const,
       meetingId: scope.meetingId,
       title: 'Transcript',
       text: segment.text,
       quote: segment.quote,
-    });
-  }
+    }));
 
   if (mid?.evidence_spans) {
-    for (const span of mid.evidence_spans.slice(0, 6)) {
+    for (const span of mid.evidence_spans.slice(0, 3)) {
       addEvidence(evidenceItems, {
         id: `mid-${span.span_id}`,
         kind: 'transcript',
@@ -232,7 +233,7 @@ export const buildMeetingAskPlutoContext = ({
     mid?.decisions?.map((decision) => decision.description) ??
     analysis?.all_decisions?.map((decision) => asString(decision.text) ?? '') ??
     [];
-  for (const [index, decision] of decisions.entries()) {
+  for (const [index, decision] of decisions.slice(0, 3).entries()) {
     addEvidence(evidenceItems, {
       id: `decision-${index}`,
       kind: 'decision',
@@ -250,7 +251,7 @@ export const buildMeetingAskPlutoContext = ({
       return assignee && text ? `${text} Owner: ${assignee}.` : (text ?? '');
     }) ??
     [];
-  for (const [index, action] of actions.entries()) {
+  for (const [index, action] of actions.slice(0, 3).entries()) {
     addEvidence(evidenceItems, {
       id: `action-${index}`,
       kind: 'action_item',
@@ -272,7 +273,7 @@ export const buildMeetingAskPlutoContext = ({
     });
   }
 
-  for (const entity of entities.slice(0, 8)) {
+  for (const entity of entities.slice(0, 1)) {
     addEvidence(evidenceItems, {
       id: `entity-${entity.id}`,
       kind: 'entity',
@@ -282,7 +283,7 @@ export const buildMeetingAskPlutoContext = ({
     });
   }
 
-  for (const item of attentionItems.slice(0, 6)) {
+  for (const item of attentionItems.slice(0, 1)) {
     addEvidence(evidenceItems, {
       id: `attention-${item.id}`,
       kind: 'attention',
@@ -292,8 +293,20 @@ export const buildMeetingAskPlutoContext = ({
     });
   }
 
-  const trustStatus = deriveContextTrustStatus({ meeting, evidenceItems, mid });
-  const status = evidenceItems.length > 0 ? 'ready' : 'unavailable';
+  const boundedEvidenceItems = [
+    ...evidenceItems.slice(
+      0,
+      MEETING_ASK_PLUTO_EVIDENCE_LIMIT -
+        SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT,
+    ),
+    ...transcriptEvidenceItems,
+  ];
+  const trustStatus = deriveContextTrustStatus({
+    meeting,
+    evidenceItems: boundedEvidenceItems,
+    mid,
+  });
+  const status = boundedEvidenceItems.length > 0 ? 'ready' : 'unavailable';
   const statusNote = isLiveOrProvisional(meeting)
     ? 'This answer may use live or provisional meeting evidence.'
     : status === 'ready'
@@ -307,7 +320,7 @@ export const buildMeetingAskPlutoContext = ({
     boundary:
       'Only use evidence from this meeting. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
-    evidenceItems,
+    evidenceItems: boundedEvidenceItems,
   };
 };
 
@@ -624,44 +637,33 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
   const evidenceIndexes = extractEvidenceReferences(answerRaw).filter(
     (index) => index < context.evidenceItems.length,
   );
-  const usedIndexes =
-    evidenceIndexes.length > 0
-      ? evidenceIndexes
-      : context.evidenceItems.length > 0
-        ? [0]
-        : [];
-  const citations: MeetingAskPlutoCitation[] = usedIndexes.map(
+  const citations: MeetingAskPlutoCitation[] = evidenceIndexes.map(
     (index, citationIndex) => {
       const item = context.evidenceItems[index];
-      const trust_status = deriveCitationTrustStatus({
-        evidenceValid: context.trustStatus !== 'needs_review',
-      });
       return {
         id: `citation-${citationIndex + 1}`,
         claim: item.text,
         meeting_id: item.meetingId,
         meeting_title: context.scope.title || 'Untitled Session',
         evidence_span: item.quote || item.text,
-        evidence_valid: trust_status === 'grounded',
-        trust_status:
-          context.trustStatus === 'weak_evidence'
-            ? 'weak_evidence'
-            : trust_status,
+        evidence_valid: false,
+        trust_status: 'needs_review',
       };
     },
   );
   const cleanAnswer = answerRaw.replace(/\[Evidence\s+\d+\]/gi, '').trim();
+  const responseTrustStatus = 'needs_review';
 
   return {
     status: 'answered',
     answer: cleanAnswer,
     scope: context.scope,
-    trustStatus: context.trustStatus,
+    trustStatus: responseTrustStatus,
     claims: cleanAnswer
       ? [
           {
             text: cleanAnswer,
-            trustStatus: context.trustStatus,
+            trustStatus: responseTrustStatus,
             citationIds: citations.map((citation) => citation.id),
           },
         ]

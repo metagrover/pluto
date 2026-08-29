@@ -185,6 +185,34 @@ describe('meeting-scoped Ask Pluto context', () => {
     });
   });
 
+  it('keeps derived decisions, actions, notes, and recent transcript in long meeting context', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({
+        transcript_json: JSON.stringify({
+          segments: Array.from({ length: 30 }, (_, index) => ({
+            speaker: 'Avery',
+            start: index,
+            end: index + 1,
+            text: `Transcript segment ${index + 1}`,
+          })),
+        }),
+      }),
+      entities: [],
+      attentionItems: [],
+    });
+
+    expect(context.evidenceItems.map((item) => item.kind)).toEqual(
+      expect.arrayContaining(['decision', 'action_item', 'note', 'transcript']),
+    );
+    const transcriptItems = context.evidenceItems.filter(
+      (item) => item.kind === 'transcript',
+    );
+    expect(transcriptItems.at(-1)?.text).toContain('Transcript segment 30');
+    expect(
+      transcriptItems.some((item) => item.text.includes('segment 1')),
+    ).toBe(false);
+  });
+
   it('returns an honest unavailable packet when the meeting has no usable evidence', () => {
     const response = buildUnavailableMeetingAskPlutoResponse(
       makeMeeting({
@@ -405,6 +433,68 @@ describe('meeting-scoped Ask Pluto context', () => {
 
     expect(response.answer).toContain("I couldn't summarize that reliably yet");
     expect(response.answer).toContain('Pricing is still under discussion');
+  });
+
+  it('does not fabricate a citation when the model omits evidence references', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw: 'The team chose GraphQL.',
+      context,
+    });
+
+    expect(response.citations).toEqual([]);
+    expect(response.trustStatus).toBe('needs_review');
+    expect(response.claims).toEqual([
+      {
+        text: 'The team chose GraphQL.',
+        trustStatus: 'needs_review',
+        citationIds: [],
+      },
+    ]);
+  });
+
+  it('rejects out-of-range evidence references instead of citing the first item', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw: 'The team chose GraphQL. [Evidence 999]',
+      context,
+    });
+
+    expect(response.answer).toBe('The team chose GraphQL.');
+    expect(response.citations).toEqual([]);
+    expect(response.trustStatus).toBe('needs_review');
+    expect(response.claims[0]?.trustStatus).toBe('needs_review');
+  });
+
+  it('does not treat a syntactically valid evidence marker as semantic validation', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw: 'The wire transfer was approved. [Evidence 1]',
+      context,
+    });
+
+    expect(response.citations).toHaveLength(1);
+    expect(response.citations[0]).toMatchObject({
+      evidence_valid: false,
+      trust_status: 'needs_review',
+    });
+    expect(response.trustStatus).toBe('needs_review');
+    expect(response.claims[0]?.trustStatus).toBe('needs_review');
   });
 
   it('bounds follow-up turns and prompt context to the meeting scope', () => {

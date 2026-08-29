@@ -99,12 +99,20 @@ export const createMeetingContextProducer = (
   dependencies: MeetingContextProducerDependencies,
 ): {
   ingest(request: unknown): Promise<MeetingContextIngestionResult>;
+  cancel(meetingId: string): Promise<void>;
 } => {
   const tails = new Map<string, Promise<void>>();
+  const cancelledMeetingIds = new Set<string>();
+  const assertActive = (meetingId: string) => {
+    if (cancelledMeetingIds.has(meetingId)) {
+      throw new Error('meeting_context_cancelled');
+    }
+  };
 
   const process = async (
     request: MeetingContextIngestionRequest,
   ): Promise<MeetingContextIngestionResult> => {
+    assertActive(request.meetingId);
     const eventInputs = request.segments.flatMap((segment) =>
       extractDeterministicMeetingContextEvents(request.meetingId, segment),
     );
@@ -115,14 +123,17 @@ export const createMeetingContextProducer = (
     let createdEventCount = 0;
     let reusedEventCount = 0;
     for (const input of eventInputs) {
+      assertActive(request.meetingId);
       if (dependencies.getEventByKey(input.meetingId, input.eventKey)) {
         reusedEventCount += 1;
       } else {
         createdEventCount += 1;
       }
       await dependencies.appendEvent(input);
+      assertActive(request.meetingId);
     }
 
+    assertActive(request.meetingId);
     const latest = dependencies.getLatestSnapshot(request.meetingId);
     const state = reduceMeetingContextEvents(
       request.meetingId,
@@ -142,6 +153,7 @@ export const createMeetingContextProducer = (
   return {
     async ingest(value) {
       const request = parseRequest(value);
+      assertActive(request.meetingId);
       const previous = tails.get(request.meetingId) ?? Promise.resolve();
       const operation = previous
         .catch(() => undefined)
@@ -157,6 +169,12 @@ export const createMeetingContextProducer = (
         }
       });
       return await operation;
+    },
+    async cancel(meetingId) {
+      const normalizedMeetingId = meetingId.trim();
+      if (!normalizedMeetingId) return;
+      cancelledMeetingIds.add(normalizedMeetingId);
+      await (tails.get(normalizedMeetingId) ?? Promise.resolve());
     },
   };
 };

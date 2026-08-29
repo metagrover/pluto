@@ -1,6 +1,21 @@
 vi.mock('../../electron/db', () => ({
   getEntitiesByType: vi.fn(),
   getEntity: vi.fn(),
+  getMeeting: vi.fn(),
+  getCommitmentQueueRevision: vi.fn(() => 'revision'),
+  getEntityMeetings: vi.fn(() => []),
+  getRelatedEntities: vi.fn(() => []),
+  getCommitmentSourceRelations: vi.fn(() => ({ projects: [], meetings: [] })),
+  withCommitmentTransaction: vi.fn((operation: () => unknown) => operation()),
+  commitCommitmentAliases: vi.fn(),
+  identityStore: {
+    getBindings: vi.fn(() => []),
+    getCapture: vi.fn(() => ({ origin: 'unknown', selfPersonId: null })),
+    getRevision: vi.fn(() => 0),
+    getResolution: vi.fn(),
+    saveResolution: vi.fn(),
+  },
+  resolveCommitmentIdentity: vi.fn(),
   findEntity: vi.fn(),
   upsertEntity: vi.fn().mockImplementation((e: Record<string, unknown>) => ({
     ...e,
@@ -171,7 +186,13 @@ describe('Relationship Inference', () => {
       relationships: [],
     };
 
-    await processExtractedEntities(extracted, 'meeting-action-source');
+    await processExtractedEntities(
+      extracted,
+      'meeting-action-source',
+      undefined,
+      undefined,
+      { generate: async () => '' },
+    );
 
     expect(db.upsertEntity).toHaveBeenCalledWith(
       expect.objectContaining({

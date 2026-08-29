@@ -28,12 +28,9 @@ export interface MeetingAskPlutoTurn {
   citationIds?: string[];
 }
 
-export type MeetingAskPlutoAnswerMode = 'quick' | 'deep';
-
 export interface MeetingAskPlutoRequest {
   requestId: string;
   query: string;
-  answerMode?: MeetingAskPlutoAnswerMode;
   scope:
     | {
         type: 'meeting';

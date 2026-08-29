@@ -181,4 +181,38 @@ describe('meeting context producer', () => {
       expect.stringMatching(/^end:/),
     ]);
   });
+
+  it('drains and tombstones queued work before meeting deletion', async () => {
+    let releaseAppend: () => void = () => {};
+    let appendStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      appendStarted = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    const dependencies = repositoryDependencies({
+      onAppend: async () => {
+        appendStarted();
+        await blocked;
+      },
+    });
+    const producer = createMeetingContextProducer(dependencies);
+    const ingestion = producer.ingest(
+      requestFor('meeting-delete', 'We decided to launch Monday.'),
+    );
+    await started;
+
+    const cancellation = producer.cancel('meeting-delete');
+    releaseAppend();
+
+    await cancellation;
+    await expect(ingestion).rejects.toThrow('meeting_context_cancelled');
+    expect(dependencies.getLatestSnapshot('meeting-delete')).toBeUndefined();
+    await expect(
+      producer.ingest(
+        requestFor('meeting-delete', "I'll send another checklist."),
+      ),
+    ).rejects.toThrow('meeting_context_cancelled');
+  });
 });

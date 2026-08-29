@@ -246,6 +246,165 @@ describe('UnifiedLLMProvider', () => {
     expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
   });
 
+  it('uses bounded non-thinking JSON for project scope without changing knowledge synthesis', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    installFetchMock((_url, init) => {
+      bodies.push(parseRequestBody(init));
+      return jsonResponse({ response: '{}', done: true, done_reason: 'stop' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+      ollama_structured_thinking: true,
+    });
+    await provider.synthesizeKnowledgeDocument('x'.repeat(90_000), {
+      purpose: 'projectScope',
+    });
+    await provider.synthesizeKnowledgeDocument('knowledge');
+    expect(bodies[0]).toMatchObject({
+      model: 'qwen3.5:9b',
+      format: 'json',
+      stream: true,
+      think: false,
+      options: { num_predict: 2500, num_ctx: 16384 },
+    });
+    expect(bodies[1]).toMatchObject({
+      think: true,
+      options: { num_predict: 4096 },
+    });
+  });
+
+  it.each(['ollama', 'openai'] as const)(
+    'constrains %s project scope responses to the supplied schema',
+    async (providerType) => {
+      const responseSchema = {
+        type: 'object',
+        properties: { projects: { type: 'array', items: { type: 'string' } } },
+        required: ['projects'],
+        additionalProperties: false,
+      };
+      const bodies: Array<Record<string, unknown>> = [];
+      installFetchMock((_url, init) => {
+        bodies.push(parseRequestBody(init));
+        return jsonResponse({
+          response: '{"projects":[]}',
+          done: true,
+          done_reason: 'stop',
+          choices: [{ message: { content: '{"projects":[]}' } }],
+        });
+      });
+      const provider = new UnifiedLLMProvider(providerType, {
+        ollama_model: 'qwen3.5:9b',
+        openai_api_key: 'test-key',
+      });
+
+      await expect(
+        provider.synthesizeKnowledgeDocument('review', {
+          purpose: 'projectScope',
+          responseSchema,
+        }),
+      ).resolves.toBe('{"projects":[]}');
+      expect(
+        providerType === 'ollama'
+          ? bodies[0].format
+          : bodies[0].response_format,
+      ).toEqual(
+        providerType === 'ollama'
+          ? responseSchema
+          : {
+              type: 'json_schema',
+              json_schema: {
+                name: 'projectScopeReview',
+                schema: responseSchema,
+                strict: true,
+              },
+            },
+      );
+    },
+  );
+
+  it.each([
+    ['missing completion', { response: '{"projects":[]}' }],
+    [
+      'output limit',
+      { response: '{"projects":[]}', done: true, done_reason: 'length' },
+    ],
+  ])('rejects project scope output with %s', async (_reason, packet) => {
+    installFetchMock(() => new Response(`${JSON.stringify(packet)}\n`));
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    await expect(
+      provider.synthesizeKnowledgeDocument('review', {
+        purpose: 'projectScope',
+      }),
+    ).rejects.toThrow('project_scope_response_incomplete');
+  });
+
+  it('lets visible project scope preempt resumable notes and yield to chat', async () => {
+    const signals: AbortSignal[] = [];
+    const controller = new AbortController();
+    const fetchMock = installFetchMock((_url, init) => {
+      if (signals.length >= 2)
+        return jsonResponse({ response: validAnalysisMarkdown });
+      signals.push(init!.signal!);
+      if (init!.signal!.aborted) return Promise.reject(init!.signal!.reason);
+      return new Promise<Response>((_resolve, reject) =>
+        init!.signal!.addEventListener(
+          'abort',
+          () => reject(init!.signal!.reason),
+          { once: true },
+        ),
+      );
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const knowledge = (
+      provider as unknown as {
+        generateText(options: {
+          prompt: string;
+          task: string;
+          signal: AbortSignal;
+        }): Promise<string>;
+      }
+    )
+      .generateText({
+        prompt: 'notes',
+        task: 'notesWriter',
+        signal: controller.signal,
+      })
+      .catch((error) => error);
+    let review: Promise<unknown> | undefined;
+    let analysis: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      review = provider
+        .synthesizeKnowledgeDocument('review', {
+          purpose: 'projectScope',
+          signal: controller.signal,
+        })
+        .catch((error) => error);
+      await vi.waitFor(() => expect(signals[0].aborted).toBe(true), {
+        timeout: 500,
+      });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      analysis = provider.answerAskPluto('question', { mode: 'fast' });
+      await expect(review).resolves.toMatchObject({
+        name: 'AbortError',
+        message: 'foreground_preempted',
+      });
+      await expect(analysis).resolves.toBe(validAnalysisMarkdown);
+      await expect(knowledge).resolves.toMatchObject({
+        name: 'AbortError',
+        message: 'foreground_preempted',
+      });
+    } finally {
+      controller.abort();
+      await Promise.allSettled([knowledge, review, analysis]);
+    }
+  });
+
   it('keeps synchronous Ask Pluto visible while preserving the larger Deep budget', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
@@ -323,13 +482,17 @@ describe('UnifiedLLMProvider', () => {
       return jsonResponse({ response: '{"intent":"factual"}' });
     });
     const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: 'qwen3.5:9b',
+      ollama_model: 'gemma4:12b',
       ollama_structured_thinking: true,
     });
 
     await provider.classifyQueryIntent('Classify this query.');
 
-    expect(requestBody).toMatchObject({ think: false, format: 'json' });
+    expect(requestBody).toMatchObject({
+      model: 'phi4-mini:3.8b',
+      think: false,
+      format: 'json',
+    });
     expect(requestBody.options).toMatchObject({ num_predict: 128 });
   });
 
@@ -434,7 +597,7 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('uses Qwen as the single default across meeting-intelligence tasks', async () => {
+  it('uses Gemma 4 as the single default across general-purpose tasks', async () => {
     const selectedModels: string[] = [];
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -443,6 +606,7 @@ describe('UnifiedLLMProvider', () => {
             { name: 'kimike:latest' },
             { name: 'phi4-mini:3.8b:latest' },
             { name: 'qwen3.5:9b' },
+            { name: 'gemma4:12b' },
           ],
         });
       }
@@ -482,10 +646,41 @@ describe('UnifiedLLMProvider', () => {
     await provider.extractValueSignals('Speaker A: status update');
     await provider.extractEntities('Speaker A: status update');
 
-    expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b', 'qwen3.5:9b']);
+    expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
-  it('avoids embedding-only ollama models during auto-detection', async () => {
+  it('defaults Quick chat to Phi while Deep chat uses Gemma 4', async () => {
+    const selectedModels: string[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse({
+          models: [
+            { name: 'phi4-mini:3.8b' },
+            { name: 'qwen3.5:9b' },
+            { name: 'gemma4:12b' },
+          ],
+        });
+      }
+      if (url.endsWith('/api/generate')) {
+        const body = parseRequestBody(init);
+        selectedModels.push(String(body.model));
+        return jsonResponse({ response: 'Grounded answer' });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {});
+    await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
+    await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
+
+    expect(selectedModels).toEqual([
+      'phi4-mini:3.8b',
+      'phi4-mini:3.8b',
+      'gemma4:12b',
+    ]);
+  });
+
+  it('does not substitute an arbitrary installed model for Gemma 4', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -507,10 +702,10 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('kimike:latest');
+    expect(selectedModel).toBe('gemma4:12b');
   });
 
-  it('falls back to default ollama model when model listing fails', async () => {
+  it('uses Gemma 4 without a model-discovery dependency', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -527,7 +722,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('qwen3.5:9b');
+    expect(selectedModel).toBe('gemma4:12b');
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {
@@ -770,6 +965,7 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(getOllamaTimeoutMs('topicSegmentation')).toBe(300_000);
     expect(getOllamaTimeoutMs('topicAnalysis')).toBe(300_000);
     expect(getOllamaTimeoutMs('knowledgeDoc')).toBe(900_000);
+    expect(getOllamaTimeoutMs('projectScopeReview')).toBe(180_000);
     expect(getOllamaActiveGenerationTimeoutMs(512)).toBe(376_000);
     expect(getOllamaActiveGenerationTimeoutMs(4_096)).toBe(1_200_000);
     expect(getOllamaTimeoutMs('askPlutoLive')).toBe(20_000);

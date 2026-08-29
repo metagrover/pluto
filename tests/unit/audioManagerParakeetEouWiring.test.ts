@@ -34,11 +34,12 @@ describe('AudioManager Parakeet EOU wiring', () => {
   });
 
   it('publishes live text before non-blocking context ingestion', () => {
-    const publishIndex = source.indexOf('onLiveTranscript?.(segments)');
+    const publishIndex = source.indexOf('onLiveTranscript?.(readingSegments)');
     const ingestIndex = source.indexOf(
       'meetingContextIngestion.accept(segments)',
     );
 
+    expect(publishIndex).toBeGreaterThan(-1);
     expect(ingestIndex).toBeGreaterThan(publishIndex);
     expect(source.slice(publishIndex, ingestIndex + 80)).not.toContain(
       'await meetingContextIngestion',

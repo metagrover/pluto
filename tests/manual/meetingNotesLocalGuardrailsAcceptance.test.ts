@@ -10,6 +10,7 @@ import {
 } from '../../electron/llm/meetingNotesSource';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import { meetingNotesFidelityHoldoutCases } from './fixtures/meetingNotesFidelityHoldoutCases';
 import { meetingNotesGemmaReliabilityCases } from './fixtures/meetingNotesGemmaReliabilityCases';
 import type { MeetingNotesLocalGuardrailsCase } from './fixtures/meetingNotesLocalGuardrailsCases';
@@ -18,7 +19,7 @@ const suite =
   process.env.RUN_MEETING_NOTES_PROVIDER_BENCHMARK === '1'
     ? describe
     : describe.skip;
-const model = process.env.OLLAMA_BENCHMARK_MODEL || 'qwen3.5:9b';
+const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
 const seed = Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED ?? 41);
 const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
 const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';

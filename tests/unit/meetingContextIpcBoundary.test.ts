@@ -31,4 +31,17 @@ describe('meeting context IPC boundary', () => {
     expect(handler).not.toContain('requireParakeetEouOwner');
     expect(handler).toContain('meetingContextProducer.ingest(request)');
   });
+
+  it('drains queued context production before deleting its meeting', () => {
+    const handler = sliceBetween(
+      main,
+      "ipcMain.handle('DELETE_MEETING'",
+      "ipcMain.handle('GENERATE_TITLE'",
+    );
+
+    expect(handler).toContain('await meetingContextProducer.cancel(meetingId)');
+    expect(handler.indexOf('meetingContextProducer.cancel')).toBeLessThan(
+      handler.indexOf('db.deleteMeeting'),
+    );
+  });
 });

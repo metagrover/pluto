@@ -171,7 +171,7 @@
     @apply rounded-full bg-pro-border;
   }
   .meeting-ask-pluto-dock__message {
-    @apply rounded-lg border p-3 text-sm leading-6;
+    @apply rounded-lg border p-3 text-base leading-6;
   }
   .meeting-ask-pluto-dock__message--user {
     @apply ml-auto w-fit max-w-[72%] border-pro-border/60 bg-pro-hover text-pro-text-main;
@@ -239,7 +239,7 @@
     @apply flex min-h-12 items-end gap-2 rounded-lg border border-pro-accent/45 bg-pro-surface/80 px-3 py-2 shadow-inner transition-colors duration-200;
   }
   .meeting-ask-pluto-dock__composer textarea {
-    @apply max-h-32 min-h-8 flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-sm font-medium leading-5 text-pro-text-main outline-none placeholder:text-pro-text-muted/65;
+    @apply max-h-32 min-h-8 flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-base font-medium leading-6 text-pro-text-main outline-none placeholder:text-pro-text-muted/65;
   }
   .meeting-ask-pluto-dock__composer button {
     @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pro-accent text-pro-bg transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-45;
@@ -1169,11 +1169,11 @@
     @apply relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-pro-bg;
   }
   .live-transcript-scroll {
-    @apply min-h-0 flex-1 overscroll-contain overflow-x-hidden overflow-y-auto px-8 pb-8 pt-6 lg:px-12;
+    @apply min-h-0 flex-1 overscroll-contain overflow-y-auto px-8 pb-8 pt-6 lg:px-12;
   }
   .live-transcript-heading,
   .live-transcript-body {
-    @apply mx-auto w-full max-w-[820px] min-w-0;
+    @apply mx-auto w-full max-w-[820px];
   }
   .live-transcript-heading {
     @apply mb-5 flex flex-col gap-3 border-b border-pro-border/40 pb-5 md:flex-row md:items-end md:justify-between;
@@ -1191,7 +1191,7 @@
     @apply flex flex-col;
   }
   .transcript-turn {
-    @apply grid min-w-0 grid-cols-[82px_minmax(0,1fr)] gap-5 border-b border-pro-border/60 py-4;
+    @apply grid grid-cols-[82px_minmax(0,1fr)] gap-5 border-b border-pro-border/60 py-4;
   }
   .transcript-speaker {
     @apply flex flex-col gap-1 text-xs;
@@ -1200,7 +1200,7 @@
     @apply font-mono text-[10px] text-pro-text-muted;
   }
   .transcript-turn p {
-    @apply min-w-0 max-w-[70ch] break-words text-[15px] leading-[1.7] text-pro-text-main [overflow-wrap:anywhere];
+    @apply max-w-[70ch] text-[15px] leading-[1.7] text-pro-text-main;
   }
   .transcript-turn__content {
     @apply flex min-w-0 flex-col gap-3;
@@ -1215,7 +1215,7 @@
     @apply flex min-h-11 items-center gap-2 rounded-full border border-pro-border bg-pro-bg px-4 text-xs font-semibold text-pro-text-main shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-pro-surface hover:shadow-md active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface;
   }
   .transcript-interim {
-    @apply ml-[102px] min-w-0 max-w-[70ch] break-words border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted [overflow-wrap:anywhere];
+    @apply ml-[102px] max-w-[70ch] border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted;
   }
   .transcript-waiting {
     @apply py-24 text-center;

@@ -178,10 +178,7 @@ export class NativeJsonLineProcess {
       if (this.child === child)
         this.options.diagnostic?.('parakeet_stderr_activity');
     });
-    child.once('error', (error) => {
-      this.reportProcessError(error);
-      this.failChild(child, 'parakeet_process_error');
-    });
+    child.once('error', () => this.failChild(child, 'parakeet_process_error'));
     child.once('exit', () => this.failChild(child, 'parakeet_process_exited'));
   }
 
@@ -313,18 +310,6 @@ export class NativeJsonLineProcess {
   private failCurrent(code: string): void {
     const child = this.child;
     if (child) this.failChild(child, code);
-  }
-
-  private reportProcessError(error: unknown): void {
-    const code =
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      typeof error.code === 'string' &&
-      /^[A-Z][A-Z0-9_]*$/.test(error.code)
-        ? error.code
-        : 'unknown';
-    this.options.diagnostic?.(`parakeet_process_error:${code}`);
   }
 
   private failChild(child: NativeChildProcess, code: string): void {

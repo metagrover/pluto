@@ -292,9 +292,83 @@ describe('MeetingAskPlutoDock', () => {
     expect(answer?.querySelectorAll('ul > li')).toHaveLength(2);
     expect(answer?.querySelectorAll('ol > li')).toHaveLength(2);
     expect(answer?.querySelector('strong')?.textContent).toBe('Isha');
-    expect(answer?.querySelector('a')?.getAttribute('href')).toBe(
-      'https://example.com/meeting',
+    expect(answer?.querySelector('a')).toBeNull();
+    expect(answer?.textContent).toContain('Open the meeting');
+
+    await act(async () => root.unmount());
+  });
+
+  it('does not append a completed answer after its dock unmounts', async () => {
+    const root = createRoot(container);
+    const onConversationChange = vi.fn();
+    let resolveResponse: (packet: MeetingAskPlutoResponse) => void = () => {};
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise<MeetingAskPlutoResponse>((resolve) => {
+          resolveResponse = resolve;
+        }),
     );
+
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          liveContext={liveContext}
+          conversation={[]}
+          onConversationChange={onConversationChange}
+        />,
+      );
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
+    await typeInto(input!, 'What did we decide?');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+    expect(onConversationChange).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.unmount());
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:meeting-chat:cancel',
+      expect.stringMatching(/^ask-pluto-/),
+    );
+    await act(async () => {
+      resolveResponse(response);
+      await flushPromises();
+    });
+
+    expect(onConversationChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the send action and announces conversation updates', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          liveContext={liveContext}
+          conversation={[
+            {
+              id: 'assistant-answer',
+              role: 'assistant',
+              content: response.answer,
+              packet: response,
+            },
+          ]}
+        />,
+      );
+      await flushPromises();
+    });
+
+    expect(
+      container.querySelector('[role="log"][aria-live="polite"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Send question"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('textarea')?.maxLength).toBe(4_000);
 
     await act(async () => root.unmount());
   });
@@ -389,7 +463,7 @@ describe('MeetingAskPlutoDock', () => {
 
     const request = invoke.mock.calls[0]?.[1];
     expect(request.requestId).toMatch(/^ask-pluto-/);
-    expect(request.answerMode).toBe('quick');
+    expect(request.answerMode).toBeUndefined();
     expect(request.scope.type).toBe('live_meeting');
     expect(request.scope.transcript).toHaveLength(24);
     expect(request.scope.transcript[0].id).toBe('segment-56');

@@ -28,6 +28,7 @@ import type {
   AskPlutoRetrievalSummary,
   ResolvedAskPlutoScope,
 } from '../src/types/askPlutoQuery';
+import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
@@ -56,6 +57,14 @@ import {
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
+import {
+  type ProjectInitiativeDiscoveryState,
+  discoverProjectInitiative,
+} from './projectInitiativeDiscovery';
+import {
+  isProjectScopeReviewBusy,
+  reviewProjectScopeBatch,
+} from './projectScopeReview';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -258,6 +267,22 @@ function createWindow() {
   win.webContents.on('will-prevent-unload', () => {
     console.warn('[CaptureLease] navigation prevented: capture_active');
   });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url === win?.webContents.getURL()) return;
+    event.preventDefault();
+    console.warn('[Security] Blocked renderer navigation', { url });
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (protocol === 'https:' || protocol === 'http:') {
+        void shell.openExternal(url);
+      }
+    } catch {
+      console.warn('[Security] Blocked malformed renderer URL');
+    }
+    return { action: 'deny' };
+  });
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
@@ -287,8 +312,8 @@ app.on('activate', () => {
   }
 });
 
-import type { MeetingAskPlutoRequest } from '../src/types/askPluto';
 import { describeMeetingAskPlutoRequest } from '../src/utils/askPlutoDiagnostics';
+import { parseMeetingAskPlutoRequest } from '../src/utils/meetingAskPlutoRequest';
 import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
@@ -299,6 +324,8 @@ import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
+import { startIdentityReconciliation } from './identityReconciliation';
 import {
   describePreviousConversationFailure,
   inheritConversationScope,
@@ -410,7 +437,8 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   runSecondary: async (input) => {
     if (
       !input.provider.extractValueSignals ||
-      !input.provider.extractEntities
+      !input.provider.extractEntities ||
+      !input.provider.synthesizeKnowledgeDocument
     ) {
       throw new Error('value_signals_failed');
     }
@@ -456,12 +484,15 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     if (!input.canCommit()) return;
     await extractAndProcessEntities(
       {
+        synthesizeKnowledgeDocument:
+          input.provider.synthesizeKnowledgeDocument?.bind(input.provider),
         extractEntities: async () => ({
           ...auditedEntities,
           action_items: input.analysis.all_action_items.map((item) => ({
             description: item.text,
             assignee: item.assignee,
             due_date: item.due,
+            evidence: item.evidence,
           })),
           decisions: input.analysis.all_decisions.map((decision) => ({
             description: decision.text,
@@ -475,7 +506,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: input.analysis.overview,
         valueSignals: signals,
       },
-      { canCommit: input.canCommit },
+      { canCommit: input.canCommit, signal: input.signal },
     );
     if (!input.canCommit()) return;
     db.updateMeetingAnalysisRunStatusIfCurrent({
@@ -540,6 +571,10 @@ const activeAnalysisGenerations = new Map<
 const activeAskPlutoQueries = new Map<
   string,
   { controller: AbortController; settled: Promise<void> }
+>();
+const activeMeetingAskPlutoQueries = new Map<
+  string,
+  { controller: AbortController; ownerId: number; settled: Promise<void> }
 >();
 const activeAskPlutoSessionOwners = new Set<number>();
 let activeTranscriptionCount = 0;
@@ -637,8 +672,10 @@ function abortMeetingTasks(meetingId: string) {
   }
 }
 
+let stopIdentityReconciliation: (() => void) | undefined;
 // Cleanup on quit
 app.on('before-quit', async () => {
+  stopIdentityReconciliation?.();
   console.log('[Pluto] Shutting down...');
   // Abort all active tasks
   for (const controller of activeMeetingTasks.values()) {
@@ -657,6 +694,27 @@ app.on('before-quit', async () => {
 
 app.whenReady().then(async () => {
   db.recoverInterruptedMeetingAnalysisRuns();
+  for (const channel of IDENTITY_CHANNELS) {
+    ipcMain.handle(channel, (_event, payload) =>
+      handleIdentityRequest(channel, payload),
+    );
+  }
+  stopIdentityReconciliation = startIdentityReconciliation({
+    pauseReasons: () => knowledgeSynthesisPause.snapshot(),
+    onChange: () => {
+      if (win && !win.isDestroyed())
+        win.webContents.send('MEETING_NOTES_UPDATED');
+    },
+    generate: async (prompt, responseSchema, signal) => {
+      const provider = await getProvider(await getAllSettings(db));
+      signal?.throwIfAborted();
+      return provider.synthesizeKnowledgeDocument(prompt, {
+        purpose: 'commitmentReconciliation',
+        responseSchema,
+        signal,
+      });
+    },
+  });
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -1046,6 +1104,10 @@ app.whenReady().then(async () => {
         knowledgeSynthesisPause,
         getMeetingArtifactsRootDir,
         startParakeetLiveRecording,
+        prepareCaptureIdentity: (id: string) => {
+          const self = db.identityStore.getSelfPersonId();
+          return () => db.identityStore.recordCapture(id, 'local', self);
+        },
       });
     },
   );
@@ -2226,6 +2288,7 @@ app.whenReady().then(async () => {
       // Abort any active background tasks for this meeting
       abortMeetingTasks(meetingId);
       meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
+      await meetingContextProducer.cancel(meetingId);
 
       const result = db.deleteMeeting(id);
       if (downstreamActivity.runId) {
@@ -2261,7 +2324,15 @@ app.whenReady().then(async () => {
   // Entity operations
   ipcMain.handle('UPSERT_ENTITY', (_event, entity) => {
     try {
-      const saved = db.upsertEntity(entity);
+      const saved = db.withCommitmentTransaction(() => {
+        const previous = entity.id ? db.getEntity(entity.id) : undefined;
+        const result = db.upsertEntity(entity);
+        return result.type === 'action_item' &&
+          Object.hasOwn(entity, 'assigned_to') &&
+          entity.assigned_to !== previous?.assigned_to
+          ? db.correctActionOwner(result.id, entity.assigned_to)
+          : result;
+      });
       queueAllKnowledgeDocsRefresh();
       return saved;
     } catch (e) {
@@ -2273,6 +2344,210 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ENTITY', (_event, id) => db.getEntity(id));
   ipcMain.handle('GET_ENTITIES_BY_TYPE', (_event, type) =>
     db.getEntitiesByType(type),
+  );
+  ipcMain.handle('GET_PROJECT_PORTFOLIO', () => db.getProjectPortfolio());
+  const projectInitiativeDiscoveryStateKey =
+    'project_initiative_discovery_state_v12';
+  const readProjectInitiativeDiscoveryStates = (): Record<
+    string,
+    ProjectInitiativeDiscoveryState
+  > => {
+    try {
+      const parsed = JSON.parse(
+        db.getSetting(projectInitiativeDiscoveryStateKey) || '{}',
+      );
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  };
+  let projectInitiativeDiscovery: Promise<
+    Awaited<ReturnType<typeof discoverProjectInitiative>>
+  > | null = null;
+  ipcMain.handle(
+    'DISCOVER_PROJECT_INITIATIVE',
+    (_event, options?: { retryFailed?: unknown }) => {
+      if (projectInitiativeDiscovery) return projectInitiativeDiscovery;
+      projectInitiativeDiscovery = discoverProjectInitiative(
+        {
+          listSources: () =>
+            db.getProjectInitiativeDiscoverySources().map((meeting) => {
+              const fullText = parseTranscriptSegments(meeting.transcript_json)
+                .map((segment) =>
+                  typeof segment.text === 'string' ? segment.text : '',
+                )
+                .join(' ');
+              return {
+                id: String(meeting.id),
+                title: meeting.title,
+                text: fullText,
+                fullText,
+                projectCount: meeting.project_count,
+                projectNames: db
+                  .getMeetingEntities(String(meeting.id))
+                  .filter((entity) => entity.type === 'project')
+                  .map((entity) => entity.name),
+                startedAt: meeting.started_at || meeting.created_at,
+              };
+            }),
+          getSource: (id) => {
+            const meeting = db.getMeeting(id) as
+              | db.PersistedMeeting
+              | undefined;
+            if (!meeting || meeting.transcript_status !== 'validated')
+              return null;
+            const projectCount = db
+              .getMeetingEntities(id)
+              .filter((entity) => entity.type === 'project').length;
+            if (!projectCount) return null;
+            const fullText = parseTranscriptSegments(meeting.transcript_json)
+              .map((segment) =>
+                typeof segment.text === 'string' ? segment.text : '',
+              )
+              .join(' ');
+            return {
+              id: String(meeting.id),
+              title: meeting.title,
+              text: fullText,
+              fullText,
+              projectCount,
+              projectNames: db
+                .getMeetingEntities(id)
+                .filter((entity) => entity.type === 'project')
+                .map((entity) => entity.name),
+              startedAt: meeting.started_at || meeting.created_at,
+            };
+          },
+          getState: (id) => readProjectInitiativeDiscoveryStates()[id],
+          saveState: (id, state) => {
+            const states = readProjectInitiativeDiscoveryStates();
+            states[id] = state;
+            db.setSetting(
+              projectInitiativeDiscoveryStateKey,
+              JSON.stringify(states),
+            );
+          },
+          getInitiative: db.getEntity,
+          saveInitiative: (initiative) => {
+            if (!db.getEntity(initiative.id))
+              db.upsertEntity({
+                id: initiative.id,
+                type: 'project',
+                name: initiative.name,
+                status: 'active',
+                metadata: initiative.metadata,
+                dedupe_by_name: false,
+              });
+            db.ensureMeetingEntity({
+              meeting_id: initiative.sourceMeetingId,
+              entity_id: initiative.id,
+              context: initiative.context,
+            });
+          },
+          generate: async (prompt, responseSchema) => {
+            const provider = await getProvider(await getAllSettings(db));
+            return provider.synthesizeKnowledgeDocument(prompt, {
+              purpose: 'projectScope',
+              responseSchema,
+              signal: AbortSignal.timeout(300_000),
+            });
+          },
+          isBusy: () =>
+            isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+        },
+        { retryFailed: options?.retryFailed === true },
+      ).finally(() => {
+        projectInitiativeDiscovery = null;
+      });
+      return projectInitiativeDiscovery;
+    },
+  );
+  let projectScopeReview: Promise<
+    Awaited<ReturnType<typeof reviewProjectScopeBatch>>
+  > | null = null;
+  ipcMain.handle(
+    'REVIEW_PROJECT_SCOPE',
+    (_event, options?: { excludeProjectIds?: unknown }) => {
+      const excludeProjectIds = Array.isArray(options?.excludeProjectIds)
+        ? options.excludeProjectIds
+            .filter((id): id is string => typeof id === 'string')
+            .slice(0, 1000)
+        : [];
+      if (projectScopeReview) return projectScopeReview;
+      projectScopeReview = reviewProjectScopeBatch(
+        {
+          listProjects: () =>
+            db
+              .getProjectPortfolio()
+              .sort((a, b) => b.meeting_count - a.meeting_count),
+          getProject: db.getEntity,
+          getSources: (id) => {
+            return db
+              .getEntityMeetings(id)
+              .filter((meeting) => meeting.transcript_status === 'validated')
+              .sort(
+                (a, b) =>
+                  Date.parse(b.started_at || b.created_at || '') -
+                  Date.parse(a.started_at || a.created_at || ''),
+              )
+              .map((meeting) => {
+                const fullText = parseTranscriptSegments(
+                  meeting.transcript_json,
+                )
+                  .map((segment) =>
+                    typeof segment.text === 'string' ? segment.text : '',
+                  )
+                  .join(' ');
+                return {
+                  id: String(meeting.id),
+                  fullText,
+                  text: fullText,
+                };
+              });
+          },
+          generate: async (prompt, responseSchema) => {
+            const provider = await getProvider(await getAllSettings(db));
+            return provider.synthesizeKnowledgeDocument(prompt, {
+              purpose: 'projectScope',
+              responseSchema,
+              signal: AbortSignal.timeout(300_000),
+            });
+          },
+          save: (id, metadata) => {
+            const entity = db.getEntity(id);
+            if (entity) db.upsertEntity({ ...entity, metadata });
+          },
+          saveAttempt: (id, attempt) => {
+            const entity = db.getEntity(id);
+            if (!entity) return;
+            let metadata: Record<string, unknown> = {};
+            try {
+              const parsed = JSON.parse(entity.metadata || '{}');
+              if (
+                parsed &&
+                typeof parsed === 'object' &&
+                !Array.isArray(parsed)
+              )
+                metadata = parsed;
+            } catch {
+              // Keep a malformed legacy metadata value from blocking retry state.
+            }
+            db.upsertEntity({
+              ...entity,
+              metadata: { ...metadata, projectScopeReviewAttempt: attempt },
+            });
+          },
+          isBusy: () =>
+            isProjectScopeReviewBusy(knowledgeSynthesisPause.snapshot()),
+        },
+        { excludeProjectIds },
+      ).finally(() => {
+        projectScopeReview = null;
+      });
+      return projectScopeReview;
+    },
   );
   ipcMain.handle('GET_ALL_ENTITIES', () => db.getAllEntities());
   ipcMain.handle('SEARCH_ENTITIES', (_event, query) =>
@@ -2889,7 +3164,7 @@ app.whenReady().then(async () => {
             valueSignals: normalizedSignals,
             priorityHints: mergedPriorityHints,
           },
-          { canCommit },
+          { canCommit, signal },
         );
 
         if (signal.aborted) {
@@ -3011,7 +3286,22 @@ app.whenReady().then(async () => {
         console.log(
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
-        const result = await processExtractedEntities(entities, meetingId);
+        const provider = await getProvider(await getAllSettings(db));
+        const result = await processExtractedEntities(
+          entities,
+          meetingId,
+          undefined,
+          undefined,
+          {
+            signal: getAbortSignalForMeeting(String(meetingId)),
+            generate: (prompt, responseSchema, signal) =>
+              provider.synthesizeKnowledgeDocument(prompt, {
+                purpose: 'commitmentReconciliation',
+                responseSchema,
+                signal,
+              }),
+          },
+        );
         queueKnowledgeDocsRefreshForMeeting(String(meetingId));
         return result;
       } catch (error) {
@@ -3786,10 +4076,80 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'intelligence:meeting-chat',
-    async (event, request: MeetingAskPlutoRequest) => {
+    async (event, rawRequest: unknown) => {
       const startTime = Date.now();
-      const query = request?.query?.trim() || '';
-      const requestId = request?.requestId || `ask-pluto-${randomUUID()}`;
+      const parsedRequest = parseMeetingAskPlutoRequest(rawRequest);
+      if (!parsedRequest.ok) {
+        console.warn('[Pluto][Ask Pluto][main] invalid request', {
+          reason: parsedRequest.reason,
+          receivedAt: new Date(startTime).toISOString(),
+        });
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          scope: {
+            type: 'meeting' as const,
+            meetingId: '',
+          },
+          trustStatus: 'needs_review' as const,
+          claims: [],
+          citations: [],
+          rationale: 'The meeting question request was invalid.',
+        };
+      }
+      const request = parsedRequest.request;
+      const query = request.query.trim();
+      const requestId = request.requestId;
+
+      if (
+        request.scope.type === 'live_meeting' &&
+        !captureSessionLease.recordingForOwner(event.sender.id)
+      ) {
+        console.warn('[Pluto][Ask Pluto][main] rejected unowned live request', {
+          requestId,
+          senderId: event.sender.id,
+        });
+        return {
+          status: 'unavailable' as const,
+          answer: '',
+          scope: {
+            type: 'live_meeting' as const,
+            meetingId: '',
+            title: request.scope.title,
+          },
+          trustStatus: 'needs_review' as const,
+          claims: [],
+          citations: [],
+          rationale: 'The live recording is no longer active for this window.',
+        };
+      }
+
+      const replacedRequests: Promise<void>[] = [];
+      for (const active of activeMeetingAskPlutoQueries.values()) {
+        if (active.ownerId === event.sender.id) {
+          active.controller.abort(
+            new DOMException('Meeting chat request replaced', 'AbortError'),
+          );
+          replacedRequests.push(active.settled);
+        }
+      }
+      await Promise.all(replacedRequests);
+      const controller = new AbortController();
+      let markSettled: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        markSettled = resolve;
+      });
+      const activeRequestKey = `${event.sender.id}:${requestId}`;
+      activeMeetingAskPlutoQueries.set(activeRequestKey, {
+        controller,
+        ownerId: event.sender.id,
+        settled,
+      });
+      const abortForDestroyedOwner = () =>
+        controller.abort(
+          new DOMException('Meeting chat owner destroyed', 'AbortError'),
+        );
+      event.sender.once('destroyed', abortForDestroyedOwner);
 
       console.info('[Pluto][Ask Pluto][main] received', {
         ...describeMeetingAskPlutoRequest({ ...request, requestId }),
@@ -3797,20 +4157,6 @@ app.whenReady().then(async () => {
       });
 
       try {
-        if (!query || !request?.scope) {
-          return {
-            status: 'unavailable',
-            answer: '',
-            scope: {
-              type: 'meeting' as const,
-              meetingId: '',
-            },
-            trustStatus: 'needs_review',
-            claims: [],
-            citations: [],
-          };
-        }
-
         const context =
           request.scope.type === 'live_meeting'
             ? buildLiveMeetingAskPlutoContext(request.scope)
@@ -3891,10 +4237,12 @@ app.whenReady().then(async () => {
         });
         try {
           answerRaw = await provider.answerAskPluto(prompt, {
+            signal: controller.signal,
             live: context.scope.type === 'live_meeting',
             onToken: (delta) => visibleStream.push(delta),
           });
         } catch (providerError) {
+          if (controller.signal.aborted) throw providerError;
           console.warn(
             `[Pluto][Ask Pluto][main] provider unavailable (${requestId}) after ${Date.now() - startTime}ms:`,
             providerError,
@@ -3928,12 +4276,60 @@ app.whenReady().then(async () => {
           context,
         });
       } catch (e) {
+        if (controller.signal.aborted) {
+          return {
+            status: 'unavailable' as const,
+            answer: '',
+            scope:
+              request.scope.type === 'live_meeting'
+                ? {
+                    type: 'live_meeting' as const,
+                    meetingId: '',
+                    title: request.scope.title,
+                  }
+                : {
+                    type: 'meeting' as const,
+                    meetingId: request.scope.meetingId,
+                  },
+            trustStatus: 'needs_review' as const,
+            claims: [],
+            citations: [],
+            rationale: 'The meeting question was cancelled.',
+          };
+        }
         console.error(
           `[Pluto][Ask Pluto][main] failed (${requestId}) after ${Date.now() - startTime}ms:`,
           e,
         );
         throw e;
+      } finally {
+        event.sender.removeListener('destroyed', abortForDestroyedOwner);
+        if (
+          activeMeetingAskPlutoQueries.get(activeRequestKey)?.controller ===
+          controller
+        ) {
+          activeMeetingAskPlutoQueries.delete(activeRequestKey);
+        }
+        markSettled();
       }
+    },
+  );
+
+  ipcMain.handle(
+    'intelligence:meeting-chat:cancel',
+    async (event, requestId: unknown) => {
+      if (typeof requestId !== 'string') return { cancelled: false };
+      const active = activeMeetingAskPlutoQueries.get(
+        `${event.sender.id}:${requestId}`,
+      );
+      if (!active) {
+        return { cancelled: false };
+      }
+      active.controller.abort(
+        new DOMException('Meeting chat request cancelled', 'AbortError'),
+      );
+      await active.settled;
+      return { cancelled: true };
     },
   );
 

@@ -12,5 +12,7 @@ describe('Ask Pluto model settings surface', () => {
     expect(settings).toContain('ollama_fast_model');
     expect(settings).toContain('Fast Chat Model');
     expect(settings).toContain('Local Analysis & Deep Model');
+    expect(settings).toContain('OLLAMA_GENERAL_MODEL');
+    expect(settings).toContain('OLLAMA_QUICK_CHAT_MODEL');
   });
 });

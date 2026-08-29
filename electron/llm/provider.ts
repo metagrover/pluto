@@ -1,3 +1,4 @@
+import type { ProjectQualificationProposal } from '../../src/utils/projectQualification';
 // Re-export v3 analysis types for centralized access
 export type {
   AnalysisErrorCategory,
@@ -29,6 +30,7 @@ export interface ExtractedEntities {
     description: string;
     assignee?: string; // Name of person responsible
     due_date?: string; // Natural language date like "Friday", "next week"
+    evidence?: string; // Source quote retained for commitment reconciliation
   }>;
   decisions: Array<{
     description: string;
@@ -37,6 +39,7 @@ export interface ExtractedEntities {
   projects?: Array<{
     name: string;
     context?: string; // Brief description
+    qualification?: ProjectQualificationProposal;
   }>;
   relationships?: Array<{
     source: string;
@@ -47,7 +50,8 @@ export interface ExtractedEntities {
       | 'relates_to'
       | 'involved_in'
       | 'produced'
-      | 'assigned_to';
+      | 'assigned_to'
+      | 'belongs_to';
     context?: string;
   }>;
 }
@@ -161,7 +165,11 @@ export interface LLMProvider {
   generateTitle(transcript: string): Promise<string>;
   synthesizeKnowledgeDocument(
     prompt: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      purpose?: 'projectScope' | 'commitmentReconciliation';
+      responseSchema?: Record<string, unknown>;
+    },
   ): Promise<string>;
   answerAskPluto(
     prompt: string,
