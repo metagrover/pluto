@@ -1,18 +1,52 @@
+// @vitest-environment happy-dom
+
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
+  AT_RISK_THRESHOLD_MS,
+  MAX_INBOX_PREVIEW,
   ProjectHealthCard,
+  ProjectsExecutionTab,
   buildExecutionSummary,
   buildQuickAddActionEntity,
   getExecutionBriefHeading,
   getInboxSummary,
   getNextTaskStatusForToggle,
   getProjectCardSummary,
+  isTaskOverdue,
   partitionProjectsForDisplay,
+  safeParseMetadata,
   sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const getEntitiesByTypeMock = vi.hoisted(() => vi.fn());
+const getEntityLinksMock = vi.hoisted(() => vi.fn());
+const getProjectPortfolioMock = vi.hoisted(() => vi.fn());
+const discoverProjectInitiativeMock = vi.hoisted(() => vi.fn());
+const reviewProjectScopeMock = vi.hoisted(() => vi.fn());
+const getEntityMock = vi.hoisted(() => vi.fn());
+const getEntityMeetingsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/api/knowledgeGraph')>();
+  return {
+    ...actual,
+    getEntitiesByType: getEntitiesByTypeMock,
+    getEntityLinks: getEntityLinksMock,
+    getProjectPortfolio: getProjectPortfolioMock,
+    discoverProjectInitiative: discoverProjectInitiativeMock,
+    reviewProjectScope: reviewProjectScopeMock,
+    getEntity: getEntityMock,
+    getEntityMeetings: getEntityMeetingsMock,
+  };
+});
 
 describe('buildQuickAddActionEntity', () => {
   it('creates an explicitly confirmed user commitment', () => {
@@ -526,5 +560,517 @@ describe('sortExecutionTasksForDisplay', () => {
       'active-newer',
       'active-older',
     ]);
+  });
+});
+
+describe('safeParseMetadata', () => {
+  it('parses valid JSON string', () => {
+    expect(safeParseMetadata('{"key": "value"}')).toEqual({ key: 'value' });
+  });
+
+  it('handles already parsed objects', () => {
+    expect(safeParseMetadata({ key: 'value' })).toEqual({ key: 'value' });
+  });
+
+  it('safely falls back to empty object for invalid JSON without throwing', () => {
+    expect(safeParseMetadata('invalid json {')).toEqual({});
+    expect(safeParseMetadata('{ incomplete')).toEqual({});
+    expect(safeParseMetadata(null)).toEqual({});
+    expect(safeParseMetadata(undefined)).toEqual({});
+    expect(safeParseMetadata('')).toEqual({});
+    expect(safeParseMetadata('   ')).toEqual({});
+    expect(safeParseMetadata(123)).toEqual({});
+  });
+});
+
+describe('isTaskOverdue', () => {
+  const now = new Date('2026-07-15T12:00:00.000Z').getTime();
+
+  it('returns true when task status is explicitly overdue', () => {
+    const task = makeEntity({
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(true);
+  });
+
+  it('returns true when task due date is in the past and task is active', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: '2026-07-10T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(true);
+  });
+
+  it('returns false when task due date is in the future', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: '2026-07-20T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+
+  it('returns false when task has no due date and status is not overdue', () => {
+    const task = makeEntity({
+      status: 'active',
+      due_date: null,
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+
+  it('returns false when task is completed even if due date is in the past', () => {
+    const task = makeEntity({
+      status: 'completed',
+      due_date: '2026-07-10T00:00:00.000Z',
+    });
+    expect(isTaskOverdue(task, now)).toBe(false);
+  });
+});
+
+describe('Constants', () => {
+  it('exports expected AT_RISK_THRESHOLD_MS and MAX_INBOX_PREVIEW', () => {
+    expect(AT_RISK_THRESHOLD_MS).toBe(2 * 24 * 60 * 60 * 1000);
+    expect(MAX_INBOX_PREVIEW).toBe(6);
+  });
+});
+
+describe('ProjectHealthCard metadata resilience', () => {
+  it('renders gracefully when project and tasks have malformed metadata JSON', () => {
+    const project = makeEntity({
+      id: 'project-malformed',
+      name: 'Resilient Project',
+      metadata: 'invalid-json-{broken',
+    });
+    const task = makeEntity({
+      id: 'task-malformed',
+      name: 'Resilient Task',
+      status: 'active',
+      metadata: '{{{not-json',
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[task]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Resilient Project');
+    expect(markup).toContain('Resilient Task');
+  });
+});
+
+describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    vi.clearAllMocks();
+    getProjectPortfolioMock.mockReset();
+    discoverProjectInitiativeMock.mockReset();
+    reviewProjectScopeMock.mockReset();
+    getProjectPortfolioMock.mockResolvedValue([qualified()]);
+    discoverProjectInitiativeMock.mockResolvedValue({
+      discovered: 0,
+      remaining: 0,
+      failed: 0,
+      deferred: false,
+    });
+    reviewProjectScopeMock.mockResolvedValue({
+      reviewed: 0,
+      remaining: 0,
+      deferred: false,
+    });
+    getEntityMock.mockResolvedValue(qualified());
+    getEntityMeetingsMock.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  const qualified = () => ({
+    ...makeEntity({
+      id: 'project-1',
+      name: 'Project Orion',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'user',
+          reason: 'Confirmed initiative',
+          assessedAt: '2026-08-28',
+          outcome: 'Replace legacy billing',
+        },
+      }),
+    }),
+    meeting_count: 2,
+    last_mentioned_at: '2026-08-28T12:00:00Z',
+    latest_context: 'Migration and rollout',
+  });
+
+  it('shows qualified initiatives without fabricated health or zero metrics', async () => {
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain('Project Orion');
+    expect(container.textContent).toContain('Replace legacy billing');
+    expect(container.textContent).not.toContain('Complete');
+    expect(container.textContent).not.toContain('Tasks');
+    expect(container.textContent).not.toContain('People');
+    expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps unqualified records in a secondary disclosure', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      qualified(),
+      {
+        ...qualified(),
+        id: 'routine',
+        name: 'Routine configuration',
+        metadata: JSON.stringify({
+          projectQualification: {
+            version: 1,
+            state: 'subordinate',
+            source: 'review',
+            reason: 'A single configuration task',
+            assessedAt: '2026-08-28',
+          },
+        }),
+      },
+    ]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(
+      container.querySelector('details [data-project-id="routine"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('details')?.open).toBe(false);
+    expect(
+      container.querySelector(
+        '[data-testid="current-projects"] [data-project-id="routine"]',
+      ),
+    ).toBeNull();
+  });
+
+  it('reviews legacy scope automatically and renders the returned qualification', async () => {
+    getProjectPortfolioMock
+      .mockResolvedValueOnce([{ ...qualified(), metadata: null }])
+      .mockResolvedValue([qualified()]);
+    reviewProjectScopeMock.mockResolvedValue({
+      reviewed: 1,
+      remaining: 0,
+      deferred: false,
+    });
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
+    expect(
+      container.querySelector('[data-testid="current-projects"]')?.textContent,
+    ).toContain('Project Orion');
+  });
+
+  it('publishes a discovered initiative before starting legacy candidate review', async () => {
+    vi.useFakeTimers();
+    try {
+      getProjectPortfolioMock
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([qualified()]);
+      discoverProjectInitiativeMock
+        .mockResolvedValueOnce({
+          discovered: 1,
+          discoveredProjectId: 'project-1',
+          remaining: 1,
+          failed: 0,
+          deferred: false,
+        })
+        .mockResolvedValueOnce({
+          discovered: 0,
+          remaining: 0,
+          failed: 0,
+          deferred: false,
+        });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      expect(container.textContent).toContain('Project Orion');
+      expect(container.textContent).toContain('1 source remaining');
+      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
+      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains loaded records when scope review fails and offers retry', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      { ...qualified(), metadata: null },
+    ]);
+    reviewProjectScopeMock.mockRejectedValue(new Error('offline'));
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain('Project Orion');
+    expect(container.textContent).toContain('Retry');
+    expect(container.textContent).not.toContain('No projects');
+  });
+
+  it('continues after a malformed candidate and stops once only failed candidates remain', async () => {
+    vi.useFakeTimers();
+    try {
+      const failed = { ...qualified(), metadata: null };
+      const pending = { ...qualified(), id: 'project-2', metadata: null };
+      getProjectPortfolioMock
+        .mockResolvedValueOnce([failed, pending])
+        .mockResolvedValueOnce([failed, pending])
+        .mockResolvedValue([failed, { ...qualified(), id: 'project-2' }]);
+      reviewProjectScopeMock
+        .mockResolvedValueOnce({
+          reviewed: 0,
+          remaining: 2,
+          deferred: false,
+          failedProjectId: 'project-1',
+        })
+        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(reviewProjectScopeMock).toHaveBeenNthCalledWith(2, {
+        excludeProjectIds: ['project-1'],
+      });
+      expect(
+        container.querySelector('[data-testid="current-projects"]')
+          ?.textContent,
+      ).toContain('Project Orion');
+      expect(container.textContent).toContain('1 item still needs review');
+      expect(container.textContent).not.toContain('Pluto is looking');
+      await act(async () => vi.advanceTimersByTimeAsync(10000));
+      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(2);
+      const retry = Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === 'Retry',
+      );
+      reviewProjectScopeMock.mockResolvedValue({
+        reviewed: 1,
+        remaining: 0,
+        deferred: false,
+      });
+      await act(async () => retry?.click());
+      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
+        excludeProjectIds: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles skipped candidates after concurrent classification and continues untouched work', async () => {
+    vi.useFakeTimers();
+    try {
+      const a = { ...qualified(), metadata: null };
+      const b = { ...a, id: 'b' };
+      const c = { ...a, id: 'c' };
+      getProjectPortfolioMock
+        .mockResolvedValueOnce([a, b, c])
+        .mockResolvedValueOnce([a, b, c])
+        .mockResolvedValueOnce([qualified(), { ...qualified(), id: 'b' }, c])
+        .mockResolvedValue([
+          qualified(),
+          { ...qualified(), id: 'b' },
+          { ...qualified(), id: 'c' },
+        ]);
+      reviewProjectScopeMock
+        .mockResolvedValueOnce({
+          reviewed: 0,
+          remaining: 3,
+          deferred: false,
+          failedProjectId: a.id,
+        })
+        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false })
+        .mockResolvedValueOnce({ reviewed: 1, remaining: 0, deferred: false });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(3);
+      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
+        excludeProjectIds: [],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not describe a failed review as active discovery', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      { ...qualified(), metadata: null },
+    ]);
+    reviewProjectScopeMock.mockRejectedValue(new Error('offline'));
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain('Project review is incomplete');
+    expect(container.textContent).not.toContain('Pluto is looking');
+  });
+
+  it('offers explicit retry for current unresolved reviews without an automatic loop', async () => {
+    vi.useFakeTimers();
+    try {
+      const unresolved = {
+        ...qualified(),
+        metadata: JSON.stringify({
+          projectQualification: {
+            version: 1,
+            reviewVersion: 2,
+            state: 'unassessed',
+            source: 'review',
+            reason: 'The earlier plan is missing.',
+            issue: 'model_uncertain',
+            assessedAt: '2026-08-28',
+          },
+        }),
+      };
+      getProjectPortfolioMock.mockResolvedValue([unresolved]);
+      reviewProjectScopeMock.mockResolvedValue({
+        reviewed: 1,
+        remaining: 1,
+        deferred: false,
+        unresolvedProjectId: unresolved.id,
+      });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+      expect(container.textContent).toContain('1 item still needs review');
+      expect(container.textContent).toContain('The earlier plan is missing.');
+      const retry = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === 'Retry',
+      );
+      await act(async () => retry?.click());
+      expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(10000));
+      expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
+      expect(container.textContent).toContain('Project review is incomplete');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not restart an unresolved explicit retry after navigation', async () => {
+    const unresolved = {
+      ...qualified(),
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          reviewVersion: 2,
+          state: 'unassessed',
+          source: 'review',
+          reason: 'Still missing context.',
+          assessedAt: '2026-08-28',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([unresolved]);
+    let finish!: (value: any) => void;
+    reviewProjectScopeMock.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Retry',
+    );
+    await act(async () => retry?.click());
+    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
+    await act(async () =>
+      root.render(<ProjectsExecutionTab selectedProjectId={unresolved.id} />),
+    );
+    await act(async () =>
+      finish({
+        reviewed: 1,
+        remaining: 1,
+        deferred: false,
+        unresolvedProjectId: unresolved.id,
+        attemptedProjectId: unresolved.id,
+      }),
+    );
+    await act(async () =>
+      root.render(<ProjectsExecutionTab selectedProjectId={null} />),
+    );
+    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('1 item still needs review');
+  });
+
+  it('automatically revisits legacy uncertainty once and continues with other candidates', async () => {
+    vi.useFakeTimers();
+    try {
+      const legacy = {
+        ...qualified(),
+        metadata: JSON.stringify({
+          projectQualification: {
+            version: 1,
+            state: 'unassessed',
+            source: 'review',
+            reason: 'Insufficient grounded evidence for project scope.',
+            assessedAt: '2026-08-28',
+          },
+        }),
+      };
+      const unresolved = {
+        ...legacy,
+        metadata: JSON.stringify({
+          projectQualification: {
+            version: 1,
+            reviewVersion: 2,
+            state: 'unassessed',
+            source: 'review',
+            reason: 'Still missing context.',
+            assessedAt: '2026-08-28',
+          },
+        }),
+      };
+      const pending = { ...qualified(), id: 'next', metadata: null };
+      getProjectPortfolioMock
+        .mockResolvedValueOnce([legacy, pending])
+        .mockResolvedValueOnce([unresolved, pending])
+        .mockResolvedValue([unresolved, { ...qualified(), id: 'next' }]);
+      reviewProjectScopeMock
+        .mockResolvedValueOnce({
+          reviewed: 1,
+          remaining: 2,
+          deferred: false,
+          unresolvedProjectId: legacy.id,
+        })
+        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      expect(container.textContent).toContain('· 1 remaining');
+      await act(async () => vi.advanceTimersByTimeAsync(10000));
+      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(2);
+      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
+        excludeProjectIds: [legacy.id],
+      });
+      expect(container.textContent).toContain('1 item still needs review');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens real dossier and returns to the overview', async () => {
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    await act(async () =>
+      (
+        container.querySelector(
+          '[data-project-id="project-1"]',
+        ) as HTMLButtonElement
+      ).click(),
+    );
+    expect(container.textContent).toContain('Source');
+    const back = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Back'),
+    );
+    await act(async () => back?.click());
+    expect(
+      container.querySelector('[data-testid="current-projects"]'),
+    ).not.toBeNull();
+  });
+
+  it('syncs dossier navigation with a selected project prop', async () => {
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    await act(async () =>
+      root.render(<ProjectsExecutionTab selectedProjectId="project-1" />),
+    );
+    expect(getEntityMock).toHaveBeenCalledWith('project-1');
   });
 });

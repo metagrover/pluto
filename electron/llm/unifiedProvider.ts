@@ -45,6 +45,7 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
+const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_GENERATION_IDLE_TIMEOUT_MS = 60_000;
@@ -381,6 +382,7 @@ type LLMTask =
   | 'entities'
   | 'valueSignals'
   | 'knowledgeDoc'
+  | 'projectScopeReview'
   | 'commitmentReconciliation'
   | 'askPluto'
   | 'askPlutoDeep'
@@ -402,19 +404,22 @@ const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
     ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-    : task === 'structuredAnalysis' ||
-        task === 'notesWriter' ||
-        task === 'notesAudit' ||
-        task === 'notesMerge' ||
-        task === 'analysisEditorial' ||
-        task === 'topicSegmentation' ||
-        task === 'terminologyReconciliation' ||
-        task === 'topicAnalysis'
-      ? OLLAMA_ANALYSIS_TIMEOUT_MS
-      : OLLAMA_TIMEOUT_MS;
+    : task === 'projectScopeReview'
+      ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
+      : task === 'structuredAnalysis' ||
+          task === 'notesWriter' ||
+          task === 'notesAudit' ||
+          task === 'notesMerge' ||
+          task === 'analysisEditorial' ||
+          task === 'topicSegmentation' ||
+          task === 'terminologyReconciliation' ||
+          task === 'topicAnalysis'
+        ? OLLAMA_ANALYSIS_TIMEOUT_MS
+        : OLLAMA_TIMEOUT_MS;
 
 const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
   task === 'commitmentReconciliation' ||
+  task === 'projectScopeReview' ||
   task === 'notesWriter' ||
   task === 'notesAudit' ||
   task === 'notesMerge' ||
@@ -758,7 +763,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt: string,
     options: {
       signal?: AbortSignal;
-      purpose?: 'commitmentReconciliation';
+      purpose?: 'projectScope' | 'commitmentReconciliation';
       responseSchema?: Record<string, unknown>;
     } = {},
   ): Promise<string> {
@@ -767,7 +772,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       task:
         options.purpose === 'commitmentReconciliation'
           ? 'commitmentReconciliation'
-          : 'knowledgeDoc',
+          : options.purpose === 'projectScope'
+            ? 'projectScopeReview'
+            : 'knowledgeDoc',
       jsonMode: true,
       responseSchema: options.responseSchema,
       signal: options.signal,
@@ -906,13 +913,16 @@ export class UnifiedLLMProvider implements LLMProvider {
             options.task === 'knowledgeDoc' ||
               options.task === 'commitmentReconciliation'
               ? 0
-              : options.task === 'askPluto' || options.task === 'askPlutoDeep'
-                ? 20
-                : 10,
+              : options.task === 'projectScopeReview'
+                ? 15
+                : options.task === 'askPluto' || options.task === 'askPlutoDeep'
+                  ? 20
+                  : 10,
             {
               signal: options.signal,
               preemptible:
                 options.task === 'knowledgeDoc' ||
+                options.task === 'projectScopeReview' ||
                 options.task === 'commitmentReconciliation' ||
                 options.task === 'title' ||
                 isResumableMeetingAnalysisTask(options.task),
@@ -1171,7 +1181,11 @@ export class UnifiedLLMProvider implements LLMProvider {
         'json';
       requestBody.think = this.settings.ollama_structured_thinking ?? false;
     }
-    if (task === 'queryClassification' || task === 'commitmentReconciliation')
+    if (
+      task === 'queryClassification' ||
+      task === 'projectScopeReview' ||
+      task === 'commitmentReconciliation'
+    )
       requestBody.think = false;
     if (task === 'askPluto') requestBody.think = false;
     if (task === 'askPlutoDeep') {
@@ -1228,6 +1242,11 @@ export class UnifiedLLMProvider implements LLMProvider {
         for (const line of lines) {
           if (!line.trim()) continue;
           const packet = JSON.parse(line) as Record<string, unknown>;
+          if (task === 'projectScopeReview' && packet.done === true) {
+            completed = true;
+            if (packet.done_reason === 'length')
+              throw new Error('project_scope_response_incomplete');
+          }
           if (task === 'commitmentReconciliation' && packet.done === true) {
             completed = true;
             if (packet.done_reason === 'length')
@@ -1286,6 +1305,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         }
         if (notesBudget && !completed)
           throw new MeetingNotesError('notes_output_incomplete');
+        if (task === 'projectScopeReview' && !completed)
+          throw new Error('project_scope_response_incomplete');
         if (task === 'commitmentReconciliation' && !completed)
           throw new Error('commitment_response_incomplete');
         return answer;
@@ -1507,6 +1528,9 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') {
       return 'You are an expert at classifying conversation value signals. Always respond with valid JSON only.';
     }
+    if (task === 'projectScopeReview') {
+      return 'You assess project scope conservatively against transcript evidence. Always respond with valid JSON only.';
+    }
     if (task === 'commitmentReconciliation') {
       return 'Compare commitments conservatively by meaning and source context. Same topic is not the same obligation. Return valid JSON only.';
     }
@@ -1546,6 +1570,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;
+    if (task === 'projectScopeReview') return 0.1;
     if (task === 'commitmentReconciliation') return 0;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
@@ -1567,6 +1592,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summaryRepair') return 1024;
     if (task === 'entities') return 2048;
     if (task === 'valueSignals') return 512;
+    if (task === 'projectScopeReview') return 2500;
     if (task === 'commitmentReconciliation') return 2500;
     if (task === 'knowledgeDoc') return 4096;
     if (task === 'askPluto') return 1024;

@@ -36,7 +36,7 @@ interface DashboardProps {
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
   setActiveTab: (
-    tab: 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat',
+    tab: 'hub' | 'people' | 'projects' | 'meetings' | 'chat',
   ) => void;
   setAskPlutoVisible?: (visible: boolean) => void;
   updatingTaskIds: Set<string>;
@@ -1228,7 +1228,7 @@ export const Dashboard = ({
               </p>
               <button
                 type="button"
-                onClick={() => setActiveTab('wiki')}
+                onClick={() => setActiveTab('projects')}
                 className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
               >
                 Open knowledge{' '}
