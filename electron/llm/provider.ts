@@ -1,3 +1,4 @@
+import type { ProjectQualificationProposal } from '../../src/utils/projectQualification';
 // Re-export v3 analysis types for centralized access
 export type {
   AnalysisErrorCategory,
@@ -38,6 +39,7 @@ export interface ExtractedEntities {
   projects?: Array<{
     name: string;
     context?: string; // Brief description
+    qualification?: ProjectQualificationProposal;
   }>;
   relationships?: Array<{
     source: string;
@@ -48,7 +50,8 @@ export interface ExtractedEntities {
       | 'relates_to'
       | 'involved_in'
       | 'produced'
-      | 'assigned_to';
+      | 'assigned_to'
+      | 'belongs_to';
     context?: string;
   }>;
 }
@@ -164,7 +167,7 @@ export interface LLMProvider {
     prompt: string,
     options?: {
       signal?: AbortSignal;
-      purpose?: 'commitmentReconciliation';
+      purpose?: 'projectScope' | 'commitmentReconciliation';
       responseSchema?: Record<string, unknown>;
     },
   ): Promise<string>;

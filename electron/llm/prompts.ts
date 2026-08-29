@@ -251,7 +251,9 @@ Analyze the following transcript and extract:
 2. **Topics**: Main subjects discussed (rate importance as high/medium/low)
 3. **Action Items**: Tasks, follow-ups, or commitments made (include who is responsible and any deadline)
 4. **Decisions**: Explicit decisions or conclusions reached (include rationale if given)
-5. **Projects**: Project names or work streams mentioned
+5. **Projects**: Only independent initiatives with a distinct outcome spanning multiple actions or work packages. Routine fixes, configuration, testing, and follow-ups belong in Action Items or Topics unless the transcript establishes a broader independent initiative. A repeated mention, named noun, team, product, or general work stream is not sufficient.
+- Each project must include qualification.kind = "initiative", a concise outcome, outcomeEvidenceQuote, and at least two distinct workItems with description and evidenceQuote. Quotes must be verbatim transcript phrases of at least 12 characters; work-item quotes must independently support different work. Do not invent scope, split one action into artificial steps, or infer scope from repetition. Omit projects with insufficient evidence.
+- Associate entities only through explicit, evidenced relationships; sharing a meeting does not establish project membership.
 
 6. **Relationships**: Connections between entities (e.g., "Person works on Project", "Decision impacts Topic")
 
@@ -267,7 +269,8 @@ Rules:
 - Be conservative - only extract what's clearly present, don't infer too much
 - For relationships, include only high-confidence links where both source and target are identifiable entities in the transcript
 - Put a short evidence phrase in relationship "context" when available
-- IMPORTANT: When extracting relationships, valid types are: 'works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to'
+- Use belongs_to only for explicit task/topic/subproject membership in a qualified initiative; context must be a verbatim transcript quote of at least 12 characters supporting that membership. Use the exact extracted entity names.
+- IMPORTANT: When extracting relationships, valid types are: 'works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to', 'belongs_to'
 
 Respond with valid JSON in this exact format:
 {
@@ -275,7 +278,7 @@ Respond with valid JSON in this exact format:
   "topics": [{"name": "string", "importance": "high|medium|low"}],
   "action_items": [{"description": "string", "assignee": "string or omit", "due_date": "string or omit"}],
   "decisions": [{"description": "string", "rationale": "string or omit"}],
-  "projects": [{"name": "string", "context": "string or omit"}],
+  "projects": [{"name": "string", "context": "string or omit", "qualification": {"kind": "initiative", "outcome": "string", "outcomeEvidenceQuote": "verbatim transcript phrase", "workItems": [{"description": "string", "evidenceQuote": "verbatim transcript phrase"}, {"description": "different work item", "evidenceQuote": "different verbatim transcript phrase"}]}}],
   "relationships": [{"source": "string", "target": "string", "relationship": "string", "context": "string or omit"}]
 }
 

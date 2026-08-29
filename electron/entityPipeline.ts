@@ -8,6 +8,10 @@
 import { createHash } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
 import type { ActionCommitmentMetadata } from '../src/utils/actionCommitment';
+import {
+  assessProjectProposal,
+  readProjectQualification,
+} from '../src/utils/projectQualification';
 import { resolveRecordIdentity } from './commitmentIdentity';
 import {
   commitmentRecord,
@@ -586,33 +590,45 @@ function persistExtractedEntities(
     for (const project of extracted.projects) {
       ensureCurrent();
       if (!project?.name || typeof project.name !== 'string') continue;
-      const similar = findSimilarEntity(
-        'project',
-        project.name,
-        existingProjects,
-        0.8,
+      const similar = existingProjects.find(
+        (candidate) =>
+          normalizeForMatch(candidate.name) === normalizeForMatch(project.name),
       );
       let entity: db.Entity;
 
-      if (similar) {
-        entity = similar;
-        if (project.context && !JSON.parse(similar.metadata || '{}').context) {
-          // enrich context
-          db.upsertEntity({
-            ...similar,
-            metadata: {
-              ...JSON.parse(similar.metadata || '{}'),
-              context: project.context,
-            },
-          });
+      let metadata: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(similar?.metadata || '{}');
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          metadata = parsed as Record<string, unknown>;
         }
-        updated++;
-      } else {
-        entity = db.upsertEntity({
-          type: 'project',
-          name: project.name,
-          metadata: project.context ? { context: project.context } : undefined,
-        });
+      } catch {
+        /* Preserve the entity even if old metadata is malformed. */
+      }
+      const prior = readProjectQualification(metadata);
+      if (prior?.source !== 'user') {
+        const assessed = assessProjectProposal(
+          project.qualification,
+          transcriptForGrounding ?? '',
+          {
+            source: 'extraction',
+            sourceMeetingId: meetingId,
+          },
+        );
+        // A sparse later mention must not erase a grounded earlier assessment.
+        if (!prior || assessed.state !== 'unassessed')
+          metadata.projectQualification = assessed;
+      }
+      if (project.context && !metadata.context)
+        metadata.context = project.context;
+      entity = db.upsertEntity({
+        ...(similar ?? {}),
+        type: 'project',
+        name: similar?.name ?? project.name,
+        metadata,
+      });
+      if (similar) updated++;
+      else {
         created++;
         existingProjects.push(entity);
       }
@@ -626,36 +642,6 @@ function persistExtractedEntities(
         context: project.context,
       });
       linked++;
-
-      // Link topics that might belong to this project (heuristic: same meeting)
-      for (const topic of extracted.topics) {
-        ensureCurrent();
-        // We need to find the specific topic entity we worked with/created above
-        // We can't just findByName because we might have resolved it to a different name
-        // So we search in our local 'entities' array or just re-resolve
-        const topicEntity = findSimilarEntity(
-          'topic',
-          topic.name,
-          existingTopics,
-          0.9,
-        ); // Strong match since we just processed it
-
-        if (topicEntity) {
-          const confidence = clamp(
-            0.7 + getRelationshipBias(context, 'belongs_to'),
-            0.5,
-            0.95,
-          );
-          db.linkEntities({
-            source_entity_id: topicEntity.id,
-            target_entity_id: entity.id,
-            relationship: 'belongs_to',
-            meeting_id: meetingId,
-            confidence, // Lower confidence since it's inferred
-          });
-          linked++;
-        }
-      }
     }
   }
 
@@ -669,6 +655,51 @@ function persistExtractedEntities(
         typeof rel.target !== 'string'
       )
         continue;
+      if (rel.relationship === 'belongs_to') {
+        if (typeof rel.context !== 'string') continue;
+        const quote = rel.context?.replace(/\s+/g, ' ').trim();
+        if (
+          !quote ||
+          quote.length < 12 ||
+          !transcriptForGrounding?.replace(/\s+/g, ' ').includes(quote)
+        )
+          continue;
+        const candidates = [...existingProjects, ...entities];
+        const exact = (name: string) => {
+          const matches = candidates.filter(
+            (candidate) =>
+              normalizeForMatch(candidate.name) === normalizeForMatch(name),
+          );
+          const unique = [
+            ...new Map(
+              matches.map((candidate) => [candidate.id, candidate]),
+            ).values(),
+          ];
+          return unique.length === 1 ? unique[0] : undefined;
+        };
+        const source = exact(rel.source);
+        const target = exact(rel.target);
+        if (
+          !source ||
+          !target ||
+          source.id === target.id ||
+          !['action_item', 'topic', 'project'].includes(source.type) ||
+          target.type !== 'project' ||
+          readProjectQualification(target.metadata)?.state !== 'qualified'
+        )
+          continue;
+        db.linkEntities({
+          source_entity_id: source.id,
+          target_entity_id: target.id,
+          relationship: 'belongs_to',
+          meeting_id: meetingId,
+          evidence_meeting_id: meetingId,
+          evidence_quote: rel.context,
+          confidence: 0.85,
+        });
+        linked++;
+        continue;
+      }
       // Find Source
       let sourceEntity: db.Entity | undefined;
       // Try to find source in our just-processed list first (most likely context)
@@ -953,7 +984,7 @@ export async function extractAndProcessEntities(
       prompt: string,
       options?: {
         signal?: AbortSignal;
-        purpose?: 'commitmentReconciliation';
+        purpose?: 'projectScope' | 'commitmentReconciliation';
         responseSchema?: Record<string, unknown>;
       },
     ) => Promise<string>;
