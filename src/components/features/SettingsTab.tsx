@@ -11,11 +11,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
 import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../utils/ollamaModels';
 import { PageHeader } from '../ui/PageHeader';
+import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
 
 interface SettingsTabProps {
@@ -35,6 +37,8 @@ interface SettingsTabProps {
   setSelectedMeetingId: (id: string | number | null) => void;
   theme: 'light' | 'dark' | 'system';
   setTheme: (val: 'light' | 'dark' | 'system') => void;
+  calendarSnapshot?: CalendarIntegrationSnapshot | null;
+  onCalendarSnapshotChange?: (snapshot: CalendarIntegrationSnapshot) => void;
 }
 
 const providerOptions = [
@@ -145,6 +149,8 @@ export const SettingsTab = ({
   setSelectedMeetingId,
   theme,
   setTheme,
+  calendarSnapshot = null,
+  onCalendarSnapshotChange = () => {},
 }: SettingsTabProps) => {
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
@@ -189,6 +195,10 @@ export const SettingsTab = ({
       <PageHeader title="Settings" />
       <div>
         <IdentitySettings />
+        <CalendarSettings
+          snapshot={calendarSnapshot}
+          onSnapshotChange={onCalendarSnapshotChange}
+        />
         <Section title="Analysis">
           <SettingsRow
             label="AI Provider"

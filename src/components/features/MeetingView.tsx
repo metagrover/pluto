@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
+import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
@@ -35,6 +36,7 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingIdentityControls } from './MeetingIdentityControls';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
@@ -113,6 +115,7 @@ interface MeetingViewProps {
   setTranscriptVisible: (val: boolean) => void;
   onRetryTranscriptValidation?: () => void;
   transcriptValidationRetrying?: boolean;
+  calendarContext?: MeetingCalendarContextValue | null;
 }
 
 type MeetingNotesTemplate =
@@ -561,6 +564,7 @@ export const MeetingView = ({
   setTranscriptVisible,
   onRetryTranscriptValidation,
   transcriptValidationRetrying = false,
+  calendarContext = null,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
@@ -615,11 +619,14 @@ export const MeetingView = ({
     };
   }, [selectedMeeting.id]);
 
-  const saveTitle = async (expectedTitle = titleEdit.current.expectedTitle) => {
+  const saveTitle = async (
+    expectedTitle = titleEdit.current.expectedTitle,
+    nextTitle = titleValue,
+  ) => {
     // Returning to the same meeting is a new visit, not the old pending edit.
     const editSession = titleEdit.current;
     if (editSession.saving) return;
-    const title = titleValue.trim();
+    const title = nextTitle.trim();
     if (!title || title === latestTitle) {
       setTitleValue(latestTitle || 'Untitled Session');
       setTitleSaveError(null);
@@ -627,6 +634,7 @@ export const MeetingView = ({
       return;
     }
     const meetingId = selectedMeeting.id;
+    setTitleValue(title);
     editSession.saving = true;
     setIsSavingTitle(true);
     try {
@@ -1045,6 +1053,19 @@ export const MeetingView = ({
               </details>
             </div>
           </div>
+          {calendarContext ? (
+            <MeetingCalendarContext
+              context={calendarContext}
+              canSuggestTitle={
+                /^(meeting(?: \d+)?|new meeting|untitled (?:meeting|session))$/i.test(
+                  latestTitle.trim(),
+                ) && calendarContext.event.title.trim() !== latestTitle.trim()
+              }
+              onUseTitle={(title) =>
+                void saveTitle(titleEdit.current.expectedTitle, title)
+              }
+            />
+          ) : null}
         </header>
         <TranscriptIntegrityPanel
           status={selectedMeeting.transcript_status}

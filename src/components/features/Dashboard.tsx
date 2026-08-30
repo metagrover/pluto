@@ -20,9 +20,14 @@ import {
   useState,
 } from 'react';
 import type { CSSProperties, FormEvent, RefObject } from 'react';
+import type {
+  CalendarEvent,
+  CalendarIntegrationSnapshot,
+} from '../../../electron/calendar/types';
 
 import relaxedEmptyIllustration from '../../assets/illustrations/dashboard-relaxed-empty.webp';
 
+import { UpcomingMeetings } from './UpcomingMeetings';
 import type {
   DashboardActionInsightItem,
   DashboardHomeModel,
@@ -59,6 +64,11 @@ interface DashboardProps {
     attentionItemId: string,
     nextStatus: 'active' | 'dismissed' | 'snoozed',
   ) => Promise<void>;
+  calendarSnapshot?: CalendarIntegrationSnapshot | null;
+  calendarEvents?: CalendarEvent[];
+  calendarLoading?: boolean;
+  onCalendarConnect?: () => Promise<void>;
+  onCalendarOpenSettings?: () => void;
 }
 
 const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
@@ -230,17 +240,6 @@ const DashboardSuggestionReview = ({
   );
 };
 
-const formatMeetingDate = (value: string): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year:
-      date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
-  });
-};
-
 const CURRENT_READ_CLAIM_ID = 'dashboard-current-read-claim';
 
 export const shouldUseReducedDashboardMotion = (): boolean =>
@@ -401,7 +400,6 @@ export const Dashboard = ({
   loading,
   isRecording,
   setSelectedMeetingId,
-  setActiveTab,
   updatingTaskIds,
   actionError,
   handleCompleteTask,
@@ -409,6 +407,11 @@ export const Dashboard = ({
   handleCreateCommitment = async () => undefined,
   handleSetDailyCommitments = async () => {},
   handleUpdateAttentionStatus = async () => {},
+  calendarSnapshot = null,
+  calendarEvents = [],
+  calendarLoading = false,
+  onCalendarConnect = async () => {},
+  onCalendarOpenSettings = () => {},
 }: DashboardProps) => {
   const [addingCommitment, setAddingCommitment] = useState(false);
   const [commitmentText, setCommitmentText] = useState('');
@@ -546,7 +549,6 @@ export const Dashboard = ({
   };
 
   const recentWin = model.recentWin;
-  const latestMeeting = model.latestMeeting;
   const hasSuggestedCommitments =
     model.commitments.needsConfirmation.length > 0;
   const currentSuggestion = model.commitments.needsConfirmation[0];
@@ -1114,7 +1116,17 @@ export const Dashboard = ({
         </section>
 
         <aside className="min-w-0 space-y-8">
-          <section aria-labelledby="recent-win-title">
+          <UpcomingMeetings
+            snapshot={calendarSnapshot}
+            events={calendarEvents}
+            loading={calendarLoading}
+            onConnect={onCalendarConnect}
+            onOpenSettings={onCalendarOpenSettings}
+          />
+          <section
+            aria-labelledby="recent-win-title"
+            className="border-t border-pro-border/70 pt-6"
+          >
             <p className="text-[10px] font-medium text-pro-text-muted/60">
               {recentWin.state === 'populated' ? 'Evidence-backed' : 'Momentum'}
             </p>
@@ -1179,63 +1191,6 @@ export const Dashboard = ({
               )}
             </div>
           </section>
-
-          {latestMeeting.state === 'populated' ? (
-            <section
-              aria-labelledby="continue-title"
-              className="border-t border-pro-border/70 pt-6"
-            >
-              <p className="text-[10px] font-semibold text-pro-text-muted/60">
-                Recent context · {formatMeetingDate(latestMeeting.occurredAt)}
-              </p>
-              <h2
-                id="continue-title"
-                className="mt-1 text-[17px] font-serif font-normal leading-6 text-pro-text-main"
-              >
-                Continue where you left off
-              </h2>
-              <h3 className="mt-3 text-[13px] font-semibold text-pro-text-main">
-                {latestMeeting.title}
-              </h3>
-              <p className="mt-1 line-clamp-2 text-[12px] font-medium leading-5 text-pro-text-muted">
-                {latestMeeting.detail}
-              </p>
-              <button
-                type="button"
-                onClick={() => setSelectedMeetingId(latestMeeting.meetingId)}
-                className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-              >
-                Open meeting{' '}
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            </section>
-          ) : model.knowledgeDocuments.state === 'populated' ? (
-            <section
-              aria-labelledby="knowledge-reentry-title"
-              className="border-t border-pro-border/70 pt-6"
-            >
-              <p className="text-[10px] font-semibold text-pro-text-muted/60">
-                Working memory
-              </p>
-              <h2
-                id="knowledge-reentry-title"
-                className="mt-1 text-[16px] font-semibold leading-6 text-pro-text-main"
-              >
-                Return to your current read
-              </h2>
-              <p className="mt-3 text-[12px] font-medium leading-5 text-pro-text-muted">
-                {model.knowledgeDocuments.cards[0].title}
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveTab('projects')}
-                className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-              >
-                Open knowledge{' '}
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            </section>
-          ) : null}
         </aside>
       </div>
     </main>

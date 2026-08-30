@@ -335,7 +335,8 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Daily briefing');
     expect(markup).toContain('Today&#x27;s focus');
-    expect(markup).toContain('Continue where you left off');
+    expect(markup).toContain('Upcoming meetings');
+    expect(markup).not.toContain('Continue where you left off');
     expect(markup).not.toContain('Ask Pluto');
     expect(markup).not.toContain('dashboard-top-of-mind-item');
     expect(
@@ -399,7 +400,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('Your wins will show up here');
   });
 
-  it('keeps Recent Win visible and places the latest meeting beneath it', () => {
+  it('places Upcoming meetings before Recent win and removes duplicate re-entry', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting({ title: 'Launch Review' })],
@@ -415,11 +416,14 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Your wins will show up here');
-    expect(markup).toContain('Continue where you left off');
-    expect(markup).toContain('Launch Review');
+    expect(markup).toContain('Upcoming meetings');
+    expect(markup.indexOf('Upcoming meetings')).toBeLessThan(
+      markup.indexOf('Recent win'),
+    );
+    expect(markup).not.toContain('Continue where you left off');
   });
 
-  it('keeps a supported recent win above quiet latest-meeting context', () => {
+  it('keeps a supported recent win beneath the compact agenda', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeetingWithSupportedWin()],
@@ -435,7 +439,10 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Privacy review is ready to close');
-    expect(markup).toContain('Continue where you left off');
+    expect(markup.indexOf('Upcoming meetings')).toBeLessThan(
+      markup.indexOf('Recent win'),
+    );
+    expect(markup).not.toContain('Continue where you left off');
     expect(markup).not.toContain('Your wins will show up here');
   });
 

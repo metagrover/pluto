@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import type { CalendarEvent } from '../../../electron/calendar/types';
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
@@ -32,6 +33,7 @@ interface ZenModeProps {
   captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
+  calendarEvent?: CalendarEvent | null;
   askPlutoConversation?: MeetingAskPlutoConversationMessage[];
   setAskPlutoConversation?: React.Dispatch<
     React.SetStateAction<MeetingAskPlutoConversationMessage[]>
@@ -58,6 +60,7 @@ export const ZenMode = ({
   captureHealth,
   liveTranscriptIntegrity,
   recordingStartedAtMs,
+  calendarEvent = null,
   askPlutoConversation,
   setAskPlutoConversation,
   askPlutoMinimized,
@@ -126,6 +129,7 @@ export const ZenMode = ({
           }
           notes={currentNotes}
           onNotesChange={setCurrentNotes}
+          calendarEvent={calendarEvent}
         />
         <LiveTranscript
           segments={model.transcript}

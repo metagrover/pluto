@@ -35,7 +35,9 @@
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Pluto needs microphone access to record and transcribe your meetings.",
       "NSCameraUsageDescription": "Pluto needs camera access for screen sharing and meeting contexts.",
-      "NSAudioCaptureUsageDescription": "Pluto needs permission to capture system audio for transcription."
+      "NSAudioCaptureUsageDescription": "Pluto needs permission to capture system audio for transcription.",
+      "NSCalendarsFullAccessUsageDescription": "Pluto reads meeting titles, times, and participants to identify recordings and show upcoming meetings.",
+      "NSCalendarsUsageDescription": "Pluto reads meeting titles, times, and participants to identify recordings and show upcoming meetings."
     }
   }
 }

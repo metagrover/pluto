@@ -31,6 +31,11 @@ import type {
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
+  CalendarHelperClient,
+  resolveCalendarHelperPath,
+} from './calendar/client';
+import { createCalendarService } from './calendar/service';
+import {
   appendCaptureJournalChunk,
   appendCaptureTranscriptAcceptanceFrame,
   appendCaptureTranscriptCheckpoint,
@@ -562,6 +567,22 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   },
 });
 
+const calendarHelperPath = resolveCalendarHelperPath({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  cwd: process.cwd(),
+});
+const calendarClient = new CalendarHelperClient({
+  executablePath: calendarHelperPath,
+});
+const calendarService = createCalendarService({
+  platform: process.platform,
+  runtimeAvailable: () => fs.existsSync(calendarHelperPath),
+  client: calendarClient,
+  store: db.calendarStore,
+});
+
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
 const activeAnalysisGenerations = new Map<
@@ -676,6 +697,7 @@ let stopIdentityReconciliation: (() => void) | undefined;
 // Cleanup on quit
 app.on('before-quit', async () => {
   stopIdentityReconciliation?.();
+  calendarService.stop();
   console.log('[Pluto] Shutting down...');
   // Abort all active tasks
   for (const controller of activeMeetingTasks.values()) {
@@ -718,6 +740,36 @@ app.whenReady().then(async () => {
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
+
+  ipcMain.handle('CALENDAR_GET_STATE', () => calendarService.getSnapshot());
+  ipcMain.handle('CALENDAR_CONNECT', () => calendarService.connect());
+  ipcMain.handle('CALENDAR_SELECT', (_event, calendar) =>
+    calendarService.selectCalendar(calendar),
+  );
+  ipcMain.handle('CALENDAR_REFRESH', async () => {
+    await calendarService.refresh();
+    return calendarService.getSnapshot();
+  });
+  ipcMain.handle('CALENDAR_LIST_DAY', (_event, range) =>
+    calendarService.listDay(range.start, range.end),
+  );
+  ipcMain.handle('CALENDAR_DISCONNECT', () => {
+    calendarService.disconnect();
+    return calendarService.getSnapshot();
+  });
+  ipcMain.handle('CALENDAR_GET_MEETING_CONTEXT', (_event, meetingId) =>
+    db.calendarStore.getMeetingContext(String(meetingId)),
+  );
+  ipcMain.handle('OPEN_CALENDAR_SYSTEM_SETTINGS', async (_event, target) => {
+    if (process.platform !== 'darwin') return false;
+    const url =
+      target === 'accounts'
+        ? 'x-apple.systempreferences:com.apple.Internet-Accounts-Settings.extension'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars';
+    await shell.openExternal(url);
+    return true;
+  });
+  calendarService.start();
 
   const parakeetModelRoot = path.join(
     app.getPath('userData'),
@@ -2070,6 +2122,31 @@ app.whenReady().then(async () => {
         upsertEntity: db.upsertEntity,
         addMeetingEntity: db.addMeetingEntity,
       });
+      if (
+        result !== false &&
+        meeting?.id != null &&
+        typeof meeting.started_at === 'string'
+      ) {
+        const startedAt = new Date(meeting.started_at);
+        const explicitEnd =
+          typeof meeting.ended_at === 'string'
+            ? new Date(meeting.ended_at)
+            : null;
+        const durationSeconds = Number(meeting.duration_seconds);
+        const endedAt =
+          explicitEnd && !Number.isNaN(explicitEnd.getTime())
+            ? explicitEnd
+            : Number.isFinite(durationSeconds) && durationSeconds > 0
+              ? new Date(startedAt.getTime() + durationSeconds * 1000)
+              : null;
+        if (!Number.isNaN(startedAt.getTime()) && endedAt) {
+          db.calendarStore.associateMeeting(
+            String(meeting.id),
+            startedAt.toISOString(),
+            endedAt.toISOString(),
+          );
+        }
+      }
       if (expectedDownstreamRunId && result !== false) {
         let downstreamState: unknown = null;
         try {

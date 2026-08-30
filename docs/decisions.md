@@ -603,8 +603,9 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 
 ## 2026-08-30 - Read meeting context from the native macOS calendar store
 
-- **Status:** Accepted product direction; implementation pending.
+- **Status:** Accepted and implemented.
 - **Source:** [Issue #617](https://github.com/metagrover/pluto/issues/617), `docs/superpowers/specs/2026-08-30-native-calendar-context-design.md`
 - **Decision:** Pluto's first calendar integration reads one user-selected calendar through macOS EventKit instead of operating a Google OAuth client or hosted synchronization service. Calendars already configured on the Mac can include Google/CalDAV, iCloud, Exchange, local, and subscribed sources. Pluto requests native Calendar access only after an explicit user action, queries a bounded local window, persists only minimal meeting-context fields, marks calendar provenance separately from transcript evidence, and exposes no event mutation operation.
 - **Rationale:** A shared one-click Google OAuth client requires production verification and a stable public project domain, while bring-your-own credentials are not a one-click product. EventKit preserves the intended one-click, local-first, free open-source experience and delegates provider authentication and remote synchronization to macOS.
 - **Consequences:** Apple requires full Calendar permission to read events because EventKit has no read-only authorization level; Pluto must disclose that honestly and enforce read-only behavior in its bridge contract. `Last read from this Mac` cannot claim remote-provider freshness. Direct Google OAuth, cross-platform calendar providers, multiple selected calendars, event editing, invitations, and generated pre-meeting briefs remain outside the first release.
+- **Dashboard shape:** Upcoming meetings occupies the top of the dashboard's secondary rail and shows at most two compact rows before an inline `See more` action. Recent win moves beneath it. The lower-value continuation card is removed so calendar context does not increase dashboard density.

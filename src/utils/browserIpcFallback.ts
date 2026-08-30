@@ -1,3 +1,7 @@
+import type {
+  CalendarEvent,
+  CalendarIntegrationSnapshot,
+} from '../../electron/calendar/types';
 import type { KnowledgeDoc } from '../api/knowledgeDocs';
 import type {
   Entity,
@@ -17,6 +21,72 @@ type BrowserCaptureJournal = {
 };
 
 const now = new Date().toISOString();
+
+const previewCalendarSnapshot: CalendarIntegrationSnapshot = {
+  state: 'ready',
+  authorization: 'full_access',
+  enabled: true,
+  selectedCalendar: {
+    identifier: 'preview-work',
+    title: 'Work',
+    sourceTitle: 'iCloud',
+    sourceType: 'calDAV',
+    colorHex: '#6478D3',
+  },
+  calendars: [],
+  lastAttemptAt: now,
+  lastReadAt: now,
+  cacheStart: now,
+  cacheEnd: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  stale: false,
+};
+
+const previewCalendarEvents = (): CalendarEvent[] => {
+  const atToday = (hour: number, minute: number, durationMinutes: number) => {
+    const start = new Date();
+    start.setHours(hour, minute, 0, 0);
+    if (start.getTime() < Date.now() - 30 * 60_000) {
+      start.setTime(Date.now() + (hour === 10 ? 45 : 150) * 60_000);
+    }
+    const end = new Date(start.getTime() + durationMinutes * 60_000);
+    return { start: start.toISOString(), end: end.toISOString() };
+  };
+  const productReview = atToday(10, 30, 45);
+  const weeklySync = atToday(13, 0, 30);
+  const customerResearch = atToday(15, 30, 30);
+  const build = (
+    key: string,
+    title: string,
+    interval: { start: string; end: string },
+    attendees: string[],
+  ): CalendarEvent => ({
+    occurrenceKey: key,
+    eventIdentifier: key,
+    calendarIdentifier: 'preview-work',
+    title,
+    start: interval.start,
+    end: interval.end,
+    isAllDay: false,
+    isCancelled: false,
+    availability: 'busy',
+    organizer: { name: 'You', email: null },
+    attendees: attendees.map((name) => ({ name, email: null })),
+    lastModified: now,
+  });
+  return [
+    build('preview-product-review', 'Product design review', productReview, [
+      'Maya',
+      'Jordan',
+    ]),
+    build('preview-weekly-sync', 'Weekly team sync', weeklySync, [
+      'Avery',
+      'Priya',
+    ]),
+    build('preview-customer-research', 'Customer research', customerResearch, [
+      'Sam',
+    ]),
+  ];
+};
 
 const meetingPreviewEnabled = (): boolean =>
   typeof window !== 'undefined' &&
@@ -417,8 +487,35 @@ const createInvokeFallback =
       case 'TRANSCRIPTION_PREPARE_FINAL':
         result = { ready: true, engine: 'parakeet_coreml' };
         break;
+      case 'RECORDING_READINESS_STATUS':
+      case 'RECORDING_READINESS_PREPARE':
+        result = {
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            parakeetEouReady: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+          },
+        };
+        break;
       case 'GET_MEETINGS':
         result = meetingPreviewEnabled() ? previewTimelineMeetings : [];
+        break;
+      case 'CALENDAR_GET_STATE':
+      case 'CALENDAR_CONNECT':
+      case 'CALENDAR_SELECT':
+      case 'CALENDAR_REFRESH':
+        result = previewCalendarSnapshot;
+        break;
+      case 'CALENDAR_LIST_DAY':
+        result = previewCalendarEvents();
+        break;
+      case 'CALENDAR_GET_MEETING_CONTEXT':
+        result = null;
+        break;
+      case 'OPEN_CALENDAR_SYSTEM_SETTINGS':
+        result = true;
         break;
       case 'GET_KNOWLEDGE_DOC_SOURCES':
       case 'GET_KNOWLEDGE_CORRECTIONS':

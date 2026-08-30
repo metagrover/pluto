@@ -12,6 +12,19 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
 
+import type {
+  CalendarEvent,
+  CalendarIntegrationSnapshot,
+  MeetingCalendarContext,
+} from '../electron/calendar/types';
+import {
+  connectCalendar,
+  getCalendarState,
+  getMeetingCalendarContext,
+  listCalendarDay,
+  openCalendarSystemSettings,
+  selectCalendar,
+} from './api/calendar';
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
 import { AskPluto } from './components/features/AskPluto';
@@ -87,6 +100,8 @@ import {
 
 const meetingPreviewEnabled =
   new URLSearchParams(window.location.search).get('preview') === 'meeting';
+const dashboardPreviewEnabled =
+  new URLSearchParams(window.location.search).get('preview') === 'dashboard';
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
@@ -123,13 +138,17 @@ function App() {
   const [activeTab, setActiveTab] = useState<
     'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings'
   >(
-    window.__PLUTO_BROWSER_PREVIEW__ && !meetingPreviewEnabled
+    window.__PLUTO_BROWSER_PREVIEW__ &&
+      !meetingPreviewEnabled &&
+      !dashboardPreviewEnabled
       ? 'projects'
       : 'hub',
   );
   const [sidebarVisible, setSidebarVisible] = useState(
-    (!window.__PLUTO_BROWSER_PREVIEW__ || meetingPreviewEnabled) &&
-      window.innerWidth >= 768,
+    (!window.__PLUTO_BROWSER_PREVIEW__ ||
+      meetingPreviewEnabled ||
+      dashboardPreviewEnabled) &&
+      window.innerWidth >= 1024,
   );
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
@@ -164,6 +183,12 @@ function App() {
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
+  const [calendarSnapshot, setCalendarSnapshot] =
+    useState<CalendarIntegrationSnapshot | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [meetingCalendarContext, setMeetingCalendarContext] =
+    useState<MeetingCalendarContext | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(true);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
@@ -184,6 +209,100 @@ function App() {
   });
   const [liveTranscriptIntegrity, setLiveTranscriptIntegrity] =
     useState<LiveTranscriptIntegrity>('healthy');
+
+  const loadCalendarAgenda = async (
+    providedSnapshot?: CalendarIntegrationSnapshot,
+  ) => {
+    setCalendarLoading(true);
+    try {
+      const snapshot = providedSnapshot ?? (await getCalendarState());
+      setCalendarSnapshot(snapshot);
+      if (
+        snapshot.enabled &&
+        (snapshot.state === 'ready' || snapshot.state === 'read_failed')
+      ) {
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        const events = await listCalendarDay(
+          start.toISOString(),
+          end.toISOString(),
+        );
+        setCalendarEvents(
+          events.filter(
+            (event) => new Date(event.end).getTime() > now.getTime(),
+          ),
+        );
+      } else {
+        setCalendarEvents([]);
+      }
+    } catch (error) {
+      console.error('[Calendar] Failed to load dashboard agenda', error);
+      setCalendarEvents([]);
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleCalendarConnect = async () => {
+    setCalendarLoading(true);
+    try {
+      let snapshot = await connectCalendar();
+      if (
+        snapshot.state === 'needs_selection' &&
+        snapshot.calendars.length === 1
+      ) {
+        snapshot = await selectCalendar(snapshot.calendars[0]);
+      }
+      await loadCalendarAgenda(snapshot);
+      if (snapshot.state === 'needs_selection') {
+        setActiveTab('settings');
+        setSelectedMeetingId(null);
+      }
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleCalendarOpenSettings = () => {
+    if (
+      calendarSnapshot?.state === 'denied' ||
+      calendarSnapshot?.state === 'restricted'
+    ) {
+      void openCalendarSystemSettings('privacy');
+      return;
+    }
+    if (calendarSnapshot?.state === 'no_calendars') {
+      void openCalendarSystemSettings('accounts');
+      return;
+    }
+    setActiveTab('settings');
+    setSelectedMeetingId(null);
+  };
+
+  useEffect(() => {
+    void loadCalendarAgenda();
+  }, []);
+
+  useEffect(() => {
+    if (selectedMeetingId == null) {
+      setMeetingCalendarContext(null);
+      return;
+    }
+    let current = true;
+    void getMeetingCalendarContext(String(selectedMeetingId))
+      .then((context) => {
+        if (current) setMeetingCalendarContext(context);
+      })
+      .catch(() => {
+        if (current) setMeetingCalendarContext(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [selectedMeetingId]);
 
   useActiveCallMonitor({
     setupNeeded,
@@ -613,6 +732,16 @@ function App() {
   );
   const activeRecording = isStartingRecording || isRecording;
   const showZenMode = activeRecording && zenVisible;
+  const activeCalendarEvent = recordingStartedAtMs
+    ? (calendarEvents.find((event) => {
+        const start = new Date(event.start).getTime();
+        const end = new Date(event.end).getTime();
+        return (
+          start <= recordingStartedAtMs + 15 * 60_000 &&
+          end >= recordingStartedAtMs - 5 * 60_000
+        );
+      }) ?? null)
+    : null;
   const handleBackHomeFromZen = () => {
     setZenVisible(false);
     setSelectedMeetingId(null);
@@ -969,6 +1098,7 @@ function App() {
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
+          calendarEvent={activeCalendarEvent}
           askPlutoConversation={meetingAskPlutoConversation}
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
@@ -1033,6 +1163,7 @@ function App() {
                   void handleRetryTranscriptValidation();
                 }}
                 transcriptValidationRetrying={transcriptValidationRetrying}
+                calendarContext={meetingCalendarContext}
               />
             ) : activeTab === 'hub' ? (
               <>
@@ -1057,6 +1188,11 @@ function App() {
                   handleUpdateAttentionStatus={
                     handleUpdateDashboardAttentionStatus
                   }
+                  calendarSnapshot={calendarSnapshot}
+                  calendarEvents={calendarEvents}
+                  calendarLoading={calendarLoading}
+                  onCalendarConnect={handleCalendarConnect}
+                  onCalendarOpenSettings={handleCalendarOpenSettings}
                 />
               </>
             ) : activeTab === 'people' ? (
@@ -1118,6 +1254,10 @@ function App() {
                 fetchMeetings={fetchMeetings}
                 setSelectedMeetingId={setSelectedMeetingId}
                 theme={theme}
+                calendarSnapshot={calendarSnapshot}
+                onCalendarSnapshotChange={(snapshot) => {
+                  void loadCalendarAgenda(snapshot);
+                }}
                 setTheme={(newTheme) => {
                   setTheme(newTheme);
                   window.ipcRenderer.invoke('SET_SETTING', {

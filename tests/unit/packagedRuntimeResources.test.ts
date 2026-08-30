@@ -11,6 +11,17 @@ const projectRoot = path.resolve(import.meta.dirname, '../..');
 const execFileAsync = promisify(execFile);
 
 describe('packaged runtime resources', () => {
+  it('builds the calendar helper in native and distributable builds', () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> };
+
+    expect(packageJson.scripts['build-native']).toContain(
+      'pnpm run build:calendar-helper',
+    );
+    expect(packageJson.scripts.build).toContain('pnpm run build-native');
+  });
+
   it('copies every production runtime from resources/bin', () => {
     const config = readFileSync(
       path.join(projectRoot, 'electron-builder.json5'),
@@ -33,6 +44,8 @@ describe('packaged runtime resources', () => {
       'audiocap',
       'parakeet-runtime',
       'parakeet-resource-probe',
+      'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
+      'NSCalendarsFullAccessUsageDescription',
     ]) {
       expect(verifier).toContain(runtime);
     }
@@ -47,12 +60,22 @@ describe('packaged runtime resources', () => {
       'audiocap',
       'parakeet-runtime',
       'parakeet-resource-probe',
+      'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
     ]) {
       const executable = path.join(binPath, relativePath);
       await mkdir(path.dirname(executable), { recursive: true });
       await writeFile(executable, 'fixture');
       await chmod(executable, 0o755);
     }
+    const helperInfoPath = path.join(
+      binPath,
+      'PlutoCalendarHelper.app/Contents/Info.plist',
+    );
+    await mkdir(path.dirname(helperInfoPath), { recursive: true });
+    await writeFile(
+      helperInfoPath,
+      '<key>NSCalendarsFullAccessUsageDescription</key>',
+    );
 
     await expect(
       execFileAsync(process.execPath, [
@@ -60,6 +83,6 @@ describe('packaged runtime resources', () => {
         '--',
         appPath,
       ]),
-    ).resolves.toMatchObject({ stdout: 'Verified 4 packaged runtimes.\n' });
+    ).resolves.toMatchObject({ stdout: 'Verified 5 packaged runtimes.\n' });
   });
 });

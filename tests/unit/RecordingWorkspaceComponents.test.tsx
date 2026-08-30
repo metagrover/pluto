@@ -295,6 +295,68 @@ describe('recording workspace components', () => {
     expect(html).not.toContain('<details');
   });
 
+  it('offers matched Calendar context without replacing a typed title', async () => {
+    const calendarEvent = {
+      occurrenceKey: 'event-a',
+      eventIdentifier: 'event-a',
+      calendarIdentifier: 'calendar-a',
+      title: 'Product review',
+      start: '2026-08-30T17:30:00.000Z',
+      end: '2026-08-30T18:30:00.000Z',
+      isAllDay: false,
+      isCancelled: false,
+      availability: 'busy',
+      organizer: { name: 'Alex', email: null },
+      attendees: [{ name: 'Sam', email: null }],
+      lastModified: null,
+    };
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const onTitleChange = vi.fn();
+    await act(async () =>
+      root.render(
+        <RecordingMeetingRail
+          title=""
+          onTitleChange={onTitleChange}
+          calendarEvent={calendarEvent}
+          participants={[]}
+          participantInput=""
+          onParticipantInputChange={() => {}}
+          onAddParticipant={() => {}}
+          onRemoveParticipant={() => {}}
+          notes=""
+          onNotesChange={() => {}}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain('From Calendar');
+    expect(container.textContent).toContain('Product review');
+    expect(container.textContent).toContain('Alex · Sam');
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Use Product review as meeting title"]',
+      )
+      ?.click();
+    expect(onTitleChange).toHaveBeenCalledWith('Product review');
+    act(() => root.unmount());
+
+    const titled = renderToStaticMarkup(
+      <RecordingMeetingRail
+        title="Customer escalation"
+        onTitleChange={() => {}}
+        calendarEvent={calendarEvent}
+        participants={[]}
+        participantInput=""
+        onParticipantInputChange={() => {}}
+        onAddParticipant={() => {}}
+        onRemoveParticipant={() => {}}
+        notes=""
+        onNotesChange={() => {}}
+      />,
+    );
+    expect(titled).not.toContain('Use Product review as meeting title');
+  });
+
   it('saves live scratchpad text locally after typing pauses', async () => {
     vi.useFakeTimers();
     window.localStorage.clear();

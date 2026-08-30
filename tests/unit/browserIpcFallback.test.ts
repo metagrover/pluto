@@ -4,9 +4,38 @@ import { createBrowserIpcFallback } from '../../src/utils/browserIpcFallback';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('browser IPC capture journal fallback', () => {
+  it('provides a realistic connected calendar for dashboard previews', async () => {
+    const ipc = createBrowserIpcFallback();
+
+    await expect(ipc.invoke('CALENDAR_GET_STATE')).resolves.toMatchObject({
+      state: 'ready',
+      enabled: true,
+      selectedCalendar: { title: 'Work' },
+    });
+    await expect(
+      ipc.invoke('CALENDAR_LIST_DAY', {
+        start: new Date().toISOString(),
+        end: new Date(Date.now() + 86_400_000).toISOString(),
+      }),
+    ).resolves.toMatchObject([
+      { title: 'Product design review', calendarIdentifier: 'preview-work' },
+      { title: 'Weekly team sync', calendarIdentifier: 'preview-work' },
+      { title: 'Customer research', calendarIdentifier: 'preview-work' },
+    ]);
+  });
+
   it('reports Parakeet final transcription setup as ready', async () => {
     const ipc = createBrowserIpcFallback();
 
+    await expect(ipc.invoke('RECORDING_READINESS_STATUS')).resolves.toEqual({
+      details: {
+        parakeetClient: true,
+        parakeetModel: true,
+        parakeetEouReady: true,
+        audiocapExists: true,
+        audiocapExecutable: true,
+      },
+    });
     await expect(ipc.invoke('TRANSCRIPTION_PREPARE_FINAL')).resolves.toEqual({
       ready: true,
       engine: 'parakeet_coreml',

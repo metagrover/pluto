@@ -78,6 +78,7 @@ import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
+import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -1280,6 +1281,8 @@ const initDb = () => {
 };
 
 initDb();
+ensureCalendarSchema(db);
+export const calendarStore = createCalendarStore(db);
 export const identityStore = createIdentityStore(db);
 // Cheap invalidation lets the background scheduler avoid repeatedly reading
 // complete source text when nothing relevant has changed.

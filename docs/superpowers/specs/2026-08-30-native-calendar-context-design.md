@@ -2,7 +2,7 @@
 
 Issue: [#617](https://github.com/metagrover/pluto/issues/617)
 
-Status: Approved product direction; written-spec review pending before implementation.
+Status: Approved for implementation, including the dashboard shape confirmed on 2026-08-30.
 
 ## Outcome
 
@@ -11,6 +11,21 @@ Pluto can use one calendar already configured on the Mac to identify the meeting
 The first release is macOS-only and read-only by product contract. It supports iCloud, Google/CalDAV, Exchange, local, and subscribed calendars exposed through EventKit. Direct Google OAuth, multiple selected calendars, calendar editing, scheduling, invitations, reminders, and generated pre-meeting briefs are outside this release.
 
 ## Product boundary
+
+Dashboard is the primary day-to-day surface. Its existing right rail begins with
+an `Upcoming meetings` section that shows exactly two timed events with compact
+time, title, and duration rows. A text-only `See more` disclosure reveals the
+remaining events for the day inline. The next event receives one quiet accent
+marker; it does not become a feature card. `Recent win` moves beneath the agenda,
+and the redundant `Continue where you left off` section is removed. The agenda
+uses spacing and dividers instead of nested cards, attendee stacks, timelines, or
+a new calendar destination.
+
+The same bounded rail footprint handles first-run, loading, denied, empty, and
+degraded states. First-run offers `Connect calendar`; denied access offers a
+specific System Settings recovery action; empty days say the day is clear; and
+stale data names when it was last read. Calendar failures never displace Today's
+focus or block recording.
 
 Settings contains one `Calendar context` section with these states:
 
@@ -138,7 +153,10 @@ Offline provider state is not inferred from EventKit. If macOS returns cached ev
 
 Keep the bridge protocol and EventKit mapping in the native calendar package. Keep native-process supervision and validated types in focused Electron calendar modules. Keep cache and link persistence in focused database helpers while retaining schema migration ownership in `electron/db.ts`. Put deterministic matching and exact project-name suggestion logic in pure TypeScript modules. Put renderer calls behind a small typed calendar API rather than scattering raw IPC strings through Settings and meeting components.
 
-The visible scope is limited to the Settings calendar section, a compact active-recording calendar label/chooser, and a calendar-context block in Meeting View. It does not redesign Settings, recording, Meeting View, Dashboard, or Projects.
+The visible scope is limited to the compact Dashboard agenda described above,
+the Settings calendar section, a compact active-recording calendar label/chooser,
+and a calendar-context block in Meeting View. It does not otherwise redesign
+Settings, recording, Meeting View, Dashboard, or Projects.
 
 ## Test and acceptance plan
 

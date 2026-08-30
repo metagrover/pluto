@@ -1,0 +1,182 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { createCalendarService } from '../../electron/calendar/service';
+import type {
+  CalendarAuthorizationStatus,
+  CalendarDescriptor,
+  CalendarEvent,
+} from '../../electron/calendar/types';
+
+const calendar: CalendarDescriptor = {
+  identifier: 'calendar-a',
+  title: 'Work',
+  sourceTitle: 'iCloud',
+  sourceType: 'icloud',
+  colorHex: '#7367D9',
+};
+
+const event: CalendarEvent = {
+  occurrenceKey: 'event-a',
+  eventIdentifier: 'event-a',
+  calendarIdentifier: 'calendar-a',
+  title: 'Product review',
+  start: '2026-08-30T17:30:00.000Z',
+  end: '2026-08-30T18:30:00.000Z',
+  isAllDay: false,
+  isCancelled: false,
+  availability: 'busy',
+  organizer: null,
+  attendees: [],
+  lastModified: null,
+};
+
+const createFixture = (
+  options: {
+    platform?: NodeJS.Platform;
+    runtimeAvailable?: boolean;
+    authorization?: CalendarAuthorizationStatus;
+    calendars?: CalendarDescriptor[];
+    events?: CalendarEvent[];
+  } = {},
+) => {
+  let authorization = options.authorization ?? 'not_determined';
+  let state = {
+    enabled: false,
+    selectedCalendar: null as CalendarDescriptor | null,
+    cacheRevision: 0,
+    lastAttemptAt: null as string | null,
+    lastReadAt: null as string | null,
+    cacheStart: null as string | null,
+    cacheEnd: null as string | null,
+    errorCode: null,
+  };
+  const store = {
+    getState: vi.fn(() => state),
+    selectCalendar: vi.fn((selected: CalendarDescriptor) => {
+      state = { ...state, enabled: true, selectedCalendar: selected };
+      return state;
+    }),
+    replaceEvents: vi.fn((input: { revision: number; readAt: string }) => {
+      state = {
+        ...state,
+        cacheRevision: input.revision,
+        lastAttemptAt: input.readAt,
+        lastReadAt: input.readAt,
+      };
+      return true;
+    }),
+    listEvents: vi.fn(() => options.events ?? [event]),
+    recordFailure: vi.fn(),
+    disconnect: vi.fn(() => {
+      state = { ...state, enabled: false, selectedCalendar: null };
+    }),
+  };
+  const client = {
+    authorizationStatus: vi.fn(async () => authorization),
+    requestAccess: vi.fn(async () => {
+      authorization = options.authorization ?? 'full_access';
+      return authorization;
+    }),
+    listCalendars: vi.fn(async () => options.calendars ?? [calendar]),
+    listEvents: vi.fn(async () => options.events ?? [event]),
+    onChange: vi.fn(() => () => {}),
+    close: vi.fn(),
+  };
+  return {
+    store,
+    client,
+    service: createCalendarService({
+      platform: options.platform ?? 'darwin',
+      runtimeAvailable: () => options.runtimeAvailable ?? true,
+      client,
+      store: store as never,
+      now: () => new Date('2026-08-30T16:00:00.000Z'),
+    }),
+  };
+};
+
+describe('calendar service', () => {
+  it('reports unsupported platforms and missing runtimes without prompting', async () => {
+    const unsupported = createFixture({ platform: 'win32' });
+    await expect(unsupported.service.getSnapshot()).resolves.toMatchObject({
+      state: 'unsupported_platform',
+    });
+    expect(unsupported.client.authorizationStatus).not.toHaveBeenCalled();
+
+    const missing = createFixture({ runtimeAvailable: false });
+    await expect(missing.service.getSnapshot()).resolves.toMatchObject({
+      state: 'runtime_missing',
+    });
+  });
+
+  it('requests access only from connect and returns calendars for selection', async () => {
+    const fixture = createFixture({ authorization: 'full_access' });
+    await expect(fixture.service.connect()).resolves.toMatchObject({
+      state: 'needs_selection',
+      calendars: [calendar],
+    });
+    expect(fixture.client.requestAccess).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes a selected calendar with the bounded rolling window', async () => {
+    const fixture = createFixture({ authorization: 'full_access' });
+    await fixture.service.selectCalendar(calendar);
+
+    expect(fixture.client.listEvents).toHaveBeenCalledWith(
+      'calendar-a',
+      '2026-08-16T16:00:00.000Z',
+      '2026-09-29T16:00:00.000Z',
+    );
+    expect(fixture.store.replaceEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calendarIdentifier: 'calendar-a',
+        revision: 1,
+        events: [event],
+      }),
+    );
+  });
+
+  it('preserves the cache and records a finite failure when a read fails', async () => {
+    const fixture = createFixture({ authorization: 'full_access' });
+    fixture.store.selectCalendar(calendar);
+    fixture.client.listEvents.mockRejectedValueOnce(new Error('native failed'));
+
+    await expect(fixture.service.refresh()).rejects.toThrow('native failed');
+    expect(fixture.store.replaceEvents).not.toHaveBeenCalled();
+    expect(fixture.store.recordFailure).toHaveBeenCalledWith(
+      'read_failed',
+      '2026-08-30T16:00:00.000Z',
+    );
+  });
+
+  it('disconnects and invalidates a refresh that finishes later', async () => {
+    const fixture = createFixture({ authorization: 'full_access' });
+    fixture.store.selectCalendar(calendar);
+    let resolveEvents!: (events: CalendarEvent[]) => void;
+    fixture.client.listEvents.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveEvents = resolve;
+        }),
+    );
+
+    const refresh = fixture.service.refresh();
+    fixture.service.disconnect();
+    resolveEvents([event]);
+    await refresh;
+
+    expect(fixture.store.replaceEvents).not.toHaveBeenCalled();
+    expect(fixture.store.disconnect).toHaveBeenCalledOnce();
+    expect(fixture.client.close).toHaveBeenCalledOnce();
+  });
+
+  it('restores native change observation when reconnecting after disconnect', async () => {
+    const fixture = createFixture();
+    fixture.service.start();
+    fixture.service.disconnect();
+
+    await fixture.service.connect();
+
+    expect(fixture.client.onChange).toHaveBeenCalledTimes(2);
+  });
+});

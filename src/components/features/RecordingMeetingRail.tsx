@@ -1,5 +1,6 @@
 import { CheckCircle2, Plus, UserRound, X } from 'lucide-react';
 import { forwardRef, useEffect, useState } from 'react';
+import type { CalendarEvent } from '../../../electron/calendar/types';
 
 const MEETING_TITLE_MAX_LENGTH = 64;
 export const RECORDING_SCRATCHPAD_STORAGE_KEY = 'pluto.recording-scratchpad';
@@ -14,6 +15,7 @@ type Props = {
   onRemoveParticipant: (index: number) => void;
   notes: string;
   onNotesChange: (value: string) => void;
+  calendarEvent?: CalendarEvent | null;
 };
 
 export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
@@ -28,6 +30,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
       onRemoveParticipant,
       notes,
       onNotesChange,
+      calendarEvent = null,
     },
     ref,
   ) => {
@@ -83,6 +86,39 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
               }
               placeholder="Meeting"
             />
+            {calendarEvent ? (
+              <div className="mt-3 border-t border-pro-border/50 pt-3">
+                <p className="text-[10px] font-semibold text-pro-text-muted/65">
+                  From Calendar
+                </p>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-[12px] font-medium text-pro-text-main">
+                      {calendarEvent.title}
+                    </p>
+                    <p className="mt-0.5 truncate text-[10px] font-medium text-pro-text-muted">
+                      {[calendarEvent.organizer, ...calendarEvent.attendees]
+                        .map((person) => person?.name || person?.email)
+                        .filter(
+                          (person, index, values): person is string =>
+                            Boolean(person) && values.indexOf(person) === index,
+                        )
+                        .join(' · ')}
+                    </p>
+                  </div>
+                  {!title.trim() ? (
+                    <button
+                      type="button"
+                      aria-label={`Use ${calendarEvent.title} as meeting title`}
+                      onClick={() => onTitleChange(calendarEvent.title)}
+                      className="shrink-0 text-[10px] font-semibold text-pro-accent transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    >
+                      Use title
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </header>
           <section className="rail-notes" aria-labelledby="notes-heading">
             <h2 id="notes-heading" className="sr-only">

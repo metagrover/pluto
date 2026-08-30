@@ -38,7 +38,7 @@ describe('transcription startup boundary', () => {
 
     expect(packageJson.scripts?.predev).toBe('pnpm run ensure:dev-runtime');
     expect(packageJson.scripts?.['ensure:dev-runtime']).toBe(
-      'pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap',
+      'pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap && pnpm run ensure:calendar-helper',
     );
     expect(packageJson.scripts?.['ensure:sqlite-abi']).toBe(
       'node scripts/ensure_sqlite_abi.mjs',
