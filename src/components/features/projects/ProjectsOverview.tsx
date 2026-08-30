@@ -182,6 +182,17 @@ export function ProjectsOverview({
     () => buildProjectPortfolio(entries, search),
     [entries, search],
   );
+  const needsAttention = portfolio.current.filter(
+    (entry) =>
+      entry.health_state === 'falling_behind' || entry.health_state === 'watch',
+  );
+  const inMotion = portfolio.current.filter(
+    (entry) => entry.health_state === 'appears_on_track',
+  );
+  const awaitingSignal = portfolio.current.filter(
+    (entry) =>
+      !entry.health_state || entry.health_state === 'not_enough_evidence',
+  );
   const reloadPortfolio = async () => {
     const data = await getProjectPortfolio();
     setEntries(data);
@@ -331,46 +342,30 @@ export function ProjectsOverview({
       ) : (
         <>
           <section data-testid="current-projects" aria-label="Current projects">
-            {portfolio.current.some(
-              (entry) =>
-                entry.health_state === 'falling_behind' ||
-                entry.health_state === 'watch',
-            ) && (
+            {needsAttention.length > 0 && (
               <div className="mb-8">
                 <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
                   Needs attention
                 </h2>
-                {portfolio.current
-                  .filter(
-                    (entry) =>
-                      entry.health_state === 'falling_behind' ||
-                      entry.health_state === 'watch',
-                  )
-                  .map((entry) => renderRow(entry))}
+                {needsAttention.map((entry) => renderRow(entry))}
               </div>
             )}
-            {portfolio.current.some(
-              (entry) =>
-                entry.health_state !== 'falling_behind' &&
-                entry.health_state !== 'watch',
-            ) && (
-              <div>
-                {portfolio.current.some(
-                  (entry) =>
-                    entry.health_state === 'falling_behind' ||
-                    entry.health_state === 'watch',
-                ) && (
+            {inMotion.length > 0 && (
+              <div className={awaitingSignal.length > 0 ? 'mb-8' : undefined}>
+                {(needsAttention.length > 0 || awaitingSignal.length > 0) && (
                   <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
                     In motion
                   </h2>
                 )}
-                {portfolio.current
-                  .filter(
-                    (entry) =>
-                      entry.health_state !== 'falling_behind' &&
-                      entry.health_state !== 'watch',
-                  )
-                  .map((entry) => renderRow(entry))}
+                {inMotion.map((entry) => renderRow(entry))}
+              </div>
+            )}
+            {awaitingSignal.length > 0 && (
+              <div>
+                <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
+                  Awaiting signal
+                </h2>
+                {awaitingSignal.map((entry) => renderRow(entry))}
               </div>
             )}
             {!portfolio.current.length && (
