@@ -119,6 +119,176 @@
     @apply block h-20 animate-pulse rounded-xl bg-pro-hover;
   }
 
+  .meetings-index {
+    --meetings-muted: oklch(47% 0.012 272);
+    --meetings-subtle: oklch(58% 0.01 272);
+    @apply mx-auto w-full max-w-4xl animate-in px-5 pb-32 md:px-8;
+  }
+  .dark .meetings-index {
+    --meetings-muted: oklch(72% 0.012 82);
+    --meetings-subtle: oklch(61% 0.012 82);
+  }
+  .meetings-index--empty {
+    @apply flex min-h-full items-center justify-center pb-20;
+  }
+  .meetings-index__header {
+    @apply mb-8 items-end md:mb-10;
+  }
+  .meetings-index__controls {
+    @apply flex min-w-0 items-center gap-2;
+  }
+  .meetings-index__search {
+    @apply relative flex h-10 w-[184px] items-center rounded-lg border border-pro-border bg-pro-surface text-pro-text-muted transition-[width,border-color,box-shadow] duration-200 focus-within:w-[232px] focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/35 focus-within:ring-offset-2 focus-within:ring-offset-pro-bg;
+  }
+  .meetings-index__search,
+  .meetings-index__sort,
+  .meetings-index__row-icon,
+  .meetings-index__row-chevron,
+  .meetings-index__row-delete {
+    color: var(--meetings-muted);
+  }
+  .meetings-index__search > svg {
+    @apply pointer-events-none absolute left-3;
+  }
+  .meetings-index__search input {
+    @apply h-full min-w-0 flex-1 bg-transparent pl-8 pr-9 text-sm text-pro-text-main outline-none placeholder:text-pro-text-muted;
+  }
+  .meetings-index__search input::placeholder {
+    color: var(--meetings-muted);
+  }
+  .meetings-index__search button {
+    @apply absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--meetings-muted);
+  }
+  .meetings-index__sort {
+    @apply inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-pro-border px-3 text-sm font-medium text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--meetings-muted);
+  }
+  .meetings-index__sort[data-active="true"] {
+    @apply border-pro-accent/35 bg-pro-accent/10 text-pro-accent;
+  }
+  .meetings-index__sort svg {
+    @apply transition-transform duration-200;
+  }
+  .meetings-index__groups {
+    @apply space-y-10;
+  }
+  .meetings-index__group-heading {
+    @apply mb-2 flex items-center gap-4;
+  }
+  .meetings-index__group-label {
+    @apply text-xs font-semibold uppercase tracking-[0.1em] text-pro-text-muted;
+    color: var(--meetings-muted);
+  }
+  .meetings-index__group-heading > div {
+    @apply h-px flex-1 bg-pro-border;
+  }
+  .meetings-index__rows {
+    @apply flex flex-col;
+  }
+  .meetings-index__row {
+    @apply relative border-b border-pro-border/60 last:border-b-0;
+  }
+  .meetings-index__row-open {
+    @apply flex min-h-16 w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .meetings-index__row-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border bg-pro-surface text-pro-text-muted transition-colors;
+  }
+  .meetings-index__row-open:hover .meetings-index__row-icon,
+  .meetings-index__row-open:focus-visible .meetings-index__row-icon {
+    @apply border-pro-accent/35 bg-pro-accent/10 text-pro-accent;
+  }
+  .meetings-index__row-summary {
+    @apply min-w-0 flex-1;
+  }
+  .meetings-index__row-heading {
+    @apply flex min-w-0 items-baseline gap-2.5;
+  }
+  .meetings-index__row-title {
+    @apply truncate text-[0.95rem] font-medium leading-6 text-pro-text-main;
+  }
+  .meetings-index__row-duration,
+  .meetings-index__row-time {
+    @apply shrink-0 text-[0.78rem] leading-5 text-pro-text-muted tabular-nums;
+    color: var(--meetings-subtle);
+  }
+  .meetings-index__row-meta {
+    @apply flex shrink-0 items-center gap-3 pl-4;
+  }
+  .meetings-index__row-status {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[0.72rem] font-semibold capitalize text-amber-700 dark:text-amber-300;
+  }
+  .meetings-index__row-chevron {
+    @apply -mr-1 text-pro-text-muted transition-colors;
+  }
+  .meetings-index__row-open:hover .meetings-index__row-chevron,
+  .meetings-index__row-open:focus-visible .meetings-index__row-chevron {
+    @apply text-pro-accent;
+  }
+  .meetings-index__row-delete {
+    @apply absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-pro-text-muted opacity-0 transition-[opacity,color,background-color] hover:bg-red-500/10 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent dark:hover:text-red-300;
+  }
+  .meetings-index__row:hover .meetings-index__row-delete {
+    @apply opacity-100;
+  }
+  .meetings-index__row:hover .meetings-index__row-chevron--deletable,
+  .meetings-index__row:focus-within .meetings-index__row-chevron--deletable {
+    @apply opacity-0;
+  }
+  .meetings-index__no-results,
+  .meetings-index__empty {
+    @apply mx-auto flex w-full max-w-lg flex-col items-center justify-center border-y border-pro-border px-6 text-center;
+  }
+  .meetings-index__no-results {
+    @apply min-h-64 text-pro-text-muted;
+  }
+  .meetings-index__no-results > p,
+  .meetings-index__empty h2 {
+    @apply mt-4 text-lg font-semibold text-pro-text-main;
+  }
+  .meetings-index__no-results > span,
+  .meetings-index__empty p {
+    @apply mt-1.5 max-w-sm text-sm leading-6 text-pro-text-muted;
+  }
+  .meetings-index__no-results button {
+    @apply mt-5 rounded-md px-2 py-1 text-sm font-semibold text-pro-accent transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .meetings-index__empty {
+    @apply min-h-80;
+  }
+  .meetings-index__empty-icon {
+    @apply flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-pro-text-muted;
+  }
+
+  @media (max-width: 640px) {
+    .meetings-index__header {
+      @apply flex-col items-stretch gap-5;
+    }
+    .meetings-index__controls {
+      @apply w-full;
+    }
+    .meetings-index__search,
+    .meetings-index__search:focus-within {
+      @apply w-auto flex-1;
+    }
+    .meetings-index__row-meta {
+      @apply gap-2 pl-2;
+    }
+    .meetings-index__row-status {
+      @apply hidden;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .meetings-index__row-delete {
+      @apply h-11 w-11 opacity-100;
+    }
+    .meetings-index__row-chevron--deletable {
+      @apply hidden;
+    }
+  }
+
   .meeting-ask-pluto-dock {
     @apply fixed bottom-5 right-5 z-40 flex flex-col rounded-lg border border-pro-border/70 bg-pro-bg/95 p-1.5 shadow-xl backdrop-blur-2xl transition-[max-height,box-shadow] duration-200;
   }
@@ -393,18 +563,22 @@
     --notes-paper: oklch(18% 0.018 272);
     --notes-paper-raised: oklch(21% 0.02 272);
     --notes-ink: oklch(91% 0.012 82);
-    --notes-muted: oklch(68% 0.015 272);
-    --notes-faint: oklch(49% 0.016 272);
+    --notes-muted: oklch(72% 0.014 82);
+    --notes-faint: oklch(55% 0.014 82);
     --notes-rule: oklch(29% 0.02 272);
     --notes-wash: oklch(23% 0.022 272);
     --notes-accent: oklch(72% 0.07 60);
+    letter-spacing: 0.005em;
   }
   .meeting-document-header {
-    @apply flex flex-col w-full max-w-[760px] mx-auto px-6 pb-8 pt-20 md:px-8;
+    @apply mx-auto flex w-full max-w-[760px] flex-col px-6 pb-9 pt-16 md:px-8;
     border-color: transparent;
   }
+  .meeting-document-meta-row {
+    @apply flex w-full min-w-0 items-center justify-between gap-4;
+  }
   .meeting-document-meta {
-    @apply flex flex-wrap items-center gap-3 text-xs;
+    @apply flex flex-wrap items-center gap-3 text-[0.8rem] leading-5;
     color: var(--notes-muted);
   }
   .meeting-document-meta span + span::before {
@@ -412,7 +586,7 @@
     @apply mr-3 text-pro-border;
   }
   .meeting-document-title {
-    @apply mb-4 font-serif text-[40px] font-medium leading-[1.15] tracking-tight;
+    @apply mb-5 font-serif text-[38px] font-medium leading-[1.18] tracking-tight;
     color: var(--notes-ink);
     text-wrap: pretty;
   }
@@ -440,7 +614,7 @@
     color: var(--notes-muted);
   }
   .meeting-pending-notes__body {
-    @apply mt-3 max-w-[68ch] whitespace-pre-wrap text-[15px] leading-7;
+    @apply mt-3 max-w-[68ch] whitespace-pre-wrap text-base leading-7;
     color: var(--notes-ink);
   }
   .meeting-analysis-skeleton {
@@ -599,41 +773,41 @@
     @apply mx-auto mt-0 w-full max-w-[760px] px-6 pb-16 md:px-8;
   }
   .meeting-transcript-header {
-    @apply flex items-end justify-between border-b pb-5 pt-9;
+    @apply flex items-end justify-between border-b pb-5 pt-10;
     border-color: var(--notes-rule);
   }
   .meeting-transcript-header h2 {
-    @apply mt-1 text-[26px] font-semibold leading-none tracking-tight;
+    @apply mt-1.5 text-[1.5rem] font-semibold leading-tight tracking-tight;
     color: var(--notes-ink);
   }
   .meeting-transcript-header p {
-    @apply text-[11px] font-semibold uppercase tracking-[0.11em];
+    @apply text-[0.72rem] font-semibold uppercase tracking-[0.1em];
     color: var(--notes-muted);
   }
   .meeting-transcript-header button {
-    @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply inline-flex min-h-10 items-center gap-1 rounded-md px-2.5 text-sm font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-transcript-record {
     @apply py-1;
   }
   .meeting-transcript-row {
-    @apply grid gap-4 border-b py-5 sm:grid-cols-[6.5rem_minmax(0,1fr)];
+    @apply grid gap-3 border-b py-6 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5;
     border-color: var(--notes-rule);
   }
   .meeting-transcript-row > div {
     @apply flex items-baseline justify-between gap-3 sm:block;
   }
   .meeting-transcript-row strong {
-    @apply block text-[11px] font-semibold leading-5;
+    @apply block text-[0.8rem] font-semibold leading-5;
     color: var(--notes-ink);
   }
   .meeting-transcript-row time {
-    @apply mt-0.5 block text-[11px] tabular-nums;
+    @apply mt-0.5 block text-[0.75rem] leading-5 tabular-nums;
     color: var(--notes-muted);
   }
   .meeting-transcript-row p {
-    @apply text-[0.95rem] leading-7;
+    @apply max-w-[68ch] text-base leading-7;
     color: var(--notes-ink);
     text-wrap: pretty;
   }
@@ -645,6 +819,10 @@
   .meeting-notes-document {
     @apply relative mx-auto w-full min-w-0 max-w-[760px] px-6 pb-36 md:px-8;
     color: var(--pro-text-main);
+  }
+  .meeting-document:not(.meeting-document--transcript-collapsed)
+    .meeting-notes-document {
+    @apply pb-12;
   }
   .meeting-document-save-row {
     @apply fixed top-6 right-8 text-xs font-medium opacity-50 hover:opacity-100 transition-opacity z-50;
@@ -677,10 +855,10 @@
     );
   }
   .meeting-notes-section {
-    @apply scroll-mt-24 pb-7;
+    @apply max-w-[68ch] scroll-mt-24 pb-9;
   }
   .meeting-notes-section + .meeting-notes-section {
-    @apply pt-3;
+    @apply pt-5;
   }
   .meeting-notes-section--current_read {
     @apply mb-0 bg-transparent pb-0 pt-4 mt-0;
@@ -691,7 +869,7 @@
   .meeting-notes-section > h2,
   .meeting-notes-section > .meeting-editable-copy h2,
   .meeting-notes-section .meeting-editable-heading {
-    @apply font-serif text-[22px] font-medium leading-[1.3] tracking-[-0.01em] mb-3;
+    @apply mb-4 text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em];
     color: var(--notes-ink);
     text-wrap: pretty;
   }
@@ -705,7 +883,7 @@
     .meeting-note-block__body
     > .meeting-editable-copy
     > p {
-    @apply text-[16px] leading-[1.5];
+    @apply text-[17px] leading-[1.65];
   }
   .meeting-notes-section--scratchpad textarea {
     @apply mt-4 w-full resize-y rounded-md px-4 py-3 text-base leading-[1.5] outline-none transition-colors placeholder:text-pro-text-muted/50;
@@ -774,7 +952,7 @@
     @apply flex min-w-0 items-start gap-2;
   }
   .meeting-markdown-preview {
-    @apply w-full cursor-text text-[16px] leading-[1.55] outline-none;
+    @apply w-full cursor-text text-[17px] leading-[1.65] outline-none;
     color: var(--notes-ink);
   }
   .meeting-markdown-preview > :first-child {
@@ -788,7 +966,7 @@
   }
   .meeting-markdown-preview p + p {
     /* One textarea line keeps preview and multiline editing in sync. */
-    margin-top: 24.8px;
+    margin-top: 28.05px;
   }
   .meeting-markdown-preview ul,
   .meeting-markdown-preview ol {
@@ -880,7 +1058,7 @@
     background: var(--notes-wash);
   }
   .meeting-note-block__meta {
-    @apply mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem];
+    @apply mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.75rem] leading-5;
     color: var(--notes-muted);
   }
   .meeting-note-block__meta > span,
@@ -907,7 +1085,7 @@
     background: var(--notes-paper-raised);
   }
   .meeting-inline-editor textarea {
-    @apply block w-full resize-y bg-transparent text-base leading-7 outline-none;
+    @apply block w-full resize-y bg-transparent text-[17px] leading-[1.65] outline-none;
     color: var(--notes-ink);
   }
   .meeting-inline-editor__actions {
@@ -922,17 +1100,17 @@
     @apply mt-2 text-xs leading-5;
   }
   .meeting-source-pane {
-    @apply fixed inset-x-4 bottom-4 z-40 flex h-[72vh] max-h-[72vh] min-h-0 flex-col overflow-hidden border shadow-2xl;
+    @apply fixed inset-x-3 bottom-3 z-40 flex h-[72vh] max-h-[72vh] min-h-0 flex-col overflow-hidden rounded-xl border shadow-2xl;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
     color: var(--notes-ink);
   }
   .meeting-source-pane__header {
-    @apply flex h-14 items-center justify-between gap-4 px-6;
+    @apply flex h-16 shrink-0 items-center justify-between gap-4 border-b px-6;
     border-color: var(--notes-rule);
   }
-  .meeting-source-pane__header strong {
-    @apply flex items-center gap-2 text-sm font-semibold;
+  .meeting-source-pane__header h2 {
+    @apply flex items-center gap-2 text-base font-semibold;
   }
   .meeting-source-pane__header button {
     @apply flex min-h-9 shrink-0 items-center gap-2 rounded-md px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
@@ -942,7 +1120,7 @@
     @apply min-h-0 flex-1 space-y-0 overflow-y-auto px-6;
   }
   .meeting-source-pane__claim {
-    @apply pb-6 pt-5 text-[0.95rem] italic leading-7;
+    @apply pb-6 pt-5 text-base italic leading-7;
     color: var(--notes-ink);
     overflow-wrap: anywhere;
   }
@@ -962,7 +1140,7 @@
     color: var(--notes-muted);
   }
   .meeting-source-pane blockquote p {
-    @apply text-[0.95rem] leading-7;
+    @apply text-base leading-7;
     text-wrap: pretty;
     overflow-wrap: anywhere;
   }
@@ -984,8 +1162,8 @@
     @apply m-4 px-3;
   }
   .meeting-source-pane__footer {
-    @apply mx-6 mb-6 mt-2 flex flex-col text-xs leading-5;
-    color: var(--notes-faint);
+    @apply mx-6 mb-5 mt-2 flex flex-col text-[0.75rem] leading-5;
+    color: var(--notes-muted);
   }
   .meeting-transcript-toggle-wrap {
     @apply relative mx-auto mt-6 w-full max-w-[760px] px-6 pb-8 pt-4 md:px-8;
@@ -996,7 +1174,7 @@
     background: var(--notes-rule);
   }
   .meeting-transcript-toggle {
-    @apply w-full min-h-10 gap-2 rounded-md px-2 py-2 text-left text-sm font-semibold transition-colors;
+    @apply w-full min-h-11 gap-2 rounded-md px-2 py-2 text-left text-sm font-semibold transition-colors;
   }
   .meeting-transcript-toggle:hover {
     color: var(--notes-ink);
@@ -1017,6 +1195,11 @@
   .meeting-transcript-toggle:hover .meeting-transcript-toggle__action svg {
     transform: translateX(2px);
   }
+  @media (min-width: 900px) {
+    .meeting-source-pane {
+      @apply inset-y-6 left-auto right-6 h-auto max-h-none w-[420px];
+    }
+  }
   @media (max-width: 520px) {
     .meeting-app-toolbar {
       @apply px-3;
@@ -1031,7 +1214,7 @@
       @apply text-[1.75rem];
     }
     .meeting-document-meta {
-      @apply gap-2 text-[0.7rem];
+      @apply gap-2 text-[0.75rem];
     }
     .meeting-document-meta span + span::before {
       @apply mr-2;

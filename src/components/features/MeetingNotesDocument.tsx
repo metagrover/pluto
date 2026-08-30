@@ -713,12 +713,11 @@ const SourcePane = ({
     <aside
       className="meeting-document meeting-source-pane"
       data-notes-source
-      aria-label="Source"
+      data-reading-surface="meeting-source"
+      aria-labelledby="meeting-source-heading"
     >
       <div className="meeting-source-pane__header">
-        <strong>
-          <span aria-hidden="true">←</span> Source
-        </strong>
+        <h2 id="meeting-source-heading">Source</h2>
         <button type="button" onClick={onClose} aria-label="Back to note">
           <span aria-hidden="true">←</span> Back to note
         </button>
@@ -852,7 +851,11 @@ export const MeetingNotesDocument = ({
     (Boolean(block.path) && block.blockType !== 'paragraph');
   return (
     <div className="meeting-document-workspace">
-      <article className="meeting-notes-document" aria-label="Meeting notes">
+      <article
+        className="meeting-notes-document"
+        data-reading-surface="meeting-notes"
+        aria-label="Meeting notes"
+      >
         {header}
         <output className="meeting-document-save-row" aria-live="polite">
           <SaveStatus state={saveState} />
