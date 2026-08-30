@@ -158,9 +158,11 @@
   }
   .meetings-index__search button {
     @apply absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--meetings-muted);
   }
   .meetings-index__sort {
     @apply inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-pro-border px-3 text-sm font-medium text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--meetings-muted);
   }
   .meetings-index__sort[data-active="true"] {
     @apply border-pro-accent/35 bg-pro-accent/10 text-pro-accent;
@@ -175,7 +177,7 @@
     @apply mb-2 flex items-center gap-4;
   }
   .meetings-index__group-label {
-    @apply text-[0.72rem] font-semibold uppercase tracking-[0.1em] text-pro-text-muted;
+    @apply text-xs font-semibold uppercase tracking-[0.1em] text-pro-text-muted;
     color: var(--meetings-muted);
   }
   .meetings-index__group-heading > div {
@@ -817,6 +819,10 @@
   .meeting-notes-document {
     @apply relative mx-auto w-full min-w-0 max-w-[760px] px-6 pb-36 md:px-8;
     color: var(--pro-text-main);
+  }
+  .meeting-document:not(.meeting-document--transcript-collapsed)
+    .meeting-notes-document {
+    @apply pb-12;
   }
   .meeting-document-save-row {
     @apply fixed top-6 right-8 text-xs font-medium opacity-50 hover:opacity-100 transition-opacity z-50;
