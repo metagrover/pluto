@@ -756,6 +756,46 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     expect(reviewProjectScopeMock).not.toHaveBeenCalled();
   });
 
+  it('keeps projects without a reliable signal out of In motion', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      {
+        ...qualified(),
+        id: 'needs-attention',
+        name: 'Migration readiness',
+        health_state: 'watch',
+        health_headline: 'Watch',
+        health_summary: 'A confirmed milestone is due soon.',
+      },
+      {
+        ...qualified(),
+        id: 'in-motion',
+        name: 'Archive launch',
+        health_state: 'appears_on_track',
+        health_headline: 'Appears on track',
+        health_summary: 'A confirmed milestone was completed recently.',
+      },
+      {
+        ...qualified(),
+        id: 'awaiting-signal',
+        name: 'Sandbox readiness',
+        health_state: 'not_enough_evidence',
+        health_headline: 'Not enough evidence',
+        health_summary: 'No reliable progress signal yet.',
+      },
+    ]);
+
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const group = (heading: string) =>
+      Array.from(container.querySelectorAll('h2')).find(
+        (element) => element.textContent === heading,
+      )?.parentElement?.textContent;
+    expect(group('Needs attention')).toContain('Migration readiness');
+    expect(group('In motion')).toContain('Archive launch');
+    expect(group('In motion')).not.toContain('Sandbox readiness');
+    expect(group('Awaiting signal')).toContain('Sandbox readiness');
+  });
+
   it('keeps unqualified records in a secondary disclosure', async () => {
     getProjectPortfolioMock.mockResolvedValue([
       qualified(),
