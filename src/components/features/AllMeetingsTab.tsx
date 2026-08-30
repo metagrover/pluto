@@ -81,69 +81,63 @@ export const AllMeetingsTab = ({
 
   if (meetings.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto w-full animate-in duration-1000 text-center py-40 relative">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
-        <div className="w-24 h-24 rounded-[2rem] bg-pro-surface border border-pro-border flex items-center justify-center text-4xl mx-auto mb-8 shadow-premium">
-          📚
+      <section
+        data-meetings-index="true"
+        className="meetings-index meetings-index--empty"
+        aria-labelledby="meetings-empty-title"
+      >
+        <div className="meetings-index__empty">
+          <span className="meetings-index__empty-icon" aria-hidden="true">
+            <Clock size={22} strokeWidth={1.75} />
+          </span>
+          <h2 id="meetings-empty-title">Your meetings will appear here</h2>
+          <p>Record a conversation to start building your meeting history.</p>
         </div>
-        <h2 className="font-serif text-3xl font-medium text-pro-text-main mb-3">
-          Your library is empty.
-        </h2>
-        <p className="text-[15px] text-pro-text-muted font-medium max-w-sm mx-auto leading-relaxed">
-          Record a session to populate this space.
-        </p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto w-full animate-in pb-32 px-4 md:px-0">
-      {/* Title + Controls */}
-      <PageHeader title="Meetings">
-        <div className="flex items-center gap-2">
-          {/* Search — expands on focus */}
-          <div className="relative group">
-            <Search
-              size={13}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-pro-text-muted group-focus-within:text-pro-accent transition-colors duration-200"
-            />
+    <section data-meetings-index="true" className="meetings-index">
+      <PageHeader title="Meetings" className="meetings-index__header">
+        <div className="meetings-index__controls">
+          <div className="meetings-index__search">
+            <Search size={13} aria-hidden="true" />
             <input
               type="text"
               placeholder="Search…"
               aria-label="Search meetings"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-[160px] focus:w-[230px] pl-8 pr-7 py-1.5 bg-pro-surface border border-pro-border hover:border-pro-text-muted/60 focus:border-pro-accent rounded-lg text-[13px] text-pro-text-main placeholder:text-pro-text-muted/80 outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg transition-all duration-300"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-pro-text-muted/40 hover:text-pro-text-main transition-colors p-0.5 rounded"
+                aria-label="Clear meeting search"
               >
-                <X size={12} />
+                <X size={13} aria-hidden="true" />
               </button>
             )}
           </div>
 
-          {/* Sort toggle — accent-tinted when active */}
           <button
+            type="button"
             onClick={() =>
               setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))
             }
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-all duration-200 ${
-              sortOrder === 'asc'
-                ? 'bg-pro-accent/10 border-pro-accent/25 text-pro-accent'
-                : 'bg-transparent border-pro-border/40 text-pro-text-muted hover:border-pro-border/70 hover:text-pro-text-main'
-            }`}
+            className="meetings-index__sort"
+            data-active={sortOrder === 'asc'}
             title={
               sortOrder === 'desc' ? 'Sort oldest first' : 'Sort newest first'
             }
           >
             <ArrowUpDown
               size={13}
-              className={`transition-transform duration-300 ${sortOrder === 'asc' ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+              className={sortOrder === 'asc' ? 'rotate-180' : ''}
             />
-            <span className="hidden sm:inline">
+            <span className="meetings-index__sort-label">
               {sortOrder === 'desc' ? 'Newest' : 'Oldest'}
             </span>
           </button>
@@ -152,70 +146,72 @@ export const AllMeetingsTab = ({
 
       {/* No search results */}
       {groupedMeetings.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="w-10 h-10 rounded-full bg-pro-surface border border-pro-border flex items-center justify-center mx-auto mb-4 text-pro-text-muted">
-            <Search size={16} />
-          </div>
-          <p className="text-[14px] font-semibold text-pro-text-main mb-1">
-            No results for "{searchQuery}"
-          </p>
-          <p className="text-[13px] text-pro-text-muted mb-6">
-            Try a different search term.
-          </p>
-          <button
-            onClick={() => setSearchQuery('')}
-            className="text-[13px] font-medium text-pro-accent hover:text-pro-accent/80 transition-colors"
-          >
+        <div className="meetings-index__no-results">
+          <Search size={18} aria-hidden="true" />
+          <p>No results for "{searchQuery}"</p>
+          <span>Try a different search term.</span>
+          <button type="button" onClick={() => setSearchQuery('')}>
             Clear search
           </button>
         </div>
       ) : (
-        <div className="space-y-8">
-          {groupedMeetings.map((group) => (
-            <div key={group.label}>
-              {/* Date label — no background, blends with page */}
-              <div className="flex items-center gap-3 mb-2 px-3 -mx-3">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/40">
+        <div className="meetings-index__groups">
+          {groupedMeetings.map((group, groupIndex) => (
+            <section
+              key={group.label}
+              className="meetings-index__group"
+              aria-labelledby={`meeting-group-${groupIndex}`}
+            >
+              <div className="meetings-index__group-heading">
+                <h2
+                  id={`meeting-group-${groupIndex}`}
+                  className="meetings-index__group-label"
+                >
                   {group.label}
-                </span>
-                <div className="flex-1 h-px bg-pro-border/15" />
+                </h2>
+                <div aria-hidden="true" />
               </div>
 
-              {/* Meeting rows */}
-              <div className="flex flex-col">
+              <div className="meetings-index__rows">
                 {group.items.map((meeting) => (
-                  <div key={meeting.id} className="relative group/row">
+                  <div key={meeting.id} className="meetings-index__row">
                     <button
+                      type="button"
                       onClick={() => onOpenMeeting(meeting.id)}
-                      className="w-full flex items-center justify-between py-2.5 px-3 -mx-3 rounded-xl hover:bg-pro-surface/60 transition-colors duration-150 text-left"
+                      className="meetings-index__row-open"
                     >
-                      {/* Left: icon + title + duration */}
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-7 h-7 rounded-lg bg-pro-surface/80 border border-pro-border/40 flex items-center justify-center text-pro-text-muted/50 group-hover/row:border-pro-accent/30 group-hover/row:text-pro-accent group-hover/row:bg-pro-accent/5 transition-all duration-150 shrink-0">
-                          <Clock size={12} strokeWidth={2} />
-                        </div>
-                        <div className="flex items-baseline gap-2.5 min-w-0">
-                          <h3 className="text-[13.5px] font-medium text-pro-text-main truncate group-hover/row:text-pro-accent transition-colors duration-150 leading-none">
+                      <span
+                        className="meetings-index__row-icon"
+                        aria-hidden="true"
+                      >
+                        <Clock size={14} strokeWidth={1.9} />
+                      </span>
+                      <span className="meetings-index__row-summary">
+                        <span className="meetings-index__row-heading">
+                          <span className="meetings-index__row-title">
                             {meeting.title || 'Untitled Meeting'}
-                          </h3>
+                          </span>
                           {meeting.duration_seconds ? (
-                            <span className="text-[11px] text-pro-text-muted/50 shrink-0 tabular-nums leading-none">
+                            <span className="meetings-index__row-duration">
                               {formatDuration(meeting.duration_seconds)}
                             </span>
                           ) : null}
-                        </div>
-                      </div>
+                        </span>
+                      </span>
 
-                      {/* Right: status badge + time + chevron */}
-                      <div className="flex items-center gap-3 shrink-0 pl-4">
+                      <span className="meetings-index__row-meta">
                         {meeting.finalization_status &&
                           meeting.finalization_status !== 'finalized' && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-500/90 bg-amber-500/8 border border-amber-500/15">
-                              <Loader2 size={9} className="animate-spin" />
+                            <span className="meetings-index__row-status">
+                              <Loader2
+                                size={10}
+                                className="animate-spin motion-reduce:animate-none"
+                                aria-hidden="true"
+                              />
                               {meeting.finalization_status.replace(/_/g, ' ')}
                             </span>
                           )}
-                        <span className="text-[12px] text-pro-text-muted/45 tabular-nums">
+                        <span className="meetings-index__row-time">
                           {new Date(
                             meetingTimestamp(meeting),
                           ).toLocaleTimeString(undefined, {
@@ -224,32 +220,33 @@ export const AllMeetingsTab = ({
                         </span>
                         <ChevronRight
                           size={13}
-                          className={`text-pro-text-muted/20 group-hover/row:text-pro-accent/50 transition-opacity duration-150 -mr-1 ${canDeleteMeeting(meeting.finalization_status) ? 'group-hover/row:opacity-0' : ''}`}
+                          aria-hidden="true"
+                          className={`meetings-index__row-chevron ${canDeleteMeeting(meeting.finalization_status) ? 'meetings-index__row-chevron--deletable' : ''}`}
                         />
-                      </div>
+                      </span>
                     </button>
 
-                    {/* Delete — revealed on row hover */}
                     {canDeleteMeeting(meeting.finalization_status) && (
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteMeeting(meeting.id);
                         }}
                         title="Delete session"
                         aria-label={`Delete ${meeting.title || 'untitled meeting'}`}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 p-1.5 text-pro-text-muted/40 hover:text-red-500 hover:bg-red-500/10 rounded-md"
+                        className="meetings-index__row-delete"
                       >
-                        <Trash2 size={12} />
+                        <Trash2 size={14} aria-hidden="true" />
                       </button>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 };

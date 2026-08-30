@@ -89,6 +89,8 @@ describe('MeetingNotesDocument', () => {
   let invoke: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.__PLUTO_BROWSER_PREVIEW__ = undefined;
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -103,6 +105,8 @@ describe('MeetingNotesDocument', () => {
     act(() => root.unmount());
     container.remove();
     vi.useRealTimers();
+    window.history.replaceState({}, '', '/');
+    window.__PLUTO_BROWSER_PREVIEW__ = undefined;
   });
 
   const renderDocument = () =>
@@ -178,6 +182,9 @@ describe('MeetingNotesDocument', () => {
     expect(container.textContent).not.toContain('Written by you');
     expect(container.querySelectorAll('article')).toHaveLength(1);
     expect(
+      container.querySelector('[data-reading-surface="meeting-notes"]'),
+    ).not.toBeNull();
+    expect(
       container.querySelector('[data-analysis-quality-notice]'),
     ).toBeNull();
   });
@@ -225,6 +232,22 @@ describe('MeetingNotesDocument', () => {
     const source = document.querySelector('[data-notes-source]');
     expect(source).toBeNull();
     expect(container.textContent).toContain('Documentation architecture');
+  });
+
+  it('labels source evidence without duplicating the back affordance', async () => {
+    window.history.replaceState({}, '', '/?source=1');
+    window.__PLUTO_BROWSER_PREVIEW__ = true;
+    await act(async () => renderDocument());
+
+    const source = document.querySelector('[data-notes-source]');
+    expect(source?.getAttribute('data-reading-surface')).toBe('meeting-source');
+    expect(source?.getAttribute('aria-labelledby')).toBe(
+      'meeting-source-heading',
+    );
+    expect(source?.querySelector('#meeting-source-heading')?.textContent).toBe(
+      'Source',
+    );
+    expect(source?.textContent).toContain('Back to note');
   });
 
   it('does not render a duplicate scratchpad beside the meeting document', async () => {

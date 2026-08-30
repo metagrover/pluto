@@ -875,7 +875,7 @@ export const MeetingView = ({
               ) : null}
             </output>
           ) : null}
-          <div className="flex w-full min-w-0 items-center justify-between gap-4">
+          <div className="meeting-document-meta-row">
             <div className="meeting-document-meta min-w-0">
               <span>
                 {new Date(
@@ -1191,6 +1191,7 @@ export const MeetingView = ({
       {transcriptVisible && (
         <section
           data-meeting-artifact="transcript"
+          data-reading-surface="meeting-transcript"
           data-state={hasTranscriptContent ? 'ready' : 'loading'}
           className="meeting-transcript-surface"
           aria-labelledby="meeting-transcript-heading"

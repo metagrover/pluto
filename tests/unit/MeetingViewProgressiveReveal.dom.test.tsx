@@ -956,6 +956,9 @@ describe('MeetingView progressive reveal', () => {
     await act(async () => renderMeeting(analyzedMeeting, true));
 
     expect(
+      container.querySelector('[data-reading-surface="meeting-transcript"]'),
+    ).not.toBeNull();
+    expect(
       container
         .querySelector('[data-meeting-page]')
         ?.classList.contains('meeting-document--transcript-collapsed'),
