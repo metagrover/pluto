@@ -111,6 +111,63 @@ describe('project portfolio source summaries', () => {
     });
   });
 
+  it('persists, edits, deletes and restores user milestones on the canonical project', () => {
+    const project = db.upsertEntity({
+      type: 'project',
+      name: 'Apollo launch',
+      metadata: {
+        projectQualification: { state: 'qualified' },
+        projectDisplayTitle: 'Apollo',
+      },
+      dedupe_by_name: false,
+    });
+    const alias = db.upsertEntity({
+      type: 'project',
+      name: 'Apollo beta',
+      dedupe_by_name: false,
+    });
+    db.mergeProject(alias.id, project.id);
+
+    const created = db.saveProjectMilestone(alias.id, {
+      title: 'Private beta',
+      status: 'planned',
+      targetDate: '2026-09-10',
+      note: 'Confirm design partners',
+    });
+    expect(db.getProjectBrief(project.id)?.milestones).toContainEqual(
+      expect.objectContaining({
+        id: created.id,
+        title: 'Private beta',
+        source: 'user',
+      }),
+    );
+
+    const edited = db.saveProjectMilestone(project.id, {
+      ...created,
+      title: 'Private beta ready',
+      status: 'in_progress',
+    });
+    expect(edited).toMatchObject({
+      id: created.id,
+      title: 'Private beta ready',
+      status: 'in_progress',
+      createdAt: created.createdAt,
+    });
+    expect(JSON.parse(db.getEntity(project.id)!.metadata!)).toMatchObject({
+      projectQualification: { state: 'qualified' },
+      projectDisplayTitle: 'Apollo',
+    });
+
+    const removed = db.deleteProjectMilestone(project.id, created.id);
+    expect(removed.id).toBe(created.id);
+    expect(db.getProjectBrief(project.id)?.milestones).toEqual([]);
+
+    db.restoreProjectMilestone(project.id, removed);
+    expect(db.getProjectBrief(project.id)?.milestones).toContainEqual(
+      expect.objectContaining({ id: created.id, title: 'Private beta ready' }),
+    );
+  });
+
   it('merges projects as a reversible alias without deleting source records', () => {
     const destination = db.upsertEntity({
       type: 'project',

@@ -302,6 +302,24 @@ export const updateProjectDisplayTitle = async (
 ): Promise<Entity> =>
   invoke('UPDATE_PROJECT_DISPLAY_TITLE', { projectId, title });
 
+export const saveProjectMilestone = async (
+  projectId: string,
+  milestone: import('../utils/projectMilestones').UserProjectMilestoneInput,
+): Promise<import('../utils/projectMilestones').UserProjectMilestone> =>
+  invoke('SAVE_PROJECT_MILESTONE', { projectId, milestone });
+
+export const deleteProjectMilestone = async (
+  projectId: string,
+  milestoneId: string,
+): Promise<import('../utils/projectMilestones').UserProjectMilestone> =>
+  invoke('DELETE_PROJECT_MILESTONE', { projectId, milestoneId });
+
+export const restoreProjectMilestone = async (
+  projectId: string,
+  milestone: import('../utils/projectMilestones').UserProjectMilestone,
+): Promise<import('../utils/projectMilestones').UserProjectMilestone> =>
+  invoke('RESTORE_PROJECT_MILESTONE', { projectId, milestone });
+
 export const mergeProject = async (
   projectId: string,
   destinationProjectId: string,
