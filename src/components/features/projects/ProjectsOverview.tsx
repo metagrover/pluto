@@ -5,6 +5,7 @@ import {
   getProjectPortfolio,
   reviewProjectScope,
 } from '../../../api/knowledgeGraph';
+import { readProjectDisplayTitle } from '../../../utils/projectBriefing';
 import {
   type ProjectPortfolioEntry,
   buildProjectPortfolio,
@@ -181,6 +182,11 @@ export function ProjectsOverview({
     () => buildProjectPortfolio(entries, search),
     [entries, search],
   );
+  const reloadPortfolio = async () => {
+    const data = await getProjectPortfolio();
+    setEntries(data);
+    setLoadError(false);
+  };
   if (activeId)
     return (
       <ProjectDossier
@@ -194,15 +200,21 @@ export function ProjectsOverview({
             activeId,
         )}
         onOpenRelatedWork={setActiveId}
+        mergeCandidates={entries.filter(
+          (entry) =>
+            readProjectQualification(entry.metadata)?.state === 'qualified',
+        )}
+        onPortfolioChanged={reloadPortfolio}
       />
     );
 
   const renderRow = (entry: ProjectPortfolioEntry, secondary = false) => {
     const qualification = readProjectQualification(entry.metadata);
+    const displayTitle = readProjectDisplayTitle(entry.metadata, entry.name);
     const date = activityDate(entry.last_mentioned_at);
     const context = secondary
       ? entry.latest_context
-      : qualification?.outcome || entry.latest_context;
+      : entry.health_summary || qualification?.outcome || entry.latest_context;
     return (
       <button
         type="button"
@@ -215,7 +227,7 @@ export function ProjectsOverview({
           <h3
             className={`${secondary ? 'text-sm font-medium' : 'text-[17px] font-medium'} leading-snug text-pro-text-main`}
           >
-            {entry.name}
+            {displayTitle}
           </h3>
           {context && (
             <p className="mt-1.5 max-w-[65ch] text-[13px] leading-relaxed text-pro-text-muted line-clamp-2">
@@ -227,6 +239,27 @@ export function ProjectsOverview({
               {qualification?.state === 'subordinate'
                 ? 'Task or topic'
                 : qualification?.reason || 'Project scope not established'}
+            </p>
+          )}
+          {!secondary && (
+            <p className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs tabular-nums text-pro-text-muted">
+              {entry.health_headline && <span>{entry.health_headline}</span>}
+              <span>
+                {entry.meeting_count} meeting
+                {entry.meeting_count === 1 ? '' : 's'}
+              </span>
+              {entry.typical_participant_count !== null &&
+                entry.typical_participant_count !== undefined && (
+                  <span>
+                    Typically {entry.typical_participant_count} people
+                  </span>
+                )}
+              {entry.recurring_cadence && (
+                <span>{entry.recurring_cadence}</span>
+              )}
+              {entry.next_milestone && (
+                <span>Next: {entry.next_milestone}</span>
+              )}
             </p>
           )}
         </div>
@@ -298,7 +331,48 @@ export function ProjectsOverview({
       ) : (
         <>
           <section data-testid="current-projects" aria-label="Current projects">
-            {portfolio.current.map((entry) => renderRow(entry))}
+            {portfolio.current.some(
+              (entry) =>
+                entry.health_state === 'falling_behind' ||
+                entry.health_state === 'watch',
+            ) && (
+              <div className="mb-8">
+                <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
+                  Needs attention
+                </h2>
+                {portfolio.current
+                  .filter(
+                    (entry) =>
+                      entry.health_state === 'falling_behind' ||
+                      entry.health_state === 'watch',
+                  )
+                  .map((entry) => renderRow(entry))}
+              </div>
+            )}
+            {portfolio.current.some(
+              (entry) =>
+                entry.health_state !== 'falling_behind' &&
+                entry.health_state !== 'watch',
+            ) && (
+              <div>
+                {portfolio.current.some(
+                  (entry) =>
+                    entry.health_state === 'falling_behind' ||
+                    entry.health_state === 'watch',
+                ) && (
+                  <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
+                    In motion
+                  </h2>
+                )}
+                {portfolio.current
+                  .filter(
+                    (entry) =>
+                      entry.health_state !== 'falling_behind' &&
+                      entry.health_state !== 'watch',
+                  )
+                  .map((entry) => renderRow(entry))}
+              </div>
+            )}
             {!portfolio.current.length && (
               <div className="py-10">
                 <h2 className="font-serif text-xl text-pro-text-main">

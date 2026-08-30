@@ -1,10 +1,19 @@
 import type { Entity } from '../api/knowledgeGraph';
+import type { ProjectHealthState } from './projectBriefing';
 import { readProjectQualification } from './projectQualification';
 
 export interface ProjectPortfolioEntry extends Entity {
   meeting_count: number;
   last_mentioned_at: string | null;
   latest_context: string | null;
+  display_title?: string;
+  health_state?: ProjectHealthState;
+  health_headline?: string;
+  health_summary?: string;
+  typical_participant_count?: number | null;
+  participant_coverage?: number;
+  recurring_cadence?: string | null;
+  next_milestone?: string | null;
 }
 
 export function buildProjectPortfolio(
@@ -25,9 +34,12 @@ export function buildProjectPortfolio(
     const qualification = readProjectQualification(entry.metadata);
     if (
       query &&
-      ![entry.name, entry.latest_context, qualification?.outcome].some(
-        (value) => value?.toLocaleLowerCase().includes(query),
-      )
+      ![
+        entry.name,
+        entry.display_title,
+        entry.latest_context,
+        qualification?.outcome,
+      ].some((value) => value?.toLocaleLowerCase().includes(query))
     )
       continue;
     if (qualification?.state !== 'qualified') other.push(entry);

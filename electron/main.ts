@@ -2346,6 +2346,25 @@ app.whenReady().then(async () => {
     db.getEntitiesByType(type),
   );
   ipcMain.handle('GET_PROJECT_PORTFOLIO', () => db.getProjectPortfolio());
+  ipcMain.handle('GET_PROJECT_BRIEF', (_event, projectId) =>
+    db.getProjectBrief(projectId),
+  );
+  ipcMain.handle(
+    'UPDATE_PROJECT_DISPLAY_TITLE',
+    (_event, { projectId, title }) =>
+      db.updateProjectDisplayTitle(projectId, title),
+  );
+  ipcMain.handle(
+    'MERGE_PROJECT',
+    (_event, { projectId, destinationProjectId }) => {
+      db.mergeProject(projectId, destinationProjectId);
+      queueAllKnowledgeDocsRefresh();
+    },
+  );
+  ipcMain.handle('RESTORE_PROJECT_MERGE', (_event, projectId) => {
+    db.restoreProjectMerge(projectId);
+    queueAllKnowledgeDocsRefresh();
+  });
   const projectInitiativeDiscoveryStateKey =
     'project_initiative_discovery_state_v12';
   const readProjectInitiativeDiscoveryStates = (): Record<

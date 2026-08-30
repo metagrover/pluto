@@ -52,7 +52,17 @@ import {
   createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../src/utils/meetingNotesHistory';
+import {
+  type ProjectBrief,
+  type ProjectBriefingMeeting,
+  buildProjectHealth,
+  buildProjectMeetingStats,
+  buildProjectMilestones,
+  readProjectDisplayTitle,
+  withProjectDisplayTitle,
+} from '../src/utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
+import { readProjectQualification } from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -380,6 +390,17 @@ const initDb = () => {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         restored_at TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS project_aliases (
+        project_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+        canonical_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        moved_aliases_json TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        restored_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_aliases_canonical
+        ON project_aliases(canonical_id, active);
 
       CREATE TABLE IF NOT EXISTS attention_items (
         id TEXT PRIMARY KEY,
@@ -1239,6 +1260,13 @@ const initDb = () => {
     db.exec(
       'ALTER TABLE commitment_aliases ADD COLUMN association_inserted INTEGER NOT NULL DEFAULT 0',
     );
+  const projectAliasColumns = db
+    .prepare('PRAGMA table_info(project_aliases)')
+    .all() as TableInfoColumn[];
+  if (
+    !projectAliasColumns.some((column) => column.name === 'moved_aliases_json')
+  )
+    db.exec('ALTER TABLE project_aliases ADD COLUMN moved_aliases_json TEXT');
 };
 
 initDb();
@@ -4333,17 +4361,21 @@ export const getKnowledgeDocProjectCandidates = (options?: {
   return db
     .prepare(`
       SELECT
-        e.id AS project_id,
-        e.name AS project_name,
+        canonical.id AS project_id,
+        canonical.name AS project_name,
         COUNT(DISTINCT me.meeting_id) AS meeting_count,
         COALESCE(SUM(me.mention_count), 0) AS mention_count,
         MAX(COALESCE(m.started_at, m.created_at, me.created_at)) AS last_mentioned_at
       FROM entities e
+      LEFT JOIN project_aliases pa
+        ON pa.project_id = e.id AND pa.active = 1
+      JOIN entities canonical
+        ON canonical.id = COALESCE(pa.canonical_id, e.id)
       JOIN meeting_entities me ON me.entity_id = e.id
       LEFT JOIN meetings m ON m.id = me.meeting_id
       WHERE e.type = 'project'
         AND COALESCE(m.started_at, m.created_at, me.created_at) >= datetime('now', '-' || ? || ' days')
-      GROUP BY e.id, e.name
+      GROUP BY canonical.id, canonical.name
       HAVING COUNT(DISTINCT me.meeting_id) >= ?
         AND COALESCE(SUM(me.mention_count), 0) >= ?
       ORDER BY mention_count DESC, last_mentioned_at DESC
@@ -4762,7 +4794,29 @@ export const getKnowledgeDocSourceMeetings = (
       .all(...memberIds, limit) as KnowledgeDocSourceMeeting[];
   }
 
-  // person_context and project share the same pattern: scope_key = entity id
+  if (doc.scope_type === 'project') {
+    return db
+      .prepare(`
+        WITH family(id) AS (
+          SELECT ? UNION SELECT project_id FROM project_aliases
+          WHERE canonical_id = ? AND active = 1
+        )
+        SELECT
+          m.*,
+          COALESCE(SUM(me.mention_count), 0) AS mention_count,
+          MAX(me.context) AS context
+        FROM meetings m
+        JOIN meeting_entities me ON me.meeting_id = m.id
+        WHERE me.entity_id IN (SELECT id FROM family)
+          AND ${MEETING_QUALITY_FILTER}
+        GROUP BY m.id
+        ORDER BY ${MEETING_SOURCE_ORDER}
+        LIMIT ?
+      `)
+      .all(doc.scope_key, doc.scope_key, limit) as KnowledgeDocSourceMeeting[];
+  }
+
+  // person_context uses scope_key = entity id.
   return db
     .prepare(`
       SELECT
@@ -5873,6 +5927,7 @@ export const upsertEntity = (entity: {
   }
 
   let existing: Entity | undefined;
+  let matchedProjectAlias = false;
 
   // 1. If ID provided, try to find by ID first
   if (entity.id) {
@@ -5891,6 +5946,30 @@ export const upsertEntity = (entity: {
       .get(entity.type, normalizedName) as Entity | undefined;
   }
 
+  if (existing?.type === 'project') {
+    const canonicalId = resolveProjectIdentityId(existing.id);
+    if (canonicalId !== existing.id) {
+      existing = getEntity(canonicalId);
+      matchedProjectAlias = true;
+    }
+  }
+
+  if (
+    !existing &&
+    entity.type === 'project' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
+        `SELECT canonical.* FROM project_aliases pa
+         JOIN entities alias ON alias.id = pa.project_id
+         JOIN entities canonical ON canonical.id = pa.canonical_id
+         WHERE pa.active = 1 AND alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    matchedProjectAlias = Boolean(existing);
+  }
+
   if (existing) {
     // Update existing entity
     const stmt = db.prepare(`
@@ -5906,7 +5985,7 @@ export const upsertEntity = (entity: {
       WHERE id = ?
     `);
     stmt.run(
-      entity.name,
+      matchedProjectAlias ? null : entity.name,
       entity.status,
       entity.due_date,
       entity.assigned_to,
@@ -6299,25 +6378,267 @@ export const restoreCommitmentAlias = (extractionId: string): void => {
 /**
  * Get all entities of a specific type
  */
+const resolveProjectIdentityId = (projectId: string): string => {
+  let current = projectId;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const alias = db
+      .prepare(
+        'SELECT canonical_id FROM project_aliases WHERE project_id = ? AND active = 1',
+      )
+      .get(current) as { canonical_id: string } | undefined;
+    if (!alias) return current;
+    current = alias.canonical_id;
+  }
+  throw new Error('project_alias_cycle');
+};
+
+export const updateProjectDisplayTitle = (
+  projectId: string,
+  title: string,
+): Entity => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  const trimmed = title.trim();
+  if (!project || project.type !== 'project' || !trimmed)
+    throw new Error('project_title_invalid');
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  ).run(withProjectDisplayTitle(project.metadata, trimmed), canonicalId);
+  return getEntity(canonicalId)!;
+};
+
+export const mergeProject = (
+  projectId: string,
+  destinationProjectId: string,
+): void => {
+  const source = getEntity(projectId);
+  const destinationId = resolveProjectIdentityId(destinationProjectId);
+  const destination = getEntity(destinationId);
+  if (
+    !source ||
+    !destination ||
+    source.type !== 'project' ||
+    destination.type !== 'project' ||
+    source.id === destination.id ||
+    resolveProjectIdentityId(source.id) === destinationId
+  )
+    throw new Error('project_merge_invalid');
+  db.transaction(() => {
+    const movedAliases = (
+      db
+        .prepare(
+          'SELECT project_id FROM project_aliases WHERE canonical_id = ? AND active = 1',
+        )
+        .all(source.id) as Array<{ project_id: string }>
+    ).map((alias) => alias.project_id);
+    db.prepare(
+      `INSERT INTO project_aliases(project_id, canonical_id, moved_aliases_json, active, restored_at)
+       VALUES (?, ?, ?, 1, NULL)
+       ON CONFLICT(project_id) DO UPDATE SET canonical_id = excluded.canonical_id,
+         moved_aliases_json = excluded.moved_aliases_json, active = 1,
+         restored_at = NULL, created_at = CURRENT_TIMESTAMP`,
+    ).run(source.id, destinationId, JSON.stringify(movedAliases));
+    db.prepare(
+      'UPDATE project_aliases SET canonical_id = ? WHERE canonical_id = ? AND active = 1',
+    ).run(destinationId, source.id);
+  })();
+};
+
+export const restoreProjectMerge = (projectId: string): void => {
+  db.transaction(() => {
+    const alias = db
+      .prepare(
+        `SELECT moved_aliases_json FROM project_aliases
+         WHERE project_id = ? AND active = 1`,
+      )
+      .get(projectId) as { moved_aliases_json: string | null } | undefined;
+    if (!alias) return;
+    let movedAliases: string[] = [];
+    try {
+      const parsed = JSON.parse(alias.moved_aliases_json || '[]');
+      if (Array.isArray(parsed))
+        movedAliases = parsed.filter(
+          (value): value is string => typeof value === 'string',
+        );
+    } catch {
+      movedAliases = [];
+    }
+    if (movedAliases.length > 0) {
+      const placeholders = movedAliases.map(() => '?').join(', ');
+      db.prepare(
+        `UPDATE project_aliases SET canonical_id = ?
+         WHERE project_id IN (${placeholders}) AND active = 1`,
+      ).run(projectId, ...movedAliases);
+    }
+    db.prepare(
+      `UPDATE project_aliases SET active = 0, restored_at = CURRENT_TIMESTAMP
+       WHERE project_id = ? AND active = 1`,
+    ).run(projectId);
+  })();
+};
+
+const parseMeetingParticipants = (
+  midJson: string | null | undefined,
+): ProjectBriefingMeeting['participants'] => {
+  if (!midJson) return [];
+  try {
+    const parsed = JSON.parse(midJson) as {
+      participants?: Array<{ entity_id?: unknown; name?: unknown }>;
+    };
+    return (parsed.participants ?? []).flatMap((participant) =>
+      typeof participant.entity_id === 'string' &&
+      typeof participant.name === 'string'
+        ? [
+            {
+              entity_id: participant.entity_id,
+              name: participant.name,
+            },
+          ]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+};
+
+export const getProjectBrief = (projectId: string): ProjectBrief | null => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  if (!project || project.type !== 'project') return null;
+  const meetings = db
+    .prepare(
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT project_id FROM project_aliases
+         WHERE canonical_id = ? AND active = 1
+       )
+       SELECT m.*, SUM(me.mention_count) AS mention_count,
+         GROUP_CONCAT(DISTINCT me.context) AS context
+       FROM meetings m
+       JOIN meeting_entities me ON me.meeting_id = m.id
+       WHERE me.entity_id IN (SELECT id FROM family)
+       GROUP BY m.id
+       ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC`,
+    )
+    .all(canonicalId, canonicalId) as Array<
+    PersistedMeeting & { mention_count: number; context: string | null }
+  >;
+  const briefingMeetings = meetings.map((meeting) => ({
+    id: String(meeting.id),
+    title: meeting.title,
+    started_at: meeting.started_at ?? null,
+    created_at: meeting.created_at ?? null,
+    meeting_type: meeting.meeting_type ?? null,
+    duration_seconds: meeting.duration_seconds ?? null,
+    mention_count: meeting.mention_count,
+    context: meeting.context,
+    participants: parseMeetingParticipants(meeting.mid_json),
+  }));
+  const tasks = db
+    .prepare(
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT project_id FROM project_aliases
+         WHERE canonical_id = ? AND active = 1
+       )
+       SELECT DISTINCT e.* FROM entities e
+       JOIN entity_links l ON l.source_entity_id = e.id
+       WHERE e.type = 'action_item'
+         AND l.relationship = 'belongs_to'
+         AND l.state = 'confirmed'
+         AND l.target_entity_id IN (SELECT id FROM family)
+       ORDER BY CASE e.status WHEN 'overdue' THEN 0 WHEN 'active' THEN 1 ELSE 2 END,
+         datetime(e.due_date) ASC, datetime(e.updated_at) DESC`,
+    )
+    .all(canonicalId, canonicalId) as Entity[];
+  const snapshot = getWorkingMemorySnapshot('project', canonicalId);
+  const mergedProjects = db
+    .prepare(
+      `SELECT e.id, e.name, pa.created_at AS mergedAt
+       FROM project_aliases pa JOIN entities e ON e.id = pa.project_id
+       WHERE pa.canonical_id = ? AND pa.active = 1
+       ORDER BY pa.created_at DESC`,
+    )
+    .all(canonicalId) as Array<{
+    id: string;
+    name: string;
+    mergedAt: string;
+  }>;
+  return {
+    project: {
+      id: project.id,
+      displayTitle: readProjectDisplayTitle(project.metadata, project.name),
+      detectedTitle: project.name,
+      metadata: project.metadata,
+      status: project.status,
+    },
+    meetingStats: buildProjectMeetingStats(briefingMeetings),
+    health: buildProjectHealth(tasks, snapshot),
+    milestones: buildProjectMilestones(tasks),
+    meetings: briefingMeetings,
+    tasks,
+    mergedProjects,
+  };
+};
+
 /** Source summaries are independent of task membership and project qualification. */
 export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
-  return db
+  const rows = db
     .prepare(`
-    WITH sources AS (
-      SELECT me.entity_id, me.context,
+    WITH project_identity AS (
+      SELECT e.id AS source_id, COALESCE(pa.canonical_id, e.id) AS canonical_id
+      FROM entities e LEFT JOIN project_aliases pa
+        ON pa.project_id = e.id AND pa.active = 1
+      WHERE e.type = 'project'
+    ), raw_sources AS (
+      SELECT pi.canonical_id AS entity_id, me.meeting_id,
+        GROUP_CONCAT(DISTINCT me.context) AS context,
         COALESCE(m.started_at, m.created_at, me.created_at) AS activity_at,
-        COUNT(*) OVER (PARTITION BY me.entity_id) AS meeting_count,
-        ROW_NUMBER() OVER (PARTITION BY me.entity_id ORDER BY
-          datetime(COALESCE(m.started_at, m.created_at, me.created_at)) DESC, m.id DESC) AS position
-      FROM meeting_entities me JOIN meetings m ON m.id = me.meeting_id
+        m.id AS source_sort_id
+      FROM project_identity pi JOIN meeting_entities me ON me.entity_id = pi.source_id
+      JOIN meetings m ON m.id = me.meeting_id
+      GROUP BY pi.canonical_id, me.meeting_id
+    ), sources AS (
+      SELECT entity_id, meeting_id, context, activity_at,
+        COUNT(*) OVER (PARTITION BY entity_id) AS meeting_count,
+        ROW_NUMBER() OVER (PARTITION BY pi.entity_id ORDER BY
+          datetime(activity_at) DESC, source_sort_id DESC) AS position
+      FROM raw_sources pi
     )
     SELECT e.*, COALESCE(s.meeting_count, 0) AS meeting_count,
       s.activity_at AS last_mentioned_at, s.context AS latest_context
     FROM entities e LEFT JOIN sources s ON s.entity_id = e.id AND s.position = 1
-    WHERE e.type = 'project'
+    WHERE e.type = 'project' AND NOT EXISTS (
+      SELECT 1 FROM project_aliases pa WHERE pa.project_id = e.id AND pa.active = 1
+    )
     ORDER BY datetime(COALESCE(s.activity_at, e.updated_at)) DESC, e.name
   `)
     .all() as ProjectPortfolioEntry[];
+  return rows.map((row) => {
+    if (readProjectQualification(row.metadata)?.state !== 'qualified')
+      return {
+        ...row,
+        display_title: readProjectDisplayTitle(row.metadata, row.name),
+      };
+    const brief = getProjectBrief(row.id);
+    return brief
+      ? {
+          ...row,
+          display_title: brief.project.displayTitle,
+          health_state: brief.health.state,
+          health_headline: brief.health.headline,
+          health_summary: brief.health.summary,
+          typical_participant_count: brief.meetingStats.typicalParticipantCount,
+          participant_coverage: brief.meetingStats.participantCoverage,
+          recurring_cadence:
+            brief.meetingStats.recurringSeries[0]?.cadence ?? null,
+          next_milestone:
+            brief.milestones.find(
+              (milestone) => milestone.status !== 'complete',
+            )?.title ?? null,
+        }
+      : row;
+  });
 };
 
 /** Validated conversations that already contain extracted project material. */
@@ -6566,7 +6887,11 @@ export const getEntityLinks = (
   options?: { includeRejected?: boolean },
 ): EntityLink[] => {
   const includeRejected = options?.includeRejected ?? false;
-  const canonicalId = resolveCommitmentIdentity(entityId)?.id ?? entityId;
+  const resolvedEntity = resolveCommitmentIdentity(entityId);
+  const canonicalId =
+    resolvedEntity?.type === 'project'
+      ? resolveProjectIdentityId(resolvedEntity.id)
+      : (resolvedEntity?.id ?? entityId);
   const links = db
     .prepare(`
     WITH RECURSIVE family(id) AS (
@@ -6582,15 +6907,17 @@ export const getEntityLinks = (
   `)
     .all(canonicalId) as EntityLink[];
   // Keep original edges intact for restoration, but expose their current identity.
+  const visibleId = (id: string) => {
+    const resolved = resolveCommitmentIdentity(id) ?? getEntity(id);
+    return resolved?.type === 'project'
+      ? resolveProjectIdentityId(resolved.id)
+      : (resolved?.id ?? id);
+  };
   return links
     .map((link) => ({
       ...link,
-      source_entity_id:
-        resolveCommitmentIdentity(link.source_entity_id)?.id ??
-        link.source_entity_id,
-      target_entity_id:
-        resolveCommitmentIdentity(link.target_entity_id)?.id ??
-        link.target_entity_id,
+      source_entity_id: visibleId(link.source_entity_id),
+      target_entity_id: visibleId(link.target_entity_id),
     }))
     .filter((link) => link.source_entity_id !== link.target_entity_id);
 };

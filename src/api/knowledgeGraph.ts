@@ -291,6 +291,26 @@ export const getProjectPortfolio = async (): Promise<
   import('../utils/projectPortfolio').ProjectPortfolioEntry[]
 > => invoke('GET_PROJECT_PORTFOLIO');
 
+export const getProjectBrief = async (
+  projectId: string,
+): Promise<import('../utils/projectBriefing').ProjectBrief | null> =>
+  invoke('GET_PROJECT_BRIEF', projectId);
+
+export const updateProjectDisplayTitle = async (
+  projectId: string,
+  title: string,
+): Promise<Entity> =>
+  invoke('UPDATE_PROJECT_DISPLAY_TITLE', { projectId, title });
+
+export const mergeProject = async (
+  projectId: string,
+  destinationProjectId: string,
+): Promise<void> =>
+  invoke('MERGE_PROJECT', { projectId, destinationProjectId });
+
+export const restoreProjectMerge = async (projectId: string): Promise<void> =>
+  invoke('RESTORE_PROJECT_MERGE', projectId);
+
 /** Discover at most one source-grounded initiative from one conversation. */
 export const discoverProjectInitiative = async (
   options: { retryFailed?: boolean } = {},

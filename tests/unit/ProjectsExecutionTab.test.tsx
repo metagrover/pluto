@@ -32,6 +32,7 @@ const discoverProjectInitiativeMock = vi.hoisted(() => vi.fn());
 const reviewProjectScopeMock = vi.hoisted(() => vi.fn());
 const getEntityMock = vi.hoisted(() => vi.fn());
 const getEntityMeetingsMock = vi.hoisted(() => vi.fn());
+const getProjectBriefMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
   const actual =
@@ -45,6 +46,7 @@ vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
     reviewProjectScope: reviewProjectScopeMock,
     getEntity: getEntityMock,
     getEntityMeetings: getEntityMeetingsMock,
+    getProjectBrief: getProjectBriefMock,
   };
 });
 
@@ -688,6 +690,35 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     });
     getEntityMock.mockResolvedValue(qualified());
     getEntityMeetingsMock.mockResolvedValue([]);
+    getProjectBriefMock.mockResolvedValue({
+      project: {
+        id: 'project-1',
+        displayTitle: 'Project Orion',
+        detectedTitle: 'Project Orion',
+        metadata: qualified().metadata,
+        status: 'active',
+      },
+      meetingStats: {
+        meetingCount: 2,
+        activeWeeks: 1,
+        participantCoverage: 0,
+        typicalParticipantCount: null,
+        frequentParticipants: [],
+        recurringSeries: [],
+      },
+      health: {
+        state: 'not_enough_evidence',
+        headline: 'Not enough evidence',
+        summary: 'No reliable status yet.',
+        updatedAt: null,
+        freshness: 'unknown',
+        evidenceTaskIds: [],
+      },
+      milestones: [],
+      meetings: [],
+      tasks: [],
+      mergedProjects: [],
+    });
   });
 
   afterEach(() => {
@@ -1071,6 +1102,6 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     await act(async () =>
       root.render(<ProjectsExecutionTab selectedProjectId="project-1" />),
     );
-    expect(getEntityMock).toHaveBeenCalledWith('project-1');
+    expect(getProjectBriefMock).toHaveBeenCalledWith('project-1');
   });
 });

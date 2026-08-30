@@ -12,8 +12,14 @@ import { getCommitmentState } from '../../../utils/actionCommitment';
 const buttonClass =
   'rounded text-sm text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:opacity-50';
 
-const Commitments = ({ projectId }: { projectId?: string }) => {
-  const [open, setOpen] = useState(false);
+const Commitments = ({
+  projectId,
+  defaultOpen = false,
+}: {
+  projectId?: string;
+  defaultOpen?: boolean;
+}) => {
+  const [open, setOpen] = useState(defaultOpen);
   const [tasks, setTasks] = useState<Entity[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -161,11 +167,12 @@ const Commitments = ({ projectId }: { projectId?: string }) => {
   const completed = tasks?.filter((task) => task.status === 'completed') ?? [];
   return (
     <details
+      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
       className="mt-10 text-pro-text-muted"
     >
       <summary className="cursor-pointer rounded text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40">
-        {projectId ? 'Linked tasks' : 'Unassigned tasks'}
+        {projectId ? 'Open commitments' : 'Unassigned tasks'}
       </summary>
       {open && (
         <div className="mt-5 space-y-5">
@@ -238,6 +245,16 @@ const Commitments = ({ projectId }: { projectId?: string }) => {
   );
 };
 
-export const ProjectCommitments = ({ projectId }: { projectId?: string }) => (
-  <Commitments key={projectId ?? 'unassigned'} projectId={projectId} />
+export const ProjectCommitments = ({
+  projectId,
+  defaultOpen = false,
+}: {
+  projectId?: string;
+  defaultOpen?: boolean;
+}) => (
+  <Commitments
+    key={projectId ?? 'unassigned'}
+    projectId={projectId}
+    defaultOpen={defaultOpen}
+  />
 );
