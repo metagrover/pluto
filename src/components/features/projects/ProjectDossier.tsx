@@ -1,6 +1,8 @@
 import {
+  Activity,
   CalendarClock,
   Check,
+  ListChecks,
   MoreHorizontal,
   Pencil,
   Repeat2,
@@ -17,6 +19,7 @@ import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
 import { ProjectCommitments } from './ProjectCommitments';
+import { ProjectMilestones } from './ProjectMilestones';
 
 interface ProjectDossierProps {
   projectId: string;
@@ -48,16 +51,6 @@ const healthTone: Record<ProjectBrief['health']['state'], string> = {
   watch: 'text-pro-warning',
   falling_behind: 'text-pro-urgent',
   not_enough_evidence: 'text-pro-text-muted',
-};
-
-const milestoneLabel: Record<
-  ProjectBrief['milestones'][number]['status'],
-  string
-> = {
-  complete: 'Complete',
-  overdue: 'Overdue',
-  upcoming: 'Due soon',
-  in_progress: 'In progress',
 };
 
 export const ProjectDossier = ({
@@ -120,6 +113,9 @@ export const ProjectDossier = ({
   }, [projectId, projectName, request]);
 
   const current = loadedProjectId === projectId ? brief : null;
+  const needsAttention =
+    current?.health.state === 'watch' ||
+    current?.health.state === 'falling_behind';
   const qualification = readProjectQualification(current?.project.metadata);
   const selectedMergeSource = useMemo(
     () => mergeCandidates.find((candidate) => candidate.id === mergeSourceId),
@@ -214,7 +210,7 @@ export const ProjectDossier = ({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[78ch] pb-16 text-pro-text-main">
+    <div className="mx-auto w-full max-w-[1080px] pb-16 text-pro-text-main">
       <div className="mb-8 flex items-center justify-between gap-4">
         <button type="button" onClick={onBack} className={quietButton}>
           ← Back to projects
@@ -375,9 +371,9 @@ export const ProjectDossier = ({
 
           <section
             aria-label="Project activity"
-            className="mb-10 border-y border-pro-border/50 py-4"
+            className="mb-8 border-y border-pro-border/45 py-3"
           >
-            <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-pro-text-muted">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-pro-text-muted">
               <span className="inline-flex items-center gap-2">
                 <CalendarClock aria-hidden="true" className="h-4 w-4" />
                 {current.meetingStats.meetingCount} meeting
@@ -406,155 +402,171 @@ export const ProjectDossier = ({
                   {current.meetingStats.meetingCount} meetings.
                 </p>
               )}
-            {current.meetingStats.frequentParticipants.length > 0 && (
-              <p className="mt-2 text-xs text-pro-text-muted">
-                Usually with{' '}
-                {current.meetingStats.frequentParticipants.join(', ')}
-              </p>
-            )}
           </section>
 
-          <div className="space-y-12">
-            <section aria-labelledby="project-current-read">
-              <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.1em] text-pro-text-muted">
-                Current read
-              </p>
-              <h2
-                id="project-current-read"
-                className={`text-xl font-semibold ${healthTone[current.health.state]}`}
+          <div className="space-y-10">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(240px,0.85fr)]">
+              <section
+                aria-labelledby="project-attention"
+                className="rounded-xl border border-pro-warning/25 bg-pro-warning/[0.055] p-5 sm:p-6"
               >
-                {current.health.headline}
-              </h2>
-              <p className="mt-3 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
-                {current.health.summary}
-              </p>
-              <p className="mt-2 text-xs text-pro-text-muted">
-                {current.health.updatedAt
-                  ? `Updated ${formatDate(current.health.updatedAt)} · ${current.health.freshness}`
-                  : 'Based on confirmed linked work and available project evidence.'}
-              </p>
-            </section>
-
-            <section aria-labelledby="project-milestones">
-              <div className="mb-4 flex items-baseline justify-between gap-4">
-                <h2 id="project-milestones" className="text-base font-semibold">
-                  Milestones
-                </h2>
-                <span className="text-xs text-pro-text-muted">
-                  Explicit dates and completed checkpoints
-                </span>
-              </div>
-              {current.milestones.length ? (
-                <>
-                  <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full border-collapse text-left text-sm">
-                      <thead>
-                        <tr className="border-b border-pro-border/60 text-xs text-pro-text-muted">
-                          <th className="pb-3 pr-4 font-medium">Milestone</th>
-                          <th className="pb-3 pr-4 font-medium">Status</th>
-                          <th className="pb-3 pr-4 font-medium">Timing</th>
-                          <th className="pb-3 font-medium">Latest signal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {current.milestones.map((milestone) => (
-                          <tr
-                            key={milestone.id}
-                            className="border-b border-pro-border/35 align-top"
-                          >
-                            <td className="py-4 pr-4 font-medium">
-                              {milestone.title}
-                            </td>
-                            <td className="py-4 pr-4 text-pro-text-muted">
-                              {milestoneLabel[milestone.status]}
-                            </td>
-                            <td className="py-4 pr-4 tabular-nums text-pro-text-muted">
-                              {milestone.timing || 'Not established'}
-                            </td>
-                            <td className="max-w-[28ch] py-4 text-pro-text-muted">
-                              {milestone.evidenceQuote || 'Linked commitment'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="divide-y divide-pro-border/40 border-y border-pro-border/50 md:hidden">
-                    {current.milestones.map((milestone) => (
-                      <div key={milestone.id} className="py-4">
-                        <p className="font-medium">{milestone.title}</p>
-                        <p className="mt-1 text-sm text-pro-text-muted">
-                          {milestoneLabel[milestone.status]} ·{' '}
-                          {milestone.timing || 'Timing not established'}
-                        </p>
-                        {milestone.evidenceQuote && (
-                          <p className="mt-2 text-sm leading-6 text-pro-text-muted">
-                            {milestone.evidenceQuote}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm leading-6 text-pro-text-muted">
-                  No explicit milestones yet. Pluto will add them when a meeting
-                  establishes a dated checkpoint or confirms meaningful
-                  completion.
+                <p
+                  className={`mb-3 text-xs font-medium ${needsAttention ? 'text-pro-warning' : 'text-pro-text-muted'}`}
+                >
+                  {needsAttention ? 'What needs attention' : 'Current read'}
                 </p>
-              )}
-            </section>
+                <h2 id="project-attention" className="text-lg font-semibold">
+                  {current.health.evidenceTaskIds.length
+                    ? current.tasks.find((task) =>
+                        current.health.evidenceTaskIds.includes(task.id),
+                      )?.name || current.health.headline
+                    : current.health.headline}
+                </h2>
+                <p className="mt-2 max-w-[62ch] text-sm leading-6 text-pro-text-muted">
+                  {current.health.summary}
+                </p>
+              </section>
+
+              <section
+                aria-labelledby="project-health"
+                className="rounded-xl border border-pro-border/55 bg-pro-bg-elevated/35 p-5"
+              >
+                <div className="flex items-center gap-2 text-xs font-medium text-pro-text-muted">
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  Health
+                  <span className="font-normal">(evidence grounded)</span>
+                </div>
+                <h2
+                  id="project-health"
+                  className={`mt-3 text-lg font-semibold ${healthTone[current.health.state]}`}
+                >
+                  {current.health.headline}
+                </h2>
+                <p className="mt-2 text-xs leading-5 text-pro-text-muted">
+                  {current.health.updatedAt
+                    ? `Updated ${formatDate(current.health.updatedAt)} · ${current.health.freshness}`
+                    : 'Based on confirmed linked work and available project evidence.'}
+                </p>
+              </section>
+            </div>
+
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(250px,0.8fr)]">
+              <ProjectMilestones
+                projectId={current.project.id}
+                milestones={current.milestones}
+                onChange={(milestones) =>
+                  setBrief((value) =>
+                    value ? { ...value, milestones } : value,
+                  )
+                }
+              />
+
+              <section
+                aria-labelledby="project-momentum"
+                className="self-start rounded-xl border border-pro-accent/15 bg-pro-accent/[0.035] p-5"
+              >
+                <div className="flex items-center gap-2 text-xs font-medium text-pro-accent">
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  Momentum
+                </div>
+                <h2 id="project-momentum" className="mt-3 font-semibold">
+                  {current.momentum.headline}
+                </h2>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-start gap-3">
+                    <CalendarClock
+                      aria-hidden="true"
+                      className="mt-0.5 h-4 w-4 text-pro-text-muted"
+                    />
+                    <div>
+                      <dt className="font-medium">
+                        {current.momentum.recentMeetingCount} meeting
+                        {current.momentum.recentMeetingCount === 1 ? '' : 's'}{' '}
+                        in the last 30 days
+                      </dt>
+                      <dd className="mt-0.5 text-xs text-pro-text-muted">
+                        {current.meetingStats.meetingCount} linked overall
+                      </dd>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <ListChecks
+                      aria-hidden="true"
+                      className="mt-0.5 h-4 w-4 text-pro-text-muted"
+                    />
+                    <div>
+                      <dt className="font-medium">
+                        {current.momentum.openCommitmentCount} open,{' '}
+                        {current.momentum.completedCommitmentCount} completed
+                      </dt>
+                      <dd className="mt-0.5 text-xs text-pro-text-muted">
+                        Confirmed linked commitments
+                      </dd>
+                    </div>
+                  </div>
+                </dl>
+                <p className="mt-4 border-t border-pro-border/40 pt-3 text-xs leading-5 text-pro-text-muted">
+                  {current.momentum.lastActivityAt
+                    ? `Last observed activity ${formatDate(current.momentum.lastActivityAt)}.`
+                    : 'No dated activity is available yet.'}
+                </p>
+              </section>
+            </div>
 
             <ProjectCommitments
               key={projectId}
               projectId={projectId}
-              defaultOpen
+              defaultOpen={false}
             />
 
-            <section aria-labelledby="project-meeting-rhythm">
-              <h2
-                id="project-meeting-rhythm"
-                className="mb-4 text-base font-semibold"
-              >
-                Meeting rhythm
-              </h2>
-              {current.meetingStats.recurringSeries.length ? (
-                <div className="divide-y divide-pro-border/40 border-y border-pro-border/50">
-                  {current.meetingStats.recurringSeries.map((series) => (
-                    <div
-                      key={series.key}
-                      className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between"
-                    >
-                      <div>
-                        <p className="flex items-center gap-2 font-medium">
-                          <Repeat2
-                            aria-hidden="true"
-                            className="h-4 w-4 text-pro-text-muted"
-                          />
-                          {series.cadence}
-                        </p>
-                        <p className="mt-1 text-sm text-pro-text-muted">
-                          {series.title}
+            <details className="group border-y border-pro-border/45 text-sm">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded py-3 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
+                <span>Meeting rhythm</span>
+                <span className="font-normal text-pro-text-muted">
+                  {current.meetingStats.recurringSeries.length
+                    ? `${current.meetingStats.recurringSeries.length} pattern${current.meetingStats.recurringSeries.length === 1 ? '' : 's'}`
+                    : 'No pattern yet'}
+                </span>
+              </summary>
+              <div className="pb-4">
+                {current.meetingStats.recurringSeries.length ? (
+                  <div className="divide-y divide-pro-border/40">
+                    {current.meetingStats.recurringSeries.map((series) => (
+                      <div
+                        key={series.key}
+                        className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between"
+                      >
+                        <div>
+                          <p className="flex items-center gap-2 font-medium">
+                            <Repeat2
+                              aria-hidden="true"
+                              className="h-4 w-4 text-pro-text-muted"
+                            />
+                            {series.cadence}
+                          </p>
+                          <p className="mt-1 text-pro-text-muted">
+                            {series.title}
+                          </p>
+                        </div>
+                        <p className="tabular-nums text-pro-text-muted sm:text-right">
+                          {series.meetingCount} observed
+                          {series.typicalParticipantCount !== null
+                            ? ` · typically ${series.typicalParticipantCount} people`
+                            : ''}
+                          <br />
+                          Last met {formatDate(series.lastMetAt)}
                         </p>
                       </div>
-                      <p className="text-sm tabular-nums text-pro-text-muted sm:text-right">
-                        {series.meetingCount} observed
-                        {series.typicalParticipantCount !== null
-                          ? ` · typically ${series.typicalParticipantCount} people`
-                          : ''}
-                        <br />
-                        Last met {formatDate(series.lastMetAt)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm leading-6 text-pro-text-muted">
-                  No recurring meeting pattern is established yet. Pluto needs
-                  at least three consistently spaced observations.
-                </p>
-              )}
-            </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="leading-6 text-pro-text-muted">
+                    No recurring meeting pattern is established yet. Pluto needs
+                    at least three consistently spaced observations.
+                  </p>
+                )}
+              </div>
+            </details>
 
             {relatedWork.length > 0 && (
               <section aria-labelledby="project-related-work">
@@ -589,23 +601,21 @@ export const ProjectDossier = ({
               </section>
             )}
 
-            <section aria-labelledby="project-sources">
-              <div className="mb-4 flex items-baseline justify-between gap-4">
-                <h2 id="project-sources" className="text-base font-semibold">
-                  Source meetings
-                </h2>
-                <span className="text-xs text-pro-text-muted">
+            <details className="group border-b border-pro-border/45 text-sm">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded py-3 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
+                <span>Source meetings</span>
+                <span className="font-normal text-pro-text-muted">
                   {current.meetings.length} linked
                 </span>
-              </div>
-              {!current.meetings.length && (
-                <p className="text-sm leading-6 text-pro-text-muted">
-                  No source meetings are linked to this project.
-                </p>
-              )}
-              <div className="divide-y divide-pro-border/40 border-y border-pro-border/50">
+              </summary>
+              <div className="divide-y divide-pro-border/40 pb-4">
+                {!current.meetings.length && (
+                  <p className="py-3 leading-6 text-pro-text-muted">
+                    No source meetings are linked to this project.
+                  </p>
+                )}
                 {current.meetings.map((meeting) => (
-                  <article key={meeting.id} className="py-5">
+                  <article key={meeting.id} className="py-4">
                     <p className="text-xs tabular-nums text-pro-text-muted">
                       {formatDate(meeting.started_at || meeting.created_at)}
                     </p>
@@ -634,7 +644,7 @@ export const ProjectDossier = ({
                       </p>
                     )}
                     {qualification?.sourceMeetingId === meeting.id && (
-                      <div className="mt-3 space-y-2 border-l-2 border-pro-border pl-3 text-sm leading-6 text-pro-text-muted">
+                      <div className="mt-3 space-y-2 rounded-md border border-pro-border/50 bg-pro-hover/25 p-3 leading-6 text-pro-text-muted">
                         {qualification.outcomeEvidenceQuote && (
                           <blockquote>
                             “{qualification.outcomeEvidenceQuote}”
@@ -650,7 +660,7 @@ export const ProjectDossier = ({
                   </article>
                 ))}
               </div>
-            </section>
+            </details>
 
             <details className="border-t border-pro-border/50 pt-5 text-sm text-pro-text-muted">
               <summary className="min-h-10 cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">

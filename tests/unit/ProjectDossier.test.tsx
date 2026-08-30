@@ -7,6 +7,9 @@ import type { ProjectBrief } from '../../src/utils/projectBriefing';
 const api = vi.hoisted(() => ({
   getProjectBrief: vi.fn(),
   updateProjectDisplayTitle: vi.fn(),
+  saveProjectMilestone: vi.fn(),
+  deleteProjectMilestone: vi.fn(),
+  restoreProjectMilestone: vi.fn(),
   mergeProject: vi.fn(),
   restoreProjectMerge: vi.fn(),
   getEntitiesByType: vi.fn(),
@@ -58,6 +61,14 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
       },
     ],
   },
+  momentum: {
+    recentMeetingCount: 2,
+    openCommitmentCount: 3,
+    completedCommitmentCount: 4,
+    recentlyCompletedCount: 1,
+    lastActivityAt: '2026-08-28T12:00:00Z',
+    headline: 'Recent activity and completed work',
+  },
   health: {
     state: 'watch',
     headline: 'Watch',
@@ -73,6 +84,9 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
       status: 'upcoming',
       timing: 'Sep 5',
       evidenceQuote: 'Complete the migration review by September 5.',
+      source: 'commitment',
+      targetDate: '2026-09-05T10:00:00Z',
+      note: null,
     },
   ],
   meetings: [
@@ -97,6 +111,25 @@ beforeEach(() => {
   root = createRoot(host);
   api.getProjectBrief.mockResolvedValue(brief());
   api.updateProjectDisplayTitle.mockResolvedValue({});
+  api.saveProjectMilestone.mockResolvedValue({
+    id: 'user-1',
+    title: 'Private beta',
+    status: 'planned',
+    targetDate: '2026-09-10',
+    note: null,
+    createdAt: '2026-08-29T12:00:00Z',
+    updatedAt: '2026-08-29T12:00:00Z',
+  });
+  api.deleteProjectMilestone.mockResolvedValue({
+    id: 'user-1',
+    title: 'Private beta',
+    status: 'planned',
+    targetDate: '2026-09-10',
+    note: null,
+    createdAt: '2026-08-29T12:00:00Z',
+    updatedAt: '2026-08-29T12:00:00Z',
+  });
+  api.restoreProjectMilestone.mockResolvedValue({});
   api.mergeProject.mockResolvedValue(undefined);
   api.restoreProjectMerge.mockResolvedValue(undefined);
   api.getEntitiesByType.mockResolvedValue([]);
@@ -122,6 +155,20 @@ const click = async (text: string) => {
   });
 };
 
+const setValue = async (
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  value: string,
+) => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(element),
+      'value',
+    )?.set?.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+
 it('leads with grounded activity, health, milestones and meeting rhythm', async () => {
   await render();
   expect(host.textContent).toContain('Archive modernization');
@@ -130,9 +177,131 @@ it('leads with grounded activity, health, milestones and meeting rhythm', async 
   expect(host.textContent).toContain('Typically 4 participants');
   expect(host.textContent).toContain('Attendance is available for 5 of 7');
   expect(host.textContent).toContain('Watch');
+  expect(host.textContent).toContain('What needs attention');
+  expect(host.textContent).toContain('Health');
+  expect(host.textContent).toContain('Momentum');
+  expect(host.textContent).toContain('2 meetings in the last 30 days');
   expect(host.textContent).toContain('Complete migration review');
+  expect(host.textContent).toContain('From meeting evidence');
   expect(host.textContent).toContain('Weekly pattern');
   expect(host.textContent).toContain('Archive weekly review');
+});
+
+it('adds a user milestone from an inline form', async () => {
+  await render();
+  await click('Add milestone');
+  const title = host.querySelector<HTMLInputElement>(
+    '#project-milestone-title',
+  )!;
+  await setValue(title, 'Private beta');
+  await click('Create milestone');
+
+  expect(api.saveProjectMilestone).toHaveBeenCalledWith('p1', {
+    title: 'Private beta',
+    status: 'planned',
+    targetDate: null,
+    note: null,
+  });
+  expect(host.textContent).toContain('User-created');
+  expect(host.textContent).toContain('Milestone saved');
+});
+
+it('keeps an unsaved milestone draft when saving fails', async () => {
+  api.saveProjectMilestone.mockRejectedValueOnce(new Error('offline'));
+  await render();
+  await click('Add milestone');
+  const title = host.querySelector<HTMLInputElement>(
+    '#project-milestone-title',
+  )!;
+  await setValue(title, 'Partner onboarding');
+  await click('Create milestone');
+
+  expect(title.value).toBe('Partner onboarding');
+  expect(host.textContent).toContain(
+    'We couldn’t save this milestone. Your draft is still here.',
+  );
+});
+
+it('completes, deletes and restores a user-created milestone', async () => {
+  const userMilestone = {
+    id: 'user-1',
+    title: 'Private beta',
+    status: 'planned' as const,
+    timing: 'Sep 10',
+    evidenceQuote: null,
+    source: 'user' as const,
+    targetDate: '2026-09-10',
+    note: null,
+  };
+  api.getProjectBrief.mockResolvedValue(
+    brief({ milestones: [...brief().milestones, userMilestone] }),
+  );
+  await render();
+
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Mark Private beta complete"]',
+      )
+      ?.click(),
+  );
+  expect(api.saveProjectMilestone).toHaveBeenCalledWith(
+    'p1',
+    expect.objectContaining({ id: 'user-1', status: 'completed' }),
+  );
+
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="Delete Private beta"]')
+      ?.click(),
+  );
+  expect(api.deleteProjectMilestone).toHaveBeenCalledWith('p1', 'user-1');
+  await click('Undo');
+  expect(api.restoreProjectMilestone).toHaveBeenCalledWith(
+    'p1',
+    expect.objectContaining({ id: 'user-1' }),
+  );
+});
+
+it('edits a user-created milestone inline', async () => {
+  const userMilestone = {
+    id: 'user-1',
+    title: 'Private beta',
+    status: 'upcoming' as const,
+    timing: 'Sep 10',
+    evidenceQuote: null,
+    source: 'user' as const,
+    userStatus: 'in_progress' as const,
+    targetDate: '2026-09-10',
+    note: 'Invite design partners',
+  };
+  api.getProjectBrief.mockResolvedValue(
+    brief({ milestones: [...brief().milestones, userMilestone] }),
+  );
+  await render();
+
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="Edit Private beta"]')
+      ?.click(),
+  );
+  const title = host.querySelector<HTMLInputElement>(
+    '#project-milestone-title',
+  )!;
+  expect(title.value).toBe('Private beta');
+  await setValue(title, 'Private beta ready');
+  await click('Save milestone');
+
+  expect(api.saveProjectMilestone).toHaveBeenCalledWith(
+    'p1',
+    expect.objectContaining({
+      id: 'user-1',
+      title: 'Private beta ready',
+      status: 'in_progress',
+      targetDate: '2026-09-10',
+      note: 'Invite design partners',
+    }),
+  );
 });
 
 it('opens a source meeting from the evidence history', async () => {
@@ -231,7 +400,9 @@ it('teaches honest empty states when evidence is sparse', async () => {
     }),
   );
   await render();
-  expect(host.textContent).toContain('No explicit milestones yet');
+  expect(host.textContent).toContain('No milestones yet');
   expect(host.textContent).toContain('No recurring meeting pattern');
   expect(host.textContent).toContain('Not enough evidence');
+  expect(host.textContent).toContain('Current read');
+  expect(host.textContent).not.toContain('What needs attention');
 });

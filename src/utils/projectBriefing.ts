@@ -1,3 +1,8 @@
+import {
+  type UserProjectMilestoneStatus,
+  readUserProjectMilestones,
+} from './projectMilestones';
+
 export interface ProjectBriefingParticipant {
   entity_id: string;
   name: string;
@@ -26,6 +31,20 @@ export interface ProjectMeetingStats {
     lastMetAt: string | null;
     meetingIds: string[];
   }>;
+}
+
+export interface ProjectMomentum {
+  recentMeetingCount: number;
+  openCommitmentCount: number;
+  completedCommitmentCount: number;
+  recentlyCompletedCount: number;
+  lastActivityAt: string | null;
+  headline:
+    | 'Recent activity and completed work'
+    | 'Recent project activity'
+    | 'Completed work recorded'
+    | 'No recent project activity recorded'
+    | 'Not enough evidence for a trend';
 }
 
 export interface ProjectBriefingTask {
@@ -71,9 +90,13 @@ export interface ProjectHealthRead {
 export interface ProjectMilestone {
   id: string;
   title: string;
-  status: 'complete' | 'overdue' | 'upcoming' | 'in_progress';
+  status: 'complete' | 'overdue' | 'upcoming' | 'in_progress' | 'planned';
   timing: string | null;
   evidenceQuote: string | null;
+  source: 'user' | 'commitment';
+  userStatus?: UserProjectMilestoneStatus;
+  targetDate: string | null;
+  note: string | null;
 }
 
 export interface ProjectBrief {
@@ -85,6 +108,7 @@ export interface ProjectBrief {
     status: string | null;
   };
   meetingStats: ProjectMeetingStats;
+  momentum: ProjectMomentum;
   health: ProjectHealthRead;
   milestones: ProjectMilestone[];
   meetings: Array<
@@ -297,6 +321,52 @@ export const buildProjectMeetingStats = (
   };
 };
 
+export const buildProjectMomentum = (
+  meetings: ProjectBriefingMeeting[],
+  tasks: ProjectBriefingTask[],
+  now = Date.now(),
+): ProjectMomentum => {
+  const recentBoundary = now - 30 * 86_400_000;
+  const recentMeetingCount = meetings.filter(
+    (meeting) =>
+      (dateValue(meeting.started_at ?? meeting.created_at) ?? 0) >=
+      recentBoundary,
+  ).length;
+  const completed = tasks.filter((task) => task.status === 'completed');
+  const recentlyCompletedCount = completed.filter(
+    (task) => (dateValue(task.updated_at) ?? 0) >= recentBoundary,
+  ).length;
+  const activity = [
+    ...meetings.map((meeting) => meeting.started_at ?? meeting.created_at),
+    ...tasks.map((task) => task.updated_at),
+  ]
+    .map((value) => ({ value, timestamp: dateValue(value) }))
+    .filter(
+      (entry): entry is { value: string; timestamp: number } =>
+        Boolean(entry.value) && entry.timestamp !== null,
+    )
+    .sort((left, right) => right.timestamp - left.timestamp);
+  const hasEvidence = meetings.length > 0 || tasks.length > 0;
+  const headline: ProjectMomentum['headline'] =
+    recentMeetingCount > 0 && recentlyCompletedCount > 0
+      ? 'Recent activity and completed work'
+      : recentMeetingCount > 0
+        ? 'Recent project activity'
+        : recentlyCompletedCount > 0
+          ? 'Completed work recorded'
+          : hasEvidence
+            ? 'No recent project activity recorded'
+            : 'Not enough evidence for a trend';
+  return {
+    recentMeetingCount,
+    openCommitmentCount: tasks.length - completed.length,
+    completedCommitmentCount: completed.length,
+    recentlyCompletedCount,
+    lastActivityAt: activity[0]?.value ?? null,
+    headline,
+  };
+};
+
 const formatTiming = (value: string | null): string | null => {
   const timestamp = dateValue(value);
   return timestamp === null
@@ -339,12 +409,65 @@ export const buildProjectMilestones = (
         status,
         timing: formatTiming(task.due_date),
         evidenceQuote: evidenceQuote(task.metadata),
+        source: 'commitment' as const,
+        targetDate: task.due_date,
+        note: null,
       };
     })
     .sort((left, right) => {
-      const priority = { overdue: 0, upcoming: 1, in_progress: 2, complete: 3 };
+      const priority = {
+        overdue: 0,
+        upcoming: 1,
+        in_progress: 2,
+        planned: 3,
+        complete: 4,
+      };
       return priority[left.status] - priority[right.status];
     });
+
+export const buildUserProjectMilestones = (
+  metadata: string | null,
+  now = Date.now(),
+): ProjectMilestone[] =>
+  readUserProjectMilestones(metadata).map((milestone) => {
+    const dueAt = milestone.targetDate
+      ? dateValue(`${milestone.targetDate}T23:59:59.999Z`)
+      : null;
+    const status: ProjectMilestone['status'] =
+      milestone.status === 'completed'
+        ? 'complete'
+        : dueAt !== null && dueAt < now
+          ? 'overdue'
+          : dueAt !== null && dueAt - now <= 14 * 86_400_000
+            ? 'upcoming'
+            : milestone.status;
+    return {
+      id: milestone.id,
+      title: milestone.title,
+      status,
+      timing: formatTiming(milestone.targetDate),
+      evidenceQuote: null,
+      source: 'user',
+      userStatus: milestone.status,
+      targetDate: milestone.targetDate,
+      note: milestone.note,
+    };
+  });
+
+export const sortProjectMilestones = (
+  milestones: ProjectMilestone[],
+): ProjectMilestone[] => {
+  const priority: Record<ProjectMilestone['status'], number> = {
+    overdue: 0,
+    upcoming: 1,
+    in_progress: 2,
+    planned: 3,
+    complete: 4,
+  };
+  return [...milestones].sort(
+    (left, right) => priority[left.status] - priority[right.status],
+  );
+};
 
 export const buildProjectHealth = (
   tasks: ProjectBriefingTask[],

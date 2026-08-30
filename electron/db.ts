@@ -58,9 +58,19 @@ import {
   buildProjectHealth,
   buildProjectMeetingStats,
   buildProjectMilestones,
+  buildProjectMomentum,
+  buildUserProjectMilestones,
   readProjectDisplayTitle,
+  sortProjectMilestones,
   withProjectDisplayTitle,
 } from '../src/utils/projectBriefing';
+import {
+  type UserProjectMilestone,
+  type UserProjectMilestoneInput,
+  restoreUserProjectMilestone,
+  withSavedUserProjectMilestone,
+  withoutUserProjectMilestone,
+} from '../src/utils/projectMilestones';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import { readProjectQualification } from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
@@ -6409,6 +6419,62 @@ export const updateProjectDisplayTitle = (
   return getEntity(canonicalId)!;
 };
 
+export const saveProjectMilestone = (
+  projectId: string,
+  input: UserProjectMilestoneInput,
+): UserProjectMilestone =>
+  db.transaction(() => {
+    const canonicalId = resolveProjectIdentityId(projectId);
+    const project = getEntity(canonicalId);
+    if (!project || project.type !== 'project')
+      throw new Error('project_milestone_project_invalid');
+    const saved = withSavedUserProjectMilestone(project.metadata, input, {
+      id: randomUUID(),
+      now: new Date().toISOString(),
+    });
+    db.prepare(
+      'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).run(saved.metadata, canonicalId);
+    return saved.milestone;
+  })();
+
+export const deleteProjectMilestone = (
+  projectId: string,
+  milestoneId: string,
+): UserProjectMilestone =>
+  db.transaction(() => {
+    const canonicalId = resolveProjectIdentityId(projectId);
+    const project = getEntity(canonicalId);
+    if (!project || project.type !== 'project')
+      throw new Error('project_milestone_project_invalid');
+    const deleted = withoutUserProjectMilestone(project.metadata, milestoneId);
+    if (!deleted.removed) throw new Error('project_milestone_not_found');
+    db.prepare(
+      'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).run(deleted.metadata, canonicalId);
+    return deleted.removed;
+  })();
+
+export const restoreProjectMilestone = (
+  projectId: string,
+  milestone: UserProjectMilestone,
+): UserProjectMilestone =>
+  db.transaction(() => {
+    const canonicalId = resolveProjectIdentityId(projectId);
+    const project = getEntity(canonicalId);
+    if (!project || project.type !== 'project')
+      throw new Error('project_milestone_project_invalid');
+    const restored = restoreUserProjectMilestone(
+      project.metadata,
+      milestone,
+      new Date().toISOString(),
+    );
+    db.prepare(
+      'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    ).run(restored.metadata, canonicalId);
+    return restored.milestone;
+  })();
+
 export const mergeProject = (
   projectId: string,
   destinationProjectId: string,
@@ -6573,8 +6639,12 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
       status: project.status,
     },
     meetingStats: buildProjectMeetingStats(briefingMeetings),
+    momentum: buildProjectMomentum(briefingMeetings, tasks),
     health: buildProjectHealth(tasks, snapshot),
-    milestones: buildProjectMilestones(tasks),
+    milestones: sortProjectMilestones([
+      ...buildUserProjectMilestones(project.metadata),
+      ...buildProjectMilestones(tasks),
+    ]),
     meetings: briefingMeetings,
     tasks,
     mergedProjects,

@@ -2354,6 +2354,19 @@ app.whenReady().then(async () => {
     (_event, { projectId, title }) =>
       db.updateProjectDisplayTitle(projectId, title),
   );
+  ipcMain.handle('SAVE_PROJECT_MILESTONE', (_event, { projectId, milestone }) =>
+    db.saveProjectMilestone(projectId, milestone),
+  );
+  ipcMain.handle(
+    'DELETE_PROJECT_MILESTONE',
+    (_event, { projectId, milestoneId }) =>
+      db.deleteProjectMilestone(projectId, milestoneId),
+  );
+  ipcMain.handle(
+    'RESTORE_PROJECT_MILESTONE',
+    (_event, { projectId, milestone }) =>
+      db.restoreProjectMilestone(projectId, milestone),
+  );
   ipcMain.handle(
     'MERGE_PROJECT',
     (_event, { projectId, destinationProjectId }) => {

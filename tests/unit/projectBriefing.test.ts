@@ -3,7 +3,10 @@ import {
   buildProjectHealth,
   buildProjectMeetingStats,
   buildProjectMilestones,
+  buildProjectMomentum,
+  buildUserProjectMilestones,
   readProjectDisplayTitle,
+  sortProjectMilestones,
   withProjectDisplayTitle,
 } from '../../src/utils/projectBriefing';
 
@@ -104,6 +107,49 @@ describe('project milestones and health', () => {
     expect(buildProjectMilestones(tasks, now)[0]).toMatchObject({
       status: 'overdue',
       timing: 'Aug 20',
+      source: 'commitment',
+      targetDate: '2026-08-20T12:00:00Z',
+    });
+  });
+
+  it('keeps user milestones distinct and orders active work before completed work', () => {
+    const metadata = JSON.stringify({
+      projectMilestonesVersion: 1,
+      projectMilestones: [
+        {
+          id: 'user-complete',
+          title: 'Requirements signed off',
+          status: 'completed',
+          targetDate: '2026-08-10',
+          note: null,
+          createdAt: '2026-08-01T12:00:00Z',
+          updatedAt: '2026-08-20T12:00:00Z',
+        },
+        {
+          id: 'user-next',
+          title: 'Private beta',
+          status: 'planned',
+          targetDate: '2026-09-05',
+          note: 'Invite five design partners',
+          createdAt: '2026-08-20T12:00:00Z',
+          updatedAt: '2026-08-20T12:00:00Z',
+        },
+      ],
+    });
+
+    const result = sortProjectMilestones(
+      buildUserProjectMilestones(metadata, now),
+    );
+    expect(result.map((milestone) => milestone.id)).toEqual([
+      'user-next',
+      'user-complete',
+    ]);
+    expect(result[0]).toMatchObject({
+      status: 'upcoming',
+      source: 'user',
+      userStatus: 'planned',
+      targetDate: '2026-09-05',
+      note: 'Invite five design partners',
     });
   });
 
@@ -124,6 +170,53 @@ describe('project milestones and health', () => {
     );
     expect(buildProjectHealth([], undefined, now).state).toBe(
       'not_enough_evidence',
+    );
+  });
+
+  it('summarizes observed momentum without inventing a progress score', () => {
+    const meetings = [
+      {
+        id: 'recent',
+        title: 'Launch review',
+        started_at: '2026-08-27T12:00:00Z',
+        created_at: null,
+      },
+      {
+        id: 'older',
+        title: 'Kickoff',
+        started_at: '2026-07-01T12:00:00Z',
+        created_at: null,
+      },
+    ];
+    const tasks = [
+      {
+        id: 'open',
+        name: 'Confirm launch scope',
+        status: 'active',
+        due_date: null,
+        updated_at: '2026-08-28T12:00:00Z',
+        metadata: null,
+      },
+      {
+        id: 'done',
+        name: 'Finish prototype',
+        status: 'completed',
+        due_date: null,
+        updated_at: '2026-08-25T12:00:00Z',
+        metadata: null,
+      },
+    ];
+
+    expect(buildProjectMomentum(meetings, tasks, now)).toEqual({
+      recentMeetingCount: 1,
+      openCommitmentCount: 1,
+      completedCommitmentCount: 1,
+      recentlyCompletedCount: 1,
+      lastActivityAt: '2026-08-28T12:00:00Z',
+      headline: 'Recent activity and completed work',
+    });
+    expect(buildProjectMomentum([], [], now).headline).toBe(
+      'Not enough evidence for a trend',
     );
   });
 });
