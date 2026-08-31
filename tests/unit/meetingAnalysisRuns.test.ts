@@ -97,7 +97,7 @@ describe('meeting analysis run coordinator', () => {
         metrics: expect.objectContaining({
           sourceSegmentCount: 1,
           sourceCharacterCount: 18,
-          queueMs: 25,
+          queueMs: expect.any(Number),
           modelMs: 100,
           stages: [
             expect.objectContaining({
@@ -113,6 +113,9 @@ describe('meeting analysis run coordinator', () => {
     expect(
       JSON.stringify(upsertMeetingAnalysisRunMetric.mock.calls),
     ).not.toContain('We agreed to ship.');
+    expect(
+      upsertMeetingAnalysisRunMetric.mock.calls[0]![0].metrics.queueMs,
+    ).toBeGreaterThanOrEqual(25);
   });
 
   it.each([false, true])(
@@ -615,5 +618,149 @@ describe('meeting analysis run coordinator', () => {
       );
     });
     expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs one primary meeting at a time and admits queued manuals before automatics', async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const order: string[] = [];
+    const beginMeetingAnalysisRun = vi.fn();
+    const updateMeetingAnalysisQueuePosition = vi.fn().mockReturnValue(true);
+    let runSequence = 0;
+    const analysis = {
+      analysis_schema_version: 3 as const,
+      overview: 'Reviewed notes.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general' as const,
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    };
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: (meetingId) => ({
+          id: meetingId,
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: `meeting-${meetingId}` }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: (meeting) => ({
+          sourceRevision: `source-${meeting.id}`,
+          eligibilityRevision: `eligible-${meeting.id}`,
+          userNotesHash: `notes-${meeting.id}`,
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun,
+        updateMeetingAnalysisQueuePosition,
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async (transcript: string) => {
+          const meetingId = transcript.match(/meeting-(one|two|three)/)?.[1]!;
+          order.push(meetingId);
+          if (meetingId === 'one') await first;
+          return analysis;
+        },
+      }),
+      createRunId: () => `run-${++runSequence}`,
+    });
+
+    const one = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'one',
+      requestId: 'request-one',
+      template: 'auto',
+      reason: 'automatic',
+    });
+    const two = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'two',
+      requestId: 'request-two',
+      template: 'auto',
+      reason: 'automatic',
+    });
+    const three = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'three',
+      requestId: 'request-three',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    await vi.waitFor(() => expect(order).toEqual(['one']));
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledTimes(3);
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'queued', queuePosition: null }),
+    );
+    expect(updateMeetingAnalysisQueuePosition).toHaveBeenCalledWith({
+      meetingId: 'three',
+      runId: 'run-3',
+      queuePosition: 1,
+    });
+    releaseFirst();
+
+    await Promise.all([one, two, three]);
+    expect(order).toEqual(['one', 'three', 'two']);
+  });
+
+  it('revalidates publication revisions after admission and before the first model call', async () => {
+    let reads = 0;
+    const generateStructuredAnalysis = vi.fn();
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => {
+          reads += 1;
+          return {
+            id: 'revalidate',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 1, text: 'Stable transcript.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: reads >= 3 ? 'changed' : '',
+          };
+        },
+        getMeetingAnalysisPublicationRevisions: (meeting) => ({
+          sourceRevision: 'source-revalidate',
+          eligibilityRevision: 'eligible-revalidate',
+          userNotesHash: meeting.user_notes
+            ? 'changed-notes'
+            : 'original-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      createRunId: () => 'run-revalidate',
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'revalidate',
+        requestId: 'request-revalidate',
+        template: 'auto',
+        reason: 'manual',
+      }),
+    ).rejects.toThrow('meeting_notes_superseded');
+    expect(generateStructuredAnalysis).not.toHaveBeenCalled();
   });
 });

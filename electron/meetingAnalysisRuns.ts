@@ -14,6 +14,7 @@ import {
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 import type { LLMProvider } from './llm/provider';
+import { createMeetingNotesScheduler } from './meetingNotesScheduler';
 
 type MeetingRecord = {
   id: string | number;
@@ -53,6 +54,8 @@ export type MeetingAnalysisRunCoordinatorDb = {
     sourceRevision: string;
     eligibilityRevision: string;
     userNotesHash: string;
+    stage?: 'queued' | 'notes_writer';
+    queuePosition?: number | null;
   }): unknown;
   updateMeetingAnalysisRunStatus(input: {
     meetingId: string | number;
@@ -67,6 +70,18 @@ export type MeetingAnalysisRunCoordinatorDb = {
     stage: string;
     errorCode?: string | null;
   }): boolean;
+  updateMeetingAnalysisQueuePosition?(input: {
+    meetingId: string | number;
+    runId: string;
+    queuePosition: number | null;
+  }): boolean;
+  updateMeetingAnalysisQueueSnapshot?(
+    updates: Array<{
+      meetingId: string | number;
+      runId: string;
+      queuePosition: number | null;
+    }>,
+  ): number;
   updateMeetingAnalysisRunStatusIfCurrent(input: {
     meetingId: string | number;
     runId: string;
@@ -183,6 +198,7 @@ type ActiveRun = {
   fingerprint: string;
   runId: string;
   controller: AbortController;
+  scheduleKey: string;
   subscribers: Map<string, { reject: (reason: unknown) => void }>;
   promise: Promise<PublishedMeetingNotes>;
 };
@@ -296,6 +312,23 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       /* A closing renderer cannot change durable publication/run state. */
     }
   };
+  const scheduledRuns = new Map<string, { meetingId: string; runId: string }>();
+  const scheduler = createMeetingNotesScheduler((snapshot) => {
+    const updates = snapshot.flatMap((entry) => {
+      const run = scheduledRuns.get(entry.key);
+      return run ? [{ ...run, queuePosition: entry.position }] : [];
+    });
+    if (dependencies.db.updateMeetingAnalysisQueueSnapshot) {
+      dependencies.db.updateMeetingAnalysisQueueSnapshot(updates);
+    } else {
+      for (const update of updates) {
+        dependencies.db.updateMeetingAnalysisQueuePosition?.(update);
+      }
+    }
+    for (const update of updates) {
+      notify(update.meetingId);
+    }
+  });
   const startSecondary = (
     input: Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
     controller: AbortController,
@@ -361,9 +394,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       new DOMException('Meeting notes request cancelled', 'AbortError'),
     );
     if (active.subscribers.size === 0) {
-      active.controller.abort(
-        new DOMException('Meeting notes generation cancelled', 'AbortError'),
+      const reason = new DOMException(
+        'Meeting notes generation cancelled',
+        'AbortError',
       );
+      if (!scheduler.cancel(active.scheduleKey, reason)) {
+        active.controller.abort(reason);
+      }
       dependencies.db.updateMeetingAnalysisRunStatus({
         meetingId,
         runId: active.runId,
@@ -383,9 +420,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     const secondary = secondaryByMeeting.get(normalizedMeetingId);
     const target = active ?? secondary;
     if (!target) return false;
-    target.controller.abort(
-      new DOMException('Meeting notes run superseded', 'AbortError'),
+    const reason = new DOMException(
+      'Meeting notes run superseded',
+      'AbortError',
     );
+    if (!active || !scheduler.cancel(active.scheduleKey, reason)) {
+      target.controller.abort(reason);
+    }
     dependencies.db.updateMeetingAnalysisRunStatus({
       meetingId: normalizedMeetingId,
       runId: target.runId,
@@ -585,110 +626,162 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       runId,
       inputRevision: fingerprint,
       ...revisions,
+      stage: 'queued',
+      queuePosition: null,
     });
     notify(meetingId);
 
-    const promise = (async (): Promise<PublishedMeetingNotes> => {
-      try {
-        let generatedNodeCount = 0;
-        const analysis = await provider.generateStructuredAnalysis(
-          buildAnalysisTranscriptFromJson(meeting.transcript_json),
-          meeting.user_notes ?? '',
-          input.template,
-          {
-            signal: controller.signal,
-            source,
-            knownTerms: terms,
-            trustedUserTerms: [],
-            entityHints: terms,
-            contextTokens: NOTES_CONTEXT_TOKENS,
-            stageCache,
-            cacheKey: fingerprint,
-            onStageEvent: runMetrics.observe,
-            onPlan: ({ plannedLeafCount }) =>
-              runMetrics.setPlannedLeafCount(plannedLeafCount),
-            onRepair: () => runMetrics.recordRepair(),
-            onRepartition: () => runMetrics.recordRepartition(),
-            onStage: (task) => {
-              if (task !== 'notesAudit') {
-                generatedNodeCount += 1;
-                runMetrics.setGeneratedNodeCount(generatedNodeCount);
-              }
-              dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
-                meetingId,
-                runId,
-                inputRevision: fingerprint,
-                ...revisions,
-                notesStatus: 'running',
-                secondaryStatus: 'pending',
-                stage: task,
-              });
-              notify(meetingId);
-            },
-          },
-        );
-        if (controller.signal.aborted) throw controller.signal.reason;
-        const published = dependencies.db.publishMeetingNotesIfCurrent({
-          meetingId,
-          runId,
-          inputRevision: fingerprint,
-          ...revisions,
-          analysis,
-        });
-        if (!published) throw new Error('meeting_notes_superseded');
-        finalizeMetric('published');
-        notify(meetingId);
-        if (dependencies.runSecondary) {
-          const secondaryInput = {
+    const scheduleKey = `${meetingId}:${runId}`;
+    scheduledRuns.set(scheduleKey, { meetingId, runId });
+    const scheduledPromise = scheduler.enqueue({
+      key: scheduleKey,
+      scheduleClass: primaryReason,
+      run: async (): Promise<PublishedMeetingNotes> => {
+        try {
+          runMetrics.setPrimaryQueueMs(Date.now() - metricsStartedAtMs);
+          const admittedMeeting = dependencies.db.getMeeting(meetingId);
+          const admittedRevisions = admittedMeeting
+            ? dependencies.db.getMeetingAnalysisPublicationRevisions(
+                admittedMeeting,
+              )
+            : null;
+          if (
+            !admittedMeeting ||
+            !isEligibleMeetingSource(admittedMeeting) ||
+            !admittedMeeting.transcript_json ||
+            !admittedRevisions ||
+            admittedRevisions.sourceRevision !== revisions.sourceRevision ||
+            admittedRevisions.eligibilityRevision !==
+              revisions.eligibilityRevision ||
+            admittedRevisions.userNotesHash !== revisions.userNotesHash ||
+            !dependencies.db.isMeetingAnalysisRunCurrent({
+              meetingId,
+              runId,
+              inputRevision: fingerprint,
+              ...revisions,
+            })
+          ) {
+            throw new Error('meeting_notes_superseded');
+          }
+          source = createNotesSource(admittedMeeting.transcript_json);
+          dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
             meetingId,
             runId,
             inputRevision: fingerprint,
             ...revisions,
-          };
-          startSecondary(
+            notesStatus: 'running',
+            secondaryStatus: 'pending',
+            stage: 'notes_writer',
+          });
+          notify(meetingId);
+          let generatedNodeCount = 0;
+          const analysis = await provider.generateStructuredAnalysis(
+            buildAnalysisTranscriptFromJson(admittedMeeting.transcript_json),
+            admittedMeeting.user_notes ?? '',
+            input.template,
             {
-              ...secondaryInput,
-              transcript: buildAnalysisTranscriptFromJson(
-                meeting.transcript_json,
-              ),
-              analysis,
-              provider,
               signal: controller.signal,
-              canCommit: () =>
-                !controller.signal.aborted &&
-                dependencies.db.isMeetingAnalysisRunCurrent({
-                  ...secondaryInput,
-                  requirePublished: true,
-                }),
+              source,
+              knownTerms: terms,
+              trustedUserTerms: [],
+              entityHints: terms,
+              contextTokens: NOTES_CONTEXT_TOKENS,
+              stageCache,
+              cacheKey: fingerprint,
+              onStageEvent: runMetrics.observe,
+              onPlan: ({ plannedLeafCount }) =>
+                runMetrics.setPlannedLeafCount(plannedLeafCount),
+              onRepair: () => runMetrics.recordRepair(),
+              onRepartition: () => runMetrics.recordRepartition(),
+              onStage: (task) => {
+                if (task !== 'notesAudit') {
+                  generatedNodeCount += 1;
+                  runMetrics.setGeneratedNodeCount(generatedNodeCount);
+                }
+                dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
+                  meetingId,
+                  runId,
+                  inputRevision: fingerprint,
+                  ...revisions,
+                  notesStatus: 'running',
+                  secondaryStatus: 'pending',
+                  stage: task,
+                });
+                notify(meetingId);
+              },
             },
-            controller,
           );
+          if (controller.signal.aborted) throw controller.signal.reason;
+          const published = dependencies.db.publishMeetingNotesIfCurrent({
+            meetingId,
+            runId,
+            inputRevision: fingerprint,
+            ...revisions,
+            analysis,
+          });
+          if (!published) throw new Error('meeting_notes_superseded');
+          finalizeMetric('published');
+          notify(meetingId);
+          if (dependencies.runSecondary) {
+            const secondaryInput = {
+              meetingId,
+              runId,
+              inputRevision: fingerprint,
+              ...revisions,
+            };
+            startSecondary(
+              {
+                ...secondaryInput,
+                transcript: buildAnalysisTranscriptFromJson(
+                  admittedMeeting.transcript_json,
+                ),
+                analysis,
+                provider,
+                signal: controller.signal,
+                canCommit: () =>
+                  !controller.signal.aborted &&
+                  dependencies.db.isMeetingAnalysisRunCurrent({
+                    ...secondaryInput,
+                    requirePublished: true,
+                  }),
+              },
+              controller,
+            );
+          }
+          return { meetingId, runId, status: 'published' };
+        } catch (error) {
+          const code = errorCode(error);
+          dependencies.db.updateMeetingAnalysisRunStatus({
+            meetingId,
+            runId,
+            notesStatus: code === 'notes_cancelled' ? 'cancelled' : 'failed',
+            secondaryStatus:
+              code === 'notes_cancelled' ? 'superseded' : 'pending',
+            stage: code === 'notes_cancelled' ? 'cancelled' : 'notes_failed',
+            errorCode: code,
+          });
+          finalizeMetric(code === 'notes_cancelled' ? 'cancelled' : 'failed');
+          notify(meetingId);
+          throw error;
+        } finally {
+          if (activeByMeeting.get(meetingId)?.runId === runId) {
+            activeByMeeting.delete(meetingId);
+          }
+          scheduledRuns.delete(scheduleKey);
         }
-        return { meetingId, runId, status: 'published' };
-      } catch (error) {
-        const code = errorCode(error);
-        dependencies.db.updateMeetingAnalysisRunStatus({
-          meetingId,
-          runId,
-          notesStatus: code === 'notes_cancelled' ? 'cancelled' : 'failed',
-          secondaryStatus:
-            code === 'notes_cancelled' ? 'superseded' : 'pending',
-          stage: code === 'notes_cancelled' ? 'cancelled' : 'notes_failed',
-          errorCode: code,
-        });
-        finalizeMetric(code === 'notes_cancelled' ? 'cancelled' : 'failed');
-        notify(meetingId);
-        throw error;
-      } finally {
-        if (activeByMeeting.get(meetingId)?.runId === runId) {
-          activeByMeeting.delete(meetingId);
-        }
+      },
+    });
+    const promise = scheduledPromise.finally(() => {
+      if (activeByMeeting.get(meetingId)?.runId === runId) {
+        activeByMeeting.delete(meetingId);
       }
-    })();
+      scheduledRuns.delete(scheduleKey);
+    });
     activeByMeeting.set(meetingId, {
       fingerprint,
       runId,
       controller,
+      scheduleKey,
       subscribers: new Map(),
       promise,
     });

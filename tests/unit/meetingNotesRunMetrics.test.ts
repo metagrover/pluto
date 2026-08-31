@@ -95,6 +95,26 @@ describe('meeting notes run metrics', () => {
     ]);
   });
 
+  it('adds primary scheduler wait to provider gate wait', () => {
+    const metrics = createMeetingNotesRunMetrics(base);
+    metrics.setPrimaryQueueMs(400);
+    metrics.observe({
+      phase: 'queued',
+      sequence: 0,
+      task: 'notesWriter',
+      atMs: 1_400,
+    });
+    metrics.observe({ phase: 'started', sequence: 0, atMs: 1_450 });
+    metrics.observe({
+      phase: 'finished',
+      sequence: 0,
+      atMs: 1_500,
+      outcome: 'complete',
+    });
+
+    expect(metrics.snapshot('published', 1_500).queueMs).toBe(450);
+  });
+
   it('finishes one attempt once and permits null hosted-provider token counts', () => {
     const metrics = createMeetingNotesRunMetrics(base);
     metrics.observe({

@@ -3121,6 +3121,51 @@ export const updateMeetingAnalysisQueuePosition = (input: {
   return result.changes === 1;
 };
 
+export const updateMeetingAnalysisQueueSnapshot = (
+  updates: Array<{
+    meetingId: string | number;
+    runId: string;
+    queuePosition: number | null;
+  }>,
+): number => {
+  for (const update of updates) {
+    if (
+      update.queuePosition !== null &&
+      (!Number.isSafeInteger(update.queuePosition) || update.queuePosition <= 0)
+    ) {
+      throw new Error('invalid_meeting_analysis_queue_position');
+    }
+  }
+  const statement = db.prepare(
+    `UPDATE meeting_analysis_runs
+     SET queue_position = ?, updated_at = ?
+     WHERE meeting_id = ? AND run_id = ? AND notes_status = 'running'`,
+  );
+  const applySnapshot = db.transaction(
+    (
+      entries: Array<{
+        meetingId: string | number;
+        runId: string;
+        queuePosition: number | null;
+      }>,
+    ) => {
+      const now = new Date().toISOString();
+      return entries.reduce(
+        (changes, entry) =>
+          changes +
+          statement.run(
+            entry.queuePosition,
+            now,
+            String(entry.meetingId),
+            entry.runId,
+          ).changes,
+        0,
+      );
+    },
+  );
+  return applySnapshot.immediate(updates);
+};
+
 export type MeetingAnalysisRunMetricRecord = {
   runId: string;
   meetingId: string;

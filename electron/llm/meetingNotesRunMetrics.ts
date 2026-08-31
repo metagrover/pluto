@@ -73,6 +73,7 @@ export const createMeetingNotesRunMetrics = (input: {
 }) => {
   const stages = new Map<number, MutableStage>();
   let plannedLeafCount: number | null = null;
+  let primaryQueueMs = 0;
   let generatedNodeCount = 0;
   let repairCount = 0;
   let repartitionCount = 0;
@@ -111,6 +112,9 @@ export const createMeetingNotesRunMetrics = (input: {
 
   return {
     observe,
+    setPrimaryQueueMs(value: number): void {
+      primaryQueueMs = roundMs(value);
+    },
     setPlannedLeafCount(value: number): void {
       plannedLeafCount = value;
     },
@@ -140,10 +144,12 @@ export const createMeetingNotesRunMetrics = (input: {
         generatedNodeCount,
         repairCount,
         repartitionCount,
-        queueMs: completedStages.reduce(
-          (total, stage) => total + stage.queueWaitMs,
-          0,
-        ),
+        queueMs:
+          primaryQueueMs +
+          completedStages.reduce(
+            (total, stage) => total + stage.queueWaitMs,
+            0,
+          ),
         modelMs: completedStages.reduce(
           (total, stage) => total + stage.modelMs,
           0,

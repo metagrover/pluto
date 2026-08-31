@@ -23,6 +23,7 @@ import {
   saveMeeting,
   saveMeetingAnalysisSecondaryFieldsIfCurrent,
   updateMeetingAnalysisQueuePosition,
+  updateMeetingAnalysisQueueSnapshot,
   updateMeetingAnalysisRunStatus,
   updateMeetingAnalysisRunStatusIfCurrent,
   upsertMeetingAnalysisRunMetric,
@@ -690,6 +691,48 @@ describe('meeting analysis run publication', () => {
       stage: 'notes_writer',
       queue_position: null,
     });
+  });
+
+  it('updates a primary queue snapshot in one validated batch', () => {
+    const first = fixture('queued-snapshot-first');
+    const second = fixture('queued-snapshot-second');
+    beginMeetingAnalysisRun({
+      meetingId: 'queued-snapshot-first',
+      runId: 'run-snapshot-first',
+      inputRevision: 'input-first',
+      ...first,
+      stage: 'queued',
+      queuePosition: 2,
+    });
+    beginMeetingAnalysisRun({
+      meetingId: 'queued-snapshot-second',
+      runId: 'run-snapshot-second',
+      inputRevision: 'input-second',
+      ...second,
+      stage: 'queued',
+      queuePosition: 3,
+    });
+
+    expect(
+      updateMeetingAnalysisQueueSnapshot([
+        {
+          meetingId: 'queued-snapshot-first',
+          runId: 'run-snapshot-first',
+          queuePosition: null,
+        },
+        {
+          meetingId: 'queued-snapshot-second',
+          runId: 'run-snapshot-second',
+          queuePosition: 1,
+        },
+      ]),
+    ).toBe(2);
+    expect(
+      getMeetingAnalysisRun('queued-snapshot-first')?.queue_position,
+    ).toBeNull();
+    expect(
+      getMeetingAnalysisRun('queued-snapshot-second')?.queue_position,
+    ).toBe(1);
   });
 
   it('stores only validated terminal metrics and retains the newest 100 runs', () => {
