@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react';
+import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -104,6 +104,7 @@ describe('MeetingNotesDocument', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     window.history.replaceState({}, '', '/');
     window.__PLUTO_BROWSER_PREVIEW__ = undefined;
@@ -167,6 +168,20 @@ describe('MeetingNotesDocument', () => {
       );
     });
     return textarea.value;
+  };
+
+  const changeTextarea = async (
+    textarea: HTMLTextAreaElement,
+    value: string,
+  ) => {
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, value);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   };
 
   it('renders one outcomes-first article with subtle authorship', async () => {
@@ -259,6 +274,233 @@ describe('MeetingNotesDocument', () => {
     );
     expect(notes).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('autosaves a meaningful inline edit after a short idle delay', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+
+    await changeTextarea(textarea!, 'Use docs as reviewed code.');
+    expect(container.textContent).toContain('Unsaved changes');
+    expect(invoke).not.toHaveBeenCalled();
+
+    await act(async () => vi.advanceTimersByTimeAsync(650));
+
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'all_decisions:0',
+      original: 'Use docs as code.',
+      edited: 'Use docs as reviewed code.',
+    });
+  });
+
+  it('settles autosave after the Strict Mode effect replay used in development', async () => {
+    vi.useFakeTimers();
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <MeetingNotesDocument
+            meeting={meeting}
+            model={model}
+            transcriptSegments={transcript}
+            onDocumentChanged={vi.fn()}
+            onShowTranscript={vi.fn()}
+          />
+        </StrictMode>,
+      ),
+    );
+    const textarea = await openBlockEditor('Use docs as code.');
+    await changeTextarea(textarea!, 'Use docs as reviewed code.');
+
+    await act(async () => vi.advanceTimersByTimeAsync(650));
+
+    expect(container.querySelector('.meeting-save-state')?.textContent).toBe(
+      'Saved',
+    );
+    expect(textarea?.getAttribute('aria-busy')).toBe('false');
+  });
+
+  it('keeps a failed draft visible and offers a usable save retry', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    invoke
+      .mockRejectedValueOnce(new Error('synthetic save failure'))
+      .mockResolvedValueOnce(null);
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+
+    await changeTextarea(textarea!, 'Use docs as reviewed code.');
+    await act(async () => textarea?.blur());
+    await act(async () => Promise.resolve());
+
+    expect(container.textContent).toContain('Use docs as reviewed code.');
+    expect(container.textContent).toContain('Notes were not saved');
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Retry save',
+    );
+    expect(retry).toBeTruthy();
+
+    await act(async () => retry?.click());
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain('Notes were not saved');
+    consoleError.mockRestore();
+  });
+
+  it('cancels the current inline edit on Escape without saving it', async () => {
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+    await changeTextarea(textarea!, 'Use docs as reviewed code.');
+
+    await act(async () => {
+      textarea?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          code: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => Promise.resolve());
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Use docs as code.');
+    expect(container.textContent).not.toContain('Use docs as reviewed code.');
+  });
+
+  it('offers a keyboard-reachable edit action with native spellcheck', async () => {
+    await act(async () => renderDocument());
+    const edit = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Edit item: Use docs as code."]',
+    );
+    expect(edit).toBeTruthy();
+
+    await act(async () => edit?.click());
+
+    const textarea = container.querySelector<HTMLTextAreaElement>(
+      '.meeting-note-block textarea',
+    );
+    expect(textarea).toBeTruthy();
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea?.getAttribute('aria-label')).toBe(
+      'Edit item: Use docs as code.',
+    );
+    expect(textarea?.getAttribute('spellcheck')).toBe('true');
+  });
+
+  it('does not swallow boundary navigation when no adjacent editor exists', async () => {
+    const singleBlockModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [model.sections[0].blocks[0]],
+        },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={singleBlockModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+    const textarea = await openBlockEditor('Use docs as code.');
+    textarea?.setSelectionRange(0, 0);
+    const arrowUp = new KeyboardEvent('keydown', {
+      key: 'ArrowUp',
+      code: 'ArrowUp',
+      bubbles: true,
+      cancelable: true,
+    });
+
+    await act(async () => textarea?.dispatchEvent(arrowUp));
+
+    expect(arrowUp.defaultPrevented).toBe(false);
+  });
+
+  it('moves editing focus to the adjacent note row with Arrow Up', async () => {
+    const twoBlockModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [
+            model.sections[0].blocks[0],
+            {
+              id: 'decision-1',
+              path: 'all_decisions:1',
+              text: 'Review the migration guide.',
+              originalText: 'Review the migration guide.',
+              authorship: 'ai',
+              edited: false,
+              blockType: 'decision',
+            },
+          ],
+        },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={twoBlockModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+    const second = await openBlockEditor('Review the migration guide.');
+    second?.setSelectionRange(0, 0);
+
+    await act(async () => {
+      second?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'ArrowUp',
+          code: 'ArrowUp',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    const firstBlock = container.querySelectorAll('.meeting-note-block')[0];
+    const firstTextarea = firstBlock.querySelector('textarea');
+    expect(firstTextarea).toBeTruthy();
+    expect(document.activeElement).toBe(firstTextarea);
+  });
+
+  it('offers an explicit Add item action for an editable section', async () => {
+    await act(async () => renderDocument());
+    const outcomes = container.querySelector('[data-notes-section="outcomes"]');
+    const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Add item',
+    );
+    expect(addItem).toBeTruthy();
+
+    await act(async () => addItem?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SAVE_USER_EDIT',
+      expect.objectContaining({
+        meetingId: meeting.id,
+        path: 'native_continuations:all_decisions:0',
+        original: '[]',
+        edited: expect.stringMatching(/^\[{"id":".+","text":""}\]$/),
+      }),
+    );
   });
 
   it('uses a real persisted checkbox for generated actions', async () => {
@@ -679,6 +921,149 @@ describe('MeetingNotesDocument', () => {
       path: 'native_continuations:all_decisions:0',
       original: '[]',
       edited: '[]',
+    });
+  });
+
+  it('removes a native continuation when Backspace is pressed after erasing its text', async () => {
+    const continuationModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [
+            {
+              id: 'decision-0',
+              path: 'all_decisions:0',
+              text: 'Use docs as code.',
+              originalText: 'Use docs as code.',
+              authorship: 'ai',
+              edited: false,
+              blockType: 'decision',
+              nativeContinuations: [
+                { id: 'survivor', text: 'Keep me' },
+                { id: 'temporary', text: 'Temporary item' },
+              ],
+            },
+            {
+              id: 'decision-0:continuation:survivor',
+              text: 'Keep me',
+              originalText: 'Keep me',
+              authorship: 'human',
+              edited: true,
+              blockType: 'decision',
+              nativeContinuation: {
+                parentPath: 'all_decisions:0',
+                id: 'survivor',
+              },
+              nativeContinuations: [
+                { id: 'survivor', text: 'Keep me' },
+                { id: 'temporary', text: 'Temporary item' },
+              ],
+            },
+            {
+              id: 'decision-0:continuation:temporary',
+              text: 'Temporary item',
+              originalText: 'Temporary item',
+              authorship: 'human',
+              edited: true,
+              blockType: 'decision',
+              nativeContinuation: {
+                parentPath: 'all_decisions:0',
+                id: 'temporary',
+              },
+              nativeContinuations: [
+                { id: 'survivor', text: 'Keep me' },
+                { id: 'temporary', text: 'Temporary item' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={continuationModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+
+    const textarea = await openBlockEditor('Temporary item');
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    textarea.setSelectionRange(0, 0);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Backspace',
+          code: 'Backspace',
+          bubbles: true,
+        }),
+      );
+    });
+
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'native_continuations:all_decisions:0',
+      original: '[]',
+      edited: JSON.stringify([{ id: 'survivor', text: 'Keep me' }]),
+    });
+    expect(container.textContent).toContain('Item deleted');
+
+    const postDeleteModel: MeetingNotesDocumentModel = {
+      ...continuationModel,
+      sections: [
+        {
+          ...continuationModel.sections[0],
+          blocks: continuationModel.sections[0].blocks
+            .filter((block) => block.nativeContinuation?.id !== 'temporary')
+            .map((block) => ({
+              ...block,
+              nativeContinuations: [{ id: 'survivor', text: 'Keep me' }],
+            })),
+        },
+      ],
+    };
+    invoke.mockClear();
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={postDeleteModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+    const undo = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Undo',
+    );
+    expect(undo).toBeTruthy();
+
+    await act(async () => undo?.click());
+
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'native_continuations:all_decisions:0',
+      original: '[]',
+      edited: JSON.stringify([
+        { id: 'survivor', text: 'Keep me' },
+        { id: 'temporary', text: 'Temporary item' },
+      ]),
     });
   });
 

@@ -840,6 +840,21 @@
     @apply inline-flex items-center gap-1.5 text-[0.72rem] font-medium;
     color: var(--notes-muted);
   }
+  .meeting-save-state button {
+    @apply min-h-8 rounded-md px-2 underline underline-offset-2 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+  }
+  .meeting-note-undo {
+    @apply fixed bottom-6 left-1/2 z-50 flex min-h-11 -translate-x-1/2 items-center gap-4 rounded-lg border px-4 text-[0.8rem] font-medium shadow-md;
+    color: var(--notes-ink);
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
+  }
+  .meeting-note-undo button {
+    @apply min-h-9 rounded-md px-2 font-semibold underline underline-offset-2 hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-accent);
+    text-decoration-color: color-mix(in oklch, currentColor 40%, transparent);
+  }
   .meeting-save-state--dirty,
   .meeting-save-state--saving {
     color: var(--notes-accent);
@@ -962,6 +977,26 @@
   .meeting-markdown-preview {
     @apply w-full cursor-text text-[17px] leading-[1.65] outline-none;
     color: var(--notes-ink);
+  }
+  .meeting-inline-preview {
+    @apply relative min-w-0 w-full;
+  }
+  .meeting-note-edit-trigger {
+    @apply absolute top-[-0.4rem] flex h-10 w-10 items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,color] hover:bg-pro-hover hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    right: -2.15rem;
+    color: var(--notes-muted);
+  }
+  .meeting-note-block:hover .meeting-note-edit-trigger,
+  .meeting-inline-preview:focus-within .meeting-note-edit-trigger {
+    opacity: 0.55;
+  }
+  .meeting-note-edit-trigger:hover,
+  .meeting-note-edit-trigger:focus-visible {
+    opacity: 1;
+  }
+  .meeting-notes-add-item {
+    @apply mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-md px-2 text-[0.78rem] font-medium opacity-60 transition-[opacity,background-color,color] hover:bg-pro-hover hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-40;
+    color: var(--notes-muted);
   }
   .meeting-markdown-preview > :first-child {
     @apply mt-0;
