@@ -44,7 +44,7 @@ const RecoveryAction = ({
   action: () => void;
   actionLabel: string;
 }) => (
-  <div className="border-b border-pro-border/70 pb-5">
+  <div className="pb-5">
     <p className="text-[13px] font-medium leading-5 text-pro-text-main">
       {title}
     </p>
@@ -108,7 +108,7 @@ export const UpcomingMeetings = ({
             <div className="h-11 rounded-md bg-pro-surface/70" />
           </div>
         ) : snapshot.state === 'not_determined' ? (
-          <div className="border-b border-pro-border/70 pb-5">
+          <div className="pb-5">
             <p className="text-[12px] font-medium leading-5 text-pro-text-main">
               See what’s next
             </p>
@@ -119,7 +119,7 @@ export const UpcomingMeetings = ({
               type="button"
               aria-label="Connect Calendar"
               onClick={() => void onConnect()}
-              className="mt-1 inline-flex min-h-8 items-center text-[11px] font-semibold text-pro-text-muted underline decoration-pro-border underline-offset-4 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="mt-2 inline-flex min-h-8 items-center justify-center rounded-md border border-pro-border/60 bg-pro-surface/70 px-3 text-[11px] font-semibold text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
               Connect calendar
             </button>
@@ -152,12 +152,12 @@ export const UpcomingMeetings = ({
           />
         ) : snapshot.state === 'runtime_missing' ||
           snapshot.state === 'unsupported_platform' ? (
-          <p className="border-b border-pro-border/70 pb-5 text-[11px] font-medium leading-5 text-pro-text-muted">
+          <p className="pb-5 text-[11px] font-medium leading-5 text-pro-text-muted">
             Calendar context isn’t available on this device.
           </p>
         ) : events.length ? (
           <>
-            <div className="divide-y divide-pro-border/60 border-b border-pro-border/70">
+            <div className="divide-y divide-pro-border/60">
               {visibleEvents.map((event, index) => (
                 <article
                   key={event.occurrenceKey}
@@ -229,7 +229,7 @@ export const UpcomingMeetings = ({
             actionLabel="Open Pluto settings"
           />
         ) : (
-          <p className="border-b border-pro-border/70 pb-5 text-[12px] font-medium text-pro-text-muted">
+          <p className="pb-5 text-[12px] font-medium text-pro-text-muted">
             No more meetings today
           </p>
         )}

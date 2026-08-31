@@ -86,6 +86,7 @@ describe('UpcomingMeetings', () => {
       'button[aria-label="Show 1 more meeting"]',
     );
     expect(more?.textContent).toContain('See more');
+    expect(container.querySelector('.border-b')).toBeNull();
 
     await act(async () => more?.click());
     expect(
@@ -113,7 +114,11 @@ describe('UpcomingMeetings', () => {
       'button[aria-label="Connect Calendar"]',
     );
     expect(connectButton?.className).toContain('text-pro-text-muted');
+    expect(connectButton?.className).toContain('rounded-md');
+    expect(connectButton?.className).toContain('border-pro-border');
+    expect(connectButton?.className).toContain('bg-pro-surface');
     expect(connectButton?.className).not.toContain('bg-pro-accent');
+    expect(first.container.querySelector('.border-b')).toBeNull();
     await act(async () => connectButton?.click());
     expect(onConnect).toHaveBeenCalledOnce();
     act(() => first.root.unmount());
@@ -130,6 +135,7 @@ describe('UpcomingMeetings', () => {
       onOpenSettings,
     });
     expect(denied.container.textContent).toContain('Calendar access is off');
+    expect(denied.container.querySelector('.border-b')).toBeNull();
     denied.container
       .querySelector<HTMLButtonElement>(
         'button[aria-label="Open Calendar settings"]',
