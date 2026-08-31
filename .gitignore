@@ -39,6 +39,7 @@ python/constraints.txt
 
 # Local performance evidence; curated benchmark summaries live in docs/benchmarks.
 artifacts/ask-pluto-benchmark/
+.artifacts/meeting-notes-latency/
 *.suo
 *.ntvs*
 *.njsproj
