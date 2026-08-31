@@ -1,9 +1,4 @@
-import {
-  CalendarDays,
-  ChevronDown,
-  ChevronUp,
-  LockKeyhole,
-} from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 import type {
@@ -114,31 +109,20 @@ export const UpcomingMeetings = ({
           </div>
         ) : snapshot.state === 'not_determined' ? (
           <div className="border-b border-pro-border/70 pb-5">
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-accent/8 text-pro-accent">
-                <CalendarDays className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="text-[13px] font-medium leading-5 text-pro-text-main">
-                  See what’s next
-                </p>
-                <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-                  Read one calendar already on this Mac.
-                </p>
-              </div>
-            </div>
+            <p className="text-[12px] font-medium leading-5 text-pro-text-main">
+              See what’s next
+            </p>
+            <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
+              Show meetings from one calendar already on this Mac.
+            </p>
             <button
               type="button"
               aria-label="Connect Calendar"
               onClick={() => void onConnect()}
-              className="mt-3 inline-flex min-h-9 items-center gap-1.5 text-[11px] font-semibold text-pro-accent transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="mt-1 inline-flex min-h-8 items-center text-[11px] font-semibold text-pro-text-muted underline decoration-pro-border underline-offset-4 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
-              Connect Calendar
+              Connect calendar
             </button>
-            <p className="mt-1 flex items-center gap-1 text-[9px] font-medium text-pro-text-muted/60">
-              <LockKeyhole className="h-3 w-3" aria-hidden="true" />
-              Calendar context stays on this Mac
-            </p>
           </div>
         ) : snapshot.state === 'denied' || snapshot.state === 'restricted' ? (
           <RecoveryAction

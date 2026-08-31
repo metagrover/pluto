@@ -109,13 +109,12 @@ describe('UpcomingMeetings', () => {
       onConnect,
     });
     expect(first.container.textContent).toContain('See what’s next');
-    await act(async () =>
-      first.container
-        .querySelector<HTMLButtonElement>(
-          'button[aria-label="Connect Calendar"]',
-        )
-        ?.click(),
+    const connectButton = first.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Connect Calendar"]',
     );
+    expect(connectButton?.className).toContain('text-pro-text-muted');
+    expect(connectButton?.className).not.toContain('bg-pro-accent');
+    await act(async () => connectButton?.click());
     expect(onConnect).toHaveBeenCalledOnce();
     act(() => first.root.unmount());
 
