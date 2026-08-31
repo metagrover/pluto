@@ -529,12 +529,19 @@ private final class FluidAudioEouCallbackCollector: @unchecked Sendable {
 actor FluidAudioEouManager: ParakeetEouManaging {
     private let backend: any FluidAudioEouBackend
     private let collector: FluidAudioEouCallbackCollector
+    private let maxPendingSeconds: Double
+    private var pendingSinceAudioSeconds: Double?
     private var closed = false
 
-    init(backend: any FluidAudioEouBackend) async {
+    init(
+        backend: any FluidAudioEouBackend,
+        maxPendingSeconds: Double = 45
+    ) async {
+        precondition(maxPendingSeconds.isFinite && maxPendingSeconds > 0)
         let collector = FluidAudioEouCallbackCollector()
         self.backend = backend
         self.collector = collector
+        self.maxPendingSeconds = maxPendingSeconds
         await backend.setPartialCallback { transcript in
             collector.append(kind: .partial, transcript: transcript)
         }
@@ -566,7 +573,11 @@ actor FluidAudioEouManager: ParakeetEouManaging {
         }
         buffer.frameLength = AVAudioFrameCount(frame.frameCount)
         _ = try await backend.process(audioBuffer: buffer)
-        return await snapshots(from: collector.drain())
+        let snapshots = await snapshots(from: collector.drain())
+        return boundPendingSnapshots(
+            snapshots,
+            audioEndSeconds: frame.audioEndSeconds
+        )
     }
 
     func finish() async throws -> [ParakeetEouManagerSnapshot] {
@@ -612,6 +623,35 @@ actor FluidAudioEouManager: ParakeetEouManaging {
                 tokens: tokens
             )
         }
+    }
+
+    private func boundPendingSnapshots(
+        _ snapshots: [ParakeetEouManagerSnapshot],
+        audioEndSeconds: Double
+    ) -> [ParakeetEouManagerSnapshot] {
+        if snapshots.contains(where: { $0.kind == .eou || $0.kind == .final }) {
+            pendingSinceAudioSeconds = nil
+            return snapshots
+        }
+        guard
+            let lastPartialIndex = snapshots.lastIndex(where: {
+                $0.kind == .partial &&
+                    !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
+        else { return snapshots }
+        guard let pendingSinceAudioSeconds else {
+            self.pendingSinceAudioSeconds = audioEndSeconds
+            return snapshots
+        }
+        guard audioEndSeconds - pendingSinceAudioSeconds >= maxPendingSeconds else {
+            return snapshots
+        }
+
+        var bounded = snapshots
+        let partial = bounded[lastPartialIndex]
+        bounded[lastPartialIndex] = .eou(partial.transcript, tokens: partial.tokens)
+        self.pendingSinceAudioSeconds = nil
+        return bounded
     }
 
     private func currentTokens() async -> [ParakeetEouManagerToken] {
