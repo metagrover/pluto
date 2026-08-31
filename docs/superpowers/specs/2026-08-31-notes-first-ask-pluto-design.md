@@ -1,6 +1,6 @@
 # Notes-first Ask Pluto design
 
-**Status:** Architecture approved; awaiting written-spec review  
+**Status:** Approved for implementation
 **Governing issue:** [#699](https://github.com/metagrover/pluto/issues/699)  
 **Related work:** #62, #614, #667, #694
 
