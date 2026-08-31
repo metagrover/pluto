@@ -93,6 +93,7 @@ import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
+import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
@@ -1944,9 +1945,16 @@ export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
   return { rebuilt: true, indexedMeetingCount: meetings.length };
 }
 
-const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
+const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
   // Ensure ID is a string
-  const id = String(meeting.id);
+  const id = String(incomingMeeting.id);
+  const current = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as
+    | PersistedMeeting
+    | undefined;
+  const meeting = preserveOmittedTranscriptOwnedFields(
+    current,
+    incomingMeeting,
+  );
 
   let payloadLifecycleStatus: TranscriptLifecycleStatus | null = null;
   try {
@@ -2066,7 +2074,9 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 
   console.log(`[DB] Save successful for meeting: ${id}`);
   return result;
-});
+};
+
+const saveMeetingTransaction = db.transaction(saveMeetingRecord);
 
 export const saveMeeting = (meeting: PersistedMeeting) =>
   saveMeetingTransaction(meeting);
