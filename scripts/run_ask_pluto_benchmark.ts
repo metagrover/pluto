@@ -4,52 +4,113 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 
+import type { RetrievalResult } from '../electron/intelligence/intelligenceTypes.ts';
+import { buildMeetingNotesEvidenceDocument } from '../electron/intelligence/meetingNotesEvidence.ts';
+import { getAskPlutoPrompt } from '../electron/intelligence/queryPrompts.ts';
+import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
 import {
   type AskPlutoBenchmarkMode,
   type AskPlutoBenchmarkSample,
   evaluateAskPlutoBenchmark,
+  validateAskPlutoBenchmarkSample,
 } from '../src/services/askPlutoBenchmark.ts';
-import {
-  OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
-} from '../src/utils/ollamaModels.ts';
+import { OLLAMA_GENERAL_MODEL } from '../src/utils/ollamaModels.ts';
 
 const argumentValue = (name: string): string | undefined => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
 };
 
-const sharedModel = argumentValue('--model');
-const fastModel =
-  argumentValue('--fast-model') || sharedModel || OLLAMA_QUICK_CHAT_MODEL;
-const deepModel =
-  argumentValue('--deep-model') || sharedModel || OLLAMA_GENERAL_MODEL;
-const runs = Math.max(1, Number.parseInt(argumentValue('--runs') || '5', 10));
-const deepTokens = Math.max(
-  2048,
-  Number.parseInt(argumentValue('--deep-tokens') || '2048', 10),
+const model =
+  process.env.ASK_PLUTO_BENCHMARK_MODEL ||
+  argumentValue('--model') ||
+  argumentValue('--deep-model') ||
+  OLLAMA_GENERAL_MODEL;
+const runs = Math.max(
+  1,
+  Number.parseInt(
+    process.env.ASK_PLUTO_BENCHMARK_RUNS || argumentValue('--runs') || '5',
+    10,
+  ),
 );
 const outPath = path.resolve(
-  argumentValue('--out') || 'artifacts/ask-pluto-benchmark/latest.json',
+  process.env.ASK_PLUTO_BENCHMARK_OUT ||
+    argumentValue('--out') ||
+    'artifacts/ask-pluto-benchmark/latest.json',
 );
-const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
-const prompts: Record<AskPlutoBenchmarkMode, string> = {
-  fast: `You are Pluto, a meeting assistant. Answer in one sentence using only the evidence and include [Source 1].
+const provider = new UnifiedLLMProvider('ollama', {
+  ollama_model: model,
+  ollama_fast_model: model,
+  ollama_seed: 42,
+});
 
-Question: Who owns launch signoff and when is the launch?
+const fixtures = {
+  fast: {
+    query: 'Who owns launch signoff and when is the launch?',
+    meetings: [
+      {
+        id: 'benchmark-fast-1',
+        title: 'Launch Review',
+        enhanced_notes:
+          'Sam owns launch signoff. The launch is scheduled for Friday.',
+        mid_json: JSON.stringify({
+          participants: [{ name: 'Sam' }],
+          topics: [{ name: 'Launch' }],
+          decisions: [{ description: 'Launch on Friday.' }],
+          action_items: [{ description: 'Sam owns launch signoff.' }],
+        }),
+      },
+    ],
+    intent: 'factual',
+  },
+  deep: {
+    query:
+      'What changed between the earlier and current launch plans, and what risk remains?',
+    meetings: [
+      {
+        id: 'benchmark-deep-1',
+        title: 'Earlier Launch Review',
+        enhanced_notes:
+          'The launch was planned for Tuesday. Sam owned final signoff. Integration testing was complete.',
+      },
+      {
+        id: 'benchmark-deep-2',
+        title: 'Current Launch Review',
+        enhanced_notes:
+          'The launch moved to Friday. Alex now owns final signoff. Payment integration testing remains blocked.',
+      },
+    ],
+    intent: 'comparative',
+  },
+} as const;
 
-[Source 1] Meeting: Launch Review
-Evidence: Sam owns launch signoff. The launch is Friday.`,
-  deep: `You are Pluto, a meeting assistant. Compare the two meetings in at most three concise bullets. Use both [Source 1] and [Source 2] for every comparison claim.
+type BenchmarkMeeting =
+  | (typeof fixtures.fast.meetings)[number]
+  | (typeof fixtures.deep.meetings)[number];
 
-Question: What changed between the earlier and current launch plans, and what risk remains?
-
-[Source 1] Meeting: Earlier Launch Review
-Evidence: The launch was planned for Tuesday. Sam owned final signoff. Integration testing was complete.
-
-[Source 2] Meeting: Current Launch Review
-Evidence: The launch moved to Friday. Alex now owns final signoff. Payment integration testing remains blocked.`,
+const toRetrievalResult = (meeting: BenchmarkMeeting): RetrievalResult => {
+  const document = buildMeetingNotesEvidenceDocument(meeting);
+  const evidence = [
+    document.notesText && `[Analysis]: ${document.notesText}`,
+    document.decisionsText && `[Decisions]: ${document.decisionsText}`,
+    document.actionItemsText && `[Action items]: ${document.actionItemsText}`,
+    document.topicsText && `[Topics]: ${document.topicsText}`,
+    document.participantsText && `[Participants]: ${document.participantsText}`,
+  ].filter((value): value is string => Boolean(value));
+  return {
+    meeting_id: document.meetingId,
+    meeting_title: document.title,
+    mid: null,
+    evidence_text: evidence.join('\n'),
+    score: 1,
+    score_breakdown: {
+      fts_rank: 1,
+      graph_proximity: 0,
+      recency_decay: 0,
+      mention_weight: 0,
+    },
+  };
 };
 
 const answerPassesQuality = (
@@ -78,86 +139,74 @@ const answerPassesQuality = (
 
 const generate = async (
   mode: AskPlutoBenchmarkMode,
+  coldStart: boolean,
 ): Promise<AskPlutoBenchmarkSample> => {
   const startedAt = performance.now();
+  const fixture = fixtures[mode];
+  const context = fixture.meetings.map(toRetrievalResult);
+  const retrievalCompletedAt = performance.now();
+  const prompt = getAskPlutoPrompt(fixture.query, context, fixture.intent);
+  const queuedAt = performance.now();
+  let generationStartedAt: number | null = null;
   let firstTokenMs: number | null = null;
-  let pending = '';
-  let answer = '';
-  const response = await fetch(`${ollamaUrl}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: mode === 'fast' ? fastModel : deepModel,
-      prompt: prompts[mode],
-      stream: true,
-      think: false,
-      keep_alive: '1h',
-      options: {
-        num_ctx: mode === 'deep' ? 16_384 : 8192,
-        num_predict: mode === 'deep' ? deepTokens : 1024,
-        temperature: 0.2,
-        ...(mode === 'deep' ? { top_k: 40, top_p: 1 } : {}),
-        seed: 42,
-      },
-    }),
-    signal: AbortSignal.timeout(mode === 'deep' ? 180_000 : 90_000),
+  const answer = await provider.answerAskPluto(prompt, {
+    mode,
+    onStart: () => {
+      generationStartedAt = performance.now();
+    },
+    onToken: (delta) => {
+      if (delta && firstTokenMs === null) {
+        firstTokenMs = performance.now() - startedAt;
+      }
+    },
   });
-  if (!response.ok || !response.body) {
-    throw new Error(`Ollama benchmark request failed: ${response.status}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const consume = (chunk: string) => {
-    pending += chunk;
-    const lines = pending.split('\n');
-    pending = lines.pop() || '';
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const packet = JSON.parse(line) as { response?: unknown };
-      if (typeof packet.response !== 'string' || !packet.response) continue;
-      if (firstTokenMs === null) firstTokenMs = performance.now() - startedAt;
-      answer += packet.response;
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    consume(decoder.decode(value, { stream: true }));
-  }
-  consume(`${decoder.decode()}${pending ? '\n' : ''}`);
-  if (firstTokenMs === null || !answer.trim()) {
+  const completedAt = performance.now();
+  if (firstTokenMs === null || generationStartedAt === null || !answer.trim()) {
     throw new Error(`Ollama returned no visible ${mode} answer`);
   }
-  return {
+  const sample: AskPlutoBenchmarkSample = {
     mode,
+    policy: 'notes_only',
+    retrievalMs: Math.round(retrievalCompletedAt - startedAt),
+    queueMs: Math.round(generationStartedAt - queuedAt),
     firstTokenMs: Math.round(firstTokenMs),
-    totalMs: Math.round(performance.now() - startedAt),
+    generationMs: Math.round(completedAt - generationStartedAt),
+    totalMs: Math.round(completedAt - startedAt),
+    promptChars: prompt.length,
+    evidenceChars: context.reduce(
+      (total, source) => total + source.evidence_text.length,
+      0,
+    ),
+    sourceCount: context.length,
+    coldStart,
     qualityPassed: answerPassesQuality(mode, answer),
   };
+  if (!validateAskPlutoBenchmarkSample(sample)) {
+    throw new Error('Ask Pluto benchmark produced an unsafe sample');
+  }
+  return sample;
 };
 
-const main = async () => {
-  await generate('fast');
+export const runAskPlutoBenchmark = async () => {
+  await generate('fast', true);
   const samples: AskPlutoBenchmarkSample[] = [];
   for (const mode of ['fast', 'deep'] as const) {
     for (let index = 0; index < runs; index += 1) {
-      const sample = await generate(mode);
+      const sample = await generate(mode, false);
       samples.push(sample);
       console.log(
-        `[AskPlutoBenchmark] mode=${mode} run=${index + 1}/${runs} first_token=${sample.firstTokenMs}ms total=${sample.totalMs}ms quality=${sample.qualityPassed ? 'pass' : 'fail'}`,
+        `[AskPlutoBenchmark] mode=${mode} run=${index + 1}/${runs} retrieval=${sample.retrievalMs}ms queue=${sample.queueMs}ms first_token=${sample.firstTokenMs}ms generation=${sample.generationMs}ms total=${sample.totalMs}ms quality=${sample.qualityPassed ? 'pass' : 'fail'}`,
       );
     }
   }
 
   const evaluation = evaluateAskPlutoBenchmark(samples);
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
-    models: { fast: fastModel, deep: deepModel },
+    model,
     runsPerMode: runs,
-    deepTokens,
+    responseBudgets: { fast: 192, deep: 512 },
     environment: {
       platform: process.platform,
       arch: process.arch,
@@ -174,9 +223,5 @@ const main = async () => {
     `[AskPlutoBenchmark] ${evaluation.passed ? 'PASS' : 'FAIL'} fast_p95=${evaluation.fast.firstTokenP95Ms}ms/${evaluation.fast.targetMs}ms deep_p95=${evaluation.deep.firstTokenP95Ms}ms/${evaluation.deep.targetMs}ms report=${outPath}`,
   );
   if (!evaluation.passed) process.exitCode = 1;
+  return report;
 };
-
-void main().catch((error) => {
-  console.error('[AskPlutoBenchmark] failed:', error);
-  process.exitCode = 1;
-});

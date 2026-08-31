@@ -2,10 +2,66 @@ export type AskPlutoBenchmarkMode = 'fast' | 'deep';
 
 export interface AskPlutoBenchmarkSample {
   mode: AskPlutoBenchmarkMode;
+  policy: 'notes_only' | 'transcript_exact' | 'transcript_fallback';
+  retrievalMs: number;
+  queueMs: number;
   firstTokenMs: number;
+  generationMs: number;
   totalMs: number;
+  promptChars: number;
+  evidenceChars: number;
+  sourceCount: number;
+  coldStart: boolean;
   qualityPassed: boolean;
 }
+
+const SAMPLE_KEYS = new Set<keyof AskPlutoBenchmarkSample>([
+  'mode',
+  'policy',
+  'retrievalMs',
+  'queueMs',
+  'firstTokenMs',
+  'generationMs',
+  'totalMs',
+  'promptChars',
+  'evidenceChars',
+  'sourceCount',
+  'coldStart',
+  'qualityPassed',
+]);
+
+export const validateAskPlutoBenchmarkSample = (
+  value: unknown,
+): value is AskPlutoBenchmarkSample => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => !SAMPLE_KEYS.has(key as never))) {
+    return false;
+  }
+  return (
+    (record.mode === 'fast' || record.mode === 'deep') &&
+    (record.policy === 'notes_only' ||
+      record.policy === 'transcript_exact' ||
+      record.policy === 'transcript_fallback') &&
+    [
+      'retrievalMs',
+      'queueMs',
+      'firstTokenMs',
+      'generationMs',
+      'totalMs',
+      'promptChars',
+      'evidenceChars',
+      'sourceCount',
+    ].every(
+      (key) =>
+        typeof record[key] === 'number' &&
+        Number.isFinite(record[key]) &&
+        Number(record[key]) >= 0,
+    ) &&
+    typeof record.coldStart === 'boolean' &&
+    typeof record.qualityPassed === 'boolean'
+  );
+};
 
 export const ASK_PLUTO_FIRST_TOKEN_TARGET_MS = {
   fast: 5000,

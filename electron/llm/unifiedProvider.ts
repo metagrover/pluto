@@ -472,16 +472,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   name: string;
   requiresApiKey: boolean;
 
+  private providerType: ProviderType;
+  private settings: LLMSettings;
   private openAIBaseUrl = 'https://api.openai.com/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
   private activeOllamaModel: string | null = null;
 
-  constructor(
-    private providerType: ProviderType,
-    private settings: LLMSettings,
-  ) {
+  constructor(providerType: ProviderType, settings: LLMSettings) {
+    this.providerType = providerType;
+    this.settings = settings;
     this.name = this.getProviderName(providerType);
     this.requiresApiKey = providerType !== 'ollama';
   }
