@@ -17,6 +17,10 @@ import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import { generateMeetingNotes } from './meetingNotesPipeline';
+import type {
+  NotesStageObserver,
+  NotesStageOutcome,
+} from './meetingNotesRunMetrics';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
@@ -365,6 +369,7 @@ export const collapseOversizedTopics = (
 // generation at the provider boundary so request timeouts measure model work,
 // not time spent waiting behind another analysis or knowledge request.
 const runWithOllamaGenerationGate = createSerializedTaskGate<symbol, string>();
+let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
 
 type LLMTask =
@@ -466,6 +471,11 @@ interface TextGenerationOptions {
   notesBudget?: { contextTokens: number; outputTokens: number };
   notesModel?: string;
   notesResponseSchema?: Record<string, unknown>;
+  notesStageObserver?: NotesStageObserver;
+  onNotesMetrics?: (metrics: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+  }) => void;
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
@@ -526,6 +536,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: NotesStageObserver;
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
@@ -566,6 +577,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             contextTokens: request.contextTokens,
             outputTokens: request.outputTokens,
           },
+          notesStageObserver: options.onStageEvent,
           notesModel: model,
         });
         return wire.decode(raw);
@@ -872,6 +884,51 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   private async generateText(options: TextGenerationOptions): Promise<string> {
     const queuedAt = Date.now();
+    const notesStageObserver = options.notesBudget
+      ? options.notesStageObserver
+      : undefined;
+    const notesStageSequence = notesStageObserver
+      ? nextNotesStageSequence++
+      : null;
+    let notesStageStartedAt: number | null = null;
+    let notesStageFinished = false;
+    let terminalNotesMetrics = {
+      inputTokens: null as number | null,
+      outputTokens: null as number | null,
+    };
+    const observeNotesStarted = () => {
+      if (!notesStageObserver || notesStageSequence === null) return;
+      notesStageStartedAt ??= Date.now();
+      notesStageObserver({
+        phase: 'started',
+        sequence: notesStageSequence,
+        atMs: notesStageStartedAt,
+      });
+    };
+    const observeNotesFinished = (outcome: NotesStageOutcome) => {
+      if (
+        !notesStageObserver ||
+        notesStageSequence === null ||
+        notesStageFinished
+      )
+        return;
+      notesStageFinished = true;
+      notesStageObserver({
+        phase: 'finished',
+        sequence: notesStageSequence,
+        atMs: Date.now(),
+        outcome,
+        ...terminalNotesMetrics,
+      });
+    };
+    if (notesStageObserver && notesStageSequence !== null) {
+      notesStageObserver({
+        phase: 'queued',
+        sequence: notesStageSequence,
+        task: options.task as import('./meetingNotesTypes').NotesTask,
+        atMs: queuedAt,
+      });
+    }
     if (options.notesBudget) {
       calculateNotesRequestBudget({
         prompt: options.prompt,
@@ -888,14 +945,17 @@ export class UnifiedLLMProvider implements LLMProvider {
       let result: string;
       switch (this.providerType) {
         case 'openai':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithOpenAI(options);
           break;
         case 'claude':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithClaude(options);
           break;
         case 'gemini':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithGemini(options);
           break;
@@ -911,9 +971,14 @@ export class UnifiedLLMProvider implements LLMProvider {
                     waitMs: Date.now() - queuedAt,
                   }),
                 );
+              observeNotesStarted();
               options.onStart?.();
               return this.generateWithOllama({
                 ...options,
+                onNotesMetrics: (metrics) => {
+                  terminalNotesMetrics = metrics;
+                  options.onNotesMetrics?.(metrics);
+                },
                 signal: options.signal
                   ? AbortSignal.any([options.signal, gateSignal])
                   : gateSignal,
@@ -944,7 +1009,20 @@ export class UnifiedLLMProvider implements LLMProvider {
           throw new Error(`Unsupported provider: ${this.providerType}`);
       }
       options.signal?.throwIfAborted();
+      observeNotesFinished('complete');
       return result;
+    } catch (error) {
+      observeNotesFinished(
+        isSerializedTaskPreemption(error)
+          ? 'preempted'
+          : error instanceof MeetingNotesError &&
+              error.code === 'notes_output_truncated'
+            ? 'truncated'
+            : isAbortError(error)
+              ? 'cancelled'
+              : 'failed',
+      );
+      throw error;
     } finally {
       if (!isBackground) {
         knowledgeSynthesisPause.release('llm_active');
@@ -1146,6 +1224,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesBudget,
     notesResponseSchema,
     notesModel,
+    onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
     const model =
       notesBudget && notesModel
@@ -1268,11 +1347,16 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
           if (notesBudget && packet.done) {
             completed = true;
+            const notesMetrics = readNotesMetrics(packet);
+            onNotesMetrics?.({
+              inputTokens: notesMetrics.inputTokens,
+              outputTokens: notesMetrics.outputTokens,
+            });
             console.log(
               '[Notes metrics]',
               JSON.stringify({
                 task,
-                ...readNotesMetrics(packet),
+                ...notesMetrics,
                 elapsedMs: Date.now() - start,
               }),
             );

@@ -138,6 +138,7 @@ export interface LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
     },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */

@@ -308,6 +308,29 @@ it('resumes a preempted writer without repairing it or rerunning a completed wri
   expect(generate).toHaveBeenCalledTimes(3);
 });
 
+it('routes one privacy-safe stage observer through every notes transport attempt', async () => {
+  const f = makeDirectNotesFixture();
+  const p = new UnifiedLLMProvider('ollama', {});
+  const observer = vi.fn();
+  const generate = vi
+    .spyOn(p as never, 'generateText')
+    .mockResolvedValueOnce(JSON.stringify(f.draft))
+    .mockResolvedValueOnce(JSON.stringify(f.audit));
+
+  await p.generateStructuredAnalysis('', '', 'auto', {
+    source: f.source,
+    onStageEvent: observer,
+  });
+
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(
+    generate.mock.calls.map(
+      ([options]) =>
+        (options as { notesStageObserver?: unknown }).notesStageObserver,
+    ),
+  ).toEqual([observer, observer]);
+});
+
 it('preserves configured model, thinking, seed and request budgets on actual transport', async () => {
   const f = makeDirectNotesFixture();
   const outputs = [f.draft, f.audit];

@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 const gemini = vi.hoisted(() => ({ model: vi.fn(), generate: vi.fn() }));
 vi.mock('@google/generative-ai', () => ({
@@ -162,6 +163,7 @@ type Transport = {
     jsonMode: boolean;
     notesBudget: { contextTokens: number; outputTokens: number };
     signal?: AbortSignal;
+    notesStageObserver?: (event: NotesStageEvent) => void;
   }): Promise<string>;
 };
 const request = {
@@ -254,4 +256,79 @@ it('reads the final Ollama metrics-only packet and rejects a truncated stream', 
   await expect(provider.generateText(request)).rejects.toThrow(
     'notes_output_truncated',
   );
+});
+
+it('reports Ollama queue, active time, and terminal token metrics without raw packets', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      text: async () =>
+        [
+          JSON.stringify({ message: { content: '{}' } }),
+          JSON.stringify({
+            done: true,
+            done_reason: 'stop',
+            prompt_eval_count: 321,
+            eval_count: 45,
+            prompt_eval_duration: 20_000_000,
+            eval_duration: 30_000_000,
+          }),
+        ].join('\n'),
+    })),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'qwen3.5:9b',
+  }) as unknown as Transport;
+  const events: NotesStageEvent[] = [];
+
+  await expect(
+    provider.generateText({
+      ...request,
+      notesStageObserver: (event) => events.push(event),
+    }),
+  ).resolves.toBe('{}');
+
+  expect(events.map((event) => event.phase)).toEqual([
+    'queued',
+    'started',
+    'finished',
+  ]);
+  expect(events[2]).toMatchObject({
+    outcome: 'complete',
+    inputTokens: 321,
+    outputTokens: 45,
+  });
+  expect(JSON.stringify(events)).not.toContain('{}');
+});
+
+it('reports cloud truncation exactly once with null token counts', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{}' }, finish_reason: 'length' }],
+      }),
+    })),
+  );
+  const provider = new UnifiedLLMProvider('openai', {
+    openai_api_key: 'test',
+  }) as unknown as Transport;
+  const events: NotesStageEvent[] = [];
+
+  await expect(
+    provider.generateText({
+      ...request,
+      notesStageObserver: (event) => events.push(event),
+    }),
+  ).rejects.toThrow('notes_output_truncated');
+
+  expect(events.filter((event) => event.phase === 'finished')).toEqual([
+    expect.objectContaining({
+      outcome: 'truncated',
+      inputTokens: null,
+      outputTokens: null,
+    }),
+  ]);
 });
