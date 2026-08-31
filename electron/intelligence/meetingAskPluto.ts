@@ -514,6 +514,63 @@ export const buildLiveMeetingFallbackResponse = ({
       'Returned the frozen live meeting snapshot as a fallback after model generation failed.',
   });
 
+const PREPARED_DECISION_QUERY =
+  /\b(?:decid(?:e|ed|ing)|decisions?|agreed?|agreements?)\b/i;
+const PREPARED_ACTION_QUERY =
+  /\b(?:action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible))\b/i;
+const PREPARED_SUMMARY_QUERY =
+  /\b(?:summari[sz]e|summary|recaps?|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+
+export const buildPreparedMeetingAskPlutoResponse = (
+  query: string,
+  context: MeetingAskPlutoContext,
+): MeetingAskPlutoResponse | null => {
+  if (context.scope.type !== 'meeting') return null;
+  const kind = PREPARED_DECISION_QUERY.test(query)
+    ? 'decision'
+    : PREPARED_ACTION_QUERY.test(query)
+      ? 'action_item'
+      : PREPARED_SUMMARY_QUERY.test(query)
+        ? 'note'
+        : null;
+  if (!kind) return null;
+
+  const selected = context.evidenceItems
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.kind === kind)
+    .slice(0, kind === 'note' ? 1 : 4);
+  if (selected.length === 0) return null;
+
+  const citations: MeetingAskPlutoCitation[] = selected.map(
+    ({ item }, citationIndex) => ({
+      id: `citation-${citationIndex + 1}`,
+      claim: item.text,
+      meeting_id: item.meetingId,
+      meeting_title: context.scope.title || 'Untitled Session',
+      evidence_span: item.text,
+      evidence_valid: true,
+      trust_status: context.trustStatus,
+    }),
+  );
+  const answer = selected.map(({ item }) => item.text).join('\n');
+
+  return {
+    status: 'answered',
+    answer,
+    scope: context.scope,
+    trustStatus: context.trustStatus,
+    claims: [
+      {
+        text: answer,
+        trustStatus: context.trustStatus,
+        citationIds: citations.map((citation) => citation.id),
+      },
+    ],
+    citations,
+    rationale: 'Returned existing structured meeting-note evidence directly.',
+  };
+};
+
 export const buildMeetingAskPlutoPrompt = ({
   query,
   context,

@@ -360,6 +360,48 @@ describe('Query Engine', () => {
         'Recording review: The team found a twenty-second recording gap and assigned an audio capture investigation. [Source 1]',
       );
     });
+
+    it('returns prepared decisions without model synthesis', () => {
+      expect(
+        buildExtractiveTemporalSummary('What did we decide?', [
+          {
+            meeting_id: 'current',
+            meeting_title: 'Architecture review',
+            mid: null,
+            evidence_text:
+              '[Current meeting]: Architecture review\n[Decisions]: Use SQLite for local storage.',
+            score: 1,
+            score_breakdown: {
+              fts_rank: 0,
+              graph_proximity: 0,
+              recency_decay: 1,
+              mention_weight: 0,
+            },
+          },
+        ]),
+      ).toBe('Architecture review: Use SQLite for local storage. [Source 1]');
+    });
+
+    it('returns prepared action items without model synthesis', () => {
+      expect(
+        buildExtractiveTemporalSummary('What are the next steps?', [
+          {
+            meeting_id: 'current',
+            meeting_title: 'Launch review',
+            mid: null,
+            evidence_text:
+              '[Current meeting]: Launch review\n[Action items]: Sam will send the customer update.',
+            score: 1,
+            score_breakdown: {
+              fts_rank: 0,
+              graph_proximity: 0,
+              recency_decay: 1,
+              mention_weight: 0,
+            },
+          },
+        ]),
+      ).toBe('Launch review: Sam will send the customer update. [Source 1]');
+    });
   });
 
   describe('explicit meeting scope', () => {

@@ -367,6 +367,7 @@ import {
   buildMeetingAskPlutoPrompt,
   buildMeetingAskPlutoProviderUnavailableResponse,
   buildMeetingAskPlutoResponseFromAnswer,
+  buildPreparedMeetingAskPlutoResponse,
   buildUnavailableMeetingAskPlutoResponse,
   normalizeMeetingAskPlutoTurns,
 } from './intelligence/meetingAskPluto';
@@ -4308,6 +4309,20 @@ app.whenReady().then(async () => {
             },
             query,
           );
+        }
+
+        const preparedResponse = buildPreparedMeetingAskPlutoResponse(
+          query,
+          context,
+        );
+        if (preparedResponse) {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('intelligence:meeting-chat:delta', {
+              requestId,
+              delta: preparedResponse.answer,
+            });
+          }
+          return preparedResponse;
         }
 
         const settings = await getAllSettings(db);

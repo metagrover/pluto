@@ -8,6 +8,7 @@ import {
   buildMeetingAskPlutoPrompt,
   buildMeetingAskPlutoProviderUnavailableResponse,
   buildMeetingAskPlutoResponseFromAnswer,
+  buildPreparedMeetingAskPlutoResponse,
   buildUnavailableMeetingAskPlutoResponse,
   normalizeMeetingAskPlutoTurns,
 } from '../../electron/intelligence/meetingAskPluto';
@@ -236,6 +237,32 @@ describe('meeting-scoped Ask Pluto context', () => {
       transcriptItems.some((item) => item.text.includes('segment 1')),
     ).toBe(false);
     expect(context.statusNote).toContain('exact-wording request');
+  });
+
+  it('returns structured decisions directly with valid evidence', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What did we decide?',
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildPreparedMeetingAskPlutoResponse(
+      'What did we decide?',
+      context,
+    );
+
+    expect(response).toMatchObject({
+      status: 'answered',
+      answer: 'Use GraphQL for the new API layer.',
+      trustStatus: 'grounded',
+      citations: [
+        expect.objectContaining({
+          evidence_valid: true,
+          trust_status: 'grounded',
+        }),
+      ],
+    });
   });
 
   it('returns an honest unavailable packet when the meeting has no usable evidence', () => {

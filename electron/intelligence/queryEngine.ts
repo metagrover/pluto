@@ -362,6 +362,10 @@ export const mergeRetrievalResultsByMeeting = (
 
 const EXTRACTIVE_TEMPORAL_SUMMARY_QUERY =
   /\b(?:summari[sz]e|summary|recaps?|analy[sz]e|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+const EXTRACTIVE_DECISION_QUERY =
+  /\b(?:decid(?:e|ed|ing)|decisions?|agreed?|agreements?)\b/i;
+const EXTRACTIVE_ACTION_QUERY =
+  /\b(?:action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible))\b/i;
 const CONTEXTLESS_SUMMARY_TEXT =
   /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
 const GENERIC_MEETING_TITLE =
@@ -451,19 +455,41 @@ const extractPreparedAnalysis = (evidence: string): string | null => {
     .replace(/[,;:]$/, '.');
 };
 
+const extractPreparedField = (
+  evidence: string,
+  label: 'Decisions' | 'Action items',
+): string | null => {
+  const match = evidence.match(
+    new RegExp(`\\[${label}\\]:\\s*([\\s\\S]*?)(?=\\n\\[[^\\]]+\\]:|$)`, 'i'),
+  );
+  const normalized = match?.[1]?.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+};
+
 export const buildExtractiveTemporalSummary = (
   query: string,
   context: RetrievalResult[],
 ): string | null => {
-  if (!EXTRACTIVE_TEMPORAL_SUMMARY_QUERY.test(query) || context.length < 1) {
+  const field = EXTRACTIVE_DECISION_QUERY.test(query)
+    ? 'Decisions'
+    : EXTRACTIVE_ACTION_QUERY.test(query)
+      ? 'Action items'
+      : null;
+  if (
+    !field &&
+    (!EXTRACTIVE_TEMPORAL_SUMMARY_QUERY.test(query) || context.length < 1)
+  ) {
     return null;
   }
   const claims = context.flatMap((source, index) => {
     const title = (source.meeting_title || source.mid?.title || '').trim();
     if (!title || GENERIC_MEETING_TITLE.test(title)) return [];
-    const analysis = extractPreparedAnalysis(source.evidence_text);
-    if (!analysis) return [];
-    return [`${title}: ${analysis} [Source ${index + 1}]`];
+    const prepared = field
+      ? extractPreparedField(source.evidence_text, field)
+      : extractPreparedAnalysis(source.evidence_text);
+    if (!prepared) return [];
+    return [`${title}: ${prepared} [Source ${index + 1}]`];
   });
   return claims.length > 0 ? claims.slice(0, 2).join('\n\n') : null;
 };
