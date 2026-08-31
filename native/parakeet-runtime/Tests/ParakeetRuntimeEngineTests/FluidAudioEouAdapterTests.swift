@@ -4,11 +4,17 @@ import ParakeetRuntimeCore
 @testable import ParakeetRuntimeEngine
 import XCTest
 
+private enum FakeFluidEouCallback {
+    case partial(String)
+    case eou(String)
+}
+
 private actor FakeFluidEouBackend: FluidAudioEouBackend {
     private var partial: (@Sendable (String) -> Void)?
     private var eou: (@Sendable (String) -> Void)?
-    private var partialTranscripts: [String]
-    private let emitsEou: Bool
+    private var callbackBatches: [[FakeFluidEouCallback]]
+    private var rawTokenBatches: [[String]]
+    private var currentRawTokens: [String] = []
     private(set) var observedFormat: (Double, AVAudioChannelCount, AVAudioFrameCount)?
     private(set) var cleanedUp = false
 
@@ -16,8 +22,20 @@ private actor FakeFluidEouBackend: FluidAudioEouBackend {
         partialTranscripts: [String] = ["hello"],
         emitsEou: Bool = true
     ) {
-        self.partialTranscripts = partialTranscripts
-        self.emitsEou = emitsEou
+        callbackBatches = partialTranscripts.map { transcript in
+            emitsEou ? [.partial(transcript), .eou(transcript)] : [.partial(transcript)]
+        }
+        rawTokenBatches = partialTranscripts.map { transcript in
+            transcript.split(separator: " ").map { "▁\($0)" }
+        }
+    }
+
+    init(
+        callbackBatches: [[FakeFluidEouCallback]],
+        rawTokenBatches: [[String]]
+    ) {
+        self.callbackBatches = callbackBatches
+        self.rawTokenBatches = rawTokenBatches
     }
 
     func setPartialCallback(_ callback: @escaping @Sendable (String) -> Void) {
@@ -34,17 +52,24 @@ private actor FakeFluidEouBackend: FluidAudioEouBackend {
             audioBuffer.format.channelCount,
             audioBuffer.frameLength
         )
-        let transcript = partialTranscripts.isEmpty
-            ? "hello"
-            : partialTranscripts.removeFirst()
-        partial?(transcript)
-        if emitsEou { eou?(transcript) }
+        if !rawTokenBatches.isEmpty {
+            currentRawTokens = rawTokenBatches.removeFirst()
+        }
+        let callbacks = callbackBatches.isEmpty ? [] : callbackBatches.removeFirst()
+        for callback in callbacks {
+            switch callback {
+            case .partial(let transcript): partial?(transcript)
+            case .eou(let transcript): eou?(transcript)
+            }
+        }
         return ""
     }
 
     func finish() async throws -> String { "hello final" }
-    func getTokenTimestampsMs() async -> [Int] { [100] }
-    func getRawTokenStrings() async -> [String] { ["hello"] }
+    func getTokenTimestampsMs() async -> [Int] {
+        currentRawTokens.indices.map { 100 + $0 * 100 }
+    }
+    func getRawTokenStrings() async -> [String] { currentRawTokens }
     func getEouTimestampsMs() async -> [Int] { [320] }
     func cleanup() async { cleanedUp = true }
 }
@@ -66,7 +91,7 @@ final class FluidAudioEouAdapterTests: XCTestCase {
         let snapshots = try await manager.append(frame)
 
         XCTAssertEqual(snapshots.map(\.kind), [.partial, .eou])
-        XCTAssertEqual(snapshots.last?.tokens.first?.text, "hello")
+        XCTAssertEqual(snapshots.last?.tokens.first?.text, "▁hello")
         let observed = await backend.observedFormat
         XCTAssertEqual(observed?.0, 48_000)
         XCTAssertEqual(observed?.1, 1)
@@ -85,7 +110,7 @@ final class FluidAudioEouAdapterTests: XCTestCase {
         XCTAssertTrue(cleanedUp)
     }
 
-    func testBoundsAProvisionalRunWhenTheModelDoesNotEmitEou() async throws {
+    func testBoundsAProvisionalRunAtTheLastCompletedWord() async throws {
         let backend = FakeFluidEouBackend(
             partialTranscripts: ["one", "one two", "one two three", "one two three four"],
             emitsEou: false
@@ -113,9 +138,133 @@ final class FluidAudioEouAdapterTests: XCTestCase {
 
         XCTAssertEqual(first.map(\.kind), [.partial])
         XCTAssertEqual(second.map(\.kind), [.partial])
-        XCTAssertEqual(bounded.map(\.kind), [.eou])
+        XCTAssertEqual(bounded.map(\.kind), [.eou, .partial])
+        XCTAssertEqual(bounded.first?.transcript, "one two")
+        XCTAssertEqual(bounded.first?.tokens.map(\.text), ["▁one", "▁two"])
         XCTAssertEqual(bounded.last?.transcript, "one two three")
         XCTAssertEqual(next.map(\.kind), [.partial])
         XCTAssertEqual(next.last?.transcript, "one two three four")
+    }
+
+    func testBoundsPendingSpeechWhileLaterFramesHaveNoCallbacks() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: [[.partial("one two")], [], []],
+            rawTokenBatches: [["▁one", "▁two"]]
+        )
+        let manager = await FluidAudioEouManager(backend: backend, maxPendingSeconds: 0.5)
+
+        _ = try await manager.append(frame(start: 0))
+        _ = try await manager.append(frame(start: 0.32))
+        let bounded = try await manager.append(frame(start: 0.64))
+
+        XCTAssertEqual(bounded.map(\.kind), [.eou, .partial])
+        XCTAssertEqual(bounded.first?.transcript, "one")
+        XCTAssertEqual(bounded.last?.transcript, "one two")
+    }
+
+    func testTrailingPartialAfterEouStartsANewPendingRun() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: [
+                [.eou("hello"), .partial("hello again")],
+                [],
+                [.partial("hello again now")],
+            ],
+            rawTokenBatches: [
+                ["▁hello", "▁again"],
+                ["▁hello", "▁again"],
+                ["▁hello", "▁again", "▁now"],
+            ]
+        )
+        let manager = await FluidAudioEouManager(backend: backend, maxPendingSeconds: 0.5)
+
+        let initial = try await manager.append(frame(start: 0))
+        _ = try await manager.append(frame(start: 0.32))
+        let bounded = try await manager.append(frame(start: 0.64))
+
+        XCTAssertEqual(initial.map(\.kind), [.eou, .partial])
+        XCTAssertEqual(initial.first?.tokens.map(\.text), ["▁hello"])
+        XCTAssertEqual(bounded.map(\.kind), [.eou, .partial])
+        XCTAssertEqual(bounded.first?.transcript, "hello again")
+        XCTAssertEqual(bounded.last?.transcript, "hello again now")
+    }
+
+    func testWordSafeCheckpointSurvivesSubwordContinuationThroughSession() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: [
+                [.partial("meet")],
+                [.partial("meeting")],
+                [.partial("meeting now")],
+                [.partial("meeting now works")],
+            ],
+            rawTokenBatches: [
+                ["▁meet"],
+                ["▁meet", "ing"],
+                ["▁meet", "ing", "▁now"],
+                ["▁meet", "ing", "▁now", "▁works"],
+            ]
+        )
+        let manager = await FluidAudioEouManager(backend: backend, maxPendingSeconds: 0.5)
+        let session = ParakeetEouSession(
+            driver: SingleEouManagerDriver(manager: manager),
+            activeModelURL: URL(fileURLWithPath: "/models")
+        )
+        try await session.open(streamId: "meeting.mic", source: .mic, generation: 1)
+
+        _ = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 1,
+            frame: frame(start: 0)
+        )
+        _ = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 2,
+            frame: frame(start: 0.32)
+        )
+        let checkpoint = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 3,
+            frame: frame(start: 0.64)
+        )
+        let continued = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 4,
+            frame: frame(start: 0.96)
+        )
+
+        XCTAssertEqual(checkpoint.compactMap(\.eouUpdate).last?.committedText, "meeting")
+        XCTAssertEqual(checkpoint.compactMap(\.eouUpdate).last?.tentativeText, "now")
+        XCTAssertEqual(continued.compactMap(\.eouUpdate).last?.committedText, "meeting")
+        XCTAssertEqual(continued.compactMap(\.eouUpdate).last?.tentativeText, "now works")
+    }
+
+    private func frame(start: Double) throws -> EouPcmFrame {
+        let samples = [Float](repeating: 0.25, count: 15_360)
+        return try EouPcmFrame(
+            sampleRate: 48_000,
+            channelCount: 1,
+            frameCount: samples.count,
+            audioStartSeconds: start,
+            audioEndSeconds: start + 0.32,
+            pcmData: samples.withUnsafeBytes { Data($0) }
+        )
+    }
+}
+
+private actor SingleEouManagerDriver: ParakeetEouDriving {
+    private var manager: (any ParakeetEouManaging)?
+
+    init(manager: any ParakeetEouManaging) {
+        self.manager = manager
+    }
+
+    func makeManager(request: ParakeetEouManagerRequest) async throws
+        -> any ParakeetEouManaging
+    {
+        guard let manager else { throw EouSessionFailure.modelUnavailable }
+        self.manager = nil
+        return manager
+    }
+}
+
+private extension RuntimeEvent {
+    var eouUpdate: EouUpdate? {
+        guard case .eouUpdate(let update) = self else { return nil }
+        return update
     }
 }
