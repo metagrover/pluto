@@ -4,10 +4,7 @@ import {
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../src/utils/ollamaModels';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
-import {
-  createSerializedTaskGate,
-  isSerializedTaskPreemption,
-} from '../serializedTaskGate';
+import { isSerializedTaskPreemption } from '../serializedTaskGate';
 import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
@@ -15,6 +12,10 @@ import {
 } from './analysisDocument';
 import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
+import {
+  type LocalInferenceTask,
+  runWithLocalInferenceCoordinator,
+} from './inferenceCoordinator';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import { generateMeetingNotes } from './meetingNotesPipeline';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
@@ -361,47 +362,13 @@ export const collapseOversizedTopics = (
     });
 };
 
-// The default local Ollama runtime has one generation slot. Queue every
-// generation at the provider boundary so request timeouts measure model work,
-// not time spent waiting behind another analysis or knowledge request.
-const runWithOllamaGenerationGate = createSerializedTaskGate<symbol, string>();
 let electronActiveOllamaModel: string | null = null;
 
-type LLMTask =
-  | 'summary'
-  | 'summaryRepair'
-  | 'structuredAnalysis'
-  | 'notesWriter'
-  | 'notesAudit'
-  | 'notesMerge'
-  | 'analysisEditorial'
-  | 'topicSegmentation'
-  | 'terminologyReconciliation'
-  | 'topicAnalysis'
-  | 'speaker'
-  | 'title'
-  | 'entities'
-  | 'valueSignals'
-  | 'knowledgeDoc'
-  | 'projectScopeReview'
-  | 'commitmentReconciliation'
-  | 'askPluto'
-  | 'askPlutoDeep'
-  | 'askPlutoLive'
-  | 'queryClassification';
+type LLMTask = LocalInferenceTask;
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
-
-const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
-  task === 'notesWriter' ||
-  task === 'notesAudit' ||
-  task === 'notesMerge' ||
-  task === 'topicSegmentation' ||
-  task === 'terminologyReconciliation' ||
-  task === 'topicAnalysis' ||
-  task === 'analysisEditorial';
 
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
@@ -472,16 +439,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   name: string;
   requiresApiKey: boolean;
 
+  private providerType: ProviderType;
+  private settings: LLMSettings;
   private openAIBaseUrl = 'https://api.openai.com/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
   private activeOllamaModel: string | null = null;
 
-  constructor(
-    private providerType: ProviderType,
-    private settings: LLMSettings,
-  ) {
+  constructor(providerType: ProviderType, settings: LLMSettings) {
+    this.providerType = providerType;
+    this.settings = settings;
     this.name = this.getProviderName(providerType);
     this.requiresApiKey = providerType !== 'ollama';
   }
@@ -871,7 +839,6 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async generateText(options: TextGenerationOptions): Promise<string> {
-    const queuedAt = Date.now();
     if (options.notesBudget) {
       calculateNotesRequestBudget({
         prompt: options.prompt,
@@ -900,17 +867,29 @@ export class UnifiedLLMProvider implements LLMProvider {
           result = await this.generateWithGemini(options);
           break;
         case 'ollama':
-          result = await runWithOllamaGenerationGate(
-            Symbol(options.task),
-            async (gateSignal) => {
-              if (options.notesBudget)
+          result = await runWithLocalInferenceCoordinator({
+            key: Symbol(options.task),
+            task: options.task,
+            signal: options.signal,
+            onAdmitted: ({ task, queueMs }) => {
+              if (options.notesBudget) {
                 console.log(
                   '[Notes gate]',
-                  JSON.stringify({
-                    task: options.task,
-                    waitMs: Date.now() - queuedAt,
-                  }),
+                  JSON.stringify({ task, waitMs: queueMs }),
                 );
+              }
+              if (
+                task === 'askPluto' ||
+                task === 'askPlutoDeep' ||
+                task === 'askPlutoLive'
+              ) {
+                console.info(
+                  '[Inference admission]',
+                  JSON.stringify({ task, queueMs }),
+                );
+              }
+            },
+            run: async (gateSignal) => {
               options.onStart?.();
               return this.generateWithOllama({
                 ...options,
@@ -919,26 +898,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                   : gateSignal,
               });
             },
-            options.task === 'knowledgeDoc' ||
-              options.task === 'commitmentReconciliation'
-              ? 0
-              : options.task === 'projectScopeReview'
-                ? 15
-                : options.task === 'askPluto' ||
-                    options.task === 'askPlutoDeep' ||
-                    options.task === 'askPlutoLive'
-                  ? 20
-                  : 10,
-            {
-              signal: options.signal,
-              preemptible:
-                options.task === 'knowledgeDoc' ||
-                options.task === 'projectScopeReview' ||
-                options.task === 'commitmentReconciliation' ||
-                options.task === 'title' ||
-                isResumableMeetingAnalysisTask(options.task),
-            },
-          );
+          });
           break;
         default:
           throw new Error(`Unsupported provider: ${this.providerType}`);
@@ -1420,7 +1380,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (task === 'askPluto' || task === 'queryClassification') {
+    if (task === 'askPlutoLive' || task === 'queryClassification') {
       return (
         (this.settings.ollama_fast_model || '').trim() ||
         OLLAMA_QUICK_CHAT_MODEL

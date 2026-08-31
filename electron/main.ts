@@ -185,6 +185,13 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
+
+export const focusPrimaryWindow = (): void => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+};
 const postMeetingBackgroundActivity = createPostMeetingBackgroundActivity(
   (allowed) => {
     if (win && !win.isDestroyed()) {
@@ -367,6 +374,7 @@ import {
   buildMeetingAskPlutoPrompt,
   buildMeetingAskPlutoProviderUnavailableResponse,
   buildMeetingAskPlutoResponseFromAnswer,
+  buildPreparedMeetingAskPlutoResponse,
   buildUnavailableMeetingAskPlutoResponse,
   normalizeMeetingAskPlutoTurns,
 } from './intelligence/meetingAskPluto';
@@ -4286,6 +4294,7 @@ app.whenReady().then(async () => {
                 });
                 return buildMeetingAskPlutoContext({
                   meeting,
+                  query,
                   entities,
                   attentionItems,
                 });
@@ -4307,6 +4316,20 @@ app.whenReady().then(async () => {
             },
             query,
           );
+        }
+
+        const preparedResponse = buildPreparedMeetingAskPlutoResponse(
+          query,
+          context,
+        );
+        if (preparedResponse) {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('intelligence:meeting-chat:delta', {
+              requestId,
+              delta: preparedResponse.answer,
+            });
+          }
+          return preparedResponse;
         }
 
         const settings = await getAllSettings(db);

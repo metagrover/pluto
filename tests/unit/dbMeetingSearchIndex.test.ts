@@ -12,10 +12,13 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  deleteMeeting,
   getMeetingFtsIntegrity,
+  getMeetingNotesFtsIntegrity,
   getTemporalMeetings,
   repairMeetingFtsIndex,
   saveMeeting,
+  searchMeetingNotesFts,
   searchMeetingsFts,
 } from '../../electron/db';
 
@@ -53,6 +56,83 @@ describe('meeting search index integrity', () => {
       distinctMeetingCount: 2,
       duplicateRowCount: 0,
     });
+  });
+
+  it('indexes effective meeting notes without transcript-only terms', () => {
+    saveMeeting({
+      id: 'notes-only-1',
+      title: 'Launch review',
+      transcript_json: JSON.stringify({
+        segments: [{ text: 'Cobalt transcript-only phrase.' }],
+      }),
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The Orchid launch is planned for Thursday.',
+        topics: [],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'team_sync',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    });
+
+    expect(searchMeetingNotesFts('"Orchid"')).toHaveLength(1);
+    expect(searchMeetingNotesFts('"Cobalt"')).toHaveLength(0);
+  });
+
+  it('refreshes the notes index from user edit overlays', () => {
+    const analysisJson = JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'The Orchid launch is planned for Thursday.',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [],
+      meeting_type: 'team_sync',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    });
+    saveMeeting({
+      id: 'notes-only-1',
+      title: 'Launch review',
+      analysis_json: analysisJson,
+      user_edits_json: JSON.stringify({
+        overview: {
+          original: 'The Orchid launch is planned for Thursday.',
+          edited: 'The Marigold launch is planned for Friday.',
+          edited_at: '2026-08-31T00:00:00.000Z',
+        },
+      }),
+    });
+
+    expect(searchMeetingNotesFts('"Orchid"')).toHaveLength(0);
+    expect(searchMeetingNotesFts('"Marigold"')).toHaveLength(1);
+    expect(getMeetingNotesFtsIntegrity()).toEqual(
+      expect.objectContaining({ duplicateRowCount: 0 }),
+    );
+  });
+
+  it('removes derived notes search evidence when its meeting is deleted', () => {
+    saveMeeting({
+      id: 'notes-delete-1',
+      title: 'Deletion review',
+      enhanced_notes: 'Marzipan deletion marker.',
+    });
+    expect(searchMeetingNotesFts('"Marzipan"')).toHaveLength(1);
+    const beforeDelete = getMeetingNotesFtsIntegrity().rowCount;
+
+    deleteMeeting('notes-delete-1');
+
+    expect(searchMeetingNotesFts('"Marzipan"')).toHaveLength(0);
+    expect(getMeetingNotesFtsIntegrity().rowCount).toBe(beforeDelete - 1);
   });
 
   it('uses a half-open temporal range and returns complete meeting rows', () => {
