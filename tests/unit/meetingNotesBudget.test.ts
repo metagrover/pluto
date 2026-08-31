@@ -206,3 +206,17 @@ it('bisects one source span without splitting a Unicode surrogate pair', () => {
   ).toBe(text);
   expect(halves!.flat().map((span) => span.end)).not.toContain(3);
 });
+
+it('prefers a whitespace boundary when bisecting one oversized source span', () => {
+  const text = 'alpha bravo charlie';
+  const source = createNotesSource(JSON.stringify({ segments: [{ text }] }));
+
+  expect(
+    bisectNotesSourceSpans(source, [
+      { segment: 0, start: 0, end: text.length },
+    ]),
+  ).toEqual([
+    [{ segment: 0, start: 0, end: 6 }],
+    [{ segment: 0, start: 6, end: text.length }],
+  ]);
+});

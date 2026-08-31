@@ -60,6 +60,8 @@ const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
     ? WRITER_OUTPUT_TOKENS
     : AUDIT_OUTPUT_TOKENS;
 const SAFETY_TOKENS = 512;
+const NOTES_COMPACT_RETRY_INSTRUCTION =
+  'COMPACT RETRY: Return the complete same JSON contract more concisely. Preserve every supported action, decision, condition, owner, due date, disposition, and exact source reference.';
 export const NOTES_HIERARCHY_LIMITS = {
   maxDepth: 8,
   maxNodes: 128,
@@ -157,6 +159,23 @@ const fits = (
 ) =>
   estimateNotesTokens(prompt) + outputTokens + SAFETY_TOKENS <=
   input.contextTokens;
+
+const withTruncationRetry = async <T>(
+  input: GenerateMeetingNotesInput,
+  operation: (retryInstruction?: string) => Promise<T>,
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      !(error instanceof MeetingNotesError) ||
+      error.code !== 'notes_output_truncated'
+    )
+      throw error;
+    assertNotCancelled(input);
+    return operation(NOTES_COMPACT_RETRY_INSTRUCTION);
+  }
+};
 
 const withOneRepair = async <T>(
   input: GenerateMeetingNotesInput,
@@ -390,6 +409,7 @@ const auditDraft = async (
   inherited: NotesItem[] = [],
   idPrefix = 'document',
   fullSource = false,
+  retryInstruction?: string,
 ): Promise<{
   audited: AuditedNotes;
   draft: NotesDraft;
@@ -397,13 +417,16 @@ const auditDraft = async (
   changeCount: number;
 }> => {
   const sourceText = serializeSource(input, evidenceSpans);
-  const auditPrompt = reviewPrompt(input, {
+  const baseAuditPrompt = reviewPrompt(input, {
     sourceText,
     draft,
     userNotes: input.context.userNotes,
     knownTerms,
     ...(inherited.length ? { inherited } : {}),
   });
+  const auditPrompt = retryInstruction
+    ? `${baseAuditPrompt}\n\n${retryInstruction}`
+    : baseAuditPrompt;
   assertFits(input, auditPrompt, reviewOutputTokens(input));
   const result = await withOneRepair(
     input,
@@ -622,17 +645,29 @@ const runHierarchy = async (
     }
     const idPrefix = `leaf${leafSequence++}`;
     const draft = remapDraftIds(
-      await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
+      await withTruncationRetry(input, (retryInstruction) =>
+        writeDraft(
+          input,
+          'notesWriter',
+          retryInstruction
+            ? `${writerPrompt}\n\n${retryInstruction}`
+            : writerPrompt,
+          evidenceSpans,
+        ),
+      ),
       idPrefix,
     );
-    const audited = await auditDraft(
-      input,
-      draft,
-      evidenceSpans,
-      knownTerms,
-      [],
-      idPrefix,
-      leaves.length === 1,
+    const audited = await withTruncationRetry(input, (retryInstruction) =>
+      auditDraft(
+        input,
+        draft,
+        evidenceSpans,
+        knownTerms,
+        [],
+        idPrefix,
+        leaves.length === 1,
+        retryInstruction,
+      ),
     );
     hierarchyIssues.push(...(audited.audited.issues ?? []));
     return {
@@ -650,9 +685,34 @@ const runHierarchy = async (
       depth: 0,
     };
   };
+  const processLeaf = async (
+    primarySpans: SourceSpan[],
+    overlapSpans: SourceSpan[] = [],
+    repartitionDepth = 0,
+  ): Promise<AuditedNode[]> => {
+    try {
+      return [await buildLeafNode(primarySpans, overlapSpans)];
+    } catch (error) {
+      if (
+        !(error instanceof MeetingNotesError) ||
+        error.code !== 'notes_output_truncated'
+      )
+        throw error;
+      assertNotCancelled(input);
+      const split = bisectNotesSourceSpans(input.source, primarySpans);
+      if (!split || repartitionDepth >= NOTES_HIERARCHY_LIMITS.maxDepth)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      input.onRepartition?.();
+      const [leftSpans, rightSpans] = split;
+      return [
+        ...(await processLeaf(leftSpans, [], repartitionDepth + 1)),
+        ...(await processLeaf(rightSpans, [], repartitionDepth + 1)),
+      ];
+    }
+  };
   const nodes: AuditedNode[] = [];
   for (const leaf of leaves) {
-    nodes.push(await buildLeafNode(leaf.primarySpans, leaf.overlapSpans));
+    nodes.push(...(await processLeaf(leaf.primarySpans, leaf.overlapSpans)));
   }
 
   let generatedNodes = nodes.length;
@@ -769,8 +829,8 @@ const runHierarchy = async (
         input.onRepartition?.();
         const [leftSpans, rightSpans] = sourceSplitIndex.split;
         const replacements = [
-          await buildLeafNode(leftSpans),
-          await buildLeafNode(rightSpans),
+          ...(await processLeaf(leftSpans)),
+          ...(await processLeaf(rightSpans)),
         ];
         generatedNodes += replacements.length;
         level.splice(sourceSplitIndex.index, 1, ...replacements);
@@ -803,22 +863,99 @@ const runHierarchy = async (
       knownTerms,
       template: input.context.template,
     });
-    const merged = preserveInheritedIds(
-      remapDraftIds(
-        await writeDraft(input, 'notesMerge', mergePrompt, evidenceSpans),
-        `merge${generatedNodes}`,
-      ),
-      inherited,
-    );
-    const audited = await auditDraft(
-      input,
-      merged,
-      evidenceSpans,
-      knownTerms,
-      inherited,
-      `merge${generatedNodes}`,
-      level.length === 2,
-    );
+    let merged: NotesDraft;
+    let audited: Awaited<ReturnType<typeof auditDraft>>;
+    try {
+      merged = preserveInheritedIds(
+        remapDraftIds(
+          await withTruncationRetry(input, (retryInstruction) =>
+            writeDraft(
+              input,
+              'notesMerge',
+              retryInstruction
+                ? `${mergePrompt}\n\n${retryInstruction}`
+                : mergePrompt,
+              evidenceSpans,
+            ),
+          ),
+          `merge${generatedNodes}`,
+        ),
+        inherited,
+      );
+      audited = await withTruncationRetry(input, (retryInstruction) =>
+        auditDraft(
+          input,
+          merged,
+          evidenceSpans,
+          knownTerms,
+          inherited,
+          `merge${generatedNodes}`,
+          level.length === 2,
+          retryInstruction,
+        ),
+      );
+    } catch (error) {
+      if (
+        !(error instanceof MeetingNotesError) ||
+        error.code !== 'notes_output_truncated'
+      )
+        throw error;
+      assertNotCancelled(input);
+      let replacement:
+        | { target: AuditedNode; nodes: AuditedNode[] }
+        | undefined;
+      for (const target of [left, right].sort(
+        (a, b) =>
+          b.primarySpans.reduce(
+            (total, span) => total + span.end - span.start,
+            0,
+          ) -
+          a.primarySpans.reduce(
+            (total, span) => total + span.end - span.start,
+            0,
+          ),
+      )) {
+        const drafts = splitNotesDraftForMerge(target.draft);
+        if (drafts.length > 1) {
+          replacement = {
+            target,
+            nodes: drafts.map((draft) => ({
+              ...target,
+              draft,
+              evidenceSpans: uniqueSpans([
+                ...draftBlocks(draft).flatMap((block) => block.sources),
+                ...target.audit.dispositions.flatMap(
+                  (disposition) => disposition.sources,
+                ),
+              ]),
+            })),
+          };
+          break;
+        }
+        const split =
+          target.depth === 0
+            ? bisectNotesSourceSpans(input.source, target.primarySpans)
+            : null;
+        if (split) {
+          replacement = {
+            target,
+            nodes: [
+              ...(await processLeaf(split[0])),
+              ...(await processLeaf(split[1])),
+            ],
+          };
+          break;
+        }
+      }
+      if (!replacement)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      input.onRepartition?.();
+      generatedNodes += replacement.nodes.length;
+      if (generatedNodes > NOTES_HIERARCHY_LIMITS.maxNodes)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      level.splice(level.indexOf(replacement.target), 1, ...replacement.nodes);
+      continue;
+    }
     hierarchyIssues.push(...(audited.audited.issues ?? []));
     const parent: AuditedNode = {
       changeCount: audited.changeCount,

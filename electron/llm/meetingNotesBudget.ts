@@ -114,6 +114,16 @@ export const bisectNotesSourceSpans = (
   const segment = source.segments.find((entry) => entry.index === span.segment);
   if (!segment) throw new MeetingNotesError('invalid_source_span');
   let offset = span.start + Math.floor((span.end - span.start) / 2);
+  const priorWhitespace = segment.text.lastIndexOf(' ', offset - 1);
+  const nextWhitespace = segment.text.indexOf(' ', offset);
+  const whitespaceOffsets = [priorWhitespace, nextWhitespace]
+    .filter((candidate) => candidate >= span.start && candidate < span.end - 1)
+    .map((candidate) => candidate + 1)
+    .sort(
+      (left, right) =>
+        Math.abs(left - offset) - Math.abs(right - offset) || left - right,
+    );
+  offset = whitespaceOffsets[0] ?? offset;
   if (isSurrogateBoundary(segment.text, offset)) offset -= 1;
   if (offset <= span.start || offset >= span.end) return null;
   return [[{ ...span, end: offset }], [{ ...span, start: offset }]];

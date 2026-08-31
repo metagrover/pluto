@@ -19,7 +19,7 @@ export class NotesStageCache {
       draft: structuredClone(draft),
       expires: this.now() + 15 * 60 * 1000,
     });
-    while (this.entries.size > 4)
+    while (this.entries.size > 64)
       this.entries.delete(this.entries.keys().next().value!);
   }
 }
