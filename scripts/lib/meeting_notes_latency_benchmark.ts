@@ -25,6 +25,32 @@ export type MeetingNotesLatencySample = {
   errorCode?: string;
 };
 
+const latencyStageTasks = ['notesWriter', 'notesAudit', 'notesMerge'] as const;
+const latencyStageOutcomes = [
+  'complete',
+  'preempted',
+  'truncated',
+  'cancelled',
+  'failed',
+] as const;
+
+export const summarizeMeetingNotesLatencyStages = (
+  stages: readonly { task: string; outcome: string }[],
+) => ({
+  tasks: Object.fromEntries(
+    latencyStageTasks.map((task) => [
+      task,
+      stages.filter((stage) => stage.task === task).length,
+    ]),
+  ) as Record<(typeof latencyStageTasks)[number], number>,
+  outcomes: Object.fromEntries(
+    latencyStageOutcomes.map((outcome) => [
+      outcome,
+      stages.filter((stage) => stage.outcome === outcome).length,
+    ]),
+  ) as Record<(typeof latencyStageOutcomes)[number], number>,
+});
+
 const invalidManifest = (): never => {
   throw new Error('invalid_private_meeting_notes_latency_manifest');
 };

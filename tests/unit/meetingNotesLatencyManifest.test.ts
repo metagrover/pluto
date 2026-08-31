@@ -3,6 +3,7 @@ import {
   aggregateMeetingNotesLatencySamples,
   assertContentFreeMeetingNotesLatencyReport,
   parsePrivateMeetingNotesLatencyManifest,
+  summarizeMeetingNotesLatencyStages,
   summarizePrivateMeetingNotesLatencyManifest,
 } from '../../scripts/lib/meeting_notes_latency_benchmark';
 
@@ -113,6 +114,26 @@ describe('private meeting-notes latency manifest', () => {
       meanQueueMs: 30,
       meanModelMs: 155,
       meanModelCallCount: 3,
+    });
+  });
+
+  it('summarizes stage tasks and outcomes without retaining stage payloads', () => {
+    expect(
+      summarizeMeetingNotesLatencyStages([
+        { task: 'notesWriter', outcome: 'complete' },
+        { task: 'notesAudit', outcome: 'truncated' },
+        { task: 'notesAudit', outcome: 'complete' },
+        { task: 'notesMerge', outcome: 'failed' },
+      ]),
+    ).toEqual({
+      tasks: { notesWriter: 1, notesAudit: 2, notesMerge: 1 },
+      outcomes: {
+        complete: 2,
+        preempted: 0,
+        truncated: 1,
+        cancelled: 0,
+        failed: 1,
+      },
     });
   });
 });

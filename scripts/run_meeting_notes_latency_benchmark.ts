@@ -21,6 +21,7 @@ import {
   aggregateMeetingNotesLatencySamples,
   assertContentFreeMeetingNotesLatencyReport,
   parsePrivateMeetingNotesLatencyManifest,
+  summarizeMeetingNotesLatencyStages,
 } from './lib/meeting_notes_latency_benchmark.ts';
 import { writeOwnerOnlyPrivateFile } from './lib/privateEvaluationFile.ts';
 
@@ -114,7 +115,9 @@ const runCase = async (
     runIndex: number;
     sourceSegmentCount: number;
     sourceCharacterCount: number;
+    plannedLeafCount: number | null;
     generatedNodeCount: number;
+    stageCounts: ReturnType<typeof summarizeMeetingNotesLatencyStages>;
     repairCount: number;
     repartitionCount: number;
   }
@@ -180,7 +183,9 @@ const runCase = async (
     modelCallCount: runMetric.stages.length,
     sourceSegmentCount: runMetric.sourceSegmentCount,
     sourceCharacterCount: runMetric.sourceCharacterCount,
+    plannedLeafCount: runMetric.plannedLeafCount,
     generatedNodeCount,
+    stageCounts: summarizeMeetingNotesLatencyStages(runMetric.stages),
     repairCount: runMetric.repairCount,
     repartitionCount: runMetric.repartitionCount,
     ...(errorCode ? { errorCode } : {}),

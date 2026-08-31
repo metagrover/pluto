@@ -31,7 +31,7 @@ pnpm run benchmark:meeting-notes-latency -- --manifest .private/meeting-notes-la
 pnpm run benchmark:meeting-notes-latency -- --manifest .private/meeting-notes-latency.json --mode burst --output .artifacts/meeting-notes-latency/burst.json
 ```
 
-Reports contain opaque case keys, source counts, stage timings, call counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, and raw provider responses.
+Reports contain opaque case keys, source counts, planned leaf and generated-node counts, writer/audit/merge and terminal-outcome counts, aggregate stage timings, repair/repartition counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, raw provider responses, and individual stage payloads.
 
 To summarize the newest 100 organic runs without reading meeting content:
 
