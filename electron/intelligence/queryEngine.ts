@@ -1,5 +1,5 @@
 import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
-import { searchMeetingsFts, walkEntityGraph } from '../db';
+import { searchMeetingNotesFts, walkEntityGraph } from '../db';
 
 import type {
   MidFrontmatter,
@@ -10,33 +10,9 @@ import type {
 import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
+import { buildMeetingNotesEvidenceDocument } from './meetingNotesEvidence';
 import { getIntentClassificationPrompt } from './queryPrompts';
 import { removeTemporalPhrase, resolveTemporalQuery } from './temporalScope';
-
-interface AnalysisPoint {
-  text?: string;
-}
-
-interface AnalysisActionItem {
-  description?: string;
-  text?: string;
-  assignee?: string;
-  due_date?: string;
-}
-
-interface AnalysisTopic {
-  title?: string;
-  summary?: string;
-  key_points?: AnalysisPoint[];
-}
-
-interface V3AnalysisDocument {
-  analysis_schema_version?: number;
-  topics?: AnalysisTopic[];
-  overview?: string;
-  summary?: string;
-  all_action_items?: AnalysisActionItem[];
-}
 
 const parseMid = (value: unknown): MidFrontmatter | null => {
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -47,109 +23,24 @@ const parseMid = (value: unknown): MidFrontmatter | null => {
   }
 };
 
-const buildTranscriptEvidence = (
-  segments: Array<{ speaker?: unknown; text?: unknown }>,
-): string => {
-  const lines = segments
-    .map((segment) => {
-      const text = typeof segment.text === 'string' ? segment.text.trim() : '';
-      const speaker =
-        typeof segment.speaker === 'string' ? segment.speaker : 'Speaker';
-      return text ? `${speaker}: ${text}` : '';
-    })
-    .filter(Boolean);
-  if (lines.length === 0) return '';
-  if (lines.length <= 24) return `[Transcript]:\n${lines.join('\n')}`;
-
-  const passages: Array<{ index: number; text: string }> = [];
-  let passageLines: string[] = [];
-  let passageLength = 0;
-  for (const line of lines) {
-    passageLines.push(line);
-    passageLength += line.length;
-    if (passageLength >= 260 || passageLines.length >= 6) {
-      passages.push({ index: passages.length, text: passageLines.join(' ') });
-      passageLines = [];
-      passageLength = 0;
-    }
-  }
-  if (passageLines.length > 0) {
-    passages.push({ index: passages.length, text: passageLines.join(' ') });
-  }
-
-  const bucketCount = Math.min(6, passages.length);
-  const selected = Array.from({ length: bucketCount }, (_, bucketIndex) => {
-    const start = Math.floor((bucketIndex * passages.length) / bucketCount);
-    const end = Math.max(
-      start + 1,
-      Math.floor(((bucketIndex + 1) * passages.length) / bucketCount),
-    );
-    return passages
-      .slice(start, end)
-      .sort(
-        (left, right) =>
-          right.text.length - left.text.length || left.index - right.index,
-      )[0];
-  }).sort((left, right) => left.index - right.index);
-
-  return selected
-    .map(
-      (passage, index) =>
-        `[Transcript excerpt ${index + 1}/${selected.length}]: ${passage.text.slice(0, 420)}`,
-    )
-    .join('\n');
-};
-
 export const buildMeetingRetrievalResult = (
   meeting: dbModule.PersistedMeeting,
   label = 'Current meeting',
 ): RetrievalResult => {
-  const evidence: string[] = [
-    `[${label}]: ${meeting.title || 'Untitled meeting'}`,
-  ];
+  const document = buildMeetingNotesEvidenceDocument(meeting);
+  const evidence: string[] = [`[${label}]: ${document.title}`];
   const occurredAt = meeting.started_at || meeting.created_at;
   if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);
-  if (typeof meeting.analysis_json === 'string') {
-    try {
-      const analysis = JSON.parse(meeting.analysis_json) as V3AnalysisDocument;
-      const analysisText =
-        analysis.overview ||
-        analysis.summary ||
-        analysis.topics
-          ?.map((topic) => `${topic.title || ''}: ${topic.summary || ''}`)
-          .filter(Boolean)
-          .join('\n');
-      if (analysisText)
-        evidence.push(`[Analysis]: ${analysisText.slice(0, 1800)}`);
-      const actionItems = (analysis.all_action_items || [])
-        .map((item) => item.description || item.text || '')
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .join('; ');
-      if (actionItems) {
-        evidence.push(`[Action items]: ${actionItems.slice(0, 1200)}`);
-      }
-    } catch {
-      // Other evidence remains usable.
-    }
-  }
-  const notes = meeting.enhanced_notes || meeting.user_notes;
-  if (typeof notes === 'string' && notes.trim()) {
-    evidence.push(`[Notes]: ${notes.trim().slice(0, 1200)}`);
-  }
-  if (typeof meeting.transcript_json === 'string') {
-    try {
-      const transcript = JSON.parse(meeting.transcript_json) as {
-        segments?: Array<{ speaker?: unknown; text?: unknown }>;
-      };
-      const transcriptText = buildTranscriptEvidence(transcript.segments || []);
-      if (transcriptText) {
-        evidence.push(transcriptText.slice(0, 2800));
-      }
-    } catch {
-      // Other evidence remains usable.
-    }
-  }
+  if (document.notesText)
+    evidence.push(`[Analysis]: ${document.notesText.slice(0, 2200)}`);
+  if (document.decisionsText)
+    evidence.push(`[Decisions]: ${document.decisionsText.slice(0, 1000)}`);
+  if (document.actionItemsText)
+    evidence.push(`[Action items]: ${document.actionItemsText.slice(0, 1200)}`);
+  if (document.topicsText)
+    evidence.push(`[Topics]: ${document.topicsText.slice(0, 600)}`);
+  if (document.participantsText)
+    evidence.push(`[Participants]: ${document.participantsText.slice(0, 600)}`);
 
   return {
     meeting_id: String(meeting.id),
@@ -612,65 +503,14 @@ export const retrieveContext = async (
 
   // 2. FTS Search
   if (ftsQueryStr) {
-    const meetings = searchMeetingsFts(ftsQueryStr, { limit: 20 });
+    const meetings = searchMeetingNotesFts(ftsQueryStr, { limit: 20 });
     for (const [idx, m] of meetings.entries()) {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order
       const fts_rank = 1.0 / (idx + 1);
-      let mid: MidFrontmatter | null = null;
-      try {
-        const midJsonStr = m.mid_json;
-        if (typeof midJsonStr === 'string' && midJsonStr.trim()) {
-          mid = JSON.parse(midJsonStr);
-        }
-      } catch (e) {
-        // ignore JSON errors
-      }
-
-      let evidence_text = `[FTS Match]: ${m.snippet || 'No snippet'}\n`;
-
-      // Prefer v3 analysis (topic-structured, richest content)
-      if (typeof m.analysis_json === 'string') {
-        try {
-          const analysis = JSON.parse(m.analysis_json) as V3AnalysisDocument;
-          if (
-            analysis.analysis_schema_version === 3 &&
-            Array.isArray(analysis.topics)
-          ) {
-            const topicSummaries = analysis.topics
-              .map((t) => {
-                const points = Array.isArray(t.key_points)
-                  ? t.key_points.map((p) => `  - ${p.text || ''}`).join('\n')
-                  : '';
-                return `### ${t.title}\n${t.summary || ''}${
-                  points ? `\n${points}` : ''
-                }`;
-              })
-              .join('\n');
-            evidence_text += `[Analysis]:\n${topicSummaries.substring(0, 1500)}`;
-          } else if (analysis.overview) {
-            evidence_text += `[Overview]: ${String(analysis.overview).substring(0, 1500)}`;
-          } else if (analysis.summary) {
-            evidence_text += `[Summary]: ${String(analysis.summary).substring(0, 1500)}`;
-          }
-        } catch (e) {
-          // Fall through to enhanced_notes
-        }
-      }
-      // Fallback to enhanced_notes if evidence is still thin
-      if (
-        evidence_text.length < 200 &&
-        typeof m.enhanced_notes === 'string' &&
-        m.enhanced_notes.length > 50
-      ) {
-        evidence_text += `[Notes]: ${m.enhanced_notes.substring(0, 1500)}`;
-      }
-
-      resultsMap[m.id as string] = {
-        meeting_id: m.id as string,
-        meeting_title: m.title || 'Untitled meeting',
-        mid,
-        evidence_text,
+      const prepared = buildMeetingRetrievalResult(m, 'Notes match');
+      resultsMap[String(m.id)] = {
+        ...prepared,
         score: fts_rank * 0.4,
         score_breakdown: {
           fts_rank,
@@ -741,20 +581,9 @@ export const retrieveContext = async (
         | undefined;
       if (!m) continue;
 
-      let mid: MidFrontmatter | null = null;
-      try {
-        if (typeof m.mid_json === 'string') mid = JSON.parse(m.mid_json);
-      } catch {
-        // failed mid parse
-      }
-
+      const prepared = buildMeetingRetrievalResult(m, 'Related notes');
       resultsMap[mId] = {
-        meeting_id: mId,
-        meeting_title: m.title || 'Untitled meeting',
-        mid,
-        evidence_text:
-          m.title +
-          (m.user_notes ? ` - ${m.user_notes.substring(0, 200)}` : ''),
+        ...prepared,
         score: 0,
         score_breakdown: {
           fts_rank: 0,

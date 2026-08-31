@@ -16,11 +16,12 @@ type MockProvider = Pick<LLMProvider, 'classifyQueryIntent'>;
 type EntitySearchRow = ReturnType<
   typeof dbModule.searchEntitiesWithMeetingContext
 >[number];
-type FtsRow = ReturnType<typeof dbModule.searchMeetingsFts>[number];
+type FtsRow = ReturnType<typeof dbModule.searchMeetingNotesFts>[number];
 type GraphEntity = ReturnType<typeof dbModule.walkEntityGraph>[number];
 
 vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
+  searchMeetingNotesFts: vi.fn(),
   searchEntitiesWithMeetingContext: vi.fn(),
   walkEntityGraph: vi.fn(),
   getTemporalMeetings: vi.fn(),
@@ -199,12 +200,16 @@ describe('Query Engine', () => {
       );
 
       // Mock DB FTS
-      vi.mocked(dbModule.searchMeetingsFts).mockReturnValue([
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
         {
           id: 'm1',
           snippet: 'some api stuff',
           started_at: '2026-01-01T00:00:00Z',
           title: 'Meeting 1',
+          enhanced_notes: 'GraphQL was selected for the API.',
+          transcript_json: JSON.stringify({
+            segments: [{ text: 'Cobalt transcript-only phrase.' }],
+          }),
         } as FtsRow,
       ]);
 
@@ -227,6 +232,10 @@ describe('Query Engine', () => {
       expect(result.length).toBeGreaterThan(0);
       expect(result[0].meeting_id).toBe('m1');
       expect(result[0].score).toBeGreaterThan(0);
+      expect(result[0].evidence_text).toContain('GraphQL was selected');
+      expect(result[0].evidence_text).not.toContain('Cobalt');
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalled();
+      expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
     });
   });
 
@@ -432,26 +441,19 @@ describe('Query Engine', () => {
     );
   });
 
-  it('samples substantive transcript passages across a long meeting', () => {
-    const segments = Array.from({ length: 60 }, (_, index) => ({
-      speaker: index % 2 === 0 ? 'Me' : 'Them',
-      text:
-        index < 20
-          ? `Opening discussion ${index} about cohort selection and advisor interactions.`
-          : index < 40
-            ? `Middle discussion ${index} about Snowflake signals and revenue data.`
-            : `Closing discussion ${index} about client follow-ups and advisor notifications.`,
-    }));
+  it('never includes transcript text in normal saved meeting evidence', () => {
     const result = buildMeetingRetrievalResult({
-      id: 'long-meeting',
-      title: 'Planning review',
-      transcript_json: JSON.stringify({ segments }),
+      id: 'meeting-1',
+      title: 'Release review',
+      enhanced_notes: 'Launch moved to Friday.',
+      transcript_json: JSON.stringify({
+        segments: [{ text: 'Cobalt transcript-only phrase.' }],
+      }),
     } as dbModule.PersistedMeeting);
 
-    expect(result.evidence_text).toContain('Opening discussion');
-    expect(result.evidence_text).toContain('Middle discussion');
-    expect(result.evidence_text).toContain('Closing discussion');
-    expect(result.evidence_text).toContain('[Transcript excerpt 1/');
+    expect(result.evidence_text).toContain('Launch moved to Friday.');
+    expect(result.evidence_text).not.toContain('Cobalt');
+    expect(result.evidence_text).not.toContain('[Transcript');
   });
 
   it('uses prepared extractive answers only for one-meeting Fast requests', () => {

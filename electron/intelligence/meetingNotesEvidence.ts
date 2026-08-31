@@ -56,6 +56,12 @@ const uniqueText = (values: string[]): string => {
     .join('\n');
 };
 
+const normalizedItemText = (value: unknown): string => {
+  if (!value || typeof value !== 'object') return '';
+  const record = value as Record<string, unknown>;
+  return clean(record.text) || clean(record.description);
+};
+
 const parseMidEvidence = (value: string | null | undefined): MidEvidence => {
   if (!value?.trim()) return {};
   try {
@@ -79,10 +85,48 @@ export const buildMeetingNotesEvidenceDocument = (
 ): MeetingNotesEvidenceDocument => {
   const v3 = parseAnalysisDocumentV3Json(meeting.analysis_json);
   const mid = parseMidEvidence(meeting.mid_json);
-  const notesDocument = v3
+  const normalizedV3 = v3
+    ? {
+        ...v3,
+        topics: Array.isArray(v3.topics)
+          ? v3.topics.map((topic) => ({
+              ...topic,
+              title: clean(topic.title),
+              summary: clean(topic.summary),
+              key_points: Array.isArray(topic.key_points)
+                ? topic.key_points
+                : [],
+              decisions: Array.isArray(topic.decisions) ? topic.decisions : [],
+              action_items: Array.isArray(topic.action_items)
+                ? topic.action_items
+                : [],
+              open_questions: Array.isArray(topic.open_questions)
+                ? topic.open_questions
+                : [],
+            }))
+          : [],
+        all_decisions: Array.isArray(v3.all_decisions)
+          ? v3.all_decisions
+              .map((decision) => ({
+                ...decision,
+                text: normalizedItemText(decision),
+              }))
+              .filter((decision) => decision.text)
+          : [],
+        all_action_items: Array.isArray(v3.all_action_items)
+          ? v3.all_action_items
+              .map((action) => ({
+                ...action,
+                text: normalizedItemText(action),
+              }))
+              .filter((action) => action.text)
+          : [],
+      }
+    : null;
+  const notesDocument = normalizedV3
     ? buildMeetingNotesDocument({
         v2: null,
-        v3,
+        v3: normalizedV3,
         userNotes: meeting.user_notes || '',
         editsMap: parseUserEditsJson(meeting.user_edits_json),
       })
