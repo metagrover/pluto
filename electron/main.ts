@@ -450,7 +450,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     const signals = await input.provider.extractValueSignals(
       input.transcript,
       input.analysis.overview,
-      { signal: input.signal },
+      { signal: input.signal, workClass: 'meeting_secondary' },
     );
     if (!input.canCommit()) return;
     if (
@@ -484,7 +484,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: input.analysis.overview,
         valueSignals: signals,
       },
-      { signal: input.signal },
+      { signal: input.signal, workClass: 'meeting_secondary' },
     );
     if (!input.canCommit()) return;
     await extractAndProcessEntities(

@@ -150,12 +150,16 @@ type NotesProvider = {
       onStageEvent?: import('./llm/meetingNotesRunMetrics').NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
       onRepartition?: () => void;
+      workClass?: import('./llm/llmWorkClass').LLMWorkClass;
     },
   ): Promise<AnalysisDocumentV3>;
   extractValueSignals?(
     transcript: string,
     summary?: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llm/llmWorkClass').LLMWorkClass;
+    },
   ): Promise<{
     analysis_schema_version: number;
     continuity: string[];
@@ -166,7 +170,10 @@ type NotesProvider = {
   extractEntities?(
     transcript: string,
     context?: import('./llm/provider').EntityExtractionContext,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llm/llmWorkClass').LLMWorkClass;
+    },
   ): Promise<import('./llm/provider').ExtractedEntities>;
 };
 
@@ -693,6 +700,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                 runMetrics.setPlannedLeafCount(plannedLeafCount),
               onRepair: () => runMetrics.recordRepair(),
               onRepartition: () => runMetrics.recordRepartition(),
+              workClass:
+                primaryReason === 'manual' ? 'manual_notes' : 'automatic_notes',
               onStage: (task) => {
                 if (task !== 'notesAudit') {
                   generatedNodeCount += 1;

@@ -142,6 +142,7 @@ export interface LLMProvider {
       onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
       onRepartition?: () => void;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
     },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
@@ -163,7 +164,10 @@ export interface LLMProvider {
   extractValueSignals(
     transcript: string,
     summary?: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+    },
   ): Promise<InternalSignalDocument>;
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;
@@ -187,7 +191,10 @@ export interface LLMProvider {
   ): Promise<string>;
   classifyQueryIntent(
     prompt: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+    },
   ): Promise<string>;
   extractEntities(
     transcript: string,

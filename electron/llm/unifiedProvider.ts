@@ -15,6 +15,11 @@ import {
 } from './analysisDocument';
 import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
+import {
+  type LLMWorkClass,
+  LLM_WORK_CLASS_PRIORITY,
+  defaultLLMWorkClass,
+} from './llmWorkClass';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import { generateMeetingNotes } from './meetingNotesPipeline';
 import type {
@@ -472,6 +477,7 @@ interface TextGenerationOptions {
   notesModel?: string;
   notesResponseSchema?: Record<string, unknown>;
   notesStageObserver?: NotesStageObserver;
+  workClass?: LLMWorkClass;
   onNotesMetrics?: (metrics: {
     inputTokens: number | null;
     outputTokens: number | null;
@@ -540,6 +546,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       onStageEvent?: NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
       onRepartition?: () => void;
+      workClass?: LLMWorkClass;
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
@@ -585,6 +592,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           },
           notesStageObserver: options.onStageEvent,
           notesModel: model,
+          workClass: options.workClass,
         });
         return wire.decode(raw);
       },
@@ -639,16 +647,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractInternalSignals(
     transcript: string,
     summary?: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<InternalSignalDocument> {
     const prompt = getValueSignalsPrompt(transcript, summary);
 
     try {
-      const raw = await this.generateText({
+      const raw = await this.generateResumableAnalysisText({
         prompt,
         task: 'valueSignals',
         jsonMode: true,
         signal: options.signal,
+        workClass: options.workClass,
       });
       const parsed = JSON.parse(
         this.cleanJsonText(raw),
@@ -672,7 +681,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractValueSignals(
     transcript: string,
     summary?: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<InternalSignalDocument> {
     return this.extractInternalSignals(transcript, summary, options);
   }
@@ -828,7 +837,7 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async classifyQueryIntent(
     prompt: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<string> {
     return this.generateText({
       prompt,
@@ -841,16 +850,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<ExtractedEntities> {
     const prompt = getEntitiesPrompt(transcript, context);
 
     try {
-      const raw = await this.generateText({
+      const raw = await this.generateResumableAnalysisText({
         prompt,
         task: 'entities',
         jsonMode: true,
         signal: options.signal,
+        workClass: options.workClass,
       });
       const parsed = JSON.parse(this.cleanJsonText(raw)) as Record<
         string,
@@ -965,7 +975,9 @@ export class UnifiedLLMProvider implements LLMProvider {
           options.onStart?.();
           result = await this.generateWithGemini(options);
           break;
-        case 'ollama':
+        case 'ollama': {
+          const workClass =
+            options.workClass ?? defaultLLMWorkClass(options.task);
           result = await runWithOllamaGenerationGate(
             Symbol(options.task),
             async (gateSignal) => {
@@ -990,27 +1002,18 @@ export class UnifiedLLMProvider implements LLMProvider {
                   : gateSignal,
               });
             },
-            options.task === 'knowledgeDoc' ||
-              options.task === 'commitmentReconciliation'
-              ? 0
-              : options.task === 'projectScopeReview'
-                ? 15
-                : options.task === 'askPluto' ||
-                    options.task === 'askPlutoDeep' ||
-                    options.task === 'askPlutoLive'
-                  ? 20
-                  : 10,
+            LLM_WORK_CLASS_PRIORITY[workClass],
             {
               signal: options.signal,
               preemptible:
-                options.task === 'knowledgeDoc' ||
-                options.task === 'projectScopeReview' ||
-                options.task === 'commitmentReconciliation' ||
-                options.task === 'title' ||
+                workClass === 'meeting_secondary' ||
+                workClass === 'project_review' ||
+                workClass === 'background' ||
                 isResumableMeetingAnalysisTask(options.task),
             },
           );
           break;
+        }
         default:
           throw new Error(`Unsupported provider: ${this.providerType}`);
       }

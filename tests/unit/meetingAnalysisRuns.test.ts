@@ -186,6 +186,7 @@ describe('meeting analysis run coordinator', () => {
           knownTerms: ['Ogletree'],
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
+          workClass: 'manual_notes',
         }),
       );
       // The persisted/reusable run identity must invalidate pre-schema outputs.
