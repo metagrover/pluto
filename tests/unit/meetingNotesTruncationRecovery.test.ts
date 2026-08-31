@@ -124,6 +124,46 @@ it('bisects only the leaf that truncates twice and retains completed siblings', 
   ).toBe(true);
 });
 
+it('repartitions a leaf when its compact retry no longer fits the provider context', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1_000)}`,
+    })),
+  );
+  let writerCalls = 0;
+  const onRepartition = vi.fn();
+  const generate = vi.fn(async (request) => {
+    if (request.task === 'notesAudit') return reviewedDraft(request.prompt);
+    if (request.task === 'notesMerge')
+      return JSON.stringify(draftFor(request.prompt));
+    writerCalls += 1;
+    if (writerCalls === 1) {
+      throw new MeetingNotesError('notes_output_truncated');
+    }
+    if (writerCalls === 2) {
+      expect(request.prompt).toContain(COMPACT_RETRY);
+      throw new MeetingNotesError('notes_context_exhausted');
+    }
+    return JSON.stringify(draftFor(request.prompt));
+  });
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'test',
+    contextTokens: 16_384,
+    onRepartition,
+  });
+
+  expect(writerCalls).toBeGreaterThan(2);
+  expect(onRepartition).toHaveBeenCalled();
+  expect(result.generation_metadata.mode).toBe('hierarchical');
+});
+
 it('repacks only the affected merge after its compact retry also truncates', async () => {
   const source = makeSyntheticNotesSource(
     Array.from({ length: 6 }, (_, index) => ({

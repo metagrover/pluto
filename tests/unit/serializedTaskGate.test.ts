@@ -7,7 +7,7 @@ describe('createSerializedTaskGate', () => {
     expect(LLM_WORK_CLASS_PRIORITY).toEqual({
       ask_pluto: 30,
       manual_notes: 20,
-      automatic_notes: 15,
+      automatic_notes: 10,
       project_review: 15,
       meeting_secondary: 5,
       background: 0,

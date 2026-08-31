@@ -173,7 +173,17 @@ const withTruncationRetry = async <T>(
     )
       throw error;
     assertNotCancelled(input);
-    return operation(NOTES_COMPACT_RETRY_INSTRUCTION);
+    try {
+      return await operation(NOTES_COMPACT_RETRY_INSTRUCTION);
+    } catch (retryError) {
+      if (
+        retryError instanceof MeetingNotesError &&
+        retryError.code === 'notes_context_exhausted'
+      ) {
+        throw error;
+      }
+      throw retryError;
+    }
   }
 };
 
@@ -607,8 +617,14 @@ const runHierarchy = async (
       knownTerms,
     });
     return (
-      fits(capacityInput, writerPrompt, WRITER_OUTPUT_TOKENS) &&
-      estimateNotesTokens(auditPrompt) +
+      fits(
+        capacityInput,
+        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+        WRITER_OUTPUT_TOKENS,
+      ) &&
+      estimateNotesTokens(
+        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+      ) +
         WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
