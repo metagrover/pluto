@@ -4286,6 +4286,7 @@ app.whenReady().then(async () => {
                 });
                 return buildMeetingAskPlutoContext({
                   meeting,
+                  query,
                   entities,
                   attentionItems,
                 });
