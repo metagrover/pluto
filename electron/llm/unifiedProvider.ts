@@ -536,7 +536,10 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       onStageEvent?: NotesStageObserver;
+      onPlan?: (plan: { plannedLeafCount: number }) => void;
+      onRepartition?: () => void;
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
@@ -555,6 +558,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
       onStage: options.onStage,
+      onRepair: options.onRepair,
+      onPlan: options.onPlan,
+      onRepartition: options.onRepartition,
       generate: async (request) => {
         const wire = createNotesWireRequest(
           request.prompt,

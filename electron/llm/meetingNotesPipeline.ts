@@ -9,7 +9,11 @@ import {
   parseNotesDraft,
   projectAuditedNotes,
 } from './meetingNotesAudit';
-import { estimateNotesTokens, planNotesCapacity } from './meetingNotesBudget';
+import {
+  bisectNotesSourceSpans,
+  estimateNotesTokens,
+  planNotesCapacity,
+} from './meetingNotesBudget';
 import {
   buildNotesEditorPrompt,
   countEditedBlocks,
@@ -579,43 +583,28 @@ const runHierarchy = async (
       userNotes: input.context.userNotes,
       knownTerms,
     });
-    const mergePrompt = buildNotesMergePrompt({
-      sourceText: `${sourceText}\n${sourceText}`,
-      drafts: [
-        { meetingType: 'general', overview: null, sections: [] },
-        { meetingType: 'general', overview: null, sections: [] },
-      ],
-      inherited: [],
-      primaryRanges: [spans, spans],
-      userNotes: input.context.userNotes,
-      knownTerms,
-      template: input.context.template,
-    });
     return (
       fits(capacityInput, writerPrompt, WRITER_OUTPUT_TOKENS) &&
       estimateNotesTokens(auditPrompt) +
         WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
-        planningTokens &&
-      estimateNotesTokens(mergePrompt) +
-        WRITER_OUTPUT_TOKENS * 3 +
-        SAFETY_TOKENS <=
         planningTokens
     );
   });
+  input.onPlan?.({ plannedLeafCount: leaves.length });
   if (leaves.length * 2 - 1 > NOTES_HIERARCHY_LIMITS.maxNodes) {
     throw new MeetingNotesError('notes_hierarchy_limit');
   }
 
-  const nodes: AuditedNode[] = [];
   const hierarchyIssues: string[] = [];
-  for (const [index, leaf] of leaves.entries()) {
+  let leafSequence = 0;
+  const buildLeafNode = async (
+    primarySpans: SourceSpan[],
+    overlapSpans: SourceSpan[] = [],
+  ): Promise<AuditedNode> => {
     assertNotCancelled(input);
-    let evidenceSpans = uniqueSpans([
-      ...leaf.overlapSpans,
-      ...leaf.primarySpans,
-    ]);
+    let evidenceSpans = uniqueSpans([...overlapSpans, ...primarySpans]);
     let writerPrompt = buildNotesWriterPrompt({
       sourceText: serializeSource(input, evidenceSpans),
       userNotes: input.context.userNotes,
@@ -623,7 +612,7 @@ const runHierarchy = async (
       template: input.context.template,
     });
     if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
-      evidenceSpans = leaf.primarySpans;
+      evidenceSpans = primarySpans;
       writerPrompt = buildNotesWriterPrompt({
         sourceText: serializeSource(input, evidenceSpans),
         userNotes: input.context.userNotes,
@@ -631,9 +620,10 @@ const runHierarchy = async (
         template: input.context.template,
       });
     }
+    const idPrefix = `leaf${leafSequence++}`;
     const draft = remapDraftIds(
       await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
-      `leaf${index}`,
+      idPrefix,
     );
     const audited = await auditDraft(
       input,
@@ -641,16 +631,16 @@ const runHierarchy = async (
       evidenceSpans,
       knownTerms,
       [],
-      `leaf${index}`,
+      idPrefix,
       leaves.length === 1,
     );
     hierarchyIssues.push(...(audited.audited.issues ?? []));
-    nodes.push({
+    return {
       changeCount: audited.changeCount,
       draft: audited.draft,
       audit: audited.audit,
       audited: audited.audited,
-      primarySpans: leaf.primarySpans,
+      primarySpans,
       evidenceSpans: uniqueSpans([
         ...draftBlocks(audited.draft).flatMap((block) => block.sources),
         ...audited.audit.dispositions.flatMap(
@@ -658,7 +648,11 @@ const runHierarchy = async (
         ),
       ]),
       depth: 0,
-    });
+    };
+  };
+  const nodes: AuditedNode[] = [];
+  for (const leaf of leaves) {
+    nodes.push(await buildLeafNode(leaf.primarySpans, leaf.overlapSpans));
   }
 
   let generatedNodes = nodes.length;
@@ -749,7 +743,38 @@ const runHierarchy = async (
       });
       if (generatedNodes > NOTES_HIERARCHY_LIMITS.maxNodes)
         throw new MeetingNotesError('notes_hierarchy_limit');
-      if (!didSplit) throw new MeetingNotesError('notes_context_exhausted');
+      if (!didSplit) {
+        const sourceSplitIndex = level
+          .map((node, index) => ({
+            index,
+            depth: node.depth,
+            split: bisectNotesSourceSpans(input.source, node.primarySpans),
+            size: node.primarySpans.reduce(
+              (total, span) => total + span.end - span.start,
+              0,
+            ),
+          }))
+          .filter(
+            (
+              candidate,
+            ): candidate is typeof candidate & {
+              split: [SourceSpan[], SourceSpan[]];
+            } => candidate.depth === 0 && candidate.split !== null,
+          )
+          .sort((left, right) => right.size - left.size)[0];
+        if (!sourceSplitIndex)
+          throw new MeetingNotesError('notes_context_exhausted');
+        if (generatedNodes + 2 > NOTES_HIERARCHY_LIMITS.maxNodes)
+          throw new MeetingNotesError('notes_hierarchy_limit');
+        input.onRepartition?.();
+        const [leftSpans, rightSpans] = sourceSplitIndex.split;
+        const replacements = [
+          await buildLeafNode(leftSpans),
+          await buildLeafNode(rightSpans),
+        ];
+        generatedNodes += replacements.length;
+        level.splice(sourceSplitIndex.index, 1, ...replacements);
+      }
       continue;
     }
     const [left, right] = pair;

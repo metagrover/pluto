@@ -138,7 +138,10 @@ export interface LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
+      onPlan?: (plan: { plannedLeafCount: number }) => void;
+      onRepartition?: () => void;
     },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */

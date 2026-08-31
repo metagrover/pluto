@@ -153,6 +153,10 @@ const runCase = async (
       source,
       contextTokens,
       onStageEvent: metrics.observe,
+      onPlan: ({ plannedLeafCount }) =>
+        metrics.setPlannedLeafCount(plannedLeafCount),
+      onRepair: () => metrics.recordRepair(),
+      onRepartition: () => metrics.recordRepartition(),
     });
     generatedNodeCount = analysis.generation_metadata?.hierarchy?.nodes ?? 1;
     metrics.setGeneratedNodeCount(generatedNodeCount);

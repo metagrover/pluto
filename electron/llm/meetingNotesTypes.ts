@@ -112,6 +112,8 @@ export type GenerateMeetingNotesInput = {
   signal?: AbortSignal;
   onRepair?: (task: NotesTask) => void;
   onStage?: (task: NotesTask) => void;
+  onPlan?: (plan: { plannedLeafCount: number }) => void;
+  onRepartition?: () => void;
   stageCache?: import('./meetingNotesStageCache').NotesStageCache;
   cacheKey?: string;
 };

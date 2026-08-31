@@ -121,6 +121,54 @@ it('uses one writer and one complete-document editor without segmentation or a t
   });
 });
 
+it('plans leaves from leaf work without reserving capacity for a hypothetical merge', async () => {
+  const text = 'Agenda update. '.repeat(900);
+  const source = makeSyntheticNotesSource([{ speaker: 'Milo', text }]);
+  const span = { segment: 0, start: 0, end: text.length };
+  let leafFit: boolean | undefined;
+  const plan = vi
+    .spyOn(hierarchy, 'planNotesLeaves')
+    .mockImplementation((_source, fitsPrompt) => {
+      leafFit = fitsPrompt(text, [span]);
+      return [
+        {
+          primarySpans: [span],
+          overlapSpans: [],
+          primaryText: text,
+          sourceText: text,
+          sourceRevision: source.revision,
+        },
+      ];
+    });
+  const emptyDraft = {
+    meetingType: 'general',
+    overview: null,
+    sections: [],
+  } as const;
+  const generate = vi
+    .fn<(request: NotesRequest) => Promise<string>>()
+    .mockRejectedValueOnce(new MeetingNotesError('notes_input_overflow'))
+    .mockResolvedValue(JSON.stringify(emptyDraft));
+  const onPlan = vi.fn();
+
+  try {
+    await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16_384,
+      onPlan,
+    });
+    expect(leafFit).toBe(true);
+    expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 1 });
+  } finally {
+    plan.mockRestore();
+  }
+});
+
 it.each(['faithful', 'inverted'] as const)(
   'conserves the supported privacy decision or excludes its inversion with a warning: %s',
   async (wording) => {
@@ -1089,6 +1137,7 @@ it('reconciles a middle commitment with a later cancellation using original evid
     },
   ]);
   const mergeAuditPrompts: string[] = [];
+  const onRepartition = vi.fn();
   const generate = vi.fn(async (request) => {
     const hasCommitment = request.prompt.includes('COMMIT_SIGNAL');
     const hasCancellation = request.prompt.includes('CANCEL_SIGNAL');
@@ -1188,9 +1237,11 @@ it('reconciles a middle commitment with a later cancellation using original evid
     provider: 'ollama',
     model: 'qwen3.5:9b',
     contextTokens: 16384,
+    onRepartition,
   });
 
   expect(result.generation_metadata.mode).toBe('hierarchical');
+  expect(onRepartition).toHaveBeenCalled();
   expect(result.all_action_items).toEqual([]);
   expect(
     mergeAuditPrompts.some((prompt) => prompt.includes('COMMIT_SIGNAL')),
@@ -1389,19 +1440,34 @@ it('fails at the node ceiling before making a partial hierarchy request', async 
     })),
   );
   const generate = vi.fn();
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    source.segments.slice(0, 65).map((segment) => ({
+      primarySpans: [
+        { segment: segment.index, start: 0, end: segment.text.length },
+      ],
+      overlapSpans: [],
+      primaryText: segment.text,
+      sourceText: segment.text,
+      sourceRevision: source.revision,
+    })),
+  );
 
-  await expect(
-    generateMeetingNotes({
-      reviewProtocol: 'editor',
-      source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'qwen3.5:9b',
-      contextTokens: 16384,
-    }),
-  ).rejects.toThrow('notes_hierarchy_limit');
-  expect(generate).not.toHaveBeenCalled();
+  try {
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'qwen3.5:9b',
+        contextTokens: 16384,
+      }),
+    ).rejects.toThrow('notes_hierarchy_limit');
+    expect(generate).not.toHaveBeenCalled();
+  } finally {
+    plan.mockRestore();
+  }
 });
 
 it('keeps the documented depth ceiling alongside the enforced node ceiling', () => {

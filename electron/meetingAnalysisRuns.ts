@@ -131,7 +131,10 @@ type NotesProvider = {
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
       onStageEvent?: import('./llm/meetingNotesRunMetrics').NotesStageObserver;
+      onPlan?: (plan: { plannedLeafCount: number }) => void;
+      onRepartition?: () => void;
     },
   ): Promise<AnalysisDocumentV3>;
   extractValueSignals?(
@@ -587,6 +590,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
 
     const promise = (async (): Promise<PublishedMeetingNotes> => {
       try {
+        let generatedNodeCount = 0;
         const analysis = await provider.generateStructuredAnalysis(
           buildAnalysisTranscriptFromJson(meeting.transcript_json),
           meeting.user_notes ?? '',
@@ -601,7 +605,15 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             stageCache,
             cacheKey: fingerprint,
             onStageEvent: runMetrics.observe,
+            onPlan: ({ plannedLeafCount }) =>
+              runMetrics.setPlannedLeafCount(plannedLeafCount),
+            onRepair: () => runMetrics.recordRepair(),
+            onRepartition: () => runMetrics.recordRepartition(),
             onStage: (task) => {
+              if (task !== 'notesAudit') {
+                generatedNodeCount += 1;
+                runMetrics.setGeneratedNodeCount(generatedNodeCount);
+              }
               dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
                 meetingId,
                 runId,
