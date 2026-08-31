@@ -108,6 +108,7 @@ export function createEouTranscriptProjection(): {
         ])
         .sort(
           (left, right) =>
+            Number(right.segment.confirmed) - Number(left.segment.confirmed) ||
             left.segment.timestampMs - right.segment.timestampMs ||
             sourceRank[left.source] - sourceRank[right.source] ||
             left.revision - right.revision,
