@@ -1384,6 +1384,7 @@
   }
   .transcript-turn p {
     @apply max-w-[70ch] text-[15px] leading-[1.7] text-pro-text-main;
+    overflow-wrap: anywhere;
   }
   .transcript-turn__content {
     @apply flex min-w-0 flex-col gap-3;
@@ -1399,6 +1400,7 @@
   }
   .transcript-interim {
     @apply ml-[102px] max-w-[70ch] border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted;
+    overflow-wrap: anywhere;
   }
   .transcript-waiting {
     @apply py-24 text-center;
