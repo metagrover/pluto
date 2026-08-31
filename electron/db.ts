@@ -2057,7 +2057,9 @@ const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
     meeting.end_reason || 'manual',
     meeting.user_edits_json || null,
     meeting.analysis_edit_conflicts_json || null,
-    meeting.transcript_status || 'provisional',
+    Object.prototype.hasOwnProperty.call(meeting, 'transcript_status')
+      ? meeting.transcript_status
+      : 'provisional',
     meeting.transcript_integrity_json || null,
     meeting.system_audio_path || null,
     meeting.mixed_audio_path || null,

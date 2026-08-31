@@ -98,7 +98,7 @@ describe('generic partial meeting saves', () => {
       system_audio_path: null,
       mixed_audio_path: null,
       transcript_json: null,
-      transcript_status: 'provisional',
+      transcript_status: null,
       transcript_integrity_json: null,
       transcript_validated_at: null,
     });
@@ -108,9 +108,19 @@ describe('generic partial meeting saves', () => {
       system_audio_path: null,
       mixed_audio_path: null,
       transcript_json: null,
-      transcript_status: 'provisional',
+      transcript_status: null,
       transcript_integrity_json: null,
       transcript_validated_at: null,
+    });
+  });
+
+  it('uses the provisional status default when a new meeting omits status', () => {
+    const id = 'new-meeting-default-status';
+
+    saveMeeting({ id, title: 'New meeting' });
+
+    expect(getMeeting(id)).toMatchObject({
+      transcript_status: 'provisional',
     });
   });
 });
