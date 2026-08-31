@@ -1,0 +1,8 @@
+### Make saved Ask Pluto answer from meeting notes
+
+- **Issue:** [#699](https://github.com/metagrover/pluto/issues/699)
+- **PR:** Not created yet.
+- **Changed:** Saved-meeting Ask Pluto now searches a dedicated, rebuildable notes index containing effective generated notes, user-authored notes, user edit overlays, and structured meeting intelligence. Both global and meeting-scoped chat exclude transcript-derived ranking, snippets, context, and citations for ordinary questions. Explicit quotation requests receive only a bounded recent transcript window, while meetings without usable notes can use a clearly disclosed weak transcript fallback. Active-recording chat remains transcript-backed. Saved Fast and Deep synthesis stay on the configured general Gemma model with their existing compact response budgets instead of swapping through Phi; active-meeting chat and query classification retain the quick model.
+- **Why:** The former mixed FTS index and completed-meeting context always admitted transcript text, so a prompt-level notes preference could not guarantee notes-first answers. Transcripts were also far larger than saved notes and model swapping added avoidable local latency.
+- **Replaced:** Mixed transcript/notes retrieval, unconditional saved transcript excerpts, and routine Phi-to-Gemma switching between completed Fast and Deep chat.
+- **Notes:** The source notes and transcripts are not regenerated or rewritten. The initial runtime remains serialized Ollama. Same-model parallel decoding and direct llama.cpp or MLX runtimes remain gated follow-up evaluations after the complete production path meets semantic, latency, and memory acceptance criteria.

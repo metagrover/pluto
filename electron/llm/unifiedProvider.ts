@@ -1420,7 +1420,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (task === 'askPluto' || task === 'queryClassification') {
+    if (task === 'askPlutoLive' || task === 'queryClassification') {
       return (
         (this.settings.ollama_fast_model || '').trim() ||
         OLLAMA_QUICK_CHAT_MODEL
