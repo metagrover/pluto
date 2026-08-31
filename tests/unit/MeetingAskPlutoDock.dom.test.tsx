@@ -488,6 +488,81 @@ describe('MeetingAskPlutoDock', () => {
     await act(async () => root.unmount());
   });
 
+  it('uses a neutral title when asking about an untitled live meeting', async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock liveContext={{ ...liveContext, title: '' }} />,
+      );
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Ask about this meeting"]',
+    );
+    await typeInto(input!, 'What did we decide?');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:meeting-chat',
+      expect.objectContaining({
+        scope: expect.objectContaining({
+          type: 'live_meeting',
+          title: 'Meeting',
+        }),
+      }),
+    );
+
+    await act(async () => root.unmount());
+  });
+
+  it('surfaces an unavailable answer and clears the loading state', async () => {
+    const root = createRoot(container);
+    invoke.mockResolvedValueOnce({
+      ...response,
+      status: 'unavailable',
+      answer: '',
+      rationale: 'The meeting question request was invalid.',
+    });
+
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Ask about this meeting"]',
+    );
+    await typeInto(input!, 'What did we decide?');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Pluto could not answer this meeting right now.',
+    );
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__loading'),
+    ).toBeNull();
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__message--assistant'),
+    ).toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Send question"]'),
+    ).not.toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
   it('minimizes outside and restores the active conversation without resubmitting', async () => {
     const root = createRoot(container);
 
