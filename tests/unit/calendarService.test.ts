@@ -66,7 +66,9 @@ const createFixture = (
       return true;
     }),
     listEvents: vi.fn(() => options.events ?? [event]),
-    recordFailure: vi.fn(),
+    recordFailure: vi.fn((errorCode: 'read_failed', readAt: string) => {
+      state = { ...state, errorCode, lastAttemptAt: readAt };
+    }),
     disconnect: vi.fn(() => {
       state = { ...state, enabled: false, selectedCalendar: null };
     }),
@@ -134,6 +136,19 @@ describe('calendar service', () => {
         events: [event],
       }),
     );
+  });
+
+  it('keeps a chosen calendar when its first refresh fails', async () => {
+    const fixture = createFixture({ authorization: 'full_access' });
+    fixture.client.listEvents.mockRejectedValueOnce(new Error('native failed'));
+
+    await expect(
+      fixture.service.selectCalendar(calendar),
+    ).resolves.toMatchObject({
+      state: 'read_failed',
+      enabled: true,
+      selectedCalendar: calendar,
+    });
   });
 
   it('preserves the cache and records a finite failure when a read fails', async () => {

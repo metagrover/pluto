@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 import type {
+  CalendarDescriptor,
   CalendarEvent,
   CalendarIntegrationSnapshot,
 } from '../../../electron/calendar/types';
@@ -11,6 +12,8 @@ interface UpcomingMeetingsProps {
   events: CalendarEvent[];
   loading: boolean;
   onConnect: () => Promise<void>;
+  onSelectCalendar: (calendar: CalendarDescriptor) => Promise<void>;
+  onRefreshCalendar: () => Promise<void>;
   onOpenSettings: () => void;
 }
 
@@ -67,11 +70,29 @@ export const UpcomingMeetings = ({
   events,
   loading,
   onConnect,
+  onSelectCalendar,
+  onRefreshCalendar,
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [selectingCalendarId, setSelectingCalendarId] = useState<string | null>(
+    null,
+  );
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const visibleEvents = expanded ? events : events.slice(0, 2);
   const hiddenCount = Math.max(0, events.length - 2);
+
+  const chooseCalendar = async (calendar: CalendarDescriptor) => {
+    setSelectingCalendarId(calendar.identifier);
+    setSelectionError(null);
+    try {
+      await onSelectCalendar(calendar);
+    } catch {
+      setSelectionError('Calendar couldn’t be selected. Try again.');
+    } finally {
+      setSelectingCalendarId(null);
+    }
+  };
 
   return (
     <section
@@ -133,16 +154,59 @@ export const UpcomingMeetings = ({
           />
         ) : snapshot.state === 'needs_selection' ||
           snapshot.state === 'selected_calendar_missing' ? (
-          <RecoveryAction
-            title={
-              snapshot.state === 'selected_calendar_missing'
+          <div className="pb-5">
+            <p className="text-[13px] font-medium leading-5 text-pro-text-main">
+              {snapshot.state === 'selected_calendar_missing'
                 ? 'Choose another calendar'
-                : 'Choose one calendar'
-            }
-            detail="Pick the calendar Pluto should read in Settings."
-            action={onOpenSettings}
-            actionLabel="Open Pluto settings"
-          />
+                : 'Choose one calendar'}
+            </p>
+            <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
+              Pluto will read meetings from this calendar only.
+            </p>
+            <div className="mt-3 max-h-48 divide-y divide-pro-border/50 overflow-y-auto rounded-lg border border-pro-border/60 bg-pro-surface/55">
+              {snapshot.calendars.map((calendar) => (
+                <button
+                  key={calendar.identifier}
+                  type="button"
+                  aria-label={`Use ${calendar.title} calendar from ${calendar.sourceTitle}`}
+                  disabled={selectingCalendarId !== null}
+                  onClick={() => void chooseCalendar(calendar)}
+                  className="flex min-h-11 w-full items-center gap-2.5 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-55"
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
+                    style={
+                      calendar.colorHex
+                        ? { backgroundColor: calendar.colorHex }
+                        : undefined
+                    }
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium text-pro-text-main">
+                      {calendar.title}
+                    </span>
+                    <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
+                      {calendar.sourceTitle}
+                    </span>
+                  </span>
+                  {selectingCalendarId === calendar.identifier ? (
+                    <span className="text-[9px] font-semibold text-pro-text-muted">
+                      Selecting…
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            {selectionError ? (
+              <p
+                role="alert"
+                className="mt-2 text-[10px] font-semibold text-pro-urgent"
+              >
+                {selectionError}
+              </p>
+            ) : null}
+          </div>
         ) : snapshot.state === 'no_calendars' ? (
           <RecoveryAction
             title="No calendars found"
@@ -224,9 +288,9 @@ export const UpcomingMeetings = ({
         ) : snapshot.state === 'read_failed' ? (
           <RecoveryAction
             title="Calendar couldn’t be read"
-            detail="Your last calendar read is unavailable. Try again from Settings."
-            action={onOpenSettings}
-            actionLabel="Open Pluto settings"
+            detail="Your calendar is selected. Pluto can try the local read again."
+            action={() => void onRefreshCalendar()}
+            actionLabel="Try again"
           />
         ) : (
           <p className="pb-5 text-[12px] font-medium text-pro-text-muted">
