@@ -44,9 +44,7 @@ const renderSettings = () => {
 };
 
 const getTabs = (container: HTMLElement) =>
-  Array.from(
-    container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-  );
+  Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 
 beforeEach(() => {
   Object.defineProperty(window, 'ipcRenderer', {
