@@ -185,6 +185,13 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
+
+export const focusPrimaryWindow = (): void => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+};
 const postMeetingBackgroundActivity = createPostMeetingBackgroundActivity(
   (allowed) => {
     if (win && !win.isDestroyed()) {
