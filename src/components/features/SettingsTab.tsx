@@ -232,7 +232,7 @@ export const SettingsTab = ({
   return (
     <div className="max-w-3xl mx-auto w-full animate-in pb-32">
       <PageHeader title="Settings" />
-      <div className="sticky top-0 z-20 -mx-1 mb-8 overflow-x-auto bg-pro-bg px-1">
+      <div className="-mx-1 mb-8 overflow-x-auto px-1">
         <div
           role="tablist"
           aria-label="Settings categories"

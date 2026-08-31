@@ -156,7 +156,7 @@ Move Calendar plus Recording under Meetings, provider and model controls under I
 
 - [ ] **Step 4: Refine density without broad component churn**
 
-Keep rich Identity and Calendar setup containers. For simple sections, reduce repeated outer shadow/card weight, use consistent divided rows, and keep the current responsive stacked row behavior. Make the tab strip horizontally scrollable and sticky within Settings content without obscuring the page header.
+Keep rich Identity and Calendar setup containers. For simple sections, reduce repeated outer shadow/card weight, use consistent divided rows, and keep the current responsive stacked row behavior. Make the tab strip horizontally scrollable without giving it a separate background or allowing it to float over Settings content.
 
 - [ ] **Step 5: Run the focused tab test and verify GREEN**
 

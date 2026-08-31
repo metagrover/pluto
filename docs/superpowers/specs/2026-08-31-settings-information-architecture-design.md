@@ -50,13 +50,13 @@ Tabs group settings by user intent rather than mirroring every existing section.
 ## Layout strategy
 
 - Keep the existing centered Settings page and page header.
-- Place the tab list beneath the title and keep it visible at the top of the Settings content while the active panel scrolls.
+- Place the tab list beneath the title and let it scroll naturally with the active panel so it remains part of the page rather than floating over settings content.
 - Render exactly one tab panel at a time.
 - Give each panel a short title and description only when they add information beyond the tab label.
 - Use quiet section headings and divided rows. Avoid wrapping every control in a separate card.
 - Preserve richer bordered surfaces for Identity and Calendar because they contain multi-state setup flows rather than simple preferences.
 - Keep controls aligned to the right on wider windows and below their labels on narrow windows.
-- Allow the tab strip to scroll horizontally at narrow widths instead of compressing or wrapping labels.
+- Allow the tab strip to scroll horizontally at narrow widths instead of compressing or wrapping labels. Do not add a separate navigation background.
 
 ## Interaction model
 

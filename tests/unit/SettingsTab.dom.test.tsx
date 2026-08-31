@@ -67,9 +67,12 @@ describe('SettingsTab', () => {
   it('shows one focused category at a time', () => {
     const { container, root } = renderSettings();
     const tablist = container.querySelector('[role="tablist"]');
+    const navigation = tablist?.parentElement;
     const tabs = getTabs(container);
 
     expect(tablist?.getAttribute('aria-label')).toBe('Settings categories');
+    expect(navigation?.className).not.toContain('sticky');
+    expect(navigation?.className).not.toContain('bg-pro-bg');
     expect(tabs.map((tab) => tab.textContent)).toEqual([
       'Personal',
       'Meetings',
