@@ -16,15 +16,19 @@ import {
   getMeeting,
   getMeetingAnalysisPublicationRevisions,
   getMeetingAnalysisRun,
+  listMeetingAnalysisRunMetrics,
   publishMeetingNotesIfCurrent,
   recoverInterruptedMeetingAnalysisRuns,
   restoreMeetingNotesSnapshot,
   saveMeeting,
   saveMeetingAnalysisSecondaryFieldsIfCurrent,
+  updateMeetingAnalysisQueuePosition,
   updateMeetingAnalysisRunStatus,
   updateMeetingAnalysisRunStatusIfCurrent,
+  upsertMeetingAnalysisRunMetric,
 } from '../../electron/db';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+import { createMeetingNotesRunMetrics } from '../../electron/llm/meetingNotesRunMetrics';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
 import { retryMeetingTranscriptValidation } from '../../src/services/retryMeetingTranscriptValidation';
 
@@ -646,6 +650,112 @@ describe('meeting analysis run publication', () => {
 
     expect(getMeeting(meetingId)).toBeUndefined();
     expect(getMeetingAnalysisRun(meetingId)).toBeNull();
+  });
+
+  it('persists queued position and clears it when generation starts', () => {
+    const meetingId = 'queued-run-state';
+    const revisions = fixture(meetingId);
+    beginMeetingAnalysisRun({
+      meetingId,
+      runId: 'run-queued',
+      inputRevision: 'input-queued',
+      ...revisions,
+      stage: 'queued',
+      queuePosition: 3,
+    });
+
+    expect(getMeetingAnalysisRun(meetingId)).toMatchObject({
+      stage: 'queued',
+      queue_position: 3,
+    });
+    expect(
+      updateMeetingAnalysisQueuePosition({
+        meetingId,
+        runId: 'run-queued',
+        queuePosition: 1,
+      }),
+    ).toBe(true);
+    expect(getMeetingAnalysisRun(meetingId)?.queue_position).toBe(1);
+
+    expect(
+      updateMeetingAnalysisRunStatus({
+        meetingId,
+        runId: 'run-queued',
+        notesStatus: 'running',
+        secondaryStatus: 'pending',
+        stage: 'notes_writer',
+      }),
+    ).toBe(true);
+    expect(getMeetingAnalysisRun(meetingId)).toMatchObject({
+      stage: 'notes_writer',
+      queue_position: null,
+    });
+  });
+
+  it('stores only validated terminal metrics and retains the newest 100 runs', () => {
+    const meetingId = 'metric-history-retention';
+    fixture(meetingId);
+    for (let index = 0; index < 101; index += 1) {
+      const metrics = createMeetingNotesRunMetrics({
+        reason: 'manual',
+        sourceSegmentCount: 1,
+        sourceCharacterCount: 34,
+        startedAtMs: 0,
+      }).snapshot('published', index + 1);
+      upsertMeetingAnalysisRunMetric({
+        meetingId,
+        runId: `metric-${index.toString().padStart(3, '0')}`,
+        reason: 'manual',
+        status: 'published',
+        metrics,
+        startedAt: new Date(index * 1_000).toISOString(),
+        completedAt: new Date(index * 1_000 + 500).toISOString(),
+      });
+    }
+
+    const history = listMeetingAnalysisRunMetrics({ limit: 200 });
+    expect(history).toHaveLength(100);
+    expect(history[0]).toMatchObject({ runId: 'metric-100' });
+    expect(history.at(-1)).toMatchObject({ runId: 'metric-001' });
+    expect(() =>
+      upsertMeetingAnalysisRunMetric({
+        meetingId,
+        runId: 'private-invalid',
+        reason: 'manual',
+        status: 'failed',
+        metrics: { ...history[0]!.metrics, prompt: 'PRIVATE' },
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      }),
+    ).toThrow('invalid_meeting_notes_run_metric');
+  });
+
+  it('deletes bounded metric history with its meeting', () => {
+    const meetingId = 'deleted-run-history';
+    fixture(meetingId);
+    const metrics = createMeetingNotesRunMetrics({
+      reason: 'automatic',
+      sourceSegmentCount: 1,
+      sourceCharacterCount: 20,
+      startedAtMs: 0,
+    }).snapshot('failed', 5);
+    upsertMeetingAnalysisRunMetric({
+      meetingId,
+      runId: 'deleted-history-run',
+      reason: 'automatic',
+      status: 'failed',
+      metrics,
+      startedAt: new Date(0).toISOString(),
+      completedAt: new Date(5).toISOString(),
+    });
+
+    deleteMeeting(meetingId);
+
+    expect(
+      listMeetingAnalysisRunMetrics({ limit: 200 }).some(
+        (entry) => entry.runId === 'deleted-history-run',
+      ),
+    ).toBe(false);
   });
 
   it('does not write secondary fields after the source revision is stale', () => {

@@ -91,6 +91,11 @@ import type {
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
+import {
+  type MeetingNotesRunMetric,
+  parseMeetingNotesRunMetric,
+  serializeMeetingNotesRunMetric,
+} from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { createSecureSettingsManager } from './secureSettings';
@@ -235,6 +240,7 @@ export type MeetingAnalysisRun = {
   notes_status: MeetingAnalysisRunStatus;
   secondary_status: MeetingAnalysisSecondaryStatus;
   stage: string;
+  queue_position: number | null;
   error_code: string | null;
   started_at: string;
   updated_at: string;
@@ -340,10 +346,24 @@ const initDb = () => {
         notes_status TEXT NOT NULL,
         secondary_status TEXT NOT NULL,
         stage TEXT NOT NULL,
+        queue_position INTEGER,
         error_code TEXT,
         started_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS meeting_analysis_run_history (
+        run_id TEXT PRIMARY KEY,
+        meeting_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        metrics_json TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_meeting_analysis_run_history_completed
+        ON meeting_analysis_run_history(completed_at DESC);
 
       -- Settings table
       CREATE TABLE IF NOT EXISTS settings (
@@ -643,6 +663,19 @@ const initDb = () => {
       SELECT name, id FROM entities 
       WHERE id NOT IN (SELECT entity_id FROM entities_fts);
     `);
+
+  const meetingAnalysisRunColumns = db
+    .prepare('PRAGMA table_info(meeting_analysis_runs)')
+    .all() as TableInfoColumn[];
+  if (
+    !meetingAnalysisRunColumns.some(
+      (column) => column.name === 'queue_position',
+    )
+  ) {
+    db.exec(
+      'ALTER TABLE meeting_analysis_runs ADD COLUMN queue_position INTEGER',
+    );
+  }
 
   // Remove transcript-derived context left behind by versions that did not
   // delete these rows with their source meeting.
@@ -2975,13 +3008,23 @@ export const beginMeetingAnalysisRun = (input: {
   sourceRevision: string;
   eligibilityRevision: string;
   userNotesHash: string;
+  stage?: 'queued' | 'notes_writer';
+  queuePosition?: number | null;
 }): { status: 'started' } => {
   const now = new Date().toISOString();
+  const stage = input.stage ?? 'notes_writer';
+  const queuePosition =
+    stage === 'queued' &&
+    Number.isSafeInteger(input.queuePosition) &&
+    (input.queuePosition ?? 0) > 0
+      ? input.queuePosition!
+      : null;
   db.prepare(
     `INSERT INTO meeting_analysis_runs (
       meeting_id, run_id, input_revision, source_revision, eligibility_revision,
-      user_notes_hash, notes_status, secondary_status, stage, error_code, started_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', 'notes_writer', NULL, ?, ?)
+      user_notes_hash, notes_status, secondary_status, stage, queue_position,
+      error_code, started_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?, NULL, ?, ?)
     ON CONFLICT(meeting_id) DO UPDATE SET
       run_id = excluded.run_id,
       input_revision = excluded.input_revision,
@@ -2990,7 +3033,8 @@ export const beginMeetingAnalysisRun = (input: {
       user_notes_hash = excluded.user_notes_hash,
       notes_status = 'running',
       secondary_status = 'pending',
-      stage = 'notes_writer',
+      stage = excluded.stage,
+      queue_position = excluded.queue_position,
       error_code = NULL,
       started_at = excluded.started_at,
       updated_at = excluded.updated_at`,
@@ -3001,6 +3045,8 @@ export const beginMeetingAnalysisRun = (input: {
     input.sourceRevision,
     input.eligibilityRevision,
     input.userNotesHash,
+    stage,
+    queuePosition,
     now,
     now,
   );
@@ -3031,12 +3077,15 @@ export const updateMeetingAnalysisRunStatus = (input: {
   const result = db
     .prepare(
       `UPDATE meeting_analysis_runs
-       SET notes_status = ?, secondary_status = ?, stage = ?, error_code = ?, updated_at = ?
+       SET notes_status = ?, secondary_status = ?, stage = ?,
+           queue_position = CASE WHEN ? = 'queued' THEN queue_position ELSE NULL END,
+           error_code = ?, updated_at = ?
        WHERE meeting_id = ? AND run_id = ?`,
     )
     .run(
       input.notesStatus,
       input.secondaryStatus,
+      input.stage,
       input.stage,
       input.errorCode ?? null,
       new Date().toISOString(),
@@ -3044,6 +3093,131 @@ export const updateMeetingAnalysisRunStatus = (input: {
       input.runId,
     );
   return result.changes === 1;
+};
+
+export const updateMeetingAnalysisQueuePosition = (input: {
+  meetingId: string | number;
+  runId: string;
+  queuePosition: number | null;
+}): boolean => {
+  if (
+    input.queuePosition !== null &&
+    (!Number.isSafeInteger(input.queuePosition) || input.queuePosition <= 0)
+  ) {
+    throw new Error('invalid_meeting_analysis_queue_position');
+  }
+  const result = db
+    .prepare(
+      `UPDATE meeting_analysis_runs
+       SET queue_position = ?, updated_at = ?
+       WHERE meeting_id = ? AND run_id = ? AND notes_status = 'running'`,
+    )
+    .run(
+      input.queuePosition,
+      new Date().toISOString(),
+      String(input.meetingId),
+      input.runId,
+    );
+  return result.changes === 1;
+};
+
+export type MeetingAnalysisRunMetricRecord = {
+  runId: string;
+  meetingId: string;
+  reason: 'automatic' | 'manual';
+  status: 'published' | 'failed' | 'cancelled';
+  metrics: MeetingNotesRunMetric;
+  startedAt: string;
+  completedAt: string;
+};
+
+const terminalMetricStatuses = new Set<
+  MeetingAnalysisRunMetricRecord['status']
+>(['published', 'failed', 'cancelled']);
+
+export const upsertMeetingAnalysisRunMetric = (input: {
+  meetingId: string | number;
+  runId: string;
+  reason: 'automatic' | 'manual';
+  status: 'published' | 'failed' | 'cancelled';
+  metrics: MeetingNotesRunMetric;
+  startedAt: string;
+  completedAt: string;
+}): void => {
+  if (
+    !input.runId.trim() ||
+    !terminalMetricStatuses.has(input.status) ||
+    input.metrics.reason !== input.reason ||
+    input.metrics.status !== input.status
+  ) {
+    throw new Error('invalid_meeting_notes_run_metric');
+  }
+  const metricsJson = serializeMeetingNotesRunMetric(input.metrics);
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO meeting_analysis_run_history (
+         run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(run_id) DO UPDATE SET
+         meeting_id = excluded.meeting_id,
+         reason = excluded.reason,
+         status = excluded.status,
+         metrics_json = excluded.metrics_json,
+         started_at = excluded.started_at,
+         completed_at = excluded.completed_at`,
+    ).run(
+      input.runId,
+      String(input.meetingId),
+      input.reason,
+      input.status,
+      metricsJson,
+      input.startedAt,
+      input.completedAt,
+    );
+    db.prepare(
+      `DELETE FROM meeting_analysis_run_history
+       WHERE run_id NOT IN (
+         SELECT run_id FROM meeting_analysis_run_history
+         ORDER BY completed_at DESC, rowid DESC
+         LIMIT 100
+       )`,
+    ).run();
+  })();
+};
+
+export const listMeetingAnalysisRunMetrics = (input: {
+  limit: number;
+}): MeetingAnalysisRunMetricRecord[] => {
+  const limit = Math.min(
+    1_000,
+    Math.max(1, Number.isSafeInteger(input.limit) ? input.limit : 100),
+  );
+  const rows = db
+    .prepare(
+      `SELECT run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
+       FROM meeting_analysis_run_history
+       WHERE completed_at IS NOT NULL
+       ORDER BY completed_at DESC, rowid DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    run_id: string;
+    meeting_id: string;
+    reason: 'automatic' | 'manual';
+    status: 'published' | 'failed' | 'cancelled';
+    metrics_json: string;
+    started_at: string;
+    completed_at: string;
+  }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    meetingId: row.meeting_id,
+    reason: row.reason,
+    status: row.status,
+    metrics: parseMeetingNotesRunMetric(row.metrics_json),
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  }));
 };
 
 const hashMeetingAnalysisValue = (value: string | null | undefined): string =>
@@ -3171,7 +3345,7 @@ export const restoreMeetingNotesSnapshot = (
       );
     if (result.changes !== 1) return false;
     db.prepare(
-      `UPDATE meeting_analysis_runs SET notes_status = 'cancelled', secondary_status = 'superseded', stage = 'restored', error_code = 'notes_superseded', updated_at = ? WHERE meeting_id = ?`,
+      `UPDATE meeting_analysis_runs SET notes_status = 'cancelled', secondary_status = 'superseded', stage = 'restored', queue_position = NULL, error_code = 'notes_superseded', updated_at = ? WHERE meeting_id = ?`,
     ).run(new Date().toISOString(), String(meetingId));
     const updated = getMeeting(meetingId) as PersistedMeeting | undefined;
     if (updated) refreshMeetingFts(updated);
@@ -3301,7 +3475,7 @@ export const publishMeetingNotesIfCurrent = (input: {
     const runUpdate = db
       .prepare(
         `UPDATE meeting_analysis_runs
-         SET notes_status = 'published', stage = 'published', updated_at = ?
+         SET notes_status = 'published', stage = 'published', queue_position = NULL, updated_at = ?
          WHERE meeting_id = ? AND run_id = ? AND notes_status = 'running'`,
       )
       .run(new Date().toISOString(), meetingId, input.runId);
@@ -3323,7 +3497,7 @@ export const recoverInterruptedMeetingAnalysisRuns = (): void => {
   const now = new Date().toISOString();
   db.transaction(() => {
     db.prepare(
-      `UPDATE meeting_analysis_runs SET notes_status = 'failed', stage = 'interrupted', error_code = 'notes_interrupted', updated_at = ? WHERE notes_status = 'running'`,
+      `UPDATE meeting_analysis_runs SET notes_status = 'failed', stage = 'interrupted', queue_position = NULL, error_code = 'notes_interrupted', updated_at = ? WHERE notes_status = 'running'`,
     ).run(now);
     db.prepare(
       `UPDATE meeting_analysis_runs SET secondary_status = 'failed', stage = 'secondary_interrupted', error_code = 'secondary_interrupted', updated_at = ? WHERE notes_status = 'published' AND secondary_status IN ('pending', 'running')`,
@@ -3540,6 +3714,9 @@ export const deleteMeeting = (id: string | number) => {
     db.prepare('DELETE FROM meeting_analysis_runs WHERE meeting_id = ?').run(
       safeId,
     );
+    db.prepare(
+      'DELETE FROM meeting_analysis_run_history WHERE meeting_id = ?',
+    ).run(safeId);
   }
 
   console.log(`[DB] Deleted meeting: ${safeId}`);

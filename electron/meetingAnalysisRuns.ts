@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readDownstreamProcessingLease } from '../src/services/downstreamProcessingLease';
 import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
+import {
+  type MeetingNotesRunMetric,
+  createMeetingNotesRunMetrics,
+} from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
 import { NotesStageCache } from './llm/meetingNotesStageCache';
 import {
@@ -99,6 +103,15 @@ export type MeetingAnalysisRunCoordinatorDb = {
     analysis: AnalysisDocumentV3;
   }): boolean;
   getAllEntities(): EntityHint[];
+  upsertMeetingAnalysisRunMetric?(input: {
+    meetingId: string | number;
+    runId: string;
+    reason: 'automatic' | 'manual';
+    status: 'published' | 'failed' | 'cancelled';
+    metrics: MeetingNotesRunMetric;
+    startedAt: string;
+    completedAt: string;
+  }): void;
 };
 
 type NotesProvider = {
@@ -118,6 +131,7 @@ type NotesProvider = {
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: import('./llm/meetingNotesRunMetrics').NotesStageObserver;
     },
   ): Promise<AnalysisDocumentV3>;
   extractValueSignals?(
@@ -536,6 +550,33 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
 
     const runId = createRunId();
     const controller = new AbortController();
+    const primaryReason = input.reason === 'manual' ? 'manual' : 'automatic';
+    const metricsStartedAtMs = Date.now();
+    const metricsStartedAt = new Date(metricsStartedAtMs).toISOString();
+    const runMetrics = createMeetingNotesRunMetrics({
+      reason: primaryReason,
+      sourceSegmentCount: source.segments.length,
+      sourceCharacterCount: source.segments.reduce(
+        (total, segment) => total + segment.text.length,
+        0,
+      ),
+      startedAtMs: metricsStartedAtMs,
+    });
+    let metricFinalized = false;
+    const finalizeMetric = (status: 'published' | 'failed' | 'cancelled') => {
+      if (metricFinalized) return;
+      metricFinalized = true;
+      const completedAtMs = Date.now();
+      dependencies.db.upsertMeetingAnalysisRunMetric?.({
+        meetingId,
+        runId,
+        reason: primaryReason,
+        status,
+        metrics: runMetrics.snapshot(status, completedAtMs),
+        startedAt: metricsStartedAt,
+        completedAt: new Date(completedAtMs).toISOString(),
+      });
+    };
     dependencies.db.beginMeetingAnalysisRun({
       meetingId,
       runId,
@@ -559,6 +600,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             contextTokens: NOTES_CONTEXT_TOKENS,
             stageCache,
             cacheKey: fingerprint,
+            onStageEvent: runMetrics.observe,
             onStage: (task) => {
               dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
                 meetingId,
@@ -582,6 +624,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           analysis,
         });
         if (!published) throw new Error('meeting_notes_superseded');
+        finalizeMetric('published');
         notify(meetingId);
         if (dependencies.runSecondary) {
           const secondaryInput = {
@@ -621,6 +664,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           stage: code === 'notes_cancelled' ? 'cancelled' : 'notes_failed',
           errorCode: code,
         });
+        finalizeMetric(code === 'notes_cancelled' ? 'cancelled' : 'failed');
         notify(meetingId);
         throw error;
       } finally {

@@ -1,9 +1,120 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  it('persists one content-free terminal metric from provider stage events', async () => {
+    const upsertMeetingAnalysisRunMetric = vi.fn();
+    const generateStructuredAnalysis = vi.fn(
+      async (
+        _transcript: string,
+        _notes: string,
+        _template: string,
+        options: {
+          onStageEvent?: (event: NotesStageEvent) => void;
+        },
+      ) => {
+        options.onStageEvent?.({
+          phase: 'queued',
+          sequence: 0,
+          task: 'notesWriter',
+          atMs: 100,
+        });
+        options.onStageEvent?.({ phase: 'started', sequence: 0, atMs: 125 });
+        options.onStageEvent?.({
+          phase: 'finished',
+          sequence: 0,
+          atMs: 225,
+          outcome: 'complete',
+          inputTokens: 200,
+          outputTokens: 50,
+        });
+        return {
+          analysis_schema_version: 3,
+          overview: 'Reviewed notes.',
+          topics: [],
+          all_action_items: [],
+          all_decisions: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        };
+      },
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'metric-run',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'metric-source',
+          eligibilityRevision: 'metric-eligibility',
+          userNotesHash: 'metric-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+        upsertMeetingAnalysisRunMetric,
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis,
+      }),
+      createRunId: () => 'metric-run-id',
+    });
+
+    await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'metric-run',
+      requestId: 'metric-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledTimes(1);
+    expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: 'metric-run',
+        runId: 'metric-run-id',
+        reason: 'manual',
+        status: 'published',
+        metrics: expect.objectContaining({
+          sourceSegmentCount: 1,
+          sourceCharacterCount: 18,
+          queueMs: 25,
+          modelMs: 100,
+          stages: [
+            expect.objectContaining({
+              task: 'notesWriter',
+              outcome: 'complete',
+              inputTokens: 200,
+              outputTokens: 50,
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(
+      JSON.stringify(upsertMeetingAnalysisRunMetric.mock.calls),
+    ).not.toContain('We agreed to ship.');
+  });
+
   it.each([false, true])(
     'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
     async (notificationFails) => {
