@@ -53,6 +53,14 @@ import {
   restoreAnalysisSnapshot,
 } from '../src/utils/meetingNotesHistory';
 import {
+  type PersonBriefingCommitment,
+  type PersonBriefingMeeting,
+  type PersonCommitmentCandidate,
+  type PersonMeetingRecord,
+  mergePersonMeetingEvidence,
+  selectVerifiedPersonCommitments,
+} from '../src/utils/personBriefing';
+import {
   type ProjectBrief,
   type ProjectBriefingMeeting,
   buildProjectHealth,
@@ -79,6 +87,7 @@ import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
+import type { CalendarEvent } from './calendar/types';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -7428,6 +7437,157 @@ export const getEntityMeetings = (
     mention_count: number;
     context: string | null;
   })[];
+};
+
+export interface PersonBriefingDetail {
+  person: Entity;
+  meetings: PersonBriefingMeeting[];
+  commitments: {
+    open: PersonBriefingCommitment[];
+    delivered: PersonBriefingCommitment[];
+  };
+  knowledgeDoc: KnowledgeDoc | null;
+  workingMemorySnapshot: WorkingMemorySnapshot | null;
+}
+
+const toPersonMeetingRecord = (
+  meeting: PersistedMeeting,
+  context: string | null = null,
+): PersonMeetingRecord => ({
+  id: String(meeting.id),
+  title: meeting.title || 'Untitled meeting',
+  started_at: meeting.started_at || null,
+  created_at: meeting.created_at || null,
+  duration_seconds: meeting.duration_seconds ?? null,
+  context,
+});
+
+/**
+ * Build the People dossier from evidence-bearing identity, calendar, entity,
+ * and explicit commitment-owner records. Display names never grant authority.
+ */
+export const getPersonBriefing = (
+  personId: string,
+): PersonBriefingDetail | undefined => {
+  const person = getEntity(personId);
+  if (!person || person.type !== 'person') return undefined;
+
+  const mentionedMeetings = getEntityMeetings(personId).map((meeting) =>
+    toPersonMeetingRecord(meeting, meeting.context),
+  );
+  const mentionedById = new Map(
+    mentionedMeetings.map((meeting) => [meeting.id, meeting]),
+  );
+
+  const confirmedIds = new Set<string>();
+  const bindingRows = db
+    .prepare('SELECT meeting_id, payload FROM identity_bindings')
+    .all() as Array<{ meeting_id: string; payload: string }>;
+  for (const row of bindingRows) {
+    try {
+      const binding = JSON.parse(row.payload) as {
+        personId?: unknown;
+        individual?: unknown;
+      };
+      if (binding.individual === true && binding.personId === personId) {
+        confirmedIds.add(row.meeting_id);
+      }
+    } catch {
+      // Malformed derived identity data cannot establish participation.
+    }
+  }
+  const capturedRows = db
+    .prepare(
+      "SELECT meeting_id FROM identity_captures WHERE origin = 'local' AND self_person_id = ?",
+    )
+    .all(personId) as Array<{ meeting_id: string }>;
+  for (const row of capturedRows) confirmedIds.add(row.meeting_id);
+
+  const confirmed = [...confirmedIds].flatMap((meetingId) => {
+    const meeting = getMeeting(meetingId) as PersistedMeeting | undefined;
+    return meeting
+      ? [
+          toPersonMeetingRecord(
+            meeting,
+            mentionedById.get(meetingId)?.context ?? null,
+          ),
+        ]
+      : [];
+  });
+
+  const sameNameCount = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM entities WHERE type = 'person' AND normalized_name = ?",
+      )
+      .get(person.normalized_name) as { count: number }
+  ).count;
+  const scheduled: PersonMeetingRecord[] = [];
+  if (sameNameCount === 1) {
+    const calendarRows = db
+      .prepare('SELECT meeting_id, event_json FROM meeting_calendar_context')
+      .all() as Array<{ meeting_id: string; event_json: string }>;
+    for (const row of calendarRows) {
+      try {
+        const event = JSON.parse(row.event_json) as CalendarEvent;
+        if (event.isCancelled) continue;
+        const people = [event.organizer, ...event.attendees].filter(Boolean);
+        if (
+          !people.some(
+            (candidate) =>
+              candidate?.name &&
+              normalizeEntityName(candidate.name) === person.normalized_name,
+          )
+        ) {
+          continue;
+        }
+        const meeting = getMeeting(row.meeting_id) as
+          | PersistedMeeting
+          | undefined;
+        if (meeting) {
+          scheduled.push(
+            toPersonMeetingRecord(
+              meeting,
+              mentionedById.get(row.meeting_id)?.context ?? null,
+            ),
+          );
+        }
+      } catch {
+        // Malformed calendar cache cannot establish expected participation.
+      }
+    }
+  }
+
+  const actionCandidates = getEntitiesByType('action_item').map((action) => {
+    const metadata = parseActionMetadata(action.metadata);
+    const sourceMeetingId =
+      typeof metadata.source_meeting_id === 'string'
+        ? metadata.source_meeting_id
+        : null;
+    const source = sourceMeetingId
+      ? (getMeeting(sourceMeetingId) as PersistedMeeting | undefined)
+      : undefined;
+    return {
+      ...action,
+      sourceMeetingTitle: source?.title ?? null,
+    } satisfies PersonCommitmentCandidate;
+  });
+
+  return {
+    person,
+    meetings: mergePersonMeetingEvidence({
+      confirmed,
+      scheduled,
+      mentioned: mentionedMeetings,
+    }),
+    commitments: selectVerifiedPersonCommitments({
+      personId,
+      actions: actionCandidates,
+    }),
+    knowledgeDoc: getKnowledgeDocByScope('person_context', personId) ?? null,
+    workingMemorySnapshot:
+      getWorkingMemorySnapshot('person_context', personId) ?? null,
+  };
 };
 
 /**

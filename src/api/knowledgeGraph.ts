@@ -5,6 +5,8 @@
  * Sprint 2: Entity extraction, resolution, and relationship management.
  */
 
+import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
+
 // Type definitions matching the database schema
 export type EntityType =
   | 'person'
@@ -485,6 +487,14 @@ export const getEntityMeetings = async (
   entityId: string,
 ): Promise<EntityMeeting[]> => {
   return invoke('GET_ENTITY_MEETINGS', entityId);
+};
+
+export type PersonBriefingDetail = ElectronPersonBriefingDetail;
+
+export const getPersonBriefing = async (
+  personId: string,
+): Promise<PersonBriefingDetail | undefined> => {
+  return invoke('GET_PERSON_BRIEFING', personId);
 };
 
 // =============================================
