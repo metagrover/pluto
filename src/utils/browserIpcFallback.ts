@@ -7,6 +7,7 @@ import type {
   Entity,
   EntityMeeting,
   KnowledgeGraphStats,
+  PersonBriefingDetail,
 } from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { Meeting } from '../types';
@@ -367,6 +368,193 @@ const previewMeetings: Record<string, EntityMeeting[]> = {
   ],
 };
 
+const previewPersonContextDoc: KnowledgeDoc = {
+  id: 'preview-avery-context',
+  scope_type: 'person_context',
+  scope_key: 'preview-avery',
+  title: 'Conversations with Avery Chen',
+  rendered_content: null,
+  config: null,
+  status: 'up_to_date',
+  last_synthesized_at: now,
+  last_source_cursor: null,
+  updated_at: now,
+  structured_json: JSON.stringify({
+    schema_version: 2,
+    scope: { type: 'person_context', title: 'Avery Chen' },
+    current_read: {
+      headline: 'Avery is coordinating the launch handoff.',
+      supporting_bullets: [],
+      freshness: 'fresh',
+      source_count: 2,
+      cited_item_count: 1,
+      cited_meeting_count: 2,
+      trust_message: 'Grounded in two confirmed conversations.',
+      evidence_quality: {
+        mode: 'direct',
+        confidence: 0.9,
+        cited_meeting_count: 2,
+        source_count: 2,
+        last_reinforced_at: now,
+        freshness: 'fresh',
+      },
+    },
+    active_streams: [],
+    needs_attention: [],
+    patterns: [
+      {
+        id: 'preview-pattern',
+        title: 'Prefers written review before handoff',
+        summary:
+          'A short written review helps Avery close handoffs with fewer open questions.',
+        kind: 'pattern',
+        severity: 'steady',
+        why_now: 'Repeated across launch handoffs.',
+        stream_ids: [],
+        citations: [
+          {
+            meeting_id: 'preview-product-review',
+            quote: 'Send the review first.',
+          },
+          {
+            meeting_id: 'preview-launch-handoff',
+            quote: 'The written review keeps the handoff clear.',
+          },
+        ],
+        evidence_quality: {
+          mode: 'direct',
+          confidence: 0.9,
+          cited_meeting_count: 2,
+          source_count: 2,
+          last_reinforced_at: now,
+          freshness: 'fresh',
+        },
+      },
+    ],
+    risks_and_unknowns: [],
+    evidence_index: [
+      {
+        id: 'preview-evidence-product-review',
+        meeting_id: 'preview-product-review',
+        meeting_title: 'Product review',
+        captured_at: now,
+        quote: 'Send the review first.',
+        stream_ids: [],
+        item_ids: ['preview-pattern'],
+        mode: 'direct',
+        confidence: 0.9,
+      },
+      {
+        id: 'preview-evidence-launch-handoff',
+        meeting_id: 'preview-launch-handoff',
+        meeting_title: 'Launch handoff',
+        captured_at: now,
+        quote: 'The written review keeps the handoff clear.',
+        stream_ids: [],
+        item_ids: ['preview-pattern'],
+        mode: 'direct',
+        confidence: 0.9,
+      },
+    ],
+    source_quality_summary: {
+      included_count: 2,
+      excluded_count: 0,
+      weak_count: 0,
+      records: [],
+    },
+    change_summary: {
+      generated_at: now,
+      added_count: 1,
+      removed_count: 0,
+      updated_count: 0,
+      notable_changes: [],
+    },
+  }),
+};
+
+const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
+  'preview-avery': {
+    person: previewPeople[0],
+    meetings: [
+      {
+        id: 'preview-product-review',
+        title: 'Product review',
+        started_at: '2026-07-12T17:00:00.000Z',
+        created_at: '2026-07-12T17:00:00.000Z',
+        duration_seconds: 2700,
+        context: 'Aligned on the rollout sequence and evidence requirements.',
+        evidence: 'confirmed',
+      },
+      {
+        id: 'preview-launch-handoff',
+        title: 'Launch handoff',
+        started_at: '2026-07-10T16:30:00.000Z',
+        created_at: '2026-07-10T16:30:00.000Z',
+        duration_seconds: 1800,
+        context: 'Closed the written handoff review.',
+        evidence: 'confirmed',
+      },
+      {
+        id: 'preview-roadmap-planning',
+        title: 'Roadmap planning',
+        started_at: '2026-07-08T16:30:00.000Z',
+        created_at: '2026-07-08T16:30:00.000Z',
+        duration_seconds: 2400,
+        context: 'Avery was mentioned in the rollout discussion.',
+        evidence: 'mentioned',
+      },
+    ],
+    commitments: {
+      open: [
+        {
+          id: 'preview-avery-open',
+          text: 'Send the final launch review',
+          status: 'active',
+          dueDate: '2026-09-03T17:00:00.000Z',
+          evidence: 'I will send the final review on Thursday.',
+          sourceMeetingId: 'preview-product-review',
+          sourceMeetingTitle: 'Product review',
+          updatedAt: now,
+        },
+      ],
+      delivered: [
+        {
+          id: 'preview-avery-delivered',
+          text: 'Shared the prototype walkthrough',
+          status: 'completed',
+          dueDate: null,
+          evidence: 'I shared the walkthrough with the launch group.',
+          sourceMeetingId: 'preview-launch-handoff',
+          sourceMeetingTitle: 'Launch handoff',
+          updatedAt: now,
+        },
+      ],
+    },
+    knowledgeDoc: previewPersonContextDoc,
+    workingMemorySnapshot: null,
+  },
+  ...Object.fromEntries(
+    previewPeople.slice(1).map((person) => [
+      person.id,
+      {
+        person,
+        meetings: (previewMeetings[person.id] ?? []).map((meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          started_at: meeting.started_at,
+          created_at: meeting.created_at,
+          duration_seconds: meeting.duration_seconds,
+          context: meeting.context,
+          evidence: 'mentioned' as const,
+        })),
+        commitments: { open: [], delivered: [] },
+        knowledgeDoc: null,
+        workingMemorySnapshot: null,
+      },
+    ]),
+  ),
+};
+
 const workspaceFor = (docId?: string): KnowledgeWorkspacePayload => {
   const selected_doc = docs.find((doc) => doc.id === docId) || docs[0];
 
@@ -569,8 +757,22 @@ const createInvokeFallback =
       case 'GET_ENTITIES_BY_TYPE':
         result = args[0] === 'person' ? previewPeople : [];
         break;
+      case 'SEARCH_ENTITIES': {
+        const query = String(args[0] || '')
+          .trim()
+          .toLowerCase();
+        result = previewPeople.filter((person) =>
+          `${person.name} ${person.metadata || ''}`
+            .toLowerCase()
+            .includes(query),
+        );
+        break;
+      }
       case 'GET_ENTITY_MEETINGS':
         result = previewMeetings[String(args[0])] || [];
+        break;
+      case 'GET_PERSON_BRIEFING':
+        result = previewPersonBriefings[String(args[0])];
         break;
       case 'GET_KNOWLEDGE_TIMELINE':
         result = workspaceFor().timeline;

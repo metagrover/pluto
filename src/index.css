@@ -55,7 +55,7 @@
     @apply inline-flex items-center rounded border border-amber-500/15 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/90;
   }
   .person-row {
-    @apply relative;
+    @apply relative border-b border-pro-border/50 last:border-b-0;
   }
   .person-row--selected {
     @apply rounded-xl bg-pro-accent/5;
@@ -64,7 +64,7 @@
     @apply flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
   }
   .person-avatar {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/40 bg-pro-surface/80 text-[11px] font-semibold text-pro-text-muted/50 transition-colors duration-150;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted/70 transition-colors duration-150;
   }
   .person-row__meeting:hover .person-avatar {
     @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
@@ -76,23 +76,23 @@
     @apply truncate text-[13.5px] font-medium leading-none text-pro-text-main transition-colors duration-150;
   }
   .person-identity span {
-    @apply truncate text-[11px] leading-none text-pro-text-muted/50;
+    @apply truncate text-[11px] leading-none text-pro-text-muted/70;
   }
   .person-row__meeting:hover .person-identity strong {
     @apply text-pro-accent;
   }
   .person-context {
-    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/60;
+    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/75;
   }
   .person-meta {
-    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/45;
+    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/70;
   }
   .person-meeting-count,
   .person-date {
     @apply flex items-center gap-1.5;
   }
   .person-row__chevron {
-    @apply -mr-1 shrink-0 text-pro-text-muted/20 transition-colors duration-150;
+    @apply -mr-1 shrink-0 text-pro-text-muted/40 transition-colors duration-150;
   }
   .person-row__meeting:hover .person-row__chevron {
     @apply text-pro-accent/50;
