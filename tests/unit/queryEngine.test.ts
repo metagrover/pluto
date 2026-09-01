@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
 import {
+  buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildMeetingRetrievalResult,
   mergeRetrievalResultsByMeeting,
@@ -401,6 +402,116 @@ describe('Query Engine', () => {
           },
         ]),
       ).toBe('Launch review: Sam will send the customer update. [Source 1]');
+    });
+  });
+
+  describe('buildAssigneeActionRecall', () => {
+    const meetings = [
+      {
+        id: 'planning',
+        title: 'Launch planning',
+        started_at: '2026-08-31T18:00:00.000Z',
+        mid_json: JSON.stringify({
+          mid_version: 1,
+          meeting_id: 'planning',
+          title: 'Launch planning',
+          occurred_at: '2026-08-31T18:00:00.000Z',
+          duration_seconds: 1200,
+          participants: [],
+          projects: [],
+          topics: [],
+          decisions: [],
+          signals: {
+            continuity: [],
+            accountability_risks: [],
+            decision_impacts: [],
+          },
+          evidence_spans: [],
+          action_items: [
+            {
+              entity_id: 'action-1',
+              description: 'Send the revised launch plan to the team.',
+              assignee: 'Ayush',
+              due_date: '2026-09-03',
+              status: 'active',
+            },
+            {
+              entity_id: 'action-2',
+              description: 'Archive the old launch checklist.',
+              assignee: 'Ayush',
+              status: 'completed',
+            },
+            {
+              entity_id: 'action-3',
+              description: 'Send the updated launch plan to the team.',
+              assignee: 'Ayush',
+              due_date: '2026-09-03',
+              status: 'active',
+            },
+          ],
+        }),
+      },
+      {
+        id: 'review',
+        title: 'Product review',
+        started_at: '2026-08-30T18:00:00.000Z',
+        analysis_json: JSON.stringify({
+          analysis_schema_version: 3,
+          overview: 'The team reviewed onboarding.',
+          topics: [],
+          all_decisions: [],
+          all_action_items: [
+            {
+              text: 'Share the onboarding recordings.',
+              assignee: 'ayush',
+              status: 'active',
+            },
+          ],
+        }),
+      },
+    ] as dbModule.PersistedMeeting[];
+
+    it('answers the exact generated assignee suggestion from structured intelligence', () => {
+      const recall = buildAssigneeActionRecall(
+        "What's assigned to Ayush?",
+        meetings,
+      );
+
+      expect(recall).not.toBeNull();
+      expect(recall?.assignee).toBe('Ayush');
+      expect(recall?.answer).toContain(
+        '- Send the revised launch plan to the team. Due Sep 3. [Source 1]',
+      );
+      expect(recall?.answer).toContain(
+        '- Share the onboarding recordings. [Source 2]',
+      );
+      expect(recall?.answer).not.toContain('Archive the old launch checklist');
+      expect(recall?.answer).not.toContain('Send the updated launch plan');
+      expect(recall?.context.map((source) => source.meeting_id)).toEqual([
+        'planning',
+        'review',
+      ]);
+    });
+
+    it('recognizes natural ownership variants without matching unrelated questions', () => {
+      expect(buildAssigneeActionRecall('What does Ayush own?', meetings)).not
+        .toBeNull;
+      expect(
+        buildAssigneeActionRecall("What are Ayush's action items?", meetings),
+      ).not.toBeNull;
+      expect(
+        buildAssigneeActionRecall('What did Ayush say about launch?', meetings),
+      ).toBeNull();
+    });
+
+    it('returns an immediate no-evidence answer for a recognized assignee lookup', () => {
+      expect(
+        buildAssigneeActionRecall("What's assigned to Priya?", meetings),
+      ).toMatchObject({
+        assignee: 'Priya',
+        answer: "I couldn't find any open action items assigned to Priya.",
+        context: [],
+      });
     });
   });
 

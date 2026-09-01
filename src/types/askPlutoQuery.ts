@@ -1,6 +1,8 @@
 export type AskPlutoQueryPhase =
   | 'scope_resolved'
   | 'retrieving'
+  | 'waiting'
+  | 'writing'
   | 'generating'
   | 'citations_ready'
   | 'completed'
@@ -114,7 +116,11 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
   answer: string;
   citations: Citation[];
   currentMeeting?: AskPlutoCurrentMeeting;
-  failureReason?: 'timeout' | 'provider_unavailable';
+  failureReason?:
+    | 'timeout'
+    | 'provider_unavailable'
+    | 'invalid_response'
+    | 'generation_failed';
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;
   outcome?: AskPlutoOutcome;

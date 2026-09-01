@@ -359,6 +359,7 @@ import {
   parseAskPlutoCorrectionRecords,
   selectRelevantAskPlutoCorrections,
 } from './intelligence/askPlutoCorrections';
+import { classifyAskPlutoFailure } from './intelligence/askPlutoFailures';
 import {
   type AskPlutoReasoningMode,
   getCrossMeetingCandidateLimit,
@@ -399,6 +400,7 @@ import {
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import {
+  buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
@@ -3736,6 +3738,10 @@ app.whenReady().then(async () => {
           signal: controller.signal,
           useModelClassification: false,
         });
+        const assigneeRecall = buildAssigneeActionRecall(
+          queryText,
+          persistedMeetings,
+        );
         const explicitMeetingScope = resolveExplicitMeetingScope(
           queryText,
           persistedMeetings,
@@ -4138,17 +4144,19 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             historicalCandidateLimit,
           });
-        const context = explicitResolvedScope
-          ? explicitlyScopedPinnedResults
-          : temporalResolvedScope
-            ? pinnedResults
-            : restrictToCurrentMeeting && currentPinnedResult
-              ? [currentPinnedResult]
-              : restrictToPinnedCurrentComparison
-                ? pinnedResults
-                : restrictToPriorConversation
-                  ? priorPinnedResults
-                  : await retrieveContext(parsed, { pinnedResults });
+        const context =
+          assigneeRecall?.context ??
+          (explicitResolvedScope
+            ? explicitlyScopedPinnedResults
+            : temporalResolvedScope
+              ? pinnedResults
+              : restrictToCurrentMeeting && currentPinnedResult
+                ? [currentPinnedResult]
+                : restrictToPinnedCurrentComparison
+                  ? pinnedResults
+                  : restrictToPriorConversation
+                    ? priorPinnedResults
+                    : await retrieveContext(parsed, { pinnedResults }));
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
 
@@ -4180,7 +4188,9 @@ app.whenReady().then(async () => {
         if (context.length === 0) {
           return {
             status: 'answered' as const,
-            answer: "I couldn't find information about that in your meetings.",
+            answer:
+              assigneeRecall?.answer ??
+              "I couldn't find information about that in your meetings.",
             citations: [],
             currentMeeting: currentMeetingStatus,
             outcome: 'no_evidence' as const,
@@ -4193,7 +4203,11 @@ app.whenReady().then(async () => {
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
         );
 
-        sendStatus('generating');
+        if (assigneeRecall) {
+          sendStatus('writing');
+        } else {
+          sendStatus('waiting');
+        }
         const validatedAnswerStream = createValidatedAnswerStream(
           context,
           (delta) => {
@@ -4205,20 +4219,22 @@ app.whenReady().then(async () => {
             });
           },
         );
-        const extractiveAnswer = buildExtractiveTemporalSummary(
-          queryText,
-          context,
-        );
+        const extractiveAnswer =
+          assigneeRecall?.answer ??
+          buildExtractiveTemporalSummary(queryText, context);
         let answerRaw: string;
         if (
           extractiveAnswer &&
-          shouldUsePreparedExtractiveAnswer({
-            mode: reasoningMode,
-            contextCount: context.length,
-          })
+          (Boolean(assigneeRecall) ||
+            shouldUsePreparedExtractiveAnswer({
+              mode: reasoningMode,
+              contextCount: context.length,
+            }))
         ) {
           answerRaw = extractiveAnswer;
-          validatedAnswerStream.push(answerRaw);
+          for (const [index, line] of answerRaw.split('\n').entries()) {
+            validatedAnswerStream.push(`${index > 0 ? '\n' : ''}${line}`);
+          }
         } else {
           const settings = await getAllSettings(db);
           const provider = await getProvider(settings);
@@ -4243,6 +4259,7 @@ app.whenReady().then(async () => {
             mode: reasoningMode,
             onStart: () => {
               providerStartedAt ??= Date.now();
+              sendStatus('writing');
             },
             onToken: (delta) => {
               if (controller.signal.aborted) return;
@@ -4304,10 +4321,7 @@ app.whenReady().then(async () => {
             currentMeeting: currentMeetingStatus,
           };
         }
-        const timedOut =
-          error instanceof Error &&
-          (error.name === 'TimeoutError' ||
-            /timed?\s*out|operation was aborted/i.test(error.message));
+        const failure = classifyAskPlutoFailure(error);
         console.error(
           `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
           error,
@@ -4315,14 +4329,10 @@ app.whenReady().then(async () => {
         sendStatus('failed');
         return {
           status: 'unavailable' as const,
-          answer: timedOut
-            ? 'Local analysis took too long. Your question is still here, so you can retry or use Fast mode.'
-            : "Pluto couldn't reach the configured answer model. Your meeting evidence is unchanged, and you can retry when the model is available.",
+          answer: failure.answer,
           citations: [],
           currentMeeting: currentMeetingStatus,
-          failureReason: timedOut
-            ? ('timeout' as const)
-            : ('provider_unavailable' as const),
+          failureReason: failure.reason,
         };
       } finally {
         const finishedAt = Date.now();

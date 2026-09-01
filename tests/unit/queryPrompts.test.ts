@@ -77,7 +77,7 @@ describe('getAskPlutoPrompt', () => {
     );
   });
 
-  it('asks for concise evidence-close claims that survive local validation', () => {
+  it('asks for a useful evidence-close answer that survives local validation', () => {
     const prompt = getAskPlutoPrompt(
       'What happened in the current meeting?',
       [
@@ -101,7 +101,11 @@ describe('getAskPlutoPrompt', () => {
 
     expect(prompt).toContain('Prefer wording already present in the evidence');
     expect(prompt).toContain('Split compound facts into separate sentences');
-    expect(prompt).toContain('Return at most 2 concise supported points');
+    expect(prompt).toContain('up to 4 supported points');
+    expect(prompt).toContain('stay under 160 words');
+    expect(prompt).toContain(
+      'Include the decision, owner, deadline, or next step when it directly helps answer the question',
+    );
     expect(prompt).toContain('Make every point self-contained');
     expect(prompt).toContain('"an application"');
     expect(prompt).toContain('smallest set of directly supporting sources');
@@ -131,7 +135,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('Cover each meeting that has meaningful evidence');
     expect(prompt).toContain('up to 260 words');
     expect(prompt).toContain('do not spend output on an uncited overview');
-    expect(prompt).not.toContain('Return at most 2 concise supported points');
+    expect(prompt).not.toContain('up to 4 supported points');
   });
 
   it('includes user corrections as constraints rather than meeting evidence', () => {

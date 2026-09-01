@@ -93,16 +93,29 @@ describe('Ask Pluto request lifecycle', () => {
     });
     const requestId = queryCall?.[1].requestId as string;
     expect(requestId).toMatch(/^ask-pluto-/);
-    expect(container.textContent).toContain('Finding relevant meetings');
+    expect(container.textContent).toContain('Searching meeting notes');
+    expect(
+      container.querySelector('output[aria-live="polite"]'),
+    ).not.toBeNull();
     expect(input.disabled).toBe(false);
 
     await act(async () => {
       listeners.get('intelligence:query:status')?.(
         {},
-        { requestId, phase: 'generating' },
+        { requestId, phase: 'waiting' },
       );
     });
-    expect(container.textContent).toContain('Analyzing evidence');
+    expect(container.textContent).toContain('Preparing a grounded answer');
+    expect(
+      container.querySelector('[data-testid="ask-pluto-loading-lines"]'),
+    ).not.toBeNull();
+    await act(async () => {
+      listeners.get('intelligence:query:status')?.(
+        {},
+        { requestId, phase: 'writing' },
+      );
+    });
+    expect(container.textContent).toContain('Writing a grounded answer');
     await act(async () => {
       listeners.get('intelligence:query:delta')?.(
         {},
@@ -112,6 +125,11 @@ describe('Ask Pluto request lifecycle', () => {
     expect(container.textContent).toContain(
       'The current meeting changed direction.',
     );
+    expect(container.textContent).toContain(
+      'Checking each claim against your sources',
+    );
+    expect(container.querySelector('[data-testid="ask-pluto-stream-caret"]'))
+      .not.toBeNull;
 
     const cancel = [...container.querySelectorAll('button')].find(
       (button) => button.textContent === 'Stop',

@@ -365,11 +365,206 @@ const EXTRACTIVE_TEMPORAL_SUMMARY_QUERY =
 const EXTRACTIVE_DECISION_QUERY =
   /\b(?:decid(?:e|ed|ing)|decisions?|agreed?|agreements?)\b/i;
 const EXTRACTIVE_ACTION_QUERY =
-  /\b(?:action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible))\b/i;
+  /\b(?:action items?|next steps?|follow[- ]?ups?|assigned to|who (?:owns|is responsible))\b/i;
 const CONTEXTLESS_SUMMARY_TEXT =
   /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
 const GENERIC_MEETING_TITLE =
   /^(?:meeting|untitled meeting|recovered recording)$/i;
+
+const ASSIGNEE_ACTION_QUERY_PATTERNS = [
+  /\b(?:what(?:'s| is)|show me (?:what(?:'s| is))?)\s+assigned to\s+(.+?)(?:\?|$)/i,
+  /\bwhat\s+does\s+(.+?)\s+own(?:\?|$)/i,
+  /\bwhat\s+(?:are|were)\s+(.+?)(?:'s|’s)\s+action items?(?:\?|$)/i,
+];
+
+const parseAssigneeActionQuery = (query: string): string | null => {
+  for (const pattern of ASSIGNEE_ACTION_QUERY_PATTERNS) {
+    const match = query.trim().match(pattern);
+    const assignee = match?.[1]?.trim().replace(/[?.!,;:]+$/, '');
+    if (assignee && assignee.length <= 80) return assignee;
+  }
+  return null;
+};
+
+const normalizePersonName = (value: string): string =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+const formatActionDueDate = (value: unknown): string | null => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const isoDate = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = isoDate
+    ? new Date(
+        Date.UTC(
+          Number(isoDate[1]),
+          Number(isoDate[2]) - 1,
+          Number(isoDate[3]),
+        ),
+      )
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+};
+
+interface StructuredActionItem {
+  description: string;
+  assignee: string;
+  dueDate: string | null;
+  status: string;
+}
+
+const actionSimilarityTokens = (description: string): Set<string> =>
+  new Set(
+    description
+      .toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 2),
+  );
+
+const actionsAreNearDuplicates = (
+  left: StructuredActionItem,
+  right: StructuredActionItem,
+): boolean => {
+  const leftTokens = actionSimilarityTokens(left.description);
+  const rightTokens = actionSimilarityTokens(right.description);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return false;
+  let shared = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) shared += 1;
+  }
+  return shared / Math.min(leftTokens.size, rightTokens.size) >= 0.75;
+};
+
+const readStructuredActionItems = (
+  meeting: dbModule.PersistedMeeting,
+): StructuredActionItem[] => {
+  const mid = parseMid(meeting.mid_json);
+  if (mid?.action_items?.length) {
+    return mid.action_items.flatMap((item) => {
+      const description = item.description?.trim();
+      const assignee = item.assignee?.trim();
+      if (!description || !assignee) return [];
+      return [
+        {
+          description,
+          assignee,
+          dueDate: formatActionDueDate(item.due_date),
+          status: item.status,
+        },
+      ];
+    });
+  }
+
+  if (typeof meeting.analysis_json !== 'string') return [];
+  try {
+    const analysis = JSON.parse(meeting.analysis_json) as Record<
+      string,
+      unknown
+    >;
+    if (!Array.isArray(analysis.all_action_items)) return [];
+    return analysis.all_action_items.flatMap((value) => {
+      if (!value || typeof value !== 'object') return [];
+      const item = value as Record<string, unknown>;
+      const description =
+        typeof item.text === 'string'
+          ? item.text.trim()
+          : typeof item.description === 'string'
+            ? item.description.trim()
+            : '';
+      const assignee =
+        typeof item.assignee === 'string' ? item.assignee.trim() : '';
+      if (!description || !assignee) return [];
+      return [
+        {
+          description,
+          assignee,
+          dueDate: formatActionDueDate(item.due_date),
+          status: typeof item.status === 'string' ? item.status : 'active',
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const buildAssigneeActionRecall = (
+  query: string,
+  meetings: dbModule.PersistedMeeting[],
+): {
+  assignee: string;
+  answer: string;
+  context: RetrievalResult[];
+} | null => {
+  const assignee = parseAssigneeActionQuery(query);
+  if (!assignee) return null;
+
+  const normalizedAssignee = normalizePersonName(assignee);
+  const rawMatches = meetings.flatMap((meeting) => {
+    const actions = readStructuredActionItems(meeting).filter(
+      (item) =>
+        item.status.toLocaleLowerCase() !== 'completed' &&
+        normalizePersonName(item.assignee) === normalizedAssignee,
+    );
+    return actions.length > 0 ? [{ meeting, actions }] : [];
+  });
+  const acceptedActions: StructuredActionItem[] = [];
+  const matches = rawMatches.flatMap(({ meeting, actions }) => {
+    const uniqueActions = actions.filter((action) => {
+      if (
+        acceptedActions.some((accepted) =>
+          actionsAreNearDuplicates(accepted, action),
+        )
+      ) {
+        return false;
+      }
+      acceptedActions.push(action);
+      return true;
+    });
+    return uniqueActions.length > 0
+      ? [{ meeting, actions: uniqueActions }]
+      : [];
+  });
+  if (matches.length === 0) {
+    return {
+      assignee,
+      answer: `I couldn't find any open action items assigned to ${assignee}.`,
+      context: [],
+    };
+  }
+
+  const context = matches.map(({ meeting, actions }) => {
+    const source = buildMeetingRetrievalResult(meeting, 'Assignment source');
+    const assignments = actions
+      .map(
+        (item) =>
+          `${item.description}${item.dueDate ? ` Due ${item.dueDate}.` : ''}`,
+      )
+      .join('\n');
+    return {
+      ...source,
+      evidence_text: `${source.evidence_text}\n[Action assignments]: ${assignments}`,
+    };
+  });
+  const answer = matches
+    .flatMap(({ actions }, sourceIndex) =>
+      actions.map(
+        (item) =>
+          `- ${item.description}${item.dueDate ? ` Due ${item.dueDate}.` : ''} [Source ${sourceIndex + 1}]`,
+      ),
+    )
+    .slice(0, 12)
+    .join('\n');
+
+  return { assignee, answer, context };
+};
 
 const normalizeScopeText = (value: string): string =>
   value

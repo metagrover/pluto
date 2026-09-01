@@ -363,19 +363,26 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             : `Reading ${currentMeeting.title || 'the latest meeting'}`
         : currentMeetingRequested && currentMeeting?.kind === 'none'
           ? 'No current meeting yet'
-          : 'Finding relevant meetings';
-  const requestPhaseLabel =
-    requestPhase === 'generating'
-      ? scopeLabel && scopeMeetingCount > 0
-        ? `Analyzing ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`
+          : 'Searching meeting notes';
+  const requestPhaseLabel = (hasVisibleAnswer: boolean) => {
+    if (requestPhase === 'cancelling') return 'Stopping';
+    if (requestPhase === 'writing' || requestPhase === 'generating') {
+      return hasVisibleAnswer
+        ? 'Checking each claim against your sources'
+        : 'Writing a grounded answer';
+    }
+    if (requestPhase === 'waiting') {
+      return scopeLabel && scopeMeetingCount > 0
+        ? `Preparing an answer from ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'}`
         : comparisonMeetingCount > 0
-          ? `Comparing with ${comparisonMeetingCount} earlier ${comparisonMeetingCount === 1 ? 'meeting' : 'meetings'}`
-          : 'Analyzing evidence'
-      : requestPhase === 'cancelling'
-        ? 'Stopping'
-        : scopeLabel && scopeMeetingCount > 0
-          ? `Reading ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`
-          : resolvedScopeLabel;
+          ? `Preparing a comparison across ${comparisonMeetingCount + 1} meetings`
+          : 'Preparing a grounded answer';
+    }
+    if (scopeLabel && scopeMeetingCount > 0) {
+      return `Searching ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`;
+    }
+    return resolvedScopeLabel;
+  };
 
   if (!visible) return null;
 
@@ -458,18 +465,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
                               </ReactMarkdown>
+                              <span
+                                data-testid="ask-pluto-stream-caret"
+                                aria-hidden="true"
+                                className="ml-0.5 inline-block h-[1em] w-px translate-y-[0.12em] bg-pro-text-muted/70 animate-pulse motion-reduce:animate-none"
+                              />
                             </div>
-                          ) : null}
-                          <div className="flex items-center gap-3 min-h-[22px]">
+                          ) : (
+                            <div
+                              data-testid="ask-pluto-loading-lines"
+                              aria-hidden="true"
+                              className="w-full max-w-md space-y-2.5 py-1 animate-pulse motion-reduce:animate-none"
+                            >
+                              <div className="h-2 rounded-full bg-pro-text-muted/14 w-[88%]" />
+                              <div className="h-2 rounded-full bg-pro-text-muted/10 w-[68%]" />
+                            </div>
+                          )}
+                          <output
+                            aria-live="polite"
+                            className="flex items-center gap-3 min-h-[22px]"
+                          >
                             {!msg.content ? (
-                              <div className="flex gap-1.5 opacity-60">
-                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
-                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
+                              <div className="relative h-1 w-12 overflow-hidden rounded-full bg-pro-border/60">
+                                <div className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-pro-accent/55 animate-[pulse_1.4s_ease-in-out_infinite] motion-reduce:animate-none" />
                               </div>
                             ) : null}
                             <span className="text-[13px] text-pro-text-muted">
-                              {requestPhaseLabel}
+                              {requestPhaseLabel(Boolean(msg.content))}
                             </span>
                             <button
                               type="button"
@@ -480,7 +502,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               <Square className="h-2.5 w-2.5 fill-current" />
                               Stop
                             </button>
-                          </div>
+                          </output>
                         </div>
                       ) : (
                         <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
