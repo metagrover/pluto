@@ -85,14 +85,16 @@ export const ActiveCallAlertWindow = () => {
       onMouseEnter={pauseCountdown}
       onMouseLeave={resumeCountdown}
     >
-      <button
-        type="button"
-        className="close-alert"
-        aria-label="Close alert"
-        onClick={closeAlert}
-      >
-        ×
-      </button>
+      <div className="status-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path
+            d="M7 8.5h10M7 12h7M7 15.5h4M6.5 4.75h11A1.75 1.75 0 0 1 19.25 6.5v11a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 6.5 4.75Z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      </div>
       <div className="left-block">
         <div className="meta">
           <p className="title">Call detected</p>
@@ -103,9 +105,24 @@ export const ActiveCallAlertWindow = () => {
       </div>
       <div className="actions">
         <button type="button" className="take-notes" onClick={handleTakeNotes}>
-          Take Notes
+          Take notes
         </button>
       </div>
+      <button
+        type="button"
+        className="close-alert"
+        aria-label="Dismiss call detected alert"
+        onClick={closeAlert}
+      >
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path
+            d="m6.5 6.5 7 7m0-7-7 7"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
       <div className="progress-track">
         <div ref={progressBarRef} className="progress-bar" />
       </div>
