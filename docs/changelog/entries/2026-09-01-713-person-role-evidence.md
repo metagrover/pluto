@@ -1,7 +1,7 @@
 ### Keep person roles evidence-backed
 
 - **Issue:** [#713](https://github.com/metagrover/pluto/issues/713)
-- **PR:** Pending.
+- **PR:** [#714](https://github.com/metagrover/pluto/pull/714)
 - **Changed:** Person roles now require an exact transcript quote connecting the named person to a job title or function, and values matching another person are rejected.
 - **Why:** Model extraction could mistake a nearby attendee's name for someone else's role and preserve that mistake indefinitely on the People page.
 - **Replaced:** Ungrounded optional role strings accepted directly from model output.
