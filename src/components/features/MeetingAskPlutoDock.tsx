@@ -50,6 +50,7 @@ const LIVE_TRANSCRIPT_SEGMENT_CHAR_LIMIT =
 const LIVE_NOTES_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.notesChars;
 const LIVE_INTERIM_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.interimChars;
 const LIVE_PARTICIPANT_LIMIT = MEETING_ASK_PLUTO_LIMITS.participants;
+const LIVE_TITLE_CHAR_LIMIT = MEETING_ASK_PLUTO_LIMITS.titleChars;
 
 const trimToLimit = (value: string | undefined, limit: number) =>
   (value || '').trim().slice(0, limit);
@@ -57,7 +58,7 @@ const trimToLimit = (value: string | undefined, limit: number) =>
 const buildBoundedLiveContext = (
   liveContext: MeetingAskPlutoLiveContext,
 ): MeetingAskPlutoLiveContext => ({
-  title: liveContext.title,
+  title: trimToLimit(liveContext.title, LIVE_TITLE_CHAR_LIMIT) || 'Meeting',
   participants: liveContext.participants
     .map((participant) => participant.trim())
     .filter(Boolean)
@@ -316,6 +317,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
         activeRequestIdRef.current !== requestId ||
         scopeKeyRef.current !== requestScopeKey
       ) {
+        return;
+      }
+
+      if (packet.status === 'unavailable' || !packet.answer.trim()) {
+        setError('Pluto could not answer this meeting right now.');
         return;
       }
 
