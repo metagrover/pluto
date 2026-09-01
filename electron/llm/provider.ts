@@ -20,7 +20,8 @@ export type {
 export interface ExtractedEntities {
   people: Array<{
     name: string;
-    role?: string; // e.g., "Manager", "Designer", inferred from context
+    role?: string; // Explicit job title or function, never inferred from proximity
+    role_evidence?: string; // Exact transcript quote connecting this person to the role
   }>;
   topics: Array<{
     name: string;

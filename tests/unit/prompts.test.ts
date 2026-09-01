@@ -333,6 +333,18 @@ describe('v3 accuracy prompts', () => {
 });
 
 describe('getEntitiesPrompt', () => {
+  it('requires exact evidence before extracting a person role', () => {
+    const prompt = getEntitiesPrompt('Avery Lane joined the review.');
+
+    expect(prompt).toContain(
+      "A person's role must be a job title or function, never another person's name",
+    );
+    expect(prompt).toContain('Include role only with role_evidence');
+    expect(prompt).toContain(
+      'exact transcript quote containing this name and role',
+    );
+  });
+
   it('embeds value signals and deterministic hints as auxiliary context only', () => {
     const prompt = getEntitiesPrompt('Speaker A: Sarah owns API migration', {
       summary: 'Sarah is driving the migration.',
