@@ -14,43 +14,20 @@ import {
   type Entity,
   type EntityMeeting,
   type PersonBriefingDetail,
-  getEntitiesByType,
+  getPeopleBriefingSummaries,
   getPersonBriefing,
 } from '../../api/knowledgeGraph';
 import type {
   PersonBriefingCommitment,
   PersonBriefingMeeting,
+  PersonBriefingSummary,
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
+import { parsePersonRole } from '../../utils/personBriefing';
 import { PageHeader } from '../ui/PageHeader';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
-export type PersonBriefingRow = {
-  id: string;
-  name: string;
-  role: string;
-  meetingCount: number;
-  mentionCount: number;
-  latestMeetingId: string | null;
-  latestMeetingTitle: string | null;
-  latestMeetingAt: string | null;
-  context: string | null;
-  openCommitmentCount: number;
-};
-
-const parseRole = (metadata: string | null) => {
-  if (!metadata) return 'Known from conversations';
-  try {
-    const value = JSON.parse(metadata) as { role?: unknown };
-    if (typeof value.role !== 'string') return 'Known from conversations';
-    const role = value.role.trim();
-    return role && !['undefined', 'null', 'n/a'].includes(role.toLowerCase())
-      ? role
-      : 'Known from conversations';
-  } catch {
-    return 'Known from conversations';
-  }
-};
+export type PersonBriefingRow = PersonBriefingSummary;
 
 export const buildPersonBriefingRow = (
   person: Entity,
@@ -66,7 +43,7 @@ export const buildPersonBriefingRow = (
   return {
     id: person.id,
     name: person.name,
-    role: parseRole(person.metadata),
+    role: parsePersonRole(person.metadata),
     meetingCount: meetings.length,
     mentionCount: meetings.reduce(
       (total, meeting) => total + meeting.mention_count,
@@ -343,7 +320,7 @@ export const PersonDossier = ({
   onBack: () => void;
   onOpenMeeting: (meetingId: string) => void;
 }) => {
-  const role = parseRole(detail.person.metadata);
+  const role = parsePersonRole(detail.person.metadata);
   const brief = compileKnowledgeBrief(
     detail.knowledgeDoc,
     detail.workingMemorySnapshot,
@@ -478,6 +455,8 @@ export const PeopleTab: React.FC<{
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -485,42 +464,9 @@ export const PeopleTab: React.FC<{
       setLoading(true);
       setError(false);
       try {
-        const people = await getEntitiesByType('person');
-        const fetchedDetails = await Promise.all(
-          people.map((person) => getPersonBriefing(person.id)),
-        );
-        const byId = Object.fromEntries(
-          fetchedDetails
-            .filter((detail): detail is PersonBriefingDetail => Boolean(detail))
-            .map((detail) => [detail.person.id, detail]),
-        );
-        const briefingRows = await Promise.all(
-          people.map(async (person) => {
-            const detail = byId[person.id];
-            const meetings: EntityMeeting[] = (detail?.meetings ?? []).map(
-              (meeting) => ({
-                ...meeting,
-                meeting_type: null,
-                ended_at: null,
-                mention_count: 0,
-              }),
-            );
-            return buildPersonBriefingRow(
-              person,
-              meetings,
-              detail?.commitments.open.length ?? 0,
-            );
-          }),
-        );
+        const briefingRows = await getPeopleBriefingSummaries();
         if (!cancelled) {
-          setDetails(byId);
-          setRows(
-            briefingRows.sort(
-              (a, b) =>
-                (Date.parse(b.latestMeetingAt || '') || 0) -
-                (Date.parse(a.latestMeetingAt || '') || 0),
-            ),
-          );
+          setRows(briefingRows);
         }
       } catch (fetchError) {
         console.error('Failed to fetch people:', fetchError);
@@ -534,6 +480,32 @@ export const PeopleTab: React.FC<{
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedPersonId || details[selectedPersonId]) return;
+    let cancelled = false;
+    const fetchDetail = async () => {
+      setDetailLoading(true);
+      setDetailError(false);
+      try {
+        const detail = await getPersonBriefing(selectedPersonId);
+        if (!cancelled && detail) {
+          setDetails((current) => ({ ...current, [selectedPersonId]: detail }));
+        } else if (!cancelled) {
+          setDetailError(true);
+        }
+      } catch (fetchError) {
+        console.error('Failed to fetch person briefing:', fetchError);
+        if (!cancelled) setDetailError(true);
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
+    };
+    void fetchDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [details, selectedPersonId]);
 
   if (loading) {
     return (
@@ -552,6 +524,26 @@ export const PeopleTab: React.FC<{
           Pluto could not read relationship context. Reopen this view to try
           again.
         </p>
+      </div>
+    );
+  }
+  if (selectedPersonId && detailLoading) {
+    return (
+      <div className="people-loading" aria-label="Loading person details">
+        {[1, 2, 3].map((item) => (
+          <span key={item} />
+        ))}
+      </div>
+    );
+  }
+  if (selectedPersonId && detailError) {
+    return (
+      <div className="people-empty" role="alert">
+        <h2>This person could not be loaded</h2>
+        <p>Pluto could not read this relationship context.</p>
+        <button type="button" onClick={() => onSelectPerson(null)}>
+          Back to people
+        </button>
       </div>
     );
   }
