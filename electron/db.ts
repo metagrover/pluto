@@ -74,6 +74,7 @@ import {
   buildProjectMomentum,
   buildUserProjectMilestones,
   readProjectDisplayTitle,
+  readProjectThemeSynthesis,
   sortProjectMilestones,
   withProjectDisplayTitle,
 } from '../src/utils/projectBriefing';
@@ -85,7 +86,11 @@ import {
   withoutUserProjectMilestone,
 } from '../src/utils/projectMilestones';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
-import { readProjectQualification } from '../src/utils/projectQualification';
+import {
+  type ProjectPortfolioDisposition,
+  readProjectQualification,
+  withProjectPortfolioDisposition,
+} from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -7125,6 +7130,23 @@ export const updateProjectDisplayTitle = (
   return getEntity(canonicalId)!;
 };
 
+export const setProjectPortfolioDisposition = (
+  projectId: string,
+  disposition: ProjectPortfolioDisposition,
+): Entity => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  if (!project || project.type !== 'project')
+    throw new Error('project_disposition_invalid');
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  ).run(
+    withProjectPortfolioDisposition(project.metadata, disposition),
+    canonicalId,
+  );
+  return getEntity(canonicalId)!;
+};
+
 export const saveProjectMilestone = (
   projectId: string,
   input: UserProjectMilestoneInput,
@@ -7344,6 +7366,7 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
       metadata: project.metadata,
       status: project.status,
     },
+    theme: readProjectThemeSynthesis(project.metadata),
     meetingStats: buildProjectMeetingStats(briefingMeetings),
     momentum: buildProjectMomentum(briefingMeetings, tasks),
     health: buildProjectHealth(tasks, snapshot),
@@ -7412,6 +7435,9 @@ export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
             brief.milestones.find(
               (milestone) => milestone.status !== 'complete',
             )?.title ?? null,
+          current_focus: brief.theme?.currentFocus ?? null,
+          recent_change: brief.theme?.recentChanges[0]?.summary ?? null,
+          open_thread_count: brief.theme?.openThreads.length ?? 0,
         }
       : row;
   });

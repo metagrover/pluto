@@ -7,6 +7,7 @@
 
 import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
 import type { PersonBriefingSummary } from '../utils/personBriefing';
+import type { ProjectPortfolioDisposition } from '../utils/projectQualification';
 
 // Type definitions matching the database schema
 export type EntityType =
@@ -306,6 +307,12 @@ export const updateProjectDisplayTitle = async (
 ): Promise<Entity> =>
   invoke('UPDATE_PROJECT_DISPLAY_TITLE', { projectId, title });
 
+export const setProjectPortfolioDisposition = async (
+  projectId: string,
+  disposition: ProjectPortfolioDisposition,
+): Promise<Entity> =>
+  invoke('SET_PROJECT_PORTFOLIO_DISPOSITION', { projectId, disposition });
+
 export const saveProjectMilestone = async (
   projectId: string,
   milestone: import('../utils/projectMilestones').UserProjectMilestoneInput,
@@ -346,7 +353,7 @@ export const mergePerson = async (
 export const restorePersonMerge = async (personId: string): Promise<void> =>
   invoke('RESTORE_PERSON_MERGE', personId);
 
-/** Discover at most one source-grounded initiative from one conversation. */
+/** Synthesize durable project themes across structured meeting notes. */
 export const discoverProjectInitiative = async (
   options: { retryFailed?: boolean } = {},
 ): Promise<{

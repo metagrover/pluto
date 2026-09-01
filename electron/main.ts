@@ -62,19 +62,20 @@ import {
   evaluateIncrementalMeetingNotesAdmission,
 } from './incrementalMeetingNotesCoordinator';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
+import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
-  type ProjectInitiativeDiscoveryState,
-  discoverProjectInitiative,
-} from './projectInitiativeDiscovery';
-import {
   isProjectScopeReviewBusy,
   reviewProjectScopeBatch,
 } from './projectScopeReview';
+import {
+  type ProjectThemeSynthesisState,
+  synthesizeProjectThemes,
+} from './projectThemeSynthesis';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -2610,6 +2611,11 @@ app.whenReady().then(async () => {
     (_event, { projectId, title }) =>
       db.updateProjectDisplayTitle(projectId, title),
   );
+  ipcMain.handle(
+    'SET_PROJECT_PORTFOLIO_DISPOSITION',
+    (_event, { projectId, disposition }) =>
+      db.setProjectPortfolioDisposition(projectId, disposition),
+  );
   ipcMain.handle('SAVE_PROJECT_MILESTONE', (_event, { projectId, milestone }) =>
     db.saveProjectMilestone(projectId, milestone),
   );
@@ -2650,105 +2656,81 @@ app.whenReady().then(async () => {
     db.restorePersonMerge(String(personId));
     queueAllKnowledgeDocsRefresh();
   });
-  const projectInitiativeDiscoveryStateKey =
-    'project_initiative_discovery_state_v12';
-  const readProjectInitiativeDiscoveryStates = (): Record<
-    string,
-    ProjectInitiativeDiscoveryState
-  > => {
-    try {
-      const parsed = JSON.parse(
-        db.getSetting(projectInitiativeDiscoveryStateKey) || '{}',
-      );
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed
-        : {};
-    } catch {
-      return {};
-    }
-  };
-  let projectInitiativeDiscovery: Promise<
-    Awaited<ReturnType<typeof discoverProjectInitiative>>
+  const projectThemeSynthesisStateKey = 'project_theme_synthesis_state_v2';
+  const readProjectThemeSynthesisState =
+    (): ProjectThemeSynthesisState | null => {
+      try {
+        const parsed = JSON.parse(
+          db.getSetting(projectThemeSynthesisStateKey) || 'null',
+        );
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as ProjectThemeSynthesisState)
+          : null;
+      } catch {
+        return null;
+      }
+    };
+  let projectThemeSynthesis: Promise<
+    Awaited<ReturnType<typeof synthesizeProjectThemes>>
   > | null = null;
   ipcMain.handle(
     'DISCOVER_PROJECT_INITIATIVE',
     (_event, options?: { retryFailed?: unknown }) => {
-      if (projectInitiativeDiscovery) return projectInitiativeDiscovery;
-      projectInitiativeDiscovery = discoverProjectInitiative(
+      if (projectThemeSynthesis) return projectThemeSynthesis;
+      const sourceFromMeeting = (meeting: db.PersistedMeeting) => {
+        const evidence = buildMeetingNotesEvidenceDocument(meeting);
+        if (!evidence.hasUsableNotes) return null;
+        return {
+          id: String(meeting.id),
+          title: meeting.title,
+          notes: [
+            evidence.notesText,
+            evidence.decisionsText && `Decisions:\n${evidence.decisionsText}`,
+            evidence.actionItemsText && `Actions:\n${evidence.actionItemsText}`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          startedAt: meeting.started_at || meeting.created_at,
+          candidateProjects: db
+            .getMeetingEntities(String(meeting.id))
+            .filter((entity) => entity.type === 'project')
+            .map((entity) => ({ id: entity.id, name: entity.name })),
+        };
+      };
+      projectThemeSynthesis = synthesizeProjectThemes(
         {
           listSources: () =>
-            db.getProjectInitiativeDiscoverySources().map((meeting) => {
-              const fullText = parseTranscriptSegments(meeting.transcript_json)
-                .map((segment) =>
-                  typeof segment.text === 'string' ? segment.text : '',
-                )
-                .join(' ');
-              return {
-                id: String(meeting.id),
-                title: meeting.title,
-                text: fullText,
-                fullText,
-                projectCount: meeting.project_count,
-                projectNames: db
-                  .getMeetingEntities(String(meeting.id))
-                  .filter((entity) => entity.type === 'project')
-                  .map((entity) => entity.name),
-                startedAt: meeting.started_at || meeting.created_at,
-              };
+            (db.getMeetings() as db.PersistedMeeting[]).flatMap((meeting) => {
+              const source = sourceFromMeeting(meeting);
+              return source ? [source] : [];
             }),
           getSource: (id) => {
             const meeting = db.getMeeting(id) as
               | db.PersistedMeeting
               | undefined;
-            if (!meeting || meeting.transcript_status !== 'validated')
-              return null;
-            const projectCount = db
-              .getMeetingEntities(id)
-              .filter((entity) => entity.type === 'project').length;
-            if (!projectCount) return null;
-            const fullText = parseTranscriptSegments(meeting.transcript_json)
-              .map((segment) =>
-                typeof segment.text === 'string' ? segment.text : '',
-              )
-              .join(' ');
-            return {
-              id: String(meeting.id),
-              title: meeting.title,
-              text: fullText,
-              fullText,
-              projectCount,
-              projectNames: db
-                .getMeetingEntities(id)
-                .filter((entity) => entity.type === 'project')
-                .map((entity) => entity.name),
-              startedAt: meeting.started_at || meeting.created_at,
-            };
+            return meeting ? sourceFromMeeting(meeting) : null;
           },
-          getState: (id) => readProjectInitiativeDiscoveryStates()[id],
-          saveState: (id, state) => {
-            const states = readProjectInitiativeDiscoveryStates();
-            states[id] = state;
-            db.setSetting(
-              projectInitiativeDiscoveryStateKey,
-              JSON.stringify(states),
-            );
-          },
-          getInitiative: db.getEntity,
-          saveInitiative: (initiative) => {
-            if (!db.getEntity(initiative.id))
-              db.upsertEntity({
-                id: initiative.id,
-                type: 'project',
-                name: initiative.name,
-                status: 'active',
-                metadata: initiative.metadata,
-                dedupe_by_name: false,
-              });
-            db.ensureMeetingEntity({
-              meeting_id: initiative.sourceMeetingId,
-              entity_id: initiative.id,
-              context: initiative.context,
+          getState: readProjectThemeSynthesisState,
+          saveState: (state) =>
+            db.setSetting(projectThemeSynthesisStateKey, JSON.stringify(state)),
+          getProject: db.getEntity,
+          saveTheme: (theme) => {
+            const existing = db.getEntity(theme.id);
+            db.upsertEntity({
+              ...(existing || {}),
+              id: theme.id,
+              type: 'project',
+              name: theme.name,
+              status: 'active',
+              metadata: theme.metadata,
+              dedupe_by_name: false,
             });
+            for (const meetingId of theme.sourceMeetingIds)
+              db.ensureMeetingEntity({
+                meeting_id: meetingId,
+                entity_id: theme.id,
+                context: theme.sourceContexts[meetingId] || theme.context,
+              });
           },
           generate: async (prompt, responseSchema) => {
             const provider = await getProvider(await getAllSettings(db));
@@ -2763,9 +2745,9 @@ app.whenReady().then(async () => {
         },
         { retryFailed: options?.retryFailed === true },
       ).finally(() => {
-        projectInitiativeDiscovery = null;
+        projectThemeSynthesis = null;
       });
-      return projectInitiativeDiscovery;
+      return projectThemeSynthesis;
     },
   );
   let projectScopeReview: Promise<

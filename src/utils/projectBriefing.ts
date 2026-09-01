@@ -99,6 +99,26 @@ export interface ProjectMilestone {
   note: string | null;
 }
 
+export interface ProjectThemeSynthesisRead {
+  version: 1;
+  sourceMeetingIds: string[];
+  candidateProjectIds: string[];
+  outcome: string;
+  currentFocus: string;
+  recentChanges: Array<{
+    sourceMeetingId: string;
+    summary: string;
+    evidenceQuote: string;
+  }>;
+  openThreads: Array<{
+    sourceMeetingId: string;
+    kind: 'decision' | 'action' | 'question' | 'risk';
+    text: string;
+    evidenceQuote: string;
+  }>;
+  synthesizedAt: string;
+}
+
 export interface ProjectBrief {
   project: {
     id: string;
@@ -107,6 +127,7 @@ export interface ProjectBrief {
     metadata: string | null;
     status: string | null;
   };
+  theme: ProjectThemeSynthesisRead | null;
   meetingStats: ProjectMeetingStats;
   momentum: ProjectMomentum;
   health: ProjectHealthRead;
@@ -133,6 +154,28 @@ const parseMetadata = (metadata: string | null): Record<string, unknown> => {
   } catch {
     return {};
   }
+};
+
+export const readProjectThemeSynthesis = (
+  metadata: string | null,
+): ProjectThemeSynthesisRead | null => {
+  const theme = parseMetadata(metadata).projectThemeSynthesis;
+  if (!theme || typeof theme !== 'object' || Array.isArray(theme)) return null;
+  const value = theme as Record<string, unknown>;
+  if (
+    value.version !== 1 ||
+    !Array.isArray(value.sourceMeetingIds) ||
+    !value.sourceMeetingIds.every((id) => typeof id === 'string') ||
+    !Array.isArray(value.candidateProjectIds) ||
+    !value.candidateProjectIds.every((id) => typeof id === 'string') ||
+    typeof value.outcome !== 'string' ||
+    typeof value.currentFocus !== 'string' ||
+    !Array.isArray(value.recentChanges) ||
+    !Array.isArray(value.openThreads) ||
+    typeof value.synthesizedAt !== 'string'
+  )
+    return null;
+  return value as unknown as ProjectThemeSynthesisRead;
 };
 
 export const readProjectDisplayTitle = (

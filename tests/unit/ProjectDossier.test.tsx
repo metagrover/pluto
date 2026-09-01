@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   restoreProjectMilestone: vi.fn(),
   mergeProject: vi.fn(),
   restoreProjectMerge: vi.fn(),
+  setProjectPortfolioDisposition: vi.fn(),
   getEntitiesByType: vi.fn(),
   getEntityLinks: vi.fn(),
   updateEntityStatus: vi.fn(),
@@ -42,6 +43,29 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
         outcome: 'Make historical records searchable',
       },
     }),
+  },
+  theme: {
+    version: 1,
+    sourceMeetingIds: ['m1', 'm2'],
+    candidateProjectIds: ['candidate-1'],
+    outcome: 'Make historical records searchable',
+    currentFocus: 'Validate access rules before launch',
+    recentChanges: [
+      {
+        sourceMeetingId: 'm1',
+        summary: 'The first collection is now indexed.',
+        evidenceQuote: 'The first collection is now indexed.',
+      },
+    ],
+    openThreads: [
+      {
+        sourceMeetingId: 'm1',
+        kind: 'action',
+        text: 'Validate access rules before launch',
+        evidenceQuote: 'Validate access rules before launch.',
+      },
+    ],
+    synthesizedAt: '2026-08-28T12:00:00Z',
   },
   meetingStats: {
     meetingCount: 7,
@@ -132,6 +156,7 @@ beforeEach(() => {
   api.restoreProjectMilestone.mockResolvedValue({});
   api.mergeProject.mockResolvedValue(undefined);
   api.restoreProjectMerge.mockResolvedValue(undefined);
+  api.setProjectPortfolioDisposition.mockResolvedValue({});
   api.getEntitiesByType.mockResolvedValue([]);
   api.getEntityLinks.mockResolvedValue([]);
 });
@@ -169,22 +194,23 @@ const setValue = async (
   });
 };
 
-it('leads with grounded activity, health, milestones and meeting rhythm', async () => {
+it('leads with current focus, recent changes, and open threads', async () => {
   await render();
   expect(host.textContent).toContain('Archive modernization');
   expect(host.textContent).toContain('Make historical records searchable');
-  expect(host.textContent).toContain('7 meetings');
-  expect(host.textContent).toContain('Typically 4 participants');
-  expect(host.textContent).toContain('Attendance is available for 5 of 7');
-  expect(host.textContent).toContain('Watch');
-  expect(host.textContent).toContain('What needs attention');
-  expect(host.textContent).toContain('Health');
-  expect(host.textContent).toContain('Momentum');
-  expect(host.textContent).toContain('2 meetings in the last 30 days');
+  expect(host.textContent).toContain('7 conversations');
+  expect(host.textContent).toContain('Current focus');
+  expect(host.textContent).toContain('Validate access rules before launch');
+  expect(host.textContent).toContain('Since last time');
+  expect(host.textContent).toContain('The first collection is now indexed.');
+  expect(host.textContent).toContain('Open threads');
   expect(host.textContent).toContain('Complete migration review');
   expect(host.textContent).toContain('From meeting evidence');
-  expect(host.textContent).toContain('Weekly pattern');
-  expect(host.textContent).toContain('Archive weekly review');
+  expect(host.textContent).toContain('Conversation history');
+  expect(host.textContent!.indexOf('Conversation history')).toBeLessThan(
+    host.textContent!.indexOf('Milestones'),
+  );
+  expect(host.textContent).not.toContain('Momentum');
 });
 
 it('adds a user milestone from an inline form', async () => {
@@ -397,12 +423,60 @@ it('teaches honest empty states when evidence is sparse', async () => {
         evidenceTaskIds: [],
       },
       milestones: [],
+      theme: null,
     }),
   );
   await render();
-  expect(host.textContent).toContain('No milestones yet');
-  expect(host.textContent).toContain('No recurring meeting pattern');
-  expect(host.textContent).toContain('Not enough evidence');
-  expect(host.textContent).toContain('Current read');
-  expect(host.textContent).not.toContain('What needs attention');
+  expect(host.textContent).toContain(
+    'One conversation supports this suggestion',
+  );
+  expect(host.textContent).toContain('Review suggestion');
+  expect(host.textContent).not.toContain('Momentum');
+  expect(host.textContent).not.toContain('Not enough evidence');
+});
+
+it('lets the user confirm a one-conversation suggestion', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      theme: null,
+      meetingStats: {
+        meetingCount: 1,
+        activeWeeks: 1,
+        participantCoverage: 0,
+        typicalParticipantCount: null,
+        frequentParticipants: [],
+        recurringSeries: [],
+      },
+    }),
+  );
+  await render();
+  await click('Keep as project');
+  expect(api.setProjectPortfolioDisposition).toHaveBeenCalledWith(
+    'p1',
+    'confirmed',
+  );
+});
+
+it('dismisses a one-conversation suggestion and returns to the portfolio', async () => {
+  const back = vi.fn();
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      theme: null,
+      meetingStats: {
+        meetingCount: 1,
+        activeWeeks: 1,
+        participantCoverage: 0,
+        typicalParticipantCount: null,
+        frequentParticipants: [],
+        recurringSeries: [],
+      },
+    }),
+  );
+  await render({ onBack: back });
+  await click('Dismiss suggestion');
+  expect(api.setProjectPortfolioDisposition).toHaveBeenCalledWith(
+    'p1',
+    'dismissed',
+  );
+  expect(back).toHaveBeenCalledOnce();
 });
