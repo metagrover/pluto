@@ -1199,6 +1199,7 @@ function App() {
               <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
                 <PeopleTab
                   selectedPersonId={selectedPersonId}
+                  onSelectPerson={setSelectedPersonId}
                   onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
                 />
               </div>
