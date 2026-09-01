@@ -4,7 +4,7 @@ import ParakeetRuntimeCore
 import XCTest
 
 final class ModelArtifactIntegrityTests: XCTestCase {
-    func testDigestIsStableAndVerificationRejectsMutation() throws {
+    func testDigestIsPathIndependentAndVerificationRejectsMutation() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let canonicalRoot = root.resolvingSymlinksInPath()
@@ -14,6 +14,10 @@ final class ModelArtifactIntegrityTests: XCTestCase {
         try Data("first".utf8).write(to: canonicalRoot.appendingPathComponent("a.bin"))
 
         let digest = try ModelArtifactIntegrity.digest(directory: root)
+        XCTAssertEqual(
+            digest,
+            "e444c38d1f247eae43388ac1aef800fabd3b88c4d884cbf7a1118c34a6e10e96"
+        )
         XCTAssertEqual(
             digest,
             try ModelArtifactIntegrity.digest(directory: canonicalRoot)
