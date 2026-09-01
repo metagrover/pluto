@@ -26,6 +26,11 @@ const summary = {
   latestMeetingAt: '2026-07-12T12:00:00.000Z',
   context: 'Reviewed launch evidence.',
   openCommitmentCount: 2,
+  candidateCommitmentCount: 0,
+  briefHeadline: null,
+  briefStatus: null,
+  briefUpdatedAt: null,
+  possibleDuplicateCount: 0,
 };
 
 describe('PeopleTab loading', () => {
@@ -55,7 +60,7 @@ describe('PeopleTab loading', () => {
     expect(api.getPeopleBriefingSummaries).toHaveBeenCalledOnce();
     expect(api.getPersonBriefing).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Avery Chen');
-    expect(container.textContent).toContain('Product review');
+    expect(container.textContent).toContain('Reviewed launch evidence.');
   });
 
   it('fetches one full dossier only after that person is selected', async () => {
@@ -75,7 +80,8 @@ describe('PeopleTab loading', () => {
         updated_at: '2026-07-12T00:00:00.000Z',
       },
       meetings: [],
-      commitments: { open: [], delivered: [] },
+      commitments: { open: [], delivered: [], candidates: [] },
+      isSelf: false,
       knowledgeDoc: null,
       workingMemorySnapshot: null,
     });

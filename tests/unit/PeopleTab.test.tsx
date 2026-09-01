@@ -19,6 +19,11 @@ const rows: PersonBriefingRow[] = [
     latestMeetingAt: '2026-07-12T12:00:00.000Z',
     context: 'Reviewed the rollout sequence and evidence requirements.',
     openCommitmentCount: 2,
+    candidateCommitmentCount: 1,
+    briefHeadline: 'Avery is preparing the launch handoff.',
+    briefStatus: 'up_to_date',
+    briefUpdatedAt: '2026-07-12T13:00:00.000Z',
+    possibleDuplicateCount: 0,
   },
 ];
 
@@ -28,8 +33,9 @@ describe('PeopleBriefing', () => {
       <PeopleBriefing rows={rows} onSelectPerson={() => {}} />,
     );
     expect(markup).not.toContain('Needs you now');
-    expect(markup).toContain('Product review');
-    expect(markup).toContain('2 open commitments');
+    expect(markup).toContain('Avery is preparing the launch handoff.');
+    expect(markup).toContain('2 open loops');
+    expect(markup).toContain('1 to confirm');
     expect(markup).toContain('person-row__meeting');
     expect(markup).not.toContain('>Open <');
   });
@@ -47,7 +53,7 @@ describe('PeopleBriefing', () => {
     );
 
     expect(markup).not.toContain('Needs you now');
-    expect(markup).toContain('3 open commitments');
+    expect(markup).toContain('3 open loops');
     expect(markup).toContain('data-person-id="person-0"');
     expect(markup).toContain('data-person-id="person-11"');
     expect(markup).not.toContain('Show all');
@@ -189,7 +195,21 @@ const briefingDetail: PersonBriefingDetail = {
         updatedAt: '2026-07-11T12:00:00.000Z',
       },
     ],
+    candidates: [
+      {
+        id: 'candidate-1',
+        text: 'Prepare the customer handoff',
+        status: 'active',
+        dueDate: null,
+        evidence: 'Avery can prepare the customer handoff.',
+        sourceMeetingId: 'meeting-1',
+        sourceMeetingTitle: 'Product review',
+        updatedAt: '2026-07-12T12:00:00.000Z',
+        suggestedOwnerName: 'Avery Chen',
+      },
+    ],
   },
+  isSelf: false,
   knowledgeDoc: {
     id: 'person-context-1',
     scope_type: 'person_context',
@@ -296,7 +316,7 @@ const briefingDetail: PersonBriefingDetail = {
 };
 
 describe('PersonDossier', () => {
-  it('shows only concise, source-backed relationship context', () => {
+  it('leads with a source-backed current read and open loops', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={briefingDetail}
@@ -305,19 +325,22 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('Current context');
-    expect(markup).not.toContain('Avery is coordinating the launch handoff.');
+    expect(markup).toContain('Current read');
+    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).toContain('Confirmed context');
     expect(markup).toContain('Prefers written review before handoff');
     expect(markup).toContain('Source: Product review');
-    expect(markup).toContain('Open expectations');
+    expect(markup).toContain('Open loops');
+    expect(markup).toContain('They owe');
+    expect(markup).toContain('Needs confirmation');
+    expect(markup).toContain('Confirm owner');
+    expect(markup).toContain('Not theirs');
     expect(markup).toContain('Recently delivered');
-    expect(markup).toContain('Confirmed conversations');
-    expect(markup).toContain('Scheduled or invited');
-    expect(markup).toContain('Mentioned only');
+    expect(markup).toContain('Evidence and conversation history');
     expect(markup).toContain('Participation not confirmed');
   });
 
-  it('does not manufacture current context without compiled evidence', () => {
+  it('explains missing context without expanding empty history sections', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={{
@@ -325,7 +348,7 @@ describe('PersonDossier', () => {
           meetings: briefingDetail.meetings.filter(
             (meeting) => meeting.evidence !== 'confirmed',
           ),
-          commitments: { open: [], delivered: [] },
+          commitments: { open: [], delivered: [], candidates: [] },
           knowledgeDoc: null,
         }}
         onBack={() => {}}
@@ -333,9 +356,11 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).not.toContain('Current context');
-    expect(markup).toContain('No confirmed conversations yet');
-    expect(markup).not.toContain('Open expectations');
-    expect(markup).not.toContain('Recently delivered');
+    expect(markup).toContain('Current read');
+    expect(markup).toContain('No reliable relationship brief yet');
+    expect(markup).toContain('Conversation links available: 2');
+    expect(markup).not.toContain('No confirmed conversations yet');
+    expect(markup).not.toContain('No scheduled conversations');
+    expect(markup).not.toContain('No mention-only conversations');
   });
 });

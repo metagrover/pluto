@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type PersonMeetingRecord,
+  isUsablePersonName,
   mergePersonMeetingEvidence,
+  selectCandidatePersonCommitments,
   selectVerifiedPersonCommitments,
 } from '../../src/utils/personBriefing';
 
@@ -35,6 +37,23 @@ describe('person meeting evidence', () => {
       expect.objectContaining({ id: 'shared', evidence: 'confirmed' }),
     ]);
     expect(result.filter((item) => item.id === 'shared')).toHaveLength(1);
+  });
+});
+
+describe('person identity hygiene', () => {
+  it.each([
+    'None',
+    'unknown',
+    'speaker',
+    'Me again',
+    'Them (again)',
+    'none specified',
+  ])('rejects non-person label %s', (name) => {
+    expect(isUsablePersonName(name)).toBe(false);
+  });
+
+  it('keeps ordinary names', () => {
+    expect(isUsablePersonName('Avery Chen')).toBe(true);
   });
 });
 
@@ -107,5 +126,69 @@ describe('verified person commitments', () => {
     });
 
     expect(result.delivered.map((item) => item.id)).toEqual(['recent']);
+  });
+});
+
+describe('candidate person commitments', () => {
+  const base = {
+    id: 'candidate-action',
+    name: 'Send the final brief',
+    status: 'active' as const,
+    due_date: null,
+    assigned_to: null,
+    metadata: JSON.stringify({
+      assignee_name: 'Avery Chen',
+      commitment_state: 'possible',
+      source_meeting_id: 'meeting-1',
+      source_evidence: 'Avery can send the final brief.',
+    }),
+    updated_at: '2026-08-30T12:00:00.000Z',
+    sourceMeetingTitle: 'Launch review',
+  };
+
+  it('returns source-backed owner candidates without promoting authority', () => {
+    const result = selectCandidatePersonCommitments({
+      personNames: ['Avery Chen'],
+      actions: [
+        base,
+        {
+          ...base,
+          id: 'different-person',
+          metadata: JSON.stringify({
+            assignee_name: 'Jordan Vale',
+            commitment_state: 'possible',
+            source_meeting_id: 'meeting-1',
+          }),
+        },
+        { ...base, id: 'already-owned', assigned_to: 'person-1' },
+      ],
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'candidate-action',
+        suggestedOwnerName: 'Avery Chen',
+        sourceMeetingId: 'meeting-1',
+      }),
+    ]);
+  });
+
+  it('does not resurface a user-rejected owner candidate', () => {
+    expect(
+      selectCandidatePersonCommitments({
+        personNames: ['Avery Chen'],
+        actions: [
+          {
+            ...base,
+            metadata: JSON.stringify({
+              assignee_name: 'Avery Chen',
+              owner_source: 'user',
+              commitment_state: 'possible',
+              source_meeting_id: 'meeting-1',
+            }),
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 });

@@ -13,8 +13,38 @@ export interface PersonBriefingSummary {
   latestMeetingAt: string | null;
   context: string | null;
   openCommitmentCount: number;
+  candidateCommitmentCount: number;
+  briefHeadline: string | null;
+  briefStatus: string | null;
+  briefUpdatedAt: string | null;
   possibleDuplicateCount: number;
 }
+
+const NON_PERSON_LABELS = new Set([
+  'i',
+  'me',
+  'myself',
+  'none',
+  'none specified',
+  'omit',
+  'speaker',
+  'them',
+  'unknown',
+  'unnamed',
+  'you',
+]);
+
+const normalizePersonLabel = (value: string): string =>
+  value.toLowerCase().replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+
+export const isUsablePersonName = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  const normalized = normalizePersonLabel(value);
+  return (
+    !NON_PERSON_LABELS.has(normalized) &&
+    !/^(?:i|me|myself|speaker|them|you) again$/.test(normalized)
+  );
+};
 
 export const parsePersonRole = (metadata: unknown): string => {
   if (typeof metadata !== 'string' || !metadata)
@@ -23,7 +53,10 @@ export const parsePersonRole = (metadata: unknown): string => {
     const value = JSON.parse(metadata) as { role?: unknown };
     if (typeof value.role !== 'string') return 'Known from conversations';
     const role = value.role.trim();
-    return role && !['undefined', 'null', 'n/a'].includes(role.toLowerCase())
+    return role &&
+      !['undefined', 'null', 'n/a', 'none', 'nobody', 'unknown'].includes(
+        role.toLowerCase(),
+      )
       ? role
       : 'Known from conversations';
   } catch {
@@ -64,6 +97,11 @@ export interface PersonBriefingCommitment {
   sourceMeetingId: string;
   sourceMeetingTitle: string | null;
   updatedAt: string;
+}
+
+export interface PersonBriefingCommitmentCandidate
+  extends PersonBriefingCommitment {
+  suggestedOwnerName: string;
 }
 
 const meetingTime = (meeting: PersonMeetingRecord): number =>
@@ -149,4 +187,58 @@ export const selectVerifiedPersonCommitments = (input: {
     )
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   return { open, delivered };
+};
+
+export const selectCandidatePersonCommitments = (input: {
+  personNames: string[];
+  actions: PersonCommitmentCandidate[];
+}): PersonBriefingCommitmentCandidate[] => {
+  const personNames = new Set(
+    input.personNames.map(normalizePersonLabel).filter(Boolean),
+  );
+  return input.actions
+    .flatMap((action) => {
+      const metadata = parseActionMetadata(action.metadata);
+      const suggestedOwnerName =
+        typeof metadata.assignee_name === 'string'
+          ? metadata.assignee_name.trim()
+          : '';
+      if (
+        action.assigned_to !== null ||
+        metadata.owner_source === 'user' ||
+        getCommitmentState(action.metadata) === 'rejected' ||
+        !['active', 'overdue'].includes(action.status || '') ||
+        typeof metadata.source_meeting_id !== 'string' ||
+        !suggestedOwnerName ||
+        !personNames.has(normalizePersonLabel(suggestedOwnerName))
+      ) {
+        return [];
+      }
+      return [
+        {
+          id: action.id,
+          text:
+            typeof metadata.full_description === 'string'
+              ? metadata.full_description
+              : action.name,
+          status: action.status as PersonBriefingCommitment['status'],
+          dueDate: action.due_date,
+          evidence:
+            typeof metadata.source_evidence === 'string'
+              ? metadata.source_evidence
+              : null,
+          sourceMeetingId: metadata.source_meeting_id,
+          sourceMeetingTitle: action.sourceMeetingTitle,
+          updatedAt: action.updated_at,
+          suggestedOwnerName,
+        },
+      ];
+    })
+    .sort(
+      (a, b) =>
+        Number(b.status === 'overdue') - Number(a.status === 'overdue') ||
+        (Date.parse(a.dueDate || '') || Number.MAX_SAFE_INTEGER) -
+          (Date.parse(b.dueDate || '') || Number.MAX_SAFE_INTEGER) ||
+        Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    );
 };

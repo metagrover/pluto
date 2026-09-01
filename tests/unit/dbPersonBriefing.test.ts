@@ -68,8 +68,21 @@ describe('person briefing database read model', () => {
       latestMeetingAt: '2026-08-01T12:00:00.000Z',
       context: 'Reviewed the launch sequence.',
       openCommitmentCount: 1,
+      candidateCommitmentCount: 0,
+      briefHeadline: null,
+      briefStatus: null,
+      briefUpdatedAt: null,
       possibleDuplicateCount: 0,
     });
+  });
+
+  it('rejects placeholder person labels before persistence', () => {
+    expect(() => db.upsertEntity({ type: 'person', name: 'None' })).toThrow(
+      'person_name_invalid',
+    );
+    expect(() =>
+      db.upsertEntity({ type: 'person', name: 'Them (again)' }),
+    ).toThrow('person_name_invalid');
   });
 
   it('separates confirmed, scheduled, and mentioned-only meetings', () => {
@@ -197,7 +210,7 @@ describe('person briefing database read model', () => {
     expect(db.getPersonBriefing(person.id)?.meetings).toEqual([]);
   });
 
-  it('returns only commitments assigned through the explicit owner boundary', () => {
+  it('separates verified commitments from owner candidates', () => {
     const person = db.upsertEntity({
       id: 'person-owner',
       type: 'person',
@@ -232,9 +245,38 @@ describe('person briefing database read model', () => {
 
     const briefing = db.getPersonBriefing(person.id);
 
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id),
+    ).toMatchObject({
+      openCommitmentCount: 1,
+      candidateCommitmentCount: 1,
+    });
     expect(briefing?.commitments.open.map((item) => item.id)).toEqual([
       'verified-action',
     ]);
+    expect(briefing?.commitments.candidates).toEqual([
+      expect.objectContaining({
+        id: 'name-only-action',
+        suggestedOwnerName: 'Jordan Vale',
+      }),
+    ]);
+
+    db.correctActionOwner('name-only-action', person.id);
+    expect(db.getPersonBriefing(person.id)?.commitments).toMatchObject({
+      open: [
+        expect.objectContaining({ id: 'verified-action' }),
+        expect.objectContaining({ id: 'name-only-action' }),
+      ],
+      candidates: [],
+    });
+
+    db.correctActionOwner('name-only-action', null);
+    expect(db.getPersonBriefing(person.id)?.commitments).toMatchObject({
+      open: [expect.objectContaining({ id: 'verified-action' })],
+      candidates: [],
+    });
   });
 
   it('returns undefined for a missing or non-person entity', () => {

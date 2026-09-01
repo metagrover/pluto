@@ -2929,6 +2929,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_PERSON_BRIEFING', (_event, personId) =>
     db.getPersonBriefing(String(personId)),
   );
+  ipcMain.handle(
+    'RESOLVE_PERSON_COMMITMENT_OWNER',
+    (_event, { actionId, personId }) => {
+      const action = db.correctActionOwner(
+        String(actionId),
+        personId === null ? null : String(personId),
+      );
+      queueAllKnowledgeDocsRefresh();
+      return action;
+    },
+  );
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>
     db.getKnowledgeFeedSummary(params),
   );

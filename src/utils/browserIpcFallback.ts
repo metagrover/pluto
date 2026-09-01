@@ -475,6 +475,7 @@ const previewPersonContextDoc: KnowledgeDoc = {
 const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
   'preview-avery': {
     person: previewPeople[0],
+    isSelf: false,
     meetings: [
       {
         id: 'preview-product-review',
@@ -529,6 +530,19 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
           updatedAt: now,
         },
       ],
+      candidates: [
+        {
+          id: 'preview-avery-candidate',
+          text: 'Share final launch notes with the review group',
+          status: 'active',
+          dueDate: null,
+          evidence: 'Avery can send the final notes after the review.',
+          sourceMeetingId: 'preview-product-review',
+          sourceMeetingTitle: 'Product review',
+          updatedAt: now,
+          suggestedOwnerName: 'Avery Chen',
+        },
+      ],
     },
     knowledgeDoc: previewPersonContextDoc,
     workingMemorySnapshot: null,
@@ -539,6 +553,7 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
       person.id,
       {
         person,
+        isSelf: false,
         meetings: (previewMeetings[person.id] ?? []).map((meeting) => ({
           id: meeting.id,
           title: meeting.title,
@@ -548,7 +563,7 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
           context: meeting.context,
           evidence: 'mentioned' as const,
         })),
-        commitments: { open: [], delivered: [] },
+        commitments: { open: [], delivered: [], candidates: [] },
         knowledgeDoc: null,
         workingMemorySnapshot: null,
         mergedPeople: [],
@@ -792,6 +807,19 @@ const createInvokeFallback =
             context: latest?.context ?? null,
             openCommitmentCount:
               previewPersonBriefings[person.id]?.commitments.open.length ?? 0,
+            candidateCommitmentCount:
+              previewPersonBriefings[person.id]?.commitments.candidates
+                .length ?? 0,
+            briefHeadline:
+              previewPersonBriefings[person.id]?.knowledgeDoc?.scope_key ===
+              person.id
+                ? 'Avery is coordinating the launch handoff.'
+                : null,
+            briefStatus:
+              previewPersonBriefings[person.id]?.knowledgeDoc?.status ?? null,
+            briefUpdatedAt:
+              previewPersonBriefings[person.id]?.knowledgeDoc?.updated_at ??
+              null,
             possibleDuplicateCount: 0,
           };
         });
@@ -804,6 +832,7 @@ const createInvokeFallback =
       }
       case 'MERGE_PERSON':
       case 'RESTORE_PERSON_MERGE':
+      case 'RESOLVE_PERSON_COMMITMENT_OWNER':
         result = undefined;
         break;
       case 'SEARCH_ENTITIES': {

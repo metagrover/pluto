@@ -43,16 +43,19 @@
     @apply mt-7;
   }
   .people-list__heading {
-    @apply mb-2 flex items-center gap-3 px-3 -mx-3;
+    @apply mb-2 flex items-center justify-between gap-3 px-3;
   }
   .people-list__heading h2 {
-    @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/40;
+    @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/80;
   }
-  .people-list__heading > div {
-    @apply h-px flex-1 bg-pro-border/15;
+  .people-list__heading > span {
+    @apply text-[10px] font-semibold tabular-nums text-pro-text-muted/70;
   }
   .person-commitments {
     @apply inline-flex items-center rounded border border-amber-500/15 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/90;
+  }
+  .person-candidates {
+    @apply inline-flex items-center rounded border border-pro-accent/20 bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
   }
   .person-row {
     @apply relative border-b border-pro-border/50 last:border-b-0;
@@ -95,13 +98,37 @@
     @apply rounded-md bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
   }
   .person-row__chevron {
-    @apply -mr-1 shrink-0 text-pro-text-muted/40 transition-colors duration-150;
+    @apply -mr-1 shrink-0 text-pro-text-muted/70 transition-colors duration-150;
   }
   .person-row__meeting:hover .person-row__chevron {
     @apply text-pro-accent/50;
   }
   .people-unlinked {
-    @apply mt-8;
+    @apply mt-8 border-t border-pro-border/60 pt-3;
+  }
+  .people-unlinked > summary {
+    @apply flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-lg px-3 text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .people-unlinked > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+  .people-unlinked > summary > span:first-child {
+    @apply flex min-w-0 flex-1 flex-col gap-0.5;
+  }
+  .people-unlinked > summary strong {
+    @apply text-xs font-semibold;
+  }
+  .people-unlinked > summary small {
+    @apply text-[11px] text-pro-text-muted/80;
+  }
+  .people-unlinked > summary > span:nth-child(2) {
+    @apply text-[10px] font-semibold tabular-nums;
+  }
+  .people-unlinked > summary svg {
+    @apply transition-transform;
+  }
+  .people-unlinked[open] > summary svg {
+    @apply rotate-180;
   }
   .people-empty {
     @apply mt-7 flex min-h-56 flex-col items-center justify-center border-y border-pro-border px-5 text-center text-pro-text-muted;
@@ -246,17 +273,70 @@
   .person-dossier__merged li {
     @apply flex min-h-11 items-center justify-between gap-3 border-t border-pro-border/40 text-sm text-pro-text-main;
   }
-  .person-dossier__context {
+  .person-dossier__current-read,
+  .person-dossier__open-loops,
+  .person-dossier__upcoming {
     @apply border-b border-pro-border/60 py-7;
   }
-  .person-dossier__eyebrow {
-    @apply mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted;
+  .person-dossier__current-read-heading,
+  .person-dossier__major-heading {
+    @apply flex items-center justify-between gap-4;
+  }
+  .person-dossier__current-read-heading > div,
+  .person-dossier__major-heading > div {
+    @apply flex items-center gap-2 text-pro-text-main;
+  }
+  .person-dossier__current-read-heading h2,
+  .person-dossier__major-heading h2 {
+    @apply text-xs font-bold uppercase tracking-[0.1em];
+  }
+  .person-dossier__current-read-heading > span {
+    @apply rounded-full bg-pro-hover px-2 py-1 text-[10px] font-semibold text-pro-text-muted;
+  }
+  .person-dossier__major-heading > span {
+    @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-pro-text-muted;
+  }
+  .person-dossier__headline {
+    @apply mt-4 max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main;
+  }
+  .person-dossier__read-meta {
+    @apply mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-pro-text-muted;
+  }
+  .person-dossier__read-meta span + span::before {
+    content: '·';
+    @apply mr-3 text-pro-text-muted/60;
+  }
+  .person-dossier__read-sources {
+    @apply mt-4 flex flex-wrap gap-2;
+  }
+  .person-dossier__read-sources button,
+  .person-dossier__insights button,
+  .person-dossier__commitments > li > button {
+    @apply rounded-md text-xs font-semibold text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__read-empty {
+    @apply mt-4 max-w-2xl border-l border-pro-border pl-4;
+  }
+  .person-dossier__read-empty strong {
+    @apply text-sm font-semibold text-pro-text-main;
+  }
+  .person-dossier__read-empty p {
+    @apply mt-1 text-sm leading-6 text-pro-text-muted;
+  }
+  .person-dossier__read-empty span {
+    @apply mt-2 block text-xs font-medium text-pro-text-muted;
+  }
+  .person-dossier__patterns {
+    @apply mt-6 border-t border-pro-border/50 pt-5;
+  }
+  .person-dossier__patterns h3 {
+    @apply text-[10px] font-bold uppercase tracking-[0.12em] text-pro-text-muted;
   }
   .person-dossier__insights {
-    @apply mt-4 grid gap-6 md:grid-cols-2;
+    @apply mt-3 grid gap-x-8 gap-y-5 md:grid-cols-2;
   }
   .person-dossier__insights li {
-    @apply border-l-2 border-pro-accent/25 pl-4;
+    @apply border-t border-pro-border/60 pt-3;
   }
   .person-dossier__insights strong {
     @apply text-sm font-semibold text-pro-text-main;
@@ -270,18 +350,22 @@
   }
   .person-dossier__insights button,
   .person-dossier__commitments > li > button {
-    @apply mt-2 text-xs font-semibold text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply mt-2;
   }
   .person-dossier__activity {
     @apply grid border-b border-pro-border/60 md:grid-cols-2 md:divide-x md:divide-pro-border/60;
   }
   .person-dossier__section {
-    @apply py-7 first:pr-0 md:first:pr-7 md:last:pl-7;
+    @apply pt-5 first:pr-0 md:first:pr-7 md:last:pl-7;
+  }
+  .person-dossier__section--candidate {
+    @apply rounded-xl bg-pro-accent/[0.035] px-4 pb-5 md:rounded-none md:bg-transparent md:px-0 md:pb-0;
   }
   .person-dossier__section-heading {
     @apply flex items-center gap-2;
   }
-  .person-dossier__section-heading h2 {
+  .person-dossier__section-heading h2,
+  .person-dossier__section-heading h3 {
     @apply text-xs font-bold uppercase tracking-[0.1em] text-pro-text-main;
   }
   .person-dossier__section-heading > span {
@@ -308,8 +392,70 @@
   .person-dossier__commitments > li > button {
     @apply col-start-2 justify-self-start;
   }
+  .person-dossier__candidates {
+    @apply mt-4 space-y-5;
+  }
+  .person-dossier__candidates li {
+    @apply grid grid-cols-[auto_1fr] gap-x-3;
+  }
+  .person-dossier__candidate-actions {
+    @apply col-start-2 mt-3 flex flex-wrap items-center gap-x-3 gap-y-2;
+  }
+  .person-dossier__candidate-actions button {
+    @apply min-h-8 rounded-md px-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+  }
+  .person-dossier__candidate-actions button:first-child {
+    @apply bg-pro-accent text-pro-bg hover:bg-pro-accent/90 hover:text-pro-bg;
+  }
+  .person-dossier__candidates p[role="alert"] {
+    @apply col-start-2 mt-2 text-xs text-pro-urgent;
+  }
+  .person-dossier__section-empty {
+    @apply mt-4 text-sm leading-6 text-pro-text-muted;
+  }
+  .person-dossier__delivered {
+    @apply mt-6 border-t border-pro-border/50 pt-2;
+  }
+  .person-dossier__delivered > summary,
+  .person-dossier__history > summary {
+    @apply flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__delivered > summary::-webkit-details-marker,
+  .person-dossier__history > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+  .person-dossier__delivered > summary > span,
+  .person-dossier__history > summary > span:nth-child(2) {
+    @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] tabular-nums;
+  }
+  .person-dossier__delivered > summary svg,
+  .person-dossier__history > summary > svg {
+    @apply ml-auto transition-transform;
+  }
+  .person-dossier__delivered[open] > summary svg,
+  .person-dossier__history[open] > summary > svg {
+    @apply rotate-180;
+  }
+  .person-dossier__upcoming > button {
+    @apply mt-3 flex min-h-14 w-full items-center justify-between gap-4 rounded-lg px-3 py-2 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__upcoming > button strong {
+    @apply block text-sm font-medium text-pro-text-main;
+  }
+  .person-dossier__upcoming > button small {
+    @apply mt-1 block text-xs text-pro-text-muted;
+  }
+  .person-dossier__upcoming > button > span:last-child {
+    @apply shrink-0 text-xs tabular-nums text-pro-text-muted;
+  }
   .person-dossier__history {
-    @apply divide-y divide-pro-border/60;
+    @apply border-b border-pro-border/60 py-3;
+  }
+  .person-dossier__history > summary > span:first-child {
+    @apply flex min-w-0 flex-1 items-center gap-2;
+  }
+  .person-dossier__history-note {
+    @apply border-t border-pro-border/50 py-4 text-xs text-pro-text-muted;
   }
   .person-dossier__meeting-group {
     @apply py-7;
@@ -350,6 +496,12 @@
     }
     .person-dossier__section {
       @apply px-0;
+    }
+    .person-dossier__section--candidate {
+      @apply px-4;
+    }
+    .person-date {
+      @apply hidden;
     }
   }
 

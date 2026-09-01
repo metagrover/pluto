@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
 import type { ActionCommitmentMetadata } from '../src/utils/actionCommitment';
+import { isUsablePersonName } from '../src/utils/personBriefing';
 import {
   assessProjectProposal,
   readProjectQualification,
@@ -35,15 +36,6 @@ export interface ProcessedEntities {
   linked: number;
   entities: db.Entity[];
 }
-
-const NON_PERSON_LABELS = new Set([
-  'me',
-  'them',
-  'you',
-  'i',
-  'myself',
-  'speaker',
-]);
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
@@ -101,7 +93,7 @@ function isPersonGroundedInTranscript(
   transcript: string,
 ): boolean {
   const normalizedName = normalizeForMatch(name);
-  if (!normalizedName || NON_PERSON_LABELS.has(normalizedName)) {
+  if (!normalizedName || !isUsablePersonName(name)) {
     return false;
   }
 
