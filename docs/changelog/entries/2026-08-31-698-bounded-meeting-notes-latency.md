@@ -1,7 +1,7 @@
 ### Make meeting-note generation bounded and predictable
 
 - **Issue:** [#698](https://github.com/metagrover/pluto/issues/698)
-- **PR:** Not created yet.
+- **PR:** [#702](https://github.com/metagrover/pluto/pull/702)
 - **Changed:** Notes generation now records content-free queue, model, token, stage, repair, repartition, hierarchy, and stable failure-category metrics; sizes source leaves independently from concrete merges; retries and repartitions truncated work locally; retries one transiently failed hierarchy leaf without regenerating completed siblings; admits one primary meeting at a time with manual-first FIFO queueing; assigns explicit provider work classes; and shows truthful queued versus generating status while preserving existing notes.
 - **Why:** Parallel regeneration previously hid queue behavior and could multiply model work. The bounded pipeline reduces avoidable hierarchy calls, keeps completed siblings during recovery, and makes wait time distinguishable from active model time without persisting meeting content.
 - **Replaced:** Hypothetical merge reservations during leaf sizing, whole-run failure after a local truncation, implicit provider priorities, and indistinguishable queued/generating status.
