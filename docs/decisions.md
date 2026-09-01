@@ -662,3 +662,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Model artifact hashes canonicalize both the model root and every enumerated regular file before deriving relative paths. Integrity remains a digest of relative file names and file contents; absolute installation paths never contribute to the digest.
 - **Rationale:** macOS exposes temporary directories through symlinked aliases such as `/var` and `/private/var`. Canonicalizing only the root caused otherwise identical Parakeet bundles to hash differently outside `/Users`, blocking fresh development profiles after a complete one-gigabyte download.
 - **Consequences:** The existing pinned Parakeet digests remain authoritative, real file mutations and embedded symlinks still fail closed, and the same verified bundle can activate under production or isolated development profiles.
+
+## 2026-08-31 - Make real-data development access explicit and recoverable
+
+- **Status:** Accepted and implemented.
+- **Source:** [Issue #709](https://github.com/metagrover/pluto/issues/709), development access to meetings recorded before profile isolation.
+- **Decision:** `pnpm run dev` remains the safe temporary-profile default. `pnpm start` explicitly runs the same current Vite/Electron development build against Pluto's normal macOS profile. Before the first such launch, the command creates and verifies an atomic SQLite snapshot that later launches validate but never overwrite.
+- **Rationale:** Routine development and agent QA should not silently touch private production data, while a developer who intentionally opts in still needs current source code and existing meetings in the same runtime.
+- **Consequences:** `pnpm start` permits normal startup migrations, background processing, recordings, edits, and deletions against the real database. The snapshot provides a recovery boundary, not write isolation; `pnpm run dev` remains the command for disposable testing.

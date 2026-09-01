@@ -9,6 +9,8 @@
   "scripts": {
     "predev": "pnpm run ensure:dev-runtime",
     "dev": "vite",
+    "prestart": "pnpm run ensure:dev-runtime",
+    "start": "node scripts/start_production_profile.mjs",
     "build-swift": "mkdir -p resources/bin && swiftc resources/swift/main.swift resources/swift/AudioRecorder.swift -o resources/bin/recorder && codesign --sign - --entitlements resources/swift/entitlements.plist --force resources/bin/recorder",
     "build-native": "pnpm run build-swift && pnpm run build:audio-cap && pnpm run build:calendar-helper && pnpm run build:parakeet",
     "build": "tsc && vite build && pnpm run build-native && electron-builder",
