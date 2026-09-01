@@ -553,8 +553,9 @@ it.each([
   'notesMerge',
   'entities',
   'askPluto',
+  'askPlutoDeep',
 ] as const)(
-  'uses the configured general model except for Quick chat: %s',
+  'uses the configured general model for saved work: %s',
   async (task) => {
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'generic-model',
@@ -563,8 +564,20 @@ it.each([
     const resolver = provider as unknown as {
       resolveOllamaModel(task: string): Promise<string>;
     };
-    expect(await resolver.resolveOllamaModel(task)).toBe(
-      task === 'askPluto' ? 'fast-model' : 'generic-model',
-    );
+    expect(await resolver.resolveOllamaModel(task)).toBe('generic-model');
+  },
+);
+
+it.each(['askPlutoLive', 'queryClassification'] as const)(
+  'uses the configured quick model for active meeting work: %s',
+  async (task) => {
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'generic-model',
+      ollama_fast_model: 'fast-model',
+    });
+    const resolver = provider as unknown as {
+      resolveOllamaModel(task: string): Promise<string>;
+    };
+    expect(await resolver.resolveOllamaModel(task)).toBe('fast-model');
   },
 );

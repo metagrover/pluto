@@ -146,8 +146,8 @@ private func events(params: [String: String]) throws -> [NormalizedEvent] {
         let calendarIdentifier = params["calendarIdentifier"],
         let startValue = params["start"],
         let endValue = params["end"],
-        let start = ISO8601DateFormatter().date(from: startValue),
-        let end = ISO8601DateFormatter().date(from: endValue)
+        let start = CalendarBridgeProtocol.parseISO8601(startValue),
+        let end = CalendarBridgeProtocol.parseISO8601(endValue)
     else { throw BridgeProtocolError.invalidRequest }
     _ = try CalendarBridgeProtocol.validate(
         ListEventsParams(calendarIdentifier: calendarIdentifier, start: start, end: end)

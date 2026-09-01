@@ -4,10 +4,7 @@ import {
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../src/utils/ollamaModels';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
-import {
-  createSerializedTaskGate,
-  isSerializedTaskPreemption,
-} from '../serializedTaskGate';
+import { isSerializedTaskPreemption } from '../serializedTaskGate';
 import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
@@ -16,10 +13,10 @@ import {
 import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
 import {
-  type LLMWorkClass,
-  LLM_WORK_CLASS_PRIORITY,
-  defaultLLMWorkClass,
-} from './llmWorkClass';
+  type LocalInferenceTask,
+  runWithLocalInferenceCoordinator,
+} from './inferenceCoordinator';
+import type { LLMWorkClass } from './llmWorkClass';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import {
   generateMeetingNotes,
@@ -373,48 +370,14 @@ export const collapseOversizedTopics = (
     });
 };
 
-// The default local Ollama runtime has one generation slot. Queue every
-// generation at the provider boundary so request timeouts measure model work,
-// not time spent waiting behind another analysis or knowledge request.
-const runWithOllamaGenerationGate = createSerializedTaskGate<symbol, string>();
 let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
 
-type LLMTask =
-  | 'summary'
-  | 'summaryRepair'
-  | 'structuredAnalysis'
-  | 'notesWriter'
-  | 'notesAudit'
-  | 'notesMerge'
-  | 'analysisEditorial'
-  | 'topicSegmentation'
-  | 'terminologyReconciliation'
-  | 'topicAnalysis'
-  | 'speaker'
-  | 'title'
-  | 'entities'
-  | 'valueSignals'
-  | 'knowledgeDoc'
-  | 'projectScopeReview'
-  | 'commitmentReconciliation'
-  | 'askPluto'
-  | 'askPlutoDeep'
-  | 'askPlutoLive'
-  | 'queryClassification';
+type LLMTask = LocalInferenceTask;
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
-
-const isResumableMeetingAnalysisTask = (task: LLMTask): boolean =>
-  task === 'notesWriter' ||
-  task === 'notesAudit' ||
-  task === 'notesMerge' ||
-  task === 'topicSegmentation' ||
-  task === 'terminologyReconciliation' ||
-  task === 'topicAnalysis' ||
-  task === 'analysisEditorial';
 
 export const getOllamaTimeoutMs = (task: string): number =>
   task === 'knowledgeDoc'
@@ -1053,19 +1016,29 @@ export class UnifiedLLMProvider implements LLMProvider {
           result = await this.generateWithGemini(options);
           break;
         case 'ollama': {
-          const workClass =
-            options.workClass ?? defaultLLMWorkClass(options.task);
-          result = await runWithOllamaGenerationGate(
-            Symbol(options.task),
-            async (gateSignal) => {
+          result = await runWithLocalInferenceCoordinator({
+            key: Symbol(options.task),
+            task: options.task,
+            workClass: options.workClass,
+            signal: options.signal,
+            onAdmitted: ({ task, queueMs }) => {
               if (options.notesBudget)
                 console.log(
                   '[Notes gate]',
-                  JSON.stringify({
-                    task: options.task,
-                    waitMs: Date.now() - queuedAt,
-                  }),
+                  JSON.stringify({ task, waitMs: queueMs }),
                 );
+              if (
+                task === 'askPluto' ||
+                task === 'askPlutoDeep' ||
+                task === 'askPlutoLive'
+              ) {
+                console.info(
+                  '[Inference admission]',
+                  JSON.stringify({ task, queueMs }),
+                );
+              }
+            },
+            run: async (gateSignal) => {
               observeNotesStarted();
               options.onStart?.();
               return this.generateWithOllama({
@@ -1079,16 +1052,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                   : gateSignal,
               });
             },
-            LLM_WORK_CLASS_PRIORITY[workClass],
-            {
-              signal: options.signal,
-              preemptible:
-                workClass === 'meeting_secondary' ||
-                workClass === 'project_review' ||
-                workClass === 'background' ||
-                isResumableMeetingAnalysisTask(options.task),
-            },
-          );
+          });
           break;
         }
         default:
@@ -1590,7 +1554,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (task === 'askPluto' || task === 'queryClassification') {
+    if (task === 'askPlutoLive' || task === 'queryClassification') {
       return (
         (this.settings.ollama_fast_model || '').trim() ||
         OLLAMA_QUICK_CHAT_MODEL

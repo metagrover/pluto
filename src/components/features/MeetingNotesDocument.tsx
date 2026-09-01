@@ -1,4 +1,4 @@
-import { Check, FileText, Loader2, Pencil } from 'lucide-react';
+import { Check, FileText, Loader2, Pencil, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
@@ -30,6 +30,11 @@ type SourceSelection = {
   label: string;
   evidence?: string;
   transcriptRange?: [number, number];
+};
+
+type DeletedContinuation = {
+  parentPath: string;
+  continuation: NativeMeetingNoteContinuation;
 };
 
 const previewSourceSelection = (
@@ -130,9 +135,15 @@ const resolveSourceSegments = (
   return transcriptSegments.slice(matchIndex, matchIndex + 3);
 };
 
-const SaveStatus = ({ state }: { state: SaveState }) => {
+const SaveStatus = ({
+  state,
+  onRetry,
+}: {
+  state: SaveState;
+  onRetry?: () => void;
+}) => {
   const content = {
-    saved: null,
+    saved: 'Saved',
     dirty: 'Unsaved changes',
     saving: (
       <>
@@ -140,9 +151,17 @@ const SaveStatus = ({ state }: { state: SaveState }) => {
         Saving notes
       </>
     ),
-    error: 'Notes were not saved. Keep this window open and try again.',
+    error: (
+      <>
+        Notes were not saved.
+        {onRetry ? (
+          <button type="button" onClick={onRetry}>
+            Retry save
+          </button>
+        ) : null}
+      </>
+    ),
   }[state];
-  if (!content) return null;
 
   return (
     <span className={`meeting-save-state meeting-save-state--${state}`}>
@@ -151,30 +170,32 @@ const SaveStatus = ({ state }: { state: SaveState }) => {
   );
 };
 
-const navigateToAdjacentTextarea = (
+const navigateToAdjacentEditor = (
   current: HTMLTextAreaElement,
   direction: 'up' | 'down',
-) => {
-  const textareas = Array.from(
-    document.querySelectorAll(
-      '.meeting-notes-document textarea:not([disabled])',
-    ),
-  ) as HTMLTextAreaElement[];
-  const index = textareas.indexOf(current);
-  if (index === -1) return;
+): boolean => {
+  const editors = Array.from(
+    document.querySelectorAll('[data-meeting-note-editor]'),
+  );
+  const currentEditor = current.closest('[data-meeting-note-editor]');
+  const index = currentEditor ? editors.indexOf(currentEditor) : -1;
+  if (index === -1) return false;
   const nextIndex = direction === 'up' ? index - 1 : index + 1;
-  if (nextIndex >= 0 && nextIndex < textareas.length) {
-    const nextTextarea = textareas[nextIndex];
+  const nextEditor = editors[nextIndex];
+  if (!nextEditor) return false;
+  const nextTextarea =
+    nextEditor.querySelector<HTMLTextAreaElement>('textarea');
+  if (nextTextarea) {
     nextTextarea.focus();
-    const len = nextTextarea.value.length;
-    // Set timeout to allow focus to settle before moving cursor
-    setTimeout(() => {
-      nextTextarea.setSelectionRange(
-        direction === 'up' ? len : 0,
-        direction === 'up' ? len : 0,
-      );
-    }, 0);
+    const position = direction === 'up' ? nextTextarea.value.length : 0;
+    nextTextarea.setSelectionRange(position, position);
+    return true;
   }
+  const editTrigger =
+    nextEditor.querySelector<HTMLButtonElement>('[data-edit-item]');
+  if (!editTrigger) return false;
+  editTrigger.click();
+  return true;
 };
 
 const toggleMarkdownTask = (text: string, taskIndex: number): string => {
@@ -196,6 +217,8 @@ const InlineEditableText = ({
   asHeading = false,
   onCreateNativeContinuation,
   onSaveNativeContinuation,
+  onDeleteNativeContinuation,
+  onSaveStateChange,
   autoFocus = false,
   onSaved,
 }: {
@@ -206,6 +229,8 @@ const InlineEditableText = ({
   asHeading?: boolean;
   onCreateNativeContinuation?: () => Promise<void>;
   onSaveNativeContinuation?: (text: string) => Promise<void>;
+  onDeleteNativeContinuation?: () => Promise<void>;
+  onSaveStateChange?: (state: SaveState, retry?: () => void) => void;
   autoFocus?: boolean;
   onSaved: () => void;
 }) => {
@@ -215,11 +240,42 @@ const InlineEditableText = ({
   const [editing, setEditing] = useState(asHeading);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveGenerationRef = useRef(0);
+  const lastSavedValueRef = useRef(text.trim());
+  const draftRef = useRef(text);
+  const editingRef = useRef(editing);
+  const editSessionStartRef = useRef(text);
+  const suppressNextBlurSaveRef = useRef(false);
+  const mountedRef = useRef(true);
+  const flushPendingSaveRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    setDraft(text);
-    setEditing(asHeading);
+    lastSavedValueRef.current = text.trim();
+    if (!editingRef.current) {
+      setDraft(text);
+      draftRef.current = text;
+      setEditing(asHeading);
+    }
   }, [asHeading, text]);
+
+  useEffect(() => {
+    editingRef.current = editing;
+  }, [editing]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      const hadPendingSave = saveTimerRef.current !== null;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      mountedRef.current = false;
+      if (hadPendingSave) flushPendingSaveRef.current();
+    };
+  }, []);
 
   useEffect(() => {
     if (editing && !asHeading) {
@@ -235,58 +291,140 @@ const InlineEditableText = ({
   }, [editing, asHeading]);
 
   useEffect(() => {
-    if (autoFocus && !asHeading) setEditing(true);
+    if (autoFocus && !asHeading) {
+      editSessionStartRef.current = draftRef.current;
+      setEditing(true);
+    }
   }, [autoFocus, asHeading]);
 
   const className = asHeading
     ? 'meeting-editable-heading w-full resize-none overflow-hidden bg-transparent outline-none block'
     : 'w-full resize-none overflow-hidden bg-transparent outline-none font-sans text-[16px] leading-[1.55] m-0 p-0 block';
 
-  const save = async (newValue: string) => {
+  const clearSaveTimer = () => {
+    if (!saveTimerRef.current) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+  };
+
+  const reportSaveState = (state: SaveState, retry?: () => void) => {
+    onSaveStateChange?.(state, retry);
+  };
+
+  const save = (newValue: string): Promise<void> => {
     const next = newValue.trim();
-    if (onSaveNativeContinuation) {
+    clearSaveTimer();
+    if (!next && !onSaveNativeContinuation) {
+      setDraft(text);
+      draftRef.current = text;
+      reportSaveState('saved');
+      return Promise.resolve();
+    }
+    if (
+      next === lastSavedValueRef.current &&
+      !(onSaveNativeContinuation && !next)
+    ) {
+      reportSaveState('saved');
+      return Promise.resolve();
+    }
+
+    const generation = ++saveGenerationRef.current;
+    if (mountedRef.current) {
       setSaving(true);
       setError(null);
+      reportSaveState('saving');
+    }
+
+    const operation = saveChainRef.current.then(async () => {
+      if (
+        next === lastSavedValueRef.current &&
+        !(onSaveNativeContinuation && !next)
+      ) {
+        if (generation === saveGenerationRef.current) {
+          reportSaveState('saved');
+        }
+        return;
+      }
       try {
-        await onSaveNativeContinuation(next);
+        if (onSaveNativeContinuation && !next && onDeleteNativeContinuation) {
+          await onDeleteNativeContinuation();
+        } else if (onSaveNativeContinuation) {
+          await onSaveNativeContinuation(next);
+        } else if (next === originalText) {
+          await window.ipcRenderer.invoke('REVERT_USER_EDIT', {
+            meetingId,
+            path,
+          });
+        } else {
+          await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
+            meetingId,
+            path,
+            original: originalText,
+            edited: next,
+          });
+        }
+        lastSavedValueRef.current = next;
         onSaved();
+        if (mountedRef.current && generation === saveGenerationRef.current) {
+          setError(null);
+          reportSaveState('saved');
+        }
       } catch (cause) {
-        console.error('Failed to save native meeting note continuation', cause);
-        setError('This edit was not saved. Try again.');
-        setDraft(text);
+        const label = onSaveNativeContinuation
+          ? 'native meeting note continuation'
+          : 'meeting note edit';
+        console.error(`Failed to save ${label}`, cause);
+        if (mountedRef.current && generation === saveGenerationRef.current) {
+          setError("This edit wasn't saved. Keep Pluto open and retry.");
+          reportSaveState('error', () => {
+            void save(next);
+          });
+        }
       } finally {
-        setSaving(false);
+        if (mountedRef.current && generation === saveGenerationRef.current) {
+          setSaving(false);
+        }
       }
-      return;
-    }
-    if (!next || next === text) {
-      setDraft(text);
-      return;
-    }
-    setSaving(true);
+    });
+    saveChainRef.current = operation.catch(() => {});
+    return operation;
+  };
+  flushPendingSaveRef.current = () => {
+    void save(draftRef.current);
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const next = draft.trim();
+    if (next === lastSavedValueRef.current) return;
+    if (!next && onSaveNativeContinuation) return;
+    reportSaveState('dirty');
+    clearSaveTimer();
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void save(draftRef.current);
+    }, 650);
+    return clearSaveTimer;
+  }, [draft, editing, onSaveNativeContinuation]);
+
+  const beginEditing = () => {
+    editSessionStartRef.current = draftRef.current;
+    setEditing(true);
+  };
+
+  const cancelEditing = (target: HTMLTextAreaElement) => {
+    const baseline = editSessionStartRef.current;
+    suppressNextBlurSaveRef.current = true;
+    clearSaveTimer();
+    setDraft(baseline);
+    draftRef.current = baseline;
     setError(null);
-    try {
-      if (next === originalText) {
-        await window.ipcRenderer.invoke('REVERT_USER_EDIT', {
-          meetingId,
-          path,
-        });
-      } else {
-        await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
-          meetingId,
-          path,
-          original: originalText,
-          edited: next,
-        });
-      }
-      onSaved();
-    } catch (cause) {
-      console.error('Failed to save meeting note edit', cause);
-      setError('This edit was not saved. Try again.');
-      setDraft(text);
-    } finally {
-      setSaving(false);
+    if (baseline.trim() !== lastSavedValueRef.current) {
+      void save(baseline);
+    } else {
+      reportSaveState('saved');
     }
+    target.blur();
   };
 
   const renderMarkdown = () => {
@@ -331,143 +469,185 @@ const InlineEditableText = ({
 
   if (!asHeading && !editing) {
     return (
-      <div
-        className="meeting-markdown-preview"
-        onMouseDown={(e) => {
-          // Prevent the mousedown from blurring the currently-focused textarea
-          // before we've had a chance to set editing=true. This way a single
-          // click moves focus directly from one block to the next.
-          e.preventDefault();
+      <div className="meeting-inline-preview" data-meeting-note-editor>
+        <div
+          className="meeting-markdown-preview"
+          onMouseDown={(e) => {
+            // Prevent the mousedown from blurring the currently-focused textarea
+            // before we've had a chance to set editing=true. This way a single
+            // click moves focus directly from one block to the next.
+            e.preventDefault();
 
-          // Resolve the click coordinates to a character offset in the
-          // rendered HTML text, then map it into the raw markdown string.
-          try {
-            let clickedNode: Node | null = null;
-            let offsetInNode = 0;
+            // Resolve the click coordinates to a character offset in the
+            // rendered HTML text, then map it into the raw markdown string.
+            try {
+              let clickedNode: Node | null = null;
+              let offsetInNode = 0;
 
-            // Standard (Firefox) API
-            if ('caretPositionFromPoint' in document) {
-              const pos = (
-                document as Document & {
-                  caretPositionFromPoint: (
-                    x: number,
-                    y: number,
-                  ) => { offsetNode: Node; offset: number } | null;
+              // Standard (Firefox) API
+              if ('caretPositionFromPoint' in document) {
+                const pos = (
+                  document as Document & {
+                    caretPositionFromPoint: (
+                      x: number,
+                      y: number,
+                    ) => { offsetNode: Node; offset: number } | null;
+                  }
+                ).caretPositionFromPoint(e.clientX, e.clientY);
+                if (pos) {
+                  clickedNode = pos.offsetNode;
+                  offsetInNode = pos.offset;
                 }
-              ).caretPositionFromPoint(e.clientX, e.clientY);
-              if (pos) {
-                clickedNode = pos.offsetNode;
-                offsetInNode = pos.offset;
-              }
-            } else if ('caretRangeFromPoint' in document) {
-              // WebKit/Blink (Electron/Chrome) API
-              const range = (
-                document as Document & {
-                  caretRangeFromPoint: (x: number, y: number) => Range | null;
+              } else if ('caretRangeFromPoint' in document) {
+                // WebKit/Blink (Electron/Chrome) API
+                const range = (
+                  document as Document & {
+                    caretRangeFromPoint: (x: number, y: number) => Range | null;
+                  }
+                ).caretRangeFromPoint(e.clientX, e.clientY);
+                if (range) {
+                  clickedNode = range.startContainer;
+                  offsetInNode = range.startOffset;
                 }
-              ).caretRangeFromPoint(e.clientX, e.clientY);
-              if (range) {
-                clickedNode = range.startContainer;
-                offsetInNode = range.startOffset;
               }
+
+              if (clickedNode) {
+                // Walk all text nodes inside the preview to get an absolute
+                // character offset within the element's full text content.
+                const previewEl = e.currentTarget;
+                const walker = document.createTreeWalker(
+                  previewEl,
+                  NodeFilter.SHOW_TEXT,
+                );
+                let absoluteOffset = 0;
+                let found = false;
+                let node: Node | null = walker.nextNode();
+                while (node) {
+                  if (node === clickedNode) {
+                    absoluteOffset += offsetInNode;
+                    found = true;
+                    break;
+                  }
+                  absoluteOffset += (node.textContent ?? '').length;
+                  node = walker.nextNode();
+                }
+
+                if (found) {
+                  // Map the visible-text offset into the raw markdown by finding
+                  // the first position in draft where the surrounding text matches.
+                  // We search for a snippet of visible text around the click.
+                  const visibleText = previewEl.textContent ?? '';
+                  const snippet = visibleText.slice(
+                    Math.max(0, absoluteOffset - 12),
+                    absoluteOffset + 12,
+                  );
+                  const snippetPre = visibleText.slice(
+                    Math.max(0, absoluteOffset - 12),
+                    absoluteOffset,
+                  );
+                  const mdIdx = draft.indexOf(snippet);
+                  if (mdIdx !== -1) {
+                    pendingCaretRef.current = mdIdx + snippetPre.length;
+                  } else {
+                    // Fallback: proportional mapping
+                    const ratio =
+                      visibleText.length > 0
+                        ? absoluteOffset / visibleText.length
+                        : 1;
+                    pendingCaretRef.current = Math.round(ratio * draft.length);
+                  }
+                }
+              }
+            } catch {
+              // If anything goes wrong, just open at end
+              pendingCaretRef.current = draft.length;
             }
 
-            if (clickedNode) {
-              // Walk all text nodes inside the preview to get an absolute
-              // character offset within the element's full text content.
-              const previewEl = e.currentTarget;
-              const walker = document.createTreeWalker(
-                previewEl,
-                NodeFilter.SHOW_TEXT,
-              );
-              let absoluteOffset = 0;
-              let found = false;
-              let node: Node | null = walker.nextNode();
-              while (node) {
-                if (node === clickedNode) {
-                  absoluteOffset += offsetInNode;
-                  found = true;
-                  break;
-                }
-                absoluteOffset += (node.textContent ?? '').length;
-                node = walker.nextNode();
-              }
-
-              if (found) {
-                // Map the visible-text offset into the raw markdown by finding
-                // the first position in draft where the surrounding text matches.
-                // We search for a snippet of visible text around the click.
-                const visibleText = previewEl.textContent ?? '';
-                const snippet = visibleText.slice(
-                  Math.max(0, absoluteOffset - 12),
-                  absoluteOffset + 12,
-                );
-                const snippetPre = visibleText.slice(
-                  Math.max(0, absoluteOffset - 12),
-                  absoluteOffset,
-                );
-                const mdIdx = draft.indexOf(snippet);
-                if (mdIdx !== -1) {
-                  pendingCaretRef.current = mdIdx + snippetPre.length;
-                } else {
-                  // Fallback: proportional mapping
-                  const ratio =
-                    visibleText.length > 0
-                      ? absoluteOffset / visibleText.length
-                      : 1;
-                  pendingCaretRef.current = Math.round(ratio * draft.length);
-                }
-              }
-            }
-          } catch {
-            // If anything goes wrong, just open at end
-            pendingCaretRef.current = draft.length;
-          }
-
-          setEditing(true);
-        }}
-      >
-        {renderMarkdown()}
+            beginEditing();
+          }}
+        >
+          {renderMarkdown()}
+        </div>
+        <button
+          type="button"
+          className="meeting-note-edit-trigger"
+          data-edit-item
+          aria-label={`Edit item: ${text}`}
+          title="Edit item"
+          onClick={beginEditing}
+        >
+          <Pencil aria-hidden="true" size={13} />
+        </button>
+        {error ? <p className="meeting-edit-error">{error}</p> : null}
       </div>
     );
   }
 
   return (
-    <div className="meeting-inline-editable relative group w-full">
+    <div
+      className="meeting-inline-editable relative group w-full"
+      data-meeting-note-editor={asHeading ? undefined : ''}
+    >
       <TextareaAutosize
         ref={textareaRef}
         className={`${className} overflow-hidden`}
         style={{ color: 'var(--notes-ink)' }}
+        aria-label={
+          asHeading
+            ? 'Edit section heading'
+            : text
+              ? `Edit item: ${text}`
+              : 'Edit new item'
+        }
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          draftRef.current = event.target.value;
+        }}
         onBlur={(event) => {
           setEditing(false);
+          if (suppressNextBlurSaveRef.current) {
+            suppressNextBlurSaveRef.current = false;
+            return;
+          }
+          draftRef.current = event.target.value;
           void save(event.target.value);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
-            setDraft(text);
-            event.currentTarget.blur();
+            event.preventDefault();
+            cancelEditing(event.currentTarget);
+            return;
           }
           if (event.key === 'ArrowUp') {
             const target = event.currentTarget;
-            if (target.selectionStart === 0) {
+            if (
+              target.selectionStart === 0 &&
+              navigateToAdjacentEditor(target, 'up')
+            ) {
               event.preventDefault();
-              navigateToAdjacentTextarea(target, 'up');
             }
           }
           if (event.key === 'ArrowDown') {
             const target = event.currentTarget;
-            if (target.selectionEnd === target.value.length) {
+            if (
+              target.selectionEnd === target.value.length &&
+              navigateToAdjacentEditor(target, 'down')
+            ) {
               event.preventDefault();
-              navigateToAdjacentTextarea(target, 'down');
             }
           }
           if (event.key === 'Backspace') {
             const target = event.currentTarget;
             if (target.selectionStart === 0 && target.selectionEnd === 0) {
-              event.preventDefault();
-              navigateToAdjacentTextarea(target, 'up');
+              if (onSaveNativeContinuation && !target.value.trim()) {
+                event.preventDefault();
+                target.blur();
+                return;
+              }
+              if (navigateToAdjacentEditor(target, 'up')) {
+                event.preventDefault();
+              }
             }
           }
           if (event.key === 'Enter') {
@@ -566,8 +746,8 @@ const InlineEditableText = ({
             }
           }
         }}
-        disabled={saving}
-        spellCheck={false}
+        aria-busy={saving}
+        spellCheck
       />
       {error && <p className="text-red-500 text-[13px] mt-1">{error}</p>}
     </div>
@@ -581,6 +761,8 @@ const NoteBlock = ({
   onSaved,
   onCreateNativeContinuation,
   onUpdateNativeContinuation,
+  onDeleteNativeContinuation,
+  onSaveStateChange,
   autoFocus,
   selected,
 }: {
@@ -592,6 +774,8 @@ const NoteBlock = ({
   onUpdateNativeContinuation?: (
     update: Partial<NativeMeetingNoteContinuation>,
   ) => Promise<void>;
+  onDeleteNativeContinuation?: () => Promise<void>;
+  onSaveStateChange: (state: SaveState, retry?: () => void) => void;
   autoFocus: boolean;
   selected: boolean;
 }) => {
@@ -665,6 +849,8 @@ const NoteBlock = ({
               ? async (text) => onUpdateNativeContinuation?.({ text })
               : undefined
           }
+          onDeleteNativeContinuation={onDeleteNativeContinuation}
+          onSaveStateChange={onSaveStateChange}
           autoFocus={autoFocus}
           onSaved={onSaved}
         />
@@ -785,12 +971,24 @@ export const MeetingNotesDocument = ({
   header,
 }: MeetingNotesDocumentProps) => {
   const [saveState, setSaveState] = useState<SaveState>('saved');
+  const [retrySave, setRetrySave] = useState<(() => void) | null>(null);
   const [pendingNativeContinuationId, setPendingNativeContinuationId] =
     useState<string | null>(null);
+  const [creatingContinuationPath, setCreatingContinuationPath] = useState<
+    string | null
+  >(null);
+  const [deletedContinuation, setDeletedContinuation] =
+    useState<DeletedContinuation | null>(null);
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
   const meetingRef = useRef(meeting);
   const onDocumentChangedRef = useRef(onDocumentChanged);
+  const nativeContinuationStateRef = useRef(
+    new Map<string, NativeMeetingNoteContinuation[]>(),
+  );
+  const nativeContinuationSaveChainsRef = useRef(
+    new Map<string, Promise<void>>(),
+  );
 
   useEffect(() => {
     meetingRef.current = meeting;
@@ -800,32 +998,79 @@ export const MeetingNotesDocument = ({
   }, [onDocumentChanged]);
   useEffect(() => {
     setSaveState('saved');
+    setRetrySave(null);
     setSourceSelection(previewSourceSelection(model));
   }, [meeting.id, meeting.user_notes, model]);
+  useEffect(() => {
+    setDeletedContinuation(null);
+    nativeContinuationStateRef.current.clear();
+    nativeContinuationSaveChainsRef.current.clear();
+  }, [meeting.id]);
+  useEffect(() => {
+    if (!deletedContinuation) return;
+    const timeout = setTimeout(() => setDeletedContinuation(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [deletedContinuation]);
 
-  const saveNativeContinuations = async (
+  const handleSaveStateChange = (state: SaveState, retry?: () => void) => {
+    setSaveState(state);
+    setRetrySave(retry ? () => retry : null);
+  };
+
+  const getNativeContinuations = (
+    parentPath: string,
+    fallback: NativeMeetingNoteContinuation[],
+  ) => nativeContinuationStateRef.current.get(parentPath) || fallback;
+
+  const saveNativeContinuations = (
     parentPath: string,
     continuations: NativeMeetingNoteContinuation[],
-  ) => {
-    await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
-      meetingId: meeting.id,
-      path: nativeContinuationEditPath(parentPath),
-      original: '[]',
-      edited: JSON.stringify(continuations),
-    });
+  ): Promise<void> => {
+    nativeContinuationStateRef.current.set(parentPath, continuations);
+    const previous =
+      nativeContinuationSaveChainsRef.current.get(parentPath) ||
+      Promise.resolve();
+    const operation = previous
+      .catch(() => {})
+      .then(async () => {
+        await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
+          meetingId: meetingRef.current.id,
+          path: nativeContinuationEditPath(parentPath),
+          original: '[]',
+          edited: JSON.stringify(continuations),
+        });
+      });
+    nativeContinuationSaveChainsRef.current.set(
+      parentPath,
+      operation.catch(() => {}),
+    );
+    return operation;
   };
 
   const createNativeContinuation = async (block: MeetingNotesBlock) => {
     const parentPath = block.nativeContinuation?.parentPath || block.path;
-    if (!parentPath) return;
-    const id =
-      globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-    await saveNativeContinuations(parentPath, [
-      ...(block.nativeContinuations || []),
-      { id, text: '' },
-    ]);
-    setPendingNativeContinuationId(id);
-    onDocumentChanged();
+    if (!parentPath || creatingContinuationPath === parentPath) return;
+    setCreatingContinuationPath(parentPath);
+    handleSaveStateChange('saving');
+    try {
+      const id =
+        globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      const latest = getNativeContinuations(
+        parentPath,
+        block.nativeContinuations || [],
+      );
+      await saveNativeContinuations(parentPath, [...latest, { id, text: '' }]);
+      setPendingNativeContinuationId(id);
+      handleSaveStateChange('saved');
+      onDocumentChanged();
+    } catch (cause) {
+      handleSaveStateChange('error', () => {
+        void createNativeContinuation(block);
+      });
+      throw cause;
+    } finally {
+      setCreatingContinuationPath(null);
+    }
   };
 
   const updateNativeContinuation = async (
@@ -834,7 +1079,10 @@ export const MeetingNotesDocument = ({
   ) => {
     const parentPath = block.nativeContinuation?.parentPath;
     if (!parentPath || !block.nativeContinuation) return;
-    const continuations = (block.nativeContinuations || [])
+    const continuations = getNativeContinuations(
+      parentPath,
+      block.nativeContinuations || [],
+    )
       .map((continuation) =>
         continuation.id === block.nativeContinuation?.id
           ? { ...continuation, ...update }
@@ -842,6 +1090,57 @@ export const MeetingNotesDocument = ({
       )
       .filter((continuation) => continuation.text.trim());
     await saveNativeContinuations(parentPath, continuations);
+  };
+
+  const deleteNativeContinuation = async (block: MeetingNotesBlock) => {
+    const parentPath = block.nativeContinuation?.parentPath;
+    const continuationId = block.nativeContinuation?.id;
+    if (!parentPath || !continuationId) return;
+    const latest = getNativeContinuations(
+      parentPath,
+      block.nativeContinuations || [],
+    );
+    const continuation = latest.find(
+      (candidate) => candidate.id === continuationId,
+    ) || {
+      id: continuationId,
+      text: block.text,
+      completed: block.completed,
+    };
+    const remaining = latest.filter(
+      (candidate) => candidate.id !== continuationId,
+    );
+    await saveNativeContinuations(parentPath, remaining);
+    setDeletedContinuation({ parentPath, continuation });
+  };
+
+  const undoNativeContinuationDeletion = async () => {
+    if (!deletedContinuation) return;
+    const { parentPath, continuation } = deletedContinuation;
+    const parentBlock = model.sections
+      .flatMap((section) => section.blocks)
+      .find((block) => block.path === parentPath);
+    const latest = getNativeContinuations(
+      parentPath,
+      parentBlock?.nativeContinuations || [],
+    );
+    const restored = latest.some(
+      (candidate) => candidate.id === continuation.id,
+    )
+      ? latest
+      : [...latest, continuation];
+    handleSaveStateChange('saving');
+    try {
+      await saveNativeContinuations(parentPath, restored);
+      setDeletedContinuation(null);
+      handleSaveStateChange('saved');
+      onDocumentChanged();
+    } catch (cause) {
+      console.error('Failed to undo meeting note deletion', cause);
+      handleSaveStateChange('error', () => {
+        void undoNativeContinuationDeletion();
+      });
+    }
   };
 
   const canContinueAsNativeRow = (block: MeetingNotesBlock) =>
@@ -858,58 +1157,107 @@ export const MeetingNotesDocument = ({
       >
         {header}
         <output className="meeting-document-save-row" aria-live="polite">
-          <SaveStatus state={saveState} />
+          <SaveStatus state={saveState} onRetry={retrySave || undefined} />
         </output>
         {model.sections
           .filter((s) => s.kind !== 'scratchpad')
-          .map((section) => (
-            <section
-              key={section.id}
-              id={`meeting-section-${section.id}`}
-              className={`meeting-notes-section meeting-notes-section--${section.kind}`}
-              data-notes-section={section.kind}
-            >
-              {
-                <>
-                  <InlineEditableText
-                    meetingId={meeting.id}
-                    path={section.titlePath}
-                    originalText={section.titleOriginal || section.title}
-                    text={section.title}
-                    asHeading
-                    onSaved={onDocumentChanged}
-                  />
-                  <div className="meeting-notes-section__content">
-                    {section.blocks.map((block) => (
-                      <NoteBlock
-                        key={block.id}
-                        block={block}
-                        section={section}
-                        meetingId={meeting.id}
-                        onSaved={onDocumentChanged}
-                        onCreateNativeContinuation={
-                          canContinueAsNativeRow(block)
-                            ? () => createNativeContinuation(block)
-                            : undefined
-                        }
-                        onUpdateNativeContinuation={
-                          block.nativeContinuation
-                            ? (update) =>
-                                updateNativeContinuation(block, update)
-                            : undefined
-                        }
-                        autoFocus={
-                          block.nativeContinuation?.id ===
-                          pendingNativeContinuationId
-                        }
-                        selected={sourceSelection?.label === block.text}
+          .map((section) => {
+            const continuationAnchor = [...section.blocks]
+              .reverse()
+              .find(canContinueAsNativeRow);
+            const anchorPath =
+              continuationAnchor?.nativeContinuation?.parentPath ||
+              continuationAnchor?.path;
+            return (
+              <section
+                key={section.id}
+                id={`meeting-section-${section.id}`}
+                className={`meeting-notes-section meeting-notes-section--${section.kind}`}
+                data-notes-section={section.kind}
+              >
+                <InlineEditableText
+                  meetingId={meeting.id}
+                  path={section.titlePath}
+                  originalText={section.titleOriginal || section.title}
+                  text={section.title}
+                  asHeading
+                  onSaveStateChange={handleSaveStateChange}
+                  onSaved={onDocumentChanged}
+                />
+                <div className="meeting-notes-section__content">
+                  {section.blocks.map((block) => (
+                    <NoteBlock
+                      key={block.id}
+                      block={block}
+                      section={section}
+                      meetingId={meeting.id}
+                      onSaved={onDocumentChanged}
+                      onCreateNativeContinuation={
+                        canContinueAsNativeRow(block)
+                          ? () => createNativeContinuation(block)
+                          : undefined
+                      }
+                      onUpdateNativeContinuation={
+                        block.nativeContinuation
+                          ? (update) => updateNativeContinuation(block, update)
+                          : undefined
+                      }
+                      onDeleteNativeContinuation={
+                        block.nativeContinuation
+                          ? () => deleteNativeContinuation(block)
+                          : undefined
+                      }
+                      onSaveStateChange={handleSaveStateChange}
+                      autoFocus={
+                        block.nativeContinuation?.id ===
+                        pendingNativeContinuationId
+                      }
+                      selected={sourceSelection?.label === block.text}
+                    />
+                  ))}
+                </div>
+                {continuationAnchor && anchorPath ? (
+                  <button
+                    type="button"
+                    className="meeting-notes-add-item"
+                    disabled={creatingContinuationPath === anchorPath}
+                    onClick={() => {
+                      void createNativeContinuation(continuationAnchor).catch(
+                        (cause) => {
+                          console.error(
+                            'Failed to add native meeting note item',
+                            cause,
+                          );
+                        },
+                      );
+                    }}
+                  >
+                    {creatingContinuationPath === anchorPath ? (
+                      <Loader2
+                        aria-hidden="true"
+                        size={13}
+                        className="animate-spin"
                       />
-                    ))}
-                  </div>
-                </>
-              }
-            </section>
-          ))}
+                    ) : (
+                      <Plus aria-hidden="true" size={13} />
+                    )}
+                    Add item
+                  </button>
+                ) : null}
+              </section>
+            );
+          })}
+        {deletedContinuation ? (
+          <output className="meeting-note-undo" aria-live="polite">
+            <span>Item deleted</span>
+            <button
+              type="button"
+              onClick={() => void undoNativeContinuationDeletion()}
+            >
+              Undo
+            </button>
+          </output>
+        ) : null}
       </article>
 
       {sourceSelection

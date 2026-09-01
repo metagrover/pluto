@@ -21,6 +21,7 @@ import {
 } from 'react';
 import type { CSSProperties, FormEvent, RefObject } from 'react';
 import type {
+  CalendarDescriptor,
   CalendarEvent,
   CalendarIntegrationSnapshot,
 } from '../../../electron/calendar/types';
@@ -68,6 +69,8 @@ interface DashboardProps {
   calendarEvents?: CalendarEvent[];
   calendarLoading?: boolean;
   onCalendarConnect?: () => Promise<void>;
+  onCalendarSelect?: (calendar: CalendarDescriptor) => Promise<void>;
+  onCalendarRefresh?: () => Promise<void>;
   onCalendarOpenSettings?: () => void;
 }
 
@@ -411,6 +414,8 @@ export const Dashboard = ({
   calendarEvents = [],
   calendarLoading = false,
   onCalendarConnect = async () => {},
+  onCalendarSelect = async () => {},
+  onCalendarRefresh = async () => {},
   onCalendarOpenSettings = () => {},
 }: DashboardProps) => {
   const [addingCommitment, setAddingCommitment] = useState(false);
@@ -1121,6 +1126,8 @@ export const Dashboard = ({
             events={calendarEvents}
             loading={calendarLoading}
             onConnect={onCalendarConnect}
+            onSelectCalendar={onCalendarSelect}
+            onRefreshCalendar={onCalendarRefresh}
             onOpenSettings={onCalendarOpenSettings}
           />
           <section

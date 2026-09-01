@@ -116,6 +116,12 @@ public enum CalendarBridgeProtocol {
     public static let maximumRequestBytes = 1_048_576
     public static let maximumWindow: TimeInterval = 60 * 60 * 24 * 60
 
+    public static func parseISO8601(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
     private struct RawRequest: Decodable {
         let version: Int
         let id: String

@@ -37,6 +37,77 @@ describe('calendar helper protocol', () => {
     });
   });
 
+  it('normalizes optional fields omitted by the native encoder', () => {
+    const message = parseCalendarMessage(
+      JSON.stringify({
+        version: 1,
+        id: 'events',
+        result: {
+          events: [
+            {
+              occurrenceKey: 'calendar-a|event-a|2026-08-31T18:30:00.000Z',
+              eventIdentifier: 'event-a',
+              calendarIdentifier: 'calendar-a',
+              title: 'Product review',
+              start: '2026-08-31T18:30:00Z',
+              end: '2026-08-31T19:00:00Z',
+              isAllDay: false,
+              isCancelled: false,
+              attendees: [{ name: 'Ada' }],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(message).toEqual({
+      kind: 'response',
+      id: 'events',
+      result: {
+        events: [
+          expect.objectContaining({
+            availability: null,
+            organizer: null,
+            attendees: [{ name: 'Ada', email: null }],
+            lastModified: null,
+          }),
+        ],
+      },
+    });
+  });
+
+  it.each([
+    ['a missing required event field', { title: undefined }],
+    ['a non-array attendee list', { attendees: null }],
+    ['a malformed attendee', { attendees: [{ name: 42 }] }],
+    ['a malformed organizer', { organizer: { email: 42 } }],
+    ['a malformed availability', { availability: 42 }],
+    ['a malformed last-modified value', { lastModified: 42 }],
+  ])('rejects %s', (_description, overrides) => {
+    const event = {
+      occurrenceKey: 'calendar-a|event-a|2026-08-31T18:30:00.000Z',
+      eventIdentifier: 'event-a',
+      calendarIdentifier: 'calendar-a',
+      title: 'Product review',
+      start: '2026-08-31T18:30:00Z',
+      end: '2026-08-31T19:00:00Z',
+      isAllDay: false,
+      isCancelled: false,
+      attendees: [],
+      ...overrides,
+    };
+
+    expect(() =>
+      parseCalendarMessage(
+        JSON.stringify({
+          version: 1,
+          id: 'events',
+          result: { events: [event] },
+        }),
+      ),
+    ).toThrow('Unexpected calendar helper result');
+  });
+
   it('rejects malformed, oversized, and unexpected messages', () => {
     expect(() => parseCalendarMessage('not json')).toThrow(
       'Malformed calendar helper message',

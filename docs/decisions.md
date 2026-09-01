@@ -619,6 +619,24 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Consequences:** Apple requires full Calendar permission to read events because EventKit has no read-only authorization level; Pluto must disclose that honestly and enforce read-only behavior in its bridge contract. `Last read from this Mac` cannot claim remote-provider freshness. Direct Google OAuth, cross-platform calendar providers, multiple selected calendars, event editing, invitations, and generated pre-meeting briefs remain outside the first release.
 - **Dashboard shape:** Upcoming meetings occupies the top of the dashboard's secondary rail and shows at most two compact rows before an inline `See more` action. Recent win moves beneath it. The lower-value continuation card is removed so calendar context does not increase dashboard density.
 
+## 2026-08-31 - Make saved Ask Pluto notes-first and inference-coordinated
+
+- **Status:** Accepted.
+- **Source:** [Issue #699](https://github.com/metagrover/pluto/issues/699), `docs/superpowers/specs/2026-08-31-notes-first-ask-pluto-design.md`, informed by the runtime evaluation in #694.
+- **Decision:** Saved-meeting Ask Pluto searches a dedicated, rebuildable notes evidence index and does not use transcript-derived ranking, snippets, prompt context, or citations by default. Transcript evidence is allowed only for explicit exact-wording intent or a disclosed fallback when no usable notes exist. Active-meeting chat remains transcript-backed. Global and meeting-scoped chat share the same policy and evidence packet.
+- **Answer path:** Safely renderable summaries, decisions, action items, owners, and dates may bypass model generation. Other saved-meeting synthesis uses Gemma over compact notes evidence; Phi remains the fast model for active-meeting chat rather than causing routine completed-chat model swaps.
+- **Runtime:** A provider-neutral coordinator in Electron's main process owns priority, cancellation, model residency, and content-free timing. Pluto initially retains serialized Ollama inference, enforces one packaged production-profile instance, and isolates development profiles. Direct MLX, llama.cpp, and same-model parallel decoding remain benchmark candidates that must pass full production-path semantic, latency, memory, cancellation, and contention gates before promotion.
+- **Rationale:** The existing mixed notes/transcript index and separate transcript context paths made notes preference advisory, while long transcript context, model switching, and independently running Pluto processes inflated latency. Prior direct-runtime evidence improved some raw timings without clearing trusted quality and memory gates.
+- **Consequences:** The derived notes index can be rebuilt without changing source notes or transcripts. User edits and corrections remain authoritative. Partial notes never trigger silent transcript supplementation. Performance claims must include retrieval and queueing and report cold model load separately from warm response latency; private meeting content stays out of telemetry, fixtures, and GitHub.
+
+## 2026-08-31 - Group Settings by user intent with horizontal tabs
+
+- **Status:** Accepted and implemented.
+- **Source:** [Issue #643](https://github.com/metagrover/pluto/issues/643), `docs/superpowers/specs/2026-08-31-settings-information-architecture-design.md`
+- **Decision:** Settings uses four horizontal categories: Personal, Meetings, Intelligence, and Advanced. It shows one category at a time with standard keyboard tab behavior. Categories represent the user's intent rather than mirroring each implementation section; Calendar stays with recording, appearance stays with identity, and destructive maintenance remains isolated.
+- **Rationale:** The existing application sidebar already provides primary navigation, so a second left rail would make Settings feel administrative. A single scrolling page continued to expose every control at once, while a tab for every feature would create category sprawl. Four intent-based tabs keep the visible choice count within a manageable range and preserve room for related settings to grow.
+- **Consequences:** Personal is the default whenever Settings mounts, and the selected category lasts only while the page remains mounted. Existing settings, defaults, persistence, setup states, and destructive confirmation behavior remain unchanged. Future controls should join one of these intent categories unless a distinct user task justifies revisiting the information architecture.
+
 ## 2026-08-31 - Bound meeting-note work before claiming latency improvement
 
 - **Status:** Implemented mechanics; performance and semantic promotion remain unaccepted.

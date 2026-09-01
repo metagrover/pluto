@@ -9,6 +9,10 @@ import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
+import {
+  buildMeetingNotesEvidenceDocument,
+  resolveSavedMeetingEvidencePolicy,
+} from './meetingNotesEvidence';
 
 export const MEETING_ASK_PLUTO_TURN_LIMIT = 6;
 export const MEETING_ASK_PLUTO_TURN_CHAR_LIMIT = 1200;
@@ -40,6 +44,7 @@ export interface MeetingAskPlutoContext {
   boundary: string;
   statusNote: string;
   evidenceItems: MeetingAskPlutoEvidenceItem[];
+  truncatedEvidenceKinds?: Array<'decision' | 'action_item'>;
 }
 
 export interface MeetingAskPlutoContextEntity {
@@ -62,19 +67,6 @@ interface TranscriptSegmentLike {
   start?: unknown;
   end?: unknown;
   text?: unknown;
-}
-
-interface AnalysisV3Like {
-  analysis_schema_version?: unknown;
-  overview?: unknown;
-  topics?: Array<{
-    title?: unknown;
-    summary?: unknown;
-    decisions?: Array<{ text?: unknown }>;
-    action_items?: Array<{ text?: unknown; assignee?: unknown }>;
-  }>;
-  all_decisions?: Array<{ text?: unknown }>;
-  all_action_items?: Array<{ text?: unknown; assignee?: unknown }>;
 }
 
 const asString = (value: unknown): string | null =>
@@ -181,17 +173,23 @@ export const normalizeMeetingAskPlutoTurns = (
 
 export const buildMeetingAskPlutoContext = ({
   meeting,
+  query,
   entities = [],
   attentionItems = [],
 }: {
   meeting: PersistedMeeting;
+  query: string;
   entities?: MeetingAskPlutoContextEntity[];
   attentionItems?: MeetingAskPlutoAttentionItem[];
 }): MeetingAskPlutoContext => {
   const scope = buildScope(meeting);
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
   const mid = parseJsonObject<MidFrontmatter>(meeting.mid_json);
-  const analysis = parseJsonObject<AnalysisV3Like>(meeting.analysis_json);
+  const notesDocument = buildMeetingNotesEvidenceDocument(meeting);
+  const evidencePolicy = resolveSavedMeetingEvidencePolicy(
+    query,
+    notesDocument.hasUsableNotes,
+  );
   const transcriptEvidenceItems = transcriptSegmentsFromJson(
     meeting.transcript_json,
   )
@@ -205,72 +203,48 @@ export const buildMeetingAskPlutoContext = ({
       quote: segment.quote,
     }));
 
-  if (mid?.evidence_spans) {
-    for (const span of mid.evidence_spans.slice(0, 3)) {
-      addEvidence(evidenceItems, {
-        id: `mid-${span.span_id}`,
-        kind: 'transcript',
-        meetingId: scope.meetingId,
-        title: `MID ${span.claim_type.replace(/_/g, ' ')}`,
-        text: span.quote,
-        quote: span.quote,
-      });
-    }
-  }
-
-  const overview = asString(analysis?.overview);
-  if (overview) {
-    addEvidence(evidenceItems, {
-      id: 'analysis-overview',
-      kind: 'overview',
-      meetingId: scope.meetingId,
-      title: 'Analysis overview',
-      text: overview,
-    });
-  }
-
-  const decisions =
-    mid?.decisions?.map((decision) => decision.description) ??
-    analysis?.all_decisions?.map((decision) => asString(decision.text) ?? '') ??
-    [];
-  for (const [index, decision] of decisions.slice(0, 3).entries()) {
-    addEvidence(evidenceItems, {
-      id: `decision-${index}`,
-      kind: 'decision',
-      meetingId: scope.meetingId,
-      title: 'Decision',
-      text: decision,
-    });
-  }
-
-  const actions =
-    mid?.action_items?.map((action) => action.description) ??
-    analysis?.all_action_items?.map((action) => {
-      const text = asString(action.text);
-      const assignee = asString(action.assignee);
-      return assignee && text ? `${text} Owner: ${assignee}.` : (text ?? '');
-    }) ??
-    [];
-  for (const [index, action] of actions.slice(0, 3).entries()) {
-    addEvidence(evidenceItems, {
-      id: `action-${index}`,
-      kind: 'action_item',
-      meetingId: scope.meetingId,
-      title: 'Action item',
-      text: action,
-    });
-  }
-
-  const notes =
-    asString(meeting.enhanced_notes) ?? asString(meeting.user_notes);
-  if (notes) {
+  if (notesDocument.notesText) {
     addEvidence(evidenceItems, {
       id: 'meeting-notes',
       kind: 'note',
       meetingId: scope.meetingId,
       title: 'Meeting notes',
-      text: notes.slice(0, 1800),
+      text: notesDocument.notesText.slice(0, 2400),
     });
+  }
+
+  const decisions = notesDocument.decisionsText.split('\n').filter(Boolean);
+  const actions = notesDocument.actionItemsText.split('\n').filter(Boolean);
+  const truncatedEvidenceKinds = new Set<'decision' | 'action_item'>();
+  const addStructuredEvidence = (
+    kind: 'decision' | 'action_item',
+    values: string[],
+  ) => {
+    const initialCount = evidenceItems.length;
+    for (const [index, text] of values.entries()) {
+      addEvidence(evidenceItems, {
+        id: `${kind}-${index}`,
+        kind,
+        meetingId: scope.meetingId,
+        title: kind === 'decision' ? 'Decision' : 'Action item',
+        text,
+      });
+    }
+    if (evidenceItems.length - initialCount < values.length) {
+      truncatedEvidenceKinds.add(kind);
+    }
+  };
+  const preparedKind = PREPARED_DECISION_QUERY.test(query)
+    ? 'decision'
+    : PREPARED_ACTION_QUERY.test(query)
+      ? 'action_item'
+      : null;
+  if (preparedKind === 'action_item') {
+    addStructuredEvidence('action_item', actions);
+    addStructuredEvidence('decision', decisions);
+  } else {
+    addStructuredEvidence('decision', decisions);
+    addStructuredEvidence('action_item', actions);
   }
 
   for (const entity of entities.slice(0, 1)) {
@@ -293,34 +267,60 @@ export const buildMeetingAskPlutoContext = ({
     });
   }
 
-  const boundedEvidenceItems = [
-    ...evidenceItems.slice(
-      0,
-      MEETING_ASK_PLUTO_EVIDENCE_LIMIT -
-        SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT,
-    ),
-    ...transcriptEvidenceItems,
-  ];
-  const trustStatus = deriveContextTrustStatus({
-    meeting,
-    evidenceItems: boundedEvidenceItems,
-    mid,
-  });
+  const includeTranscript = evidencePolicy !== 'notes_only';
+  const boundedEvidenceItems = includeTranscript
+    ? [
+        ...evidenceItems.slice(
+          0,
+          MEETING_ASK_PLUTO_EVIDENCE_LIMIT -
+            SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT,
+        ),
+        ...transcriptEvidenceItems,
+      ]
+    : evidenceItems.slice(0, MEETING_ASK_PLUTO_EVIDENCE_LIMIT);
+  if (
+    boundedEvidenceItems.filter((item) => item.kind === 'decision').length <
+    decisions.length
+  ) {
+    truncatedEvidenceKinds.add('decision');
+  }
+  if (
+    boundedEvidenceItems.filter((item) => item.kind === 'action_item').length <
+    actions.length
+  ) {
+    truncatedEvidenceKinds.add('action_item');
+  }
+  const trustStatus =
+    evidencePolicy === 'transcript_fallback'
+      ? 'weak_evidence'
+      : deriveContextTrustStatus({
+          meeting,
+          evidenceItems: boundedEvidenceItems,
+          mid,
+        });
   const status = boundedEvidenceItems.length > 0 ? 'ready' : 'unavailable';
-  const statusNote = isLiveOrProvisional(meeting)
-    ? 'This answer may use live or provisional meeting evidence.'
-    : status === 'ready'
-      ? 'This answer is scoped to saved meeting evidence.'
-      : 'No transcript, notes, analysis, or meeting evidence is available yet.';
+  const statusNote =
+    evidencePolicy === 'transcript_exact'
+      ? 'This answer may use bounded transcript evidence for an exact-wording request.'
+      : evidencePolicy === 'transcript_fallback'
+        ? 'Meeting notes are unavailable, so this answer may use weak transcript evidence.'
+        : isLiveOrProvisional(meeting)
+          ? 'This answer uses live or provisional meeting notes.'
+          : status === 'ready'
+            ? 'This answer is scoped to saved meeting notes.'
+            : 'No notes or structured meeting evidence is available yet.';
 
   return {
     status,
     scope,
     trustStatus,
     boundary:
-      'Only use evidence from this meeting. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
+      'Only use evidence from this meeting supplied below. Saved meeting notes are authoritative unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
     evidenceItems: boundedEvidenceItems,
+    ...(truncatedEvidenceKinds.size > 0
+      ? { truncatedEvidenceKinds: [...truncatedEvidenceKinds] }
+      : {}),
   };
 };
 
@@ -541,6 +541,66 @@ export const buildLiveMeetingFallbackResponse = ({
     rationale:
       'Returned the frozen live meeting snapshot as a fallback after model generation failed.',
   });
+
+const PREPARED_DECISION_QUERY =
+  /\b(?:decid(?:e|ed|ing)|decisions?|agreed?|agreements?)\b/i;
+const PREPARED_ACTION_QUERY =
+  /\b(?:action items?|next steps?|follow[- ]?ups?|who (?:owns|is responsible))\b/i;
+const PREPARED_SUMMARY_QUERY =
+  /\b(?:summari[sz]e|summary|recaps?|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+
+export const buildPreparedMeetingAskPlutoResponse = (
+  query: string,
+  context: MeetingAskPlutoContext,
+): MeetingAskPlutoResponse | null => {
+  if (context.scope.type !== 'meeting') return null;
+  const kind = PREPARED_DECISION_QUERY.test(query)
+    ? 'decision'
+    : PREPARED_ACTION_QUERY.test(query)
+      ? 'action_item'
+      : PREPARED_SUMMARY_QUERY.test(query)
+        ? 'note'
+        : null;
+  if (!kind) return null;
+  if (kind !== 'note' && context.truncatedEvidenceKinds?.includes(kind)) {
+    return null;
+  }
+
+  const selected = context.evidenceItems
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.kind === kind)
+    .slice(0, kind === 'note' ? 1 : undefined);
+  if (selected.length === 0) return null;
+
+  const citations: MeetingAskPlutoCitation[] = selected.map(
+    ({ item }, citationIndex) => ({
+      id: `citation-${citationIndex + 1}`,
+      claim: item.text,
+      meeting_id: item.meetingId,
+      meeting_title: context.scope.title || 'Untitled Session',
+      evidence_span: item.text,
+      evidence_valid: true,
+      trust_status: context.trustStatus,
+    }),
+  );
+  const answer = selected.map(({ item }) => item.text).join('\n');
+
+  return {
+    status: 'answered',
+    answer,
+    scope: context.scope,
+    trustStatus: context.trustStatus,
+    claims: [
+      {
+        text: answer,
+        trustStatus: context.trustStatus,
+        citationIds: citations.map((citation) => citation.id),
+      },
+    ],
+    citations,
+    rationale: 'Returned existing structured meeting-note evidence directly.',
+  };
+};
 
 export const buildMeetingAskPlutoPrompt = ({
   query,

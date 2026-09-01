@@ -2,6 +2,7 @@ import type {
   CalendarAuthorizationStatus,
   CalendarDescriptor,
   CalendarEvent,
+  CalendarPerson,
 } from './types';
 
 export type CalendarMethod =
@@ -34,8 +35,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStringOrNull = (value: unknown): value is string | null =>
   typeof value === 'string' || value === null;
 
-const isPerson = (value: unknown) =>
-  isRecord(value) && isStringOrNull(value.name) && isStringOrNull(value.email);
+const normalizePerson = (value: unknown): CalendarPerson | null => {
+  if (!isRecord(value)) return null;
+  if (
+    (value.name !== undefined && !isStringOrNull(value.name)) ||
+    (value.email !== undefined && !isStringOrNull(value.email))
+  ) {
+    return null;
+  }
+  return {
+    name: value.name ?? null,
+    email: value.email ?? null,
+  };
+};
 
 const isCalendar = (value: unknown): value is CalendarDescriptor =>
   isRecord(value) &&
@@ -45,21 +57,47 @@ const isCalendar = (value: unknown): value is CalendarDescriptor =>
   typeof value.sourceType === 'string' &&
   isStringOrNull(value.colorHex);
 
-const isEvent = (value: unknown): value is CalendarEvent =>
-  isRecord(value) &&
-  typeof value.occurrenceKey === 'string' &&
-  typeof value.eventIdentifier === 'string' &&
-  typeof value.calendarIdentifier === 'string' &&
-  typeof value.title === 'string' &&
-  typeof value.start === 'string' &&
-  typeof value.end === 'string' &&
-  typeof value.isAllDay === 'boolean' &&
-  typeof value.isCancelled === 'boolean' &&
-  isStringOrNull(value.availability) &&
-  (value.organizer === null || isPerson(value.organizer)) &&
-  Array.isArray(value.attendees) &&
-  value.attendees.every(isPerson) &&
-  isStringOrNull(value.lastModified);
+const normalizeEvent = (value: unknown): CalendarEvent | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.occurrenceKey !== 'string' ||
+    typeof value.eventIdentifier !== 'string' ||
+    typeof value.calendarIdentifier !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.start !== 'string' ||
+    typeof value.end !== 'string' ||
+    typeof value.isAllDay !== 'boolean' ||
+    typeof value.isCancelled !== 'boolean' ||
+    !Array.isArray(value.attendees) ||
+    (value.availability !== undefined && !isStringOrNull(value.availability)) ||
+    (value.lastModified !== undefined && !isStringOrNull(value.lastModified))
+  ) {
+    return null;
+  }
+  const attendees = value.attendees.map(normalizePerson);
+  if (attendees.some((person) => person === null)) return null;
+  const organizer =
+    value.organizer === undefined || value.organizer === null
+      ? null
+      : normalizePerson(value.organizer);
+  if (value.organizer !== undefined && value.organizer !== null && !organizer) {
+    return null;
+  }
+  return {
+    occurrenceKey: value.occurrenceKey,
+    eventIdentifier: value.eventIdentifier,
+    calendarIdentifier: value.calendarIdentifier,
+    title: value.title,
+    start: value.start,
+    end: value.end,
+    isAllDay: value.isAllDay,
+    isCancelled: value.isCancelled,
+    availability: value.availability ?? null,
+    organizer,
+    attendees: attendees as CalendarPerson[],
+    lastModified: value.lastModified ?? null,
+  };
+};
 
 const parseResult = (value: unknown): CalendarHelperResult => {
   if (!isRecord(value)) throw new Error('Unexpected calendar helper result');
@@ -72,8 +110,11 @@ const parseResult = (value: unknown): CalendarHelperResult => {
   if (Array.isArray(value.calendars) && value.calendars.every(isCalendar)) {
     return { calendars: value.calendars };
   }
-  if (Array.isArray(value.events) && value.events.every(isEvent)) {
-    return { events: value.events };
+  if (Array.isArray(value.events)) {
+    const events = value.events.map(normalizeEvent);
+    if (events.every((event) => event !== null)) {
+      return { events: events as CalendarEvent[] };
+    }
   }
   throw new Error('Unexpected calendar helper result');
 };

@@ -10,19 +10,21 @@ import type {
 } from '../../electron/calendar/types';
 import { UpcomingMeetings } from '../../src/components/features/UpcomingMeetings';
 
+const workCalendar = {
+  identifier: 'calendar-a',
+  title: 'Work',
+  sourceTitle: 'iCloud',
+  sourceType: 'icloud',
+  colorHex: '#7367D9',
+};
+
 const snapshot = (
   overrides: Partial<CalendarIntegrationSnapshot> = {},
 ): CalendarIntegrationSnapshot => ({
   state: 'ready',
   authorization: 'full_access',
   enabled: true,
-  selectedCalendar: {
-    identifier: 'calendar-a',
-    title: 'Work',
-    sourceTitle: 'iCloud',
-    sourceType: 'icloud',
-    colorHex: '#7367D9',
-  },
+  selectedCalendar: workCalendar,
   calendars: [],
   lastAttemptAt: '2026-08-30T16:00:00.000Z',
   lastReadAt: '2026-08-30T16:00:00.000Z',
@@ -62,6 +64,8 @@ const render = (
         events={[meeting(0), meeting(1), meeting(2)]}
         loading={false}
         onConnect={vi.fn(async () => {})}
+        onSelectCalendar={vi.fn(async () => {})}
+        onRefreshCalendar={vi.fn(async () => {})}
         onOpenSettings={vi.fn()}
         {...props}
       />,
@@ -95,6 +99,37 @@ describe('UpcomingMeetings', () => {
     expect(container.textContent).toContain('Leadership check-in');
     expect(container.textContent).toContain('Show less');
     act(() => root.unmount());
+  });
+
+  it('uses one calm agenda hierarchy with subordinate calendar metadata', () => {
+    const longCalendar = {
+      ...workCalendar,
+      title: 'Plans with Pookie and the extended family calendar',
+    };
+    const onOpenSettings = vi.fn();
+    const agenda = render({
+      snapshot: snapshot({ selectedCalendar: longCalendar }),
+      onOpenSettings,
+    });
+
+    const heading = agenda.container.querySelector('#upcoming-meetings-title');
+    expect(heading?.className).toContain('whitespace-nowrap');
+    expect(heading?.parentElement?.textContent).toBe(
+      'Your dayUpcoming meetings',
+    );
+    expect(agenda.container.querySelector('.divide-y')).toBeNull();
+
+    const source = agenda.container.querySelector(
+      '[data-testid="upcoming-meetings-source"]',
+    );
+    expect(source?.textContent).toContain(longCalendar.title);
+    expect(source?.textContent).toContain('iCloud');
+    expect(source?.querySelector('.truncate')).not.toBeNull();
+    source
+      ?.querySelector<HTMLButtonElement>('button[aria-label="Change calendar"]')
+      ?.click();
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    act(() => agenda.root.unmount());
   });
 
   it('uses the compact footprint for first-run and denied states', async () => {
@@ -145,6 +180,31 @@ describe('UpcomingMeetings', () => {
     act(() => denied.root.unmount());
   });
 
+  it('lets the dashboard choose a calendar in place', async () => {
+    const onSelectCalendar = vi.fn(async () => {});
+    const picker = render({
+      snapshot: snapshot({
+        state: 'needs_selection',
+        enabled: false,
+        selectedCalendar: null,
+        calendars: [workCalendar],
+      }),
+      events: [],
+      onSelectCalendar,
+    });
+
+    expect(picker.container.textContent).toContain('Choose one calendar');
+    await act(async () =>
+      picker.container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Use Work calendar from iCloud"]',
+        )
+        ?.click(),
+    );
+    expect(onSelectCalendar).toHaveBeenCalledWith(workCalendar);
+    act(() => picker.root.unmount());
+  });
+
   it('handles clear-day, loading, and stale-cache states truthfully', () => {
     const clear = render({ events: [] });
     expect(clear.container.textContent).toContain('No more meetings today');
@@ -163,5 +223,25 @@ describe('UpcomingMeetings', () => {
     expect(stale.container.textContent).toContain('Last read');
     expect(stale.container.textContent).toContain('Product review');
     act(() => stale.root.unmount());
+  });
+
+  it('names the selected calendar when a fresh read fails', () => {
+    const onRefreshCalendar = vi.fn(async () => {});
+    const failed = render({
+      snapshot: snapshot({
+        state: 'read_failed',
+        stale: false,
+        lastReadAt: null,
+      }),
+      events: [],
+      onRefreshCalendar,
+    });
+
+    expect(failed.container.textContent).toContain('Couldn’t refresh Work');
+    failed.container
+      .querySelector<HTMLButtonElement>('button[aria-label="Try again"]')
+      ?.click();
+    expect(onRefreshCalendar).toHaveBeenCalledOnce();
+    act(() => failed.root.unmount());
   });
 });

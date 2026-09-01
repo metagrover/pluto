@@ -97,6 +97,7 @@ import type {
   AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
+import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
@@ -388,6 +389,16 @@ const initDb = () => {
         transcript_text, 
         enhanced_notes, 
         user_notes,
+        meeting_id UNINDEXED
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS meeting_notes_fts USING fts5(
+        title,
+        notes_text,
+        decisions_text,
+        action_items_text,
+        topics_text,
+        participants_text,
         meeting_id UNINDEXED
       );
 
@@ -1305,6 +1316,11 @@ const initDb = () => {
   } catch (e) {
     console.warn('[DB] Meeting search index repair failed:', e);
   }
+  try {
+    repairMeetingNotesFtsIndex();
+  } catch (e) {
+    console.warn('[DB] Meeting notes search index repair failed:', e);
+  }
   const aliasColumns = db
     .prepare('PRAGMA table_info(commitment_aliases)')
     .all() as TableInfoColumn[];
@@ -1927,7 +1943,29 @@ function refreshMeetingFts(meeting: PersistedMeeting) {
       midActionItems,
       id,
     );
+    refreshMeetingNotesFts(meeting);
   })();
+}
+
+function refreshMeetingNotesFts(meeting: PersistedMeeting) {
+  const document = buildMeetingNotesEvidenceDocument(meeting);
+  db.prepare('DELETE FROM meeting_notes_fts WHERE meeting_id = ?').run(
+    document.meetingId,
+  );
+  db.prepare(
+    `INSERT INTO meeting_notes_fts (
+      title, notes_text, decisions_text, action_items_text,
+      topics_text, participants_text, meeting_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    document.title,
+    document.notesText,
+    document.decisionsText,
+    document.actionItemsText,
+    document.topicsText,
+    document.participantsText,
+    document.meetingId,
+  );
 }
 
 export function getMeetingFtsIntegrity(): {
@@ -1940,6 +1978,25 @@ export function getMeetingFtsIntegrity(): {
       `SELECT COUNT(*) AS row_count,
               COUNT(DISTINCT meeting_id) AS distinct_meeting_count
        FROM meetings_fts`,
+    )
+    .get() as { row_count: number; distinct_meeting_count: number };
+  return {
+    rowCount: result.row_count,
+    distinctMeetingCount: result.distinct_meeting_count,
+    duplicateRowCount: result.row_count - result.distinct_meeting_count,
+  };
+}
+
+export function getMeetingNotesFtsIntegrity(): {
+  rowCount: number;
+  distinctMeetingCount: number;
+  duplicateRowCount: number;
+} {
+  const result = db
+    .prepare(
+      `SELECT COUNT(*) AS row_count,
+              COUNT(DISTINCT meeting_id) AS distinct_meeting_count
+       FROM meeting_notes_fts`,
     )
     .get() as { row_count: number; distinct_meeting_count: number };
   return {
@@ -1983,6 +2040,44 @@ export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
   })();
   console.log(
     `[DB] Rebuilt meeting search index (${meetings.length} meetings)`,
+  );
+  return { rebuilt: true, indexedMeetingCount: meetings.length };
+}
+
+export function repairMeetingNotesFtsIndex(options: { force?: boolean } = {}): {
+  rebuilt: boolean;
+  indexedMeetingCount: number;
+} {
+  const integrity = getMeetingNotesFtsIntegrity();
+  const meetingCount = (
+    db.prepare('SELECT COUNT(*) AS count FROM meetings').get() as {
+      count: number;
+    }
+  ).count;
+  if (
+    !options.force &&
+    integrity.duplicateRowCount === 0 &&
+    integrity.distinctMeetingCount === meetingCount
+  ) {
+    return { rebuilt: false, indexedMeetingCount: meetingCount };
+  }
+
+  const meetings = db
+    .prepare('SELECT * FROM meetings')
+    .all() as PersistedMeeting[];
+  db.transaction(() => {
+    db.prepare('DELETE FROM meeting_notes_fts').run();
+    for (const meeting of meetings) refreshMeetingNotesFts(meeting);
+    const repaired = getMeetingNotesFtsIntegrity();
+    if (
+      repaired.duplicateRowCount !== 0 ||
+      repaired.distinctMeetingCount !== meetings.length
+    ) {
+      throw new Error('meeting_notes_fts_integrity_check_failed');
+    }
+  })();
+  console.log(
+    `[DB] Rebuilt meeting notes search index (${meetings.length} meetings)`,
   );
   return { rebuilt: true, indexedMeetingCount: meetings.length };
 }
@@ -3752,6 +3847,7 @@ export const deleteMeeting = (id: string | number) => {
 
   // 2. Delete from FTS index
   db.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(safeId);
+  db.prepare('DELETE FROM meeting_notes_fts WHERE meeting_id = ?').run(safeId);
 
   // 3. Delete from entity_links (ones specifically created for this meeting)
   db.prepare('DELETE FROM entity_links WHERE meeting_id = ?').run(safeId);
@@ -7858,6 +7954,7 @@ export const resetKnowledge = () => {
     'entities_fts',
     'meetings',
     'meetings_fts',
+    'meeting_notes_fts',
   ];
 
   const deleteTransaction = db.transaction(() => {
@@ -7948,6 +8045,25 @@ export const searchMeetingsFts = (
     FROM meetings_fts f
     JOIN meetings m ON f.meeting_id = m.id
     WHERE meetings_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `)
+    .all(query, limit) as (PersistedMeeting & { snippet: string })[];
+};
+
+export const searchMeetingNotesFts = (
+  query: string,
+  options: SearchFtsOptions = {},
+) => {
+  const limit = options.limit || 50;
+  return db
+    .prepare(`
+    SELECT
+      m.*,
+      snippet(meeting_notes_fts, -1, '', '', '...', 64) as snippet
+    FROM meeting_notes_fts f
+    JOIN meetings m ON f.meeting_id = m.id
+    WHERE meeting_notes_fts MATCH ?
     ORDER BY rank
     LIMIT ?
   `)

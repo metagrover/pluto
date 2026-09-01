@@ -8,6 +8,7 @@ import {
   buildMeetingAskPlutoPrompt,
   buildMeetingAskPlutoProviderUnavailableResponse,
   buildMeetingAskPlutoResponseFromAnswer,
+  buildPreparedMeetingAskPlutoResponse,
   buildUnavailableMeetingAskPlutoResponse,
   normalizeMeetingAskPlutoTurns,
 } from '../../electron/intelligence/meetingAskPluto';
@@ -123,6 +124,7 @@ describe('meeting-scoped Ask Pluto context', () => {
   it('builds a completed meeting context packet from only the selected meeting', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
+      query: 'What did we decide about the API?',
       entities: [
         {
           id: 'project-api',
@@ -154,13 +156,11 @@ describe('meeting-scoped Ask Pluto context', () => {
       expect.arrayContaining(['meeting-1']),
     );
     expect(context.evidenceItems.map((item) => item.kind)).toEqual(
-      expect.arrayContaining([
-        'transcript',
-        'decision',
-        'action_item',
-        'entity',
-      ]),
+      expect.arrayContaining(['decision', 'action_item', 'entity']),
     );
+    expect(
+      context.evidenceItems.some((item) => item.kind === 'transcript'),
+    ).toBe(false);
   });
 
   it('supports active meetings with partial-evidence trust instead of pretending they are complete', () => {
@@ -172,20 +172,21 @@ describe('meeting-scoped Ask Pluto context', () => {
         analysis_json: null,
         mid_json: null,
       }),
+      query: 'What happened?',
       entities: [],
       attentionItems: [],
     });
 
     expect(context.status).toBe('ready');
     expect(context.trustStatus).toBe('weak_evidence');
-    expect(context.statusNote).toContain('live or provisional');
+    expect(context.statusNote).toContain('notes are unavailable');
     expect(context.evidenceItems[0]).toMatchObject({
       kind: 'transcript',
       meetingId: 'meeting-1',
     });
   });
 
-  it('keeps derived decisions, actions, notes, and recent transcript in long meeting context', () => {
+  it('keeps derived decisions, actions, and notes without saved transcript context', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting({
         transcript_json: JSON.stringify({
@@ -197,20 +198,114 @@ describe('meeting-scoped Ask Pluto context', () => {
           })),
         }),
       }),
+      query: 'What were the next steps?',
       entities: [],
       attentionItems: [],
     });
 
     expect(context.evidenceItems.map((item) => item.kind)).toEqual(
-      expect.arrayContaining(['decision', 'action_item', 'note', 'transcript']),
+      expect.arrayContaining(['decision', 'action_item', 'note']),
     );
+    expect(
+      context.evidenceItems.some((item) => item.kind === 'transcript'),
+    ).toBe(false);
+  });
+
+  it('adds only bounded recent transcript evidence for explicit quotation', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({
+        transcript_json: JSON.stringify({
+          segments: Array.from({ length: 30 }, (_, index) => ({
+            speaker: 'Avery',
+            start: index,
+            end: index + 1,
+            text: `Transcript segment ${index + 1}`,
+          })),
+        }),
+      }),
+      query: 'Quote exactly what Avery said at the end.',
+      entities: [],
+      attentionItems: [],
+    });
+
     const transcriptItems = context.evidenceItems.filter(
       (item) => item.kind === 'transcript',
     );
+    expect(transcriptItems).toHaveLength(5);
     expect(transcriptItems.at(-1)?.text).toContain('Transcript segment 30');
     expect(
       transcriptItems.some((item) => item.text.includes('segment 1')),
     ).toBe(false);
+    expect(context.statusNote).toContain('exact-wording request');
+  });
+
+  it('returns structured decisions directly with valid evidence', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What did we decide?',
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildPreparedMeetingAskPlutoResponse(
+      'What did we decide?',
+      context,
+    );
+
+    expect(response).toMatchObject({
+      status: 'answered',
+      answer: 'Use GraphQL for the new API layer.',
+      trustStatus: 'grounded',
+      citations: [
+        expect.objectContaining({
+          evidence_valid: true,
+          trust_status: 'grounded',
+        }),
+      ],
+    });
+  });
+
+  it('returns every bounded structured decision instead of silently taking four', () => {
+    const analysis = JSON.parse(makeMeeting().analysis_json || '{}');
+    analysis.topics = [];
+    analysis.all_decisions = Array.from({ length: 5 }, (_, index) => ({
+      text: `Decision ${index + 1}.`,
+    }));
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({ analysis_json: JSON.stringify(analysis) }),
+      query: 'What did we decide?',
+    });
+
+    const response = buildPreparedMeetingAskPlutoResponse(
+      'What did we decide?',
+      context,
+    );
+
+    expect(response?.answer.split('\n')).toEqual([
+      'Decision 1.',
+      'Decision 2.',
+      'Decision 3.',
+      'Decision 4.',
+      'Decision 5.',
+    ]);
+    expect(response?.citations).toHaveLength(5);
+  });
+
+  it('does not return an authoritative prepared answer when evidence is bounded', () => {
+    const analysis = JSON.parse(makeMeeting().analysis_json || '{}');
+    analysis.topics = [];
+    analysis.all_decisions = Array.from({ length: 20 }, (_, index) => ({
+      text: `Decision ${index + 1}.`,
+    }));
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({ analysis_json: JSON.stringify(analysis) }),
+      query: 'What did we decide?',
+    });
+
+    expect(context.truncatedEvidenceKinds).toContain('decision');
+    expect(
+      buildPreparedMeetingAskPlutoResponse('What did we decide?', context),
+    ).toBeNull();
   });
 
   it('returns an honest unavailable packet when the meeting has no usable evidence', () => {
@@ -438,6 +533,7 @@ describe('meeting-scoped Ask Pluto context', () => {
   it('does not fabricate a citation when the model omits evidence references', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
+      query: 'What did we decide?',
       entities: [],
       attentionItems: [],
     });
@@ -461,6 +557,7 @@ describe('meeting-scoped Ask Pluto context', () => {
   it('rejects out-of-range evidence references instead of citing the first item', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
+      query: 'What did we decide?',
       entities: [],
       attentionItems: [],
     });
@@ -479,6 +576,7 @@ describe('meeting-scoped Ask Pluto context', () => {
   it('does not treat a syntactically valid evidence marker as semantic validation', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
+      query: 'What did we decide?',
       entities: [],
       attentionItems: [],
     });
@@ -513,6 +611,7 @@ describe('meeting-scoped Ask Pluto context', () => {
       query: 'Why did you say that?',
       context: buildMeetingAskPlutoContext({
         meeting: makeMeeting(),
+        query: 'Why did you say that?',
         entities: [],
         attentionItems: [],
       }),

@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 import type {
+  CalendarDescriptor,
   CalendarEvent,
   CalendarIntegrationSnapshot,
 } from '../../../electron/calendar/types';
@@ -11,6 +12,8 @@ interface UpcomingMeetingsProps {
   events: CalendarEvent[];
   loading: boolean;
   onConnect: () => Promise<void>;
+  onSelectCalendar: (calendar: CalendarDescriptor) => Promise<void>;
+  onRefreshCalendar: () => Promise<void>;
   onOpenSettings: () => void;
 }
 
@@ -67,11 +70,34 @@ export const UpcomingMeetings = ({
   events,
   loading,
   onConnect,
+  onSelectCalendar,
+  onRefreshCalendar,
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [selectingCalendarId, setSelectingCalendarId] = useState<string | null>(
+    null,
+  );
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   const visibleEvents = expanded ? events : events.slice(0, 2);
   const hiddenCount = Math.max(0, events.length - 2);
+  const calendarSource =
+    snapshot?.selectedCalendar &&
+    (snapshot.state === 'ready' || events.length > 0)
+      ? snapshot.selectedCalendar
+      : null;
+
+  const chooseCalendar = async (calendar: CalendarDescriptor) => {
+    setSelectingCalendarId(calendar.identifier);
+    setSelectionError(null);
+    try {
+      await onSelectCalendar(calendar);
+    } catch {
+      setSelectionError('Calendar couldn’t be selected. Try again.');
+    } finally {
+      setSelectingCalendarId(null);
+    }
+  };
 
   return (
     <section
@@ -79,26 +105,16 @@ export const UpcomingMeetings = ({
       aria-busy={loading}
       className="min-w-0"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-medium text-pro-text-muted/60">
-            Your day
-          </p>
-          <h2
-            id="upcoming-meetings-title"
-            className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
-          >
-            Upcoming meetings
-          </h2>
-        </div>
-        {snapshot?.selectedCalendar ? (
-          <span
-            title={`${snapshot.selectedCalendar.title} · ${snapshot.selectedCalendar.sourceTitle}`}
-            className="max-w-24 truncate text-[9px] font-semibold text-pro-text-muted/55"
-          >
-            {snapshot.selectedCalendar.title}
-          </span>
-        ) : null}
+      <div>
+        <p className="text-[10px] font-medium text-pro-text-muted/60">
+          Your day
+        </p>
+        <h2
+          id="upcoming-meetings-title"
+          className="mt-1 whitespace-nowrap text-[18px] font-serif font-medium text-pro-text-main"
+        >
+          Upcoming meetings
+        </h2>
       </div>
 
       <div className="mt-4">
@@ -133,16 +149,59 @@ export const UpcomingMeetings = ({
           />
         ) : snapshot.state === 'needs_selection' ||
           snapshot.state === 'selected_calendar_missing' ? (
-          <RecoveryAction
-            title={
-              snapshot.state === 'selected_calendar_missing'
+          <div className="pb-5">
+            <p className="text-[13px] font-medium leading-5 text-pro-text-main">
+              {snapshot.state === 'selected_calendar_missing'
                 ? 'Choose another calendar'
-                : 'Choose one calendar'
-            }
-            detail="Pick the calendar Pluto should read in Settings."
-            action={onOpenSettings}
-            actionLabel="Open Pluto settings"
-          />
+                : 'Choose one calendar'}
+            </p>
+            <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
+              Pluto will read meetings from this calendar only.
+            </p>
+            <div className="mt-3 max-h-48 divide-y divide-pro-border/50 overflow-y-auto rounded-lg border border-pro-border/60 bg-pro-surface/55">
+              {snapshot.calendars.map((calendar) => (
+                <button
+                  key={calendar.identifier}
+                  type="button"
+                  aria-label={`Use ${calendar.title} calendar from ${calendar.sourceTitle}`}
+                  disabled={selectingCalendarId !== null}
+                  onClick={() => void chooseCalendar(calendar)}
+                  className="flex min-h-11 w-full items-center gap-2.5 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-55"
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
+                    style={
+                      calendar.colorHex
+                        ? { backgroundColor: calendar.colorHex }
+                        : undefined
+                    }
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium text-pro-text-main">
+                      {calendar.title}
+                    </span>
+                    <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
+                      {calendar.sourceTitle}
+                    </span>
+                  </span>
+                  {selectingCalendarId === calendar.identifier ? (
+                    <span className="text-[9px] font-semibold text-pro-text-muted">
+                      Selecting…
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            {selectionError ? (
+              <p
+                role="alert"
+                className="mt-2 text-[10px] font-semibold text-pro-urgent"
+              >
+                {selectionError}
+              </p>
+            ) : null}
+          </div>
         ) : snapshot.state === 'no_calendars' ? (
           <RecoveryAction
             title="No calendars found"
@@ -157,12 +216,12 @@ export const UpcomingMeetings = ({
           </p>
         ) : events.length ? (
           <>
-            <div className="divide-y divide-pro-border/60">
+            <div className="space-y-3">
               {visibleEvents.map((event, index) => (
                 <article
                   key={event.occurrenceKey}
                   data-testid="upcoming-meeting-row"
-                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3 py-3 first:pt-0"
+                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
                 >
                   <div className="flex items-start gap-2 pt-0.5">
                     {index === 0 ? (
@@ -223,10 +282,10 @@ export const UpcomingMeetings = ({
           </>
         ) : snapshot.state === 'read_failed' ? (
           <RecoveryAction
-            title="Calendar couldn’t be read"
-            detail="Your last calendar read is unavailable. Try again from Settings."
-            action={onOpenSettings}
-            actionLabel="Open Pluto settings"
+            title={`Couldn’t refresh ${snapshot.selectedCalendar?.title ?? 'calendar'}`}
+            detail="The calendar is still selected. Pluto can try the local read again."
+            action={() => void onRefreshCalendar()}
+            actionLabel="Try again"
           />
         ) : (
           <p className="pb-5 text-[12px] font-medium text-pro-text-muted">
@@ -234,6 +293,27 @@ export const UpcomingMeetings = ({
           </p>
         )}
       </div>
+      {calendarSource ? (
+        <div
+          data-testid="upcoming-meetings-source"
+          className="mt-4 flex min-w-0 items-center gap-2 text-[9px] font-medium text-pro-text-muted/60"
+        >
+          <span
+            title={`${calendarSource.title} · ${calendarSource.sourceTitle}`}
+            className="min-w-0 flex-1 truncate"
+          >
+            {calendarSource.title} · {calendarSource.sourceTitle}
+          </span>
+          <button
+            type="button"
+            aria-label="Change calendar"
+            onClick={onOpenSettings}
+            className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+          >
+            Change
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 };

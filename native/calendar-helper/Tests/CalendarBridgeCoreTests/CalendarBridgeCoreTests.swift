@@ -24,6 +24,10 @@ import Testing
     }
 }
 
+@Test func parsesJavaScriptFractionalSecondTimestamps() {
+    #expect(CalendarBridgeProtocol.parseISO8601("2026-08-16T16:00:00.000Z") != nil)
+}
+
 @Test func requiresOneCalendarAndABoundedWindow() throws {
     let start = Date(timeIntervalSince1970: 1_780_000_000)
     let end = start.addingTimeInterval(60 * 60 * 24 * 44)

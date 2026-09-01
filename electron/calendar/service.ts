@@ -170,7 +170,11 @@ export const createCalendarService = (deps: {
     if (!current) throw new Error('selected_calendar_missing');
     generation += 1;
     deps.store.selectCalendar(current);
-    await refresh();
+    try {
+      await refresh();
+    } catch {
+      // Selection is durable; refresh records its own recoverable read failure.
+    }
     return snapshotFor('full_access');
   };
 

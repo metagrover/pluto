@@ -13,6 +13,7 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 import { Sidebar } from './components/layout/Sidebar';
 
 import type {
+  CalendarDescriptor,
   CalendarEvent,
   CalendarIntegrationSnapshot,
   MeetingCalendarContext,
@@ -23,6 +24,7 @@ import {
   getMeetingCalendarContext,
   listCalendarDay,
   openCalendarSystemSettings,
+  refreshCalendar,
   selectCalendar,
 } from './api/calendar';
 import { updateAlertStatus } from './api/intelligence';
@@ -257,10 +259,27 @@ function App() {
         snapshot = await selectCalendar(snapshot.calendars[0]);
       }
       await loadCalendarAgenda(snapshot);
-      if (snapshot.state === 'needs_selection') {
-        setActiveTab('settings');
-        setSelectedMeetingId(null);
-      }
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleCalendarSelect = async (calendar: CalendarDescriptor) => {
+    setCalendarLoading(true);
+    try {
+      await loadCalendarAgenda(await selectCalendar(calendar));
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  const handleCalendarRefresh = async () => {
+    setCalendarLoading(true);
+    try {
+      await loadCalendarAgenda(await refreshCalendar());
+    } catch (error) {
+      console.error('[Calendar] Failed to refresh dashboard agenda', error);
+      await loadCalendarAgenda();
     } finally {
       setCalendarLoading(false);
     }
@@ -1192,6 +1211,8 @@ function App() {
                   calendarEvents={calendarEvents}
                   calendarLoading={calendarLoading}
                   onCalendarConnect={handleCalendarConnect}
+                  onCalendarSelect={handleCalendarSelect}
+                  onCalendarRefresh={handleCalendarRefresh}
                   onCalendarOpenSettings={handleCalendarOpenSettings}
                 />
               </>

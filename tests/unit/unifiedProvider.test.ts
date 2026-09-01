@@ -405,7 +405,7 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
-  it('keeps synchronous Ask Pluto visible while preserving the larger Deep budget', async () => {
+  it('keeps saved Ask Pluto on one model while preserving mode budgets', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
       requestBodies.push(parseRequestBody(init));
@@ -420,7 +420,7 @@ describe('UnifiedLLMProvider', () => {
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
 
     expect(requestBodies[0]).toMatchObject({
-      model: 'phi4-mini:3.8b',
+      model: 'qwen3.5:9b',
       think: false,
     });
     expect(requestBodies[0].options).toMatchObject({
@@ -428,15 +428,10 @@ describe('UnifiedLLMProvider', () => {
       num_predict: 192,
     });
     expect(requestBodies[1]).toMatchObject({
-      model: 'phi4-mini:3.8b',
-      keep_alive: 0,
-      stream: false,
-    });
-    expect(requestBodies[2]).toMatchObject({
       model: 'qwen3.5:9b',
       think: false,
     });
-    expect(requestBodies[2].options).toMatchObject({
+    expect(requestBodies[1].options).toMatchObject({
       num_ctx: 4096,
       num_predict: 512,
       top_k: 40,
@@ -649,7 +644,7 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
-  it('defaults Quick chat to Phi while Deep chat uses Gemma 4', async () => {
+  it('uses Gemma for saved chat and Phi for active meeting chat', async () => {
     const selectedModels: string[] = [];
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -672,11 +667,13 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
+    await provider.answerAskPluto('What are we discussing?', { live: true });
 
     expect(selectedModels).toEqual([
-      'phi4-mini:3.8b',
-      'phi4-mini:3.8b',
       'gemma4:12b',
+      'gemma4:12b',
+      'gemma4:12b',
+      'phi4-mini:3.8b',
     ]);
   });
 
