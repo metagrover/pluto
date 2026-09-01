@@ -532,6 +532,7 @@ actor FluidAudioEouManager: ParakeetEouManaging {
     private let maxPendingSeconds: Double
     private var pendingSinceAudioSeconds: Double?
     private var pendingSnapshot: ParakeetEouManagerSnapshot?
+    private var pendingNativeEou = false
     private var committedTokenCount = 0
     private var closed = false
 
@@ -631,37 +632,46 @@ actor FluidAudioEouManager: ParakeetEouManaging {
         _ snapshots: [ParakeetEouManagerSnapshot],
         audioEndSeconds: Double
     ) -> [ParakeetEouManagerSnapshot] {
-        var bounded = snapshots
+        var bounded: [ParakeetEouManagerSnapshot] = []
         for snapshot in snapshots {
             switch snapshot.kind {
-            case .eou, .final:
+            case .final:
+                bounded.append(snapshot)
                 committedTokenCount = snapshot.tokens.count
                 pendingSinceAudioSeconds = nil
                 pendingSnapshot = nil
-            case .partial:
-                pendingSnapshot = snapshot
-                if snapshot.tokens.count > committedTokenCount,
-                    !snapshot.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    pendingSinceAudioSeconds == nil
+                pendingNativeEou = false
+            case .eou:
+                let partial = ParakeetEouManagerSnapshot(
+                    kind: .partial,
+                    transcript: snapshot.transcript,
+                    tokens: snapshot.tokens
+                )
+                trackPending(partial, audioEndSeconds: audioEndSeconds)
+                pendingNativeEou = true
+                if bounded.last?.kind != .partial
+                    || bounded.last?.transcript != partial.transcript
                 {
-                    pendingSinceAudioSeconds = audioEndSeconds
+                    bounded.append(partial)
                 }
+            case .partial:
+                trackPending(snapshot, audioEndSeconds: audioEndSeconds)
+                bounded.append(snapshot)
             }
         }
+        let pendingTimedOut = pendingSinceAudioSeconds.map {
+            audioEndSeconds - $0 >= maxPendingSeconds
+        } ?? false
         guard
-            let pendingSinceAudioSeconds,
             let pendingSnapshot,
-            audioEndSeconds - pendingSinceAudioSeconds >= maxPendingSeconds,
+            pendingNativeEou || pendingTimedOut,
             let checkpoint = wordSafeCheckpoint(from: pendingSnapshot)
         else { return bounded }
 
-        if let latestPartialIndex = bounded.lastIndex(where: {
-            $0.kind == .partial && $0.transcript == pendingSnapshot.transcript
-        }) {
-            bounded.remove(at: latestPartialIndex)
-        }
+        bounded.removeAll { $0.kind == .partial }
         bounded.append(checkpoint)
         committedTokenCount = checkpoint.tokens.count
+        pendingNativeEou = false
         if pendingSnapshot.tokens.count > committedTokenCount {
             bounded.append(pendingSnapshot)
             self.pendingSinceAudioSeconds = audioEndSeconds
@@ -670,6 +680,19 @@ actor FluidAudioEouManager: ParakeetEouManaging {
             self.pendingSnapshot = nil
         }
         return bounded
+    }
+
+    private func trackPending(
+        _ snapshot: ParakeetEouManagerSnapshot,
+        audioEndSeconds: Double
+    ) {
+        pendingSnapshot = snapshot
+        if snapshot.tokens.count > committedTokenCount,
+            !snapshot.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            pendingSinceAudioSeconds == nil
+        {
+            pendingSinceAudioSeconds = audioEndSeconds
+        }
     }
 
     private func wordSafeCheckpoint(
