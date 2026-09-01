@@ -109,6 +109,16 @@ describe('Ask Pluto request lifecycle', () => {
     expect(
       container.querySelector('[data-testid="ask-pluto-loading-lines"]'),
     ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="ask-pluto-loading-shell"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelectorAll('[data-testid="ask-pluto-phase-step"]'),
+    ).toHaveLength(4);
+    expect(container.querySelectorAll('[data-state="complete"]')).toHaveLength(
+      1,
+    );
+    expect(container.querySelectorAll('[data-state="active"]')).toHaveLength(1);
     await act(async () => {
       listeners.get('intelligence:query:status')?.(
         {},
@@ -128,8 +138,9 @@ describe('Ask Pluto request lifecycle', () => {
     expect(container.textContent).toContain(
       'Checking each claim against your sources',
     );
-    expect(container.querySelector('[data-testid="ask-pluto-stream-caret"]'))
-      .not.toBeNull;
+    expect(
+      container.querySelector('[data-testid="ask-pluto-stream-caret"]'),
+    ).not.toBeNull();
 
     const cancel = [...container.querySelectorAll('button')].find(
       (button) => button.textContent === 'Stop',

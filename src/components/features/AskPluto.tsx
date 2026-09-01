@@ -434,6 +434,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               const citationGroups = groupCitationsByMeeting(
                 msg.citations ?? [],
               );
+              const loadingPhaseIndex = msg.content
+                ? 3
+                : requestPhase === 'waiting'
+                  ? 1
+                  : requestPhase === 'writing' || requestPhase === 'generating'
+                    ? 2
+                    : 0;
               return (
                 <div
                   key={msg.id}
@@ -459,9 +466,64 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       }`}
                     >
                       {msg.isLoading ? (
-                        <div className="space-y-3 px-1">
+                        <div
+                          data-testid="ask-pluto-loading-shell"
+                          className="w-full max-w-[34rem] px-1 py-0.5"
+                        >
+                          <output aria-live="polite" className="block">
+                            <div className="flex min-h-8 items-center justify-between gap-6">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <span
+                                  aria-hidden="true"
+                                  className="relative flex h-2 w-2 shrink-0"
+                                >
+                                  <span className="absolute inline-flex h-full w-full rounded-full bg-pro-accent/35 animate-ping motion-reduce:animate-none" />
+                                  <span className="relative inline-flex h-2 w-2 rounded-full bg-pro-accent/75" />
+                                </span>
+                                <span className="truncate text-[13px] font-medium text-pro-text-main/75">
+                                  {requestPhaseLabel(Boolean(msg.content))}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleCancel()}
+                                disabled={requestPhase === 'cancelling'}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-pro-text-muted transition-colors duration-200 hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/35 disabled:opacity-50"
+                              >
+                                <Square className="h-2 w-2 fill-current" />
+                                Stop
+                              </button>
+                            </div>
+                            <div
+                              aria-hidden="true"
+                              className="mt-1.5 grid w-28 grid-cols-4 gap-1"
+                            >
+                              {[0, 1, 2, 3].map((step) => {
+                                const state =
+                                  step < loadingPhaseIndex
+                                    ? 'complete'
+                                    : step === loadingPhaseIndex
+                                      ? 'active'
+                                      : 'pending';
+                                return (
+                                  <span
+                                    key={step}
+                                    data-testid="ask-pluto-phase-step"
+                                    data-state={state}
+                                    className={`h-0.5 rounded-full transition-colors duration-200 ${
+                                      state === 'complete'
+                                        ? 'bg-pro-accent/45'
+                                        : state === 'active'
+                                          ? 'bg-pro-accent/80'
+                                          : 'bg-pro-border/55'
+                                    }`}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </output>
                           {msg.content ? (
-                            <div className="prose prose-invert prose-sm max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                            <div className="prose prose-invert prose-sm mt-4 max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
                               </ReactMarkdown>
@@ -475,34 +537,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                             <div
                               data-testid="ask-pluto-loading-lines"
                               aria-hidden="true"
-                              className="w-full max-w-md space-y-2.5 py-1 animate-pulse motion-reduce:animate-none"
+                              className="mt-4 w-full max-w-md space-y-2.5 animate-pulse motion-reduce:animate-none"
                             >
-                              <div className="h-2 rounded-full bg-pro-text-muted/14 w-[88%]" />
-                              <div className="h-2 rounded-full bg-pro-text-muted/10 w-[68%]" />
+                              <div className="h-1.5 w-[94%] rounded-full bg-pro-text-muted/12" />
+                              <div className="h-1.5 w-[78%] rounded-full bg-pro-text-muted/10" />
+                              <div className="h-1.5 w-[56%] rounded-full bg-pro-text-muted/8" />
                             </div>
                           )}
-                          <output
-                            aria-live="polite"
-                            className="flex items-center gap-3 min-h-[22px]"
-                          >
-                            {!msg.content ? (
-                              <div className="relative h-1 w-12 overflow-hidden rounded-full bg-pro-border/60">
-                                <div className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-pro-accent/55 animate-[pulse_1.4s_ease-in-out_infinite] motion-reduce:animate-none" />
-                              </div>
-                            ) : null}
-                            <span className="text-[13px] text-pro-text-muted">
-                              {requestPhaseLabel(Boolean(msg.content))}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => void handleCancel()}
-                              disabled={requestPhase === 'cancelling'}
-                              className="inline-flex items-center gap-1 text-[12px] text-pro-text-muted hover:text-pro-text-main disabled:opacity-50"
-                            >
-                              <Square className="h-2.5 w-2.5 fill-current" />
-                              Stop
-                            </button>
-                          </output>
                         </div>
                       ) : (
                         <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
