@@ -1057,8 +1057,13 @@ const synthesizeStructuredFromPrompt = async (params: {
   scopeType: db.KnowledgeDocScopeType;
   scopeTitle: string;
   sourceEvidenceByMeeting: Map<string, string>;
+  signal?: AbortSignal;
 }): Promise<KnowledgeCompiledDocument> => {
-  const raw = await params.provider.synthesizeKnowledgeDocument(params.prompt);
+  params.signal?.throwIfAborted();
+  const raw = await params.provider.synthesizeKnowledgeDocument(params.prompt, {
+    signal: params.signal,
+  });
+  params.signal?.throwIfAborted();
   const parsed = parseKnowledgeJsonResponse(raw);
   if (isKnowledgeV2Document(parsed)) {
     return repairKnowledgeV2Document(parsed);
@@ -1077,6 +1082,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
   chunk: KnowledgeSourceChunk;
   sourceEvidenceByMeeting: Map<string, string>;
   claimCorrections: AskPlutoClaimCorrection[];
+  signal?: AbortSignal;
 }): Promise<KnowledgeCompiledDocument[]> => {
   try {
     const prompt = getKnowledgeDocumentPrompt({
@@ -1092,9 +1098,11 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
       scopeType: params.doc.scope_type,
       scopeTitle: params.doc.title,
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      signal: params.signal,
     });
     return hasStructuredContent(structured) ? [structured] : [];
   } catch (error) {
+    if (params.signal?.aborted) throw error;
     if (isSerializedTaskPreemption(error)) throw error;
     if (params.chunk.sourceMeetings.length <= MIN_RETRY_CHUNK_SOURCE_MEETINGS) {
       console.warn(
@@ -1127,6 +1135,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   sourceMeetings: SynthSourceMeeting[];
   sourceEvidenceByMeeting: Map<string, string>;
   claimCorrections: AskPlutoClaimCorrection[];
+  signal?: AbortSignal;
   onChunkProgress?: (partial: KnowledgeCompiledDocument) => void;
 }): Promise<KnowledgeCompiledDocument> => {
   const chunks = buildKnowledgeSourceChunks(
@@ -1152,6 +1161,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       chunk,
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
       claimCorrections: params.claimCorrections,
+      signal: params.signal,
     });
     for (const [index, structured] of structuredDocs.entries()) {
       chunkDocs.push({
@@ -1274,6 +1284,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       scopeType: params.doc.scope_type,
       scopeTitle: params.doc.title,
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      signal: params.signal,
     });
     return hasStructuredContent(merged)
       ? isKnowledgeV2Document(merged) && isKnowledgeV2Document(usefulFallback)
@@ -1292,6 +1303,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
           : usefulFallback
       : usefulFallback;
   } catch (error) {
+    if (params.signal?.aborted) throw error;
     console.warn(
       `[KnowledgeDoc] Merge synthesis failed for ${params.doc.id}; using deterministic chunk merge:`,
       error,
@@ -1577,6 +1589,7 @@ type KnowledgeSynthesisRequest = {
   corrections: ReturnType<typeof db.getKnowledgeCorrections>;
   sourceMeetings: SynthSourceMeeting[];
   canCommit?: () => boolean;
+  signal?: AbortSignal;
 };
 
 class KnowledgeSynthesisSupersededError extends Error {
@@ -1592,6 +1605,7 @@ const assertKnowledgeSynthesisCurrent = (
   if (request.canCommit?.() === false) {
     throw new KnowledgeSynthesisSupersededError();
   }
+  request.signal?.throwIfAborted();
 };
 
 const buildKnowledgeSynthesisRequest = (
@@ -1738,10 +1752,11 @@ const synthesizeKnowledgeDocNowInternal = async (
       sourceMeetings,
       sourceEvidenceByMeeting,
       claimCorrections,
+      signal: request.signal,
       // Flush partial content to DB after each chunk so the UI can render
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {
-        if (request.canCommit?.() === false) return;
+        if (request.canCommit?.() === false || request.signal?.aborted) return;
         try {
           const correctedPartial = applyCorrections(partial);
           const partialRendered = renderStructuredDocument(correctedPartial);
@@ -1843,6 +1858,15 @@ const synthesizeKnowledgeDocNowInternal = async (
     ) {
       return db.getKnowledgeDoc(doc.id);
     }
+    if (request.signal?.aborted) {
+      return db.upsertKnowledgeDoc({
+        id: doc.id,
+        scope_type: doc.scope_type,
+        scope_key: doc.scope_key,
+        title: doc.title,
+        status: 'stale',
+      });
+    }
     if (isSerializedTaskPreemption(error)) {
       const deferred = db.upsertKnowledgeDoc({
         id: doc.id,
@@ -1930,9 +1954,11 @@ export const setKnowledgeDocSynthesisPaused = (paused: boolean): void => {
 
 export const refreshKnowledgeDocNow = async (
   docId: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<db.KnowledgeDoc | undefined> => {
-  const request = buildKnowledgeSynthesisRequest(docId);
-  if (!request) return undefined;
+  const baseRequest = buildKnowledgeSynthesisRequest(docId);
+  if (!baseRequest) return undefined;
+  const request = { ...baseRequest, signal: options.signal };
   return runKnowledgeDocWithGlobalSynthesisGate(request.key, async () =>
     synthesizeKnowledgeDocNowInternal(request),
   );
@@ -2035,7 +2061,9 @@ const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
   return docs;
 };
 
-export const initializeKnowledgeDocs = async (): Promise<void> => {
+export const initializeKnowledgeDocs = async (
+  options: { queue?: boolean } = {},
+): Promise<string[]> => {
   const docs = ensureDocsAndCollectActive();
   // Skip docs that are already synthesized with the current synthesis
   // mechanics. Older up-to-date docs are intentionally refreshed once.
@@ -2052,7 +2080,7 @@ export const initializeKnowledgeDocs = async (): Promise<void> => {
     console.log(
       '[KnowledgeDoc] All docs up-to-date, skipping startup synthesis',
     );
-    return;
+    return [];
   }
   console.log(
     `[KnowledgeDoc] Queuing ${needsWork.length} of ${docs.length} docs for synthesis`,
@@ -2060,9 +2088,12 @@ export const initializeKnowledgeDocs = async (): Promise<void> => {
   // Stagger: each doc waits an extra 3 s so they enter the serial gate
   // one at a time rather than flooding Ollama simultaneously.
   const STAGGER_MS = 3000;
-  needsWork.forEach((doc, index) => {
-    queueKnowledgeDocRefresh(doc.id, 15000 + index * STAGGER_MS);
-  });
+  if (options.queue !== false) {
+    needsWork.forEach((doc, index) => {
+      queueKnowledgeDocRefresh(doc.id, 15000 + index * STAGGER_MS);
+    });
+  }
+  return needsWork.map((doc) => doc.id);
 };
 
 const getKnowledgeDocIdsForMeeting = (meetingId: string): Set<string> => {
@@ -2120,11 +2151,12 @@ export const queueKnowledgeDocsRefreshForMeeting = (
 
 export const refreshKnowledgeDocsForMeetingNow = async (
   meetingId: string,
-  options: { canCommit?: () => boolean } = {},
+  options: { canCommit?: () => boolean; signal?: AbortSignal } = {},
 ): Promise<{ requested: number; completed: number }> => {
   const docIds = [...getKnowledgeDocIdsForMeeting(meetingId)];
   let completed = 0;
   for (const docId of docIds) {
+    options.signal?.throwIfAborted();
     const satisfiesMeetingRefresh = (): boolean => {
       const doc = db.getKnowledgeDoc(docId);
       const currentRequest = buildKnowledgeSynthesisRequest(docId);
@@ -2147,7 +2179,11 @@ export const refreshKnowledgeDocsForMeetingNow = async (
     }
     const baseRequest = buildKnowledgeSynthesisRequest(docId);
     const request = baseRequest
-      ? { ...baseRequest, canCommit: options.canCommit }
+      ? {
+          ...baseRequest,
+          canCommit: options.canCommit,
+          signal: options.signal,
+        }
       : null;
     if (!request) throw new Error('knowledge_document_refresh_failed');
     let refreshed = await runKnowledgeDocWithGlobalSynthesisGate(
@@ -2158,7 +2194,11 @@ export const refreshKnowledgeDocsForMeetingNow = async (
     if (!satisfiesMeetingRefresh()) {
       const retryBaseRequest = buildKnowledgeSynthesisRequest(docId);
       const retryRequest = retryBaseRequest
-        ? { ...retryBaseRequest, canCommit: options.canCommit }
+        ? {
+            ...retryBaseRequest,
+            canCommit: options.canCommit,
+            signal: options.signal,
+          }
         : null;
       if (!retryRequest) throw new Error('knowledge_document_refresh_failed');
       refreshed = await runKnowledgeDocWithGlobalSynthesisGate(

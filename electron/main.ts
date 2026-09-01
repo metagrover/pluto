@@ -328,6 +328,10 @@ import { isNoOpMeetingNotesEdit } from '../src/utils/meetingNotesEditRebase';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
+import {
+  type BackgroundKnowledgeRefreshCoordinator,
+  createBackgroundKnowledgeRefreshCoordinator,
+} from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
 import {
@@ -434,6 +438,9 @@ import {
   shouldCleanupTranscriptOnSave,
 } from './transcriptCleanup';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
+
+let backgroundKnowledgeRefresh: BackgroundKnowledgeRefreshCoordinator | null =
+  null;
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
@@ -562,13 +569,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
       return;
     }
     if (input.canCommit()) {
-      try {
-        await refreshKnowledgeDocsForMeetingNow(input.meetingId, {
-          canCommit: input.canCommit,
-        });
-      } catch {
-        throw new Error('knowledge_synthesis_failed');
-      }
+      backgroundKnowledgeRefresh?.enqueue(`meeting:${input.meetingId}`);
     }
   },
 });
@@ -612,7 +613,15 @@ let parakeetEouCoordinator: ParakeetEouMeetingCoordinator | null = null;
 let parakeetEouOwner: WebContents | null = null;
 let parakeetEouGeneration: number | null = null;
 
-configureKnowledgeSynthesisPause(setKnowledgeDocSynthesisPaused);
+configureKnowledgeSynthesisPause((paused) => {
+  setKnowledgeDocSynthesisPaused(paused);
+  const hasForegroundPause = Object.entries(
+    knowledgeSynthesisPause.snapshot(),
+  ).some(([reason, count]) => reason !== 'llm_active' && Number(count) > 0);
+  if (hasForegroundPause) {
+    backgroundKnowledgeRefresh?.notifyForegroundActivity();
+  }
+});
 
 const startParakeetLiveRecording = async (
   _sender: WebContents,
@@ -702,6 +711,8 @@ function abortMeetingTasks(meetingId: string) {
 let stopIdentityReconciliation: (() => void) | undefined;
 // Cleanup on quit
 app.on('before-quit', async () => {
+  backgroundKnowledgeRefresh?.close();
+  backgroundKnowledgeRefresh = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
   console.log('[Pluto] Shutting down...');
@@ -722,6 +733,43 @@ app.on('before-quit', async () => {
 
 app.whenReady().then(async () => {
   db.recoverInterruptedMeetingAnalysisRuns();
+  backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
+    getPolicy: () => ({
+      systemIdleSeconds: powerMonitor.getSystemIdleTime(),
+      onBattery: powerMonitor.isOnBatteryPower(),
+      thermalState: powerMonitor.getCurrentThermalState(),
+      paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
+        ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
+      ),
+    }),
+    run: async (workId, signal) => {
+      if (workId.startsWith('doc:')) {
+        const refreshed = await refreshKnowledgeDocNow(
+          workId.slice('doc:'.length),
+          { signal },
+        );
+        if (!refreshed || refreshed.status !== 'up_to_date') {
+          throw new Error('knowledge_document_refresh_incomplete');
+        }
+        return;
+      }
+      await refreshKnowledgeDocsForMeetingNow(
+        workId.startsWith('meeting:')
+          ? workId.slice('meeting:'.length)
+          : workId,
+        { signal },
+      );
+    },
+    onError: (error, workId) => {
+      console.warn(
+        `[KnowledgeDoc] Deferred refresh retained for ${workId}:`,
+        error,
+      );
+    },
+  });
+  powerMonitor.on('user-did-become-active', () => {
+    backgroundKnowledgeRefresh?.notifyForegroundActivity();
+  });
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) =>
       handleIdentityRequest(channel, payload),
@@ -3487,7 +3535,7 @@ app.whenReady().then(async () => {
         }
 
         if (awaitKnowledgeSynthesis !== true) {
-          queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+          backgroundKnowledgeRefresh?.enqueue(`meeting:${meetingId}`);
         }
         clearAbortControllerForMeeting(String(meetingId));
         return result;
@@ -3521,7 +3569,7 @@ app.whenReady().then(async () => {
               }),
           },
         );
-        queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        backgroundKnowledgeRefresh?.enqueue(`meeting:${meetingId}`);
         return result;
       } catch (error) {
         console.error('[EntityPipeline] Processing failed:', error);
@@ -4652,12 +4700,18 @@ app.whenReady().then(async () => {
       `[Pluto] Released ${interruptedFinalTranscriptions} interrupted final transcription lease(s)`,
     );
   }
-  initializeKnowledgeDocs().catch((error) => {
-    console.error(
-      '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
-      error,
-    );
-  });
+  initializeKnowledgeDocs({ queue: false })
+    .then((docIds) => {
+      for (const docId of docIds) {
+        backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
+      }
+    })
+    .catch((error) => {
+      console.error(
+        '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
+        error,
+      );
+    });
   createWindow();
   await prepareFinalTranscriptionBeforeRecovery({
     shouldPrepare: db.getSetting('setup_complete') === 'true',
