@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { MeetingNotesError } from '../../electron/llm/meetingNotesTypes';
 import {
   aggregateMeetingNotesLatencySamples,
   assertContentFreeMeetingNotesLatencyReport,
+  classifyMeetingNotesLatencyError,
   parsePrivateMeetingNotesLatencyManifest,
   summarizeMeetingNotesLatencyStages,
   summarizePrivateMeetingNotesLatencyManifest,
@@ -136,4 +138,25 @@ describe('private meeting-notes latency manifest', () => {
       },
     });
   });
+
+  it.each([
+    [new MeetingNotesError('notes_provider_error'), 'notes_provider_error'],
+    [
+      new SyntaxError('private malformed stream'),
+      'notes_provider_response_invalid',
+    ],
+    [
+      new DOMException('private timeout', 'TimeoutError'),
+      'notes_provider_timeout',
+    ],
+    [new TypeError('private fetch failure'), 'notes_provider_transport_failed'],
+    [new Error('private unknown failure'), 'meeting_notes_latency_run_failed'],
+  ])(
+    'classifies failures without retaining their messages',
+    (error, expected) => {
+      const classification = classifyMeetingNotesLatencyError(error);
+      expect(classification).toBe(expected);
+      expect(classification).not.toContain('private');
+    },
+  );
 });

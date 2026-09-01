@@ -1,4 +1,7 @@
 import path from 'node:path';
+import { classifyMeetingNotesFailure } from '../../electron/llm/meetingNotesFailures';
+
+export const classifyMeetingNotesLatencyError = classifyMeetingNotesFailure;
 
 export type MeetingNotesLatencyDurationBucket = '15m' | '30m' | '45m';
 

@@ -10,7 +10,6 @@ import {
 } from '../electron/llm/meetingNotesRunMetrics.ts';
 import { createNotesSource } from '../electron/llm/meetingNotesSource.ts';
 import {
-  MeetingNotesError,
   NOTES_OLLAMA_MODEL,
   NOTES_PROMPT_VERSION,
 } from '../electron/llm/meetingNotesTypes.ts';
@@ -20,6 +19,7 @@ import {
   type PrivateMeetingNotesLatencyCase,
   aggregateMeetingNotesLatencySamples,
   assertContentFreeMeetingNotesLatencyReport,
+  classifyMeetingNotesLatencyError,
   parsePrivateMeetingNotesLatencyManifest,
   summarizeMeetingNotesLatencyStages,
 } from './lib/meeting_notes_latency_benchmark.ts';
@@ -104,17 +104,6 @@ const selectedCases = (): Array<{
   }));
 };
 
-const stableErrorCode = (error: unknown): string => {
-  if (error instanceof MeetingNotesError) return error.code;
-  if (
-    error instanceof Error &&
-    /^(notes_|meeting_notes_)[a-z_]+$/.test(error.message)
-  ) {
-    return error.message;
-  }
-  return 'meeting_notes_latency_run_failed';
-};
-
 const runCase = async (
   definition: PrivateMeetingNotesLatencyCase,
   runIndex: number,
@@ -178,7 +167,7 @@ const runCase = async (
       error instanceof DOMException && error.name === 'AbortError'
         ? 'cancelled'
         : 'failed';
-    errorCode = stableErrorCode(error);
+    errorCode = classifyMeetingNotesLatencyError(error);
     runMetric = metrics.snapshot(status, Date.now());
   }
   return {

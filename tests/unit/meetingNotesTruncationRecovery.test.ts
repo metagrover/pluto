@@ -124,6 +124,79 @@ it('bisects only the leaf that truncates twice and retains completed siblings', 
   ).toBe(true);
 });
 
+it('retries only a transiently failed leaf once and retains completed siblings', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1_000)}`,
+    })),
+  );
+  const writerKeys: string[] = [];
+  const writerCounts = new Map<string, number>();
+  const onRepair = vi.fn();
+  const generate = vi.fn(async (request) => {
+    if (request.task === 'notesAudit') return reviewedDraft(request.prompt);
+    if (request.task === 'notesMerge')
+      return JSON.stringify(draftFor(request.prompt));
+    const key = JSON.stringify(sourceSpans(request.prompt));
+    if (!writerKeys.includes(key)) writerKeys.push(key);
+    writerCounts.set(key, (writerCounts.get(key) ?? 0) + 1);
+    if (key === writerKeys[1] && writerCounts.get(key) === 1) {
+      throw new MeetingNotesError('notes_provider_error');
+    }
+    return JSON.stringify(draftFor(request.prompt));
+  });
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'test',
+    contextTokens: 16_384,
+    onRepair,
+  });
+
+  expect(writerCounts.get(writerKeys[0]!)).toBe(1);
+  expect(writerCounts.get(writerKeys[1]!)).toBe(2);
+  expect(
+    [...writerCounts.entries()]
+      .filter(([key]) => key !== writerKeys[1])
+      .every(([, count]) => count === 1),
+  ).toBe(true);
+  expect(onRepair).toHaveBeenCalledTimes(1);
+  expect(onRepair).toHaveBeenCalledWith('notesWriter');
+  expect(result.generation_metadata.mode).toBe('hierarchical');
+});
+
+it.each([
+  new MeetingNotesError('notes_writer_invalid'),
+  new MeetingNotesError('notes_cancelled'),
+  new Error('application failure'),
+])('does not retry a non-transient failed leaf: %s', async (failure) => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1_000)}`,
+    })),
+  );
+  const generate = vi.fn().mockRejectedValue(failure);
+
+  await expect(
+    generateMeetingNotes({
+      reviewProtocol: 'editor',
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16_384,
+    }),
+  ).rejects.toBe(failure);
+  expect(generate).toHaveBeenCalledTimes(1);
+});
+
 it('repartitions a leaf when its compact retry no longer fits the provider context', async () => {
   const source = makeSyntheticNotesSource(
     Array.from({ length: 6 }, (_, index) => ({

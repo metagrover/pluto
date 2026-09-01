@@ -20,6 +20,7 @@ import {
   parseEditedNotes,
 } from './meetingNotesEditor';
 import { identifyEditedNotes } from './meetingNotesEditorIdentity';
+import { isTransientMeetingNotesLeafFailure } from './meetingNotesFailures';
 import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
   planNotesLeaves,
@@ -184,6 +185,20 @@ const withTruncationRetry = async <T>(
       }
       throw retryError;
     }
+  }
+};
+
+const withOneTransientLeafRetry = async <T>(
+  input: GenerateMeetingNotesInput,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientMeetingNotesLeafFailure(error)) throw error;
+    assertNotCancelled(input);
+    input.onRepair?.('notesWriter');
+    return operation();
   }
 };
 
@@ -703,14 +718,16 @@ const runHierarchy = async (
     }
     const idPrefix = `leaf${leafSequence++}`;
     const draft = remapDraftIds(
-      await withTruncationRetry(input, (retryInstruction) =>
-        writeDraft(
-          input,
-          'notesWriter',
-          retryInstruction
-            ? `${writerPrompt}\n\n${retryInstruction}`
-            : writerPrompt,
-          evidenceSpans,
+      await withOneTransientLeafRetry(input, () =>
+        withTruncationRetry(input, (retryInstruction) =>
+          writeDraft(
+            input,
+            'notesWriter',
+            retryInstruction
+              ? `${writerPrompt}\n\n${retryInstruction}`
+              : writerPrompt,
+            evidenceSpans,
+          ),
         ),
       ),
       idPrefix,
