@@ -39,25 +39,38 @@ const applyTokensFor = (rule: Rule) =>
     .flatMap((node) => node.params.split(/\s+/));
 
 describe('Zen Ask Pluto dock styles', () => {
-  it('keeps the notes rail and transcript in the first grid row', () => {
+  it('reserves a bottom row for chat so it cannot cover the transcript', () => {
+    const [gridRule] = rulesFor('.recording-workspace-grid');
     const [railRule] = rulesFor('.recording-workspace-grid > .recording-rail');
     const [transcriptRule] = rulesFor(
       '.recording-workspace-grid > .live-transcript',
     );
+    const dockRule = rulesFor(
+      '.recording-workspace-grid > .meeting-ask-pluto-dock',
+    ).find((candidate) => !enclosingMedia(candidate));
 
+    expect(gridRule).toBeDefined();
+    expect(declarationsFor(gridRule)).toMatchObject({
+      'grid-template-rows': 'minmax(0, 1fr) auto',
+    });
     expect(railRule).toBeDefined();
     expect(declarationsFor(railRule)).toMatchObject({
       'grid-column': '1',
-      'grid-row': '1',
+      'grid-row': '1 / 3',
     });
     expect(transcriptRule).toBeDefined();
     expect(declarationsFor(transcriptRule)).toMatchObject({
       'grid-column': '2',
       'grid-row': '1',
     });
+    expect(dockRule).toBeDefined();
+    expect(declarationsFor(dockRule!)).toMatchObject({
+      'grid-column': '2',
+      'grid-row': '2',
+    });
   });
 
-  it('overlays the transcript grid cell with a 20px inset', () => {
+  it('keeps a 20px inset around the reserved chat row', () => {
     const selector = '.recording-workspace-grid > .meeting-ask-pluto-dock';
     const rule = rulesFor(selector).find(
       (candidate) => !enclosingMedia(candidate),
@@ -66,7 +79,7 @@ describe('Zen Ask Pluto dock styles', () => {
     expect(rule).toBeDefined();
     expect(declarationsFor(rule!)).toMatchObject({
       'grid-column': '2',
-      'grid-row': '1',
+      'grid-row': '2',
       inset: 'auto',
       width: 'auto',
       margin: '20px',
