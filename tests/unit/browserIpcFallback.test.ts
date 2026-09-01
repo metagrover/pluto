@@ -45,6 +45,32 @@ describe('browser IPC capture journal fallback', () => {
     );
   });
 
+  it('provides a source-disclosed person dossier for browser previews', async () => {
+    const ipc = createBrowserIpcFallback();
+
+    await expect(
+      ipc.invoke('GET_PERSON_BRIEFING', 'preview-avery'),
+    ).resolves.toMatchObject({
+      person: { id: 'preview-avery', name: 'Avery Chen' },
+      meetings: [
+        { title: 'Product review', evidence: 'confirmed' },
+        { title: 'Launch handoff', evidence: 'confirmed' },
+        { title: 'Roadmap planning', evidence: 'mentioned' },
+      ],
+      commitments: {
+        open: [{ text: 'Send the final launch review' }],
+        delivered: [{ text: 'Shared the prototype walkthrough' }],
+      },
+      knowledgeDoc: {
+        scope_type: 'person_context',
+        status: 'up_to_date',
+      },
+    });
+    await expect(ipc.invoke('SEARCH_ENTITIES', 'Avery')).resolves.toMatchObject(
+      [{ id: 'preview-avery', type: 'person' }],
+    );
+  });
+
   it('returns the exact latest activity evidence when sealing a started journal', async () => {
     const ipc = createBrowserIpcFallback();
     const activityEvidence = await buildCaptureActivityEvidence(

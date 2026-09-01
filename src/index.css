@@ -55,7 +55,7 @@
     @apply inline-flex items-center rounded border border-amber-500/15 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/90;
   }
   .person-row {
-    @apply relative;
+    @apply relative border-b border-pro-border/50 last:border-b-0;
   }
   .person-row--selected {
     @apply rounded-xl bg-pro-accent/5;
@@ -64,7 +64,7 @@
     @apply flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
   }
   .person-avatar {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/40 bg-pro-surface/80 text-[11px] font-semibold text-pro-text-muted/50 transition-colors duration-150;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted/70 transition-colors duration-150;
   }
   .person-row__meeting:hover .person-avatar {
     @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
@@ -76,23 +76,23 @@
     @apply truncate text-[13.5px] font-medium leading-none text-pro-text-main transition-colors duration-150;
   }
   .person-identity span {
-    @apply truncate text-[11px] leading-none text-pro-text-muted/50;
+    @apply truncate text-[11px] leading-none text-pro-text-muted/70;
   }
   .person-row__meeting:hover .person-identity strong {
     @apply text-pro-accent;
   }
   .person-context {
-    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/60;
+    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/75;
   }
   .person-meta {
-    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/45;
+    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/70;
   }
   .person-meeting-count,
   .person-date {
     @apply flex items-center gap-1.5;
   }
   .person-row__chevron {
-    @apply -mr-1 shrink-0 text-pro-text-muted/20 transition-colors duration-150;
+    @apply -mr-1 shrink-0 text-pro-text-muted/40 transition-colors duration-150;
   }
   .person-row__meeting:hover .person-row__chevron {
     @apply text-pro-accent/50;
@@ -117,6 +117,130 @@
   }
   .people-loading span {
     @apply block h-20 animate-pulse rounded-xl bg-pro-hover;
+  }
+  .person-dossier {
+    @apply mx-auto w-full max-w-4xl px-5 pb-24 md:px-8;
+  }
+  .person-dossier__back {
+    @apply mb-7 inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__identity {
+    @apply flex items-center gap-4 border-b border-pro-border/60 pb-7;
+  }
+  .person-dossier__identity .person-avatar {
+    @apply h-12 w-12 rounded-xl border-pro-accent/20 bg-pro-accent/5 text-base text-pro-accent;
+  }
+  .person-dossier__identity h1 {
+    @apply font-serif text-[30px] font-medium tracking-[-0.01em] text-pro-text-main;
+  }
+  .person-dossier__identity p {
+    @apply mt-0.5 text-sm text-pro-text-muted;
+  }
+  .person-dossier__context {
+    @apply border-b border-pro-border/60 py-7;
+  }
+  .person-dossier__eyebrow {
+    @apply mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted;
+  }
+  .person-dossier__insights {
+    @apply mt-4 grid gap-6 md:grid-cols-2;
+  }
+  .person-dossier__insights li {
+    @apply border-l-2 border-pro-accent/25 pl-4;
+  }
+  .person-dossier__insights strong {
+    @apply text-sm font-semibold text-pro-text-main;
+  }
+  .person-dossier__insights p {
+    @apply mt-1 text-sm leading-6 text-pro-text-muted;
+  }
+  .person-dossier__insights q,
+  .person-dossier__commitment-copy q {
+    @apply mt-2 block text-xs italic leading-5 text-pro-text-muted/80;
+  }
+  .person-dossier__insights button,
+  .person-dossier__commitments > li > button {
+    @apply mt-2 text-xs font-semibold text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__activity {
+    @apply grid border-b border-pro-border/60 md:grid-cols-2 md:divide-x md:divide-pro-border/60;
+  }
+  .person-dossier__section {
+    @apply py-7 first:pr-0 md:first:pr-7 md:last:pl-7;
+  }
+  .person-dossier__section-heading {
+    @apply flex items-center gap-2;
+  }
+  .person-dossier__section-heading h2 {
+    @apply text-xs font-bold uppercase tracking-[0.1em] text-pro-text-main;
+  }
+  .person-dossier__section-heading > span {
+    @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-pro-text-muted;
+  }
+  .person-dossier__commitments {
+    @apply mt-4 space-y-5;
+  }
+  .person-dossier__commitments li {
+    @apply grid grid-cols-[auto_1fr] gap-x-3;
+  }
+  .person-dossier__commitment-icon {
+    @apply mt-0.5 text-pro-text-muted;
+  }
+  .person-dossier__commitment-copy {
+    @apply min-w-0;
+  }
+  .person-dossier__commitment-copy strong {
+    @apply block text-sm font-medium leading-5 text-pro-text-main;
+  }
+  .person-dossier__commitment-copy > span {
+    @apply mt-1 block text-xs text-pro-text-muted;
+  }
+  .person-dossier__commitments > li > button {
+    @apply col-start-2 justify-self-start;
+  }
+  .person-dossier__history {
+    @apply divide-y divide-pro-border/60;
+  }
+  .person-dossier__meeting-group {
+    @apply py-7;
+  }
+  .person-dossier__disclosure,
+  .person-dossier__empty-line {
+    @apply mt-2 text-xs text-pro-text-muted;
+  }
+  .person-dossier__meetings {
+    @apply mt-3;
+  }
+  .person-dossier__meetings > button {
+    @apply flex min-h-14 w-full items-center justify-between gap-4 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__meetings > button > span:first-child {
+    @apply min-w-0;
+  }
+  .person-dossier__meetings strong {
+    @apply block truncate text-sm font-medium text-pro-text-main;
+  }
+  .person-dossier__meetings small {
+    @apply mt-0.5 block truncate text-xs text-pro-text-muted;
+  }
+  .person-dossier__meeting-date {
+    @apply flex shrink-0 items-center gap-2 text-xs tabular-nums text-pro-text-muted;
+  }
+
+  @media (max-width: 640px) {
+    .person-context,
+    .person-meeting-count {
+      @apply hidden;
+    }
+    .person-meta {
+      @apply ml-auto pl-1;
+    }
+    .person-dossier__activity {
+      @apply block divide-x-0 divide-y divide-pro-border/60;
+    }
+    .person-dossier__section {
+      @apply px-0;
+    }
   }
 
   .meetings-index {
