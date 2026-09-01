@@ -81,6 +81,11 @@ export const UpcomingMeetings = ({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const visibleEvents = expanded ? events : events.slice(0, 2);
   const hiddenCount = Math.max(0, events.length - 2);
+  const calendarSource =
+    snapshot?.selectedCalendar &&
+    (snapshot.state === 'ready' || events.length > 0)
+      ? snapshot.selectedCalendar
+      : null;
 
   const chooseCalendar = async (calendar: CalendarDescriptor) => {
     setSelectingCalendarId(calendar.identifier);
@@ -100,26 +105,16 @@ export const UpcomingMeetings = ({
       aria-busy={loading}
       className="min-w-0"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-medium text-pro-text-muted/60">
-            Your day
-          </p>
-          <h2
-            id="upcoming-meetings-title"
-            className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
-          >
-            Upcoming meetings
-          </h2>
-        </div>
-        {snapshot?.selectedCalendar ? (
-          <span
-            title={`${snapshot.selectedCalendar.title} · ${snapshot.selectedCalendar.sourceTitle}`}
-            className="max-w-24 truncate text-[9px] font-semibold text-pro-text-muted/55"
-          >
-            {snapshot.selectedCalendar.title}
-          </span>
-        ) : null}
+      <div>
+        <p className="text-[10px] font-medium text-pro-text-muted/60">
+          Your day
+        </p>
+        <h2
+          id="upcoming-meetings-title"
+          className="mt-1 whitespace-nowrap text-[18px] font-serif font-medium text-pro-text-main"
+        >
+          Upcoming meetings
+        </h2>
       </div>
 
       <div className="mt-4">
@@ -221,12 +216,12 @@ export const UpcomingMeetings = ({
           </p>
         ) : events.length ? (
           <>
-            <div className="divide-y divide-pro-border/60">
+            <div className="space-y-3">
               {visibleEvents.map((event, index) => (
                 <article
                   key={event.occurrenceKey}
                   data-testid="upcoming-meeting-row"
-                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3 py-3 first:pt-0"
+                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
                 >
                   <div className="flex items-start gap-2 pt-0.5">
                     {index === 0 ? (
@@ -287,8 +282,8 @@ export const UpcomingMeetings = ({
           </>
         ) : snapshot.state === 'read_failed' ? (
           <RecoveryAction
-            title="Calendar couldn’t be read"
-            detail="Your calendar is selected. Pluto can try the local read again."
+            title={`Couldn’t refresh ${snapshot.selectedCalendar?.title ?? 'calendar'}`}
+            detail="The calendar is still selected. Pluto can try the local read again."
             action={() => void onRefreshCalendar()}
             actionLabel="Try again"
           />
@@ -298,6 +293,27 @@ export const UpcomingMeetings = ({
           </p>
         )}
       </div>
+      {calendarSource ? (
+        <div
+          data-testid="upcoming-meetings-source"
+          className="mt-4 flex min-w-0 items-center gap-2 text-[9px] font-medium text-pro-text-muted/60"
+        >
+          <span
+            title={`${calendarSource.title} · ${calendarSource.sourceTitle}`}
+            className="min-w-0 flex-1 truncate"
+          >
+            {calendarSource.title} · {calendarSource.sourceTitle}
+          </span>
+          <button
+            type="button"
+            aria-label="Change calendar"
+            onClick={onOpenSettings}
+            className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+          >
+            Change
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 };

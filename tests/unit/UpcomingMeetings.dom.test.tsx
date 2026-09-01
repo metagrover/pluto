@@ -64,6 +64,8 @@ const render = (
         events={[meeting(0), meeting(1), meeting(2)]}
         loading={false}
         onConnect={vi.fn(async () => {})}
+        onSelectCalendar={vi.fn(async () => {})}
+        onRefreshCalendar={vi.fn(async () => {})}
         onOpenSettings={vi.fn()}
         {...props}
       />,
@@ -97,6 +99,37 @@ describe('UpcomingMeetings', () => {
     expect(container.textContent).toContain('Leadership check-in');
     expect(container.textContent).toContain('Show less');
     act(() => root.unmount());
+  });
+
+  it('uses one calm agenda hierarchy with subordinate calendar metadata', () => {
+    const longCalendar = {
+      ...workCalendar,
+      title: 'Plans with Pookie and the extended family calendar',
+    };
+    const onOpenSettings = vi.fn();
+    const agenda = render({
+      snapshot: snapshot({ selectedCalendar: longCalendar }),
+      onOpenSettings,
+    });
+
+    const heading = agenda.container.querySelector('#upcoming-meetings-title');
+    expect(heading?.className).toContain('whitespace-nowrap');
+    expect(heading?.parentElement?.textContent).toBe(
+      'Your dayUpcoming meetings',
+    );
+    expect(agenda.container.querySelector('.divide-y')).toBeNull();
+
+    const source = agenda.container.querySelector(
+      '[data-testid="upcoming-meetings-source"]',
+    );
+    expect(source?.textContent).toContain(longCalendar.title);
+    expect(source?.textContent).toContain('iCloud');
+    expect(source?.querySelector('.truncate')).not.toBeNull();
+    source
+      ?.querySelector<HTMLButtonElement>('button[aria-label="Change calendar"]')
+      ?.click();
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    act(() => agenda.root.unmount());
   });
 
   it('uses the compact footprint for first-run and denied states', async () => {
@@ -190,5 +223,25 @@ describe('UpcomingMeetings', () => {
     expect(stale.container.textContent).toContain('Last read');
     expect(stale.container.textContent).toContain('Product review');
     act(() => stale.root.unmount());
+  });
+
+  it('names the selected calendar when a fresh read fails', () => {
+    const onRefreshCalendar = vi.fn(async () => {});
+    const failed = render({
+      snapshot: snapshot({
+        state: 'read_failed',
+        stale: false,
+        lastReadAt: null,
+      }),
+      events: [],
+      onRefreshCalendar,
+    });
+
+    expect(failed.container.textContent).toContain('Couldn’t refresh Work');
+    failed.container
+      .querySelector<HTMLButtonElement>('button[aria-label="Try again"]')
+      ?.click();
+    expect(onRefreshCalendar).toHaveBeenCalledOnce();
+    act(() => failed.root.unmount());
   });
 });
