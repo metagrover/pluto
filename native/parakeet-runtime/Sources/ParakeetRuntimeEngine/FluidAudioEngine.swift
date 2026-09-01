@@ -529,12 +529,22 @@ private final class FluidAudioEouCallbackCollector: @unchecked Sendable {
 actor FluidAudioEouManager: ParakeetEouManaging {
     private let backend: any FluidAudioEouBackend
     private let collector: FluidAudioEouCallbackCollector
+    private let maxPendingSeconds: Double
+    private var pendingSinceAudioSeconds: Double?
+    private var pendingSnapshot: ParakeetEouManagerSnapshot?
+    private var pendingNativeEou = false
+    private var committedTokenCount = 0
     private var closed = false
 
-    init(backend: any FluidAudioEouBackend) async {
+    init(
+        backend: any FluidAudioEouBackend,
+        maxPendingSeconds: Double = 45
+    ) async {
+        precondition(maxPendingSeconds.isFinite && maxPendingSeconds > 0)
         let collector = FluidAudioEouCallbackCollector()
         self.backend = backend
         self.collector = collector
+        self.maxPendingSeconds = maxPendingSeconds
         await backend.setPartialCallback { transcript in
             collector.append(kind: .partial, transcript: transcript)
         }
@@ -566,7 +576,11 @@ actor FluidAudioEouManager: ParakeetEouManaging {
         }
         buffer.frameLength = AVAudioFrameCount(frame.frameCount)
         _ = try await backend.process(audioBuffer: buffer)
-        return await snapshots(from: collector.drain())
+        let snapshots = await snapshots(from: collector.drain())
+        return boundPendingSnapshots(
+            snapshots,
+            audioEndSeconds: frame.audioEndSeconds
+        )
     }
 
     func finish() async throws -> [ParakeetEouManagerSnapshot] {
@@ -609,9 +623,122 @@ actor FluidAudioEouManager: ParakeetEouManaging {
             ParakeetEouManagerSnapshot(
                 kind: callback.0,
                 transcript: callback.1,
-                tokens: tokens
+                tokens: tokenPrefix(matching: callback.1, from: tokens)
             )
         }
+    }
+
+    private func boundPendingSnapshots(
+        _ snapshots: [ParakeetEouManagerSnapshot],
+        audioEndSeconds: Double
+    ) -> [ParakeetEouManagerSnapshot] {
+        var bounded: [ParakeetEouManagerSnapshot] = []
+        for snapshot in snapshots {
+            switch snapshot.kind {
+            case .final:
+                bounded.append(snapshot)
+                committedTokenCount = snapshot.tokens.count
+                pendingSinceAudioSeconds = nil
+                pendingSnapshot = nil
+                pendingNativeEou = false
+            case .eou:
+                let partial = ParakeetEouManagerSnapshot(
+                    kind: .partial,
+                    transcript: snapshot.transcript,
+                    tokens: snapshot.tokens
+                )
+                trackPending(partial, audioEndSeconds: audioEndSeconds)
+                pendingNativeEou = true
+                if bounded.last?.kind != .partial
+                    || bounded.last?.transcript != partial.transcript
+                {
+                    bounded.append(partial)
+                }
+            case .partial:
+                trackPending(snapshot, audioEndSeconds: audioEndSeconds)
+                bounded.append(snapshot)
+            }
+        }
+        let pendingTimedOut = pendingSinceAudioSeconds.map {
+            audioEndSeconds - $0 >= maxPendingSeconds
+        } ?? false
+        guard
+            let pendingSnapshot,
+            pendingNativeEou || pendingTimedOut,
+            let checkpoint = wordSafeCheckpoint(from: pendingSnapshot)
+        else { return bounded }
+
+        bounded.removeAll { $0.kind == .partial }
+        bounded.append(checkpoint)
+        committedTokenCount = checkpoint.tokens.count
+        pendingNativeEou = false
+        if pendingSnapshot.tokens.count > committedTokenCount {
+            bounded.append(pendingSnapshot)
+            self.pendingSinceAudioSeconds = audioEndSeconds
+        } else {
+            self.pendingSinceAudioSeconds = nil
+            self.pendingSnapshot = nil
+        }
+        return bounded
+    }
+
+    private func trackPending(
+        _ snapshot: ParakeetEouManagerSnapshot,
+        audioEndSeconds: Double
+    ) {
+        pendingSnapshot = snapshot
+        if snapshot.tokens.count > committedTokenCount,
+            !snapshot.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            pendingSinceAudioSeconds == nil
+        {
+            pendingSinceAudioSeconds = audioEndSeconds
+        }
+    }
+
+    private func wordSafeCheckpoint(
+        from partial: ParakeetEouManagerSnapshot
+    ) -> ParakeetEouManagerSnapshot? {
+        guard let nextWordIndex = partial.tokens.indices.last(where: { index in
+            index > committedTokenCount && startsWord(partial.tokens[index].text)
+        }) else { return nil }
+        let tokens = Array(partial.tokens.prefix(nextWordIndex))
+        guard tokens.count > committedTokenCount else { return nil }
+        return .eou(decodedTranscript(from: tokens), tokens: tokens)
+    }
+
+    private func tokenPrefix(
+        matching transcript: String,
+        from tokens: [ParakeetEouManagerToken]
+    ) -> [ParakeetEouManagerToken] {
+        let target = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return [] }
+        let targetByteCount = target.utf8.count
+        var decoded = ""
+        decoded.reserveCapacity(targetByteCount)
+        var decodedByteCount = 0
+        for endIndex in tokens.indices {
+            var piece = tokens[endIndex].text.replacingOccurrences(of: "▁", with: " ")
+            if decoded.isEmpty {
+                piece = String(piece.drop(while: \.isWhitespace))
+            }
+            decoded.append(piece)
+            decodedByteCount += piece.utf8.count
+            if decodedByteCount == targetByteCount, decoded == target {
+                return Array(tokens.prefix(endIndex + 1))
+            }
+            if decodedByteCount >= targetByteCount { break }
+        }
+        return tokens
+    }
+
+    private func decodedTranscript(from tokens: [ParakeetEouManagerToken]) -> String {
+        tokens.map(\.text).joined()
+            .replacingOccurrences(of: "▁", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func startsWord(_ token: String) -> Bool {
+        token.hasPrefix("▁") || token.first?.isWhitespace == true
     }
 
     private func currentTokens() async -> [ParakeetEouManagerToken] {

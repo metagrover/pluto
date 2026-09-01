@@ -195,6 +195,47 @@ describe('EOU transcript projection', () => {
     expect(rows.map(({ timestampMs }) => timestampMs)).toEqual([0, 100, 500]);
   });
 
+  it('keeps an older tentative buffer at the live edge after committed history', () => {
+    const projection = createEouTranscriptProjection();
+    projection.apply(
+      update({
+        committedText: '',
+        tentativeText: 'a long mutable buffer',
+        processedAudioSeconds: 95,
+        tokens: [
+          {
+            text: 'a long mutable buffer',
+            startSeconds: 94,
+            endSeconds: 95,
+            committed: false,
+          },
+        ],
+      }),
+    );
+    const rows = projection.apply(
+      update({
+        source: 'system',
+        streamId: 'eou-meeting-1-system',
+        committedText: 'a later confirmed turn',
+        tentativeText: '',
+        processedAudioSeconds: 380,
+        tokens: [
+          {
+            text: 'a later confirmed turn',
+            startSeconds: 378,
+            endSeconds: 379,
+            committed: true,
+          },
+        ],
+      }),
+    );
+
+    expect(rows.map(({ confirmed }) => confirmed)).toEqual([true, false]);
+    expect(rows.map(({ timestampMs }) => timestampMs)).toEqual([
+      378_000, 94_000,
+    ]);
+  });
+
   it('ignores duplicate, stale, or prior-generation updates', () => {
     const projection = createEouTranscriptProjection();
     const current = projection.apply(update({ revision: 3 }));
