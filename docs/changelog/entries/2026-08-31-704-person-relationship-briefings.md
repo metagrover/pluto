@@ -1,7 +1,7 @@
 ### Turn People profiles into trusted relationship briefings
 
 - **Issue:** [#704](https://github.com/metagrover/pluto/issues/704)
-- **PR:** Pending.
+- **PR:** [#706](https://github.com/metagrover/pluto/pull/706)
 - **Changed:** Selecting a person now opens a concise dossier with verified open expectations, recent deliveries, source-backed relationship insights, and separate confirmed, scheduled, and mention-only meeting history.
 - **Why:** People previously jumped to one recent meeting and mixed name associations with participation and ownership, so they could not provide a dependable re-entry view of a relationship.
 - **Replaced:** Latest-meeting navigation, fuzzy assignee-name counts, undisclosed meeting associations, and immediate cross-meeting synthesis in the meeting completion path.
