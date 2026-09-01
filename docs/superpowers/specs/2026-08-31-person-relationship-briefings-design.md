@@ -79,4 +79,3 @@ The profile uses Pluto's restrained neutral palette, one accent for interaction 
 - DOM tests cover directory-to-profile navigation, hierarchy, progressive disclosure, empty evidence, source opening, and accessible labels.
 - Focused tests, full `pnpm test`, lint, production build, changelog validation, and `git diff --check` run before completion.
 - Electron is rendered and inspected at desktop and narrow width. If the runtime cannot be made available, that limitation is reported without claiming visual acceptance.
-

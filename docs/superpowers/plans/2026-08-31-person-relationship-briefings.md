@@ -66,9 +66,9 @@
 - Modify: `docs/decisions.md`
 - Create: `docs/changelog/entries/2026-08-31-704-person-relationship-briefings.md`
 
-- [ ] Record the precision-first person evidence ladder and immediate-versus-idle processing boundary in `docs/decisions.md`.
-- [ ] Add an issue-scoped changelog fragment explaining the user outcome and trust boundary.
-- [ ] Run focused tests for People, person briefing, meeting analysis, knowledge synthesis, and background refresh.
-- [ ] Run `pnpm test`, `pnpm run lint`, `pnpm run build`, `pnpm run changelog:check`, and `git diff --check`.
-- [ ] Launch Electron after repairing the native ABI if necessary; inspect People directory and dossier at desktop and 430px width.
-- [ ] Commit the verified implementation on `codex/704-person-briefings` and update issue #704 with evidence and any deviations.
+- [x] Record the precision-first person evidence ladder and immediate-versus-idle processing boundary in `docs/decisions.md`.
+- [x] Add an issue-scoped changelog fragment explaining the user outcome and trust boundary.
+- [x] Run focused tests for People, person briefing, meeting analysis, knowledge synthesis, and background refresh.
+- [x] Run `pnpm test`, `pnpm run lint`, `pnpm run build`, changelog validation, and `git diff --check`.
+- [x] Inspect the People directory and dossier in the browser preview at desktop, dark mode, and 430px. The packaged Electron shell was also launched against a disposable profile, but its transcription-runtime path safety gate blocked the workspace before People could render.
+- [x] Commit the verified implementation on `codex/704-person-briefings` and update issue #704 with evidence and any deviations.
