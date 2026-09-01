@@ -1378,6 +1378,19 @@ export const recoverInterruptedCaptureJournals = async (
       continue;
     }
 
+    if (
+      manifest.schemaVersion === 3 &&
+      !existingMeeting &&
+      manifest.activityEvidence === undefined &&
+      manifest.intervals.length === 0 &&
+      manifest.entries.length === 0 &&
+      manifest.transcriptCheckpoints.length === 0 &&
+      manifest.acceptanceFrames.length === 0
+    ) {
+      result.skippedEmptyCount += 1;
+      continue;
+    }
+
     try {
       if (manifest.schemaVersion === 3) {
         if (manifest.lifecycleState === 'recording' && deps.repairRawChunk) {

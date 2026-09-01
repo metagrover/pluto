@@ -79,7 +79,10 @@ import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
-import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
+import {
+  buildSaveMeetingFailureDiagnostic,
+  saveMeetingWithParticipantSideEffects,
+} from './saveMeetingIpc';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
@@ -2195,6 +2198,16 @@ app.whenReady().then(async () => {
   };
 
   ipcMain.handle('SAVE_MEETING', (_event, meeting, options) => {
+    const expectedValidationRunId =
+      options && typeof options.expectedValidationRunId === 'string'
+        ? options.expectedValidationRunId
+        : null;
+    const expectedDownstreamRunId =
+      options && typeof options.expectedDownstreamRunId === 'string'
+        ? options.expectedDownstreamRunId
+        : null;
+    const claimValidationLease = options?.claimValidationLease;
+    const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
     try {
       const persisted =
         meeting &&
@@ -2244,16 +2257,6 @@ app.whenReady().then(async () => {
       console.log(
         `[Pluto] Saving meeting [has_id=${Boolean(meeting?.id)}, title_length=${typeof meeting?.title === 'string' ? meeting.title.length : 0}]`,
       );
-      const expectedValidationRunId =
-        options && typeof options.expectedValidationRunId === 'string'
-          ? options.expectedValidationRunId
-          : null;
-      const expectedDownstreamRunId =
-        options && typeof options.expectedDownstreamRunId === 'string'
-          ? options.expectedDownstreamRunId
-          : null;
-      const claimValidationLease = options?.claimValidationLease;
-      const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
       const result = saveMeetingWithParticipantSideEffects({
         meeting,
         saveMeeting: () =>
@@ -2332,7 +2335,17 @@ app.whenReady().then(async () => {
       }
       return result;
     } catch (e) {
-      console.error('[Pluto] SAVE_MEETING failed:', e);
+      console.error(
+        '[Pluto] SAVE_MEETING failed',
+        buildSaveMeetingFailureDiagnostic({
+          meetingId: meeting?.id,
+          expectedValidationRunId,
+          expectedDownstreamRunId,
+          claimValidationLease,
+          transcriptOwnedFieldsOnly,
+          error: e,
+        }),
+      );
       throw e;
     }
   });

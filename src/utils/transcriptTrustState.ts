@@ -680,6 +680,47 @@ export const parseTranscriptTrustEnvelope = (
   return { ok: true, envelope: raw as TranscriptTrustEnvelopeV2 };
 };
 
+export const assertValidTranscriptTrustCandidate = (
+  meeting: TranscriptTrustMeetingFields,
+  transition: string,
+  options: { requireV2?: boolean } = {},
+): void => {
+  const integrity = (() => {
+    try {
+      const parsed = JSON.parse(meeting.transcript_integrity_json || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (integrity?.schemaVersion !== TRANSCRIPT_TRUST_SCHEMA_VERSION) {
+    if (options.requireV2) {
+      throw new Error(
+        `invalid_transcript_trust_candidate:${transition}:invalid_shape`,
+      );
+    }
+    return;
+  }
+
+  const parsed = parseTranscriptTrustEnvelope(
+    meeting.transcript_integrity_json,
+    {
+      transcriptStatus: meeting.transcript_status,
+      transcriptValidatedAt: meeting.transcript_validated_at,
+      payloadLifecycleStatus: parsePayloadLifecycleStatus(
+        meeting.transcript_json,
+      ),
+    },
+  );
+  if (!parsed.ok) {
+    throw new Error(
+      `invalid_transcript_trust_candidate:${transition}:${parsed.failure}`,
+    );
+  }
+};
+
 export const buildTranscriptTrustCapabilities = (
   input: TranscriptTrustCapabilityInput,
 ): TranscriptTrustCapabilities => {

@@ -230,6 +230,26 @@ describe('runFinalTranscription', () => {
     expect(deps.startAnalysis).not.toHaveBeenCalled();
   });
 
+  it('classifies a rejected canonical trust candidate as an integrity failure', async () => {
+    const deps = dependencies();
+    deps.commitCanonical.mockRejectedValue(
+      new Error(
+        'invalid_transcript_trust_candidate:final_transcription_validated:invalid_shape',
+      ),
+    );
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome).toEqual({
+      status: 'needs_attention',
+      reasons: ['integrity_rejected'],
+    });
+    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
+      expect.objectContaining({ failure: 'integrity_rejected' }),
+    );
+    expect(deps.startAnalysis).not.toHaveBeenCalled();
+  });
+
   it('honors cancellation without committing', async () => {
     const deps = dependencies();
     const controller = new AbortController();

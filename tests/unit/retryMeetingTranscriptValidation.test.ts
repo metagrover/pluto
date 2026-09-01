@@ -8,6 +8,24 @@ import {
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 const validationInputs = vi.hoisted(() => [] as unknown[]);
+const rejectedTrustTransitions = vi.hoisted(() => new Set<string>());
+
+vi.mock('../../src/utils/transcriptTrustState.ts', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/utils/transcriptTrustState.ts')
+  >('../../src/utils/transcriptTrustState.ts');
+  return {
+    ...actual,
+    assertValidTranscriptTrustCandidate: (
+      ...args: Parameters<typeof actual.assertValidTranscriptTrustCandidate>
+    ) => {
+      if (rejectedTrustTransitions.has(args[1])) {
+        throw new Error(`forced_invalid_trust_candidate:${args[1]}`);
+      }
+      return actual.assertValidTranscriptTrustCandidate(...args);
+    },
+  };
+});
 
 vi.mock('../../src/services/recordingTranscriptValidation.ts', async () => {
   const actual = await vi.importActual<
@@ -85,6 +103,7 @@ describe('meetingTitleNeedsGeneration', () => {
 describe('retryMeetingTranscriptValidation', () => {
   beforeEach(() => {
     validationInputs.length = 0;
+    rejectedTrustTransitions.clear();
   });
 
   it('does not generate downstream intelligence while validation still needs attention', async () => {
@@ -115,6 +134,90 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
     );
   });
+
+  it('rejects an invalid v2 trust candidate before save or notes publication', async () => {
+    const invalidMeeting = {
+      ...meeting,
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'needs_attention',
+        segments: [],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'local_speech_unaccounted' }],
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        unexpectedProducerField: true,
+      }),
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_MEETING') return invalidMeeting;
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).rejects.toThrow(
+      'invalid_transcript_trust_candidate:claim_validation:invalid_shape',
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SAVE_MEETING',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ['needs_attention', false],
+    ['validated', true],
+  ] as const)(
+    'converges a rejected %s candidate through the retry failure transition',
+    async (transition, returnsSegments) => {
+      rejectedTrustTransitions.add(transition);
+      let current: Record<string, unknown> = { ...meeting };
+      const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+        if (channel === 'GET_MEETING') return current;
+        if (channel === 'AUDIO_PROBE_DURATION') return 60;
+        if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+          return {
+            segments: returnsSegments
+              ? [rawSegment(5, 20, 'Synthetic canonical statement.')]
+              : [],
+          };
+        }
+        if (channel === 'SAVE_MEETING') {
+          current = { ...current, ...(payload as Record<string, unknown>) };
+          return true;
+        }
+        if (channel === 'FAIL_TRANSCRIPT_VALIDATION_RETRY') return true;
+        if (channel === 'TRANSCRIPTION_CANCEL_FINAL') {
+          return { cancelled: true };
+        }
+        throw new Error(`Unexpected channel: ${channel}`);
+      });
+
+      await expect(
+        retryMeetingTranscriptValidation('synthetic-id', invoke),
+      ).resolves.toEqual({ status: 'needs_attention' });
+      expect(invoke).toHaveBeenCalledWith(
+        'FAIL_TRANSCRIPT_VALIDATION_RETRY',
+        'synthetic-id',
+        expect.any(String),
+        'retry_failed',
+      );
+      expect(
+        invoke.mock.calls.filter(([channel]) => channel === 'SAVE_MEETING'),
+      ).toHaveLength(1);
+      expect(invoke).not.toHaveBeenCalledWith(
+        'GENERATE_MEETING_NOTES',
+        expect.anything(),
+      );
+    },
+  );
 
   it('converges partial capture-gap intelligence without claiming validation', async () => {
     let current: Record<string, unknown> = {
@@ -714,6 +817,9 @@ describe('retryMeetingTranscriptValidation', () => {
           journalSchemaVersion: 3,
           checkpointEvidenceVerified: true,
           gapDetected: false,
+          sourceScope: 'multiple',
+          acknowledgedChunkCount: 2,
+          recoveredChunkCount: 2,
         },
       }),
       capture_journal_generation: 'checkpoint-generation-2',

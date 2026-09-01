@@ -7,6 +7,48 @@ type ParticipantEntity = {
   id: string;
 };
 
+export type SaveMeetingFailureDiagnostic = {
+  meetingId: string | null;
+  validationRunId: string | null;
+  downstreamRunId: string | null;
+  operation:
+    | 'claim_validation'
+    | 'save_validation_result'
+    | 'save_downstream_result'
+    | 'save_meeting';
+  reason: string;
+  rollback: 'transaction_rolled_back';
+};
+
+export const buildSaveMeetingFailureDiagnostic = (input: {
+  meetingId: unknown;
+  expectedValidationRunId: string | null;
+  expectedDownstreamRunId: string | null;
+  claimValidationLease: unknown;
+  transcriptOwnedFieldsOnly: unknown;
+  error: unknown;
+}): SaveMeetingFailureDiagnostic => ({
+  meetingId: input.meetingId == null ? null : String(input.meetingId),
+  validationRunId:
+    input.expectedValidationRunId ??
+    (input.claimValidationLease &&
+    typeof input.claimValidationLease === 'object' &&
+    typeof (input.claimValidationLease as { runId?: unknown }).runId ===
+      'string'
+      ? (input.claimValidationLease as { runId: string }).runId
+      : null),
+  downstreamRunId: input.expectedDownstreamRunId,
+  operation: input.expectedDownstreamRunId
+    ? 'save_downstream_result'
+    : input.claimValidationLease
+      ? 'claim_validation'
+      : input.expectedValidationRunId
+        ? 'save_validation_result'
+        : 'save_meeting',
+  reason: input.error instanceof Error ? input.error.message : 'unknown',
+  rollback: 'transaction_rolled_back',
+});
+
 export const saveMeetingWithParticipantSideEffects = <Result>(params: {
   meeting: ParticipantBearingMeeting;
   saveMeeting: () => Result;

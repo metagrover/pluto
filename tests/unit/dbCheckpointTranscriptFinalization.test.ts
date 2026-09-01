@@ -96,6 +96,47 @@ it('claims and commits final transcription only for the exact capture generation
   });
 });
 
+it('rejects an invalid v2 final commit without publishing the transcript', () => {
+  const id = 'parakeet-final-invalid-trust';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'needs_attention',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'needs_attention',
+      segments: [],
+    }),
+    transcript_integrity_json: JSON.stringify({
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'local_speech_unaccounted' }],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    }),
+    capture_journal_generation: journalGeneration,
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'parakeet-run-invalid',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: Date.parse('2026-08-15T00:00:00.000Z'),
+  });
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+
+  expect(() =>
+    commitMeetingFinalTranscription({
+      meetingId: id,
+      runId: lease.runId,
+      captureGeneration: journalGeneration,
+      canonicalTranscriptJson,
+      transcriptIntegrityJson: '{}',
+      transcriptValidatedAt: validatedAt,
+    }),
+  ).toThrow(
+    'invalid_transcript_trust_candidate:commit_final_transcription:invalid_shape',
+  );
+  expect(getMeeting(id)).toMatchObject({ transcript_status: 'validating' });
+});
+
 it('expires interrupted final transcription without replacing provisional text', () => {
   const id = 'parakeet-final-interrupted';
   const provisional = JSON.stringify({
@@ -136,11 +177,10 @@ const canonicalTranscriptJson = JSON.stringify({
   segments: [{ speaker: 'Me', text: 'Checkpoint transcript' }],
 });
 const transcriptIntegrityJson = JSON.stringify({
-  recovery: {
-    source: 'capture_journal',
-    journalGeneration,
-    gapDetected: false,
-  },
+  schemaVersion: 2,
+  state: 'validated',
+  causes: [],
+  evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
   validationProof: {
     gateVersion: 'canonical_integrity_v1',
     validatedAt,
@@ -454,6 +494,32 @@ describe('checkpoint transcript database finalization', () => {
         downstreamRunId: 'different-downstream-run',
       }),
     ).toBe('superseded');
+  });
+
+  it('rejects invalid checkpoint trust without mutating the meeting', () => {
+    const id = 'checkpoint-invalid-trust';
+    seedValidatingMeeting(id);
+    const before = getMeeting(id);
+
+    expect(() =>
+      finalizeCheckpointTranscript({
+        ...input(id),
+        transcriptIntegrityJson: JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          causes: [],
+          evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+          validationProof: {
+            gateVersion: 'canonical_integrity_v1',
+            validatedAt,
+          },
+          unexpectedProducerField: true,
+        }),
+      }),
+    ).toThrow(
+      'invalid_transcript_trust_candidate:finalize_checkpoint_transcript:invalid_shape',
+    );
+    expect(getMeeting(id)).toEqual(before);
   });
 
   it.each([

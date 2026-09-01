@@ -8,6 +8,43 @@ const mocks = vi.hoisted(() => ({
   processDownstream: vi.fn(),
 }));
 
+const finalMetadata = {
+  policy: 'parakeet_final_v1' as const,
+  engine: 'parakeet_coreml' as const,
+  model: 'parakeet-tdt-0.6b-v3' as const,
+  computeUnits: 'cpu_and_neural_engine' as const,
+  computeType: 'int8' as const,
+  language: 'en',
+  elapsedMs: 10,
+  sources: { mic: 'speech' as const, system: 'no_speech' as const },
+  sourceDetails: {
+    mic: {
+      outcome: 'speech' as const,
+      providerVersion: 'test-provider',
+      elapsedMs: 10,
+      vadStatus: 'speech' as const,
+      speechSeconds: 1,
+      segmentCount: 1,
+      wordCount: 1,
+    },
+  },
+  providerVersions: ['test-provider'],
+  modelBundleVersions: [],
+  warnings: [],
+  vocabularyCount: 1,
+  reconciliation: {
+    policyVersion: 'cross_channel_skew_v1' as const,
+    skewApplied: false,
+    estimatedOffsetMs: 0,
+    anchorCount: 0,
+    confidence: 0,
+    droppedMicWordCount: 0,
+    collapsedSequenceCount: 0,
+    droppedExactDuplicateSegmentCount: 0,
+    droppedEmbeddedMicFragmentCount: 0,
+  },
+};
+
 vi.mock('../../src/utils/transcriptActivityEvidence', () => ({
   parseCaptureActivityEvidence: mocks.parseEvidence,
 }));
@@ -102,18 +139,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
           },
         ],
         integrity: {},
-        metadata: {
-          engine: 'parakeet_coreml',
-          model: 'parakeet-tdt-0.6b-v3',
-          computeUnits: 'cpu_and_neural_engine',
-          computeType: 'int8',
-          language: 'en',
-          elapsedMs: 10,
-          providerVersions: ['test-provider'],
-          modelBundleVersions: [],
-          warnings: [],
-          vocabularyCount: 1,
-        },
+        metadata: finalMetadata,
       });
       await dependencies.startAnalysis({
         meetingId: 'meeting-1',
@@ -144,5 +170,53 @@ describe('runPersistedMeetingFinalTranscription', () => {
     expect(persisted.liveSegments).toEqual([
       { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
     ]);
+  });
+
+  it('rejects invalid final metadata before canonical commit or downstream work', async () => {
+    const meeting = {
+      id: 'meeting-invalid-final',
+      title: 'Meeting',
+      created_at: '2026-08-15T00:00:00.000Z',
+      started_at: '2026-08-15T00:00:00.000Z',
+      duration_seconds: 60,
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      capture_journal_generation: 'generation-1',
+      transcript_status: 'provisional',
+      transcript_json: JSON.stringify({ segments: [] }),
+      transcript_integrity_json: JSON.stringify({
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        activityEvidence: { private: 'verified by parser' },
+      }),
+    } as Meeting;
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_TRANSCRIPTION_VOCABULARY') return { terms: [] };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+    mocks.runFinal.mockImplementation(async (_input, dependencies) => {
+      await dependencies.commitCanonical({
+        meetingId: 'meeting-invalid-final',
+        expectedCaptureGeneration: 'generation-1',
+        segments: [
+          { text: 'canonical', startTime: 0, endTime: 1, speaker: 'Speaker' },
+        ],
+        integrity: {},
+        metadata: { ...finalMetadata, unexpectedProducerField: true },
+      });
+      return { status: 'validated' };
+    });
+
+    await expect(
+      runPersistedMeetingFinalTranscription(meeting, invoke, {
+        runId: 'run-invalid-final',
+      }),
+    ).rejects.toThrow(
+      'invalid_transcript_trust_candidate:final_transcription_validated:invalid_shape',
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'COMMIT_FINAL_TRANSCRIPTION',
+      expect.anything(),
+    );
+    expect(mocks.processDownstream).not.toHaveBeenCalled();
   });
 });

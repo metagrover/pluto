@@ -86,7 +86,10 @@ import { readProjectQualification } from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
-import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
+import {
+  assertValidTranscriptTrustCandidate,
+  parseTranscriptTrustEnvelope,
+} from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
@@ -2467,6 +2470,16 @@ export const commitMeetingFinalTranscription = (input: {
       ...suppliedIntegrity,
       finalTranscription: finishFinalTranscriptionLease(lease),
     });
+    assertValidTranscriptTrustCandidate(
+      {
+        transcript_status: 'validated',
+        transcript_validated_at: input.transcriptValidatedAt,
+        transcript_integrity_json: nextIntegrity,
+        transcript_json: input.canonicalTranscriptJson,
+      },
+      'commit_final_transcription',
+      { requireV2: true },
+    );
     const changed = db
       .prepare(
         `UPDATE meetings
@@ -2652,7 +2665,19 @@ export const finalizeCheckpointTranscript = (
       currentDownstreamLease?.runId === input.downstreamRunId &&
       currentDownstreamLease.transcriptValidatedAt ===
         input.transcriptValidatedAt;
-    if (alreadyCommitted) return 'already_committed';
+    if (alreadyCommitted) {
+      assertValidTranscriptTrustCandidate(
+        {
+          transcript_status: 'validated',
+          transcript_validated_at: input.transcriptValidatedAt,
+          transcript_integrity_json: input.transcriptIntegrityJson,
+          transcript_json: input.canonicalTranscriptJson,
+        },
+        'finalize_checkpoint_transcript',
+        { requireV2: true },
+      );
+      return 'already_committed';
+    }
 
     const integrity = parseIntegrityRecord(current.transcript_integrity_json);
     const currentValidationRunId = readRetryLease(integrity)?.runId ?? null;
@@ -2664,6 +2689,17 @@ export const finalizeCheckpointTranscript = (
     ) {
       return 'superseded';
     }
+
+    assertValidTranscriptTrustCandidate(
+      {
+        transcript_status: 'validated',
+        transcript_validated_at: input.transcriptValidatedAt,
+        transcript_integrity_json: input.transcriptIntegrityJson,
+        transcript_json: input.canonicalTranscriptJson,
+      },
+      'finalize_checkpoint_transcript',
+      { requireV2: true },
+    );
 
     const updated = db
       .prepare(

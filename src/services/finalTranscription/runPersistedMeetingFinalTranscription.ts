@@ -9,6 +9,7 @@ import type {
   StoredTranscriptV2,
 } from '../../utils/transcriptSchema.ts';
 import { buildTranscriptJsonPayload } from '../../utils/transcriptSchema.ts';
+import { assertValidTranscriptTrustCandidate } from '../../utils/transcriptTrustState.ts';
 import { processValidatedMeetingDownstream } from '../processValidatedMeetingDownstream.ts';
 import {
   type FinalTranscriptionResourcePolicy,
@@ -203,6 +204,16 @@ export const runPersistedMeetingFinalTranscription = async (
           },
           finalTranscriptionResult: commit.metadata,
         });
+        assertValidTranscriptTrustCandidate(
+          {
+            transcript_status: 'validated',
+            transcript_validated_at: transcriptValidatedAt,
+            transcript_integrity_json: transcriptIntegrityJson,
+            transcript_json: canonicalTranscriptJson,
+          },
+          'final_transcription_validated',
+          { requireV2: true },
+        );
         const outcome = (await invoke('COMMIT_FINAL_TRANSCRIPTION', {
           meetingId,
           runId,

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { saveMeetingWithParticipantSideEffects } from '../../electron/saveMeetingIpc';
+import {
+  buildSaveMeetingFailureDiagnostic,
+  saveMeetingWithParticipantSideEffects,
+} from '../../electron/saveMeetingIpc';
 
 describe('SAVE_MEETING participant side effects', () => {
   it('upserts and links participants from the initial participant-bearing save', () => {
@@ -69,5 +72,73 @@ describe('SAVE_MEETING participant side effects', () => {
       'upsert:Grace',
       'link:entity-Grace',
     ]);
+  });
+});
+
+describe('buildSaveMeetingFailureDiagnostic', () => {
+  it('identifies a validation result failure without meeting content', () => {
+    const diagnostic = buildSaveMeetingFailureDiagnostic({
+      meetingId: 'meeting-123',
+      expectedValidationRunId: 'validation-456',
+      expectedDownstreamRunId: null,
+      claimValidationLease: null,
+      transcriptOwnedFieldsOnly: true,
+      error: new Error('invalid_transcript_trust_state:invalid_shape'),
+    });
+
+    expect(diagnostic).toEqual({
+      meetingId: 'meeting-123',
+      validationRunId: 'validation-456',
+      downstreamRunId: null,
+      operation: 'save_validation_result',
+      reason: 'invalid_transcript_trust_state:invalid_shape',
+      rollback: 'transaction_rolled_back',
+    });
+    expect(diagnostic).not.toHaveProperty('title');
+    expect(diagnostic).not.toHaveProperty('transcript');
+  });
+
+  it('reports the claimed validation run when no expected run exists yet', () => {
+    expect(
+      buildSaveMeetingFailureDiagnostic({
+        meetingId: 'meeting-claim',
+        expectedValidationRunId: null,
+        expectedDownstreamRunId: null,
+        claimValidationLease: { runId: 'claim-run-789' },
+        transcriptOwnedFieldsOnly: false,
+        error: new Error('claim_failed'),
+      }),
+    ).toMatchObject({
+      operation: 'claim_validation',
+      validationRunId: 'claim-run-789',
+    });
+  });
+
+  it('uses the same operation precedence as SAVE_MEETING dispatch', () => {
+    expect(
+      buildSaveMeetingFailureDiagnostic({
+        meetingId: 'meeting-downstream',
+        expectedValidationRunId: 'validation-run',
+        expectedDownstreamRunId: 'downstream-run',
+        claimValidationLease: { runId: 'claim-run' },
+        transcriptOwnedFieldsOnly: true,
+        error: new Error('save_failed'),
+      }),
+    ).toMatchObject({
+      operation: 'save_downstream_result',
+      validationRunId: 'validation-run',
+      downstreamRunId: 'downstream-run',
+    });
+
+    expect(
+      buildSaveMeetingFailureDiagnostic({
+        meetingId: 'meeting-validation',
+        expectedValidationRunId: 'validation-run',
+        expectedDownstreamRunId: null,
+        claimValidationLease: null,
+        transcriptOwnedFieldsOnly: false,
+        error: new Error('save_failed'),
+      }),
+    ).toMatchObject({ operation: 'save_validation_result' });
   });
 });

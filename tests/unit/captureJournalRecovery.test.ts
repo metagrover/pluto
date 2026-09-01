@@ -1209,6 +1209,103 @@ describe('capture journal recovery', () => {
     expect(savedMeetingIds).toEqual(['meeting-b']);
   });
 
+  it('classifies an empty stopping v3 orphan without retrying it as a failure', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-empty-orphan';
+    const manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    await stopCaptureJournal(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+    });
+    const saveMeeting = vi.fn();
+    const recover = () =>
+      recoverInterruptedCaptureJournals(root, {
+        getMeeting: () => null,
+        saveMeeting,
+        stitchWavSegments: vi.fn(),
+        nowMs: 3_000,
+      });
+
+    await expect(recover()).resolves.toMatchObject({
+      recoveredCount: 0,
+      failedRecoveryCount: 0,
+      skippedEmptyCount: 1,
+    });
+    await expect(recover()).resolves.toMatchObject({
+      recoveredCount: 0,
+      failedRecoveryCount: 0,
+      skippedEmptyCount: 1,
+    });
+    expect(saveMeeting).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty recovery-required meeting fail-closed', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-empty-recovery-required';
+    const manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    await stopCaptureJournal(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+    });
+    const existingMeeting = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId,
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+      title: 'Meeting',
+      userNotes: '',
+      endReason: 'interrupted',
+      failureReason: 'capture_activity_missing',
+    }) as PersistedMeeting;
+
+    await expect(
+      recoverInterruptedCaptureJournals(root, {
+        getMeeting: () => existingMeeting,
+        saveMeeting: vi.fn(),
+        stitchWavSegments: vi.fn(),
+        nowMs: 3_000,
+      }),
+    ).resolves.toMatchObject({
+      recoveredCount: 0,
+      failedRecoveryCount: 1,
+      skippedEmptyCount: 0,
+    });
+  });
+
+  it('does not classify an evidence-bearing empty orphan as empty', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-empty-with-evidence';
+    await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting: vi.fn(),
+      stitchWavSegments: vi.fn(),
+      nowMs: 3_000,
+    });
+
+    expect(result.skippedEmptyCount).toBe(0);
+  });
+
   it('continues recovering later journals after one meeting save fails', async () => {
     const root = await makeRoot();
     for (const meetingId of ['meeting-a', 'meeting-b']) {

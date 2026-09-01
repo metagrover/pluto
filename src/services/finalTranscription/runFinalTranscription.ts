@@ -296,12 +296,17 @@ export const runFinalTranscription = async <TTranscript>(
       });
       return { status: 'cancelled' };
     }
+    const failure: FinalTranscriptionFailure =
+      error instanceof Error &&
+      error.message.startsWith('invalid_transcript_trust_candidate:')
+        ? 'integrity_rejected'
+        : 'runtime_unavailable';
     await dependencies.markNeedsAttention({
       meetingId: input.meetingId,
       captureGeneration: input.captureEvidence.generation,
-      failure: 'runtime_unavailable',
+      failure,
       lease,
     });
-    return { status: 'needs_attention', reasons: ['runtime_unavailable'] };
+    return { status: 'needs_attention', reasons: [failure] };
   }
 };

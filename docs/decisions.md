@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-01 - Make meeting finalization converge before downstream work
+
+- **Status:** Accepted
+- **Source:** [Issue #718](https://github.com/metagrover/pluto/issues/718), owner-approved diagnosis and design on 2026-09-01
+- **Decision:** Pluto classifies empty orphan capture journals before recovery work, validates every canonical v2 transcript-trust candidate with the shared parser before persistence, retains the database as the final trust gate, and starts downstream notes or intelligence only after canonical commit succeeds.
+- **Rationale:** Repeated orphan-recovery failures and rejected transient trust payloads made startup logs look like active data loss while omitting the meeting and run identity needed to prove convergence. One shared contract and an explicit commit boundary keep capture preservation, transcript trust, and downstream publication causally ordered.
+- **Consequences:** Empty v3 journals with no durable capture or transcript evidence are counted as empty instead of failed recovery; recoverable journals remain fail-closed; invalid producer payloads never reach canonical persistence; content-free save diagnostics include meeting/run identity, operation, reason, and rollback outcome.
+
 ## 2026-08-25 - Retire MLX transcription after Parakeet real-use verification
 
 - **Status:** Accepted

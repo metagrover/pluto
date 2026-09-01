@@ -16,6 +16,7 @@ import {
   buildTranscriptJsonPayload,
   withTranscriptLifecycleStatus,
 } from '../utils/transcriptSchema.ts';
+import { assertValidTranscriptTrustCandidate } from '../utils/transcriptTrustState.ts';
 import {
   buildPartialCaptureGapProcessingLease,
   selectDownstreamResumeStage,
@@ -31,6 +32,21 @@ import {
 } from './transcriptValidationRetryLease.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
+
+const logRejectedTrustCandidate = (input: {
+  meetingId: string;
+  runId: string;
+  transition: string;
+  error: unknown;
+  fallback: 'not_started' | 'mark_needs_attention';
+}) =>
+  console.error('[Pluto] Transcript trust candidate rejected', {
+    meetingId: input.meetingId,
+    validationRunId: input.runId,
+    transition: input.transition,
+    reason: input.error instanceof Error ? input.error.message : 'unknown',
+    fallback: input.fallback,
+  });
 
 const requestMeetingNotesPublication = async (
   meetingId: string | number,
@@ -569,21 +585,32 @@ export const retryMeetingTranscriptValidation = async (
     verifiedCheckpointEvidence?.segmentCount === provisionalSegments.length &&
     checkpointSourceSegments.length > 0;
   const canonicalMode = 'recovered_channels' as const;
-  const claimed = await invoke(
-    'SAVE_MEETING',
-    {
-      ...meeting,
-      transcript_status: 'validating',
-      transcript_json: withTranscriptLifecycleStatus(
-        meeting.transcript_json,
-        'validating',
-      ),
-      transcript_integrity_json: JSON.stringify(
-        beginRetryLease(priorIntegrity, lease),
-      ),
-    },
-    { claimValidationLease: lease },
-  );
+  const claimCandidate = {
+    ...meeting,
+    transcript_status: 'validating' as const,
+    transcript_json: withTranscriptLifecycleStatus(
+      meeting.transcript_json,
+      'validating',
+    ),
+    transcript_integrity_json: JSON.stringify(
+      beginRetryLease(priorIntegrity, lease),
+    ),
+  };
+  try {
+    assertValidTranscriptTrustCandidate(claimCandidate, 'claim_validation');
+  } catch (error) {
+    logRejectedTrustCandidate({
+      meetingId: String(meetingId),
+      runId,
+      transition: 'claim_validation',
+      error,
+      fallback: 'not_started',
+    });
+    throw error;
+  }
+  const claimed = await invoke('SAVE_MEETING', claimCandidate, {
+    claimValidationLease: lease,
+  });
   if (claimed === false) return { status: 'superseded' };
 
   const runBeforeDeadline = async <T>(operation: Promise<T>): Promise<T> => {
@@ -757,35 +784,47 @@ export const retryMeetingTranscriptValidation = async (
     }
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
     if (readRunId(latest) !== runId) return { status: 'superseded' };
-    const saved = await invoke(
-      'SAVE_MEETING',
-      {
-        ...latest,
-        transcript_status: 'needs_attention',
-        transcript_json: withTranscriptLifecycleStatus(
-          latest.transcript_json,
-          'needs_attention',
-        ),
-        transcript_integrity_json: JSON.stringify(
-          usesV2Trust
-            ? {
-                ...finishRetryLease(integrity),
-                state: 'needs_attention',
-                causes: reasons.map((code) => ({ code })),
-                validationProof: undefined,
-              }
-            : finishRetryLease(integrity),
-        ),
-        transcript_validated_at: null,
-        enhanced_notes: null,
-        analysis_json: null,
-        value_signals_json: null,
-      },
-      {
-        expectedValidationRunId: runId,
-        transcriptOwnedFieldsOnly: true,
-      },
-    );
+    const needsAttentionCandidate = {
+      ...latest,
+      transcript_status: 'needs_attention' as const,
+      transcript_json: withTranscriptLifecycleStatus(
+        latest.transcript_json,
+        'needs_attention',
+      ),
+      transcript_integrity_json: JSON.stringify(
+        usesV2Trust
+          ? {
+              ...finishRetryLease(integrity),
+              state: 'needs_attention',
+              causes: reasons.map((code) => ({ code })),
+              validationProof: undefined,
+            }
+          : finishRetryLease(integrity),
+      ),
+      transcript_validated_at: null,
+      enhanced_notes: null,
+      analysis_json: null,
+      value_signals_json: null,
+    };
+    try {
+      assertValidTranscriptTrustCandidate(
+        needsAttentionCandidate,
+        'needs_attention',
+      );
+    } catch (error) {
+      logRejectedTrustCandidate({
+        meetingId: String(meetingId),
+        runId,
+        transition: 'needs_attention',
+        error,
+        fallback: 'mark_needs_attention',
+      });
+      return await failCurrentRetry('retry_failed');
+    }
+    const saved = await invoke('SAVE_MEETING', needsAttentionCandidate, {
+      expectedValidationRunId: runId,
+      transcriptOwnedFieldsOnly: true,
+    });
     if (saved === false) return { status: 'superseded' };
     return { status: 'needs_attention' };
   }
@@ -810,7 +849,7 @@ export const retryMeetingTranscriptValidation = async (
       };
   const canonicalReplacement = {
     ...current,
-    transcript_status: 'validated',
+    transcript_status: 'validated' as const,
     transcript_validated_at: validatedAt,
     transcript_integrity_json: JSON.stringify(validatedIntegrity),
     transcript_json: JSON.stringify(
@@ -832,6 +871,18 @@ export const retryMeetingTranscriptValidation = async (
       }),
     ),
   };
+  try {
+    assertValidTranscriptTrustCandidate(canonicalReplacement, 'validated');
+  } catch (error) {
+    logRejectedTrustCandidate({
+      meetingId: String(meetingId),
+      runId,
+      transition: 'validated',
+      error,
+      fallback: 'mark_needs_attention',
+    });
+    return await failCurrentRetry('retry_failed');
+  }
   await invoke(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
     meetingId,
