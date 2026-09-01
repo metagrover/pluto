@@ -289,6 +289,24 @@ export const MeetingAnalysisSkeleton = ({
   </section>
 );
 
+export const MeetingAnalysisQueueStatus = ({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}) => (
+  <output
+    aria-atomic="true"
+    data-meeting-artifact="analysis"
+    data-state="queued"
+    className="meeting-analysis-queue max-w-[760px]"
+  >
+    <p className="meeting-analysis-queue__label">{title}</p>
+    <p className="meeting-analysis-queue__detail">{detail}</p>
+  </output>
+);
+
 export const MeetingAnalysisUnavailable = () => (
   <section
     aria-label="Notes are unavailable"
@@ -723,7 +741,9 @@ export const MeetingView = ({
     ? selectedMeeting.user_notes?.trim()
     : '';
   const isMeetingProcessing =
-    downstreamPresentation.state === 'loading' && !notesDocument.hasAnalysis;
+    (downstreamPresentation.state === 'loading' ||
+      downstreamPresentation.state === 'queued') &&
+    !notesDocument.hasAnalysis;
 
   useEffect(() => {
     if (!isMeetingProcessing) return;
@@ -1142,12 +1162,29 @@ export const MeetingView = ({
             detail={downstreamPresentation.detail}
           />
         ) : null}
+        {isMeetingProcessing && downstreamPresentation.state === 'queued' ? (
+          <MeetingAnalysisQueueStatus
+            title={downstreamPresentation.title}
+            detail={downstreamPresentation.detail}
+          />
+        ) : null}
         {downstreamPresentation.state === 'failed' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisUnavailable />
         ) : null}
         {notesDocument.hasAnalysis ? (
           <div data-meeting-artifact="analysis" data-state="ready">
+            {downstreamPresentation.state === 'ready' &&
+            downstreamPresentation.notesUpdateQueuePosition ? (
+              <output
+                aria-atomic="true"
+                className="mx-auto mb-4 block w-full max-w-[760px] px-5 text-sm text-pro-text-muted md:px-8"
+              >
+                {downstreamPresentation.notesUpdateQueuePosition === 1
+                  ? 'Notes update is next in the local queue.'
+                  : `Notes update is position ${downstreamPresentation.notesUpdateQueuePosition} in the local queue.`}
+              </output>
+            ) : null}
             {downstreamPresentation.state === 'ready' &&
             downstreamPresentation.notesUpdateFailed &&
             !regenerateNotesError &&

@@ -89,6 +89,46 @@ const primaryTextFor = (source: NotesSource, spans: SourceSpan[]): string =>
     })
     .join('\n');
 
+export const bisectNotesSourceSpans = (
+  source: NotesSource,
+  spans: SourceSpan[],
+): [SourceSpan[], SourceSpan[]] | null => {
+  if (spans.length > 1) {
+    const total = spans.reduce((sum, span) => sum + span.end - span.start, 0);
+    let consumed = 0;
+    let splitAt = 1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 1; index < spans.length; index++) {
+      const prior = spans[index - 1]!;
+      consumed += prior.end - prior.start;
+      const distance = Math.abs(total / 2 - consumed);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        splitAt = index;
+      }
+    }
+    return [spans.slice(0, splitAt), spans.slice(splitAt)];
+  }
+  const span = spans[0];
+  if (!span || span.end - span.start < 2) return null;
+  const segment = source.segments.find((entry) => entry.index === span.segment);
+  if (!segment) throw new MeetingNotesError('invalid_source_span');
+  let offset = span.start + Math.floor((span.end - span.start) / 2);
+  const priorWhitespace = segment.text.lastIndexOf(' ', offset - 1);
+  const nextWhitespace = segment.text.indexOf(' ', offset);
+  const whitespaceOffsets = [priorWhitespace, nextWhitespace]
+    .filter((candidate) => candidate >= span.start && candidate < span.end - 1)
+    .map((candidate) => candidate + 1)
+    .sort(
+      (left, right) =>
+        Math.abs(left - offset) - Math.abs(right - offset) || left - right,
+    );
+  offset = whitespaceOffsets[0] ?? offset;
+  if (isSurrogateBoundary(segment.text, offset)) offset -= 1;
+  if (offset <= span.start || offset >= span.end) return null;
+  return [[{ ...span, end: offset }], [{ ...span, start: offset }]];
+};
+
 const splitSegment = (
   source: NotesSource,
   segment: NotesSource['segments'][number],

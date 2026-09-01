@@ -56,6 +56,11 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import {
+  type IncrementalMeetingNotesOffer,
+  createIncrementalMeetingNotesCoordinator,
+  evaluateIncrementalMeetingNotesAdmission,
+} from './incrementalMeetingNotesCoordinator';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import {
   canReuseRunningCaptureForProbe,
@@ -409,6 +414,7 @@ import {
 } from './knowledgeSynthesisPause';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { getAllSettings, getProvider } from './llm/factory';
+import { createNotesSource } from './llm/meetingNotesSource';
 import type {
   AnalysisArtifacts,
   AnalysisDocument,
@@ -450,7 +456,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     const signals = await input.provider.extractValueSignals(
       input.transcript,
       input.analysis.overview,
-      { signal: input.signal },
+      { signal: input.signal, workClass: 'meeting_secondary' },
     );
     if (!input.canCommit()) return;
     if (
@@ -484,7 +490,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
         summary: input.analysis.overview,
         valueSignals: signals,
       },
-      { signal: input.signal },
+      { signal: input.signal, workClass: 'meeting_secondary' },
     );
     if (!input.canCommit()) return;
     await extractAndProcessEntities(
@@ -876,6 +882,38 @@ app.whenReady().then(async () => {
   let nativeAudioOwner: WebContents | null = null;
   const captureSessionLease = createCaptureSessionLeaseRegistry();
   const watchedCaptureOwners = new Set<number>();
+  type CaptureIncrementalNotesOffer = IncrementalMeetingNotesOffer & {
+    ownerId: number;
+    source: ReturnType<typeof createNotesSource>;
+    userNotes: string;
+    liveTranscriptHealthy: boolean;
+  };
+  const incrementalNotesCoordinator =
+    createIncrementalMeetingNotesCoordinator<CaptureIncrementalNotesOffer>({
+      admit: async (input) => {
+        const active = captureSessionLease.recordingForOwner(input.ownerId);
+        const policy = {
+          captureOwned: active?.meetingId === input.meetingId,
+          liveTranscriptHealthy: input.liveTranscriptHealthy,
+          onBattery: powerMonitor.isOnBatteryPower(),
+          thermalState: powerMonitor.getCurrentThermalState(),
+          freeMemoryBytes: os.freemem(),
+          totalMemoryBytes: os.totalmem(),
+          ...(await probeAvailableMemory()),
+        };
+        return evaluateIncrementalMeetingNotesAdmission(policy).admitted;
+      },
+      run: (input, signal) =>
+        meetingNotesRunCoordinator.precomputeIncrementalMeetingNotes({
+          source: input.source,
+          userNotes: input.userNotes,
+          template: 'auto',
+          signal,
+        }),
+      onMetric: (metric) => {
+        console.log('[Incremental notes]', JSON.stringify(metric));
+      },
+    });
 
   const stopNativeAudioCapture = () => {
     const processToStop = nativeAudioProcess;
@@ -899,11 +937,79 @@ app.whenReady().then(async () => {
         parakeetEouGeneration = null;
       }
       if (released) {
+        incrementalNotesCoordinator.cancel(released.meetingId);
         knowledgeSynthesisPause.release('capture');
         console.warn('[CaptureLease] released: owner_destroyed');
       }
     });
   };
+
+  ipcMain.handle(
+    'MEETING_NOTES_OFFER_INCREMENTAL',
+    (event, { meetingId, segments, userNotes, liveTranscriptHealthy } = {}) => {
+      const normalizedMeetingId = String(meetingId || '');
+      captureSessionLease.requireRecordingOwner(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      if (
+        !Array.isArray(segments) ||
+        segments.length < 2 ||
+        segments.length > 2_000 ||
+        typeof userNotes !== 'string' ||
+        userNotes.length > 100_000 ||
+        liveTranscriptHealthy !== true
+      ) {
+        throw new Error('invalid_incremental_meeting_notes_offer');
+      }
+      const normalizedSegments = segments.map((segment) => {
+        if (
+          !segment ||
+          typeof segment !== 'object' ||
+          typeof segment.text !== 'string' ||
+          !segment.text.trim() ||
+          segment.text.length > 50_000 ||
+          (segment.speaker !== null &&
+            typeof segment.speaker !== 'string' &&
+            typeof segment.speaker !== 'number')
+        ) {
+          throw new Error('invalid_incremental_meeting_notes_offer');
+        }
+        return { speaker: segment.speaker, text: segment.text };
+      });
+      const source = createNotesSource(
+        JSON.stringify({ segments: normalizedSegments }),
+      );
+      const sourceCharacterCount = source.segments.reduce(
+        (total, segment) => total + segment.text.length,
+        0,
+      );
+      incrementalNotesCoordinator.offer({
+        meetingId: normalizedMeetingId,
+        ownerId: event.sender.id,
+        source,
+        sourceRevision: source.revision,
+        sourceSegmentCount: source.segments.length,
+        sourceCharacterCount,
+        userNotes,
+        liveTranscriptHealthy: true,
+      });
+      return { accepted: true };
+    },
+  );
+
+  ipcMain.handle(
+    'MEETING_NOTES_CANCEL_INCREMENTAL',
+    (event, { meetingId } = {}) => {
+      const normalizedMeetingId = String(meetingId || '');
+      captureSessionLease.requireRecordingOwner(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      incrementalNotesCoordinator.cancel(normalizedMeetingId);
+      return { cancelled: true };
+    },
+  );
 
   const eouCoordinator = new ParakeetEouMeetingCoordinator({
     createClient: async () => {
@@ -1324,6 +1430,7 @@ app.whenReady().then(async () => {
       normalizedMeetingId,
       event.sender.id,
     );
+    incrementalNotesCoordinator.cancel(normalizedMeetingId);
     const manifest = await stopCaptureJournal(getMeetingArtifactsRootDir(), {
       ...request,
       meetingId: normalizedMeetingId,

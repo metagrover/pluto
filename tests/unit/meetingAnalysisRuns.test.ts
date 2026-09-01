@@ -1,9 +1,180 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  it('precomputes a live leaf with the same source-independent cache identity used at publication', async () => {
+    const precomputeStructuredAnalysisLeaf = vi
+      .fn()
+      .mockResolvedValue('generated');
+    const db = {
+      getMeeting: vi.fn(),
+      getMeetingAnalysisPublicationRevisions: vi.fn(),
+      getMeetingAnalysisRun: vi.fn(),
+      beginMeetingAnalysisRun: vi.fn(),
+      updateMeetingAnalysisRunStatus: vi.fn(),
+      updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
+      isMeetingAnalysisRunCurrent: vi.fn(),
+      publishMeetingNotesIfCurrent: vi.fn(),
+      getAllEntities: () => [{ type: 'project', name: 'Apollo' }],
+    };
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db,
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: vi.fn(),
+        precomputeStructuredAnalysisLeaf,
+      }),
+    });
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: [{ speaker: 'Milo', text: 'Accepted live transcript.' }],
+      }),
+    );
+
+    await expect(
+      coordinator.precomputeIncrementalMeetingNotes({
+        source,
+        userNotes: 'Use Apollo terminology.',
+        template: 'auto',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toBe('generated');
+
+    expect(precomputeStructuredAnalysisLeaf).toHaveBeenCalledWith(
+      '',
+      'Use Apollo terminology.',
+      'auto',
+      expect.objectContaining({
+        source,
+        knownTerms: ['Apollo'],
+        entityHints: ['Apollo'],
+        trustedUserTerms: [],
+        contextTokens: 16_384,
+        stageCache: expect.anything(),
+        cacheKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+        workClass: 'background',
+      }),
+    );
+  });
+
+  it('persists one content-free terminal metric from provider stage events', async () => {
+    const upsertMeetingAnalysisRunMetric = vi.fn();
+    const generateStructuredAnalysis = vi.fn(
+      async (
+        _transcript: string,
+        _notes: string,
+        _template: string,
+        options: {
+          onStageEvent?: (event: NotesStageEvent) => void;
+        },
+      ) => {
+        options.onStageEvent?.({
+          phase: 'queued',
+          sequence: 0,
+          task: 'notesWriter',
+          atMs: 100,
+        });
+        options.onStageEvent?.({ phase: 'started', sequence: 0, atMs: 125 });
+        options.onStageEvent?.({
+          phase: 'finished',
+          sequence: 0,
+          atMs: 225,
+          outcome: 'complete',
+          inputTokens: 200,
+          outputTokens: 50,
+        });
+        return {
+          analysis_schema_version: 3,
+          overview: 'Reviewed notes.',
+          topics: [],
+          all_action_items: [],
+          all_decisions: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        };
+      },
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'metric-run',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'metric-source',
+          eligibilityRevision: 'metric-eligibility',
+          userNotesHash: 'metric-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+        upsertMeetingAnalysisRunMetric,
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis,
+      }),
+      createRunId: () => 'metric-run-id',
+    });
+
+    await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'metric-run',
+      requestId: 'metric-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledTimes(1);
+    expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: 'metric-run',
+        runId: 'metric-run-id',
+        reason: 'manual',
+        status: 'published',
+        metrics: expect.objectContaining({
+          sourceSegmentCount: 1,
+          sourceCharacterCount: 18,
+          queueMs: expect.any(Number),
+          modelMs: 100,
+          stages: [
+            expect.objectContaining({
+              task: 'notesWriter',
+              outcome: 'complete',
+              inputTokens: 200,
+              outputTokens: 50,
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(
+      JSON.stringify(upsertMeetingAnalysisRunMetric.mock.calls),
+    ).not.toContain('We agreed to ship.');
+    expect(
+      upsertMeetingAnalysisRunMetric.mock.calls[0]![0].metrics.queueMs,
+    ).toBeGreaterThanOrEqual(25);
+  });
+
   it.each([false, true])(
     'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
     async (notificationFails) => {
@@ -72,6 +243,7 @@ describe('meeting analysis run coordinator', () => {
           knownTerms: ['Ogletree'],
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
+          workClass: 'manual_notes',
         }),
       );
       // The persisted/reusable run identity must invalidate pre-schema outputs.
@@ -96,8 +268,24 @@ describe('meeting analysis run coordinator', () => {
       expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
         expect.objectContaining({ inputRevision: fingerprint }),
       );
+      const stageCacheKey = createHash('sha256')
+        .update(
+          JSON.stringify({
+            userNotesHash: 'notes-terms',
+            terms: ['Ogletree'],
+            template: 'auto',
+            provider: 'ollama',
+            model: 'gemma4:12b',
+            thinking: null,
+            seed: null,
+            contextTokens: 16384,
+            promptVersion: 'notes-v28',
+          }),
+          'utf8',
+        )
+        .digest('hex');
       expect(generateStructuredAnalysis.mock.calls[0]?.[3].cacheKey).toBe(
-        fingerprint,
+        stageCacheKey,
       );
     },
   );
@@ -504,5 +692,149 @@ describe('meeting analysis run coordinator', () => {
       );
     });
     expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs one primary meeting at a time and admits queued manuals before automatics', async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const order: string[] = [];
+    const beginMeetingAnalysisRun = vi.fn();
+    const updateMeetingAnalysisQueuePosition = vi.fn().mockReturnValue(true);
+    let runSequence = 0;
+    const analysis = {
+      analysis_schema_version: 3 as const,
+      overview: 'Reviewed notes.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general' as const,
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    };
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: (meetingId) => ({
+          id: meetingId,
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: `meeting-${meetingId}` }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: (meeting) => ({
+          sourceRevision: `source-${meeting.id}`,
+          eligibilityRevision: `eligible-${meeting.id}`,
+          userNotesHash: `notes-${meeting.id}`,
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun,
+        updateMeetingAnalysisQueuePosition,
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async (transcript: string) => {
+          const meetingId = transcript.match(/meeting-(one|two|three)/)?.[1]!;
+          order.push(meetingId);
+          if (meetingId === 'one') await first;
+          return analysis;
+        },
+      }),
+      createRunId: () => `run-${++runSequence}`,
+    });
+
+    const one = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'one',
+      requestId: 'request-one',
+      template: 'auto',
+      reason: 'automatic',
+    });
+    const two = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'two',
+      requestId: 'request-two',
+      template: 'auto',
+      reason: 'automatic',
+    });
+    const three = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'three',
+      requestId: 'request-three',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    await vi.waitFor(() => expect(order).toEqual(['one']));
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledTimes(3);
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'queued', queuePosition: null }),
+    );
+    expect(updateMeetingAnalysisQueuePosition).toHaveBeenCalledWith({
+      meetingId: 'three',
+      runId: 'run-3',
+      queuePosition: 1,
+    });
+    releaseFirst();
+
+    await Promise.all([one, two, three]);
+    expect(order).toEqual(['one', 'three', 'two']);
+  });
+
+  it('revalidates publication revisions after admission and before the first model call', async () => {
+    let reads = 0;
+    const generateStructuredAnalysis = vi.fn();
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => {
+          reads += 1;
+          return {
+            id: 'revalidate',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 1, text: 'Stable transcript.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: reads >= 3 ? 'changed' : '',
+          };
+        },
+        getMeetingAnalysisPublicationRevisions: (meeting) => ({
+          sourceRevision: 'source-revalidate',
+          eligibilityRevision: 'eligible-revalidate',
+          userNotesHash: meeting.user_notes
+            ? 'changed-notes'
+            : 'original-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      createRunId: () => 'run-revalidate',
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'revalidate',
+        requestId: 'request-revalidate',
+        template: 'auto',
+        reason: 'manual',
+      }),
+    ).rejects.toThrow('meeting_notes_superseded');
+    expect(generateStructuredAnalysis).not.toHaveBeenCalled();
   });
 });

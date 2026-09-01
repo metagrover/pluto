@@ -6,7 +6,10 @@ import {
   UnifiedLLMProvider,
   getOllamaTimeoutMs,
 } from '../../electron/llm/unifiedProvider';
-import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
+import {
+  makeDirectNotesFixture,
+  makeSyntheticNotesSource,
+} from '../fixtures/meeting-notes-v10';
 import kindCorrection from '../manual/fixtures/meetingNotesV10KindCorrection.json';
 
 // These are unit tests: exhausted response queues must never reach a live model.
@@ -306,6 +309,77 @@ it('resumes a preempted writer without repairing it or rerunning a completed wri
   });
   expect(result.quality.retry_count).toBe(0);
   expect(generate).toHaveBeenCalledTimes(3);
+});
+
+it('routes one privacy-safe stage observer through every notes transport attempt', async () => {
+  const f = makeDirectNotesFixture();
+  const p = new UnifiedLLMProvider('ollama', {});
+  const observer = vi.fn();
+  const generate = vi
+    .spyOn(p as never, 'generateText')
+    .mockResolvedValueOnce(JSON.stringify(f.draft))
+    .mockResolvedValueOnce(JSON.stringify(f.audit));
+
+  await p.generateStructuredAnalysis('', '', 'auto', {
+    source: f.source,
+    onStageEvent: observer,
+  });
+
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(
+    generate.mock.calls.map(
+      ([options]) =>
+        (options as { notesStageObserver?: unknown }).notesStageObserver,
+    ),
+  ).toEqual([observer, observer]);
+});
+
+it('precomputes one closed leaf with background priority and no audit', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1_000)}`,
+    })),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {});
+  const generate = vi
+    .spyOn(provider as never, 'generateText')
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: {
+              text: 'Context',
+              sources: [
+                {
+                  segment: source.segments[0]!.index,
+                  start: 0,
+                  end: source.segments[0]!.text.length,
+                },
+              ],
+            },
+            items: [],
+          },
+        ],
+      }),
+    );
+
+  await expect(
+    provider.precomputeStructuredAnalysisLeaf('', '', 'auto', {
+      source,
+      contextTokens: 16_384,
+      stageCache: new NotesStageCache(),
+      cacheKey: 'compatible-config',
+      workClass: 'background',
+    }),
+  ).resolves.toBe('generated');
+
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledWith(
+    expect.objectContaining({ task: 'notesWriter', workClass: 'background' }),
+  );
 });
 
 it('preserves configured model, thinking, seed and request budgets on actual transport', async () => {

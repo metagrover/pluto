@@ -609,7 +609,8 @@
     border-color: var(--notes-rule);
   }
   .meeting-pending-notes__label,
-  .meeting-analysis-skeleton__label {
+  .meeting-analysis-skeleton__label,
+  .meeting-analysis-queue__label {
     @apply text-[11px] font-semibold uppercase tracking-[0.12em];
     color: var(--notes-muted);
   }
@@ -622,6 +623,13 @@
   }
   .meeting-analysis-skeleton__lines {
     @apply mt-5 space-y-4;
+  }
+  .meeting-analysis-queue {
+    @apply mx-auto w-full px-6 pb-16 pt-8 md:px-8;
+  }
+  .meeting-analysis-queue__detail {
+    @apply mt-2 max-w-[68ch] text-sm leading-6;
+    color: var(--notes-muted);
   }
   .meeting-document-actions {
     @apply relative flex min-h-10 items-center justify-end gap-1 z-50;

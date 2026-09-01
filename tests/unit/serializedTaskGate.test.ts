@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
+import { LLM_WORK_CLASS_PRIORITY } from '../../electron/llm/llmWorkClass';
 import { createSerializedTaskGate } from '../../electron/serializedTaskGate';
 
 describe('createSerializedTaskGate', () => {
+  it('uses the one explicit product work-class priority order', () => {
+    expect(LLM_WORK_CLASS_PRIORITY).toEqual({
+      ask_pluto: 30,
+      manual_notes: 20,
+      automatic_notes: 10,
+      project_review: 15,
+      meeting_secondary: 5,
+      background: 0,
+    });
+  });
   it('cancels queued work before the active task finishes and permits retry', async () => {
     const run = createSerializedTaskGate<string, string>();
     let release!: () => void;
