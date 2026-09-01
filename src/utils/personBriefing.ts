@@ -2,6 +2,34 @@ import { getCommitmentState, parseActionMetadata } from './actionCommitment';
 
 export type PersonMeetingEvidence = 'confirmed' | 'scheduled' | 'mentioned';
 
+export interface PersonBriefingSummary {
+  id: string;
+  name: string;
+  role: string;
+  meetingCount: number;
+  mentionCount: number;
+  latestMeetingId: string | null;
+  latestMeetingTitle: string | null;
+  latestMeetingAt: string | null;
+  context: string | null;
+  openCommitmentCount: number;
+}
+
+export const parsePersonRole = (metadata: unknown): string => {
+  if (typeof metadata !== 'string' || !metadata)
+    return 'Known from conversations';
+  try {
+    const value = JSON.parse(metadata) as { role?: unknown };
+    if (typeof value.role !== 'string') return 'Known from conversations';
+    const role = value.role.trim();
+    return role && !['undefined', 'null', 'n/a'].includes(role.toLowerCase())
+      ? role
+      : 'Known from conversations';
+  } catch {
+    return 'Known from conversations';
+  }
+};
+
 export interface PersonMeetingRecord {
   id: string;
   title: string;

@@ -55,9 +55,11 @@ import {
 import {
   type PersonBriefingCommitment,
   type PersonBriefingMeeting,
+  type PersonBriefingSummary,
   type PersonCommitmentCandidate,
   type PersonMeetingRecord,
   mergePersonMeetingEvidence,
+  parsePersonRole,
   selectVerifiedPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
@@ -7535,6 +7537,114 @@ export const getEntityMeetings = (
   })[];
 };
 
+type PeopleBriefingSummaryRow = {
+  id: string;
+  name: string;
+  metadata: string | null;
+  meeting_count: number;
+  mention_count: number;
+  latest_meeting_id: string | null;
+  latest_meeting_title: string | null;
+  latest_meeting_at: string | null;
+  latest_context: string | null;
+  open_commitment_count: number;
+};
+
+/**
+ * Build the People list in one bounded query. This read model intentionally
+ * selects no transcript, notes, or analysis payloads; full evidence is loaded
+ * only for the person the user opens.
+ */
+export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
+  const rows = db
+    .prepare(`
+      WITH person_meetings AS (
+        SELECT
+          me.entity_id AS person_id,
+          m.id AS meeting_id,
+          m.title AS meeting_title,
+          COALESCE(m.started_at, m.created_at) AS meeting_at,
+          SUM(me.mention_count) AS mention_count,
+          GROUP_CONCAT(DISTINCT me.context) AS context
+        FROM meeting_entities me
+        JOIN meetings m ON m.id = me.meeting_id
+        JOIN entities person ON person.id = me.entity_id AND person.type = 'person'
+        GROUP BY me.entity_id, m.id
+      ), ranked_meetings AS (
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY person_id
+          ORDER BY datetime(meeting_at) DESC, meeting_id DESC
+        ) AS recency_rank
+        FROM person_meetings
+      ), meeting_stats AS (
+        SELECT
+          person_id,
+          COUNT(*) AS meeting_count,
+          COALESCE(SUM(mention_count), 0) AS mention_count
+        FROM person_meetings
+        GROUP BY person_id
+      ), open_commitments AS (
+        SELECT assigned_to AS person_id, COUNT(*) AS open_commitment_count
+        FROM entities
+        WHERE type = 'action_item'
+          AND status IN ('active', 'overdue')
+          AND assigned_to IS NOT NULL
+          AND json_extract(
+            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            '$.owner_source'
+          ) = 'user'
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            '$.commitment_state'
+          ), '') != 'rejected'
+          AND json_type(
+            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            '$.source_meeting_id'
+          ) = 'text'
+        GROUP BY assigned_to
+      )
+      SELECT
+        person.id,
+        person.name,
+        person.metadata,
+        COALESCE(stats.meeting_count, 0) AS meeting_count,
+        COALESCE(stats.mention_count, 0) AS mention_count,
+        latest.meeting_id AS latest_meeting_id,
+        latest.meeting_title AS latest_meeting_title,
+        latest.meeting_at AS latest_meeting_at,
+        latest.context AS latest_context,
+        COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count
+      FROM entities person
+      LEFT JOIN meeting_stats stats ON stats.person_id = person.id
+      LEFT JOIN ranked_meetings latest
+        ON latest.person_id = person.id AND latest.recency_rank = 1
+      LEFT JOIN open_commitments commitments ON commitments.person_id = person.id
+      WHERE person.type = 'person'
+        AND NOT EXISTS (
+          SELECT 1 FROM commitment_aliases alias
+          WHERE alias.extraction_id = person.id AND alias.active = 1
+        )
+      ORDER BY
+        COALESCE(commitments.open_commitment_count, 0) DESC,
+        datetime(latest.meeting_at) DESC,
+        person.name ASC
+    `)
+    .all() as PeopleBriefingSummaryRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    role: parsePersonRole(row.metadata),
+    meetingCount: Number(row.meeting_count),
+    mentionCount: Number(row.mention_count),
+    latestMeetingId: row.latest_meeting_id,
+    latestMeetingTitle: row.latest_meeting_title,
+    latestMeetingAt: row.latest_meeting_at,
+    context: row.latest_context,
+    openCommitmentCount: Number(row.open_commitment_count),
+  }));
+};
+
 export interface PersonBriefingDetail {
   person: Entity;
   meetings: PersonBriefingMeeting[];
@@ -7547,7 +7657,10 @@ export interface PersonBriefingDetail {
 }
 
 const toPersonMeetingRecord = (
-  meeting: PersistedMeeting,
+  meeting: Pick<
+    PersistedMeeting,
+    'id' | 'title' | 'started_at' | 'created_at' | 'duration_seconds'
+  >,
   context: string | null = null,
 ): PersonMeetingRecord => ({
   id: String(meeting.id),
@@ -7557,6 +7670,24 @@ const toPersonMeetingRecord = (
   duration_seconds: meeting.duration_seconds ?? null,
   context,
 });
+
+const getPersonMeetingRecord = (
+  meetingId: string,
+): PersonMeetingRecord | undefined => {
+  const meeting = db
+    .prepare(`
+      SELECT id, title, started_at, created_at, duration_seconds
+      FROM meetings
+      WHERE id = ?
+    `)
+    .get(meetingId) as
+    | Pick<
+        PersistedMeeting,
+        'id' | 'title' | 'started_at' | 'created_at' | 'duration_seconds'
+      >
+    | undefined;
+  return meeting ? toPersonMeetingRecord(meeting) : undefined;
+};
 
 /**
  * Build the People dossier from evidence-bearing identity, calendar, entity,
@@ -7568,30 +7699,44 @@ export const getPersonBriefing = (
   const person = getEntity(personId);
   if (!person || person.type !== 'person') return undefined;
 
-  const mentionedMeetings = getEntityMeetings(personId).map((meeting) =>
-    toPersonMeetingRecord(meeting, meeting.context),
-  );
+  const mentionedMeetings = (
+    db
+      .prepare(`
+        SELECT
+          m.id,
+          m.title,
+          m.started_at,
+          m.created_at,
+          m.duration_seconds,
+          GROUP_CONCAT(DISTINCT me.context) AS context
+        FROM meetings m
+        JOIN meeting_entities me ON me.meeting_id = m.id
+        WHERE me.entity_id = ?
+        GROUP BY m.id
+        ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC
+      `)
+      .all(personId) as Array<
+      Pick<
+        PersistedMeeting,
+        'id' | 'title' | 'started_at' | 'created_at' | 'duration_seconds'
+      > & { context: string | null }
+    >
+  ).map((meeting) => toPersonMeetingRecord(meeting, meeting.context));
   const mentionedById = new Map(
     mentionedMeetings.map((meeting) => [meeting.id, meeting]),
   );
 
   const confirmedIds = new Set<string>();
   const bindingRows = db
-    .prepare('SELECT meeting_id, payload FROM identity_bindings')
-    .all() as Array<{ meeting_id: string; payload: string }>;
-  for (const row of bindingRows) {
-    try {
-      const binding = JSON.parse(row.payload) as {
-        personId?: unknown;
-        individual?: unknown;
-      };
-      if (binding.individual === true && binding.personId === personId) {
-        confirmedIds.add(row.meeting_id);
-      }
-    } catch {
-      // Malformed derived identity data cannot establish participation.
-    }
-  }
+    .prepare(`
+      SELECT meeting_id
+      FROM identity_bindings
+      WHERE json_valid(payload)
+        AND json_extract(payload, '$.individual') = 1
+        AND json_extract(payload, '$.personId') = ?
+    `)
+    .all(personId) as Array<{ meeting_id: string }>;
+  for (const row of bindingRows) confirmedIds.add(row.meeting_id);
   const capturedRows = db
     .prepare(
       "SELECT meeting_id FROM identity_captures WHERE origin = 'local' AND self_person_id = ?",
@@ -7600,14 +7745,9 @@ export const getPersonBriefing = (
   for (const row of capturedRows) confirmedIds.add(row.meeting_id);
 
   const confirmed = [...confirmedIds].flatMap((meetingId) => {
-    const meeting = getMeeting(meetingId) as PersistedMeeting | undefined;
+    const meeting = getPersonMeetingRecord(meetingId);
     return meeting
-      ? [
-          toPersonMeetingRecord(
-            meeting,
-            mentionedById.get(meetingId)?.context ?? null,
-          ),
-        ]
+      ? [{ ...meeting, context: mentionedById.get(meetingId)?.context ?? null }]
       : [];
   });
 
@@ -7637,16 +7777,12 @@ export const getPersonBriefing = (
         ) {
           continue;
         }
-        const meeting = getMeeting(row.meeting_id) as
-          | PersistedMeeting
-          | undefined;
+        const meeting = getPersonMeetingRecord(row.meeting_id);
         if (meeting) {
-          scheduled.push(
-            toPersonMeetingRecord(
-              meeting,
-              mentionedById.get(row.meeting_id)?.context ?? null,
-            ),
-          );
+          scheduled.push({
+            ...meeting,
+            context: mentionedById.get(row.meeting_id)?.context ?? null,
+          });
         }
       } catch {
         // Malformed calendar cache cannot establish expected participation.
@@ -7654,20 +7790,26 @@ export const getPersonBriefing = (
     }
   }
 
-  const actionCandidates = getEntitiesByType('action_item').map((action) => {
-    const metadata = parseActionMetadata(action.metadata);
-    const sourceMeetingId =
-      typeof metadata.source_meeting_id === 'string'
-        ? metadata.source_meeting_id
-        : null;
-    const source = sourceMeetingId
-      ? (getMeeting(sourceMeetingId) as PersistedMeeting | undefined)
-      : undefined;
-    return {
-      ...action,
-      sourceMeetingTitle: source?.title ?? null,
-    } satisfies PersonCommitmentCandidate;
-  });
+  const actionCandidates = db
+    .prepare(`
+      SELECT
+        action.id,
+        action.name,
+        action.status,
+        action.due_date,
+        action.assigned_to,
+        action.metadata,
+        action.updated_at,
+        source.title AS sourceMeetingTitle
+      FROM entities action
+      LEFT JOIN meetings source ON source.id = json_extract(
+        CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+        '$.source_meeting_id'
+      )
+      WHERE action.type = 'action_item'
+        AND action.assigned_to = ?
+    `)
+    .all(personId) as PersonCommitmentCandidate[];
 
   return {
     person,

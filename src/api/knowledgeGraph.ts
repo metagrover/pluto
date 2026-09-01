@@ -6,6 +6,7 @@
  */
 
 import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
+import type { PersonBriefingSummary } from '../utils/personBriefing';
 
 // Type definitions matching the database schema
 export type EntityType =
@@ -490,6 +491,12 @@ export const getEntityMeetings = async (
 };
 
 export type PersonBriefingDetail = ElectronPersonBriefingDetail;
+
+export const getPeopleBriefingSummaries = async (): Promise<
+  PersonBriefingSummary[]
+> => {
+  return invoke('GET_PEOPLE_BRIEFING_SUMMARIES');
+};
 
 export const getPersonBriefing = async (
   personId: string,

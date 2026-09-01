@@ -2891,6 +2891,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ENTITY_MEETINGS', (_event, entityId) =>
     db.getEntityMeetings(entityId),
   );
+  ipcMain.handle('GET_PEOPLE_BRIEFING_SUMMARIES', () =>
+    db.getPeopleBriefingSummaries(),
+  );
   ipcMain.handle('GET_PERSON_BRIEFING', (_event, personId) =>
     db.getPersonBriefing(String(personId)),
   );

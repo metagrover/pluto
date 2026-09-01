@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getPersonBriefing } from '../../src/api/knowledgeGraph';
+import {
+  getPeopleBriefingSummaries,
+  getPersonBriefing,
+} from '../../src/api/knowledgeGraph';
 
 describe('person briefing renderer API', () => {
   const invoke = vi.fn(async () => ({}));
@@ -16,5 +19,11 @@ describe('person briefing renderer API', () => {
     await getPersonBriefing('person-1');
 
     expect(invoke).toHaveBeenCalledWith('GET_PERSON_BRIEFING', 'person-1');
+  });
+
+  it('requests the bounded People list read model', async () => {
+    await getPeopleBriefingSummaries();
+
+    expect(invoke).toHaveBeenCalledWith('GET_PEOPLE_BRIEFING_SUMMARIES');
   });
 });

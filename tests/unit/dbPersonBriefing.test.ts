@@ -31,6 +31,46 @@ const saveFixtureMeeting = (id: string, startedAt: string) =>
   });
 
 describe('person briefing database read model', () => {
+  it('builds every People list row in one bounded summary read', () => {
+    const person = db.upsertEntity({
+      id: 'person-summary',
+      type: 'person',
+      name: 'Avery Summary',
+      metadata: { role: 'Design lead' },
+    });
+    saveFixtureMeeting('summary-meeting', '2026-08-01T12:00:00.000Z');
+    db.addMeetingEntity({
+      meeting_id: 'summary-meeting',
+      entity_id: person.id,
+      mention_count: 3,
+      context: 'Reviewed the launch sequence.',
+    });
+    const action = db.upsertEntity({
+      id: 'summary-action',
+      type: 'action_item',
+      name: 'Send the launch review',
+      status: 'active',
+      metadata: {
+        commitment_state: 'confirmed',
+        source_meeting_id: 'summary-meeting',
+      },
+    });
+    db.correctActionOwner(action.id, person.id);
+
+    expect(db.getPeopleBriefingSummaries()).toContainEqual({
+      id: person.id,
+      name: 'Avery Summary',
+      role: 'Design lead',
+      meetingCount: 1,
+      mentionCount: 3,
+      latestMeetingId: 'summary-meeting',
+      latestMeetingTitle: 'Meeting summary-meeting',
+      latestMeetingAt: '2026-08-01T12:00:00.000Z',
+      context: 'Reviewed the launch sequence.',
+      openCommitmentCount: 1,
+    });
+  });
+
   it('separates confirmed, scheduled, and mentioned-only meetings', () => {
     const person = db.upsertEntity({
       id: 'person-avery',
