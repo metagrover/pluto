@@ -670,3 +670,12 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** `pnpm run dev` remains the safe temporary-profile default. `pnpm start` explicitly runs the same current Vite/Electron development build against Pluto's normal macOS profile. Before the first such launch, the command creates and verifies an atomic SQLite snapshot that later launches validate but never overwrite.
 - **Rationale:** Routine development and agent QA should not silently touch private production data, while a developer who intentionally opts in still needs current source code and existing meetings in the same runtime.
 - **Consequences:** `pnpm start` permits normal startup migrations, background processing, recordings, edits, and deletions against the real database. The snapshot provides a recovery boundary, not write isolation; `pnpm run dev` remains the command for disposable testing.
+
+## 2026-09-01 - Require direct evidence for durable person roles
+
+- **Status:** Accepted and implemented.
+- **Source:** [Issue #713](https://github.com/metagrover/pluto/issues/713), production People metadata investigation.
+- **Decision:** A model-extracted person role is durable metadata only when an exact transcript quote contains both the named person and the role phrase. A value matching any extracted or already-known person name is never a role. Invalid or missing role evidence removes only the proposed role; it does not remove the person.
+- **Repair boundary:** Existing role metadata is removed only when the value matches another stored person and Pluto previously wrote the same extraction-authored `Role: ...` meeting context. Matching names without that provenance and roles that do not match a person remain untouched.
+- **Rationale:** Person names were grounded before persistence, but optional roles were accepted from model output without evidence and became sticky metadata. Conservative omission is more trustworthy than displaying a nearby attendee as someone else's title.
+- **Consequences:** Entity extraction may retain fewer roles, but every newly persisted role is directly inspectable against source text. Startup repair is idempotent, preserves unrelated metadata, and logs only a content-free count.

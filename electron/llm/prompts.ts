@@ -247,7 +247,7 @@ Goal:
 
 Analyze the following transcript and extract:
 
-1. **People**: Names of people mentioned or participating (include any role/title if mentioned)
+1. **People**: Names of people mentioned or participating. Include a role only when the transcript explicitly states that person's job title or function.
 2. **Topics**: Main subjects discussed (rate importance as high/medium/low)
 3. **Action Items**: Tasks, follow-ups, or commitments made (include who is responsible and any deadline)
 4. **Decisions**: Explicit decisions or conclusions reached (include rationale if given)
@@ -264,6 +264,9 @@ Rules:
   - People: prefer full names when available (e.g., "Sarah Chen" over "Sarah")
   - Projects/topics: keep wording consistent and specific (avoid vague labels like "the project")
 - Resolve pronouns/nicknames to the canonical entity only when confidence is high; otherwise omit
+- A person's role must be a job title or function, never another person's name, a team name, a relationship, or a nearby attendee
+- Include role only with role_evidence: an exact transcript quote that contains both the extracted person's name and the role phrase and explicitly connects them
+- If that exact evidence does not exist, omit both role and role_evidence; do not infer a role from proximity or conversation order
 - For action items, "assignee" should be a name if mentioned, otherwise omit
 - For due dates, use the exact phrase from the transcript (e.g., "by Friday", "next week")
 - Be conservative - only extract what's clearly present, don't infer too much
@@ -274,7 +277,7 @@ Rules:
 
 Respond with valid JSON in this exact format:
 {
-  "people": [{"name": "string", "role": "string or omit"}],
+  "people": [{"name": "string", "role": "job title or function, or omit", "role_evidence": "exact transcript quote containing this name and role, or omit"}],
   "topics": [{"name": "string", "importance": "high|medium|low"}],
   "action_items": [{"description": "string", "assignee": "string or omit", "due_date": "string or omit"}],
   "decisions": [{"description": "string", "rationale": "string or omit"}],

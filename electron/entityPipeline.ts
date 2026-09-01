@@ -146,6 +146,70 @@ function filterUngroundedPeople(
   return grounded;
 }
 
+const normalizedPhrase = (value: string): string =>
+  normalizeForMatch(value).replace(/\s+/g, ' ');
+
+const containsNormalizedPhrase = (text: string, phrase: string): boolean => {
+  const normalizedText = normalizedPhrase(text);
+  const normalizedNeedle = normalizedPhrase(phrase);
+  return Boolean(
+    normalizedNeedle && ` ${normalizedText} `.includes(` ${normalizedNeedle} `),
+  );
+};
+
+/**
+ * Roles are durable metadata, so model proximity is not enough. Keep a role
+ * only when an exact quote explicitly contains the person and role, and the
+ * role is not itself another known person's name.
+ */
+export function sanitizeExtractedPersonRoles(
+  people: ExtractedEntities['people'],
+  transcript: string | undefined,
+  knownPersonNames: string[] = [],
+): ExtractedEntities['people'] {
+  const personNames = new Set(
+    [...knownPersonNames, ...people.map((person) => person?.name)]
+      .filter((name): name is string => typeof name === 'string')
+      .map(normalizedPhrase)
+      .filter(Boolean),
+  );
+
+  return people.flatMap((person) => {
+    if (!person?.name || typeof person.name !== 'string') return [];
+    const role =
+      typeof person.role === 'string' ? person.role.trim() : undefined;
+    const evidence =
+      typeof person.role_evidence === 'string'
+        ? person.role_evidence.trim()
+        : undefined;
+    const normalizedRole = role ? normalizedPhrase(role) : '';
+    const roleIsPersonName = Boolean(
+      normalizedRole && personNames.has(normalizedRole),
+    );
+    const evidenceIsExact = Boolean(
+      transcript && evidence && transcript.includes(evidence),
+    );
+    const evidenceNamesPerson = Boolean(
+      evidence && containsNormalizedPhrase(evidence, person.name),
+    );
+    const evidenceNamesRole = Boolean(
+      role && evidence && containsNormalizedPhrase(evidence, role),
+    );
+
+    if (
+      !role ||
+      !evidence ||
+      roleIsPersonName ||
+      !evidenceIsExact ||
+      !evidenceNamesPerson ||
+      !evidenceNamesRole
+    ) {
+      return [{ name: person.name }];
+    }
+    return [{ name: person.name, role, role_evidence: evidence }];
+  });
+}
+
 /**
  * Find a similar entity using fuzzy matching
  * Returns the best match if it exceeds the similarity threshold
@@ -333,11 +397,16 @@ function persistExtractedEntities(
 
   // Load existing entities for resolution
   const existingPeople = db.getEntitiesByType('person');
+  const people = sanitizeExtractedPersonRoles(
+    extracted.people,
+    transcriptForGrounding,
+    existingPeople.map((person) => person.name),
+  );
   const existingTopics = db.getEntitiesByType('topic');
   const existingProjects = db.getEntitiesByType('project');
 
   // 1. Process People
-  for (const person of extracted.people) {
+  for (const person of people) {
     ensureCurrent();
     if (!person?.name || typeof person.name !== 'string') continue;
     // Try to find a match

@@ -124,6 +124,7 @@ export interface ExtractedEntities {
   people: Array<{
     name: string;
     role?: string;
+    role_evidence?: string;
   }>;
   topics: Array<{
     name: string;

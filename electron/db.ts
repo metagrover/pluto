@@ -1341,6 +1341,91 @@ const initDb = () => {
     db.exec('ALTER TABLE project_aliases ADD COLUMN moved_aliases_json TEXT');
 };
 
+type ExtractionAuthoredPersonRole = {
+  id: string;
+  metadata: string;
+  role: string;
+};
+
+/**
+ * Remove only roles with both forms of provenance for the known failure mode:
+ * the role equals another person entity and extraction wrote the same Role:
+ * context on a meeting link. Other metadata and ambiguous roles are preserved.
+ */
+export function repairExtractionAuthoredPersonRoles(): number {
+  const candidates = db
+    .prepare(`
+      WITH person_roles AS (
+        SELECT
+          person.id,
+          person.metadata,
+          json_extract(
+            CASE WHEN json_valid(person.metadata) THEN person.metadata ELSE '{}' END,
+            '$.role'
+          ) AS role
+        FROM entities person
+        WHERE person.type = 'person'
+      )
+      SELECT candidate.id, candidate.metadata, candidate.role
+      FROM person_roles candidate
+      WHERE typeof(candidate.role) = 'text'
+        AND TRIM(candidate.role) != ''
+        AND EXISTS (
+          SELECT 1
+          FROM entities other
+          WHERE other.type = 'person'
+            AND other.id != candidate.id
+            AND other.normalized_name = LOWER(TRIM(candidate.role))
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM meeting_entities source
+          WHERE source.entity_id = candidate.id
+            AND source.context = 'Role: ' || candidate.role
+        )
+    `)
+    .all() as ExtractionAuthoredPersonRole[];
+
+  const updatePerson = db.prepare(`
+    UPDATE entities
+    SET metadata = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND json_extract(
+        CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.role'
+      ) = ?
+  `);
+  const clearExtractionContext = db.prepare(`
+    UPDATE meeting_entities
+    SET context = NULL
+    WHERE entity_id = ? AND context = ?
+  `);
+  const repair = db.transaction(() => {
+    let repairedCount = 0;
+    for (const candidate of candidates) {
+      const metadata = JSON.parse(candidate.metadata) as Record<
+        string,
+        unknown
+      >;
+      const { role: _removedRole, ...preservedMetadata } = metadata;
+      const nextMetadata =
+        Object.keys(preservedMetadata).length > 0
+          ? JSON.stringify(preservedMetadata)
+          : null;
+      const result = updatePerson.run(
+        nextMetadata,
+        candidate.id,
+        candidate.role,
+      );
+      if (result.changes !== 1) continue;
+      clearExtractionContext.run(candidate.id, `Role: ${candidate.role}`);
+      repairedCount++;
+    }
+    return repairedCount;
+  });
+  return repair();
+}
+
 initDb();
 ensureCalendarSchema(db);
 export const calendarStore = createCalendarStore(db);
@@ -1362,6 +1447,17 @@ db.exec(`CREATE TRIGGER IF NOT EXISTS identity_input_meetings_update AFTER UPDAT
   BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;
   CREATE TRIGGER IF NOT EXISTS identity_input_meetings_delete AFTER DELETE ON meetings
   BEGIN UPDATE identity_input_revision SET revision = revision + 1 WHERE singleton = 1; END;`);
+
+try {
+  const repairedCount = repairExtractionAuthoredPersonRoles();
+  if (repairedCount > 0) {
+    console.log(
+      `[DB] Removed ${repairedCount} extraction-authored person-name roles`,
+    );
+  }
+} catch (e) {
+  console.warn('[DB] Person role metadata repair failed:', e);
+}
 
 export const getIdentityInputRevision = () =>
   (
