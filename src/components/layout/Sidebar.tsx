@@ -10,7 +10,6 @@ import {
   Search,
   Settings,
   Sun,
-  Trash2,
   Users,
 } from 'lucide-react';
 import {
@@ -19,7 +18,6 @@ import {
 } from '../../services/captureLifecycle';
 import type { Meeting } from '../../types';
 import { sortMeetingsByStartTime } from '../../utils/meetingOrdering';
-import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import { Logo } from '../Brand/Logo';
 
 type ActiveTab =
@@ -42,7 +40,6 @@ interface SidebarProps {
   recordingState?: CaptureLifecycleState;
   onReturnToRecording?: () => void;
   onOpenSearch: () => void;
-  handleDeleteMeeting: (id: string | number) => void;
   theme: 'light' | 'dark' | 'system';
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
@@ -59,7 +56,6 @@ export const Sidebar = ({
   recordingState,
   onReturnToRecording,
   onOpenSearch,
-  handleDeleteMeeting,
   theme,
   setTheme,
 }: SidebarProps) => {
@@ -302,7 +298,7 @@ export const Sidebar = ({
                 }
 
                 return (
-                  <div key={m.id} className="relative group">
+                  <div key={m.id}>
                     <button
                       type="button"
                       onClick={() => {
@@ -329,19 +325,6 @@ export const Sidebar = ({
                         {dateLabel}, {timeString}
                       </span>
                     </button>
-                    {canDeleteMeeting(m.finalization_status) ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteMeeting(m.id);
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
-                        title="Delete Session"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    ) : null}
                   </div>
                 );
               })}

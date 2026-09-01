@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Sidebar } from '../../src/components/layout/Sidebar';
+import type { Meeting } from '../../src/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -35,7 +36,6 @@ describe('Sidebar navigation', () => {
           safeMeetings={[]}
           onStartRecording={vi.fn()}
           onOpenSearch={vi.fn()}
-          handleDeleteMeeting={vi.fn()}
           theme="dark"
           setTheme={vi.fn()}
         />,
@@ -59,5 +59,37 @@ describe('Sidebar navigation', () => {
       true,
     );
     expect(buttonTexts.some((text) => text.includes('Settings'))).toBe(true);
+  });
+
+  it('keeps recent meeting rows free of inline delete controls', () => {
+    const meeting: Meeting = {
+      id: 'meeting-1',
+      title: 'Weekly review',
+      meeting_type: 'Recording',
+      created_at: '2026-09-01T15:01:00.000Z',
+      started_at: '2026-09-01T15:01:00.000Z',
+      duration_seconds: 120,
+      finalization_status: 'finalized',
+    };
+
+    act(() =>
+      root.render(
+        <Sidebar
+          sidebarVisible
+          activeTab="hub"
+          setActiveTab={vi.fn()}
+          selectedMeetingId={null}
+          setSelectedMeetingId={vi.fn()}
+          safeMeetings={[meeting]}
+          onStartRecording={vi.fn()}
+          onOpenSearch={vi.fn()}
+          theme="dark"
+          setTheme={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('Weekly review');
+    expect(container.querySelector('[title="Delete Session"]')).toBeNull();
   });
 });

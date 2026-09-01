@@ -1081,7 +1081,6 @@ function App() {
               setZenVisible(true);
             }}
             onOpenSearch={() => setSearchVisible(true)}
-            handleDeleteMeeting={handleDeleteMeeting}
             theme={theme}
             setTheme={(newTheme) => {
               setTheme(newTheme);
