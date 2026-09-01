@@ -26,6 +26,7 @@ import {
 import { writeOwnerOnlyPrivateFile } from './lib/privateEvaluationFile.ts';
 
 type BenchmarkMode = 'isolated' | 'repeat-30' | 'burst';
+type HierarchyAuditStrategy = 'every_node' | 'final_only';
 
 const option = (name: string, fallback?: string): string => {
   const index = process.argv.indexOf(name);
@@ -39,6 +40,13 @@ const outputPath = path.resolve(option('--output'));
 const mode = option('--mode', 'isolated') as BenchmarkMode;
 if (!['isolated', 'repeat-30', 'burst'].includes(mode)) {
   throw new Error('invalid_meeting_notes_latency_mode');
+}
+const hierarchyAuditStrategy = option(
+  '--hierarchy-audit-strategy',
+  'every_node',
+) as HierarchyAuditStrategy;
+if (!['every_node', 'final_only'].includes(hierarchyAuditStrategy)) {
+  throw new Error('invalid_meeting_notes_hierarchy_audit_strategy');
 }
 const manifest = parsePrivateMeetingNotesLatencyManifest(
   JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown,
@@ -155,6 +163,7 @@ const runCase = async (
     const analysis = await provider.generateStructuredAnalysis('', '', 'auto', {
       source,
       contextTokens,
+      hierarchyAuditStrategy,
       onStageEvent: metrics.observe,
       onPlan: ({ plannedLeafCount }) =>
         metrics.setPlannedLeafCount(plannedLeafCount),
@@ -220,6 +229,7 @@ const main = async () => {
       contextTokens,
       seed,
       structuredThinking: false,
+      hierarchyAuditStrategy,
       fixtureOrderSha256: createHash('sha256')
         .update(cases.map(({ definition }) => definition.caseKey).join('\n'))
         .digest('hex'),

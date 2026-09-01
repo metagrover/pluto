@@ -31,6 +31,14 @@ pnpm run benchmark:meeting-notes-latency -- --manifest .private/meeting-notes-la
 pnpm run benchmark:meeting-notes-latency -- --manifest .private/meeting-notes-latency.json --mode burst --output .artifacts/meeting-notes-latency/burst.json
 ```
 
+To measure the experimental hierarchy that replaces leaf and intermediate model audits with deterministic source/commitment checks, use a manifest containing exactly one case and opt in explicitly:
+
+```bash
+pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json --mode isolated --hierarchy-audit-strategy final_only --output .artifacts/meeting-notes-latency/final-only.json
+```
+
+This flag affects the private benchmark only. Product generation retains an audit at every hierarchy node. Do not promote the experiment unless the case publishes and separately passes the existing source-grounded semantic quality gate.
+
 Reports contain opaque case keys, source counts, planned leaf and generated-node counts, writer/audit/merge and terminal-outcome counts, aggregate stage timings, repair/repartition counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, raw provider responses, and individual stage payloads.
 
 To summarize the newest 100 organic runs without reading meeting content:

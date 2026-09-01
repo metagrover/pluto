@@ -411,6 +411,42 @@ type AuditedNode = {
   depth: number;
 };
 
+const deterministicallyCheckedDraft = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  inherited: NotesItem[] = [],
+): Awaited<ReturnType<typeof auditDraft>> => {
+  assertAllowedSources(draft, evidenceSpans);
+  assertSourceGuardrails(input, draft, evidenceSpans, false);
+  validateInheritedItems(
+    inherited.filter(
+      (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+        item.kind === 'action' || item.kind === 'decision',
+    ),
+    commitmentsFor(draft),
+    [],
+  );
+  const audit: NotesAudit = {
+    changes: [],
+    verdicts: [],
+    dispositions: [],
+    terminology: [],
+  };
+  return {
+    draft,
+    audit,
+    changeCount: 0,
+    audited: {
+      source: input.source,
+      draft,
+      verdicts: new Map(),
+      acceptedTerminology: [],
+      issues: [],
+    },
+  };
+};
+
 const auditDraft = async (
   input: GenerateMeetingNotesInput,
   draft: NotesDraft,
@@ -602,6 +638,7 @@ const runHierarchy = async (
   planningTokens = input.contextTokens,
 ): Promise<AnalysisDocumentV3> => {
   const capacityInput = { ...input, contextTokens: planningTokens };
+  const finalAuditOnly = input.hierarchyAuditStrategy === 'final_only';
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
     const sourceText = serializeSource(input, spans);
     const writerPrompt = buildNotesWriterPrompt({
@@ -610,6 +647,16 @@ const runHierarchy = async (
       knownTerms,
       template: input.context.template,
     });
+    if (
+      !fits(
+        capacityInput,
+        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+        WRITER_OUTPUT_TOKENS,
+      )
+    ) {
+      return false;
+    }
+    if (finalAuditOnly) return true;
     const auditPrompt = reviewPrompt(input, {
       sourceText,
       draft: {},
@@ -617,18 +664,13 @@ const runHierarchy = async (
       knownTerms,
     });
     return (
-      fits(
-        capacityInput,
-        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-        WRITER_OUTPUT_TOKENS,
-      ) &&
       estimateNotesTokens(
         `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
       ) +
         WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
-        planningTokens
+      planningTokens
     );
   });
   input.onPlan?.({ plannedLeafCount: leaves.length });
@@ -673,18 +715,21 @@ const runHierarchy = async (
       ),
       idPrefix,
     );
-    const audited = await withTruncationRetry(input, (retryInstruction) =>
-      auditDraft(
-        input,
-        draft,
-        evidenceSpans,
-        knownTerms,
-        [],
-        idPrefix,
-        leaves.length === 1,
-        retryInstruction,
-      ),
-    );
+    const audited =
+      !finalAuditOnly || leaves.length === 1
+        ? await withTruncationRetry(input, (retryInstruction) =>
+            auditDraft(
+              input,
+              draft,
+              evidenceSpans,
+              knownTerms,
+              [],
+              idPrefix,
+              leaves.length === 1,
+              retryInstruction,
+            ),
+          )
+        : deterministicallyCheckedDraft(input, draft, evidenceSpans);
     hierarchyIssues.push(...(audited.audited.issues ?? []));
     return {
       changeCount: audited.changeCount,
@@ -768,6 +813,19 @@ const runHierarchy = async (
           ...left.evidenceSpans,
           ...right.evidenceSpans,
         ]);
+        if (
+          !fits(
+            capacityInput,
+            mergePromptFor(left, right),
+            WRITER_OUTPUT_TOKENS,
+          )
+        ) {
+          continue;
+        }
+        if (finalAuditOnly && level.length > 2) {
+          pair = [left, right];
+          continue;
+        }
         const auditBase = reviewPrompt(input, {
           sourceText: serializeSource(input, evidence),
           draft: {},
@@ -779,18 +837,14 @@ const runHierarchy = async (
           ],
         });
         if (
-          fits(
-            capacityInput,
-            mergePromptFor(left, right),
-            WRITER_OUTPUT_TOKENS,
-          ) &&
           estimateNotesTokens(auditBase) +
             WRITER_OUTPUT_TOKENS +
             reviewOutputTokens(input) +
             SAFETY_TOKENS <=
-            planningTokens
-        )
+          planningTokens
+        ) {
           pair = [left, right];
+        }
       }
     }
     if (!pair) {
@@ -898,18 +952,26 @@ const runHierarchy = async (
         ),
         inherited,
       );
-      audited = await withTruncationRetry(input, (retryInstruction) =>
-        auditDraft(
-          input,
-          merged,
-          evidenceSpans,
-          knownTerms,
-          inherited,
-          `merge${generatedNodes}`,
-          level.length === 2,
-          retryInstruction,
-        ),
-      );
+      audited =
+        !finalAuditOnly || level.length === 2
+          ? await withTruncationRetry(input, (retryInstruction) =>
+              auditDraft(
+                input,
+                merged,
+                evidenceSpans,
+                knownTerms,
+                inherited,
+                `merge${generatedNodes}`,
+                level.length === 2,
+                retryInstruction,
+              ),
+            )
+          : deterministicallyCheckedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            );
     } catch (error) {
       if (
         !(error instanceof MeetingNotesError) ||

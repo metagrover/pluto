@@ -1124,6 +1124,46 @@ it('uses bounded source-backed leaf and merge stages when the full meeting canno
   expect(result.generation_metadata.mode).toBe('hierarchical');
 }, 15_000);
 
+it('can benchmark a hierarchy with deterministic intermediate checks and one final model audit', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1000)}`,
+    })),
+  );
+  const generate = vi.fn(async (request) => {
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    if (request.task === 'notesAudit') {
+      return auditFor(request.prompt, span);
+    }
+    return JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [{ title: { text: 'Context', sources: [span] }, items: [] }],
+    });
+  });
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'final_only',
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+  });
+
+  const tasks = generate.mock.calls.map(([request]) => request.task);
+  expect(tasks.filter((task) => task === 'notesWriter').length).toBeGreaterThan(
+    1,
+  );
+  expect(tasks).toContain('notesMerge');
+  expect(tasks.filter((task) => task === 'notesAudit')).toHaveLength(1);
+  expect(result.generation_metadata.mode).toBe('hierarchical');
+  expect(result.generation_metadata.audit_status).toBe('complete');
+}, 15_000);
+
 it('reconciles a middle commitment with a later cancellation using original evidence across leaves', async () => {
   const source = makeSyntheticNotesSource([
     {

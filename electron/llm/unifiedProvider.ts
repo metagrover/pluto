@@ -539,6 +539,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      /** Explicit benchmark experiment; product callers retain every-node audits. */
+      hierarchyAuditStrategy?: 'every_node' | 'final_only';
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
@@ -564,6 +566,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
+      hierarchyAuditStrategy: options.hierarchyAuditStrategy,
       onStage: options.onStage,
       onRepair: options.onRepair,
       onPlan: options.onPlan,

@@ -135,6 +135,8 @@ export interface LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      /** Explicit benchmark experiment; product callers retain every-node audits. */
+      hierarchyAuditStrategy?: 'every_node' | 'final_only';
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
