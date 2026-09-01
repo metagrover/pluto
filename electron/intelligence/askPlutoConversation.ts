@@ -8,6 +8,10 @@ const REFERENTIAL_PATTERN =
 
 const DIAGNOSTIC_PATTERN =
   /\b(what went wrong|why (?:couldn't|could not|didn't|did not) you|that didn't answer|that did not answer|why no results|why did that fail)\b/i;
+const EXPANSION_FOLLOW_UP_PATTERN =
+  /^(?:there (?:should|must) be more|is that all|anything else|what else|show me more|more)[?.!]*$/i;
+const ASSIGNEE_QUERY_PATTERN =
+  /\b(?:what(?:'s| is)|show me (?:what(?:'s| is))?)\s+assigned to\s+(.+?)(?:\?|$)|\bwhat\s+does\s+(.+?)\s+own(?:\?|$)|\bwhat\s+(?:are|were)\s+(.+?)(?:'s|’s)\s+action items?(?:\?|$)/i;
 
 export const queryReferencesPriorConversation = (query: string): boolean =>
   REFERENTIAL_PATTERN.test(query);
@@ -19,6 +23,26 @@ export const latestAssistantTurn = (
   turns: AskPlutoConversationTurn[],
 ): AskPlutoConversationTurn | undefined =>
   [...turns].reverse().find((turn) => turn.role === 'assistant');
+
+export const resolveConversationQuery = (
+  query: string,
+  turns: AskPlutoConversationTurn[],
+): string => {
+  if (!EXPANSION_FOLLOW_UP_PATTERN.test(query.trim())) return query;
+  const priorAssignee = [...turns]
+    .reverse()
+    .filter((turn) => turn.role === 'user')
+    .map((turn) => turn.content.match(ASSIGNEE_QUERY_PATTERN))
+    .find(Boolean);
+  const assignee = priorAssignee
+    ?.slice(1)
+    .find((candidate): candidate is string => Boolean(candidate?.trim()))
+    ?.trim()
+    .replace(/[?.!,;:]+$/, '');
+  return assignee
+    ? `What else is assigned to ${assignee}? Search all meeting notes and distinguish explicit assignments from possible follow-ups.`
+    : query;
+};
 
 export const inheritConversationScope = (
   query: string,

@@ -94,14 +94,25 @@ export const buildMeetingNotesEvidenceDocument = (
               title: clean(topic.title),
               summary: clean(topic.summary),
               key_points: Array.isArray(topic.key_points)
-                ? topic.key_points
+                ? topic.key_points.flatMap((point) => {
+                    const text = normalizedItemText(point);
+                    return text ? [{ ...point, text }] : [];
+                  })
                 : [],
-              decisions: Array.isArray(topic.decisions) ? topic.decisions : [],
+              decisions: Array.isArray(topic.decisions)
+                ? topic.decisions.flatMap((decision) => {
+                    const text = normalizedItemText(decision);
+                    return text ? [{ ...decision, text }] : [];
+                  })
+                : [],
               action_items: Array.isArray(topic.action_items)
-                ? topic.action_items
+                ? topic.action_items.flatMap((action) => {
+                    const text = normalizedItemText(action);
+                    return text ? [{ ...action, text }] : [];
+                  })
                 : [],
               open_questions: Array.isArray(topic.open_questions)
-                ? topic.open_questions
+                ? topic.open_questions.map(clean).filter(Boolean)
                 : [],
             }))
           : [],

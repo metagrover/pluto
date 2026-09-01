@@ -133,4 +133,40 @@ describe('buildMeetingNotesEvidenceDocument', () => {
     expect(document.hasUsableNotes).toBe(true);
     expect(document.decisionsText).toBe('Use SQLite.');
   });
+
+  it('ignores malformed structured note values instead of crashing retrieval', () => {
+    const document = buildMeetingNotesEvidenceDocument({
+      id: 'meeting-malformed',
+      title: 'Imported notes',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'A valid overview remains searchable.',
+        topics: [
+          {
+            title: 'Follow-ups',
+            summary: 'A valid topic summary.',
+            key_points: [{ text: { unexpected: true } }],
+            decisions: [],
+            action_items: [],
+            open_questions: [{ unexpected: true }],
+          },
+        ],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    });
+
+    expect(document.notesText).toContain(
+      'A valid overview remains searchable.',
+    );
+    expect(document.notesText).toContain('A valid topic summary.');
+    expect(document.notesText).not.toContain('[object Object]');
+  });
 });

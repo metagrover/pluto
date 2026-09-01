@@ -154,6 +154,22 @@ describe('getAskPlutoPrompt', () => {
     );
   });
 
+  it('does not turn participation into ownership for assignee questions', () => {
+    const prompt = getAskPlutoPrompt(
+      'What else is assigned to Ayush?',
+      [],
+      'factual',
+    );
+
+    expect(prompt).toContain('Search every provided source');
+    expect(prompt).toContain(
+      'Separate items that explicitly name the person as owner from possible follow-ups',
+    );
+    expect(prompt).toContain(
+      'Never convert participation, discussion, or an unnamed owner into an assignment',
+    );
+  });
+
   it('bounds each source before sending it to the synchronous chat model', () => {
     const prompt = getAskPlutoPrompt(
       'What is the main topic?',

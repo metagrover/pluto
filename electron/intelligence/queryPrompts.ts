@@ -34,6 +34,10 @@ export const getAskPlutoPrompt = (
     /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i.test(
       query,
     );
+  const ownershipQuestion =
+    /\b(?:assigned to|action items?|what (?:else )?does .+ own|who owns)\b/i.test(
+      query,
+    );
   const evidenceBudget =
     context.length === 1
       ? 2600
@@ -78,9 +82,11 @@ ${details.join('\n')}`;
 
   const formatGuidance = multiMeetingSynthesis
     ? 'Write a rich, readable breakdown using one bullet for each meeting that has meaningful evidence. Start each bullet with the exact meeting title and occurrence date from that source, then explain its concrete topics, decisions, and follow-ups in 1-2 evidence-close sentences. Begin directly with the meeting bullets; do not spend output on an uncited overview.'
-    : intent === 'factual'
-      ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence. Include the decision, owner, deadline, or next step when it directly helps answer the question.'
-      : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
+    : ownershipQuestion
+      ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment.'
+      : intent === 'factual'
+        ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence. Include the decision, owner, deadline, or next step when it directly helps answer the question.'
+        : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
   const responseLimit = multiMeetingSynthesis
     ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
     : 'Use up to 4 supported points and stay under 160 words. Return fewer rather than inventing coverage.';

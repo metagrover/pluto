@@ -17,6 +17,11 @@ describe('Ask Pluto query IPC boundary', () => {
     );
     expect(queryHandler).toContain('assigneeRecall?.context');
     expect(queryHandler).toContain('assigneeRecall?.answer');
+    expect(queryHandler).toContain(
+      'assigneeRecall && !assigneeRecall.coverageLimited',
+    );
+    expect(queryHandler).toContain('mergeRetrievalResultsByMeeting');
+    expect(queryHandler).toContain('resolveConversationQuery');
   });
 
   it('publishes waiting and writing phases around model generation', () => {

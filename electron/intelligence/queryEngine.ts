@@ -502,11 +502,25 @@ export const buildAssigneeActionRecall = (
   assignee: string;
   answer: string;
   context: RetrievalResult[];
+  coverageLimited: boolean;
+  mentionedMeetingCount: number;
 } | null => {
   const assignee = parseAssigneeActionQuery(query);
   if (!assignee) return null;
 
   const normalizedAssignee = normalizePersonName(assignee);
+  const mentionedMeetingCount = meetings.filter((meeting) =>
+    [
+      meeting.user_notes,
+      meeting.enhanced_notes,
+      meeting.mid_json,
+      meeting.analysis_json,
+    ].some(
+      (value) =>
+        typeof value === 'string' &&
+        normalizePersonName(value).includes(normalizedAssignee),
+    ),
+  ).length;
   const rawMatches = meetings.flatMap((meeting) => {
     const actions = readStructuredActionItems(meeting).filter(
       (item) =>
@@ -537,6 +551,8 @@ export const buildAssigneeActionRecall = (
       assignee,
       answer: `I couldn't find any open action items assigned to ${assignee}.`,
       context: [],
+      coverageLimited: mentionedMeetingCount > 0,
+      mentionedMeetingCount,
     };
   }
 
@@ -563,7 +579,13 @@ export const buildAssigneeActionRecall = (
     .slice(0, 12)
     .join('\n');
 
-  return { assignee, answer, context };
+  return {
+    assignee,
+    answer,
+    context,
+    coverageLimited: mentionedMeetingCount > context.length,
+    mentionedMeetingCount,
+  };
 };
 
 const normalizeScopeText = (value: string): string =>

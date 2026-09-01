@@ -513,6 +513,24 @@ describe('Query Engine', () => {
         context: [],
       });
     });
+
+    it('marks structured recall as incomplete when the person appears in other meeting notes', () => {
+      const recall = buildAssigneeActionRecall("What's assigned to Ayush?", [
+        meetings[0],
+        {
+          id: 'other-ayush-meeting',
+          title: 'Partner follow-up',
+          enhanced_notes:
+            'Ayush discussed several next steps, but the saved notes do not name an owner.',
+        } as dbModule.PersistedMeeting,
+      ]);
+
+      expect(recall).toMatchObject({
+        coverageLimited: true,
+        mentionedMeetingCount: 2,
+      });
+      expect(recall?.context).toHaveLength(1);
+    });
   });
 
   describe('explicit meeting scope', () => {

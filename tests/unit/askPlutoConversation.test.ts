@@ -5,6 +5,7 @@ import {
   inheritConversationScope,
   isDiagnosticConversationFollowUp,
   queryReferencesPriorConversation,
+  resolveConversationQuery,
 } from '../../electron/intelligence/askPlutoConversation';
 import type { AskPlutoConversationTurn } from '../../src/types/askPlutoQuery';
 
@@ -65,6 +66,24 @@ describe('Ask Pluto conversation scope', () => {
   it('explains a prior no-evidence result without searching globally', () => {
     expect(describePreviousConversationFailure(priorTurns[1])).toContain(
       '20 meetings from today',
+    );
+  });
+
+  it('carries the assignee into a request for more results', () => {
+    const turns: AskPlutoConversationTurn[] = [
+      { role: 'user', content: "What's assigned to Ayush?" },
+      {
+        role: 'assistant',
+        content: 'A partial list of assignments.',
+        outcome: 'partial',
+      },
+    ];
+
+    expect(resolveConversationQuery('there should be more?', turns)).toBe(
+      'What else is assigned to Ayush? Search all meeting notes and distinguish explicit assignments from possible follow-ups.',
+    );
+    expect(resolveConversationQuery('What did Priya decide?', turns)).toBe(
+      'What did Priya decide?',
     );
   });
 });

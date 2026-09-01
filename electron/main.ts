@@ -352,6 +352,7 @@ import {
   inheritConversationScope,
   isDiagnosticConversationFollowUp,
   latestAssistantTurn,
+  resolveConversationQuery,
 } from './intelligence/askPlutoConversation';
 import {
   detectExplicitAskPlutoCorrection,
@@ -3657,6 +3658,33 @@ app.whenReady().then(async () => {
           : input.requestId;
       const controller = new AbortController();
       const persistedMeetings = db.getMeetings() as db.PersistedMeeting[];
+      const priorTurns: AskPlutoConversationTurn[] =
+        typeof input === 'string' || !Array.isArray(input.priorTurns)
+          ? []
+          : input.priorTurns
+              .filter(
+                (turn) =>
+                  (turn.role === 'user' || turn.role === 'assistant') &&
+                  typeof turn.content === 'string' &&
+                  turn.content.trim(),
+              )
+              .slice(-6)
+              .map((turn) => ({
+                role: turn.role,
+                content: turn.content.trim().slice(0, 1200),
+                meetingIds: Array.isArray(turn.meetingIds)
+                  ? turn.meetingIds
+                      .filter((id): id is string => typeof id === 'string')
+                      .slice(0, 8)
+                  : [],
+                ...(turn.outcome ? { outcome: turn.outcome } : {}),
+                ...(turn.resolvedScope
+                  ? { resolvedScope: turn.resolvedScope }
+                  : {}),
+                ...(turn.retrievalSummary
+                  ? { retrievalSummary: turn.retrievalSummary }
+                  : {}),
+              }));
       const activeRecording = captureSessionLease.recordingForOwner(
         event.sender.id,
       );
@@ -3734,16 +3762,20 @@ app.whenReady().then(async () => {
         sendStatus('scope_resolved');
         sendStatus('retrieving');
 
-        const parsed = await parseQuery(queryText, {
+        const effectiveQueryText = resolveConversationQuery(
+          queryText,
+          priorTurns,
+        );
+        const parsed = await parseQuery(effectiveQueryText, {
           signal: controller.signal,
           useModelClassification: false,
         });
         const assigneeRecall = buildAssigneeActionRecall(
-          queryText,
+          effectiveQueryText,
           persistedMeetings,
         );
         const explicitMeetingScope = resolveExplicitMeetingScope(
-          queryText,
+          effectiveQueryText,
           persistedMeetings,
         );
         const requestedMode =
@@ -3752,7 +3784,7 @@ app.whenReady().then(async () => {
             ? input.modeOverride
             : 'auto';
         reasoningMode = resolveAskPlutoReasoningMode({
-          query: queryText,
+          query: effectiveQueryText,
           intent: parsed.intent,
           override: requestedMode,
         });
@@ -3768,34 +3800,7 @@ app.whenReady().then(async () => {
         }
 
         const currentMeetingRequested =
-          queryReferencesCurrentMeeting(queryText);
-        const priorTurns: AskPlutoConversationTurn[] =
-          typeof input === 'string' || !Array.isArray(input.priorTurns)
-            ? []
-            : input.priorTurns
-                .filter(
-                  (turn) =>
-                    (turn.role === 'user' || turn.role === 'assistant') &&
-                    typeof turn.content === 'string' &&
-                    turn.content.trim(),
-                )
-                .slice(-6)
-                .map((turn) => ({
-                  role: turn.role,
-                  content: turn.content.trim().slice(0, 1200),
-                  meetingIds: Array.isArray(turn.meetingIds)
-                    ? turn.meetingIds
-                        .filter((id): id is string => typeof id === 'string')
-                        .slice(0, 8)
-                    : [],
-                  ...(turn.outcome ? { outcome: turn.outcome } : {}),
-                  ...(turn.resolvedScope
-                    ? { resolvedScope: turn.resolvedScope }
-                    : {}),
-                  ...(turn.retrievalSummary
-                    ? { retrievalSummary: turn.retrievalSummary }
-                    : {}),
-                }));
+          queryReferencesCurrentMeeting(effectiveQueryText);
         const inheritedScope = parsed.temporal_range
           ? undefined
           : inheritConversationScope(queryText, priorTurns);
@@ -4087,7 +4092,7 @@ app.whenReady().then(async () => {
         const priorMeetingIds = [
           ...new Set([
             ...(inheritedScope?.meetingIds || []),
-            ...(queryReferencesPriorTurn(queryText)
+            ...(queryReferencesPriorTurn(effectiveQueryText)
               ? priorTurns
                   .filter((turn) => turn.role === 'assistant')
                   .flatMap((turn) => turn.meetingIds || [])
@@ -4109,7 +4114,7 @@ app.whenReady().then(async () => {
                 )
             : [];
         const historicalCandidateLimit = currentMeetingRequested
-          ? getCrossMeetingCandidateLimit(queryText, parsed.intent)
+          ? getCrossMeetingCandidateLimit(effectiveQueryText, parsed.intent)
           : 0;
         const historicalPinnedResults = persistedMeetings
           .filter((meeting) => String(meeting.id) !== currentMeeting.meetingId)
@@ -4144,19 +4149,27 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             historicalCandidateLimit,
           });
+        const generalContext =
+          !assigneeRecall || assigneeRecall.coverageLimited
+            ? explicitResolvedScope
+              ? explicitlyScopedPinnedResults
+              : temporalResolvedScope
+                ? pinnedResults
+                : restrictToCurrentMeeting && currentPinnedResult
+                  ? [currentPinnedResult]
+                  : restrictToPinnedCurrentComparison
+                    ? pinnedResults
+                    : restrictToPriorConversation
+                      ? priorPinnedResults
+                      : await retrieveContext(parsed, { pinnedResults })
+            : [];
         const context =
-          assigneeRecall?.context ??
-          (explicitResolvedScope
-            ? explicitlyScopedPinnedResults
-            : temporalResolvedScope
-              ? pinnedResults
-              : restrictToCurrentMeeting && currentPinnedResult
-                ? [currentPinnedResult]
-                : restrictToPinnedCurrentComparison
-                  ? pinnedResults
-                  : restrictToPriorConversation
-                    ? priorPinnedResults
-                    : await retrieveContext(parsed, { pinnedResults }));
+          assigneeRecall && !assigneeRecall.coverageLimited
+            ? assigneeRecall.context
+            : mergeRetrievalResultsByMeeting(
+                assigneeRecall?.context ?? [],
+                generalContext,
+              );
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
 
@@ -4203,7 +4216,7 @@ app.whenReady().then(async () => {
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
         );
 
-        if (assigneeRecall) {
+        if (assigneeRecall && !assigneeRecall.coverageLimited) {
           sendStatus('writing');
         } else {
           sendStatus('waiting');
@@ -4220,12 +4233,13 @@ app.whenReady().then(async () => {
           },
         );
         const extractiveAnswer =
-          assigneeRecall?.answer ??
-          buildExtractiveTemporalSummary(queryText, context);
+          assigneeRecall && !assigneeRecall.coverageLimited
+            ? assigneeRecall.answer
+            : buildExtractiveTemporalSummary(effectiveQueryText, context);
         let answerRaw: string;
         if (
           extractiveAnswer &&
-          (Boolean(assigneeRecall) ||
+          (Boolean(assigneeRecall && !assigneeRecall.coverageLimited) ||
             shouldUsePreparedExtractiveAnswer({
               mode: reasoningMode,
               contextCount: context.length,
@@ -4239,11 +4253,11 @@ app.whenReady().then(async () => {
           const settings = await getAllSettings(db);
           const provider = await getProvider(settings);
           const prompt = getAskPlutoPrompt(
-            queryText,
+            effectiveQueryText,
             context,
             parsed.intent,
             shouldIncludePriorConversation(
-              queryText,
+              effectiveQueryText,
               Boolean(explicitMeetingScope),
             )
               ? priorTurns
