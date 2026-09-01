@@ -71,6 +71,38 @@ describe('browser IPC capture journal fallback', () => {
     );
   });
 
+  it('provides bounded People summaries and identity actions for browser previews', async () => {
+    const ipc = createBrowserIpcFallback();
+
+    await expect(ipc.invoke('GET_PROJECT_PORTFOLIO')).resolves.toEqual([]);
+    await expect(ipc.invoke('GET_PEOPLE_BRIEFING_SUMMARIES')).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'preview-avery',
+          name: 'Avery Chen',
+          meetingCount: 1,
+          openCommitmentCount: 1,
+          possibleDuplicateCount: 0,
+        }),
+      ]),
+    );
+    await expect(
+      ipc.invoke('UPDATE_PERSON_NAME', {
+        personId: 'preview-avery',
+        name: 'Avery C.',
+      }),
+    ).resolves.toMatchObject({ id: 'preview-avery', name: 'Avery C.' });
+    await expect(
+      ipc.invoke('MERGE_PERSON', {
+        canonicalId: 'preview-avery',
+        duplicateId: 'preview-maya',
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      ipc.invoke('RESTORE_PERSON_MERGE', 'preview-maya'),
+    ).resolves.toBeUndefined();
+  });
+
   it('returns the exact latest activity evidence when sealing a started journal', async () => {
     const ipc = createBrowserIpcFallback();
     const activityEvidence = await buildCaptureActivityEvidence(

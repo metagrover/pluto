@@ -532,6 +532,7 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
     },
     knowledgeDoc: previewPersonContextDoc,
     workingMemorySnapshot: null,
+    mergedPeople: [],
   },
   ...Object.fromEntries(
     previewPeople.slice(1).map((person) => [
@@ -550,6 +551,7 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
         commitments: { open: [], delivered: [] },
         knowledgeDoc: null,
         workingMemorySnapshot: null,
+        mergedPeople: [],
       },
     ]),
   ),
@@ -754,8 +756,55 @@ const createInvokeFallback =
       case 'GET_KNOWLEDGE_GRAPH_STATS':
         result = emptyGraphStats;
         break;
+      case 'GET_PROJECT_PORTFOLIO':
+        result = [];
+        break;
       case 'GET_ENTITIES_BY_TYPE':
         result = args[0] === 'person' ? previewPeople : [];
+        break;
+      case 'GET_PEOPLE_BRIEFING_SUMMARIES':
+        result = previewPeople.map((person) => {
+          const meetings = previewMeetings[person.id] ?? [];
+          const latest = meetings[0] ?? null;
+          let role = 'Known from conversations';
+          try {
+            const metadata = JSON.parse(person.metadata || '{}') as {
+              role?: unknown;
+            };
+            if (typeof metadata.role === 'string' && metadata.role.trim()) {
+              role = metadata.role.trim();
+            }
+          } catch {
+            // Preview data without valid metadata keeps the neutral role label.
+          }
+          return {
+            id: person.id,
+            name: person.name,
+            role,
+            meetingCount: meetings.length,
+            mentionCount: meetings.reduce(
+              (total, meeting) => total + meeting.mention_count,
+              0,
+            ),
+            latestMeetingId: latest?.id ?? null,
+            latestMeetingTitle: latest?.title ?? null,
+            latestMeetingAt: latest?.started_at ?? latest?.created_at ?? null,
+            context: latest?.context ?? null,
+            openCommitmentCount:
+              previewPersonBriefings[person.id]?.commitments.open.length ?? 0,
+            possibleDuplicateCount: 0,
+          };
+        });
+        break;
+      case 'UPDATE_PERSON_NAME': {
+        const payload = args[0] as { personId?: string; name?: string };
+        result = previewPeople.find((person) => person.id === payload.personId);
+        if (result && payload.name) result = { ...result, name: payload.name };
+        break;
+      }
+      case 'MERGE_PERSON':
+      case 'RESTORE_PERSON_MERGE':
+        result = undefined;
         break;
       case 'SEARCH_ENTITIES': {
         const query = String(args[0] || '')

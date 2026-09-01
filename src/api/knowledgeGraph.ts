@@ -333,6 +333,19 @@ export const mergeProject = async (
 export const restoreProjectMerge = async (projectId: string): Promise<void> =>
   invoke('RESTORE_PROJECT_MERGE', projectId);
 
+export const updatePersonName = async (
+  personId: string,
+  name: string,
+): Promise<Entity> => invoke('UPDATE_PERSON_NAME', { personId, name });
+
+export const mergePerson = async (
+  personId: string,
+  destinationPersonId: string,
+): Promise<void> => invoke('MERGE_PERSON', { personId, destinationPersonId });
+
+export const restorePersonMerge = async (personId: string): Promise<void> =>
+  invoke('RESTORE_PERSON_MERGE', personId);
+
 /** Discover at most one source-grounded initiative from one conversation. */
 export const discoverProjectInitiative = async (
   options: { retryFailed?: boolean } = {},

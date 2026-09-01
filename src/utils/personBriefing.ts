@@ -13,6 +13,7 @@ export interface PersonBriefingSummary {
   latestMeetingAt: string | null;
   context: string | null;
   openCommitmentCount: number;
+  possibleDuplicateCount: number;
 }
 
 export const parsePersonRole = (metadata: unknown): string => {

@@ -91,6 +91,9 @@
   .person-date {
     @apply flex items-center gap-1.5;
   }
+  .person-possible-duplicate {
+    @apply rounded-md bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
+  }
   .person-row__chevron {
     @apply -mr-1 shrink-0 text-pro-text-muted/40 transition-colors duration-150;
   }
@@ -121,11 +124,29 @@
   .person-dossier {
     @apply mx-auto w-full max-w-4xl px-5 pb-24 md:px-8;
   }
+  .person-dossier__topline {
+    @apply mb-7 flex min-h-10 items-start justify-between gap-4;
+  }
   .person-dossier__back {
-    @apply mb-7 inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply inline-flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__more {
+    @apply relative;
+  }
+  .person-dossier__more > summary {
+    @apply flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__more > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+  .person-dossier__more > div {
+    @apply absolute right-0 z-20 mt-1 w-52 rounded-lg border border-pro-border bg-pro-bg p-1 shadow-lg;
+  }
+  .person-dossier__more > div button {
+    @apply flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-pro-text-main hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:opacity-40;
   }
   .person-dossier__identity {
-    @apply flex items-center gap-4 border-b border-pro-border/60 pb-7;
+    @apply flex items-start gap-4 border-b border-pro-border/60 pb-7;
   }
   .person-dossier__identity .person-avatar {
     @apply h-12 w-12 rounded-xl border-pro-accent/20 bg-pro-accent/5 text-base text-pro-accent;
@@ -133,8 +154,97 @@
   .person-dossier__identity h1 {
     @apply font-serif text-[30px] font-medium tracking-[-0.01em] text-pro-text-main;
   }
-  .person-dossier__identity p {
-    @apply mt-0.5 text-sm text-pro-text-muted;
+  .person-dossier__identity-copy {
+    @apply min-w-0 flex-1;
+  }
+  .person-dossier__name {
+    @apply flex items-start gap-2;
+  }
+  .person-dossier__name > button {
+    @apply mt-0.5 flex min-h-10 min-w-10 items-center justify-center rounded-md text-pro-text-muted opacity-70 transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent sm:opacity-0 sm:group-hover:opacity-100;
+  }
+  .person-dossier__identity-meta {
+    @apply mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1;
+  }
+  .person-dossier__identity-meta p {
+    @apply text-sm text-pro-text-muted;
+  }
+  .person-dossier__identity-meta button {
+    @apply min-h-8 rounded-md px-1.5 text-xs font-semibold text-pro-accent hover:bg-pro-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__name-form > label,
+  .person-dossier__merge > label {
+    @apply mb-2 block text-xs font-semibold text-pro-text-muted;
+  }
+  .person-dossier__name-form > div {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .person-dossier__name-form input,
+  .person-dossier__merge select {
+    @apply min-h-10 min-w-0 rounded-md border border-pro-accent/60 bg-pro-bg px-3 text-sm text-pro-text-main outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/35;
+  }
+  .person-dossier__name-form input {
+    @apply flex-1 font-serif text-xl;
+  }
+  .person-dossier__name-form button,
+  .person-dossier__merge button,
+  .person-dossier__merge-result button,
+  .person-dossier__merged button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:opacity-50;
+  }
+  .person-dossier__name-form > p,
+  .person-dossier__merge > p[role="alert"] {
+    @apply mt-2 text-sm text-pro-urgent;
+  }
+  .person-dossier__saved {
+    @apply mt-2 block text-xs font-semibold text-pro-success;
+  }
+  .person-dossier__merge {
+    @apply border-b border-pro-border/60 py-6;
+  }
+  .person-dossier__merge > p {
+    @apply mt-2 max-w-[65ch] text-sm leading-6 text-pro-text-muted;
+  }
+  .person-dossier__merge > label {
+    @apply mt-5;
+  }
+  .person-dossier__merge select {
+    @apply w-full max-w-sm;
+  }
+  .person-dossier__merge-preview {
+    @apply mt-4 flex flex-col gap-3 border-y border-pro-border/50 py-4 sm:flex-row sm:items-center;
+  }
+  .person-dossier__merge-preview > div {
+    @apply min-w-0 flex-1;
+  }
+  .person-dossier__merge-preview strong {
+    @apply block text-sm font-semibold text-pro-text-main;
+  }
+  .person-dossier__merge-preview span,
+  .person-dossier__merge-preview p,
+  .person-dossier__merge-preview small {
+    @apply mt-1 block text-xs text-pro-text-muted;
+  }
+  .person-dossier__merge-preview > button {
+    @apply bg-pro-accent text-pro-bg hover:bg-pro-accent/90 hover:text-pro-bg;
+  }
+  .person-dossier__merge-cancel {
+    @apply mt-2;
+  }
+  .person-dossier__merge-result {
+    @apply flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-pro-border/60 py-2 text-sm text-pro-text-main;
+  }
+  .person-dossier__merged {
+    @apply border-b border-pro-border/60 py-3;
+  }
+  .person-dossier__merged > summary {
+    @apply flex min-h-10 cursor-pointer list-none items-center text-xs font-semibold text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .person-dossier__merged > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+  .person-dossier__merged li {
+    @apply flex min-h-11 items-center justify-between gap-3 border-t border-pro-border/40 text-sm text-pro-text-main;
   }
   .person-dossier__context {
     @apply border-b border-pro-border/60 py-7;
