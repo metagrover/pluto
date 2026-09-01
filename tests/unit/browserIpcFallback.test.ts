@@ -75,9 +75,7 @@ describe('browser IPC capture journal fallback', () => {
     const ipc = createBrowserIpcFallback();
 
     await expect(ipc.invoke('GET_PROJECT_PORTFOLIO')).resolves.toEqual([]);
-    await expect(
-      ipc.invoke('GET_PEOPLE_BRIEFING_SUMMARIES'),
-    ).resolves.toEqual(
+    await expect(ipc.invoke('GET_PEOPLE_BRIEFING_SUMMARIES')).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: 'preview-avery',

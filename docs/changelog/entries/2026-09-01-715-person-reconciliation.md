@@ -1,7 +1,7 @@
 ### Reconcile duplicate people without losing evidence
 
 - **Issue:** [#715](https://github.com/metagrover/pluto/issues/715)
-- **PR:** Pending.
+- **PR:** [#716](https://github.com/metagrover/pluto/pull/716)
 - **Changed:** People profiles can now be renamed, merged into a chosen canonical person, undone immediately, and restored later. Meetings, expectations, speaker confirmations, graph relationships, and person-context processing resolve through the same identity family.
 - **Why:** Duplicate person rows fragmented relationship history and made corrections local to one surface instead of fixing the stored identity model.
 - **Replaced:** Independent person rows that remained fragmented after a display correction, plus one-surface cleanup that left downstream IDs unresolved.
