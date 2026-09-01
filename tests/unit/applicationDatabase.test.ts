@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createApplicationDatabase } from '../../electron/database/applicationDatabase';
+import {
+  createApplicationDatabase,
+  resolveApplicationDatabasePath,
+  resolveMigrationsFolder,
+} from '../../electron/database/applicationDatabase';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -11,6 +15,26 @@ afterEach(() => {
 });
 
 describe('application database ownership', () => {
+  it('resolves development and packaged paths explicitly', () => {
+    expect(resolveApplicationDatabasePath({ userDataPath: '/profile' })).toBe(
+      '/profile/pluto.db',
+    );
+    expect(
+      resolveMigrationsFolder({
+        isPackaged: false,
+        appRoot: '/checkout',
+        resourcesPath: '/resources',
+      }),
+    ).toBe('/checkout/drizzle');
+    expect(
+      resolveMigrationsFolder({
+        isPackaged: true,
+        appRoot: '/checkout',
+        resourcesPath: '/Resources',
+      }),
+    ).toBe('/Resources/drizzle');
+  });
+
   it('reuses one connection, performs operational recovery, and closes once', () => {
     const root = fs.mkdtempSync(
       path.join(os.tmpdir(), 'pluto-application-db-'),

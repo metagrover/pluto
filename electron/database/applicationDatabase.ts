@@ -46,11 +46,30 @@ export const createApplicationDatabase = (
 
 let applicationDatabase: ApplicationDatabase | null = null;
 
+export const resolveApplicationDatabasePath = (input: {
+  userDataPath: string;
+}): string => path.join(input.userDataPath, 'pluto.db');
+
+export const resolveMigrationsFolder = (input: {
+  isPackaged: boolean;
+  appRoot: string;
+  resourcesPath: string;
+}): string =>
+  path.join(input.isPackaged ? input.resourcesPath : input.appRoot, 'drizzle');
+
 const getOwner = () => {
   if (!applicationDatabase) {
+    const appRoot =
+      typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd();
     applicationDatabase = createApplicationDatabase({
-      databasePath: path.join(app.getPath('userData'), 'pluto.db'),
-      migrationsFolder: path.join(process.cwd(), 'drizzle'),
+      databasePath: resolveApplicationDatabasePath({
+        userDataPath: app.getPath('userData'),
+      }),
+      migrationsFolder: resolveMigrationsFolder({
+        isPackaged: app.isPackaged ?? false,
+        appRoot,
+        resourcesPath: process.resourcesPath ?? appRoot,
+      }),
     });
   }
   return applicationDatabase;

@@ -56,6 +56,7 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import { closeApplicationDatabase } from './database/applicationDatabase';
 import {
   type IncrementalMeetingNotesOffer,
   createIncrementalMeetingNotesCoordinator,
@@ -743,6 +744,7 @@ app.on('before-quit', async () => {
   parakeetEouGeneration = null;
   parakeetRuntimeHost?.shutdown();
   parakeetRuntimeHost = null;
+  closeApplicationDatabase();
 });
 
 app.whenReady().then(async () => {

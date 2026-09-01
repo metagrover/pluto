@@ -14,9 +14,13 @@ describe('Electron bootstrap boundary', () => {
     expect(source).not.toContain("from './db'");
     expect(source).toContain("app.setPath('userData'");
     expect(source.indexOf('requestSingleInstanceLock')).toBeGreaterThan(-1);
-    expect(source.indexOf("import('./main')")).toBeGreaterThan(
+    expect(source.indexOf('initializeApplicationDatabase()')).toBeGreaterThan(
       source.indexOf('requestSingleInstanceLock'),
     );
+    expect(source.indexOf("import('./main')")).toBeGreaterThan(
+      source.indexOf('initializeApplicationDatabase()'),
+    );
+    expect(source).toContain('describeDatabaseStartupError');
   });
 
   it('builds Electron from the bootstrap and always isolates development data', () => {
@@ -29,5 +33,18 @@ describe('Electron bootstrap boundary', () => {
     expect(source).toContain('resolveDevelopmentUserDataDir');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
     expect(packageJson.main).toBe('dist-electron/bootstrap.js');
+  });
+
+  it('closes the database after main-process consumers stop', () => {
+    const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
+    const beforeQuit = source.indexOf("app.on('before-quit'");
+    const stopCalendar = source.indexOf('calendarService.stop()', beforeQuit);
+    const closeDatabase = source.indexOf(
+      'closeApplicationDatabase()',
+      beforeQuit,
+    );
+    expect(beforeQuit).toBeGreaterThan(-1);
+    expect(stopCalendar).toBeGreaterThan(beforeQuit);
+    expect(closeDatabase).toBeGreaterThan(stopCalendar);
   });
 });

@@ -22,6 +22,11 @@
       "from": "resources/model-manifests",
       "to": "model-manifests",
       "filter": ["**/*"]
+    },
+    {
+      "from": "drizzle",
+      "to": "drizzle",
+      "filter": ["**/*"]
     }
   ],
   "mac": {
