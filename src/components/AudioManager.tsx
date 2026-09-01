@@ -8,6 +8,7 @@ import {
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
 import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
+import { shouldOfferIncrementalMeetingNotes } from '../services/incrementalMeetingNotesOffer';
 import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
 import { reconcileLiveTranscriptSegments } from '../services/liveTranscription/liveTranscriptReconciliation';
 import {
@@ -311,6 +312,7 @@ export const AudioManager = ({
     createStopToValidatedLatencyAccumulator(),
   );
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
+  const incrementalNotesOfferedCharactersRef = useRef(0);
   const zeroMicChunkStreakRef = useRef(0);
   const micChunkConversionFailuresRef = useRef(0);
   const disableMicChunkTranscriptionRef = useRef(false);
@@ -741,6 +743,36 @@ export const AudioManager = ({
               onLiveTranscript?.(readingSegments);
               onInterimTranscript?.('');
               meetingContextIngestion.accept(segments);
+              const incrementalSegments = mergeConsecutiveSpeakerSegments(
+                [...processedMicSegmentsRef.current].sort(
+                  (left, right) => left.startTime - right.startTime,
+                ),
+              );
+              const sourceCharacterCount = incrementalSegments.reduce(
+                (total, segment) => total + segment.text.length,
+                0,
+              );
+              if (
+                shouldOfferIncrementalMeetingNotes({
+                  sourceCharacterCount,
+                  lastOfferedCharacterCount:
+                    incrementalNotesOfferedCharactersRef.current,
+                })
+              ) {
+                incrementalNotesOfferedCharactersRef.current =
+                  sourceCharacterCount;
+                void window.ipcRenderer
+                  .invoke('MEETING_NOTES_OFFER_INCREMENTAL', {
+                    meetingId,
+                    segments: incrementalSegments.map((segment) => ({
+                      speaker: segment.speaker,
+                      text: segment.text,
+                    })),
+                    userNotes,
+                    liveTranscriptHealthy: true,
+                  })
+                  .catch(() => undefined);
+              }
             },
           );
           onLiveTranscriptIntegrityChange?.('healthy');
@@ -752,6 +784,9 @@ export const AudioManager = ({
           )
             return;
           console.warn(`[Pluto] Live Parakeet EOU unavailable: ${code}`);
+          void window.ipcRenderer
+            .invoke('MEETING_NOTES_CANCEL_INCREMENTAL', { meetingId })
+            .catch(() => undefined);
           onLiveTranscriptIntegrityChange?.('lagging');
         },
       });
@@ -1008,6 +1043,7 @@ export const AudioManager = ({
       pendingSystemChunksRef.current = new Map();
       lastMicChunkBoundarySecRef.current = 0;
       processedMicSegmentsRef.current = [];
+      incrementalNotesOfferedCharactersRef.current = 0;
       micPcmChunksRef.current = [];
       systemPcmCarryoverBytesRef.current = new Uint8Array(0);
       systemPcmSampleRateRef.current = 48000;

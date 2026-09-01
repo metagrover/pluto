@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import {
+  bisectNotesSourceSpans,
   calculateNotesRequestBudget,
   estimateNotesTokens,
   partitionNotesSource,
@@ -169,4 +170,53 @@ it('adds at most one fitting prior utterance as supplemental overlap', () => {
   expect(leaves[1]?.primaryText).toBe('C');
   expect(leaves[1]?.overlapSpans).toEqual([{ segment: 1, start: 0, end: 1 }]);
   expect(leaves[1]?.sourceText).toBe('B\nC');
+});
+
+it('bisects an oversized node at a source-segment boundary when possible', () => {
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [{ text: 'short' }, { text: 'a much longer second segment' }],
+    }),
+  );
+
+  expect(
+    bisectNotesSourceSpans(source, [
+      { segment: 0, start: 0, end: 5 },
+      { segment: 1, start: 0, end: 28 },
+    ]),
+  ).toEqual([
+    [{ segment: 0, start: 0, end: 5 }],
+    [{ segment: 1, start: 0, end: 28 }],
+  ]);
+});
+
+it('bisects one source span without splitting a Unicode surrogate pair', () => {
+  const text = 'ab😀cd';
+  const source = createNotesSource(JSON.stringify({ segments: [{ text }] }));
+  const halves = bisectNotesSourceSpans(source, [
+    { segment: 0, start: 0, end: text.length },
+  ]);
+
+  expect(halves).not.toBeNull();
+  expect(
+    halves!
+      .flat()
+      .map((span) => text.slice(span.start, span.end))
+      .join(''),
+  ).toBe(text);
+  expect(halves!.flat().map((span) => span.end)).not.toContain(3);
+});
+
+it('prefers a whitespace boundary when bisecting one oversized source span', () => {
+  const text = 'alpha bravo charlie';
+  const source = createNotesSource(JSON.stringify({ segments: [{ text }] }));
+
+  expect(
+    bisectNotesSourceSpans(source, [
+      { segment: 0, start: 0, end: text.length },
+    ]),
+  ).toEqual([
+    [{ segment: 0, start: 0, end: 6 }],
+    [{ segment: 0, start: 6, end: text.length }],
+  ]);
 });

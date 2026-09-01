@@ -103,6 +103,8 @@ export type NotesContext = {
 export type GenerateMeetingNotesInput = {
   /** Internal acceptance route, removed when the editor is promoted. */
   reviewProtocol?: 'editor';
+  /** Benchmark-only experiment. Product callers must retain the default. */
+  hierarchyAuditStrategy?: 'every_node' | 'final_only';
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
@@ -112,6 +114,8 @@ export type GenerateMeetingNotesInput = {
   signal?: AbortSignal;
   onRepair?: (task: NotesTask) => void;
   onStage?: (task: NotesTask) => void;
+  onPlan?: (plan: { plannedLeafCount: number }) => void;
+  onRepartition?: () => void;
   stageCache?: import('./meetingNotesStageCache').NotesStageCache;
   cacheKey?: string;
 };

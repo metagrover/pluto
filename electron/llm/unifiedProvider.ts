@@ -16,8 +16,16 @@ import {
   type LocalInferenceTask,
   runWithLocalInferenceCoordinator,
 } from './inferenceCoordinator';
+import type { LLMWorkClass } from './llmWorkClass';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
-import { generateMeetingNotes } from './meetingNotesPipeline';
+import {
+  generateMeetingNotes,
+  precomputeNextMeetingNotesLeaf,
+} from './meetingNotesPipeline';
+import type {
+  NotesStageObserver,
+  NotesStageOutcome,
+} from './meetingNotesRunMetrics';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
@@ -362,6 +370,7 @@ export const collapseOversizedTopics = (
     });
 };
 
+let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
 
 type LLMTask = LocalInferenceTask;
@@ -433,23 +442,28 @@ interface TextGenerationOptions {
   notesBudget?: { contextTokens: number; outputTokens: number };
   notesModel?: string;
   notesResponseSchema?: Record<string, unknown>;
+  notesStageObserver?: NotesStageObserver;
+  workClass?: LLMWorkClass;
+  onNotesMetrics?: (metrics: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+  }) => void;
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
   name: string;
   requiresApiKey: boolean;
 
-  private providerType: ProviderType;
-  private settings: LLMSettings;
   private openAIBaseUrl = 'https://api.openai.com/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
   private activeOllamaModel: string | null = null;
 
-  constructor(providerType: ProviderType, settings: LLMSettings) {
-    this.providerType = providerType;
-    this.settings = settings;
+  constructor(
+    private providerType: ProviderType,
+    private settings: LLMSettings,
+  ) {
     this.name = this.getProviderName(providerType);
     this.requiresApiKey = providerType !== 'ollama';
   }
@@ -491,9 +505,16 @@ export class UnifiedLLMProvider implements LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      /** Explicit benchmark experiment; product callers retain every-node audits. */
+      hierarchyAuditStrategy?: 'every_node' | 'final_only';
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: NotesStageObserver;
+      onPlan?: (plan: { plannedLeafCount: number }) => void;
+      onRepartition?: () => void;
+      workClass?: LLMWorkClass;
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
@@ -511,7 +532,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
+      hierarchyAuditStrategy: options.hierarchyAuditStrategy,
       onStage: options.onStage,
+      onRepair: options.onRepair,
+      onPlan: options.onPlan,
+      onRepartition: options.onRepartition,
       generate: async (request) => {
         const wire = createNotesWireRequest(
           request.prompt,
@@ -534,7 +559,80 @@ export class UnifiedLLMProvider implements LLMProvider {
             contextTokens: request.contextTokens,
             outputTokens: request.outputTokens,
           },
+          notesStageObserver: options.onStageEvent,
           notesModel: model,
+          workClass: options.workClass,
+        });
+        return wire.decode(raw);
+      },
+      provider: this.providerType,
+      model,
+      contextTokens: options.contextTokens ?? 16_384,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  }
+
+  async precomputeStructuredAnalysisLeaf(
+    transcript: string,
+    userNotes: string,
+    template: MeetingNotesTemplate,
+    options: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+      stageCache: import('./meetingNotesStageCache').NotesStageCache;
+      cacheKey: string;
+      onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: NotesStageObserver;
+      workClass?: LLMWorkClass;
+    },
+  ): Promise<'generated' | 'reused' | 'discarded'> {
+    options.signal?.throwIfAborted();
+    const model =
+      this.providerType === 'ollama'
+        ? await this.resolveOllamaModel('notesWriter')
+        : this.getConfiguredAnalysisModel();
+    return precomputeNextMeetingNotesLeaf({
+      source: options.source ?? createNotesSourceFromText(transcript),
+      context: {
+        userNotes,
+        template,
+        trustedUserTerms: options.trustedUserTerms ?? [],
+        entityHints: options.entityHints ?? options.knownTerms ?? [],
+      },
+      stageCache: options.stageCache,
+      cacheKey: options.cacheKey,
+      onStage: options.onStage,
+      onRepair: options.onRepair,
+      generate: async (request) => {
+        const wire = createNotesWireRequest(
+          request.prompt,
+          request.sourceSpans ?? [],
+        );
+        const raw = await this.generateResumableAnalysisText({
+          prompt: wire.prompt,
+          task: request.task,
+          jsonMode: true,
+          signal: request.signal,
+          ...(this.providerType === 'ollama'
+            ? {
+                notesResponseSchema: buildNotesResponseSchema(
+                  request.responseContract,
+                  wire.sourceLabels,
+                ),
+              }
+            : {}),
+          notesBudget: {
+            contextTokens: request.contextTokens,
+            outputTokens: request.outputTokens,
+          },
+          notesStageObserver: options.onStageEvent,
+          notesModel: model,
+          workClass: options.workClass,
         });
         return wire.decode(raw);
       },
@@ -589,16 +687,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractInternalSignals(
     transcript: string,
     summary?: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<InternalSignalDocument> {
     const prompt = getValueSignalsPrompt(transcript, summary);
 
     try {
-      const raw = await this.generateText({
+      const raw = await this.generateResumableAnalysisText({
         prompt,
         task: 'valueSignals',
         jsonMode: true,
         signal: options.signal,
+        workClass: options.workClass,
       });
       const parsed = JSON.parse(
         this.cleanJsonText(raw),
@@ -622,7 +721,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractValueSignals(
     transcript: string,
     summary?: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<InternalSignalDocument> {
     return this.extractInternalSignals(transcript, summary, options);
   }
@@ -778,7 +877,7 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async classifyQueryIntent(
     prompt: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<string> {
     return this.generateText({
       prompt,
@@ -791,16 +890,17 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
   ): Promise<ExtractedEntities> {
     const prompt = getEntitiesPrompt(transcript, context);
 
     try {
-      const raw = await this.generateText({
+      const raw = await this.generateResumableAnalysisText({
         prompt,
         task: 'entities',
         jsonMode: true,
         signal: options.signal,
+        workClass: options.workClass,
       });
       const parsed = JSON.parse(this.cleanJsonText(raw)) as Record<
         string,
@@ -839,6 +939,52 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async generateText(options: TextGenerationOptions): Promise<string> {
+    const queuedAt = Date.now();
+    const notesStageObserver = options.notesBudget
+      ? options.notesStageObserver
+      : undefined;
+    const notesStageSequence = notesStageObserver
+      ? nextNotesStageSequence++
+      : null;
+    let notesStageStartedAt: number | null = null;
+    let notesStageFinished = false;
+    let terminalNotesMetrics = {
+      inputTokens: null as number | null,
+      outputTokens: null as number | null,
+    };
+    const observeNotesStarted = () => {
+      if (!notesStageObserver || notesStageSequence === null) return;
+      notesStageStartedAt ??= Date.now();
+      notesStageObserver({
+        phase: 'started',
+        sequence: notesStageSequence,
+        atMs: notesStageStartedAt,
+      });
+    };
+    const observeNotesFinished = (outcome: NotesStageOutcome) => {
+      if (
+        !notesStageObserver ||
+        notesStageSequence === null ||
+        notesStageFinished
+      )
+        return;
+      notesStageFinished = true;
+      notesStageObserver({
+        phase: 'finished',
+        sequence: notesStageSequence,
+        atMs: Date.now(),
+        outcome,
+        ...terminalNotesMetrics,
+      });
+    };
+    if (notesStageObserver && notesStageSequence !== null) {
+      notesStageObserver({
+        phase: 'queued',
+        sequence: notesStageSequence,
+        task: options.task as import('./meetingNotesTypes').NotesTask,
+        atMs: queuedAt,
+      });
+    }
     if (options.notesBudget) {
       calculateNotesRequestBudget({
         prompt: options.prompt,
@@ -855,29 +1001,32 @@ export class UnifiedLLMProvider implements LLMProvider {
       let result: string;
       switch (this.providerType) {
         case 'openai':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithOpenAI(options);
           break;
         case 'claude':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithClaude(options);
           break;
         case 'gemini':
+          observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithGemini(options);
           break;
-        case 'ollama':
+        case 'ollama': {
           result = await runWithLocalInferenceCoordinator({
             key: Symbol(options.task),
             task: options.task,
+            workClass: options.workClass,
             signal: options.signal,
             onAdmitted: ({ task, queueMs }) => {
-              if (options.notesBudget) {
+              if (options.notesBudget)
                 console.log(
                   '[Notes gate]',
                   JSON.stringify({ task, waitMs: queueMs }),
                 );
-              }
               if (
                 task === 'askPluto' ||
                 task === 'askPlutoDeep' ||
@@ -890,9 +1039,14 @@ export class UnifiedLLMProvider implements LLMProvider {
               }
             },
             run: async (gateSignal) => {
+              observeNotesStarted();
               options.onStart?.();
               return this.generateWithOllama({
                 ...options,
+                onNotesMetrics: (metrics) => {
+                  terminalNotesMetrics = metrics;
+                  options.onNotesMetrics?.(metrics);
+                },
                 signal: options.signal
                   ? AbortSignal.any([options.signal, gateSignal])
                   : gateSignal,
@@ -900,11 +1054,25 @@ export class UnifiedLLMProvider implements LLMProvider {
             },
           });
           break;
+        }
         default:
           throw new Error(`Unsupported provider: ${this.providerType}`);
       }
       options.signal?.throwIfAborted();
+      observeNotesFinished('complete');
       return result;
+    } catch (error) {
+      observeNotesFinished(
+        isSerializedTaskPreemption(error)
+          ? 'preempted'
+          : error instanceof MeetingNotesError &&
+              error.code === 'notes_output_truncated'
+            ? 'truncated'
+            : isAbortError(error)
+              ? 'cancelled'
+              : 'failed',
+      );
+      throw error;
     } finally {
       if (!isBackground) {
         knowledgeSynthesisPause.release('llm_active');
@@ -1106,6 +1274,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesBudget,
     notesResponseSchema,
     notesModel,
+    onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
     const model =
       notesBudget && notesModel
@@ -1228,11 +1397,16 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
           if (notesBudget && packet.done) {
             completed = true;
+            const notesMetrics = readNotesMetrics(packet);
+            onNotesMetrics?.({
+              inputTokens: notesMetrics.inputTokens,
+              outputTokens: notesMetrics.outputTokens,
+            });
             console.log(
               '[Notes metrics]',
               JSON.stringify({
                 task,
-                ...readNotesMetrics(packet),
+                ...notesMetrics,
                 elapsedMs: Date.now() - start,
               }),
             );

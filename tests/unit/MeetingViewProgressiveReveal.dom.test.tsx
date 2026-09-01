@@ -751,6 +751,63 @@ describe('MeetingView progressive reveal', () => {
     );
   });
 
+  it('shows a stable local queue status and replaces it when generation starts', async () => {
+    const queuedMeeting = {
+      ...baseMeeting,
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 3,
+      }),
+    };
+    await act(async () => renderMeeting(queuedMeeting));
+
+    const queuedStatus = container.querySelector('output[data-state="queued"]');
+    expect(queuedStatus?.textContent).toContain(
+      'Position 3 in the local notes queue',
+    );
+    expect(queuedStatus?.getAttribute('data-state')).toBe('queued');
+
+    await act(async () => renderMeeting(queuedMeeting));
+    expect(container.querySelector('output[data-state="queued"]')).toBe(
+      queuedStatus,
+    );
+
+    await act(async () =>
+      renderMeeting({
+        ...queuedMeeting,
+        analysis_run_json: JSON.stringify({
+          notes_status: 'running',
+          stage: 'notesWriter',
+          queue_position: null,
+        }),
+      }),
+    );
+    expect(container.querySelector('output[data-state="queued"]')).toBeNull();
+    expect(container.textContent).toContain('Analyzing conversation');
+  });
+
+  it('keeps existing notes visible while their regeneration is queued', async () => {
+    await act(async () =>
+      renderMeeting({
+        ...analyzedMeeting,
+        analysis_run_json: JSON.stringify({
+          notes_status: 'running',
+          stage: 'queued',
+          queue_position: 2,
+        }),
+      }),
+    );
+
+    expect(container.querySelector('output')?.textContent).toContain(
+      'Notes update is position 2 in the local queue.',
+    );
+    expect(
+      container.querySelector('[data-meeting-artifact="analysis"]')
+        ?.textContent,
+    ).toContain('The analysis arrived in place.');
+  });
+
   it('shows a failed regeneration beside the previous notes after reopening the meeting', async () => {
     await act(async () =>
       renderMeeting({

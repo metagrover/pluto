@@ -3,6 +3,12 @@ import type { Meeting } from '../../types';
 export type DownstreamProcessingPresentation =
   | { state: 'loading'; title: string; detail: string }
   | {
+      state: 'queued';
+      title: string;
+      detail: string;
+      position: number;
+    }
+  | {
       state: 'failed';
       title: string;
       detail: string;
@@ -11,17 +17,29 @@ export type DownstreamProcessingPresentation =
       state: 'ready';
       secondaryStatus?: 'running' | 'failed';
       notesUpdateFailed?: true;
+      notesUpdateQueuePosition?: number;
     };
 
 export const getDownstreamProcessingPresentation = (
   meeting: Partial<Meeting>,
 ): DownstreamProcessingPresentation => {
-  let run: { notes_status?: string; secondary_status?: string } = {};
+  let run: {
+    notes_status?: string;
+    secondary_status?: string;
+    stage?: unknown;
+    queue_position?: unknown;
+  } = {};
   try {
     run = JSON.parse(meeting.analysis_run_json || '{}') || {};
   } catch {
     /* Legacy meetings have no run status. */
   }
+  const queuePosition =
+    run.stage === 'queued' &&
+    Number.isSafeInteger(run.queue_position) &&
+    (run.queue_position as number) > 0
+      ? (run.queue_position as number)
+      : null;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: {
@@ -81,6 +99,9 @@ export const getDownstreamProcessingPresentation = (
     }
     return {
       state: 'ready',
+      ...(queuePosition !== null
+        ? { notesUpdateQueuePosition: queuePosition }
+        : {}),
       ...(run.notes_status === 'failed'
         ? { notesUpdateFailed: true as const }
         : {}),
@@ -97,6 +118,35 @@ export const getDownstreamProcessingPresentation = (
       title: 'Notes need another pass',
       detail: 'Your transcript is ready. Try again to continue.',
     };
+
+  if (queuePosition !== null) {
+    return {
+      state: 'queued',
+      title:
+        queuePosition === 1
+          ? 'Notes are next'
+          : `Position ${queuePosition} in the local notes queue`,
+      detail:
+        queuePosition === 1
+          ? 'Waiting for the current local notes run to finish.'
+          : 'Pluto will start this meeting automatically.',
+      position: queuePosition,
+    };
+  }
+
+  if (
+    run.notes_status === 'running' &&
+    (run.stage === 'notes_writer' ||
+      run.stage === 'notesWriter' ||
+      run.stage === 'notesAudit' ||
+      run.stage === 'notesMerge')
+  ) {
+    return {
+      state: 'loading',
+      title: 'Analyzing conversation',
+      detail: 'Building grounded meeting notes.',
+    };
+  }
 
   if (state === 'processing') {
     if (stage === 'analysis') {

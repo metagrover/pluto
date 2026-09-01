@@ -135,11 +135,38 @@ export interface LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      /** Explicit benchmark experiment; product callers retain every-node audits. */
+      hierarchyAuditStrategy?: 'every_node' | 'final_only';
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
+      onPlan?: (plan: { plannedLeafCount: number }) => void;
+      onRepartition?: () => void;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
     },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
+  /** Precompute one closed hierarchy leaf without auditing or publishing it. */
+  precomputeStructuredAnalysisLeaf(
+    transcript: string,
+    userNotes: string,
+    template: import('./prompts').MeetingNotesTemplate,
+    options: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+      stageCache: import('./meetingNotesStageCache').NotesStageCache;
+      cacheKey: string;
+      onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+    },
+  ): Promise<'generated' | 'reused' | 'discarded'>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateSummary(transcript: string, userNotes?: string): Promise<string>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
@@ -159,7 +186,10 @@ export interface LLMProvider {
   extractValueSignals(
     transcript: string,
     summary?: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+    },
   ): Promise<InternalSignalDocument>;
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;
@@ -183,7 +213,10 @@ export interface LLMProvider {
   ): Promise<string>;
   classifyQueryIntent(
     prompt: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+    },
   ): Promise<string>;
   extractEntities(
     transcript: string,

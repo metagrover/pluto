@@ -1,4 +1,9 @@
 import { createSerializedTaskGate } from '../serializedTaskGate';
+import {
+  type LLMWorkClass,
+  LLM_WORK_CLASS_PRIORITY,
+  defaultLLMWorkClass,
+} from './llmWorkClass';
 
 export type LocalInferenceTask =
   | 'summary'
@@ -35,22 +40,13 @@ const RESUMABLE_ANALYSIS_TASKS = new Set<LocalInferenceTask>([
 
 export const getLocalInferenceAdmission = (
   task: LocalInferenceTask,
+  workClass: LLMWorkClass = defaultLLMWorkClass(task),
 ): { priority: number; preemptible: boolean } => ({
-  priority:
-    task === 'knowledgeDoc' || task === 'commitmentReconciliation'
-      ? 0
-      : task === 'projectScopeReview'
-        ? 15
-        : task === 'askPluto' ||
-            task === 'askPlutoDeep' ||
-            task === 'askPlutoLive'
-          ? 20
-          : 10,
+  priority: LLM_WORK_CLASS_PRIORITY[workClass],
   preemptible:
-    task === 'knowledgeDoc' ||
-    task === 'projectScopeReview' ||
-    task === 'commitmentReconciliation' ||
-    task === 'title' ||
+    workClass === 'meeting_secondary' ||
+    workClass === 'project_review' ||
+    workClass === 'background' ||
     RESUMABLE_ANALYSIS_TASKS.has(task),
 });
 
@@ -59,12 +55,14 @@ const runSerializedInference = createSerializedTaskGate<symbol, unknown>();
 export const runWithLocalInferenceCoordinator = <Result>({
   key,
   task,
+  workClass,
   signal,
   run,
   onAdmitted,
 }: {
   key: symbol;
   task: LocalInferenceTask;
+  workClass?: LLMWorkClass;
   signal?: AbortSignal;
   run: (signal: AbortSignal) => Promise<Result>;
   onAdmitted?: (metrics: {
@@ -73,7 +71,7 @@ export const runWithLocalInferenceCoordinator = <Result>({
   }) => void;
 }): Promise<Result> => {
   const queuedAt = Date.now();
-  const admission = getLocalInferenceAdmission(task);
+  const admission = getLocalInferenceAdmission(task, workClass);
   return runSerializedInference(
     key,
     async (coordinatorSignal) => {

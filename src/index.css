@@ -609,7 +609,8 @@
     border-color: var(--notes-rule);
   }
   .meeting-pending-notes__label,
-  .meeting-analysis-skeleton__label {
+  .meeting-analysis-skeleton__label,
+  .meeting-analysis-queue__label {
     @apply text-[11px] font-semibold uppercase tracking-[0.12em];
     color: var(--notes-muted);
   }
@@ -622,6 +623,13 @@
   }
   .meeting-analysis-skeleton__lines {
     @apply mt-5 space-y-4;
+  }
+  .meeting-analysis-queue {
+    @apply mx-auto w-full px-6 pb-16 pt-8 md:px-8;
+  }
+  .meeting-analysis-queue__detail {
+    @apply mt-2 max-w-[68ch] text-sm leading-6;
+    color: var(--notes-muted);
   }
   .meeting-document-actions {
     @apply relative flex min-h-10 items-center justify-end gap-1 z-50;
@@ -1271,7 +1279,7 @@
     @apply flex h-10 shrink-0 items-center gap-2 rounded-full border border-pro-border/70 bg-pro-bg px-3 text-xs font-semibold text-pro-text-muted shadow-sm transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .recording-capture-bar {
-    @apply grid min-h-[76px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface px-6 pb-3 pt-5;
+    @apply grid min-h-[76px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface pb-3 pl-24 pr-6 pt-5;
   }
   .recording-status,
   .recording-actions,
@@ -1384,6 +1392,7 @@
   }
   .transcript-turn p {
     @apply max-w-[70ch] text-[15px] leading-[1.7] text-pro-text-main;
+    overflow-wrap: anywhere;
   }
   .transcript-turn__content {
     @apply flex min-w-0 flex-col gap-3;
@@ -1399,6 +1408,7 @@
   }
   .transcript-interim {
     @apply ml-[102px] max-w-[70ch] border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted;
+    overflow-wrap: anywhere;
   }
   .transcript-waiting {
     @apply py-24 text-center;

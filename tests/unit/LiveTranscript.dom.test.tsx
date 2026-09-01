@@ -147,6 +147,64 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('labels an older provisional turn as Live below later confirmed history', () => {
+    const root = createRoot(container);
+    const projection = createEouTranscriptProjection();
+    projection.apply({
+      streamId: 'test-mic',
+      source: 'mic',
+      revision: 1,
+      generation: 1,
+      processedAudioSeconds: 95,
+      committedText: '',
+      tentativeText: 'a mutable live turn',
+      tokens: [
+        {
+          text: 'a mutable live turn',
+          startSeconds: 94,
+          endSeconds: 95,
+          committed: false,
+        },
+      ],
+    });
+    const segments = projection.apply({
+      streamId: 'test-system',
+      source: 'system',
+      revision: 1,
+      generation: 1,
+      processedAudioSeconds: 380,
+      committedText: 'a later confirmed turn',
+      tentativeText: '',
+      tokens: [
+        {
+          text: 'a later confirmed turn',
+          startSeconds: 378,
+          endSeconds: 379,
+          committed: true,
+        },
+      ],
+    });
+
+    act(() =>
+      root.render(<LiveTranscript segments={segments} interimText="" />),
+    );
+
+    expect(
+      [...container.querySelectorAll('.transcript-speaker time')].map(
+        (time) => time.textContent,
+      ),
+    ).toEqual(['06:18', 'Live']);
+    expect(
+      [...container.querySelectorAll('.transcript-turn')].map((turn) =>
+        turn.textContent?.toLowerCase().includes('a later confirmed turn')
+          ? 'confirmed'
+          : 'live',
+      ),
+    ).toEqual(['confirmed', 'live']);
+
+    act(() => root.unmount());
+  });
+
   it('distinguishes the tentative tail and reports truthful live status', () => {
     const root = createRoot(container);
     act(() =>

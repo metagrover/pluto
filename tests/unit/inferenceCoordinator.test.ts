@@ -8,7 +8,7 @@ import {
 describe('local inference coordinator', () => {
   it('keeps task admission policy independent of a model backend', () => {
     expect(getLocalInferenceAdmission('askPluto')).toEqual({
-      priority: 20,
+      priority: 30,
       preemptible: false,
     });
     expect(getLocalInferenceAdmission('notesWriter')).toEqual({
@@ -17,6 +17,10 @@ describe('local inference coordinator', () => {
     });
     expect(getLocalInferenceAdmission('knowledgeDoc')).toEqual({
       priority: 0,
+      preemptible: true,
+    });
+    expect(getLocalInferenceAdmission('notesWriter', 'manual_notes')).toEqual({
+      priority: 20,
       preemptible: true,
     });
   });

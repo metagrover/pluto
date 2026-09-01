@@ -29,34 +29,40 @@ const TranscriptTurn = memo(
     turn,
   }: {
     turn: LiveTranscriptTurn;
-  }) => (
-    <article className="transcript-turn">
-      <div className="transcript-speaker">
-        <strong>{speakerLabel(turn)}</strong>
-        <time>{new Date(turn.timestampMs).toISOString().slice(14, 19)}</time>
-      </div>
-      <div className="transcript-turn__content">
-        {turn.paragraphs.map((paragraph) => (
-          <p key={paragraph.id}>
-            {paragraph.parts.map((part, index) => (
-              <Fragment key={part.id}>
-                {index > 0 && ' '}
-                <span
-                  className={
-                    part.confirmed
-                      ? 'transcript-paragraph-part'
-                      : 'transcript-paragraph-part transcript-paragraph-part--tentative'
-                  }
-                >
-                  {part.text}
-                </span>
-              </Fragment>
-            ))}
-          </p>
-        ))}
-      </div>
-    </article>
-  ),
+  }) => {
+    const startedAt = new Date(turn.timestampMs).toISOString();
+    const isLive = turn.segments.some((segment) => !segment.confirmed);
+    return (
+      <article className="transcript-turn">
+        <div className="transcript-speaker">
+          <strong>{speakerLabel(turn)}</strong>
+          <time dateTime={startedAt}>
+            {isLive ? 'Live' : startedAt.slice(14, 19)}
+          </time>
+        </div>
+        <div className="transcript-turn__content">
+          {turn.paragraphs.map((paragraph) => (
+            <p key={paragraph.id}>
+              {paragraph.parts.map((part, index) => (
+                <Fragment key={part.id}>
+                  {index > 0 && ' '}
+                  <span
+                    className={
+                      part.confirmed
+                        ? 'transcript-paragraph-part'
+                        : 'transcript-paragraph-part transcript-paragraph-part--tentative'
+                    }
+                  >
+                    {part.text}
+                  </span>
+                </Fragment>
+              ))}
+            </p>
+          ))}
+        </div>
+      </article>
+    );
+  },
 );
 
 export const LiveTranscript = ({

@@ -9,13 +9,18 @@ import {
   parseNotesDraft,
   projectAuditedNotes,
 } from './meetingNotesAudit';
-import { estimateNotesTokens, planNotesCapacity } from './meetingNotesBudget';
+import {
+  bisectNotesSourceSpans,
+  estimateNotesTokens,
+  planNotesCapacity,
+} from './meetingNotesBudget';
 import {
   buildNotesEditorPrompt,
   countEditedBlocks,
   parseEditedNotes,
 } from './meetingNotesEditor';
 import { identifyEditedNotes } from './meetingNotesEditorIdentity';
+import { isTransientMeetingNotesLeafFailure } from './meetingNotesFailures';
 import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
   planNotesLeaves,
@@ -56,6 +61,8 @@ const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
     ? WRITER_OUTPUT_TOKENS
     : AUDIT_OUTPUT_TOKENS;
 const SAFETY_TOKENS = 512;
+const NOTES_COMPACT_RETRY_INSTRUCTION =
+  'COMPACT RETRY: Return the complete same JSON contract more concisely. Preserve every supported action, decision, condition, owner, due date, disposition, and exact source reference.';
 export const NOTES_HIERARCHY_LIMITS = {
   maxDepth: 8,
   maxNodes: 128,
@@ -153,6 +160,47 @@ const fits = (
 ) =>
   estimateNotesTokens(prompt) + outputTokens + SAFETY_TOKENS <=
   input.contextTokens;
+
+const withTruncationRetry = async <T>(
+  input: GenerateMeetingNotesInput,
+  operation: (retryInstruction?: string) => Promise<T>,
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      !(error instanceof MeetingNotesError) ||
+      error.code !== 'notes_output_truncated'
+    )
+      throw error;
+    assertNotCancelled(input);
+    try {
+      return await operation(NOTES_COMPACT_RETRY_INSTRUCTION);
+    } catch (retryError) {
+      if (
+        retryError instanceof MeetingNotesError &&
+        retryError.code === 'notes_context_exhausted'
+      ) {
+        throw error;
+      }
+      throw retryError;
+    }
+  }
+};
+
+const withOneTransientLeafRetry = async <T>(
+  input: GenerateMeetingNotesInput,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientMeetingNotesLeafFailure(error)) throw error;
+    assertNotCancelled(input);
+    input.onRepair?.('notesWriter');
+    return operation();
+  }
+};
 
 const withOneRepair = async <T>(
   input: GenerateMeetingNotesInput,
@@ -284,13 +332,30 @@ const writeDraft = async (
   prompt: string,
   allowedSpans: SourceSpan[],
 ) => {
+  const evidenceRevision = createHash('sha256')
+    .update(
+      JSON.stringify(
+        allowedSpans.map((span) => {
+          const segment = input.source.segments.find(
+            (entry) => entry.index === span.segment,
+          );
+          return [
+            span,
+            segment?.speaker ?? null,
+            segment?.text.slice(span.start, span.end) ?? null,
+          ];
+        }),
+      ),
+      'utf8',
+    )
+    .digest('hex');
   const key = createHash('sha256')
     .update(
       JSON.stringify([
         input.cacheKey,
         input.provider,
         input.model,
-        input.source.revision,
+        evidenceRevision,
         input.contextTokens,
         task,
         prompt,
@@ -378,6 +443,42 @@ type AuditedNode = {
   depth: number;
 };
 
+const deterministicallyCheckedDraft = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  inherited: NotesItem[] = [],
+): Awaited<ReturnType<typeof auditDraft>> => {
+  assertAllowedSources(draft, evidenceSpans);
+  assertSourceGuardrails(input, draft, evidenceSpans, false);
+  validateInheritedItems(
+    inherited.filter(
+      (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+        item.kind === 'action' || item.kind === 'decision',
+    ),
+    commitmentsFor(draft),
+    [],
+  );
+  const audit: NotesAudit = {
+    changes: [],
+    verdicts: [],
+    dispositions: [],
+    terminology: [],
+  };
+  return {
+    draft,
+    audit,
+    changeCount: 0,
+    audited: {
+      source: input.source,
+      draft,
+      verdicts: new Map(),
+      acceptedTerminology: [],
+      issues: [],
+    },
+  };
+};
+
 const auditDraft = async (
   input: GenerateMeetingNotesInput,
   draft: NotesDraft,
@@ -386,6 +487,7 @@ const auditDraft = async (
   inherited: NotesItem[] = [],
   idPrefix = 'document',
   fullSource = false,
+  retryInstruction?: string,
 ): Promise<{
   audited: AuditedNotes;
   draft: NotesDraft;
@@ -393,13 +495,16 @@ const auditDraft = async (
   changeCount: number;
 }> => {
   const sourceText = serializeSource(input, evidenceSpans);
-  const auditPrompt = reviewPrompt(input, {
+  const baseAuditPrompt = reviewPrompt(input, {
     sourceText,
     draft,
     userNotes: input.context.userNotes,
     knownTerms,
     ...(inherited.length ? { inherited } : {}),
   });
+  const auditPrompt = retryInstruction
+    ? `${baseAuditPrompt}\n\n${retryInstruction}`
+    : baseAuditPrompt;
   assertFits(input, auditPrompt, reviewOutputTokens(input));
   const result = await withOneRepair(
     input,
@@ -559,12 +664,12 @@ const metadataFor = (
   return document;
 };
 
-const runHierarchy = async (
+export const precomputeNextMeetingNotesLeaf = async (
   input: GenerateMeetingNotesInput,
-  knownTerms: NotesKnownTerm[],
-  planningTokens = input.contextTokens,
-): Promise<AnalysisDocumentV3> => {
-  const capacityInput = { ...input, contextTokens: planningTokens };
+): Promise<'generated' | 'reused' | 'discarded'> => {
+  assertNotCancelled(input);
+  if (!input.stageCache || !input.cacheKey) return 'discarded';
+  const knownTerms = knownTermsFor(input);
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
     const sourceText = serializeSource(input, spans);
     const writerPrompt = buildNotesWriterPrompt({
@@ -579,39 +684,27 @@ const runHierarchy = async (
       userNotes: input.context.userNotes,
       knownTerms,
     });
-    const mergePrompt = buildNotesMergePrompt({
-      sourceText: `${sourceText}\n${sourceText}`,
-      drafts: [
-        { meetingType: 'general', overview: null, sections: [] },
-        { meetingType: 'general', overview: null, sections: [] },
-      ],
-      inherited: [],
-      primaryRanges: [spans, spans],
-      userNotes: input.context.userNotes,
-      knownTerms,
-      template: input.context.template,
-    });
     return (
-      fits(capacityInput, writerPrompt, WRITER_OUTPUT_TOKENS) &&
-      estimateNotesTokens(auditPrompt) +
+      fits(
+        input,
+        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+        WRITER_OUTPUT_TOKENS,
+      ) &&
+      estimateNotesTokens(
+        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+      ) +
         WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
-        planningTokens &&
-      estimateNotesTokens(mergePrompt) +
-        WRITER_OUTPUT_TOKENS * 3 +
-        SAFETY_TOKENS <=
-        planningTokens
+        input.contextTokens
     );
   });
-  if (leaves.length * 2 - 1 > NOTES_HIERARCHY_LIMITS.maxNodes) {
-    throw new MeetingNotesError('notes_hierarchy_limit');
-  }
-
-  const nodes: AuditedNode[] = [];
-  const hierarchyIssues: string[] = [];
-  for (const [index, leaf] of leaves.entries()) {
-    assertNotCancelled(input);
+  // The final leaf is still growing. Cache only closed leaves whose exact
+  // source packet can recur unchanged in the canonical final hierarchy.
+  const closedLeaves = leaves.slice(0, -1);
+  if (!closedLeaves.length) return 'discarded';
+  let reused = false;
+  for (const leaf of closedLeaves) {
     let evidenceSpans = uniqueSpans([
       ...leaf.overlapSpans,
       ...leaf.primarySpans,
@@ -631,26 +724,139 @@ const runHierarchy = async (
         template: input.context.template,
       });
     }
-    const draft = remapDraftIds(
-      await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
-      `leaf${index}`,
+    let requested = false;
+    const runInput: GenerateMeetingNotesInput = {
+      ...input,
+      onStage: (task) => {
+        requested = true;
+        input.onStage?.(task);
+      },
+    };
+    await withOneTransientLeafRetry(runInput, () =>
+      withTruncationRetry(runInput, (retryInstruction) =>
+        writeDraft(
+          runInput,
+          'notesWriter',
+          retryInstruction
+            ? `${writerPrompt}\n\n${retryInstruction}`
+            : writerPrompt,
+          evidenceSpans,
+        ),
+      ),
     );
-    const audited = await auditDraft(
-      input,
-      draft,
-      evidenceSpans,
+    if (requested) return 'generated';
+    reused = true;
+  }
+  return reused ? 'reused' : 'discarded';
+};
+
+const runHierarchy = async (
+  input: GenerateMeetingNotesInput,
+  knownTerms: NotesKnownTerm[],
+  planningTokens = input.contextTokens,
+): Promise<AnalysisDocumentV3> => {
+  const capacityInput = { ...input, contextTokens: planningTokens };
+  const finalAuditOnly = input.hierarchyAuditStrategy === 'final_only';
+  const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
+    const sourceText = serializeSource(input, spans);
+    const writerPrompt = buildNotesWriterPrompt({
+      sourceText,
+      userNotes: input.context.userNotes,
       knownTerms,
-      [],
-      `leaf${index}`,
-      leaves.length === 1,
+      template: input.context.template,
+    });
+    if (
+      !fits(
+        capacityInput,
+        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+        WRITER_OUTPUT_TOKENS,
+      )
+    ) {
+      return false;
+    }
+    if (finalAuditOnly) return true;
+    const auditPrompt = reviewPrompt(input, {
+      sourceText,
+      draft: {},
+      userNotes: input.context.userNotes,
+      knownTerms,
+    });
+    return (
+      estimateNotesTokens(
+        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+      ) +
+        WRITER_OUTPUT_TOKENS +
+        reviewOutputTokens(input) +
+        SAFETY_TOKENS <=
+      planningTokens
     );
+  });
+  input.onPlan?.({ plannedLeafCount: leaves.length });
+  if (leaves.length * 2 - 1 > NOTES_HIERARCHY_LIMITS.maxNodes) {
+    throw new MeetingNotesError('notes_hierarchy_limit');
+  }
+
+  const hierarchyIssues: string[] = [];
+  let leafSequence = 0;
+  const buildLeafNode = async (
+    primarySpans: SourceSpan[],
+    overlapSpans: SourceSpan[] = [],
+  ): Promise<AuditedNode> => {
+    assertNotCancelled(input);
+    let evidenceSpans = uniqueSpans([...overlapSpans, ...primarySpans]);
+    let writerPrompt = buildNotesWriterPrompt({
+      sourceText: serializeSource(input, evidenceSpans),
+      userNotes: input.context.userNotes,
+      knownTerms,
+      template: input.context.template,
+    });
+    if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
+      evidenceSpans = primarySpans;
+      writerPrompt = buildNotesWriterPrompt({
+        sourceText: serializeSource(input, evidenceSpans),
+        userNotes: input.context.userNotes,
+        knownTerms,
+        template: input.context.template,
+      });
+    }
+    const idPrefix = `leaf${leafSequence++}`;
+    const draft = remapDraftIds(
+      await withOneTransientLeafRetry(input, () =>
+        withTruncationRetry(input, (retryInstruction) =>
+          writeDraft(
+            input,
+            'notesWriter',
+            retryInstruction
+              ? `${writerPrompt}\n\n${retryInstruction}`
+              : writerPrompt,
+            evidenceSpans,
+          ),
+        ),
+      ),
+      idPrefix,
+    );
+    const audited =
+      !finalAuditOnly || leaves.length === 1
+        ? await withTruncationRetry(input, (retryInstruction) =>
+            auditDraft(
+              input,
+              draft,
+              evidenceSpans,
+              knownTerms,
+              [],
+              idPrefix,
+              leaves.length === 1,
+              retryInstruction,
+            ),
+          )
+        : deterministicallyCheckedDraft(input, draft, evidenceSpans);
     hierarchyIssues.push(...(audited.audited.issues ?? []));
-    nodes.push({
+    return {
       changeCount: audited.changeCount,
       draft: audited.draft,
       audit: audited.audit,
       audited: audited.audited,
-      primarySpans: leaf.primarySpans,
+      primarySpans,
       evidenceSpans: uniqueSpans([
         ...draftBlocks(audited.draft).flatMap((block) => block.sources),
         ...audited.audit.dispositions.flatMap(
@@ -658,7 +864,36 @@ const runHierarchy = async (
         ),
       ]),
       depth: 0,
-    });
+    };
+  };
+  const processLeaf = async (
+    primarySpans: SourceSpan[],
+    overlapSpans: SourceSpan[] = [],
+    repartitionDepth = 0,
+  ): Promise<AuditedNode[]> => {
+    try {
+      return [await buildLeafNode(primarySpans, overlapSpans)];
+    } catch (error) {
+      if (
+        !(error instanceof MeetingNotesError) ||
+        error.code !== 'notes_output_truncated'
+      )
+        throw error;
+      assertNotCancelled(input);
+      const split = bisectNotesSourceSpans(input.source, primarySpans);
+      if (!split || repartitionDepth >= NOTES_HIERARCHY_LIMITS.maxDepth)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      input.onRepartition?.();
+      const [leftSpans, rightSpans] = split;
+      return [
+        ...(await processLeaf(leftSpans, [], repartitionDepth + 1)),
+        ...(await processLeaf(rightSpans, [], repartitionDepth + 1)),
+      ];
+    }
+  };
+  const nodes: AuditedNode[] = [];
+  for (const leaf of leaves) {
+    nodes.push(...(await processLeaf(leaf.primarySpans, leaf.overlapSpans)));
   }
 
   let generatedNodes = nodes.length;
@@ -698,6 +933,19 @@ const runHierarchy = async (
           ...left.evidenceSpans,
           ...right.evidenceSpans,
         ]);
+        if (
+          !fits(
+            capacityInput,
+            mergePromptFor(left, right),
+            WRITER_OUTPUT_TOKENS,
+          )
+        ) {
+          continue;
+        }
+        if (finalAuditOnly && level.length > 2) {
+          pair = [left, right];
+          continue;
+        }
         const auditBase = reviewPrompt(input, {
           sourceText: serializeSource(input, evidence),
           draft: {},
@@ -709,18 +957,14 @@ const runHierarchy = async (
           ],
         });
         if (
-          fits(
-            capacityInput,
-            mergePromptFor(left, right),
-            WRITER_OUTPUT_TOKENS,
-          ) &&
           estimateNotesTokens(auditBase) +
             WRITER_OUTPUT_TOKENS +
             reviewOutputTokens(input) +
             SAFETY_TOKENS <=
-            planningTokens
-        )
+          planningTokens
+        ) {
           pair = [left, right];
+        }
       }
     }
     if (!pair) {
@@ -749,7 +993,38 @@ const runHierarchy = async (
       });
       if (generatedNodes > NOTES_HIERARCHY_LIMITS.maxNodes)
         throw new MeetingNotesError('notes_hierarchy_limit');
-      if (!didSplit) throw new MeetingNotesError('notes_context_exhausted');
+      if (!didSplit) {
+        const sourceSplitIndex = level
+          .map((node, index) => ({
+            index,
+            depth: node.depth,
+            split: bisectNotesSourceSpans(input.source, node.primarySpans),
+            size: node.primarySpans.reduce(
+              (total, span) => total + span.end - span.start,
+              0,
+            ),
+          }))
+          .filter(
+            (
+              candidate,
+            ): candidate is typeof candidate & {
+              split: [SourceSpan[], SourceSpan[]];
+            } => candidate.depth === 0 && candidate.split !== null,
+          )
+          .sort((left, right) => right.size - left.size)[0];
+        if (!sourceSplitIndex)
+          throw new MeetingNotesError('notes_context_exhausted');
+        if (generatedNodes + 2 > NOTES_HIERARCHY_LIMITS.maxNodes)
+          throw new MeetingNotesError('notes_hierarchy_limit');
+        input.onRepartition?.();
+        const [leftSpans, rightSpans] = sourceSplitIndex.split;
+        const replacements = [
+          ...(await processLeaf(leftSpans)),
+          ...(await processLeaf(rightSpans)),
+        ];
+        generatedNodes += replacements.length;
+        level.splice(sourceSplitIndex.index, 1, ...replacements);
+      }
       continue;
     }
     const [left, right] = pair;
@@ -778,22 +1053,107 @@ const runHierarchy = async (
       knownTerms,
       template: input.context.template,
     });
-    const merged = preserveInheritedIds(
-      remapDraftIds(
-        await writeDraft(input, 'notesMerge', mergePrompt, evidenceSpans),
-        `merge${generatedNodes}`,
-      ),
-      inherited,
-    );
-    const audited = await auditDraft(
-      input,
-      merged,
-      evidenceSpans,
-      knownTerms,
-      inherited,
-      `merge${generatedNodes}`,
-      level.length === 2,
-    );
+    let merged: NotesDraft;
+    let audited: Awaited<ReturnType<typeof auditDraft>>;
+    try {
+      merged = preserveInheritedIds(
+        remapDraftIds(
+          await withTruncationRetry(input, (retryInstruction) =>
+            writeDraft(
+              input,
+              'notesMerge',
+              retryInstruction
+                ? `${mergePrompt}\n\n${retryInstruction}`
+                : mergePrompt,
+              evidenceSpans,
+            ),
+          ),
+          `merge${generatedNodes}`,
+        ),
+        inherited,
+      );
+      audited =
+        !finalAuditOnly || level.length === 2
+          ? await withTruncationRetry(input, (retryInstruction) =>
+              auditDraft(
+                input,
+                merged,
+                evidenceSpans,
+                knownTerms,
+                inherited,
+                `merge${generatedNodes}`,
+                level.length === 2,
+                retryInstruction,
+              ),
+            )
+          : deterministicallyCheckedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            );
+    } catch (error) {
+      if (
+        !(error instanceof MeetingNotesError) ||
+        error.code !== 'notes_output_truncated'
+      )
+        throw error;
+      assertNotCancelled(input);
+      let replacement:
+        | { target: AuditedNode; nodes: AuditedNode[] }
+        | undefined;
+      for (const target of [left, right].sort(
+        (a, b) =>
+          b.primarySpans.reduce(
+            (total, span) => total + span.end - span.start,
+            0,
+          ) -
+          a.primarySpans.reduce(
+            (total, span) => total + span.end - span.start,
+            0,
+          ),
+      )) {
+        const drafts = splitNotesDraftForMerge(target.draft);
+        if (drafts.length > 1) {
+          replacement = {
+            target,
+            nodes: drafts.map((draft) => ({
+              ...target,
+              draft,
+              evidenceSpans: uniqueSpans([
+                ...draftBlocks(draft).flatMap((block) => block.sources),
+                ...target.audit.dispositions.flatMap(
+                  (disposition) => disposition.sources,
+                ),
+              ]),
+            })),
+          };
+          break;
+        }
+        const split =
+          target.depth === 0
+            ? bisectNotesSourceSpans(input.source, target.primarySpans)
+            : null;
+        if (split) {
+          replacement = {
+            target,
+            nodes: [
+              ...(await processLeaf(split[0])),
+              ...(await processLeaf(split[1])),
+            ],
+          };
+          break;
+        }
+      }
+      if (!replacement)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      input.onRepartition?.();
+      generatedNodes += replacement.nodes.length;
+      if (generatedNodes > NOTES_HIERARCHY_LIMITS.maxNodes)
+        throw new MeetingNotesError('notes_repartition_exhausted');
+      level.splice(level.indexOf(replacement.target), 1, ...replacement.nodes);
+      continue;
+    }
     hierarchyIssues.push(...(audited.audited.issues ?? []));
     const parent: AuditedNode = {
       changeCount: audited.changeCount,

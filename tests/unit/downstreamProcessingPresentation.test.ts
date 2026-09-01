@@ -33,6 +33,80 @@ it('reports an interrupted notes run rather than preparing forever', () => {
   ).toMatchObject({ state: 'failed' });
 });
 
+it('presents a valid persisted local queue position without claiming generation started', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 1,
+      }),
+    }),
+  ).toEqual({
+    state: 'queued',
+    title: 'Notes are next',
+    detail: 'Waiting for the current local notes run to finish.',
+    position: 1,
+  });
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 3,
+      }),
+    }),
+  ).toMatchObject({
+    state: 'queued',
+    title: 'Position 3 in the local notes queue',
+    position: 3,
+  });
+});
+
+it('keeps existing notes ready while exposing their queued update position', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_json: '{}',
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'queued',
+        queue_position: 2,
+      }),
+    }),
+  ).toEqual({ state: 'ready', notesUpdateQueuePosition: 2 });
+});
+
+it.each([0, -1, 1.5, '2'])(
+  'ignores malformed queue position %j',
+  (position) => {
+    expect(
+      getDownstreamProcessingPresentation({
+        analysis_run_json: JSON.stringify({
+          notes_status: 'running',
+          stage: 'queued',
+          queue_position: position,
+        }),
+      }).state,
+    ).toBe('loading');
+  },
+);
+
+it('replaces queued copy with generating copy when admission clears position', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'running',
+        stage: 'notesWriter',
+        queue_position: null,
+      }),
+    }),
+  ).toEqual({
+    state: 'loading',
+    title: 'Analyzing conversation',
+    detail: 'Building grounded meeting notes.',
+  });
+});
+
 describe('downstream processing presentation', () => {
   it('maps persisted stages to truthful loading copy', () => {
     expect(
