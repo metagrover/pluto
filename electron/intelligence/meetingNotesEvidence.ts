@@ -149,14 +149,24 @@ export const buildMeetingNotesEvidenceDocument = (
     blocks
       ? blocks
           .filter((block) => block.blockType === 'decision')
-          .map((block) => block.text)
+          .flatMap((block) => [
+            block.text,
+            ...(block.nativeContinuations || []).map(
+              (continuation) => continuation.text,
+            ),
+          ])
       : (mid.decisions || []).map((decision) => clean(decision.description)),
   );
   const actionItemsText = uniqueText(
     blocks
       ? blocks
           .filter((block) => block.blockType === 'action')
-          .map((block) => block.text)
+          .flatMap((block) => [
+            block.text,
+            ...(block.nativeContinuations || []).map(
+              (continuation) => continuation.text,
+            ),
+          ])
       : (mid.action_items || []).map((action) => clean(action.description)),
   );
   const topicsText = uniqueText(

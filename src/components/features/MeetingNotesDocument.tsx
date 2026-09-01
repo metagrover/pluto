@@ -249,6 +249,7 @@ const InlineEditableText = ({
   const editSessionStartRef = useRef(text);
   const suppressNextBlurSaveRef = useRef(false);
   const mountedRef = useRef(true);
+  const flushPendingSaveRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     lastSavedValueRef.current = text.trim();
@@ -266,8 +267,13 @@ const InlineEditableText = ({
   useEffect(() => {
     mountedRef.current = true;
     return () => {
+      const hadPendingSave = saveTimerRef.current !== null;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       mountedRef.current = false;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (hadPendingSave) flushPendingSaveRef.current();
     };
   }, []);
 
@@ -323,9 +329,11 @@ const InlineEditableText = ({
     }
 
     const generation = ++saveGenerationRef.current;
-    setSaving(true);
-    setError(null);
-    reportSaveState('saving');
+    if (mountedRef.current) {
+      setSaving(true);
+      setError(null);
+      reportSaveState('saving');
+    }
 
     const operation = saveChainRef.current.then(async () => {
       if (
@@ -380,6 +388,9 @@ const InlineEditableText = ({
     });
     saveChainRef.current = operation.catch(() => {});
     return operation;
+  };
+  flushPendingSaveRef.current = () => {
+    void save(draftRef.current);
   };
 
   useEffect(() => {
@@ -972,6 +983,12 @@ export const MeetingNotesDocument = ({
     useState<SourceSelection | null>(() => previewSourceSelection(model));
   const meetingRef = useRef(meeting);
   const onDocumentChangedRef = useRef(onDocumentChanged);
+  const nativeContinuationStateRef = useRef(
+    new Map<string, NativeMeetingNoteContinuation[]>(),
+  );
+  const nativeContinuationSaveChainsRef = useRef(
+    new Map<string, Promise<void>>(),
+  );
 
   useEffect(() => {
     meetingRef.current = meeting;
@@ -986,6 +1003,8 @@ export const MeetingNotesDocument = ({
   }, [meeting.id, meeting.user_notes, model]);
   useEffect(() => {
     setDeletedContinuation(null);
+    nativeContinuationStateRef.current.clear();
+    nativeContinuationSaveChainsRef.current.clear();
   }, [meeting.id]);
   useEffect(() => {
     if (!deletedContinuation) return;
@@ -998,16 +1017,34 @@ export const MeetingNotesDocument = ({
     setRetrySave(retry ? () => retry : null);
   };
 
-  const saveNativeContinuations = async (
+  const getNativeContinuations = (
+    parentPath: string,
+    fallback: NativeMeetingNoteContinuation[],
+  ) => nativeContinuationStateRef.current.get(parentPath) || fallback;
+
+  const saveNativeContinuations = (
     parentPath: string,
     continuations: NativeMeetingNoteContinuation[],
-  ) => {
-    await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
-      meetingId: meeting.id,
-      path: nativeContinuationEditPath(parentPath),
-      original: '[]',
-      edited: JSON.stringify(continuations),
-    });
+  ): Promise<void> => {
+    nativeContinuationStateRef.current.set(parentPath, continuations);
+    const previous =
+      nativeContinuationSaveChainsRef.current.get(parentPath) ||
+      Promise.resolve();
+    const operation = previous
+      .catch(() => {})
+      .then(async () => {
+        await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
+          meetingId: meetingRef.current.id,
+          path: nativeContinuationEditPath(parentPath),
+          original: '[]',
+          edited: JSON.stringify(continuations),
+        });
+      });
+    nativeContinuationSaveChainsRef.current.set(
+      parentPath,
+      operation.catch(() => {}),
+    );
+    return operation;
   };
 
   const createNativeContinuation = async (block: MeetingNotesBlock) => {
@@ -1018,10 +1055,11 @@ export const MeetingNotesDocument = ({
     try {
       const id =
         globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-      await saveNativeContinuations(parentPath, [
-        ...(block.nativeContinuations || []),
-        { id, text: '' },
-      ]);
+      const latest = getNativeContinuations(
+        parentPath,
+        block.nativeContinuations || [],
+      );
+      await saveNativeContinuations(parentPath, [...latest, { id, text: '' }]);
       setPendingNativeContinuationId(id);
       handleSaveStateChange('saved');
       onDocumentChanged();
@@ -1041,7 +1079,10 @@ export const MeetingNotesDocument = ({
   ) => {
     const parentPath = block.nativeContinuation?.parentPath;
     if (!parentPath || !block.nativeContinuation) return;
-    const continuations = (block.nativeContinuations || [])
+    const continuations = getNativeContinuations(
+      parentPath,
+      block.nativeContinuations || [],
+    )
       .map((continuation) =>
         continuation.id === block.nativeContinuation?.id
           ? { ...continuation, ...update }
@@ -1055,14 +1096,18 @@ export const MeetingNotesDocument = ({
     const parentPath = block.nativeContinuation?.parentPath;
     const continuationId = block.nativeContinuation?.id;
     if (!parentPath || !continuationId) return;
-    const continuation = (block.nativeContinuations || []).find(
+    const latest = getNativeContinuations(
+      parentPath,
+      block.nativeContinuations || [],
+    );
+    const continuation = latest.find(
       (candidate) => candidate.id === continuationId,
     ) || {
       id: continuationId,
       text: block.text,
       completed: block.completed,
     };
-    const remaining = (block.nativeContinuations || []).filter(
+    const remaining = latest.filter(
       (candidate) => candidate.id !== continuationId,
     );
     await saveNativeContinuations(parentPath, remaining);
@@ -1075,7 +1120,10 @@ export const MeetingNotesDocument = ({
     const parentBlock = model.sections
       .flatMap((section) => section.blocks)
       .find((block) => block.path === parentPath);
-    const latest = parentBlock?.nativeContinuations || [];
+    const latest = getNativeContinuations(
+      parentPath,
+      parentBlock?.nativeContinuations || [],
+    );
     const restored = latest.some(
       (candidate) => candidate.id === continuation.id,
     )

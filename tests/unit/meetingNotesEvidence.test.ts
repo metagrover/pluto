@@ -77,6 +77,20 @@ describe('buildMeetingNotesEvidenceDocument', () => {
           edited: 'Ship on Friday.',
           edited_at: '2026-08-31T00:00:00.000Z',
         },
+        'native_continuations:all_decisions:0': {
+          original: '[]',
+          edited: JSON.stringify([
+            { id: 'decision-user', text: 'Document the rollback decision.' },
+          ]),
+          edited_at: '2026-08-31T00:00:00.000Z',
+        },
+        'native_continuations:all_action_items:0': {
+          original: '[]',
+          edited: JSON.stringify([
+            { id: 'action-user', text: 'Morgan will verify rollback.' },
+          ]),
+          edited_at: '2026-08-31T00:00:00.000Z',
+        },
       }),
       mid_json: JSON.stringify({
         participants: [{ name: 'Sam' }],
@@ -98,6 +112,8 @@ describe('buildMeetingNotesEvidenceDocument', () => {
     expect(document.notesText).toContain('Launch moved to Friday.');
     expect(document.notesText).toContain('Remember the customer follow-up.');
     expect(document.decisionsText).toContain('Ship on Friday.');
+    expect(document.decisionsText).toContain('Document the rollback decision.');
+    expect(document.actionItemsText).toContain('Morgan will verify rollback.');
     expect(JSON.stringify(document)).not.toContain('Cobalt');
     expect(JSON.stringify(document)).not.toContain('Ship on Thursday.');
   });

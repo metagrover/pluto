@@ -44,6 +44,7 @@ export interface MeetingAskPlutoContext {
   boundary: string;
   statusNote: string;
   evidenceItems: MeetingAskPlutoEvidenceItem[];
+  truncatedEvidenceKinds?: Array<'decision' | 'action_item'>;
 }
 
 export interface MeetingAskPlutoContextEntity {
@@ -213,25 +214,37 @@ export const buildMeetingAskPlutoContext = ({
   }
 
   const decisions = notesDocument.decisionsText.split('\n').filter(Boolean);
-  for (const [index, decision] of decisions.slice(0, 3).entries()) {
-    addEvidence(evidenceItems, {
-      id: `decision-${index}`,
-      kind: 'decision',
-      meetingId: scope.meetingId,
-      title: 'Decision',
-      text: decision,
-    });
-  }
-
   const actions = notesDocument.actionItemsText.split('\n').filter(Boolean);
-  for (const [index, action] of actions.slice(0, 3).entries()) {
-    addEvidence(evidenceItems, {
-      id: `action-${index}`,
-      kind: 'action_item',
-      meetingId: scope.meetingId,
-      title: 'Action item',
-      text: action,
-    });
+  const truncatedEvidenceKinds = new Set<'decision' | 'action_item'>();
+  const addStructuredEvidence = (
+    kind: 'decision' | 'action_item',
+    values: string[],
+  ) => {
+    const initialCount = evidenceItems.length;
+    for (const [index, text] of values.entries()) {
+      addEvidence(evidenceItems, {
+        id: `${kind}-${index}`,
+        kind,
+        meetingId: scope.meetingId,
+        title: kind === 'decision' ? 'Decision' : 'Action item',
+        text,
+      });
+    }
+    if (evidenceItems.length - initialCount < values.length) {
+      truncatedEvidenceKinds.add(kind);
+    }
+  };
+  const preparedKind = PREPARED_DECISION_QUERY.test(query)
+    ? 'decision'
+    : PREPARED_ACTION_QUERY.test(query)
+      ? 'action_item'
+      : null;
+  if (preparedKind === 'action_item') {
+    addStructuredEvidence('action_item', actions);
+    addStructuredEvidence('decision', decisions);
+  } else {
+    addStructuredEvidence('decision', decisions);
+    addStructuredEvidence('action_item', actions);
   }
 
   for (const entity of entities.slice(0, 1)) {
@@ -265,6 +278,18 @@ export const buildMeetingAskPlutoContext = ({
         ...transcriptEvidenceItems,
       ]
     : evidenceItems.slice(0, MEETING_ASK_PLUTO_EVIDENCE_LIMIT);
+  if (
+    boundedEvidenceItems.filter((item) => item.kind === 'decision').length <
+    decisions.length
+  ) {
+    truncatedEvidenceKinds.add('decision');
+  }
+  if (
+    boundedEvidenceItems.filter((item) => item.kind === 'action_item').length <
+    actions.length
+  ) {
+    truncatedEvidenceKinds.add('action_item');
+  }
   const trustStatus =
     evidencePolicy === 'transcript_fallback'
       ? 'weak_evidence'
@@ -293,6 +318,9 @@ export const buildMeetingAskPlutoContext = ({
       'Only use evidence from this meeting supplied below. Saved meeting notes are authoritative unless the request explicitly asks for exact wording or the notes are unavailable. Do not use any other meeting, project, person, or global memory unless the user explicitly asks to broaden scope.',
     statusNote,
     evidenceItems: boundedEvidenceItems,
+    ...(truncatedEvidenceKinds.size > 0
+      ? { truncatedEvidenceKinds: [...truncatedEvidenceKinds] }
+      : {}),
   };
 };
 
@@ -534,11 +562,14 @@ export const buildPreparedMeetingAskPlutoResponse = (
         ? 'note'
         : null;
   if (!kind) return null;
+  if (kind !== 'note' && context.truncatedEvidenceKinds?.includes(kind)) {
+    return null;
+  }
 
   const selected = context.evidenceItems
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.kind === kind)
-    .slice(0, kind === 'note' ? 1 : 4);
+    .slice(0, kind === 'note' ? 1 : undefined);
   if (selected.length === 0) return null;
 
   const citations: MeetingAskPlutoCitation[] = selected.map(

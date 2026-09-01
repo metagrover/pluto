@@ -295,6 +295,25 @@ describe('MeetingNotesDocument', () => {
     });
   });
 
+  it('flushes a pending inline edit when the document unmounts', async () => {
+    vi.useFakeTimers();
+    await act(async () => renderDocument());
+    const textarea = await openBlockEditor('Use docs as code.');
+
+    await changeTextarea(textarea!, 'Use docs before navigating away.');
+    expect(invoke).not.toHaveBeenCalled();
+
+    act(() => root.unmount());
+    await act(async () => Promise.resolve());
+
+    expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: 'all_decisions:0',
+      original: 'Use docs as code.',
+      edited: 'Use docs before navigating away.',
+    });
+  });
+
   it('settles autosave after the Strict Mode effect replay used in development', async () => {
     vi.useFakeTimers();
     await act(async () =>
@@ -856,6 +875,79 @@ describe('MeetingNotesDocument', () => {
         { id: 'follow-up', text: 'Follow up with QA.', completed: true },
       ]),
     });
+  });
+
+  it('merges concurrent native-row autosaves against the latest local state', async () => {
+    const continuations = [
+      { id: 'first', text: 'First follow-up.' },
+      { id: 'second', text: 'Second follow-up.' },
+    ];
+    const continuationModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [
+            {
+              id: 'decision-0',
+              path: 'all_decisions:0',
+              text: 'Use docs as code.',
+              originalText: 'Use docs as code.',
+              authorship: 'ai',
+              edited: false,
+              blockType: 'decision',
+              nativeContinuations: continuations,
+            },
+            ...continuations.map((continuation) => ({
+              id: `decision-0:continuation:${continuation.id}`,
+              text: continuation.text,
+              originalText: continuation.text,
+              authorship: 'human' as const,
+              edited: true,
+              blockType: 'decision' as const,
+              nativeContinuation: {
+                parentPath: 'all_decisions:0',
+                id: continuation.id,
+              },
+              nativeContinuations: continuations,
+            })),
+          ],
+        },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={continuationModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+
+    await act(async () => {
+      const checkboxes = container.querySelectorAll<HTMLInputElement>(
+        '.meeting-note-block input[type="checkbox"]',
+      );
+      checkboxes[1]?.click();
+      checkboxes[2]?.click();
+      for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    });
+
+    const continuationWrites = invoke.mock.calls.filter(
+      ([channel, payload]) =>
+        channel === 'SAVE_USER_EDIT' &&
+        payload.path === 'native_continuations:all_decisions:0',
+    );
+    expect(continuationWrites).toHaveLength(2);
+    expect(JSON.parse(continuationWrites[1][1].edited)).toEqual([
+      { id: 'first', text: 'First follow-up.', completed: true },
+      { id: 'second', text: 'Second follow-up.', completed: true },
+    ]);
   });
 
   it('removes an abandoned empty native continuation row', async () => {

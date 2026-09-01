@@ -265,6 +265,49 @@ describe('meeting-scoped Ask Pluto context', () => {
     });
   });
 
+  it('returns every bounded structured decision instead of silently taking four', () => {
+    const analysis = JSON.parse(makeMeeting().analysis_json || '{}');
+    analysis.topics = [];
+    analysis.all_decisions = Array.from({ length: 5 }, (_, index) => ({
+      text: `Decision ${index + 1}.`,
+    }));
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({ analysis_json: JSON.stringify(analysis) }),
+      query: 'What did we decide?',
+    });
+
+    const response = buildPreparedMeetingAskPlutoResponse(
+      'What did we decide?',
+      context,
+    );
+
+    expect(response?.answer.split('\n')).toEqual([
+      'Decision 1.',
+      'Decision 2.',
+      'Decision 3.',
+      'Decision 4.',
+      'Decision 5.',
+    ]);
+    expect(response?.citations).toHaveLength(5);
+  });
+
+  it('does not return an authoritative prepared answer when evidence is bounded', () => {
+    const analysis = JSON.parse(makeMeeting().analysis_json || '{}');
+    analysis.topics = [];
+    analysis.all_decisions = Array.from({ length: 20 }, (_, index) => ({
+      text: `Decision ${index + 1}.`,
+    }));
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting({ analysis_json: JSON.stringify(analysis) }),
+      query: 'What did we decide?',
+    });
+
+    expect(context.truncatedEvidenceKinds).toContain('decision');
+    expect(
+      buildPreparedMeetingAskPlutoResponse('What did we decide?', context),
+    ).toBeNull();
+  });
+
   it('returns an honest unavailable packet when the meeting has no usable evidence', () => {
     const response = buildUnavailableMeetingAskPlutoResponse(
       makeMeeting({
