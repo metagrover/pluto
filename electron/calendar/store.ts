@@ -33,47 +33,6 @@ interface ContextRow {
   match_evidence: 'time_overlap' | 'user_selected';
 }
 
-export const ensureCalendarSchema = (sql: SqlDatabase) => {
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS calendar_integration (
-      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-      enabled INTEGER NOT NULL DEFAULT 0,
-      selected_calendar_json TEXT,
-      cache_revision INTEGER NOT NULL DEFAULT 0,
-      last_attempt_at TEXT,
-      last_read_at TEXT,
-      cache_start TEXT,
-      cache_end TEXT,
-      error_code TEXT
-    );
-    INSERT OR IGNORE INTO calendar_integration(singleton) VALUES (1);
-
-    CREATE TABLE IF NOT EXISTS calendar_events (
-      occurrence_key TEXT PRIMARY KEY,
-      calendar_identifier TEXT NOT NULL,
-      starts_at TEXT NOT NULL,
-      ends_at TEXT NOT NULL,
-      is_all_day INTEGER NOT NULL,
-      is_cancelled INTEGER NOT NULL,
-      event_json TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_calendar_events_window
-      ON calendar_events(starts_at, ends_at);
-
-    CREATE TABLE IF NOT EXISTS meeting_calendar_context (
-      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
-      occurrence_key TEXT NOT NULL,
-      calendar_title TEXT NOT NULL,
-      event_json TEXT NOT NULL,
-      match_origin TEXT NOT NULL CHECK(match_origin IN ('automatic', 'user')),
-      match_evidence TEXT NOT NULL CHECK(match_evidence IN ('time_overlap', 'user_selected')),
-      cache_revision INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-};
-
 export const createCalendarStore = (sql: SqlDatabase) => {
   const readIntegration = () =>
     sql

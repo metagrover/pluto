@@ -21,45 +21,6 @@ export interface IdentityJob {
 }
 
 export function createIdentityStore(sql: Database.Database) {
-  sql.exec(`CREATE TABLE IF NOT EXISTS identity_workspace (
-    singleton INTEGER PRIMARY KEY CHECK(singleton = 1), self_person_id TEXT, revision INTEGER NOT NULL DEFAULT 0);
-    INSERT OR IGNORE INTO identity_workspace(singleton) VALUES (1);
-    CREATE TABLE IF NOT EXISTS identity_profiles (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), payload TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS identity_person_aliases (
-      person_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, aliases_json TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS identity_captures (
-      meeting_id TEXT PRIMARY KEY, origin TEXT NOT NULL, self_person_id TEXT);
-    CREATE TABLE IF NOT EXISTS identity_bindings (
-      meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-      speaker TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(meeting_id, speaker));
-    CREATE TABLE IF NOT EXISTS identity_resolutions (
-      action_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS identity_resolution_history (
-      action_id TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL,
-      PRIMARY KEY(action_id, fingerprint));
-    CREATE TABLE IF NOT EXISTS identity_jobs (
-      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
-      revision INTEGER NOT NULL, fingerprint TEXT NOT NULL, cursor TEXT,
-      state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-      error TEXT, next_attempt_at INTEGER NOT NULL DEFAULT 0);
-    UPDATE identity_jobs SET state = 'pending' WHERE state = 'running';`);
-  // Old provisional caches did not retain source scope. They are derived data,
-  // so invalidate them instead of retaining quotes that cannot be deleted by source.
-  sql.transaction(() => {
-    for (const table of [
-      'identity_resolutions',
-      'identity_resolution_history',
-    ]) {
-      const columns = sql.prepare(`PRAGMA table_info(${table})`).all() as {
-        name: string;
-      }[];
-      if (!columns.some((column) => column.name === 'meeting_id')) {
-        sql.exec(`ALTER TABLE ${table} ADD COLUMN meeting_id TEXT;`);
-      }
-      sql.exec(`DELETE FROM ${table} WHERE meeting_id IS NULL OR NOT EXISTS (SELECT 1 FROM meetings m WHERE m.id = ${table}.meeting_id);
-        CREATE INDEX IF NOT EXISTS idx_${table}_meeting ON ${table}(meeting_id);`);
-    }
-  })();
   const getRevision = () =>
     (
       sql
@@ -380,5 +341,14 @@ export function createIdentityStore(sql: Database.Database) {
     },
   };
 }
+
+export const recoverInterruptedIdentityJobs = (
+  sql: Database.Database,
+): number =>
+  sql
+    .prepare(
+      "UPDATE identity_jobs SET state = 'pending' WHERE state = 'running'",
+    )
+    .run().changes;
 
 export type IdentityStore = ReturnType<typeof createIdentityStore>;

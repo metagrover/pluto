@@ -1,11 +1,13 @@
-import Database from 'better-sqlite3';
+import path from 'node:path';
+import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  createCalendarStore,
-  ensureCalendarSchema,
-} from '../../electron/calendar/store';
+import { createCalendarStore } from '../../electron/calendar/store';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import {
+  type DatabaseRuntime,
+  createDatabaseRuntime,
+} from '../../electron/database/runtime';
 
 const calendar = {
   identifier: 'calendar-a',
@@ -32,12 +34,15 @@ const calendarEvent: CalendarEvent = {
 
 describe('calendar store', () => {
   let sql: Database.Database;
+  let runtime: DatabaseRuntime;
   beforeEach(() => {
-    sql = new Database(':memory:');
-    sql.exec('CREATE TABLE meetings (id TEXT PRIMARY KEY)');
-    ensureCalendarSchema(sql);
+    runtime = createDatabaseRuntime({
+      databasePath: ':memory:',
+      migrationsFolder: path.join(process.cwd(), 'drizzle'),
+    });
+    sql = runtime.initialize();
   });
-  afterEach(() => sql.close());
+  afterEach(() => runtime.close());
 
   it('persists one selected calendar and transactionally replaces its window', () => {
     const store = createCalendarStore(sql);
@@ -95,7 +100,9 @@ describe('calendar store', () => {
       readAt: '2026-08-30T16:00:00.000Z',
       events: [calendarEvent],
     });
-    sql.prepare('INSERT INTO meetings (id) VALUES (?)').run('meeting-a');
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-a', 'Meeting');
     expect(
       store.associateMeeting(
         'meeting-a',
@@ -125,7 +132,9 @@ describe('calendar store', () => {
       readAt: '2026-08-30T16:00:00.000Z',
       events: [calendarEvent],
     });
-    sql.prepare('INSERT INTO meetings (id) VALUES (?)').run('meeting-a');
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-a', 'Meeting');
     store.setMeetingContext('meeting-a', calendarEvent.occurrenceKey, 'user');
 
     store.disconnect();
