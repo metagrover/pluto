@@ -332,13 +332,30 @@ const writeDraft = async (
   prompt: string,
   allowedSpans: SourceSpan[],
 ) => {
+  const evidenceRevision = createHash('sha256')
+    .update(
+      JSON.stringify(
+        allowedSpans.map((span) => {
+          const segment = input.source.segments.find(
+            (entry) => entry.index === span.segment,
+          );
+          return [
+            span,
+            segment?.speaker ?? null,
+            segment?.text.slice(span.start, span.end) ?? null,
+          ];
+        }),
+      ),
+      'utf8',
+    )
+    .digest('hex');
   const key = createHash('sha256')
     .update(
       JSON.stringify([
         input.cacheKey,
         input.provider,
         input.model,
-        input.source.revision,
+        evidenceRevision,
         input.contextTokens,
         task,
         prompt,
@@ -645,6 +662,92 @@ const metadataFor = (
     ...(hierarchy ? { hierarchy } : {}),
   };
   return document;
+};
+
+export const precomputeNextMeetingNotesLeaf = async (
+  input: GenerateMeetingNotesInput,
+): Promise<'generated' | 'reused' | 'discarded'> => {
+  assertNotCancelled(input);
+  if (!input.stageCache || !input.cacheKey) return 'discarded';
+  const knownTerms = knownTermsFor(input);
+  const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
+    const sourceText = serializeSource(input, spans);
+    const writerPrompt = buildNotesWriterPrompt({
+      sourceText,
+      userNotes: input.context.userNotes,
+      knownTerms,
+      template: input.context.template,
+    });
+    const auditPrompt = reviewPrompt(input, {
+      sourceText,
+      draft: {},
+      userNotes: input.context.userNotes,
+      knownTerms,
+    });
+    return (
+      fits(
+        input,
+        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+        WRITER_OUTPUT_TOKENS,
+      ) &&
+      estimateNotesTokens(
+        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+      ) +
+        WRITER_OUTPUT_TOKENS +
+        reviewOutputTokens(input) +
+        SAFETY_TOKENS <=
+        input.contextTokens
+    );
+  });
+  // The final leaf is still growing. Cache only closed leaves whose exact
+  // source packet can recur unchanged in the canonical final hierarchy.
+  const closedLeaves = leaves.slice(0, -1);
+  if (!closedLeaves.length) return 'discarded';
+  let reused = false;
+  for (const leaf of closedLeaves) {
+    let evidenceSpans = uniqueSpans([
+      ...leaf.overlapSpans,
+      ...leaf.primarySpans,
+    ]);
+    let writerPrompt = buildNotesWriterPrompt({
+      sourceText: serializeSource(input, evidenceSpans),
+      userNotes: input.context.userNotes,
+      knownTerms,
+      template: input.context.template,
+    });
+    if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
+      evidenceSpans = leaf.primarySpans;
+      writerPrompt = buildNotesWriterPrompt({
+        sourceText: serializeSource(input, evidenceSpans),
+        userNotes: input.context.userNotes,
+        knownTerms,
+        template: input.context.template,
+      });
+    }
+    let requested = false;
+    const runInput: GenerateMeetingNotesInput = {
+      ...input,
+      onStage: (task) => {
+        requested = true;
+        input.onStage?.(task);
+      },
+    };
+    await withOneTransientLeafRetry(runInput, () =>
+      withTruncationRetry(runInput, (retryInstruction) =>
+        writeDraft(
+          runInput,
+          'notesWriter',
+          retryInstruction
+            ? `${writerPrompt}\n\n${retryInstruction}`
+            : writerPrompt,
+          evidenceSpans,
+        ),
+      ),
+    );
+    if (requested) return 'generated';
+    reused = true;
+  }
+  return reused ? 'reused' : 'discarded';
 };
 
 const runHierarchy = async (

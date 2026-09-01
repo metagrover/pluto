@@ -153,6 +153,7 @@ type NotesProvider = {
       workClass?: import('./llm/llmWorkClass').LLMWorkClass;
     },
   ): Promise<AnalysisDocumentV3>;
+  precomputeStructuredAnalysisLeaf?: LLMProvider['precomputeStructuredAnalysisLeaf'];
   extractValueSignals?(
     transcript: string,
     summary?: string,
@@ -214,6 +215,18 @@ const NOTES_CONTEXT_TOKENS = 16_384;
 
 const hashFingerprint = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+
+export const createMeetingNotesStageCacheKey = (input: {
+  userNotesHash: string;
+  terms: string[];
+  template: MeetingNotesTemplate;
+  provider: string;
+  model: string | null;
+  thinking: unknown;
+  seed: unknown;
+  contextTokens: number;
+  promptVersion: string;
+}): string => hashFingerprint(input);
 
 const hasAuthorizedPartialCaptureGap = (meeting: MeetingRecord): boolean => {
   if (
@@ -310,7 +323,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     string,
     { runId: string; controller: AbortController }
   >();
-  const stageCache = new NotesStageCache();
+  const stageCache = new NotesStageCache(Date.now, 60 * 60 * 1000);
   const createRunId = dependencies.createRunId ?? randomUUID;
   const notify = (meetingId: string) => {
     try {
@@ -447,6 +460,54 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     return true;
   };
 
+  const precomputeIncrementalMeetingNotes = async (input: {
+    source: ReturnType<typeof createNotesSource>;
+    userNotes: string;
+    template: MeetingNotesTemplate;
+    signal: AbortSignal;
+  }): Promise<'generated' | 'reused' | 'discarded'> => {
+    input.signal.throwIfAborted();
+    const settings = await dependencies.getSettings();
+    const provider = await dependencies.getProvider(settings);
+    if (!provider.precomputeStructuredAnalysisLeaf) return 'discarded';
+    const terms = dependencies.db
+      .getAllEntities()
+      .filter((entity) => entity.type === 'person' || entity.type === 'project')
+      .map((entity) => entity.name)
+      .filter((name) => typeof name === 'string' && name.trim())
+      .slice(0, 24);
+    const userNotesHash = createHash('sha256')
+      .update(input.userNotes, 'utf8')
+      .digest('hex');
+    const cacheKey = createMeetingNotesStageCacheKey({
+      userNotesHash,
+      terms,
+      template: input.template,
+      provider: provider.name,
+      model: configuredModel(settings),
+      thinking: settings.ollama_structured_thinking ?? null,
+      seed: settings.ollama_seed ?? null,
+      contextTokens: NOTES_CONTEXT_TOKENS,
+      promptVersion: NOTES_PROMPT_VERSION,
+    });
+    return provider.precomputeStructuredAnalysisLeaf(
+      '',
+      input.userNotes,
+      input.template,
+      {
+        signal: input.signal,
+        source: input.source,
+        knownTerms: terms,
+        trustedUserTerms: [],
+        entityHints: terms,
+        contextTokens: NOTES_CONTEXT_TOKENS,
+        stageCache,
+        cacheKey,
+        workClass: 'background',
+      },
+    );
+  };
+
   const generateAndPublishMeetingNotes = async (
     input: GenerateMeetingNotesInput,
   ): Promise<PublishedMeetingNotes> => {
@@ -532,9 +593,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       .map((entity) => entity.name)
       .filter((name) => typeof name === 'string' && name.trim())
       .slice(0, 24);
-    const fingerprint = hashFingerprint({
-      sourceRevision: revisions.sourceRevision,
-      eligibilityRevision: revisions.eligibilityRevision,
+    const generationIdentity = {
       userNotesHash: revisions.userNotesHash,
       terms,
       template: input.template,
@@ -544,7 +603,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       seed: settings.ollama_seed ?? null,
       contextTokens: NOTES_CONTEXT_TOKENS,
       promptVersion: NOTES_PROMPT_VERSION,
+    };
+    const fingerprint = hashFingerprint({
+      sourceRevision: revisions.sourceRevision,
+      eligibilityRevision: revisions.eligibilityRevision,
+      ...generationIdentity,
     });
+    const stageCacheKey = createMeetingNotesStageCacheKey(generationIdentity);
 
     const active = activeByMeeting.get(meetingId);
     if (active?.fingerprint === fingerprint) {
@@ -694,7 +759,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
               entityHints: terms,
               contextTokens: NOTES_CONTEXT_TOKENS,
               stageCache,
-              cacheKey: fingerprint,
+              cacheKey: stageCacheKey,
               onStageEvent: runMetrics.observe,
               onPlan: ({ plannedLeafCount }) =>
                 runMetrics.setPlannedLeafCount(plannedLeafCount),
@@ -802,6 +867,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
 
   return {
     generateAndPublishMeetingNotes,
+    precomputeIncrementalMeetingNotes,
     cancelMeetingNotes,
     supersedeMeetingNotes,
   };

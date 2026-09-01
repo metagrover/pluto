@@ -193,6 +193,14 @@ During capture, Pluto treats recording health and the live conversation as the p
 
 This keeps the user in the conversation, makes capture trust visible, and reserves the full-page note editor pattern for contexts where writing is actually the primary task.
 
+## 2026-08-31 - Admit only exact incremental note leaves under capture headroom
+
+- **Status:** Accepted
+- **Source:** [Issue #701](https://github.com/metagrover/pluto/issues/701), approved meeting-notes performance continuation
+- **Decision:** Pluto may precompute one closed meeting-note source leaf at a time during capture only when the active renderer owns the capture lease, the accepted live transcript is healthy, the Mac is on AC power with nominal thermal state and sufficient memory, and the request runs at background preemptible priority. The growing tail is excluded, provisional drafts remain in a bounded in-memory cache, and final generation reuses a draft only when its exact evidence, prompt, model, settings, user context, and source labels match.
+- **Rationale:** Local note generation is too slow to begin entirely after a typical meeting, but unconditional capture-time Ollama work would violate Pluto's recording and transcription trust boundary. Exact closed-leaf reuse can move eligible work earlier without publishing provisional claims or weakening final review.
+- **Consequences:** Incremental offers are latest-only and source-growth bounded; stop, owner loss, live-transcript degradation, foreground preemption, or failed headroom admission discards/cancels work. Final transcription changes normally invalidate unmatched leaves, all normal merge/audit/publication checks still run, the cache is capped at 64 drafts and one hour, and no latency improvement may be claimed before a live accepted meeting demonstrates actual reuse.
+
 ## 2026-08-11 - Give active capture an explicit local compute budget
 
 - **Status:** Accepted

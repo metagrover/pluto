@@ -15,3 +15,14 @@ it('expires and bounds completed parsed drafts and never exposes mutable cached 
   now = 15 * 60 * 1000;
   expect(cache.get('next63')).toBeUndefined();
 });
+
+it('supports a bounded meeting-length lifetime for incremental leaf reuse', () => {
+  let now = 0;
+  const cache = new NotesStageCache(() => now, 60 * 60 * 1000);
+  cache.set('leaf', makeDirectNotesFixture().draft);
+
+  now = 45 * 60 * 1000;
+  expect(cache.get('leaf')).toBeDefined();
+  now = 60 * 60 * 1000;
+  expect(cache.get('leaf')).toBeUndefined();
+});

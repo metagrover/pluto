@@ -21,7 +21,10 @@ import {
   defaultLLMWorkClass,
 } from './llmWorkClass';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
-import { generateMeetingNotes } from './meetingNotesPipeline';
+import {
+  generateMeetingNotes,
+  precomputeNextMeetingNotesLeaf,
+} from './meetingNotesPipeline';
 import type {
   NotesStageObserver,
   NotesStageOutcome,
@@ -571,6 +574,77 @@ export class UnifiedLLMProvider implements LLMProvider {
       onRepair: options.onRepair,
       onPlan: options.onPlan,
       onRepartition: options.onRepartition,
+      generate: async (request) => {
+        const wire = createNotesWireRequest(
+          request.prompt,
+          request.sourceSpans ?? [],
+        );
+        const raw = await this.generateResumableAnalysisText({
+          prompt: wire.prompt,
+          task: request.task,
+          jsonMode: true,
+          signal: request.signal,
+          ...(this.providerType === 'ollama'
+            ? {
+                notesResponseSchema: buildNotesResponseSchema(
+                  request.responseContract,
+                  wire.sourceLabels,
+                ),
+              }
+            : {}),
+          notesBudget: {
+            contextTokens: request.contextTokens,
+            outputTokens: request.outputTokens,
+          },
+          notesStageObserver: options.onStageEvent,
+          notesModel: model,
+          workClass: options.workClass,
+        });
+        return wire.decode(raw);
+      },
+      provider: this.providerType,
+      model,
+      contextTokens: options.contextTokens ?? 16_384,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  }
+
+  async precomputeStructuredAnalysisLeaf(
+    transcript: string,
+    userNotes: string,
+    template: MeetingNotesTemplate,
+    options: {
+      signal?: AbortSignal;
+      knownTerms?: string[];
+      source?: import('./meetingNotesTypes').NotesSource;
+      trustedUserTerms?: string[];
+      entityHints?: string[];
+      contextTokens?: number;
+      stageCache: import('./meetingNotesStageCache').NotesStageCache;
+      cacheKey: string;
+      onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onStageEvent?: NotesStageObserver;
+      workClass?: LLMWorkClass;
+    },
+  ): Promise<'generated' | 'reused' | 'discarded'> {
+    options.signal?.throwIfAborted();
+    const model =
+      this.providerType === 'ollama'
+        ? await this.resolveOllamaModel('notesWriter')
+        : this.getConfiguredAnalysisModel();
+    return precomputeNextMeetingNotesLeaf({
+      source: options.source ?? createNotesSourceFromText(transcript),
+      context: {
+        userNotes,
+        template,
+        trustedUserTerms: options.trustedUserTerms ?? [],
+        entityHints: options.entityHints ?? options.knownTerms ?? [],
+      },
+      stageCache: options.stageCache,
+      cacheKey: options.cacheKey,
+      onStage: options.onStage,
+      onRepair: options.onRepair,
       generate: async (request) => {
         const wire = createNotesWireRequest(
           request.prompt,

@@ -2,9 +2,66 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  it('precomputes a live leaf with the same source-independent cache identity used at publication', async () => {
+    const precomputeStructuredAnalysisLeaf = vi
+      .fn()
+      .mockResolvedValue('generated');
+    const db = {
+      getMeeting: vi.fn(),
+      getMeetingAnalysisPublicationRevisions: vi.fn(),
+      getMeetingAnalysisRun: vi.fn(),
+      beginMeetingAnalysisRun: vi.fn(),
+      updateMeetingAnalysisRunStatus: vi.fn(),
+      updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
+      isMeetingAnalysisRunCurrent: vi.fn(),
+      publishMeetingNotesIfCurrent: vi.fn(),
+      getAllEntities: () => [{ type: 'project', name: 'Apollo' }],
+    };
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db,
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: vi.fn(),
+        precomputeStructuredAnalysisLeaf,
+      }),
+    });
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: [{ speaker: 'Milo', text: 'Accepted live transcript.' }],
+      }),
+    );
+
+    await expect(
+      coordinator.precomputeIncrementalMeetingNotes({
+        source,
+        userNotes: 'Use Apollo terminology.',
+        template: 'auto',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toBe('generated');
+
+    expect(precomputeStructuredAnalysisLeaf).toHaveBeenCalledWith(
+      '',
+      'Use Apollo terminology.',
+      'auto',
+      expect.objectContaining({
+        source,
+        knownTerms: ['Apollo'],
+        entityHints: ['Apollo'],
+        trustedUserTerms: [],
+        contextTokens: 16_384,
+        stageCache: expect.anything(),
+        cacheKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+        workClass: 'background',
+      }),
+    );
+  });
+
   it('persists one content-free terminal metric from provider stage events', async () => {
     const upsertMeetingAnalysisRunMetric = vi.fn();
     const generateStructuredAnalysis = vi.fn(
@@ -211,8 +268,24 @@ describe('meeting analysis run coordinator', () => {
       expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
         expect.objectContaining({ inputRevision: fingerprint }),
       );
+      const stageCacheKey = createHash('sha256')
+        .update(
+          JSON.stringify({
+            userNotesHash: 'notes-terms',
+            terms: ['Ogletree'],
+            template: 'auto',
+            provider: 'ollama',
+            model: 'gemma4:12b',
+            thinking: null,
+            seed: null,
+            contextTokens: 16384,
+            promptVersion: 'notes-v28',
+          }),
+          'utf8',
+        )
+        .digest('hex');
       expect(generateStructuredAnalysis.mock.calls[0]?.[3].cacheKey).toBe(
-        fingerprint,
+        stageCacheKey,
       );
     },
   );
