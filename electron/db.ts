@@ -54,12 +54,15 @@ import {
 } from '../src/utils/meetingNotesHistory';
 import {
   type PersonBriefingCommitment,
+  type PersonBriefingCommitmentCandidate,
   type PersonBriefingMeeting,
   type PersonBriefingSummary,
   type PersonCommitmentCandidate,
   type PersonMeetingRecord,
+  isUsablePersonName,
   mergePersonMeetingEvidence,
   parsePersonRole,
+  selectCandidatePersonCommitments,
   selectVerifiedPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
@@ -6448,29 +6451,8 @@ export const upsertEntity = (entity: {
   domain_tag?: string;
 }): Entity => {
   const normalizedName = normalizeEntityName(entity.name);
-
-  // ── SANITY FILTER (V1.8 No-Nonsense) ──
-  const blocklist = [
-    'none',
-    'omit',
-    'unknown',
-    'none specified',
-    'unnamed',
-    'unknown project',
-  ];
-  if (
-    blocklist.includes(normalizedName) ||
-    normalizedName.includes('(unknown)')
-  ) {
-    console.log(`[DB] Sanity Filter: Blocking entity "${entity.name}"`);
-    // Return a dummy object or throw. To avoid breaking the pipeline, we return the existing or a partial.
-    // However, best is to return a "Trash" sentinel or just a minimal record that won't be rendered.
-    // For now, let's just use the "none" ID if it exists or create nothing.
-    // Better: throw a soft error or return a type that the caller handles.
-    // Re-evaluating: The simplest is to return a mock Entity and let the caller ignore it,
-    // or just return the record but prefix name with [BLOCKED].
-    // Actually, the user wants it BLOCKED from the UI. The UI already filters it.
-    // Adding it here ensures it's not even normalized into the graph.
+  if (entity.type === 'person' && !isUsablePersonName(entity.name)) {
+    throw new Error('person_name_invalid');
   }
 
   let existing: Entity | undefined;
@@ -7998,6 +7980,10 @@ type PeopleBriefingSummaryRow = {
   latest_meeting_at: string | null;
   latest_context: string | null;
   open_commitment_count: number;
+  candidate_commitment_count: number;
+  brief_headline: string | null;
+  brief_status: string | null;
+  brief_updated_at: string | null;
   possible_duplicate_count: number;
 };
 
@@ -8062,6 +8048,39 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
             '$.source_meeting_id'
           ) = 'text'
         GROUP BY identity.canonical_id
+      ), person_names AS (
+        SELECT identity.canonical_id AS person_id, person.normalized_name
+        FROM entities person
+        JOIN person_identity identity ON identity.source_id = person.id
+        WHERE person.type = 'person'
+        UNION
+        SELECT identity.canonical_id AS person_id, name_alias.normalized_name
+        FROM person_name_aliases name_alias
+        JOIN person_identity identity ON identity.source_id = name_alias.person_id
+      ), candidate_commitments AS (
+        SELECT names.person_id, COUNT(DISTINCT action.id) AS candidate_commitment_count
+        FROM person_names names
+        JOIN entities action
+          ON action.type = 'action_item'
+          AND action.assigned_to IS NULL
+          AND LOWER(TRIM(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.assignee_name'
+          ))) = names.normalized_name
+        WHERE action.status IN ('active', 'overdue')
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.owner_source'
+          ), '') != 'user'
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.commitment_state'
+          ), '') != 'rejected'
+          AND json_type(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.source_meeting_id'
+          ) = 'text'
+        GROUP BY names.person_id
       )
       SELECT
         person.id,
@@ -8074,6 +8093,15 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latest.meeting_at AS latest_meeting_at,
         latest.context AS latest_context,
         COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count,
+        COALESCE(candidates.candidate_commitment_count, 0) AS candidate_commitment_count,
+        CASE
+          WHEN json_valid(brief.structured_json)
+            AND json_type(brief.structured_json, '$.current_read.headline') = 'text'
+          THEN json_extract(brief.structured_json, '$.current_read.headline')
+          ELSE NULL
+        END AS brief_headline,
+        brief.status AS brief_status,
+        COALESCE(brief.last_synthesized_at, brief.updated_at) AS brief_updated_at,
         (
           SELECT COUNT(*) FROM entities possible
           WHERE possible.type = 'person'
@@ -8089,6 +8117,9 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
       LEFT JOIN ranked_meetings latest
         ON latest.person_id = person.id AND latest.recency_rank = 1
       LEFT JOIN open_commitments commitments ON commitments.person_id = person.id
+      LEFT JOIN candidate_commitments candidates ON candidates.person_id = person.id
+      LEFT JOIN knowledge_docs brief
+        ON brief.scope_type = 'person_context' AND brief.scope_key = person.id
       WHERE person.type = 'person'
         AND NOT EXISTS (SELECT 1 FROM person_aliases alias
           WHERE alias.person_id = person.id AND alias.active = 1)
@@ -8099,19 +8130,25 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
     `)
     .all() as PeopleBriefingSummaryRow[];
 
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    role: parsePersonRole(row.metadata),
-    meetingCount: Number(row.meeting_count),
-    mentionCount: Number(row.mention_count),
-    latestMeetingId: row.latest_meeting_id,
-    latestMeetingTitle: row.latest_meeting_title,
-    latestMeetingAt: row.latest_meeting_at,
-    context: row.latest_context,
-    openCommitmentCount: Number(row.open_commitment_count),
-    possibleDuplicateCount: Number(row.possible_duplicate_count),
-  }));
+  return rows
+    .filter((row) => isUsablePersonName(row.name))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: parsePersonRole(row.metadata),
+      meetingCount: Number(row.meeting_count),
+      mentionCount: Number(row.mention_count),
+      latestMeetingId: row.latest_meeting_id,
+      latestMeetingTitle: row.latest_meeting_title,
+      latestMeetingAt: row.latest_meeting_at,
+      context: row.latest_context,
+      openCommitmentCount: Number(row.open_commitment_count),
+      candidateCommitmentCount: Number(row.candidate_commitment_count),
+      briefHeadline: row.brief_headline,
+      briefStatus: row.brief_status,
+      briefUpdatedAt: row.brief_updated_at,
+      possibleDuplicateCount: Number(row.possible_duplicate_count),
+    }));
 };
 
 export interface PersonBriefingDetail {
@@ -8120,7 +8157,9 @@ export interface PersonBriefingDetail {
   commitments: {
     open: PersonBriefingCommitment[];
     delivered: PersonBriefingCommitment[];
+    candidates: PersonBriefingCommitmentCandidate[];
   };
+  isSelf: boolean;
   knowledgeDoc: KnowledgeDoc | null;
   workingMemorySnapshot: WorkingMemorySnapshot | null;
   mergedPeople: Array<{ id: string; name: string; mergedAt: string }>;
@@ -8168,7 +8207,8 @@ export const getPersonBriefing = (
 ): PersonBriefingDetail | undefined => {
   const canonicalId = resolvePersonIdentityId(personId);
   const person = getEntity(canonicalId);
-  if (!person || person.type !== 'person') return undefined;
+  if (!person || person.type !== 'person' || !isUsablePersonName(person.name))
+    return undefined;
 
   const mentionedMeetings = (
     db
@@ -8299,6 +8339,52 @@ export const getPersonBriefing = (
     `)
     .all(canonicalId, canonicalId, canonicalId) as PersonCommitmentCandidate[];
 
+  const candidateOwnerActions = db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT person_id FROM person_aliases
+        WHERE canonical_id = ? AND active = 1
+      ), names(normalized_name) AS (
+        SELECT normalized_name FROM entities WHERE id IN (SELECT id FROM family)
+        UNION
+        SELECT normalized_name FROM person_name_aliases
+        WHERE person_id IN (SELECT id FROM family)
+      )
+      SELECT
+        action.id,
+        action.name,
+        action.status,
+        action.due_date,
+        action.assigned_to,
+        action.metadata,
+        action.updated_at,
+        source.title AS sourceMeetingTitle
+      FROM entities action
+      LEFT JOIN meetings source ON source.id = json_extract(
+        CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+        '$.source_meeting_id'
+      )
+      WHERE action.type = 'action_item'
+        AND action.assigned_to IS NULL
+        AND LOWER(TRIM(json_extract(
+          CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.assignee_name'
+        ))) IN (SELECT normalized_name FROM names)
+    `)
+    .all(canonicalId, canonicalId) as PersonCommitmentCandidate[];
+
+  const personNames = db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT person_id FROM person_aliases
+        WHERE canonical_id = ? AND active = 1
+      )
+      SELECT name FROM entities WHERE id IN (SELECT id FROM family)
+      UNION SELECT display_name AS name FROM person_name_aliases
+      WHERE person_id IN (SELECT id FROM family)
+    `)
+    .all(canonicalId, canonicalId) as Array<{ name: string }>;
+
   const mergedPeople = db
     .prepare(
       `SELECT person.id, person.name, alias.created_at AS mergedAt
@@ -8312,6 +8398,7 @@ export const getPersonBriefing = (
     name: string;
     mergedAt: string;
   }>;
+  const selfPersonId = identityStore.getSelfPersonId();
 
   return {
     person,
@@ -8320,10 +8407,19 @@ export const getPersonBriefing = (
       scheduled,
       mentioned: mentionedMeetings,
     }),
-    commitments: selectVerifiedPersonCommitments({
-      personId: canonicalId,
-      actions: actionCandidates,
-    }),
+    commitments: {
+      ...selectVerifiedPersonCommitments({
+        personId: canonicalId,
+        actions: actionCandidates,
+      }),
+      candidates: selectCandidatePersonCommitments({
+        personNames: personNames.map((row) => row.name),
+        actions: candidateOwnerActions,
+      }),
+    },
+    isSelf:
+      selfPersonId !== null &&
+      resolvePersonIdentityId(selfPersonId) === canonicalId,
     knowledgeDoc: getKnowledgeDocByScope('person_context', canonicalId) ?? null,
     workingMemorySnapshot:
       getWorkingMemorySnapshot('person_context', canonicalId) ?? null,

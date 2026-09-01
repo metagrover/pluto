@@ -518,6 +518,13 @@ export const getPersonBriefing = async (
   return invoke('GET_PERSON_BRIEFING', personId);
 };
 
+export const resolvePersonCommitmentOwner = async (
+  actionId: string,
+  personId: string | null,
+): Promise<Entity> => {
+  return invoke('RESOLVE_PERSON_COMMITMENT_OWNER', { actionId, personId });
+};
+
 // =============================================
 // ACTION ITEM QUERIES
 // =============================================

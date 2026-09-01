@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   updatePersonName: vi.fn(),
   mergePerson: vi.fn(),
   restorePersonMerge: vi.fn(),
+  resolvePersonCommitmentOwner: vi.fn(),
 }));
 
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -44,13 +45,18 @@ const summary = (id: string, name: string, possibleDuplicateCount = 0) => ({
   latestMeetingAt: '2026-08-20T12:00:00.000Z',
   context: null,
   openCommitmentCount: 0,
+  candidateCommitmentCount: 0,
+  briefHeadline: null,
+  briefStatus: null,
+  briefUpdatedAt: null,
   possibleDuplicateCount,
 });
 
 const detail = (id: string, name: string) => ({
   person: entity(id, name),
   meetings: [],
-  commitments: { open: [], delivered: [] },
+  commitments: { open: [], delivered: [], candidates: [] },
+  isSelf: false,
   knowledgeDoc: null,
   workingMemorySnapshot: null,
   mergedPeople: [],
@@ -79,6 +85,7 @@ describe('People identity controls', () => {
     api.updatePersonName.mockResolvedValue(entity('person-1', 'Avery Smith'));
     api.mergePerson.mockResolvedValue(undefined);
     api.restorePersonMerge.mockResolvedValue(undefined);
+    api.resolvePersonCommitmentOwner.mockResolvedValue({});
   });
 
   afterEach(async () => {
@@ -182,5 +189,37 @@ describe('People identity controls', () => {
     await click('Restore Avery C.');
 
     expect(api.restorePersonMerge).toHaveBeenCalledWith('person-2');
+  });
+
+  it('requires an explicit owner decision for a name-matched open loop', async () => {
+    api.getPersonBriefing.mockResolvedValue({
+      ...detail('person-1', 'Avery Chen'),
+      commitments: {
+        open: [],
+        delivered: [],
+        candidates: [
+          {
+            id: 'action-1',
+            text: 'Share the launch notes',
+            status: 'active',
+            dueDate: null,
+            evidence: 'Avery can share the notes.',
+            sourceMeetingId: 'meeting-1',
+            sourceMeetingTitle: 'Product review',
+            updatedAt: '2026-08-20T12:00:00.000Z',
+            suggestedOwnerName: 'Avery Chen',
+          },
+        ],
+      },
+    });
+    await render();
+    expect(host.textContent).toContain('Needs confirmation');
+
+    await click('Confirm owner');
+
+    expect(api.resolvePersonCommitmentOwner).toHaveBeenCalledWith(
+      'action-1',
+      'person-1',
+    );
   });
 });

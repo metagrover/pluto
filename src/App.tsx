@@ -321,7 +321,7 @@ function App() {
     return () => {
       current = false;
     };
-  }, [selectedMeetingId]);
+  }, [selectedMeetingId, selectedPersonId]);
 
   useActiveCallMonitor({
     setupNeeded,
