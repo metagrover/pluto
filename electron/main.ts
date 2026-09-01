@@ -2618,6 +2618,22 @@ app.whenReady().then(async () => {
     db.restoreProjectMerge(projectId);
     queueAllKnowledgeDocsRefresh();
   });
+  ipcMain.handle('UPDATE_PERSON_NAME', (_event, { personId, name }) => {
+    const person = db.updatePersonName(String(personId), String(name));
+    queueAllKnowledgeDocsRefresh();
+    return person;
+  });
+  ipcMain.handle(
+    'MERGE_PERSON',
+    (_event, { personId, destinationPersonId }) => {
+      db.mergePerson(String(personId), String(destinationPersonId));
+      queueAllKnowledgeDocsRefresh();
+    },
+  );
+  ipcMain.handle('RESTORE_PERSON_MERGE', (_event, personId) => {
+    db.restorePersonMerge(String(personId));
+    queueAllKnowledgeDocsRefresh();
+  });
   const projectInitiativeDiscoveryStateKey =
     'project_initiative_discovery_state_v12';
   const readProjectInitiativeDiscoveryStates = (): Record<

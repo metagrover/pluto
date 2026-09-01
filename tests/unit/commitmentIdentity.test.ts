@@ -274,4 +274,47 @@ describe('identity publication boundary', () => {
       'commitment_reconciliation_stale',
     );
   });
+
+  it('projects saved speaker bindings through the canonical person family', () => {
+    db.saveMeeting({
+      id: 'person-merge-identity-source',
+      title: 'Identity source',
+      transcript_json: JSON.stringify([
+        { speaker: 'Speaker 1', text: 'I will publish the checklist.' },
+      ]),
+    });
+    const canonical = db.upsertEntity({
+      id: 'person-merge-identity-canonical',
+      type: 'person',
+      name: 'Morgan Reed',
+      dedupe_by_name: false,
+    });
+    const duplicate = db.upsertEntity({
+      id: 'person-merge-identity-duplicate',
+      type: 'person',
+      name: 'M. Reed',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setBinding('person-merge-identity-source', {
+      speaker: 'Speaker 1',
+      personId: duplicate.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'v1',
+      evidence: [],
+    });
+    const before = db.getCommitmentQueueRevision();
+
+    db.mergePerson(duplicate.id, canonical.id);
+
+    const context = identity.getMeetingIdentityContext(
+      'person-merge-identity-source',
+    );
+    expect(context.bindings[0].personId).toBe(canonical.id);
+    expect(context.people.map((person) => person.id)).toContain(canonical.id);
+    expect(context.people.map((person) => person.id)).not.toContain(
+      duplicate.id,
+    );
+    expect(db.getCommitmentQueueRevision()).not.toBe(before);
+  });
 });

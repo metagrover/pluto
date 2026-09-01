@@ -23,15 +23,29 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
     }),
   );
   const people = db.getEntitiesByType('person').map((person) => {
-    const aliases = db.identityStore.getPersonAliases(person.id);
+    const aliases = [
+      ...db.identityStore.getPersonAliases(person.id),
+      ...db.getPersonNameAliases(person.id),
+    ];
     return {
       id: person.id,
       name: person.name,
-      ...(aliases.length ? { aliases } : {}),
+      ...(aliases.length ? { aliases: [...new Set(aliases)] } : {}),
     };
   });
-  const bindings = db.identityStore.getBindings(meetingId);
-  const capture = db.identityStore.getCapture(meetingId);
+  const bindings = db.identityStore.getBindings(meetingId).map((binding) => ({
+    ...binding,
+    personId: binding.personId
+      ? db.resolvePersonIdentityId(binding.personId)
+      : null,
+  }));
+  const storedCapture = db.identityStore.getCapture(meetingId);
+  const capture = {
+    ...storedCapture,
+    selfPersonId: storedCapture.selfPersonId
+      ? db.resolvePersonIdentityId(storedCapture.selfPersonId)
+      : null,
+  };
   // A high-confidence individual near-end attribution plus capture-time self
   // confirmation can name Me. A remote channel may contain several people.
   let attribution: Record<string, unknown> = {};

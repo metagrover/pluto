@@ -68,6 +68,7 @@ describe('person briefing database read model', () => {
       latestMeetingAt: '2026-08-01T12:00:00.000Z',
       context: 'Reviewed the launch sequence.',
       openCommitmentCount: 1,
+      possibleDuplicateCount: 0,
     });
   });
 

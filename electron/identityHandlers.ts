@@ -68,7 +68,7 @@ function selectedPerson(payload: Record<string, unknown>): string | null {
     if (payload.personId === null) return null;
     const personId = id(payload.personId, 'person');
     if (db.getEntity(personId)?.type !== 'person') throw invalid('person');
-    return personId;
+    return db.resolvePersonIdentityId(personId);
   }
   if (
     typeof payload.newName !== 'string' ||
@@ -85,13 +85,19 @@ function selectedPerson(payload: Record<string, unknown>): string | null {
 }
 
 function globalState() {
+  const storedSelfPersonId = db.identityStore.getSelfPersonId();
+  const selfPersonId = storedSelfPersonId
+    ? db.resolvePersonIdentityId(storedSelfPersonId)
+    : null;
+  const profile = db.identityStore.getProfile();
+  const self = selfPersonId ? db.getEntity(selfPersonId) : null;
   return {
-    selfPersonId: db.identityStore.getSelfPersonId(),
+    selfPersonId,
     people: db
       .getEntitiesByType('person')
       .map(({ id, name }) => ({ id, name })),
     revision: db.identityStore.getRevision(),
-    profile: db.identityStore.getProfile(),
+    profile: self ? { ...profile, preferredName: self.name } : profile,
   };
 }
 
@@ -174,13 +180,17 @@ export function handleIdentityRequest(channel: string, value: unknown) {
     return db.withCommitmentTransaction(() => {
       requireRevision(payload.expectedRevision);
       if (profile.preferredName) {
-        const selfPersonId = db.identityStore.getSelfPersonId();
-        const person = db.upsertEntity({
-          ...(selfPersonId ? { id: selfPersonId } : {}),
-          type: 'person',
-          name: profile.preferredName,
-          dedupe_by_name: false,
-        });
+        const storedSelfPersonId = db.identityStore.getSelfPersonId();
+        const selfPersonId = storedSelfPersonId
+          ? db.resolvePersonIdentityId(storedSelfPersonId)
+          : null;
+        const person = selfPersonId
+          ? db.updatePersonName(selfPersonId, profile.preferredName)
+          : db.upsertEntity({
+              type: 'person',
+              name: profile.preferredName,
+              dedupe_by_name: false,
+            });
         db.identityStore.setSelfPersonId(person.id);
       } else db.identityStore.setSelfPersonId(null);
       db.identityStore.saveProfile({ ...profile, disposition: 'completed' });

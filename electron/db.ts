@@ -456,6 +456,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_project_aliases_canonical
         ON project_aliases(canonical_id, active);
 
+      CREATE TABLE IF NOT EXISTS person_aliases (
+        person_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+        canonical_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        moved_aliases_json TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        restored_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_person_aliases_canonical
+        ON person_aliases(canonical_id, active);
+
+      CREATE TABLE IF NOT EXISTS person_name_aliases (
+        person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        normalized_name TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('rename', 'user')),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(person_id, normalized_name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_person_name_aliases_name
+        ON person_name_aliases(normalized_name);
+
       CREATE TABLE IF NOT EXISTS attention_items (
         id TEXT PRIMARY KEY,
         dedupe_key TEXT NOT NULL UNIQUE,
@@ -3993,6 +4015,11 @@ export const deleteMeeting = (id: string | number) => {
         AND NOT EXISTS (SELECT 1 FROM identity_captures c WHERE c.self_person_id = entities.id)
         AND NOT EXISTS (SELECT 1 FROM identity_bindings b WHERE json_extract(b.payload, '$.personId') = entities.id)
         AND NOT EXISTS (SELECT 1 FROM identity_person_aliases a WHERE a.person_id = entities.id)
+        AND NOT EXISTS (SELECT 1 FROM person_aliases a
+          WHERE (a.person_id = entities.id OR a.canonical_id = entities.id)
+            AND a.active = 1)
+        AND NOT EXISTS (SELECT 1 FROM person_name_aliases a
+          WHERE a.person_id = entities.id)
     `).run();
   } catch (e) {
     console.warn('[DB] Failed to clean up orphan entities:', e);
@@ -4931,9 +4958,11 @@ export const getProjectEntityIdsForMeeting = (meetingId: string): string[] => {
 export const getPersonEntityIdsForMeeting = (meetingId: string): string[] => {
   const rows = db
     .prepare(`
-      SELECT DISTINCT e.id
+      SELECT DISTINCT COALESCE(alias.canonical_id, e.id) AS id
       FROM entities e
       JOIN meeting_entities me ON me.entity_id = e.id
+      LEFT JOIN person_aliases alias
+        ON alias.person_id = e.id AND alias.active = 1
       WHERE me.meeting_id = ? AND e.type = 'person'
     `)
     .all(meetingId) as Array<{ id: string }>;
@@ -4960,17 +4989,25 @@ export const getTranscriptionPersonCandidates =
   (): TranscriptionPersonCandidate[] => {
     const rows = db
       .prepare(`
+      WITH person_identity AS (
+        SELECT e.id AS source_id,
+          COALESCE(alias.canonical_id, e.id) AS canonical_id
+        FROM entities e LEFT JOIN person_aliases alias
+          ON alias.person_id = e.id AND alias.active = 1
+        WHERE e.type = 'person'
+      )
       SELECT
-        e.name,
-        COALESCE(e.saliency_score, 0) AS saliency_score,
+        canonical.name,
+        COALESCE(canonical.saliency_score, 0) AS saliency_score,
         COUNT(DISTINCT me.meeting_id) AS meeting_count,
         COALESCE(SUM(me.mention_count), 0) AS mention_count,
-        MAX(COALESCE(m.started_at, m.created_at, me.created_at, e.updated_at)) AS last_mentioned_at
-      FROM entities e
-      JOIN meeting_entities me ON me.entity_id = e.id
+        MAX(COALESCE(m.started_at, m.created_at, me.created_at,
+          canonical.updated_at)) AS last_mentioned_at
+      FROM person_identity identity
+      JOIN entities canonical ON canonical.id = identity.canonical_id
+      JOIN meeting_entities me ON me.entity_id = identity.source_id
       JOIN meetings m ON m.id = me.meeting_id
-      WHERE e.type = 'person'
-      GROUP BY e.id, e.name, e.saliency_score
+      GROUP BY canonical.id, canonical.name, canonical.saliency_score
     `)
       .all() as Array<{
       name: string;
@@ -5003,18 +5040,26 @@ export const getKnowledgeDocPersonCandidates = (options?: {
 
   return db
     .prepare(`
+      WITH person_identity AS (
+        SELECT e.id AS source_id,
+          COALESCE(alias.canonical_id, e.id) AS canonical_id
+        FROM entities e LEFT JOIN person_aliases alias
+          ON alias.person_id = e.id AND alias.active = 1
+        WHERE e.type = 'person'
+      )
       SELECT
-        e.id AS person_id,
-        e.name AS person_name,
+        canonical.id AS person_id,
+        canonical.name AS person_name,
         COUNT(DISTINCT me.meeting_id) AS meeting_count,
         COALESCE(SUM(me.mention_count), 0) AS mention_count,
         MAX(COALESCE(m.started_at, m.created_at, me.created_at)) AS last_mentioned_at
-      FROM entities e
-      JOIN meeting_entities me ON me.entity_id = e.id
+      FROM person_identity identity
+      JOIN entities canonical ON canonical.id = identity.canonical_id
+      JOIN meeting_entities me ON me.entity_id = identity.source_id
       LEFT JOIN meetings m ON m.id = me.meeting_id
-      WHERE e.type = 'person'
-        AND COALESCE(m.started_at, m.created_at, me.created_at) >= datetime('now', '-' || ? || ' days')
-      GROUP BY e.id, e.name
+      WHERE COALESCE(m.started_at, m.created_at, me.created_at) >=
+        datetime('now', '-' || ? || ' days')
+      GROUP BY canonical.id, canonical.name
       HAVING COUNT(DISTINCT me.meeting_id) >= ?
         AND COALESCE(SUM(me.mention_count), 0) >= ?
       ORDER BY meeting_count DESC, mention_count DESC
@@ -6338,6 +6383,22 @@ export const getKnowledgeWorkspace = (params?: {
 /**
  * Create or update an entity
  */
+export const resolvePersonIdentityId = (personId: string): string => {
+  let current = personId;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const alias = db
+      .prepare(
+        'SELECT canonical_id FROM person_aliases WHERE person_id = ? AND active = 1',
+      )
+      .get(current) as { canonical_id: string } | undefined;
+    if (!alias) return current;
+    current = alias.canonical_id;
+  }
+  throw new Error('person_alias_cycle');
+};
+
 export const upsertEntity = (entity: {
   id?: string; // Optional ID to force update on specific entity
   type: EntityType;
@@ -6378,6 +6439,7 @@ export const upsertEntity = (entity: {
 
   let existing: Entity | undefined;
   let matchedProjectAlias = false;
+  let matchedPersonAlias = false;
 
   // 1. If ID provided, try to find by ID first
   if (entity.id) {
@@ -6404,6 +6466,16 @@ export const upsertEntity = (entity: {
     }
   }
 
+  if (existing?.type === 'person') {
+    const canonicalId = resolvePersonIdentityId(existing.id);
+    if (canonicalId !== existing.id) {
+      existing = db
+        .prepare('SELECT * FROM entities WHERE id = ?')
+        .get(canonicalId) as Entity | undefined;
+      matchedPersonAlias = true;
+    }
+  }
+
   if (
     !existing &&
     entity.type === 'project' &&
@@ -6418,6 +6490,29 @@ export const upsertEntity = (entity: {
       )
       .get(normalizedName) as Entity | undefined;
     matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'person' &&
+    entity.dedupe_by_name !== false
+  ) {
+    const matches = db
+      .prepare(
+        `SELECT DISTINCT COALESCE(pa.canonical_id, person.id) AS canonical_id
+         FROM person_name_aliases name_alias
+         JOIN entities person ON person.id = name_alias.person_id
+         LEFT JOIN person_aliases pa
+           ON pa.person_id = person.id AND pa.active = 1
+         WHERE name_alias.normalized_name = ?`,
+      )
+      .all(normalizedName) as Array<{ canonical_id: string }>;
+    if (matches.length === 1) {
+      existing = db
+        .prepare('SELECT * FROM entities WHERE id = ?')
+        .get(matches[0].canonical_id) as Entity | undefined;
+      matchedPersonAlias = Boolean(existing);
+    }
   }
 
   if (existing) {
@@ -6435,7 +6530,7 @@ export const upsertEntity = (entity: {
       WHERE id = ?
     `);
     stmt.run(
-      matchedProjectAlias ? null : entity.name,
+      matchedProjectAlias || matchedPersonAlias ? null : entity.name,
       entity.status,
       entity.due_date,
       entity.assigned_to,
@@ -6502,6 +6597,149 @@ export const getEntity = (id: string): Entity | undefined => {
     | undefined;
 };
 
+export const getPersonNameAliases = (personId: string): string[] => {
+  const canonicalId = resolvePersonIdentityId(personId);
+  const rows = db
+    .prepare(
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT person_id FROM person_aliases
+         WHERE canonical_id = ? AND active = 1
+       ), names AS (
+         SELECT display_name AS name, normalized_name
+         FROM person_name_aliases
+         WHERE person_id IN (SELECT id FROM family)
+         UNION
+         SELECT name, normalized_name FROM entities
+         WHERE id IN (SELECT id FROM family) AND id != ?
+       )
+       SELECT name FROM names
+       WHERE normalized_name != (
+         SELECT normalized_name FROM entities WHERE id = ?
+       )
+       GROUP BY normalized_name
+       ORDER BY MIN(name)`,
+    )
+    .all(canonicalId, canonicalId, canonicalId, canonicalId) as Array<{
+    name: string;
+  }>;
+  return rows.map((row) => row.name);
+};
+
+export const updatePersonName = (personId: string, name: string): Entity =>
+  db.transaction(() => {
+    const canonicalId = resolvePersonIdentityId(personId);
+    const person = getEntity(canonicalId);
+    const trimmed = name.trim().replace(/\s+/g, ' ');
+    if (!person || person.type !== 'person' || !trimmed)
+      throw new Error('person_name_invalid');
+    const normalizedName = normalizeEntityName(trimmed);
+    if (normalizedName === person.normalized_name) {
+      if (trimmed === person.name) return person;
+    } else {
+      db.prepare(
+        `INSERT INTO person_name_aliases(
+           person_id, normalized_name, display_name, source
+         ) VALUES (?, ?, ?, 'rename')
+         ON CONFLICT(person_id, normalized_name) DO UPDATE SET
+           display_name = excluded.display_name`,
+      ).run(person.id, person.normalized_name, person.name);
+    }
+    db.prepare(
+      `UPDATE entities SET name = ?, normalized_name = ?,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).run(trimmed, normalizedName, person.id);
+    try {
+      db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(person.id);
+      db.prepare(
+        'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
+      ).run(trimmed, person.id);
+    } catch (error) {
+      console.warn(
+        '[DB] Failed to update person search index:',
+        person.id,
+        error,
+      );
+    }
+    return getEntity(person.id)!;
+  })();
+
+export const mergePerson = (
+  personId: string,
+  destinationPersonId: string,
+): void => {
+  const source = getEntity(personId);
+  const destinationId = resolvePersonIdentityId(destinationPersonId);
+  const destination = getEntity(destinationId);
+  if (
+    !source ||
+    !destination ||
+    source.type !== 'person' ||
+    destination.type !== 'person' ||
+    source.id === destination.id ||
+    resolvePersonIdentityId(source.id) === destinationId
+  ) {
+    throw new Error('person_merge_invalid');
+  }
+  db.transaction(() => {
+    const movedAliases = (
+      db
+        .prepare(
+          'SELECT person_id FROM person_aliases WHERE canonical_id = ? AND active = 1',
+        )
+        .all(source.id) as Array<{ person_id: string }>
+    ).map((alias) => alias.person_id);
+    db.prepare(
+      `INSERT INTO person_aliases(
+         person_id, canonical_id, moved_aliases_json, active, restored_at
+       ) VALUES (?, ?, ?, 1, NULL)
+       ON CONFLICT(person_id) DO UPDATE SET
+         canonical_id = excluded.canonical_id,
+         moved_aliases_json = excluded.moved_aliases_json,
+         active = 1,
+         restored_at = NULL,
+         created_at = CURRENT_TIMESTAMP`,
+    ).run(source.id, destinationId, JSON.stringify(movedAliases));
+    db.prepare(
+      `UPDATE person_aliases SET canonical_id = ?
+       WHERE canonical_id = ? AND active = 1`,
+    ).run(destinationId, source.id);
+  })();
+};
+
+export const restorePersonMerge = (personId: string): void => {
+  db.transaction(() => {
+    const alias = db
+      .prepare(
+        `SELECT moved_aliases_json FROM person_aliases
+         WHERE person_id = ? AND active = 1`,
+      )
+      .get(personId) as { moved_aliases_json: string | null } | undefined;
+    if (!alias) return;
+    let movedAliases: string[] = [];
+    try {
+      const parsed = JSON.parse(alias.moved_aliases_json || '[]');
+      if (Array.isArray(parsed)) {
+        movedAliases = parsed.filter(
+          (value): value is string => typeof value === 'string',
+        );
+      }
+    } catch {
+      movedAliases = [];
+    }
+    if (movedAliases.length > 0) {
+      const placeholders = movedAliases.map(() => '?').join(', ');
+      db.prepare(
+        `UPDATE person_aliases SET canonical_id = ?
+         WHERE person_id IN (${placeholders}) AND active = 1`,
+      ).run(personId, ...movedAliases);
+    }
+    db.prepare(
+      `UPDATE person_aliases SET active = 0, restored_at = CURRENT_TIMESTAMP
+       WHERE person_id = ? AND active = 1`,
+    ).run(personId);
+  })();
+};
+
 export interface CommitmentAliasInput {
   extractionId: string;
   canonicalId: string;
@@ -6532,6 +6770,12 @@ export const getCommitmentQueueRevision = (): string =>
         db
           .prepare(
             "SELECT id, name FROM entities WHERE type IN ('person', 'project') ORDER BY id",
+          )
+          .all(),
+        db.prepare('SELECT * FROM person_aliases ORDER BY person_id').all(),
+        db
+          .prepare(
+            'SELECT * FROM person_name_aliases ORDER BY person_id, normalized_name',
           )
           .all(),
         db
@@ -6597,9 +6841,7 @@ export const getIdentityReconciliationInputs = () => ({
   actions: db
     .prepare("SELECT * FROM entities WHERE type = 'action_item' ORDER BY id")
     .all() as Entity[],
-  people: db
-    .prepare("SELECT id, name FROM entities WHERE type = 'person' ORDER BY id")
-    .all(),
+  people: getEntitiesByType('person').map(({ id, name }) => ({ id, name })),
   projects: db
     .prepare("SELECT id, name FROM entities WHERE type = 'project' ORDER BY id")
     .all(),
@@ -6674,10 +6916,16 @@ export const correctActionOwner = (
       throw new Error('identity_action_invalid');
     if (personId !== null && getEntity(personId)?.type !== 'person')
       throw new Error('identity_person_invalid');
+    const canonicalPersonId =
+      personId === null ? null : resolvePersonIdentityId(personId);
     const metadata = parseActionMetadata(entity.metadata);
     db.prepare(
       'UPDATE entities SET assigned_to = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ).run(personId, JSON.stringify({ ...metadata, owner_source: 'user' }), id);
+    ).run(
+      canonicalPersonId,
+      JSON.stringify({ ...metadata, owner_source: 'user' }),
+      id,
+    );
     const source =
       typeof metadata.source_meeting_id === 'string'
         ? metadata.source_meeting_id
@@ -7174,6 +7422,8 @@ export const getEntitiesByType = (type: EntityType): Entity[] => {
   return db
     .prepare(`SELECT * FROM entities WHERE type = ? AND NOT EXISTS
       (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND NOT EXISTS
+      (SELECT 1 FROM person_aliases a WHERE a.person_id = entities.id AND a.active = 1)
       ORDER BY updated_at DESC`)
     .all(type) as Entity[];
 };
@@ -7185,6 +7435,8 @@ export const getAllEntities = (): Entity[] => {
   return db
     .prepare(`SELECT * FROM entities WHERE NOT EXISTS
       (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND NOT EXISTS
+      (SELECT 1 FROM person_aliases a WHERE a.person_id = entities.id AND a.active = 1)
       ORDER BY type, updated_at DESC`)
     .all() as Entity[];
 };
@@ -7202,6 +7454,8 @@ export const searchEntities = (query: string): Entity[] => {
     WHERE entities_fts MATCH ?
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
         WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND NOT EXISTS (SELECT 1 FROM person_aliases a
+        WHERE a.person_id = entities.id AND a.active = 1)
     ORDER BY rank
   `)
     .all(`${sanitized}*`) as Entity[];
@@ -7215,11 +7469,27 @@ export const findEntity = (
   name: string,
 ): Entity | undefined => {
   const normalizedName = normalizeEntityName(name);
-  return db
+  const direct = db
     .prepare(`
     SELECT * FROM entities WHERE type = ? AND normalized_name = ?
   `)
     .get(type, normalizedName) as Entity | undefined;
+  if (direct?.type === 'person') {
+    return getEntity(resolvePersonIdentityId(direct.id));
+  }
+  if (direct) return direct;
+  if (type !== 'person') return undefined;
+  const matches = db
+    .prepare(
+      `SELECT DISTINCT COALESCE(pa.canonical_id, person.id) AS canonical_id
+       FROM person_name_aliases name_alias
+       JOIN entities person ON person.id = name_alias.person_id
+       LEFT JOIN person_aliases pa
+         ON pa.person_id = person.id AND pa.active = 1
+       WHERE name_alias.normalized_name = ?`,
+    )
+    .all(normalizedName) as Array<{ canonical_id: string }>;
+  return matches.length === 1 ? getEntity(matches[0].canonical_id) : undefined;
 };
 
 /**
@@ -7399,14 +7669,28 @@ export const getEntityLinks = (
   const includeRejected = options?.includeRejected ?? false;
   const resolvedEntity = resolveCommitmentIdentity(entityId);
   const canonicalId =
-    resolvedEntity?.type === 'project'
-      ? resolveProjectIdentityId(resolvedEntity.id)
-      : (resolvedEntity?.id ?? entityId);
+    resolvedEntity?.type === 'person'
+      ? resolvePersonIdentityId(resolvedEntity.id)
+      : resolvedEntity?.type === 'project'
+        ? resolveProjectIdentityId(resolvedEntity.id)
+        : (resolvedEntity?.id ?? entityId);
+  const aliasTable =
+    resolvedEntity?.type === 'person'
+      ? 'person_aliases'
+      : resolvedEntity?.type === 'project'
+        ? 'project_aliases'
+        : 'commitment_aliases';
+  const aliasIdColumn =
+    resolvedEntity?.type === 'person'
+      ? 'person_id'
+      : resolvedEntity?.type === 'project'
+        ? 'project_id'
+        : 'extraction_id';
   const links = db
     .prepare(`
     WITH RECURSIVE family(id) AS (
       SELECT ? UNION
-      SELECT a.extraction_id FROM commitment_aliases a
+      SELECT a.${aliasIdColumn} FROM ${aliasTable} a
       JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
     )
     SELECT * FROM entity_links
@@ -7419,9 +7703,11 @@ export const getEntityLinks = (
   // Keep original edges intact for restoration, but expose their current identity.
   const visibleId = (id: string) => {
     const resolved = resolveCommitmentIdentity(id) ?? getEntity(id);
-    return resolved?.type === 'project'
-      ? resolveProjectIdentityId(resolved.id)
-      : (resolved?.id ?? id);
+    return resolved?.type === 'person'
+      ? resolvePersonIdentityId(resolved.id)
+      : resolved?.type === 'project'
+        ? resolveProjectIdentityId(resolved.id)
+        : (resolved?.id ?? id);
   };
   return links
     .map((link) => ({
@@ -7446,7 +7732,13 @@ export const getRelatedEntities = (
   confidence: number;
   evidence_quote: string | null;
 })[] => {
-  const canonicalId = resolveCommitmentIdentity(entityId)?.id ?? entityId;
+  const resolved = resolveCommitmentIdentity(entityId) ?? getEntity(entityId);
+  const canonicalId =
+    resolved?.type === 'person'
+      ? resolvePersonIdentityId(resolved.id)
+      : resolved?.type === 'project'
+        ? resolveProjectIdentityId(resolved.id)
+        : (resolved?.id ?? entityId);
   const links = getEntityLinks(canonicalId, options);
   const results: (Entity & {
     link_id: string;
@@ -7595,7 +7887,11 @@ export const getMeetingEntities = (
   const canonicalRows = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
     const canonical =
-      row.type === 'action_item' ? resolveCommitmentIdentity(row.id) : row;
+      row.type === 'action_item'
+        ? resolveCommitmentIdentity(row.id)
+        : row.type === 'person'
+          ? getEntity(resolvePersonIdentityId(row.id))
+          : row;
     if (canonical && !canonicalRows.has(canonical.id))
       canonicalRows.set(canonical.id, {
         ...canonical,
@@ -7615,10 +7911,32 @@ export const getEntityMeetings = (
   mention_count: number;
   context: string | null;
 })[] => {
+  const entity = getEntity(entityId);
+  const canonicalId =
+    entity?.type === 'person'
+      ? resolvePersonIdentityId(entityId)
+      : entity?.type === 'project'
+        ? resolveProjectIdentityId(entityId)
+        : entity?.type === 'action_item'
+          ? resolveCommitmentIdentity(entityId)?.id || entityId
+          : entityId;
+  const aliasTable =
+    entity?.type === 'person'
+      ? 'person_aliases'
+      : entity?.type === 'project'
+        ? 'project_aliases'
+        : 'commitment_aliases';
+  const aliasIdColumn =
+    entity?.type === 'person'
+      ? 'person_id'
+      : entity?.type === 'project'
+        ? 'project_id'
+        : 'extraction_id';
   return db
     .prepare(`
     WITH RECURSIVE family(id) AS (
-      SELECT ? UNION SELECT a.extraction_id FROM commitment_aliases a JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
+      SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
+      JOIN family f ON a.canonical_id = f.id WHERE a.active = 1
     )
     SELECT m.*, SUM(me.mention_count) AS mention_count, GROUP_CONCAT(DISTINCT me.context) AS context
     FROM meetings m
@@ -7627,7 +7945,7 @@ export const getEntityMeetings = (
     GROUP BY m.id
     ORDER BY m.started_at DESC
   `)
-    .all(entityId) as (PersistedMeeting & {
+    .all(canonicalId) as (PersistedMeeting & {
     mention_count: number;
     context: string | null;
   })[];
@@ -7644,6 +7962,7 @@ type PeopleBriefingSummaryRow = {
   latest_meeting_at: string | null;
   latest_context: string | null;
   open_commitment_count: number;
+  possible_duplicate_count: number;
 };
 
 /**
@@ -7654,18 +7973,26 @@ type PeopleBriefingSummaryRow = {
 export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
   const rows = db
     .prepare(`
-      WITH person_meetings AS (
+      WITH person_identity AS (
         SELECT
-          me.entity_id AS person_id,
+          person.id AS source_id,
+          COALESCE(alias.canonical_id, person.id) AS canonical_id
+        FROM entities person
+        LEFT JOIN person_aliases alias
+          ON alias.person_id = person.id AND alias.active = 1
+        WHERE person.type = 'person'
+      ), person_meetings AS (
+        SELECT
+          identity.canonical_id AS person_id,
           m.id AS meeting_id,
           m.title AS meeting_title,
           COALESCE(m.started_at, m.created_at) AS meeting_at,
           SUM(me.mention_count) AS mention_count,
           GROUP_CONCAT(DISTINCT me.context) AS context
         FROM meeting_entities me
+        JOIN person_identity identity ON identity.source_id = me.entity_id
         JOIN meetings m ON m.id = me.meeting_id
-        JOIN entities person ON person.id = me.entity_id AND person.type = 'person'
-        GROUP BY me.entity_id, m.id
+        GROUP BY identity.canonical_id, m.id
       ), ranked_meetings AS (
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY person_id
@@ -7680,24 +8007,25 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         FROM person_meetings
         GROUP BY person_id
       ), open_commitments AS (
-        SELECT assigned_to AS person_id, COUNT(*) AS open_commitment_count
-        FROM entities
-        WHERE type = 'action_item'
-          AND status IN ('active', 'overdue')
-          AND assigned_to IS NOT NULL
+        SELECT identity.canonical_id AS person_id,
+          COUNT(*) AS open_commitment_count
+        FROM entities action
+        JOIN person_identity identity ON identity.source_id = action.assigned_to
+        WHERE action.type = 'action_item'
+          AND action.status IN ('active', 'overdue')
           AND json_extract(
-            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.owner_source'
           ) = 'user'
           AND COALESCE(json_extract(
-            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.commitment_state'
           ), '') != 'rejected'
           AND json_type(
-            CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.source_meeting_id'
           ) = 'text'
-        GROUP BY assigned_to
+        GROUP BY identity.canonical_id
       )
       SELECT
         person.id,
@@ -7709,17 +8037,25 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latest.meeting_title AS latest_meeting_title,
         latest.meeting_at AS latest_meeting_at,
         latest.context AS latest_context,
-        COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count
+        COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count,
+        (
+          SELECT COUNT(*) FROM entities possible
+          WHERE possible.type = 'person'
+            AND possible.id != person.id
+            AND possible.normalized_name = person.normalized_name
+            AND NOT EXISTS (
+              SELECT 1 FROM person_aliases hidden
+              WHERE hidden.person_id = possible.id AND hidden.active = 1
+            )
+        ) AS possible_duplicate_count
       FROM entities person
       LEFT JOIN meeting_stats stats ON stats.person_id = person.id
       LEFT JOIN ranked_meetings latest
         ON latest.person_id = person.id AND latest.recency_rank = 1
       LEFT JOIN open_commitments commitments ON commitments.person_id = person.id
       WHERE person.type = 'person'
-        AND NOT EXISTS (
-          SELECT 1 FROM commitment_aliases alias
-          WHERE alias.extraction_id = person.id AND alias.active = 1
-        )
+        AND NOT EXISTS (SELECT 1 FROM person_aliases alias
+          WHERE alias.person_id = person.id AND alias.active = 1)
       ORDER BY
         COALESCE(commitments.open_commitment_count, 0) DESC,
         datetime(latest.meeting_at) DESC,
@@ -7738,6 +8074,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
     latestMeetingAt: row.latest_meeting_at,
     context: row.latest_context,
     openCommitmentCount: Number(row.open_commitment_count),
+    possibleDuplicateCount: Number(row.possible_duplicate_count),
   }));
 };
 
@@ -7750,6 +8087,7 @@ export interface PersonBriefingDetail {
   };
   knowledgeDoc: KnowledgeDoc | null;
   workingMemorySnapshot: WorkingMemorySnapshot | null;
+  mergedPeople: Array<{ id: string; name: string; mergedAt: string }>;
 }
 
 const toPersonMeetingRecord = (
@@ -7792,12 +8130,17 @@ const getPersonMeetingRecord = (
 export const getPersonBriefing = (
   personId: string,
 ): PersonBriefingDetail | undefined => {
-  const person = getEntity(personId);
+  const canonicalId = resolvePersonIdentityId(personId);
+  const person = getEntity(canonicalId);
   if (!person || person.type !== 'person') return undefined;
 
   const mentionedMeetings = (
     db
       .prepare(`
+        WITH family(id) AS (
+          SELECT ? UNION SELECT person_id FROM person_aliases
+          WHERE canonical_id = ? AND active = 1
+        )
         SELECT
           m.id,
           m.title,
@@ -7807,11 +8150,11 @@ export const getPersonBriefing = (
           GROUP_CONCAT(DISTINCT me.context) AS context
         FROM meetings m
         JOIN meeting_entities me ON me.meeting_id = m.id
-        WHERE me.entity_id = ?
+        WHERE me.entity_id IN (SELECT id FROM family)
         GROUP BY m.id
         ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC
       `)
-      .all(personId) as Array<
+      .all(canonicalId, canonicalId) as Array<
       Pick<
         PersistedMeeting,
         'id' | 'title' | 'started_at' | 'created_at' | 'duration_seconds'
@@ -7829,15 +8172,22 @@ export const getPersonBriefing = (
       FROM identity_bindings
       WHERE json_valid(payload)
         AND json_extract(payload, '$.individual') = 1
-        AND json_extract(payload, '$.personId') = ?
+        AND json_extract(payload, '$.personId') IN (
+          SELECT ? UNION SELECT person_id FROM person_aliases
+          WHERE canonical_id = ? AND active = 1
+        )
     `)
-    .all(personId) as Array<{ meeting_id: string }>;
+    .all(canonicalId, canonicalId) as Array<{ meeting_id: string }>;
   for (const row of bindingRows) confirmedIds.add(row.meeting_id);
   const capturedRows = db
     .prepare(
-      "SELECT meeting_id FROM identity_captures WHERE origin = 'local' AND self_person_id = ?",
+      `SELECT meeting_id FROM identity_captures
+       WHERE origin = 'local' AND self_person_id IN (
+         SELECT ? UNION SELECT person_id FROM person_aliases
+         WHERE canonical_id = ? AND active = 1
+       )`,
     )
-    .all(personId) as Array<{ meeting_id: string }>;
+    .all(canonicalId, canonicalId) as Array<{ meeting_id: string }>;
   for (const row of capturedRows) confirmedIds.add(row.meeting_id);
 
   const confirmed = [...confirmedIds].flatMap((meetingId) => {
@@ -7850,7 +8200,10 @@ export const getPersonBriefing = (
   const sameNameCount = (
     db
       .prepare(
-        "SELECT COUNT(*) AS count FROM entities WHERE type = 'person' AND normalized_name = ?",
+        `SELECT COUNT(*) AS count FROM entities
+         WHERE type = 'person' AND normalized_name = ?
+           AND NOT EXISTS (SELECT 1 FROM person_aliases alias
+             WHERE alias.person_id = entities.id AND alias.active = 1)`,
       )
       .get(person.normalized_name) as { count: number }
   ).count;
@@ -7893,7 +8246,7 @@ export const getPersonBriefing = (
         action.name,
         action.status,
         action.due_date,
-        action.assigned_to,
+        ? AS assigned_to,
         action.metadata,
         action.updated_at,
         source.title AS sourceMeetingTitle
@@ -7903,9 +8256,26 @@ export const getPersonBriefing = (
         '$.source_meeting_id'
       )
       WHERE action.type = 'action_item'
-        AND action.assigned_to = ?
+        AND action.assigned_to IN (
+          SELECT ? UNION SELECT person_id FROM person_aliases
+          WHERE canonical_id = ? AND active = 1
+        )
     `)
-    .all(personId) as PersonCommitmentCandidate[];
+    .all(canonicalId, canonicalId, canonicalId) as PersonCommitmentCandidate[];
+
+  const mergedPeople = db
+    .prepare(
+      `SELECT person.id, person.name, alias.created_at AS mergedAt
+       FROM person_aliases alias
+       JOIN entities person ON person.id = alias.person_id
+       WHERE alias.canonical_id = ? AND alias.active = 1
+       ORDER BY alias.created_at DESC, person.name`,
+    )
+    .all(canonicalId) as Array<{
+    id: string;
+    name: string;
+    mergedAt: string;
+  }>;
 
   return {
     person,
@@ -7915,12 +8285,13 @@ export const getPersonBriefing = (
       mentioned: mentionedMeetings,
     }),
     commitments: selectVerifiedPersonCommitments({
-      personId,
+      personId: canonicalId,
       actions: actionCandidates,
     }),
-    knowledgeDoc: getKnowledgeDocByScope('person_context', personId) ?? null,
+    knowledgeDoc: getKnowledgeDocByScope('person_context', canonicalId) ?? null,
     workingMemorySnapshot:
-      getWorkingMemorySnapshot('person_context', personId) ?? null,
+      getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    mergedPeople,
   };
 };
 
@@ -8188,6 +8559,10 @@ export const resetKnowledge = () => {
     'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
+    'person_name_aliases',
+    'person_aliases',
+    'project_aliases',
+    'commitment_aliases',
     'entities',
     'entities_fts',
     'meetings',
