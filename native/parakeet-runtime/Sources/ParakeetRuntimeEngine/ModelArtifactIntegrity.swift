@@ -25,7 +25,12 @@ public enum ModelArtifactIntegrity {
             guard let url = entry as? URL else { return nil }
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             if values.isSymbolicLink == true { throw RuntimeFailure.modelPreparationFailed }
-            return values.isRegularFile == true ? url : nil
+            guard values.isRegularFile == true else { return nil }
+            let canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
+            guard canonicalURL.path.hasPrefix(canonicalDirectory.path + "/") else {
+                throw RuntimeFailure.modelPreparationFailed
+            }
+            return canonicalURL
         }.sorted { left, right in
             relativePath(of: left, within: canonicalDirectory)
                 < relativePath(of: right, within: canonicalDirectory)
