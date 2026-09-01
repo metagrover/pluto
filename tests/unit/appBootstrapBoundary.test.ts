@@ -21,9 +21,13 @@ describe('Electron bootstrap boundary', () => {
 
   it('builds Electron from the bootstrap and always isolates development data', () => {
     const source = fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
+    ) as { main?: string };
 
     expect(source).toContain("entry: 'electron/bootstrap.ts'");
     expect(source).toContain('resolveDevelopmentUserDataDir');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
+    expect(packageJson.main).toBe('dist-electron/bootstrap.js');
   });
 });
