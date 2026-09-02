@@ -387,7 +387,11 @@ describe('MeetingView transcript integrity', () => {
           transcriptVisible={false}
           setTranscriptVisible={vi.fn()}
           onRetryTranscriptValidation={vi.fn()}
-          transcriptValidationRetryingMeetingId={retryingMeetingId}
+          transcriptValidationRetryOperation={
+            retryingMeetingId
+              ? { meetingId: retryingMeetingId, kind: 'speaker_labels' }
+              : null
+          }
         />,
       );
 
@@ -399,6 +403,39 @@ describe('MeetingView transcript integrity', () => {
     const selectedMeetingActive = renderMeeting('meeting-historical-speakers');
     expect(selectedMeetingActive).toContain('Improving labels');
     expect(selectedMeetingActive).not.toContain('Retrying analysis');
+  });
+
+  it('keeps the initiating retry message after leaving and returning', () => {
+    const beforeNavigation = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'required_source_failed',
+          },
+        })}
+        onRetry={vi.fn()}
+        retryOperationKind="transcript"
+      />,
+    );
+    const afterReturning = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        downstreamFailed
+        onRetry={vi.fn()}
+        retryOperationKind="transcript"
+      />,
+    );
+
+    for (const markup of [beforeNavigation, afterReturning]) {
+      expect(markup).toContain('Transcript needs another pass');
+      expect(markup).toContain('Your recording is safe.');
+      expect(markup).toContain('Retrying transcription');
+      expect(markup).not.toContain('Analysis needs another pass');
+      expect(markup).not.toContain('Retrying analysis');
+    }
   });
 
   it('uses the same notice for retryable analysis without a second alert', () => {

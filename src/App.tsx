@@ -48,6 +48,10 @@ import {
   persistDashboardPriorityOrder,
 } from './components/features/dashboardActionCompletion';
 import type {
+  MeetingRetryKind,
+  MeetingRetryOperation,
+} from './components/features/meetingFailurePresentation';
+import type {
   CaptureHealthState,
   LiveTranscriptIntegrity,
   LiveTranscriptSegment,
@@ -117,9 +121,9 @@ function App() {
     useState<Meeting | null>(null);
   const selectedMeetingIdRef = useRef<string | number | null>(null);
   const [
-    transcriptValidationRetryingMeetingId,
-    setTranscriptValidationRetryingMeetingId,
-  ] = useState<string | number | null>(null);
+    transcriptValidationRetryOperation,
+    setTranscriptValidationRetryOperation,
+  ] = useState<MeetingRetryOperation | null>(null);
   const finalTranscriptionAbortRef = useRef<AbortController | null>(null);
   const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
     useState<string | number | null>(null);
@@ -767,9 +771,10 @@ function App() {
 
   const handleRetryTranscriptValidation = async (
     meetingId: string | number | null = selectedMeetingId,
+    kind: MeetingRetryKind = 'analysis',
   ) => {
-    if (!meetingId || transcriptValidationRetryingMeetingId !== null) return;
-    setTranscriptValidationRetryingMeetingId(meetingId);
+    if (!meetingId || transcriptValidationRetryOperation !== null) return;
+    setTranscriptValidationRetryOperation({ meetingId, kind });
     try {
       const summary = safeMeetings.find(
         (candidate) => String(candidate.id) === String(meetingId),
@@ -810,8 +815,10 @@ function App() {
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
-      setTranscriptValidationRetryingMeetingId((current) =>
-        String(current) === String(meetingId) ? null : current,
+      setTranscriptValidationRetryOperation((current) =>
+        current && String(current.meetingId) === String(meetingId)
+          ? null
+          : current,
       );
     }
   };
@@ -924,7 +931,7 @@ function App() {
 
   useEffect(() => {
     if (
-      transcriptValidationRetryingMeetingId !== null ||
+      transcriptValidationRetryOperation !== null ||
       finalTranscriptionAbortRef.current ||
       selectNextMeetingForFinalTranscription(safeMeetings)
     )
@@ -937,11 +944,11 @@ function App() {
     autoAnalysisAttemptsRef.current.add(
       meetingProcessingFingerprint(candidate),
     );
-    void handleRetryTranscriptValidation(candidate.id);
-  }, [safeMeetings, transcriptValidationRetryingMeetingId]);
+    void handleRetryTranscriptValidation(candidate.id, 'analysis');
+  }, [safeMeetings, transcriptValidationRetryOperation]);
 
   useEffect(() => {
-    if (transcriptValidationRetryingMeetingId !== null) return;
+    if (transcriptValidationRetryOperation !== null) return;
     const candidate = safeMeetings.find(shouldAutoProcessMeetingAnalysis);
     if (!candidate?.id) return;
     const delay = nextMeetingProcessingWakeDelay(
@@ -971,7 +978,7 @@ function App() {
       }
     }, delay);
     return () => window.clearTimeout(timeout);
-  }, [safeMeetings, transcriptValidationRetryingMeetingId]);
+  }, [safeMeetings, transcriptValidationRetryOperation]);
 
   const searchPlutoResults = buildSearchPlutoResults({
     query: searchQuery,
@@ -1323,11 +1330,11 @@ function App() {
                 highlightEntities={highlightEntities}
                 transcriptVisible={transcriptVisible}
                 setTranscriptVisible={setTranscriptVisible}
-                onRetryTranscriptValidation={() => {
-                  void handleRetryTranscriptValidation();
+                onRetryTranscriptValidation={(kind) => {
+                  void handleRetryTranscriptValidation(undefined, kind);
                 }}
-                transcriptValidationRetryingMeetingId={
-                  transcriptValidationRetryingMeetingId
+                transcriptValidationRetryOperation={
+                  transcriptValidationRetryOperation
                 }
                 calendarContext={meetingCalendarContext}
               />

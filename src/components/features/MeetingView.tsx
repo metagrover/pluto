@@ -44,8 +44,11 @@ import { getDownstreamProcessingPresentation } from './downstreamProcessingPrese
 import type { MeetingActionItemCard } from './meetingActionItems';
 import {
   type MeetingRegenerationFailurePresentation,
+  type MeetingRetryKind,
+  type MeetingRetryOperation,
   resolveMeetingFailurePresentation,
   resolveMeetingRegenerationFailurePresentation,
+  resolveMeetingRetryProgressPresentation,
 } from './meetingFailurePresentation';
 import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
 
@@ -114,8 +117,8 @@ interface MeetingViewProps {
   highlightEntities: (text: string) => ReactNode;
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
-  onRetryTranscriptValidation?: () => void;
-  transcriptValidationRetryingMeetingId?: string | number | null;
+  onRetryTranscriptValidation?: (kind: MeetingRetryKind) => void;
+  transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
 }
 
@@ -141,6 +144,7 @@ export const TranscriptIntegrityPanel = ({
   downstreamFailed = false,
   onRetry,
   retrying = false,
+  retryOperationKind = null,
   retryUnavailable = false,
 }: {
   status: Meeting['transcript_status'];
@@ -154,8 +158,9 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable?: boolean;
   hasExistingAnalysis?: boolean;
   downstreamFailed?: boolean;
-  onRetry?: () => void;
+  onRetry?: (kind: MeetingRetryKind) => void;
   retrying?: boolean;
+  retryOperationKind?: MeetingRetryKind | null;
   retryUnavailable?: boolean;
 }) => {
   let micActivitySeconds = 0;
@@ -234,7 +239,8 @@ export const TranscriptIntegrityPanel = ({
   if (
     hasExistingAnalysis &&
     trust.kind !== 'capture_gap' &&
-    !speakerAttributionFailure
+    !speakerAttributionFailure &&
+    !retryOperationKind
   )
     return null;
 
@@ -247,7 +253,18 @@ export const TranscriptIntegrityPanel = ({
     downstreamFailed,
   });
 
-  if (!panelCopy) return null;
+  const progressCopy = retryOperationKind
+    ? resolveMeetingRetryProgressPresentation(retryOperationKind)
+    : null;
+  if (!panelCopy && !progressCopy) return null;
+  const title = progressCopy?.title ?? panelCopy?.title;
+  const detail = progressCopy?.detail ?? panelCopy?.detail;
+  const actionLabel = panelCopy?.actionLabel ?? null;
+  const retryKind: MeetingRetryKind = speakerAttributionFailure
+    ? 'speaker_labels'
+    : canRetryFinalTranscription
+      ? 'transcript'
+      : 'analysis';
 
   return (
     <section aria-live="polite" className="meeting-failure-notice">
@@ -255,30 +272,31 @@ export const TranscriptIntegrityPanel = ({
         <Sparkles className="h-3.5 w-3.5" />
       </span>
       <div className="meeting-failure-notice__copy">
-        <strong>{panelCopy.title}</strong>
-        <p>{panelCopy.detail}</p>
+        <strong>{title}</strong>
+        <p>{detail}</p>
       </div>
-      {panelCopy.actionLabel && onRetry ? (
+      {(progressCopy || actionLabel) && onRetry ? (
         <button
           type="button"
           className="meeting-failure-notice__action"
-          onClick={onRetry}
-          disabled={retrying || retryUnavailable}
+          onClick={() => onRetry(retryKind)}
+          disabled={Boolean(progressCopy) || retrying || retryUnavailable}
         >
-          {retrying ? (
+          {progressCopy || retrying ? (
             <>
               <Loader2
                 aria-hidden="true"
                 className="h-3.5 w-3.5 animate-spin"
               />
-              {panelCopy.actionLabel === 'Improve labels'
-                ? 'Improving labels'
-                : panelCopy.actionLabel === 'Retry transcription'
-                  ? 'Retrying transcription'
-                  : 'Retrying analysis'}
+              {progressCopy?.loadingLabel ??
+                (actionLabel === 'Improve labels'
+                  ? 'Improving labels'
+                  : actionLabel === 'Retry transcription'
+                    ? 'Retrying transcription'
+                    : 'Retrying analysis')}
             </>
           ) : (
-            panelCopy.actionLabel
+            actionLabel
           )}
         </button>
       ) : null}
@@ -602,7 +620,7 @@ export const MeetingView = ({
   transcriptVisible,
   setTranscriptVisible,
   onRetryTranscriptValidation,
-  transcriptValidationRetryingMeetingId = null,
+  transcriptValidationRetryOperation = null,
   calendarContext = null,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
@@ -745,12 +763,12 @@ export const MeetingView = ({
       .map((segment) => String(segment.speaker || '').trim())
       .filter(Boolean),
   ).size;
-  const transcriptValidationRetrying =
-    transcriptValidationRetryingMeetingId !== null &&
-    String(transcriptValidationRetryingMeetingId) ===
+  const selectedMeetingRetryOperation =
+    transcriptValidationRetryOperation !== null &&
+    String(transcriptValidationRetryOperation.meetingId) ===
       String(selectedMeeting.id);
-  const transcriptValidationBusy =
-    transcriptValidationRetryingMeetingId !== null;
+  const transcriptValidationRetrying = Boolean(selectedMeetingRetryOperation);
+  const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
   const canImproveHistoricalSpeakerLabelsForMeeting =
     canImproveHistoricalSpeakerLabels(selectedMeeting);
 
@@ -1033,7 +1051,9 @@ export const MeetingView = ({
                     onRetryTranscriptValidation ? (
                       <button
                         type="button"
-                        onClick={onRetryTranscriptValidation}
+                        onClick={() =>
+                          onRetryTranscriptValidation('speaker_labels')
+                        }
                         className="meeting-toolbar-button"
                         disabled={transcriptValidationBusy}
                         aria-label={
@@ -1164,6 +1184,11 @@ export const MeetingView = ({
           downstreamFailed={downstreamPresentation.state === 'failed'}
           onRetry={onRetryTranscriptValidation}
           retrying={transcriptValidationRetrying}
+          retryOperationKind={
+            selectedMeetingRetryOperation
+              ? transcriptValidationRetryOperation.kind
+              : null
+          }
           retryUnavailable={
             transcriptValidationBusy && !transcriptValidationRetrying
           }
