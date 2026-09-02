@@ -177,9 +177,13 @@ export const shouldAutoProcessMeetingAnalysis = (
         integrity.finalTranscription.state === 'needs_attention');
     unverifiedCompletedParakeetFinal =
       meeting?.transcript_status === 'validated' &&
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'complete' &&
-      !hasVerifiedSpeakerAttribution(meeting.transcript_json);
+      ((meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'complete') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'complete')) &&
+      (meeting.speaker_attribution_verified === false ||
+        (typeof meeting.transcript_json === 'string' &&
+          !hasVerifiedSpeakerAttribution(meeting.transcript_json)));
   } catch {
     pendingParakeetFinal = false;
     unverifiedCompletedParakeetFinal = false;

@@ -1758,4 +1758,30 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
       }),
     ).toBe(false);
   });
+
+  it('uses bounded speaker trust to gate thin Parakeet summaries', () => {
+    const summary = {
+      ...meeting,
+      transcript_json: undefined,
+      has_transcript: true,
+      has_transcript_text: true,
+      has_audio: true,
+      transcript_status: 'validated' as const,
+      final_transcription_policy: 'parakeet_final_v1',
+      final_transcription_state: 'complete',
+    };
+
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...summary,
+        speaker_attribution_verified: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...summary,
+        speaker_attribution_verified: true,
+      }),
+    ).toBe(true);
+  });
 });

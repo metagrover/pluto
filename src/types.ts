@@ -232,6 +232,7 @@ export interface Meeting {
   final_transcription_policy?: string | null;
   final_transcription_state?: string | null;
   final_transcription_engine?: string | null;
+  speaker_attribution_verified?: boolean | null;
   automatic_attempts_exhausted?: boolean;
   dashboard_detail?: string | null;
   recent_win_title?: string | null;
@@ -264,6 +265,7 @@ export interface MeetingSummary
     | 'final_transcription_policy'
     | 'final_transcription_state'
     | 'final_transcription_engine'
+    | 'speaker_attribution_verified'
     | 'automatic_attempts_exhausted'
   > {
   ended_at?: string | null;

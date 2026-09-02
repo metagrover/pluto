@@ -769,9 +769,17 @@ function App() {
     if (!meetingId || transcriptValidationRetrying) return;
     setTranscriptValidationRetrying(true);
     try {
-      const meeting = safeMeetings.find(
+      const summary = safeMeetings.find(
         (candidate) => String(candidate.id) === String(meetingId),
       );
+      const meeting =
+        selectedMeetingDetail &&
+        String(selectedMeetingDetail.id) === String(meetingId)
+          ? selectedMeetingDetail
+          : ((await window.ipcRenderer.invoke(
+              'GET_MEETING',
+              summary?.id ?? meetingId,
+            )) as Meeting | null);
       if (meeting && canRetryMeetingFinalTranscription(meeting)) {
         await runMeetingFinalTranscription(meeting);
         return;

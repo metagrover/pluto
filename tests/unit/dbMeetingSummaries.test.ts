@@ -118,8 +118,45 @@ describe('meeting summary read model', () => {
       final_transcription_policy: 'parakeet_final_v1',
       final_transcription_state: 'needs_attention',
       final_transcription_engine: null,
+      speaker_attribution_verified: null,
       automatic_attempts_exhausted: false,
     });
+  });
+
+  it('projects speaker trust as a content-free processing flag', () => {
+    saveMeeting({
+      id: 'speaker-trust-status',
+      title: 'Meeting',
+      started_at: '2026-09-01T12:35:00.000Z',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: 'PRIVATE TRANSCRIPT' }],
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          mappingApplied: false,
+        },
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          engine: 'parakeet_coreml',
+        },
+      }),
+    });
+
+    expect(getMeetingProcessingStatuses('speaker-trust-status')).toEqual([
+      expect.objectContaining({
+        id: 'speaker-trust-status',
+        speaker_attribution_verified: false,
+      }),
+    ]);
+    expect(
+      JSON.stringify(getMeetingProcessingStatuses('speaker-trust-status')),
+    ).not.toContain('PRIVATE');
   });
 
   it('searches private note text while returning result metadata only', () => {
