@@ -8,9 +8,8 @@ OUTPUT_DIRECTORY="${PROJECT_ROOT}/resources/bin"
 
 swift build --package-path "${PACKAGE_PATH}" --configuration release --product parakeet-runtime
 swift build --package-path "${PACKAGE_PATH}" --configuration release --product parakeet-resource-probe
-SWIFT_BIN_DIRECTORY="$(swift build --package-path "${PACKAGE_PATH}" --configuration release --show-bin-path)"
-
-if [[ -z "${SWIFT_BIN_DIRECTORY}" || "${SWIFT_BIN_DIRECTORY}" != "${PACKAGE_PATH}/.build/"* ]]; then
+SWIFT_BIN_OUTPUT="$(swift build --package-path "${PACKAGE_PATH}" --configuration release --show-bin-path)"
+if ! SWIFT_BIN_DIRECTORY="$(node "${SCRIPT_DIR}/lib/swift_bin_path.mjs" "${PACKAGE_PATH}/.build" <<<"${SWIFT_BIN_OUTPUT}")"; then
   echo "Unexpected Swift output directory" >&2
   exit 1
 fi
