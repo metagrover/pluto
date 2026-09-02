@@ -4,6 +4,7 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
+import { hasVerifiedSpeakerAttribution } from '../utils/speakerAttributionTrust.ts';
 import { parseStopToValidatedLatencySummary } from '../utils/stopToValidatedLatency.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
@@ -21,6 +22,7 @@ import {
   buildPartialCaptureGapProcessingLease,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
+import { runPersistedMeetingFinalTranscription } from './finalTranscription/runPersistedMeetingFinalTranscription.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 import {
@@ -137,6 +139,7 @@ export const shouldAutoProcessMeetingAnalysis = (
   let downstreamAttempt = 0;
   let pendingParakeetFinal = false;
   let automaticAttemptsExhausted = false;
+  let unverifiedCompletedParakeetFinal = false;
   try {
     const downstream = JSON.parse(
       meeting?.downstream_processing_json || '{}',
@@ -172,8 +175,14 @@ export const shouldAutoProcessMeetingAnalysis = (
         meeting.final_transcription_state === 'needs_attention') ||
       (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
         integrity.finalTranscription.state === 'needs_attention');
+    unverifiedCompletedParakeetFinal =
+      meeting?.transcript_status === 'validated' &&
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscription.state === 'complete' &&
+      !hasVerifiedSpeakerAttribution(meeting.transcript_json);
   } catch {
     pendingParakeetFinal = false;
+    unverifiedCompletedParakeetFinal = false;
   }
   const genericTitleRepairNeeded =
     typeof meeting?.title === 'string' &&
@@ -184,6 +193,7 @@ export const shouldAutoProcessMeetingAnalysis = (
     !meeting ||
     automaticAttemptsExhausted ||
     pendingParakeetFinal ||
+    unverifiedCompletedParakeetFinal ||
     (downstreamState === 'failed' &&
       downstreamStage === 'analysis' &&
       downstreamAttempt >= MAX_AUTOMATIC_ANALYSIS_ATTEMPTS) ||
@@ -441,6 +451,26 @@ export const retryMeetingTranscriptValidation = async (
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
+  if (
+    meeting.transcript_status === 'validated' &&
+    !hasVerifiedSpeakerAttribution(meeting.transcript_json) &&
+    meeting.capture_journal_generation &&
+    meeting.audio_path &&
+    meeting.system_audio_path &&
+    meeting.mixed_audio_path &&
+    meeting.transcript_json
+  ) {
+    const outcome = await runPersistedMeetingFinalTranscription(
+      meeting,
+      invoke,
+      {
+        runId: crypto.randomUUID(),
+      },
+    );
+    return {
+      status: outcome.status === 'cancelled' ? 'superseded' : outcome.status,
+    };
+  }
   let hasCaptureGap = false;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {

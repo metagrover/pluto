@@ -106,6 +106,7 @@ export const resolveMeetingRegenerationFailurePresentation = (
 
 type MeetingFailurePresentationInput = {
   retryableFinalTranscription: boolean;
+  speakerAttributionFailure: boolean;
   captureRecoveryRequired: boolean;
   captureGap: boolean;
   hasExistingAnalysis: boolean;
@@ -115,6 +116,14 @@ type MeetingFailurePresentationInput = {
 export const resolveMeetingFailurePresentation = (
   input: MeetingFailurePresentationInput,
 ): MeetingFailurePresentation | null => {
+  if (input.retryableFinalTranscription && input.speakerAttributionFailure) {
+    return {
+      title: "Pluto couldn't verify who spoke",
+      detail:
+        'Retry to re-check speaker attribution privately on this Mac from the saved recording.',
+      actionLabel: 'Retry transcription',
+    };
+  }
   if (input.retryableFinalTranscription) {
     return {
       title: 'Transcript needs another pass',

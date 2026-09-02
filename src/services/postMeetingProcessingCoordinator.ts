@@ -1,4 +1,5 @@
 import type { Meeting } from '../types.ts';
+import { hasVerifiedSpeakerAttribution } from '../utils/speakerAttributionTrust.ts';
 import { readDownstreamProcessingLease } from './downstreamProcessingLease.ts';
 import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValidation.ts';
 
@@ -22,11 +23,25 @@ export const canRetryMeetingFinalTranscription = (
 ): boolean => {
   if (
     !meeting ||
-    meeting.transcript_status !== 'needs_attention' ||
+    !['needs_attention', 'validated'].includes(
+      String(meeting.transcript_status),
+    ) ||
     !meeting.capture_journal_generation ||
-    !(meeting.audio_path || meeting.system_audio_path || meeting.has_audio)
+    !(
+      (meeting.audio_path &&
+        meeting.system_audio_path &&
+        meeting.mixed_audio_path &&
+        meeting.transcript_json) ||
+      (meeting.has_audio && meeting.has_transcript)
+    )
   ) {
     return false;
+  }
+  if (
+    meeting.transcript_status === 'validated' &&
+    !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+  ) {
+    return true;
   }
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
@@ -46,7 +61,11 @@ export const canRetryMeetingFinalTranscription = (
 export const isParakeetValidatedMeeting = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
-  if (meeting?.transcript_status !== 'validated') return false;
+  if (
+    meeting?.transcript_status !== 'validated' ||
+    !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+  )
+    return false;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: { policy?: unknown; state?: unknown };

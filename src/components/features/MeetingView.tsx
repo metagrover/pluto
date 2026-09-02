@@ -27,6 +27,7 @@ import {
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
+import { hasVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust';
 import {
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
@@ -208,22 +209,42 @@ export const TranscriptIntegrityPanel = ({
     },
     capabilities,
   );
-  if (hasExistingAnalysis && trust.kind !== 'capture_gap') return null;
-
   let canRetryFinalTranscription = false;
+  let speakerAttributionFailure = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
-      finalTranscription?: { policy?: unknown; state?: unknown };
+      finalTranscription?: {
+        policy?: unknown;
+        state?: unknown;
+        failure?: unknown;
+      };
     };
     canRetryFinalTranscription =
       integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
       integrity.finalTranscription.state === 'needs_attention';
+    speakerAttributionFailure =
+      integrity.finalTranscription?.failure ===
+        'speaker_attribution_rejected' ||
+      (status === 'validated' &&
+        integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'complete' &&
+        Boolean(audioPath && systemAudioPath && mixedAudioPath) &&
+        !hasVerifiedSpeakerAttribution(transcriptJson));
+    canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
+    speakerAttributionFailure = false;
   }
+  if (
+    hasExistingAnalysis &&
+    trust.kind !== 'capture_gap' &&
+    !speakerAttributionFailure
+  )
+    return null;
 
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
+    speakerAttributionFailure,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,

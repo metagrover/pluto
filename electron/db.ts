@@ -92,6 +92,7 @@ import {
   withProjectPortfolioDisposition,
 } from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
+import { hasVerifiedSpeakerAttribution } from '../src/utils/speakerAttributionTrust';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import {
@@ -2424,6 +2425,23 @@ const readMeetingFinalTranscriptionLease = (
   return readFinalTranscriptionLease(integrity.finalTranscription);
 };
 
+const finalTranscriptionDigest = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const finalTranscriptionSourcePathsDigest = (
+  meeting: Pick<
+    PersistedMeeting,
+    'audio_path' | 'system_audio_path' | 'mixed_audio_path'
+  >,
+): string =>
+  finalTranscriptionDigest(
+    JSON.stringify([
+      meeting.audio_path ?? null,
+      meeting.system_audio_path ?? null,
+      meeting.mixed_audio_path ?? null,
+    ]),
+  );
+
 export const claimMeetingFinalTranscription = (
   meetingId: string | number,
   lease: FinalTranscriptionLease,
@@ -2433,9 +2451,13 @@ export const claimMeetingFinalTranscription = (
     if (
       !current ||
       current.capture_journal_generation !== lease.captureGeneration ||
-      !['provisional', 'needs_attention'].includes(
+      (!['provisional', 'needs_attention'].includes(
         String(current.transcript_status),
-      )
+      ) &&
+        !(
+          current.transcript_status === 'validated' &&
+          !hasVerifiedSpeakerAttribution(current.transcript_json)
+        ))
     ) {
       return false;
     }
@@ -2447,13 +2469,22 @@ export const claimMeetingFinalTranscription = (
     }
     const priorIntegrity = current.transcript_integrity_json ?? null;
     const integrity = parseIntegrityRecord(priorIntegrity);
+    const claimedTranscriptJson = withTranscriptLifecycleStatus(
+      current.transcript_json,
+      'validating',
+    );
+    const claimedLease: FinalTranscriptionLease = {
+      ...lease,
+      expectedTranscriptSHA256: finalTranscriptionDigest(claimedTranscriptJson),
+      expectedSourcePathsSHA256: finalTranscriptionSourcePathsDigest(current),
+    };
     const nextIntegrity = JSON.stringify({
       ...integrity,
       state: 'validating',
       causes: [],
       validationProof: undefined,
       retry: undefined,
-      finalTranscription: lease,
+      finalTranscription: claimedLease,
     });
     return (
       db
@@ -2467,7 +2498,7 @@ export const claimMeetingFinalTranscription = (
              AND transcript_integrity_json IS ?`,
         )
         .run(
-          withTranscriptLifecycleStatus(current.transcript_json, 'validating'),
+          claimedTranscriptJson,
           nextIntegrity,
           String(meetingId),
           lease.captureGeneration,
@@ -2526,7 +2557,13 @@ export const commitMeetingFinalTranscription = (input: {
       lease.runId !== input.runId ||
       lease.captureGeneration !== input.captureGeneration ||
       current.capture_journal_generation !== input.captureGeneration ||
-      current.transcript_status !== 'validating'
+      current.transcript_status !== 'validating' ||
+      (lease.expectedTranscriptSHA256 !== undefined &&
+        finalTranscriptionDigest(current.transcript_json || '') !==
+          lease.expectedTranscriptSHA256) ||
+      (lease.expectedSourcePathsSHA256 !== undefined &&
+        finalTranscriptionSourcePathsDigest(current) !==
+          lease.expectedSourcePathsSHA256)
     ) {
       return false;
     }
