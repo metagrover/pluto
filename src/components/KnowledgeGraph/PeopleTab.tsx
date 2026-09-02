@@ -19,13 +19,18 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type Entity,
+  type EntityAliasSuggestion,
   type EntityMeeting,
   type PersonBriefingDetail,
+  getEntityAliasSuggestions,
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
+  recordEntityCorrection,
   resolvePersonCommitmentOwner,
   restorePersonMerge,
+  triggerDreamingNow,
+  updateEntityAliasSuggestionStatus,
   updatePersonName,
 } from '../../api/knowledgeGraph';
 import type {
@@ -92,6 +97,15 @@ export const PeopleBriefing = ({
   onSelectPerson: (personId: string) => void;
 }) => {
   const [query, setQuery] = useState('');
+  const [dreaming, setDreaming] = useState(false);
+  const handleDreamNow = async () => {
+    setDreaming(true);
+    try {
+      await triggerDreamingNow({ force: true });
+    } finally {
+      setDreaming(false);
+    }
+  };
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
@@ -215,17 +229,28 @@ export const PeopleBriefing = ({
   return (
     <section aria-label="People" className="people-briefing">
       <PageHeader title="People">
-        {rows.length > 0 && (
-          <label className="people-search">
-            <Search aria-hidden="true" size={13} />
-            <span className="sr-only">Search people</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search people"
-            />
-          </label>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={dreaming}
+            onClick={() => void handleDreamNow()}
+            className="flex items-center gap-1.5 rounded-lg border border-pro-border/50 px-3 py-1.5 text-[13px] text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+            title="Consolidate cross-meeting knowledge and discover updates"
+          >
+            {dreaming ? 'Consolidating…' : '✨ Dream Now'}
+          </button>
+          {rows.length > 0 && (
+            <label className="people-search">
+              <Search aria-hidden="true" size={13} />
+              <span className="sr-only">Search people</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search people"
+              />
+            </label>
+          )}
+        </div>
       </PageHeader>
 
       {rows.length === 0 ? (
@@ -485,12 +510,31 @@ export const PersonDossier = ({
     id: string;
     name: string;
   } | null>(null);
+  const [aliasSuggestions, setAliasSuggestions] = useState<
+    EntityAliasSuggestion[]
+  >([]);
+  const [dreamingState, setDreamingState] = useState<
+    'idle' | 'running' | 'done' | 'error'
+  >('idle');
+  const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
   }, [detail]);
+
+  useEffect(() => {
+    let active = true;
+    getEntityAliasSuggestions(detail.person.id)
+      .then((suggestions) => {
+        if (active) setAliasSuggestions(suggestions);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [detail.person.id]);
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.focus();
@@ -632,6 +676,63 @@ export const PersonDossier = ({
     }
   };
 
+  const handleDreamNow = async () => {
+    setDreamingState('running');
+    try {
+      await triggerDreamingNow({
+        entityId: currentDetail.person.id,
+        force: true,
+      });
+      await onIdentityChanged();
+      const updatedAliases = await getEntityAliasSuggestions(
+        currentDetail.person.id,
+      );
+      setAliasSuggestions(updatedAliases);
+      setDreamingState('done');
+    } catch {
+      setDreamingState('error');
+    }
+  };
+
+  const handleMergeAlias = async (suggestion: EntityAliasSuggestion) => {
+    try {
+      await updateEntityAliasSuggestionStatus(suggestion.id, 'merged');
+      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+      await onIdentityChanged();
+    } catch {
+      // keep on error
+    }
+  };
+
+  const handleDismissAlias = async (suggestion: EntityAliasSuggestion) => {
+    try {
+      await updateEntityAliasSuggestionStatus(suggestion.id, 'dismissed');
+      await recordEntityCorrection({
+        entityId: currentDetail.person.id,
+        itemType: 'alias',
+        fingerprint: suggestion.suggested_name,
+        reason: 'dismissed_by_user',
+      });
+      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+    } catch {
+      // keep on error
+    }
+  };
+
+  const handleDismissInsight = async (observation: string) => {
+    try {
+      await recordEntityCorrection({
+        entityId: currentDetail.person.id,
+        itemType: 'insight',
+        fingerprint: observation,
+        reason: 'reported_inaccurate',
+      });
+      setDismissedInsights((prev) => [...prev, observation]);
+    } catch {
+      // keep on error
+    }
+  };
+
   return (
     <article className="person-dossier">
       <div className="person-dossier__topline">
@@ -667,9 +768,54 @@ export const PersonDossier = ({
             >
               Merge another person
             </button>
+            <button
+              type="button"
+              disabled={dreamingState === 'running'}
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
+                void handleDreamNow();
+              }}
+            >
+              {dreamingState === 'running'
+                ? 'Dreaming in progress…'
+                : 'Dream Now'}
+            </button>
           </div>
         </details>
       </div>
+      {aliasSuggestions.map((suggestion) => (
+        <div
+          key={suggestion.id}
+          role="alert"
+          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-pro-accent/30 bg-pro-accent/[0.04] p-3.5 text-sm"
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-pro-accent">
+              💡 Suggested Alias:
+            </span>
+            <span>
+              Recent meetings refer to this person as{' '}
+              <strong>"{suggestion.suggested_name}"</strong>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleMergeAlias(suggestion)}
+              className="rounded bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90"
+            >
+              Merge
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDismissAlias(suggestion)}
+              className="rounded border border-pro-border px-3 py-1 text-xs text-pro-text-muted hover:text-pro-text-main"
+            >
+              Keep Separate
+            </button>
+          </div>
+        </div>
+      ))}
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
           {currentDetail.person.name.slice(0, 1).toUpperCase()}
@@ -922,15 +1068,29 @@ export const PersonDossier = ({
           <div className="person-dossier__patterns">
             <h3>Recent patterns</h3>
             <ul className="person-dossier__insights">
-              {insights.map((insight) => {
-                const citation = insight.citations[0];
-                const source = brief.evidenceIndex.find(
-                  (entry) => entry.meeting_id === citation?.meeting_id,
-                );
-                return (
-                  <li key={insight.id}>
-                    <strong>{insight.title}</strong>
-                    <p>{insight.summary}</p>
+              {insights
+                .filter((insight) => !dismissedInsights.includes(insight.title))
+                .map((insight) => {
+                  const citation = insight.citations[0];
+                  const source = brief.evidenceIndex.find(
+                    (entry) => entry.meeting_id === citation?.meeting_id,
+                  );
+                  return (
+                    <li key={insight.id}>
+                      <div className="flex items-start justify-between gap-2">
+                        <strong>{insight.title}</strong>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDismissInsight(insight.title)
+                          }
+                          title="Report inaccurate"
+                          className="text-xs text-pro-text-muted hover:text-pro-urgent"
+                        >
+                          Report inaccurate
+                        </button>
+                      </div>
+                      <p>{insight.summary}</p>
                     {citation ? <q>{citation.quote}</q> : null}
                     {citation ? (
                       <button
