@@ -124,6 +124,33 @@ private struct ServiceEouDriver: ParakeetEouDriving {
     }
 }
 
+private actor CapturingSpeakerEvidenceDriver: SpeakerEvidenceDriving {
+    private(set) var paths: [URL] = []
+
+    func analyze(
+        mixedURL: URL,
+        micURL: URL,
+        systemURL: URL
+    ) async throws -> SpeakerEvidenceOutput {
+        paths = [mixedURL, micURL, systemURL]
+        return SpeakerEvidenceOutput(
+            turns: [SpeakerEvidenceTurn(startTime: 0, endTime: 1, cluster: "S1")],
+            energyWindows: [
+                SpeakerEnergyWindow(startTime: 0, endTime: 0.1, micRms: 0.2, systemRms: 0)
+            ],
+            provenance: SpeakerEvidenceProvenance(
+                modelIdentifier: "test",
+                modelRevision: String(repeating: "a", count: 40),
+                artifactDigest: String(repeating: "b", count: 64),
+                runtimeVersion: "test"
+            ),
+            timings: SpeakerEvidenceTimings(
+                diarizationMs: 1, energyAnalysisMs: 1, totalMs: 2),
+            windowSeconds: 0.1
+        )
+    }
+}
+
 private extension RuntimeEvent {
     var eouUpdate: EouUpdate? {
         guard case .eouUpdate(let update) = self else { return nil }
@@ -173,6 +200,72 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(transcribed.result?.vocabularyCount, 2)
         let vocabulary = await driver.vocabulary
         XCTAssertEqual(vocabulary, ["Pluto", "FluidAudio"])
+    }
+
+    func testSpeakerEvidenceApprovesAllThreePathsBeforeCallingDriver() async throws {
+        let modelRoot = try makeDirectory("speaker-models")
+        let audioRoot = try makeDirectory("speaker-audio")
+        let mixed = audioRoot.appendingPathComponent("mixed.wav")
+        let mic = audioRoot.appendingPathComponent("mic.wav")
+        let system = audioRoot.appendingPathComponent("system.wav")
+        for url in [mixed, mic, system] {
+            XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        }
+        let driver = CapturingSpeakerEvidenceDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            speakerEvidenceDriver: driver
+        )
+
+        let response = await service.handle(RuntimeRequest(
+            id: "speaker",
+            method: .speakerEvidence,
+            mixedAudioPath: mixed.path,
+            micAudioPath: mic.path,
+            systemAudioPath: system.path
+        ))
+
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.result?.speakerEvidence?.turns.first?.cluster, "S1")
+        let approvedPaths = await driver.paths
+        XCTAssertEqual(approvedPaths, [mixed, mic, system].map(\.standardizedFileURL))
+    }
+
+    func testSpeakerEvidenceRejectsOutOfRootPathWithoutCallingDriver() async throws {
+        let modelRoot = try makeDirectory("speaker-models")
+        let audioRoot = try makeDirectory("speaker-audio")
+        let outsideRoot = try makeDirectory("speaker-outside")
+        let mixed = outsideRoot.appendingPathComponent("mixed.wav")
+        let mic = audioRoot.appendingPathComponent("mic.wav")
+        let system = audioRoot.appendingPathComponent("system.wav")
+        for url in [mixed, mic, system] {
+            XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: Data()))
+        }
+        let driver = CapturingSpeakerEvidenceDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            speakerEvidenceDriver: driver
+        )
+
+        let response = await service.handle(RuntimeRequest(
+            id: "speaker",
+            method: .speakerEvidence,
+            mixedAudioPath: mixed.path,
+            micAudioPath: mic.path,
+            systemAudioPath: system.path
+        ))
+
+        XCTAssertEqual(response.error?.code, .pathNotAllowed)
+        let approvedPaths = await driver.paths
+        XCTAssertTrue(approvedPaths.isEmpty)
     }
 
     func testRoutesEouPcmAndEventsThroughPreparedService() async throws {
