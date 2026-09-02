@@ -82,7 +82,7 @@ export function ProjectsOverview({
     };
     refresh()
       .then(() => {
-        if (!cancelled && !activeId && shouldRetry) void synthesize();
+        if (!cancelled && !activeId) void synthesize();
       })
       .catch(() => {
         if (!cancelled) {

@@ -12,13 +12,7 @@ import type {
 
 export interface ReconcileDreamingOutputDeps {
   getEntity(id: string): Entity | null | undefined;
-  upsertEntity(
-    entity: Partial<Entity> & {
-      id: string;
-      type: Entity['type'];
-      name: string;
-    },
-  ): Entity;
+  upsertEntity: typeof db.upsertEntity;
   saveAliasSuggestion(input: {
     entityId: string;
     suggestedName: string;
@@ -105,7 +99,9 @@ export const reconcileDreamingOutput = async (
     }
 
     upsertEntity({
-      ...entity,
+      id: entity.id,
+      type: entity.type,
+      name: entity.name,
       metadata: finalMetadata,
     });
   } else if (type === 'person') {
@@ -131,7 +127,9 @@ export const reconcileDreamingOutput = async (
     }
 
     upsertEntity({
-      ...entity,
+      id: entity.id,
+      type: entity.type,
+      name: entity.name,
       metadata,
     });
   }

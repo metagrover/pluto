@@ -9,9 +9,12 @@ import type {
 export interface PackageEntityNotesDeps {
   getEntity(id: string): Entity | null | undefined;
   getEntityMeetings(entityId: string): Array<{
-    id: string;
-    started_at: string | null;
-    created_at: string;
+    id: string | number;
+    started_at?: string | null;
+    created_at?: string;
+    user_notes?: string | null;
+    enhanced_notes?: string | null;
+    title?: string;
   }>;
   getMeeting(id: string): PersistedMeeting | null | undefined;
   getEntityCorrections(entityId: string): Array<{ fingerprint: string }>;
@@ -39,7 +42,9 @@ export const packageEntityNotes = (
 
   const recentMeetingNotes: DreamingMeetingNote[] = [];
   for (const em of entityMeetings) {
-    const meeting = getMeeting(em.id);
+    const meetingId = String(em.id);
+    const meeting: Partial<PersistedMeeting> | null =
+      getMeeting(meetingId) ?? (em as unknown as Partial<PersistedMeeting>);
     if (!meeting) continue;
 
     // Extract ONLY enhanced_notes and user_notes, NEVER raw transcript_json
@@ -51,8 +56,8 @@ export const packageEntityNotes = (
     if (!notesContent) continue;
 
     recentMeetingNotes.push({
-      meetingId: meeting.id,
-      title: meeting.title,
+      meetingId,
+      title: meeting.title ?? 'Untitled Meeting',
       startedAt: meeting.started_at ?? meeting.created_at ?? null,
       notesContent,
     });

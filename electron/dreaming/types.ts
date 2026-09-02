@@ -37,6 +37,8 @@ export interface EntityMeetingNoteSummary {
   mentionedContext?: string | null;
 }
 
+export type DreamingMeetingNote = EntityMeetingNoteSummary;
+
 export interface DreamingInputPackage {
   entityId: string;
   entityType: DreamingEntityType;

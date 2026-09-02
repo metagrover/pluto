@@ -49,7 +49,7 @@ export interface IdleDreamingCoordinatorDeps {
   ) => Promise<void>;
   getEntity?: (
     entityId: string,
-  ) => { type: DreamingEntityType } | null | undefined;
+  ) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
 }
