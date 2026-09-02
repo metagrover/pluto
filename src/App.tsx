@@ -931,7 +931,10 @@ function App() {
       await runPersistedMeetingFinalTranscription(
         detail,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          onTranscriptCommitted: refreshSelectedMeetingState,
+        },
       );
     } catch (error) {
       console.error('[Pluto] Final transcription worker failed', error);

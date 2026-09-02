@@ -31,6 +31,7 @@ export type FinalTranscriptionInput = {
   mixedAudioPath: string;
   systemAudioPath: string;
   provisionalSegments: AttributionSegment[];
+  preserveProvisionalText?: boolean;
   activityWindows: SpeakerActivityWindow[];
   language: string;
   vocabulary?: string[];
@@ -173,6 +174,7 @@ export const runFinalTranscription = async <TTranscript>(
       mixAudioPath: '',
       systemAudioPath: input.systemAudioPath,
       provisionalSegments: input.provisionalSegments,
+      preserveProvisionalText: input.preserveProvisionalText,
       activityWindows: input.activityWindows,
       canonicalMode: 'recovered_channels',
       transcriptionScheduling: 'sequential_channels',
