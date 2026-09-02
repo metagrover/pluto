@@ -69,8 +69,7 @@ export const reconcileDreamingOutput = async (
       const existing = readUserProjectMilestones(metadataStr);
       for (const m of projectOutput.milestones) {
         const alreadyExists = existing.some(
-          (ex) =>
-            ex.title.trim().toLowerCase() === m.name.trim().toLowerCase(),
+          (ex) => ex.title.trim().toLowerCase() === m.name.trim().toLowerCase(),
         );
         const dismissed = isItemDismissed(entityId, 'milestone', m.name);
         if (!alreadyExists && !dismissed) {

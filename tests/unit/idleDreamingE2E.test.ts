@@ -79,15 +79,22 @@ describe('Idle Dreaming End-to-End Engine', () => {
     });
 
     // 4. Run dreaming via manual trigger
-    const runResult = await coordinator.triggerNow({ entityId: project.id, force: true });
+    const runResult = await coordinator.triggerNow({
+      entityId: project.id,
+      force: true,
+    });
     expect(runResult.status).toBe('completed');
 
     // 5. Verify milestone was reconciled into project metadata
     const updatedProject = db.getEntity(project.id);
     const metadata = JSON.parse(updatedProject?.metadata || '{}');
-    expect(metadata.dossierSummary).toBe('Mobile app redesign aiming for offline caching and iOS beta.');
+    expect(metadata.dossierSummary).toBe(
+      'Mobile app redesign aiming for offline caching and iOS beta.',
+    );
     expect(metadata.projectMilestones).toHaveLength(1);
-    expect(metadata.projectMilestones[0].title).toBe('iOS Offline Caching Implemented');
+    expect(metadata.projectMilestones[0].title).toBe(
+      'iOS Offline Caching Implemented',
+    );
 
     // 6. Verify alias suggestion was staged
     const aliases = db.getEntityAliasSuggestions(project.id);
@@ -139,7 +146,10 @@ describe('Idle Dreaming End-to-End Engine', () => {
       reconcile: async () => {},
     });
 
-    const pendingPromise = hangingCoordinator.triggerNow({ entityId: project.id, force: true });
+    const pendingPromise = hangingCoordinator.triggerNow({
+      entityId: project.id,
+      force: true,
+    });
     // User moves mouse / foreground activity happens
     hangingCoordinator.notifyForegroundActivity();
 
