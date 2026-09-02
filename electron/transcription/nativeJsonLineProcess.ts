@@ -143,7 +143,9 @@ export interface NativeJsonLineTransport {
   ignoreResponse(id: string): void;
 }
 
-const MAX_BUFFER_BYTES = 1024 * 1024;
+// Speaker evidence contains one compact energy record per 100 ms. Keep a hard
+// bound while allowing multi-hour meetings to cross the JSON-line transport.
+const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 export class NativeJsonLineProcess {
   private child: NativeChildProcess | null = null;
