@@ -1,7 +1,7 @@
 ### Verify speakers acoustically before publishing a final transcript
 
 - **Issue:** [#725](https://github.com/metagrover/pluto/issues/725)
-- **PR:** Pending review.
+- **PR:** [#729](https://github.com/metagrover/pluto/pull/729)
 - **Changed:** Pluto's local Parakeet finalization now runs a pinned, integrity-checked offline diarization model against the saved mixed recording, combines anonymous speaker turns with microphone and system-channel energy, and commits `Me`/`Them` labels only when the acoustic acceptance gate passes.
 - **Why:** Channel origin alone cannot prove that every utterance belongs to the expected speaker, which allowed a sentence spoken by the meeting owner to be attributed to someone else.
 - **Replaced:** Treating microphone and system channels as sufficient final speaker identity, and allowing channel-fallback speaker maps to unlock downstream meeting intelligence.
