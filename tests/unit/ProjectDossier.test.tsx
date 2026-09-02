@@ -18,6 +18,10 @@ const api = vi.hoisted(() => ({
   updateEntityStatus: vi.fn(),
   upsertEntity: vi.fn(),
   linkEntities: vi.fn(),
+  getEntityAliasSuggestions: vi.fn().mockResolvedValue([]),
+  updateEntityAliasSuggestionStatus: vi.fn().mockResolvedValue({ success: true }),
+  triggerDreamingNow: vi.fn().mockResolvedValue({ status: 'completed' }),
+  recordEntityCorrection: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../src/api/knowledgeGraph', () => api);
 import { ProjectDossier } from '../../src/components/features/projects/ProjectDossier';
@@ -494,3 +498,43 @@ it('dismisses a one-conversation suggestion and returns to the portfolio', async
   );
   expect(back).toHaveBeenCalledOnce();
 });
+
+it('renders alias suggestions and allows user to dismiss them', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  api.getEntityAliasSuggestions.mockResolvedValue([
+    {
+      id: 'sug-1',
+      entity_id: 'p1',
+      suggested_name: 'Archive Modernization V2',
+      source_meeting_ids_json: '["m1"]',
+      status: 'pending',
+      created_at: '2026-08-28T12:00:00Z',
+      updated_at: '2026-08-28T12:00:00Z',
+    },
+  ]);
+
+  await render();
+  expect(host.textContent).toContain('Archive Modernization V2');
+  expect(host.textContent).toContain('Suggested Alias');
+
+  await click('Keep Separate');
+  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith('sug-1', 'dismissed');
+  expect(api.recordEntityCorrection).toHaveBeenCalledWith(
+    expect.objectContaining({
+      entityId: 'p1',
+      itemType: 'alias',
+      fingerprint: 'Archive Modernization V2',
+    }),
+  );
+});
+
+it('triggers manual dreaming run when Dream Now is clicked', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  await render();
+  await click('Dream Now');
+  expect(api.triggerDreamingNow).toHaveBeenCalledWith({
+    entityId: 'p1',
+    force: true,
+  });
+});
+

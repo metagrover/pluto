@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   discoverProjectInitiative,
   getProjectPortfolio,
+  triggerDreamingNow,
 } from '../../../api/knowledgeGraph';
 import { readProjectDisplayTitle } from '../../../utils/projectBriefing';
 import {
@@ -81,7 +82,7 @@ export function ProjectsOverview({
     };
     refresh()
       .then(() => {
-        if (!cancelled && !activeId) void synthesize();
+        if (!cancelled && !activeId && shouldRetry) void synthesize();
       })
       .catch(() => {
         if (!cancelled) {
@@ -93,7 +94,19 @@ export function ProjectsOverview({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [attempt, activeId]);
+  }, [activeId, attempt]);
+
+  const [dreaming, setDreaming] = useState(false);
+  const handleDreamNow = async () => {
+    setDreaming(true);
+    try {
+      await triggerDreamingNow({ force: true });
+      const next = await getProjectPortfolio();
+      setEntries(next);
+    } finally {
+      setDreaming(false);
+    }
+  };
 
   const portfolio = useMemo(
     () => buildProjectPortfolio(entries, search),
@@ -222,19 +235,30 @@ export function ProjectsOverview({
             Established across conversations, with suggestions kept separate.
           </p>
         </div>
-        <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
-          <Search
-            aria-hidden="true"
-            className="h-3.5 w-3.5 text-pro-text-muted"
-          />
-          <input
-            aria-label="Search projects and discussed work"
-            placeholder="Search projects"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={dreaming}
+            onClick={() => void handleDreamNow()}
+            className="flex items-center gap-1.5 rounded-lg border border-pro-border/50 px-3 py-2 text-[13px] text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+            title="Consolidate cross-meeting knowledge and discover updates"
+          >
+            {dreaming ? 'Consolidating…' : '✨ Dream Now'}
+          </button>
+          <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
+            <Search
+              aria-hidden="true"
+              className="h-3.5 w-3.5 text-pro-text-muted"
+            />
+            <input
+              aria-label="Search projects and discussed work"
+              placeholder="Search projects"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
+            />
+          </label>
+        </div>
       </div>
 
       {loadError && (

@@ -9,6 +9,7 @@ import {
 import { useState } from 'react';
 import {
   deleteProjectMilestone,
+  recordEntityCorrection,
   restoreProjectMilestone,
   saveProjectMilestone,
 } from '../../../api/knowledgeGraph';
@@ -182,9 +183,19 @@ export function ProjectMilestones({
     setBusy(true);
     setError('');
     try {
-      const removed = await deleteProjectMilestone(projectId, milestone.id);
-      onChange(milestones.filter((item) => item.id !== milestone.id));
-      setDeleted(removed);
+      if (milestone.source === 'user') {
+        const removed = await deleteProjectMilestone(projectId, milestone.id);
+        onChange(milestones.filter((item) => item.id !== milestone.id));
+        setDeleted(removed);
+      } else {
+        onChange(milestones.filter((item) => item.id !== milestone.id));
+      }
+      await recordEntityCorrection({
+        entityId: projectId,
+        itemType: 'milestone',
+        fingerprint: milestone.title,
+        reason: 'removed_by_user',
+      });
       setNotice('Milestone deleted');
     } catch {
       setError('We couldn’t delete this milestone. Please try again.');
@@ -394,6 +405,18 @@ export function ProjectMilestones({
                         <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                       </button>
                     </>
+                  )}
+                  {milestone.source !== 'user' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void remove(milestone)}
+                      aria-label={`Remove ${milestone.title}`}
+                      title="Remove from project"
+                      className={buttonClass}
+                    >
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
                   )}
                 </div>
               </div>
