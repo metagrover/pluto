@@ -22,6 +22,7 @@ import {
   type EntityAliasSuggestion,
   type EntityMeeting,
   type PersonBriefingDetail,
+  addPersonNameAlias,
   getEntityAliasSuggestions,
   getPeopleBriefingSummaries,
   getPersonBriefing,
@@ -696,6 +697,10 @@ export const PersonDossier = ({
 
   const handleMergeAlias = async (suggestion: EntityAliasSuggestion) => {
     try {
+      await addPersonNameAlias(
+        currentDetail.person.id,
+        suggestion.suggested_name,
+      );
       await updateEntityAliasSuggestionStatus(suggestion.id, 'merged');
       setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
       await onIdentityChanged();

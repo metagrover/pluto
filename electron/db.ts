@@ -102,6 +102,7 @@ import {
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
+import { generateItemFingerprint } from './dreaming/validateDreamingOutput';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -7077,6 +7078,29 @@ export const updatePersonName = (personId: string, name: string): Entity =>
     return getEntity(person.id)!;
   })();
 
+export const addPersonNameAlias = (
+  personId: string,
+  aliasName: string,
+): void => {
+  const canonicalId = resolvePersonIdentityId(personId);
+  const person = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!person || person.type !== 'person' || !trimmed) {
+    throw new Error('person_name_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === person.normalized_name) {
+    return;
+  }
+  db.prepare(
+    `INSERT INTO person_name_aliases(
+       person_id, normalized_name, display_name, source
+     ) VALUES (?, ?, ?, 'alias_suggestion')
+     ON CONFLICT(person_id, normalized_name) DO UPDATE SET
+       display_name = excluded.display_name`,
+  ).run(person.id, normalizedName, trimmed);
+};
+
 export const mergePerson = (
   personId: string,
   destinationPersonId: string,
@@ -7628,6 +7652,43 @@ export const mergeProject = (
     db.prepare(
       'UPDATE project_aliases SET canonical_id = ? WHERE canonical_id = ? AND active = 1',
     ).run(destinationId, source.id);
+  })();
+};
+
+export const addProjectAlias = (projectId: string, aliasName: string): void => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!project || project.type !== 'project' || !trimmed) {
+    throw new Error('project_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === project.normalized_name) {
+    return;
+  }
+  db.transaction(() => {
+    let aliasEntity = db
+      .prepare('SELECT * FROM entities WHERE type = ? AND normalized_name = ?')
+      .get('project', normalizedName) as Entity | undefined;
+    if (!aliasEntity) {
+      const aliasId = `proj_${createHash('sha256')
+        .update(`alias:${canonicalId}:${normalizedName}`)
+        .digest('hex')
+        .slice(0, 12)}`;
+      aliasEntity = upsertEntity({
+        id: aliasId,
+        type: 'project',
+        name: trimmed,
+        status: 'active',
+        dedupe_by_name: false,
+      });
+    }
+    if (
+      aliasEntity.id !== canonicalId &&
+      resolveProjectIdentityId(aliasEntity.id) !== canonicalId
+    ) {
+      mergeProject(aliasEntity.id, canonicalId);
+    }
   })();
 };
 
@@ -9364,7 +9425,9 @@ export const recordEntityCorrection = (input: {
 }): EntityCorrectionRecord => {
   const normalizedId = String(input.entityId).trim();
   const normalizedType = String(input.itemType).trim();
-  const normalizedFingerprint = String(input.fingerprint).trim().toLowerCase();
+  const normalizedFingerprint = generateItemFingerprint(
+    String(input.fingerprint),
+  );
   const id = `corr_${createHash('sha256')
     .update(`${normalizedId}:${normalizedType}:${normalizedFingerprint}`)
     .digest('hex')
@@ -9413,10 +9476,12 @@ export const isItemDismissed = (
     .get(
       String(entityId),
       String(itemType),
-      String(fingerprint).trim().toLowerCase(),
+      generateItemFingerprint(String(fingerprint)),
     );
   return Boolean(row);
 };
+
+export { generateItemFingerprint };
 
 export interface EntityAliasSuggestion {
   id: string;

@@ -345,7 +345,10 @@ import {
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
-import { createIdleDreamingCoordinator } from './dreaming/idleDreamingCoordinator';
+import {
+  createIdleDreamingCoordinator,
+  createRoundRobinEntityQueue,
+} from './dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from './dreaming/packageEntityNotes';
 import { reconcileDreamingOutput } from './dreaming/reconcileDreamingOutput';
 import {
@@ -790,6 +793,11 @@ app.whenReady().then(async () => {
       );
     },
   });
+  const dreamingEntityQueue = createRoundRobinEntityQueue({
+    getProjects: () => db.getEntitiesByType('project'),
+    getPeople: () => db.getEntitiesByType('person'),
+  });
+
   idleDreamingCoordinator = createIdleDreamingCoordinator({
     getPolicy: () => ({
       systemIdleSeconds: powerMonitor.getSystemIdleTime(),
@@ -799,17 +807,8 @@ app.whenReady().then(async () => {
         ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
       ),
     }),
-    getNextDirtyEntityId: () => {
-      const projects = db.getEntitiesByType('project');
-      if (projects.length > 0) {
-        return { entityId: projects[0].id, type: 'project' };
-      }
-      const people = db.getEntitiesByType('person');
-      if (people.length > 0) {
-        return { entityId: people[0].id, type: 'person' };
-      }
-      return null;
-    },
+    getNextDirtyEntityId: () => dreamingEntityQueue.getNextCandidate(),
+    getEntity: (id: string) => db.getEntity(id),
     packageNotes: (entityId: string) => packageEntityNotes(entityId),
     generate: async (prompt, responseSchema, signal) => {
       const provider = await getProvider(await getAllSettings(db));
@@ -2729,6 +2728,10 @@ app.whenReady().then(async () => {
       queueAllKnowledgeDocsRefresh();
     },
   );
+  ipcMain.handle('ADD_PROJECT_ALIAS', (_event, { projectId, aliasName }) => {
+    db.addProjectAlias(String(projectId), String(aliasName));
+    queueAllKnowledgeDocsRefresh();
+  });
   ipcMain.handle('RESTORE_PROJECT_MERGE', (_event, projectId) => {
     db.restoreProjectMerge(projectId);
     queueAllKnowledgeDocsRefresh();
@@ -2737,6 +2740,10 @@ app.whenReady().then(async () => {
     const person = db.updatePersonName(String(personId), String(name));
     queueAllKnowledgeDocsRefresh();
     return person;
+  });
+  ipcMain.handle('ADD_PERSON_NAME_ALIAS', (_event, { personId, aliasName }) => {
+    db.addPersonNameAlias(String(personId), String(aliasName));
+    queueAllKnowledgeDocsRefresh();
   });
   ipcMain.handle(
     'MERGE_PERSON',

@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   deleteProjectMilestone: vi.fn(),
   restoreProjectMilestone: vi.fn(),
   mergeProject: vi.fn(),
+  addProjectAlias: vi.fn().mockResolvedValue(undefined),
   restoreProjectMerge: vi.fn(),
   setProjectPortfolioDisposition: vi.fn(),
   getEntitiesByType: vi.fn(),
@@ -541,4 +542,39 @@ it('triggers manual dreaming run when Dream Now is clicked', async () => {
     entityId: 'p1',
     force: true,
   });
+});
+
+it('merges an alias suggestion and registers the alias', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  api.getEntityAliasSuggestions.mockResolvedValue([
+    {
+      id: 'sug-2',
+      entity_id: 'p1',
+      suggested_name: 'Historical Archive Modernization',
+      source_meeting_ids_json: '["m1"]',
+      status: 'pending',
+      created_at: '2026-08-28T12:00:00Z',
+      updated_at: '2026-08-28T12:00:00Z',
+    },
+  ]);
+
+  await render();
+  expect(host.textContent).toContain('Historical Archive Modernization');
+
+  const alert = host.querySelector('[role="alert"]');
+  const mergeButton = Array.from(alert?.querySelectorAll('button') ?? []).find(
+    (btn) => btn.textContent?.trim() === 'Merge',
+  );
+  await act(async () => {
+    mergeButton?.click();
+  });
+
+  expect(api.addProjectAlias).toHaveBeenCalledWith(
+    'p1',
+    'Historical Archive Modernization',
+  );
+  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith(
+    'sug-2',
+    'merged',
+  );
 });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type IdleDreamingPolicy,
   createIdleDreamingCoordinator,
+  createRoundRobinEntityQueue,
 } from '../../electron/dreaming/idleDreamingCoordinator';
 
 describe('IdleDreamingCoordinator', () => {
@@ -141,5 +142,114 @@ describe('IdleDreamingCoordinator', () => {
     expect(result.status).toBe('aborted');
     expect(capturedSignal?.aborted).toBe(true);
     expect(reconcileMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRoundRobinEntityQueue', () => {
+  it('fairly rotates through all projects and people before repeating', () => {
+    const projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
+    const people = [{ id: 'person-1' }, { id: 'person-2' }];
+
+    const queue = createRoundRobinEntityQueue({
+      getProjects: () => projects,
+      getPeople: () => people,
+    });
+
+    // Round 1: Interleaves projects and people fairly
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-1',
+      type: 'project',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-1',
+      type: 'person',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-2',
+      type: 'project',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-2',
+      type: 'person',
+    });
+
+    // All entities visited; round 2 starts from beginning
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-1',
+      type: 'project',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-1',
+      type: 'person',
+    });
+  });
+
+  it('handles asymmetric numbers of projects and people', () => {
+    const projects = [{ id: 'proj-1' }];
+    const people = [{ id: 'person-1' }, { id: 'person-2' }, { id: 'person-3' }];
+
+    const queue = createRoundRobinEntityQueue({
+      getProjects: () => projects,
+      getPeople: () => people,
+    });
+
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-1',
+      type: 'project',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-1',
+      type: 'person',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-2',
+      type: 'person',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-3',
+      type: 'person',
+    });
+
+    // Cycles back
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-1',
+      type: 'project',
+    });
+  });
+
+  it('prunes deleted entities and handles new additions dynamically', () => {
+    let projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
+    const people = [{ id: 'person-1' }];
+
+    const queue = createRoundRobinEntityQueue({
+      getProjects: () => projects,
+      getPeople: () => people,
+    });
+
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-1',
+      type: 'project',
+    });
+
+    // Delete proj-2 and add proj-3
+    projects = [{ id: 'proj-1' }, { id: 'proj-3' }];
+
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'person-1',
+      type: 'person',
+    });
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'proj-3',
+      type: 'project',
+    });
+  });
+
+  it('returns null when no entities exist', () => {
+    const queue = createRoundRobinEntityQueue({
+      getProjects: () => [],
+      getPeople: () => [],
+    });
+
+    expect(queue.getNextCandidate()).toBeNull();
   });
 });

@@ -337,6 +337,11 @@ export const mergeProject = async (
 ): Promise<void> =>
   invoke('MERGE_PROJECT', { projectId, destinationProjectId });
 
+export const addProjectAlias = async (
+  projectId: string,
+  aliasName: string,
+): Promise<void> => invoke('ADD_PROJECT_ALIAS', { projectId, aliasName });
+
 export const restoreProjectMerge = async (projectId: string): Promise<void> =>
   invoke('RESTORE_PROJECT_MERGE', projectId);
 
@@ -344,6 +349,11 @@ export const updatePersonName = async (
   personId: string,
   name: string,
 ): Promise<Entity> => invoke('UPDATE_PERSON_NAME', { personId, name });
+
+export const addPersonNameAlias = async (
+  personId: string,
+  aliasName: string,
+): Promise<void> => invoke('ADD_PERSON_NAME_ALIAS', { personId, aliasName });
 
 export const mergePerson = async (
   personId: string,

@@ -55,4 +55,45 @@ describe('Entity Corrections Persistence', () => {
     const listAfterDuplicate = db.getEntityCorrections(entityId);
     expect(listAfterDuplicate).toHaveLength(1);
   });
+
+  it('unifies item fingerprints across mixed casing and whitespace', () => {
+    const entityId = 'proj-beta-456';
+    const itemType = 'milestone';
+    const rawInput = '   Stripe Elements   Connected!  ';
+    const expectedFingerprint = 'stripe-elements-connected';
+
+    expect(db.generateItemFingerprint(rawInput)).toBe(expectedFingerprint);
+
+    const saved = db.recordEntityCorrection({
+      entityId,
+      itemType,
+      fingerprint: rawInput,
+      reason: 'wrong_milestone',
+    });
+
+    expect(saved.fingerprint).toBe(expectedFingerprint);
+
+    // Queries with different casing, whitespace, and slug format should all match
+    expect(db.isItemDismissed(entityId, itemType, expectedFingerprint)).toBe(
+      true,
+    );
+    expect(
+      db.isItemDismissed(entityId, itemType, 'STRIPE ELEMENTS CONNECTED'),
+    ).toBe(true);
+    expect(
+      db.isItemDismissed(
+        entityId,
+        itemType,
+        '  Stripe   Elements   Connected! ',
+      ),
+    ).toBe(true);
+    expect(
+      db.isItemDismissed(entityId, itemType, 'stripe-elements-connected'),
+    ).toBe(true);
+
+    // Unrelated queries do not match
+    expect(
+      db.isItemDismissed(entityId, itemType, 'stripe-elements-pending'),
+    ).toBe(false);
+  });
 });

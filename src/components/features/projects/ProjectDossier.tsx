@@ -2,6 +2,7 @@ import { Check, MoreHorizontal, Pencil } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type EntityAliasSuggestion,
+  addProjectAlias,
   getEntityAliasSuggestions,
   getProjectBrief,
   mergeProject,
@@ -140,8 +141,10 @@ export const ProjectDossier = ({
 
   const handleMergeAlias = async (suggestion: EntityAliasSuggestion) => {
     try {
+      await addProjectAlias(projectId, suggestion.suggested_name);
       await updateEntityAliasSuggestionStatus(suggestion.id, 'merged');
       setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
+      await onPortfolioChanged?.();
       setRequest((r) => r + 1);
     } catch {
       // keep suggestion on error

@@ -27,6 +27,12 @@ export interface IdleDreamingResult {
   error?: string;
 }
 
+export {
+  createRoundRobinEntityQueue,
+  type RoundRobinEntityQueue,
+  type RoundRobinEntityQueueDeps,
+} from './entityQueue';
+
 export interface IdleDreamingCoordinatorDeps {
   getPolicy: () => IdleDreamingPolicy;
   getNextDirtyEntityId: () => DirtyEntityCandidate | null | undefined;
@@ -41,6 +47,9 @@ export interface IdleDreamingCoordinatorDeps {
     type: DreamingEntityType,
     output: ProjectDreamingOutput | PersonDreamingOutput,
   ) => Promise<void>;
+  getEntity?: (
+    entityId: string,
+  ) => { type: DreamingEntityType } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
 }
@@ -126,7 +135,12 @@ export const createIdleDreamingCoordinator = (
     }
 
     const candidate = options?.entityId
-      ? { entityId: options.entityId, type: 'project' as DreamingEntityType }
+      ? {
+          entityId: options.entityId,
+          type:
+            (deps.getEntity?.(options.entityId)?.type as DreamingEntityType) ??
+            'project',
+        }
       : deps.getNextDirtyEntityId();
 
     if (!candidate) return { status: 'no_work' };
