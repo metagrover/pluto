@@ -132,6 +132,7 @@ describe('runFinalTranscription', () => {
       'commit-canonical',
       'start-analysis',
     ]);
+    expect(deps.speakerEvidence).toHaveBeenCalledOnce();
     expect(deps.commitCanonical.mock.calls[0][0].segments).toEqual([
       expect.objectContaining({ speaker: 'Me' }),
       expect.objectContaining({ speaker: 'Them' }),
@@ -171,8 +172,10 @@ describe('runFinalTranscription', () => {
         }),
       },
       speakerAttribution: {
-        source: 'offline_diarization_acoustic_v1',
+        source: 'recovered_channel_acoustic_v1',
+        diarizationAttempted: true,
         mappingApplied: true,
+        nearEndEvidenceAttempted: true,
       },
     });
     const committed = await deps.commitCanonical.mock.results[0].value;
@@ -247,7 +250,7 @@ describe('runFinalTranscription', () => {
     );
   });
 
-  it('fails closed before commit and downstream when acoustic attribution is rejected', async () => {
+  it('does not let mixed-audio diarization override recovered channel attribution', async () => {
     const deps = dependencies();
     deps.speakerEvidence.mockResolvedValue({
       turns: [{ startTime: 0, endTime: 4, cluster: 'S1' }],
@@ -267,12 +270,10 @@ describe('runFinalTranscription', () => {
 
     const outcome = await runFinalTranscription(baseInput, deps);
 
-    expect(outcome.status).toBe('needs_attention');
-    expect(deps.commitCanonical).not.toHaveBeenCalled();
-    expect(deps.startAnalysis).not.toHaveBeenCalled();
-    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
-      expect.objectContaining({ failure: 'speaker_attribution_rejected' }),
-    );
+    expect(outcome.status).toBe('validated');
+    expect(deps.speakerEvidence).toHaveBeenCalledOnce();
+    expect(deps.commitCanonical).toHaveBeenCalledOnce();
+    expect(deps.startAnalysis).toHaveBeenCalledOnce();
   });
 
   it('does not analyze when the generation-bound commit loses a race', async () => {

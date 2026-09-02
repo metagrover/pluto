@@ -20,12 +20,20 @@ export const hasVerifiedSpeakerAttribution = (
   transcriptJson: string | null | undefined,
 ): boolean => {
   const attribution = readStoredSpeakerAttribution(transcriptJson);
-  return Boolean(
-    attribution &&
-      attribution.diarizationAttempted === true &&
-      attribution.mappingApplied === true &&
-      attribution.source !== 'channel_fallback' &&
-      Number.isFinite(attribution.confidence) &&
-      attribution.confidence > 0,
-  );
+  return isVerifiedSpeakerAttribution(attribution);
 };
+
+export const isVerifiedSpeakerAttribution = (
+  attribution: StoredTranscriptSpeakerAttribution | null | undefined,
+): boolean =>
+  Boolean(
+    attribution &&
+      attribution.mappingApplied === true &&
+      Number.isFinite(attribution.confidence) &&
+      attribution.confidence > 0 &&
+      (attribution.source === 'recovered_channel_acoustic_v1' ||
+        (attribution.diarizationAttempted === true &&
+          (attribution.source === 'diarization' ||
+            attribution.source === 'local_diarization_acoustic' ||
+            attribution.source === 'offline_diarization_acoustic_v1'))),
+  );

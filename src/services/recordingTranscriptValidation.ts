@@ -238,6 +238,7 @@ export const runRecordingTranscriptValidation = async (input: {
   canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
   transcriptionScheduling?: 'parallel' | 'sequential_channels';
   checkpointEvidenceVerified?: boolean;
+  resolveAttributionWindows?: () => Promise<SpeakerActivityWindow[]>;
   transcribe: RecordingTranscribe;
   probeDuration: (audioPath: string) => Promise<number | null>;
 }): Promise<RecordingTranscriptValidationResult> => {
@@ -358,6 +359,9 @@ export const runRecordingTranscriptValidation = async (input: {
     probeDuration(input.probeDuration, input.mixAudioPath),
     probeDuration(input.probeDuration, input.systemAudioPath),
   ]);
+  const attributionWindows = input.resolveAttributionWindows
+    ? await input.resolveAttributionWindows()
+    : input.activityWindows;
 
   const rawMicSegments = toSegments(mic.result, 'Me', 'mic');
   const mixedSegments = toSegments(mix.result, 'Unknown', 'mix');
@@ -367,11 +371,14 @@ export const runRecordingTranscriptValidation = async (input: {
       ? collapseCrossChannelWordBleed({
           micSegments: rawMicSegments,
           systemSegments: rawSystemSegments,
+          activityWindows: attributionWindows,
+          fallbackActivityWindows: input.activityWindows,
         })
       : {
           micSegments: rawMicSegments,
           systemSegments: rawSystemSegments,
           droppedMicSeconds: 0,
+          unresolvedAmbiguousSeconds: 0,
           reconciliation: emptyCrossChannelReconciliation(),
         };
   const micSegments = collapsedChannels.micSegments;
@@ -387,11 +394,14 @@ export const runRecordingTranscriptValidation = async (input: {
     micSegments,
     systemSegments,
     provisionalSegments: input.provisionalSegments,
-    activityWindows: input.activityWindows,
+    activityWindows: attributionWindows,
   });
   const collapsedPassThroughSeconds =
     reconciliation.evidence.collapsedPassThroughSeconds +
     collapsedChannels.droppedMicSeconds;
+  const unresolvedAmbiguousSeconds =
+    reconciliation.evidence.unresolvedAmbiguousSeconds +
+    collapsedChannels.unresolvedAmbiguousSeconds;
   const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
   const systemActivitySeconds = activitySeconds(input.activityWindows, 'Them');
   const micSpeechSeconds = segmentSeconds(micSegments);
@@ -459,8 +469,7 @@ export const runRecordingTranscriptValidation = async (input: {
       ? asrConfirmedRemoteCoveredSeconds
       : candidateRemoteCoveredSeconds,
     collapsedPassThroughSeconds,
-    unresolvedAmbiguousSeconds:
-      reconciliation.evidence.unresolvedAmbiguousSeconds,
+    unresolvedAmbiguousSeconds,
     requiredSourcesSucceeded,
   });
   const evidence: TranscriptIntegrityEvidence = {
@@ -490,8 +499,7 @@ export const runRecordingTranscriptValidation = async (input: {
       ? Math.max(0, systemActivitySeconds - systemSpeechSeconds)
       : 0,
     collapsedPassThroughSeconds,
-    unresolvedAmbiguousSeconds:
-      reconciliation.evidence.unresolvedAmbiguousSeconds,
+    unresolvedAmbiguousSeconds,
   };
 
   return {

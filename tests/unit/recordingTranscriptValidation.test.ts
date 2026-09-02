@@ -365,10 +365,7 @@ describe('runRecordingTranscriptValidation', () => {
       mixAudioPath: '',
       systemAudioPath: '/synthetic/system.wav',
       provisionalSegments: [],
-      activityWindows: [
-        { speaker: 'Me', startTime: 0, endTime: 8 },
-        { speaker: 'Them', startTime: 0, endTime: 8 },
-      ],
+      activityWindows: [{ speaker: 'Them', startTime: 0, endTime: 8 }],
       canonicalMode: 'recovered_channels',
       transcriptionScheduling: 'sequential_channels',
       transcribe: async (_path, options) => ({

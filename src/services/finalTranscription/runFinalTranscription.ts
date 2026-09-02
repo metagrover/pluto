@@ -1,3 +1,4 @@
+import { deriveAttributionEvidence } from '../../utils/acousticSpeakerAttribution.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
@@ -11,10 +12,7 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
-import {
-  type FinalSpeakerEvidence,
-  applySpeakerEvidence,
-} from './applySpeakerEvidence.ts';
+import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
 import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
 import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
 import {
@@ -165,21 +163,8 @@ export const runFinalTranscription = async <TTranscript>(
     });
     return { status: 'needs_attention', reasons: [admission.reason] };
   }
-  if (!input.mixedAudioPath) {
-    await dependencies.markNeedsAttention({
-      meetingId: input.meetingId,
-      captureGeneration: input.captureEvidence.generation,
-      failure: 'speaker_attribution_rejected',
-      lease,
-      reasons: ['missing_diarization_audio'],
-    });
-    return {
-      status: 'needs_attention',
-      reasons: ['missing_diarization_audio'],
-    };
-  }
-
   const observedResults: TranscriptionResult[] = [];
+  let speakerEvidence: FinalSpeakerEvidence | undefined;
   try {
     const validation = await runRecordingTranscriptValidation({
       meetingId: input.meetingId,
@@ -191,6 +176,32 @@ export const runFinalTranscription = async <TTranscript>(
       activityWindows: input.activityWindows,
       canonicalMode: 'recovered_channels',
       transcriptionScheduling: 'sequential_channels',
+      resolveAttributionWindows: async () => {
+        lease = advanceFinalTranscriptionLease(lease, 'attributing_speakers');
+        await dependencies.updateLease?.(lease);
+        speakerEvidence = await dependencies.speakerEvidence({
+          meetingId: input.meetingId,
+          mixedAudioPath: input.mixedAudioPath,
+          micAudioPath: input.micAudioPath,
+          systemAudioPath: input.systemAudioPath,
+          signal: input.signal,
+        });
+        const windows = deriveAttributionEvidence(
+          speakerEvidence.energyWindows,
+        ).flatMap<SpeakerActivityWindow>((window) => {
+          if (window.evidence === 'mic_exclusive') {
+            return [{ ...window, speaker: 'Me' }];
+          }
+          if (window.evidence === 'system_correlated') {
+            return [{ ...window, speaker: 'Them' }];
+          }
+          return [];
+        });
+        if (windows.length === 0) {
+          throw new Error('speaker_acoustic_evidence_missing');
+        }
+        return windows;
+      },
       probeDuration: dependencies.probeDuration,
       transcribe: async (audioPath, options) => {
         if (input.signal?.aborted) throw new Error('parakeet_cancelled');
@@ -280,7 +291,14 @@ export const runFinalTranscription = async <TTranscript>(
         ...observedResults.map((result) => result.meta.vocabularyCount ?? 0),
       ),
       reconciliation: validation.reconciliation,
+      speakerEvidence: speakerEvidence
+        ? {
+            provenance: speakerEvidence.provenance,
+            timings: speakerEvidence.timings,
+          }
+        : undefined,
     };
+    metadata.elapsedMs += speakerEvidence?.timings.totalMs ?? 0;
     lease = advanceFinalTranscriptionLease(lease, 'reviewing_integrity');
     await dependencies.updateLease?.(lease);
     if (validation.status !== 'validated') {
@@ -300,44 +318,42 @@ export const runFinalTranscription = async <TTranscript>(
       return { status: 'needs_attention', reasons: validation.reasons };
     }
 
-    lease = advanceFinalTranscriptionLease(lease, 'attributing_speakers');
-    await dependencies.updateLease?.(lease);
-    const speakerEvidence = await dependencies.speakerEvidence({
-      meetingId: input.meetingId,
-      mixedAudioPath: input.mixedAudioPath,
-      micAudioPath: input.micAudioPath,
-      systemAudioPath: input.systemAudioPath,
-      signal: input.signal,
-    });
-    if (input.signal?.aborted) return { status: 'cancelled' };
-    const attribution = applySpeakerEvidence({
-      segments: validation.segments,
-      evidence: speakerEvidence,
-    });
-    metadata.speakerAttribution = attribution.attribution;
-    metadata.speakerEvidence = {
-      provenance: speakerEvidence.provenance,
-      timings: speakerEvidence.timings,
+    const attributedSeconds = validation.segments.reduce(
+      (total, segment) =>
+        total + Math.max(0, segment.endTime - segment.startTime),
+      0,
+    );
+    const unknownSeconds = validation.segments.reduce(
+      (total, segment) =>
+        total +
+        (segment.speaker === 'Unknown'
+          ? Math.max(0, segment.endTime - segment.startTime)
+          : 0),
+      0,
+    );
+    metadata.speakerAttribution = {
+      source: 'recovered_channel_acoustic_v1',
+      confidence:
+        attributedSeconds > 0
+          ? Math.max(0, 1 - unknownSeconds / attributedSeconds)
+          : 1,
+      diarizationAttempted: true,
+      mappingApplied: true,
+      nearEndEvidenceAttempted: true,
+      engineVersion: speakerEvidence
+        ? `${speakerEvidence.provenance.runtimeVersion}@${speakerEvidence.provenance.modelRevision}`
+        : undefined,
+      modelChecksums: speakerEvidence
+        ? [speakerEvidence.provenance.artifactDigest]
+        : undefined,
     };
-    metadata.elapsedMs += speakerEvidence.timings.totalMs;
-    if (!attribution.accepted) {
-      await dependencies.markNeedsAttention({
-        meetingId: input.meetingId,
-        captureGeneration: input.captureEvidence.generation,
-        failure: 'speaker_attribution_rejected',
-        lease,
-        reasons: attribution.reasons,
-        metadata,
-      });
-      return { status: 'needs_attention', reasons: attribution.reasons };
-    }
 
     lease = advanceFinalTranscriptionLease(lease, 'saving');
     await dependencies.updateLease?.(lease);
     const commit = await dependencies.commitCanonical({
       meetingId: input.meetingId,
       expectedCaptureGeneration: input.captureEvidence.generation,
-      segments: attribution.segments,
+      segments: validation.segments,
       integrity: validation.evidence,
       metadata,
     });
