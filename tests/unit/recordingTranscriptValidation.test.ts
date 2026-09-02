@@ -408,6 +408,98 @@ describe('runRecordingTranscriptValidation', () => {
     ]);
   });
 
+  it('removes a saved Me fragment explained by remote activity despite divergent ASR text', async () => {
+    const echoWords = [
+      { word: 'So', start: 0.08, end: 0.4 },
+      { word: 'deep', start: 1.8, end: 2.2 },
+      { word: 'arch', start: 3.9, end: 4.3 },
+      { word: 'forward.', start: 7, end: 7.36 },
+    ];
+    const remoteWords = timedRawSegment(
+      0,
+      'the remote speaker says a substantially different sentence here',
+    ).words;
+    const localWords = timedRawSegment(8, 'my actual local question').words;
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'divergent-asr-echo-repair',
+      recordingDurationSeconds: 12,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [
+        {
+          id: 'remote',
+          startTime: 0,
+          endTime: 7.8,
+          text: 'The remote speaker says a substantially different sentence here.',
+          speaker: 'Them',
+          words: remoteWords,
+        },
+        {
+          id: 'echo',
+          startTime: 0.08,
+          endTime: 7.36,
+          text: 'So deep arch forward.',
+          speaker: 'Me',
+          words: echoWords,
+        },
+        {
+          id: 'local',
+          startTime: 8,
+          endTime: 11.8,
+          text: 'My actual local question.',
+          speaker: 'Me',
+          words: localWords,
+        },
+      ],
+      activityWindows: [
+        { speaker: 'Them', startTime: 0, endTime: 7.8 },
+        { speaker: 'Me', startTime: 8, endTime: 11.8 },
+      ],
+      canonicalMode: 'recovered_channels',
+      preserveProvisionalText: true,
+      transcriptionScheduling: 'sequential_channels',
+      resolveAttributionWindows: async () => [
+        { speaker: 'Them', startTime: 0, endTime: 7.8 },
+        { speaker: 'Me', startTime: 8, endTime: 11.8 },
+      ],
+      transcribe: async (_path, options) => ({
+        segments:
+          options.canonicalSource === 'mic'
+            ? [
+                {
+                  start: 0.08,
+                  end: 7.36,
+                  text: 'So deep arch forward',
+                  words: echoWords,
+                },
+                {
+                  start: 8,
+                  end: 11.8,
+                  text: 'my actual local question',
+                  words: localWords,
+                },
+              ]
+            : [
+                {
+                  start: 0,
+                  end: 7.8,
+                  text: 'the remote speaker says a substantially different sentence here',
+                  words: remoteWords,
+                },
+              ],
+        vad: { status: 'speech' as const, speechSeconds: 7.8 },
+      }),
+      probeDuration: async () => 12,
+    });
+
+    expect(result.status).toBe('validated');
+    expect(result.segments.map((segment) => segment.id)).toEqual([
+      'remote',
+      'local',
+    ]);
+  });
+
   it('credits removed cross-channel pass-through as explained mic activity', async () => {
     const duplicate = timedRawSegment(
       0,

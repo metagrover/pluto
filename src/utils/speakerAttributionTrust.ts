@@ -32,6 +32,7 @@ export const isVerifiedSpeakerAttribution = (
       Number.isFinite(attribution.confidence) &&
       attribution.confidence > 0 &&
       (attribution.source === 'recovered_channel_acoustic_v1' ||
+        attribution.source === 'recovered_channel_acoustic_v2' ||
         (attribution.diarizationAttempted === true &&
           (attribution.source === 'diarization' ||
             attribution.source === 'local_diarization_acoustic' ||

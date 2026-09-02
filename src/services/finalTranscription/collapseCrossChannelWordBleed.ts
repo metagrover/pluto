@@ -138,6 +138,54 @@ const activitySeconds = (
       0,
     );
 
+const coveredOverlapSeconds = (
+  segment: AttributionSegment,
+  candidates: AttributionSegment[],
+): number => {
+  const intervals = candidates
+    .map((candidate) => ({
+      start: Math.max(segment.startTime, candidate.startTime),
+      end: Math.min(segment.endTime, candidate.endTime),
+    }))
+    .filter((interval) => interval.end > interval.start)
+    .sort((left, right) => left.start - right.start);
+  let total = 0;
+  let coveredThrough = segment.startTime;
+  for (const interval of intervals) {
+    const start = Math.max(interval.start, coveredThrough);
+    if (interval.end <= start) continue;
+    total += interval.end - start;
+    coveredThrough = interval.end;
+  }
+  return total;
+};
+
+export const isSystemExplainedMicSegment = (
+  segment: AttributionSegment,
+  systemSegments: AttributionSegment[],
+  activityWindows: SpeakerActivityWindow[],
+): boolean => {
+  const duration = segment.endTime - segment.startTime;
+  if (duration < 1 || (segment.words?.length ?? 0) < 3) return false;
+  const localCoverage = activitySeconds(
+    activityWindows,
+    'Me',
+    segment.startTime,
+    segment.endTime,
+  );
+  const remoteCoverage = activitySeconds(
+    activityWindows,
+    'Them',
+    segment.startTime,
+    segment.endTime,
+  );
+  return (
+    localCoverage / duration <= 0.1 &&
+    remoteCoverage / duration >= 0.7 &&
+    coveredOverlapSeconds(segment, systemSegments) / duration >= 0.7
+  );
+};
+
 const dedupeExactSegments = (segments: AttributionSegment[]) => {
   const seen = new Set<string>();
   let dropped = 0;
@@ -202,9 +250,33 @@ export const collapseCrossChannelWordBleed = (input: {
   const droppedMicWords = new Set<string>();
   const droppedSystemWords = new Set<string>();
   const ambiguousMicWords = new Set<string>();
+  let droppedSystemExplainedMicSegmentCount = 0;
   let collapsedSequenceCount = 0;
 
+  micSourceSegments.forEach((segment, segmentIndex) => {
+    if (
+      !isSystemExplainedMicSegment(
+        segment,
+        systemSourceSegments,
+        input.activityWindows ?? [],
+      )
+    ) {
+      return;
+    }
+    droppedSystemExplainedMicSegmentCount += 1;
+    segment.words?.forEach((_word, wordIndex) => {
+      droppedMicWords.add(`${segmentIndex}:${wordIndex}`);
+    });
+  });
+
   for (let micStart = 0; micStart < micWords.length; micStart += 1) {
+    if (
+      droppedMicWords.has(
+        `${micWords[micStart].segmentIndex}:${micWords[micStart].wordIndex}`,
+      )
+    ) {
+      continue;
+    }
     let collapsed = false;
     for (const alignmentOffsetSeconds of alignmentOffsets) {
       for (const systemStart of systemStartsByToken.get(
@@ -318,6 +390,7 @@ export const collapseCrossChannelWordBleed = (input: {
     droppedExactDuplicateSegmentCount:
       dedupedMic.dropped + dedupedSystem.dropped,
     droppedEmbeddedMicFragmentCount: filteredMic.dropped,
+    droppedSystemExplainedMicSegmentCount,
   };
 
   return {

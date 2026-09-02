@@ -197,6 +197,7 @@ export const runPersistedMeetingFinalTranscription = async (
               canonicalSource: 'recovered_channels',
               diarization:
                 speakerAttribution.source !== 'recovered_channel_acoustic_v1' &&
+                speakerAttribution.source !== 'recovered_channel_acoustic_v2' &&
                 speakerAttribution.diarizationAttempted,
               elapsedMs: commit.metadata.elapsedMs,
               providerLabel: commit.metadata.providerVersions.join(','),

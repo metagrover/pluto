@@ -172,7 +172,7 @@ describe('runFinalTranscription', () => {
         }),
       },
       speakerAttribution: {
-        source: 'recovered_channel_acoustic_v1',
+        source: 'recovered_channel_acoustic_v2',
         diarizationAttempted: true,
         mappingApplied: true,
         nearEndEvidenceAttempted: true,
@@ -250,7 +250,7 @@ describe('runFinalTranscription', () => {
     );
   });
 
-  it('does not let mixed-audio diarization override recovered channel attribution', async () => {
+  it('keeps source ownership when mixed-audio diarization clusters are unsafe', async () => {
     const deps = dependencies();
     deps.speakerEvidence.mockResolvedValue({
       turns: [{ startTime: 0, endTime: 4, cluster: 'S1' }],
@@ -273,6 +273,10 @@ describe('runFinalTranscription', () => {
     expect(outcome.status).toBe('validated');
     expect(deps.speakerEvidence).toHaveBeenCalledOnce();
     expect(deps.commitCanonical).toHaveBeenCalledOnce();
+    expect(deps.commitCanonical.mock.calls[0][0].segments).toEqual([
+      expect.objectContaining({ speaker: 'Me' }),
+      expect.objectContaining({ speaker: 'Them' }),
+    ]);
     expect(deps.startAnalysis).toHaveBeenCalledOnce();
   });
 
