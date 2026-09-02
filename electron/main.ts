@@ -2960,6 +2960,15 @@ app.whenReady().then(async () => {
       return action;
     },
   );
+  ipcMain.handle(
+    'RECORD_ENTITY_CORRECTION',
+    (_event, input: { entityId: string; itemType: string; fingerprint: string; reason?: string }) => {
+      return db.recordEntityCorrection(input);
+    },
+  );
+  ipcMain.handle('GET_ENTITY_CORRECTIONS', (_event, entityId: string) => {
+    return db.getEntityCorrections(String(entityId));
+  });
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>
     db.getKnowledgeFeedSummary(params),
   );

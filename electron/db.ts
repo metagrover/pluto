@@ -729,6 +729,30 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
 
+      CREATE TABLE IF NOT EXISTS entity_corrections (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_corrections_unique ON entity_corrections(entity_id, item_type, fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_entity_corrections_lookup ON entity_corrections(entity_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS entity_alias_suggestions (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT NOT NULL,
+        suggested_name TEXT NOT NULL,
+        source_meeting_ids_json TEXT NOT NULL DEFAULT '[]',
+        evidence_snippet TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'merged', 'dismissed')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_alias_suggestions_unique ON entity_alias_suggestions(entity_id, suggested_name);
+      CREATE INDEX IF NOT EXISTS idx_entity_alias_suggestions_lookup ON entity_alias_suggestions(entity_id, status);
+
       CREATE TABLE IF NOT EXISTS knowledge_backlinks (
         id TEXT PRIMARY KEY,
         source_doc_id TEXT NOT NULL,
@@ -9322,3 +9346,67 @@ export const getMeetingsForEntity = (entityId: string) => {
     context: string | null;
   }>;
 };
+
+export interface EntityCorrectionRecord {
+  id: string;
+  entity_id: string;
+  item_type: string;
+  fingerprint: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export const recordEntityCorrection = (input: {
+  entityId: string;
+  itemType: string;
+  fingerprint: string;
+  reason?: string;
+}): EntityCorrectionRecord => {
+  const normalizedId = String(input.entityId).trim();
+  const normalizedType = String(input.itemType).trim();
+  const normalizedFingerprint = String(input.fingerprint).trim().toLowerCase();
+  const id = `corr_${createHash('sha256')
+    .update(`${normalizedId}:${normalizedType}:${normalizedFingerprint}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  db.prepare(`
+    INSERT INTO entity_corrections (id, entity_id, item_type, fingerprint, reason)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(entity_id, item_type, fingerprint) DO UPDATE SET
+      reason = excluded.reason,
+      created_at = CURRENT_TIMESTAMP
+  `).run(id, normalizedId, normalizedType, normalizedFingerprint, input.reason ?? null);
+
+  return db
+    .prepare('SELECT * FROM entity_corrections WHERE id = ?')
+    .get(id) as EntityCorrectionRecord;
+};
+
+export const getEntityCorrections = (entityId: string): EntityCorrectionRecord[] => {
+  return db
+    .prepare(
+      'SELECT * FROM entity_corrections WHERE entity_id = ? ORDER BY datetime(created_at) DESC',
+    )
+    .all(String(entityId)) as EntityCorrectionRecord[];
+};
+
+export const isItemDismissed = (
+  entityId: string,
+  itemType: string,
+  fingerprint: string,
+): boolean => {
+  const row = db
+    .prepare(`
+      SELECT 1 FROM entity_corrections
+      WHERE entity_id = ? AND item_type = ? AND fingerprint = ?
+      LIMIT 1
+    `)
+    .get(
+      String(entityId),
+      String(itemType),
+      String(fingerprint).trim().toLowerCase(),
+    );
+  return Boolean(row);
+};
+

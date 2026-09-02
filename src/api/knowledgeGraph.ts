@@ -586,6 +586,30 @@ export const getKnowledgeFeedSummary = async (
 // HELPER FUNCTIONS
 // =============================================
 
+export interface EntityCorrectionRecord {
+  id: string;
+  entity_id: string;
+  item_type: string;
+  fingerprint: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export const recordEntityCorrection = async (input: {
+  entityId: string;
+  itemType: string;
+  fingerprint: string;
+  reason?: string;
+}): Promise<EntityCorrectionRecord> => {
+  return invoke('RECORD_ENTITY_CORRECTION', input);
+};
+
+export const getEntityCorrections = async (
+  entityId: string,
+): Promise<EntityCorrectionRecord[]> => {
+  return invoke('GET_ENTITY_CORRECTIONS', entityId);
+};
+
 /**
  * Parse entity metadata JSON
  */
