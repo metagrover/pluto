@@ -142,6 +142,7 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
   downstreamFailed = false,
+  speakerLabelsRequired = false,
   onRetry,
   retrying = false,
   retryOperationKind = null,
@@ -158,6 +159,7 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable?: boolean;
   hasExistingAnalysis?: boolean;
   downstreamFailed?: boolean;
+  speakerLabelsRequired?: boolean;
   onRetry?: (kind: MeetingRetryKind) => void;
   retrying?: boolean;
   retryOperationKind?: MeetingRetryKind | null;
@@ -236,6 +238,8 @@ export const TranscriptIntegrityPanel = ({
     canRetryFinalTranscription = false;
     speakerAttributionFailure = false;
   }
+  canRetryFinalTranscription ||= speakerLabelsRequired;
+  speakerAttributionFailure ||= speakerLabelsRequired;
   if (
     hasExistingAnalysis &&
     trust.kind !== 'capture_gap' &&
@@ -784,6 +788,10 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
+  const inlineSpeakerLabelRepairRequired =
+    downstreamPresentation.state === 'failed' &&
+    !notesDocument.hasAnalysis &&
+    canImproveHistoricalSpeakerLabelsForMeeting;
   const pendingUserNotes = !notesDocument.hasAnalysis
     ? selectedMeeting.user_notes?.trim()
     : '';
@@ -1048,6 +1056,7 @@ export const MeetingView = ({
                   </div>
                   <div className="meeting-document-menu__section">
                     {canImproveHistoricalSpeakerLabelsForMeeting &&
+                    !inlineSpeakerLabelRepairRequired &&
                     onRetryTranscriptValidation ? (
                       <button
                         type="button"
@@ -1182,6 +1191,7 @@ export const MeetingView = ({
             selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
           )}
           downstreamFailed={downstreamPresentation.state === 'failed'}
+          speakerLabelsRequired={inlineSpeakerLabelRepairRequired}
           onRetry={onRetryTranscriptValidation}
           retrying={transcriptValidationRetrying}
           retryOperationKind={
