@@ -8,6 +8,43 @@ export type MeetingFailurePresentation = {
     | null;
 };
 
+export type MeetingRetryKind = 'speaker_labels' | 'transcript' | 'analysis';
+
+export type MeetingRetryOperation = {
+  meetingId: string | number;
+  kind: MeetingRetryKind;
+};
+
+export type MeetingRetryProgressPresentation = {
+  title: string;
+  detail: string;
+  loadingLabel: string;
+};
+
+export const resolveMeetingRetryProgressPresentation = (
+  kind: MeetingRetryKind,
+): MeetingRetryProgressPresentation => {
+  if (kind === 'speaker_labels') {
+    return {
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      loadingLabel: 'Improving labels',
+    };
+  }
+  if (kind === 'transcript') {
+    return {
+      title: 'Transcript needs another pass',
+      detail: 'Your recording is safe.',
+      loadingLabel: 'Retrying transcription',
+    };
+  }
+  return {
+    title: 'Analysis needs another pass',
+    detail: 'Your transcript is ready.',
+    loadingLabel: 'Retrying analysis',
+  };
+};
+
 export type MeetingRegenerationFailurePresentation = {
   title: string;
   detail: string;

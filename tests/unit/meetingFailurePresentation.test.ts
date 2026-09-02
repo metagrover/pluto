@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveMeetingFailurePresentation,
   resolveMeetingRegenerationFailurePresentation,
+  resolveMeetingRetryProgressPresentation,
 } from '../../src/components/features/meetingFailurePresentation';
 
 describe('meeting failure presentation', () => {
@@ -88,6 +89,37 @@ describe('meeting failure presentation', () => {
       detail: 'Your transcript is ready.',
       actionLabel: 'Retry analysis',
     });
+  });
+});
+
+describe('meeting retry progress presentation', () => {
+  it.each([
+    [
+      'speaker_labels',
+      {
+        title: 'Improve speaker labels',
+        detail: 'Pluto can take another pass using the saved recording.',
+        loadingLabel: 'Improving labels',
+      },
+    ],
+    [
+      'transcript',
+      {
+        title: 'Transcript needs another pass',
+        detail: 'Your recording is safe.',
+        loadingLabel: 'Retrying transcription',
+      },
+    ],
+    [
+      'analysis',
+      {
+        title: 'Analysis needs another pass',
+        detail: 'Your transcript is ready.',
+        loadingLabel: 'Retrying analysis',
+      },
+    ],
+  ] as const)('keeps %s progress stable', (kind, expected) => {
+    expect(resolveMeetingRetryProgressPresentation(kind)).toEqual(expected);
   });
 });
 
