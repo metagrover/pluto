@@ -8,7 +8,10 @@ import {
   reconcileCanonicalTranscript,
   validateTranscriptIntegrity,
 } from '../utils/transcriptIntegrity.ts';
-import { collapseCrossChannelWordBleed } from './finalTranscription/collapseCrossChannelWordBleed.ts';
+import {
+  collapseCrossChannelWordBleed,
+  isSystemExplainedMicSegment,
+} from './finalTranscription/collapseCrossChannelWordBleed.ts';
 import {
   CROSS_CHANNEL_SKEW_POLICY_VERSION,
   type CrossChannelReconciliationMetadata,
@@ -388,10 +391,21 @@ export const runRecordingTranscriptValidation = async (input: {
   const recoveredChannelSegments = [...micSegments, ...systemSegments].sort(
     (left, right) => left.startTime - right.startTime,
   );
+  const preservedSegments = input.preserveProvisionalText
+    ? input.provisionalSegments.filter(
+        (segment) =>
+          segment.speaker !== 'Me' ||
+          !isSystemExplainedMicSegment(
+            segment,
+            systemSegments,
+            attributionWindows,
+          ),
+      )
+    : input.provisionalSegments;
   const reconciliation = input.preserveProvisionalText
     ? {
         segments: projectSpeakerLabelsOntoTranscript({
-          segments: input.provisionalSegments,
+          segments: preservedSegments,
           evidenceSegments: recoveredChannelSegments,
         }).segments,
         evidence: {

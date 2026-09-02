@@ -12,6 +12,7 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
+import { applyRecoveredChannelEvidence } from './applyRecoveredChannelEvidence.ts';
 import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
 import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
 import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
@@ -166,6 +167,7 @@ export const runFinalTranscription = async <TTranscript>(
   }
   const observedResults: TranscriptionResult[] = [];
   let speakerEvidence: FinalSpeakerEvidence | undefined;
+  let speakerActivityWindows: SpeakerActivityWindow[] = [];
   try {
     const validation = await runRecordingTranscriptValidation({
       meetingId: input.meetingId,
@@ -202,6 +204,7 @@ export const runFinalTranscription = async <TTranscript>(
         if (windows.length === 0) {
           throw new Error('speaker_acoustic_evidence_missing');
         }
+        speakerActivityWindows = windows;
         return windows;
       },
       probeDuration: dependencies.probeDuration,
@@ -320,42 +323,33 @@ export const runFinalTranscription = async <TTranscript>(
       return { status: 'needs_attention', reasons: validation.reasons };
     }
 
-    const attributedSeconds = validation.segments.reduce(
-      (total, segment) =>
-        total + Math.max(0, segment.endTime - segment.startTime),
-      0,
-    );
-    const unknownSeconds = validation.segments.reduce(
-      (total, segment) =>
-        total +
-        (segment.speaker === 'Unknown'
-          ? Math.max(0, segment.endTime - segment.startTime)
-          : 0),
-      0,
-    );
-    metadata.speakerAttribution = {
-      source: 'recovered_channel_acoustic_v1',
-      confidence:
-        attributedSeconds > 0
-          ? Math.max(0, 1 - unknownSeconds / attributedSeconds)
-          : 1,
-      diarizationAttempted: true,
-      mappingApplied: true,
-      nearEndEvidenceAttempted: true,
-      engineVersion: speakerEvidence
-        ? `${speakerEvidence.provenance.runtimeVersion}@${speakerEvidence.provenance.modelRevision}`
-        : undefined,
-      modelChecksums: speakerEvidence
-        ? [speakerEvidence.provenance.artifactDigest]
-        : undefined,
-    };
+    if (!speakerEvidence) {
+      throw new Error('speaker_acoustic_evidence_missing');
+    }
+    const attribution = applyRecoveredChannelEvidence({
+      segments: validation.segments,
+      activityWindows: speakerActivityWindows,
+      provenance: speakerEvidence.provenance,
+    });
+    metadata.speakerAttribution = attribution.attribution;
+    if (!attribution.accepted) {
+      await dependencies.markNeedsAttention({
+        meetingId: input.meetingId,
+        captureGeneration: input.captureEvidence.generation,
+        failure: 'speaker_attribution_rejected',
+        lease,
+        reasons: attribution.reasons,
+        metadata,
+      });
+      return { status: 'needs_attention', reasons: attribution.reasons };
+    }
 
     lease = advanceFinalTranscriptionLease(lease, 'saving');
     await dependencies.updateLease?.(lease);
     const commit = await dependencies.commitCanonical({
       meetingId: input.meetingId,
       expectedCaptureGeneration: input.captureEvidence.generation,
-      segments: validation.segments,
+      segments: attribution.segments,
       integrity: validation.evidence,
       metadata,
     });
