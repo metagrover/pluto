@@ -8,7 +8,10 @@ const fixture = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 import * as db from '../../electron/db';
 import { reconcileDreamingOutput } from '../../electron/dreaming/reconcileDreamingOutput';
-import type { ProjectDreamingOutput, PersonDreamingOutput } from '../../electron/dreaming/types';
+import type {
+  PersonDreamingOutput,
+  ProjectDreamingOutput,
+} from '../../electron/dreaming/types';
 
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
 
@@ -21,7 +24,8 @@ describe('reconcileDreamingOutput', () => {
 
     const projectOutput: ProjectDreamingOutput = {
       status: 'updated',
-      dossier_summary: 'Migrating to Stripe Elements for lower latency checkout.',
+      dossier_summary:
+        'Migrating to Stripe Elements for lower latency checkout.',
       milestones: [
         {
           name: 'PCI Compliance Verified',
@@ -43,7 +47,9 @@ describe('reconcileDreamingOutput', () => {
     const updated = db.getEntity(project.id);
     expect(updated).toBeDefined();
     const metadata = JSON.parse(updated?.metadata || '{}');
-    expect(metadata.dossierSummary).toBe('Migrating to Stripe Elements for lower latency checkout.');
+    expect(metadata.dossierSummary).toBe(
+      'Migrating to Stripe Elements for lower latency checkout.',
+    );
     expect(metadata.projectMilestones).toHaveLength(1);
     expect(metadata.projectMilestones[0].title).toBe('PCI Compliance Verified');
     expect(metadata.projectMilestones[0].status).toBe('completed');

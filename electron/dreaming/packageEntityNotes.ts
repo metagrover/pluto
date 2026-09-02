@@ -1,17 +1,17 @@
+import * as db from '../db';
 import type { Entity, PersistedMeeting } from '../db';
 import type {
   DreamingEntityType,
   DreamingInputPackage,
-  EntityMeetingNoteSummary,
+  DreamingMeetingNote,
 } from './types';
 
 export interface PackageEntityNotesDeps {
   getEntity(id: string): Entity | null | undefined;
   getEntityMeetings(entityId: string): Array<{
     id: string;
-    started_at?: string | null;
-    created_at?: string | null;
-    context?: string | null;
+    started_at: string | null;
+    created_at: string;
   }>;
   getMeeting(id: string): PersistedMeeting | null | undefined;
   getEntityCorrections(entityId: string): Array<{ fingerprint: string }>;
@@ -19,22 +19,27 @@ export interface PackageEntityNotesDeps {
 
 export const packageEntityNotes = (
   entityId: string,
-  deps: PackageEntityNotesDeps,
+  deps?: Partial<PackageEntityNotesDeps>,
 ): DreamingInputPackage | null => {
-  const entity = deps.getEntity(entityId);
+  const getEntity = deps?.getEntity ?? db.getEntity;
+  const getEntityMeetings = deps?.getEntityMeetings ?? db.getEntityMeetings;
+  const getMeeting = deps?.getMeeting ?? db.getMeeting;
+  const getEntityCorrections =
+    deps?.getEntityCorrections ?? db.getEntityCorrections;
+
+  const entity = getEntity(entityId);
   if (!entity) return null;
   if (entity.type !== 'project' && entity.type !== 'person') return null;
 
-  const entityMeetings = deps.getEntityMeetings(entityId);
-  const corrections = deps.getEntityCorrections(entityId);
+  const entityMeetings = getEntityMeetings(entityId);
+  const corrections = getEntityCorrections(entityId);
   const negativeConstraints = corrections.map((c) =>
-    c.fingerprint.toLowerCase().trim(),
+    c.fingerprint.trim().toLowerCase(),
   );
 
-  const recentMeetingNotes: EntityMeetingNoteSummary[] = [];
-
-  for (const mRef of entityMeetings.slice(0, 10)) {
-    const meeting = deps.getMeeting(mRef.id);
+  const recentMeetingNotes: DreamingMeetingNote[] = [];
+  for (const em of entityMeetings) {
+    const meeting = getMeeting(em.id);
     if (!meeting) continue;
 
     // Extract ONLY enhanced_notes and user_notes, NEVER raw transcript_json
@@ -43,22 +48,21 @@ export const packageEntityNotes = (
       .join('\n\n')
       .trim();
 
-    if (notesContent) {
-      recentMeetingNotes.push({
-        meetingId: String(meeting.id),
-        title: meeting.title,
-        startedAt: meeting.started_at ?? meeting.created_at ?? null,
-        notesContent,
-        mentionedContext: mRef.context ?? null,
-      });
-    }
+    if (!notesContent) continue;
+
+    recentMeetingNotes.push({
+      meetingId: meeting.id,
+      title: meeting.title,
+      startedAt: meeting.started_at ?? meeting.created_at ?? null,
+      notesContent,
+    });
   }
 
   return {
     entityId: entity.id,
     entityType: entity.type as DreamingEntityType,
     entityName: entity.name,
-    negativeConstraints,
     recentMeetingNotes,
+    negativeConstraints,
   };
 };

@@ -1091,18 +1091,18 @@ export const PersonDossier = ({
                         </button>
                       </div>
                       <p>{insight.summary}</p>
-                    {citation ? <q>{citation.quote}</q> : null}
-                    {citation ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenMeeting(citation.meeting_id)}
-                      >
-                        Source: {source?.meeting_title ?? 'Meeting'}
-                      </button>
-                    ) : null}
-                  </li>
-                );
-              })}
+                      {citation ? <q>{citation.quote}</q> : null}
+                      {citation ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenMeeting(citation.meeting_id)}
+                        >
+                          Source: {source?.meeting_title ?? 'Meeting'}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
             </ul>
           </div>
         ) : null}

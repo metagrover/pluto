@@ -19,7 +19,9 @@ const api = vi.hoisted(() => ({
   upsertEntity: vi.fn(),
   linkEntities: vi.fn(),
   getEntityAliasSuggestions: vi.fn().mockResolvedValue([]),
-  updateEntityAliasSuggestionStatus: vi.fn().mockResolvedValue({ success: true }),
+  updateEntityAliasSuggestionStatus: vi
+    .fn()
+    .mockResolvedValue({ success: true }),
   triggerDreamingNow: vi.fn().mockResolvedValue({ status: 'completed' }),
   recordEntityCorrection: vi.fn().mockResolvedValue({}),
 }));
@@ -518,7 +520,10 @@ it('renders alias suggestions and allows user to dismiss them', async () => {
   expect(host.textContent).toContain('Suggested Alias');
 
   await click('Keep Separate');
-  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith('sug-1', 'dismissed');
+  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith(
+    'sug-1',
+    'dismissed',
+  );
   expect(api.recordEntityCorrection).toHaveBeenCalledWith(
     expect.objectContaining({
       entityId: 'p1',
@@ -537,4 +542,3 @@ it('triggers manual dreaming run when Dream Now is clicked', async () => {
     force: true,
   });
 });
-

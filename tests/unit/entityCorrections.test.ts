@@ -34,8 +34,12 @@ describe('Entity Corrections Persistence', () => {
     expect(saved.id).toBeDefined();
 
     expect(db.isItemDismissed(entityId, itemType, fingerprint)).toBe(true);
-    expect(db.isItemDismissed(entityId, itemType, 'other-milestone')).toBe(false);
-    expect(db.isItemDismissed('other-entity', itemType, fingerprint)).toBe(false);
+    expect(db.isItemDismissed(entityId, itemType, 'other-milestone')).toBe(
+      false,
+    );
+    expect(db.isItemDismissed('other-entity', itemType, fingerprint)).toBe(
+      false,
+    );
 
     const list = db.getEntityCorrections(entityId);
     expect(list).toHaveLength(1);

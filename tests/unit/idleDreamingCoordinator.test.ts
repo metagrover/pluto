@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  createIdleDreamingCoordinator,
   type IdleDreamingPolicy,
+  createIdleDreamingCoordinator,
 } from '../../electron/dreaming/idleDreamingCoordinator';
 
 describe('IdleDreamingCoordinator', () => {
@@ -17,13 +17,22 @@ describe('IdleDreamingCoordinator', () => {
       thermalState: 'nominal',
       paused: false,
     };
-    generateMock = vi.fn().mockResolvedValue(JSON.stringify({ status: 'no_change' }));
+    generateMock = vi
+      .fn()
+      .mockResolvedValue(JSON.stringify({ status: 'no_change' }));
     reconcileMock = vi.fn().mockResolvedValue(undefined);
     packageNotesMock = vi.fn().mockReturnValue({
       entityId: 'proj-1',
       entityType: 'project',
       entityName: 'Test Project',
-      recentMeetingNotes: [{ meetingId: 'm-1', title: 'M1', startedAt: null, notesContent: 'Notes' }],
+      recentMeetingNotes: [
+        {
+          meetingId: 'm-1',
+          title: 'M1',
+          startedAt: null,
+          notesContent: 'Notes',
+        },
+      ],
       negativeConstraints: [],
     });
   });
@@ -86,7 +95,10 @@ describe('IdleDreamingCoordinator', () => {
       reconcile: reconcileMock,
     });
 
-    const result = await coordinator.triggerNow({ entityId: 'proj-1', force: true });
+    const result = await coordinator.triggerNow({
+      entityId: 'proj-1',
+      force: true,
+    });
     expect(result.status).toBe('completed');
     expect(result.entityId).toBe('proj-1');
     expect(generateMock).toHaveBeenCalledOnce();
@@ -95,18 +107,20 @@ describe('IdleDreamingCoordinator', () => {
   it('preempts immediately when notifyForegroundActivity is called', async () => {
     let capturedSignal: AbortSignal | undefined;
 
-    generateMock.mockImplementation(async (_prompt: string, _schema: unknown, signal: AbortSignal) => {
-      capturedSignal = signal;
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => resolve('{}'), 5000);
-        signal.addEventListener('abort', () => {
-          clearTimeout(timeout);
-          const err = new Error('aborted');
-          err.name = 'AbortError';
-          reject(err);
+    generateMock.mockImplementation(
+      async (_prompt: string, _schema: unknown, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => resolve('{}'), 5000);
+          signal.addEventListener('abort', () => {
+            clearTimeout(timeout);
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
         });
-      });
-    });
+      },
+    );
 
     const coordinator = createIdleDreamingCoordinator({
       getPolicy: () => policy,

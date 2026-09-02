@@ -9454,10 +9454,18 @@ export const saveEntityAliasSuggestion = (input: {
       evidence_snippet = COALESCE(excluded.evidence_snippet, entity_alias_suggestions.evidence_snippet),
       updated_at = CURRENT_TIMESTAMP
     WHERE status != 'dismissed'
-  `).run(id, entityId, suggestedName, sourceMeetingIdsJson, input.evidenceSnippet ?? null);
+  `).run(
+    id,
+    entityId,
+    suggestedName,
+    sourceMeetingIdsJson,
+    input.evidenceSnippet ?? null,
+  );
 };
 
-export const getEntityAliasSuggestions = (entityId: string): EntityAliasSuggestion[] => {
+export const getEntityAliasSuggestions = (
+  entityId: string,
+): EntityAliasSuggestion[] => {
   return db
     .prepare(
       "SELECT * FROM entity_alias_suggestions WHERE entity_id = ? AND status = 'pending' ORDER BY datetime(created_at) DESC",
@@ -9475,4 +9483,3 @@ export const updateEntityAliasSuggestionStatus = (
     WHERE id = ?
   `).run(status, id);
 };
-

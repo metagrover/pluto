@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { DreamingInputPackage } from '../../electron/dreaming/types';
 import {
   generateItemFingerprint,
-  validateProjectDreamingOutput,
   validatePersonDreamingOutput,
+  validateProjectDreamingOutput,
 } from '../../electron/dreaming/validateDreamingOutput';
 
 describe('validateDreamingOutput', () => {
@@ -61,12 +61,12 @@ describe('validateDreamingOutput', () => {
       status: 'updated',
       milestones: [
         {
-          "name": "Fake milestone",
-          "status": "completed",
-          "source_meeting_id": "fake-meeting-999",
-          "evidence_snippet": "hallucinated quote"
-        }
-      ]
+          name: 'Fake milestone',
+          status: 'completed',
+          source_meeting_id: 'fake-meeting-999',
+          evidence_snippet: 'hallucinated quote',
+        },
+      ],
     });
 
     const result = validateProjectDreamingOutput(raw, sampleProjectPackage);
@@ -78,12 +78,12 @@ describe('validateDreamingOutput', () => {
       status: 'updated',
       milestones: [
         {
-          "name": "Dismissed Old Milestone",
-          "status": "completed",
-          "source_meeting_id": "m-101",
-          "evidence_snippet": "Discussed Stripe integration"
-        }
-      ]
+          name: 'Dismissed Old Milestone',
+          status: 'completed',
+          source_meeting_id: 'm-101',
+          evidence_snippet: 'Discussed Stripe integration',
+        },
+      ],
     });
 
     const result = validateProjectDreamingOutput(raw, sampleProjectPackage);
@@ -111,7 +111,7 @@ describe('validateDreamingOutput', () => {
       headline: 'Backend Lead for Billing',
       current_focus: 'Working on Stripe API integration',
       recent_collaborators: ['Bob', 'Charlie'],
-      suggested_aliases: ['Alice Smith']
+      suggested_aliases: ['Alice Smith'],
     });
 
     const result = validatePersonDreamingOutput(raw, samplePersonPackage);
@@ -121,7 +121,11 @@ describe('validateDreamingOutput', () => {
   });
 
   it('generates consistent normalized fingerprints', () => {
-    expect(generateItemFingerprint('Stripe Elements connected')).toBe('stripe-elements-connected');
-    expect(generateItemFingerprint('   Stripe   Elements connected!  ')).toBe('stripe-elements-connected');
+    expect(generateItemFingerprint('Stripe Elements connected')).toBe(
+      'stripe-elements-connected',
+    );
+    expect(generateItemFingerprint('   Stripe   Elements connected!  ')).toBe(
+      'stripe-elements-connected',
+    );
   });
 });

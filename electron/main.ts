@@ -345,6 +345,9 @@ import {
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
+import { createIdleDreamingCoordinator } from './dreaming/idleDreamingCoordinator';
+import { packageEntityNotes } from './dreaming/packageEntityNotes';
+import { reconcileDreamingOutput } from './dreaming/reconcileDreamingOutput';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
@@ -456,6 +459,9 @@ import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 
 let backgroundKnowledgeRefresh: BackgroundKnowledgeRefreshCoordinator | null =
   null;
+let idleDreamingCoordinator: ReturnType<
+  typeof createIdleDreamingCoordinator
+> | null = null;
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
@@ -728,6 +734,8 @@ let stopIdentityReconciliation: (() => void) | undefined;
 app.on('before-quit', async () => {
   backgroundKnowledgeRefresh?.close();
   backgroundKnowledgeRefresh = null;
+  idleDreamingCoordinator?.notifyForegroundActivity();
+  idleDreamingCoordinator = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
   console.log('[Pluto] Shutting down...');
@@ -782,9 +790,56 @@ app.whenReady().then(async () => {
       );
     },
   });
+  idleDreamingCoordinator = createIdleDreamingCoordinator({
+    getPolicy: () => ({
+      systemIdleSeconds: powerMonitor.getSystemIdleTime(),
+      onBattery: powerMonitor.isOnBatteryPower(),
+      thermalState: powerMonitor.getCurrentThermalState(),
+      paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
+        ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
+      ),
+    }),
+    getNextDirtyEntityId: () => {
+      const projects = db.getEntitiesByType('project');
+      if (projects.length > 0) {
+        return { entityId: projects[0].id, type: 'project' };
+      }
+      const people = db.getEntitiesByType('person');
+      if (people.length > 0) {
+        return { entityId: people[0].id, type: 'person' };
+      }
+      return null;
+    },
+    packageNotes: (entityId: string) => packageEntityNotes(entityId),
+    generate: async (prompt, responseSchema, signal) => {
+      const provider = await getProvider(await getAllSettings(db));
+      signal?.throwIfAborted();
+      return provider.synthesizeKnowledgeDocument(prompt, {
+        responseSchema,
+        signal,
+      });
+    },
+    reconcile: async (entityId, type, output) => {
+      await reconcileDreamingOutput(entityId, type, output, {
+        getEntity: db.getEntity,
+        upsertEntity: db.upsertEntity,
+        saveAliasSuggestion: db.saveEntityAliasSuggestion,
+        isItemDismissed: db.isItemDismissed,
+      });
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('MEETING_NOTES_UPDATED');
+      }
+    },
+  });
+
   powerMonitor.on('user-did-become-active', () => {
     backgroundKnowledgeRefresh?.notifyForegroundActivity();
+    idleDreamingCoordinator?.notifyForegroundActivity();
   });
+
+  setInterval(() => {
+    void idleDreamingCoordinator?.attemptIdleRun();
+  }, 60_000);
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) =>
       handleIdentityRequest(channel, payload),
@@ -2982,9 +3037,25 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(
     'UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS',
-    (_event, { id, status }: { id: string; status: 'pending' | 'merged' | 'dismissed' }) => {
+    (
+      _event,
+      {
+        id,
+        status,
+      }: { id: string; status: 'pending' | 'merged' | 'dismissed' },
+    ) => {
       db.updateEntityAliasSuggestionStatus(id, status);
       return { success: true };
+    },
+  );
+  ipcMain.handle(
+    'TRIGGER_DREAMING_NOW',
+    async (_event, options?: { entityId?: string; force?: boolean }) => {
+      return (
+        (await idleDreamingCoordinator?.triggerNow(options)) ?? {
+          status: 'no_work',
+        }
+      );
     },
   );
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>

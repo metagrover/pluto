@@ -2,6 +2,7 @@ import {
   readUserProjectMilestones,
   withSavedUserProjectMilestone,
 } from '../../src/utils/projectMilestones';
+import * as db from '../db';
 import type { Entity } from '../db';
 import type {
   DreamingEntityType,
@@ -36,12 +37,18 @@ export const reconcileDreamingOutput = async (
   entityId: string,
   type: DreamingEntityType,
   output: ProjectDreamingOutput | PersonDreamingOutput,
-  deps: ReconcileDreamingOutputDeps,
+  deps?: Partial<ReconcileDreamingOutputDeps>,
 ): Promise<void> => {
-  const entity = deps.getEntity(entityId);
+  const getEntity = deps?.getEntity ?? db.getEntity;
+  const upsertEntity = deps?.upsertEntity ?? db.upsertEntity;
+  const saveAliasSuggestion =
+    deps?.saveAliasSuggestion ?? db.saveEntityAliasSuggestion;
+  const isItemDismissed = deps?.isItemDismissed ?? db.isItemDismissed;
+
+  const entity = getEntity(entityId);
   if (!entity) return;
 
-  const now = deps.now?.() ?? new Date().toISOString();
+  const now = deps?.now?.() ?? new Date().toISOString();
   let metadata: Record<string, unknown> = {};
   try {
     metadata = JSON.parse(entity.metadata || '{}');
@@ -65,7 +72,7 @@ export const reconcileDreamingOutput = async (
           (ex) =>
             ex.title.trim().toLowerCase() === m.name.trim().toLowerCase(),
         );
-        const dismissed = deps.isItemDismissed(entityId, 'milestone', m.name);
+        const dismissed = isItemDismissed(entityId, 'milestone', m.name);
         if (!alreadyExists && !dismissed) {
           const res = withSavedUserProjectMilestone(
             metadataStr,
@@ -91,14 +98,14 @@ export const reconcileDreamingOutput = async (
 
     if (projectOutput.suggested_aliases) {
       for (const alias of projectOutput.suggested_aliases) {
-        deps.saveAliasSuggestion({
+        saveAliasSuggestion({
           entityId,
           suggestedName: alias,
         });
       }
     }
 
-    deps.upsertEntity({
+    upsertEntity({
       ...entity,
       metadata: finalMetadata,
     });
@@ -117,14 +124,14 @@ export const reconcileDreamingOutput = async (
 
     if (personOutput.suggested_aliases) {
       for (const alias of personOutput.suggested_aliases) {
-        deps.saveAliasSuggestion({
+        saveAliasSuggestion({
           entityId,
           suggestedName: alias,
         });
       }
     }
 
-    deps.upsertEntity({
+    upsertEntity({
       ...entity,
       metadata,
     });
