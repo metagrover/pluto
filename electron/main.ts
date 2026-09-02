@@ -2514,7 +2514,19 @@ app.whenReady().then(async () => {
         }
       : meeting;
   };
-  ipcMain.handle('GET_MEETINGS', () => db.getMeetings().map(withNotesRun));
+  ipcMain.handle('GET_MEETINGS', () => db.getMeetingSummaries());
+  ipcMain.handle('GET_MEETING_PROCESSING_STATUSES', () =>
+    db.getMeetingProcessingStatuses(),
+  );
+  ipcMain.handle('GET_MEETING_STATUS', (_event, id) =>
+    db.getMeetingSummary(id),
+  );
+  ipcMain.handle('SEARCH_MEETING_SUMMARIES', (_event, query) =>
+    typeof query === 'string' ? db.searchMeetingSummaries(query, 5) : [],
+  );
+  ipcMain.handle('GET_DASHBOARD_MEETING_PREVIEWS', () =>
+    db.getMeetingDashboardPreviews(),
+  );
   ipcMain.handle('GET_MEETING', (_event, id) =>
     withNotesRun(db.getMeeting(id)),
   );

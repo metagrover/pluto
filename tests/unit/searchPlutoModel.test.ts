@@ -80,6 +80,25 @@ describe('buildSearchPlutoResults', () => {
     ).toEqual([]);
   });
 
+  it('keeps bounded database meeting matches even when only private notes matched', () => {
+    const results = buildSearchPlutoResults({
+      query: 'heliotrope',
+      meetings: [],
+      meetingMatches: [
+        makeMeeting({ id: 'meeting-notes-match', title: 'Weekly sync' }),
+      ],
+      entities: [],
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        kind: 'meeting',
+        id: 'meeting-notes-match',
+        title: 'Weekly sync',
+      }),
+    ]);
+  });
+
   it('sorts matching results by latest creation time within each result type', () => {
     const results = buildSearchPlutoResults({
       query: 'launch',

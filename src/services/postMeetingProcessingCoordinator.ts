@@ -13,8 +13,8 @@ export const shouldRunMeetingFinalTranscription = (
       meeting.finalization_status !== 'recovery_required' &&
       meeting.transcript_status === 'provisional' &&
       meeting.capture_journal_generation &&
-      meeting.transcript_json &&
-      (meeting.audio_path || meeting.system_audio_path),
+      (meeting.transcript_json || meeting.has_transcript) &&
+      (meeting.audio_path || meeting.system_audio_path || meeting.has_audio),
   );
 
 export const canRetryMeetingFinalTranscription = (
@@ -24,7 +24,7 @@ export const canRetryMeetingFinalTranscription = (
     !meeting ||
     meeting.transcript_status !== 'needs_attention' ||
     !meeting.capture_journal_generation ||
-    !(meeting.audio_path || meeting.system_audio_path)
+    !(meeting.audio_path || meeting.system_audio_path || meeting.has_audio)
   ) {
     return false;
   }
@@ -32,9 +32,11 @@ export const canRetryMeetingFinalTranscription = (
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: { policy?: unknown; state?: unknown };
     };
-    return (
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'needs_attention'
+    return Boolean(
+      (meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'needs_attention') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'needs_attention'),
     );
   } catch {
     return false;
@@ -50,11 +52,14 @@ export const isParakeetValidatedMeeting = (
       finalTranscription?: { policy?: unknown; state?: unknown };
       finalTranscriptionResult?: { policy?: unknown; engine?: unknown };
     };
-    return (
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'complete' &&
-      integrity.finalTranscriptionResult?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscriptionResult.engine === 'parakeet_coreml'
+    return Boolean(
+      (meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'complete' &&
+        meeting.final_transcription_engine === 'parakeet_coreml') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'complete' &&
+          integrity.finalTranscriptionResult?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscriptionResult.engine === 'parakeet_coreml'),
     );
   } catch {
     return false;
@@ -76,7 +81,9 @@ export const meetingProcessingFingerprint = (
     meeting.transcript_integrity_json ?? null,
     meeting.downstream_processing_json ?? null,
     meeting.analysis_run_json ?? null,
-    Boolean(meeting.analysis_json || meeting.enhanced_notes),
+    Boolean(
+      meeting.analysis_json || meeting.enhanced_notes || meeting.has_analysis,
+    ),
   ]);
 
 export const selectNextMeetingForProcessing = (
