@@ -240,12 +240,24 @@ describe('NativeJsonLineProcess live events', () => {
     },
   );
 
-  it('rejects a line larger than one megabyte', async () => {
+  it('accepts a bounded multi-megabyte speaker-evidence response', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const request = process.request({ schemaVersion: 1, id: 'speaker-1' });
+
+    child.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id: 'speaker-1', ok: true, result: { evidence: 'x'.repeat(2 * 1024 * 1024) } })}\n`,
+    );
+
+    await expect(request).resolves.toMatchObject({ id: 'speaker-1', ok: true });
+  });
+
+  it('rejects a line larger than sixteen megabytes', async () => {
     const child = new FakeChild();
     const process = makeProcess(child);
     const request = process.request({ schemaVersion: 1, id: 'open-1' });
 
-    child.stdout.write(`{"private":"${'x'.repeat(1024 * 1024)}"}`);
+    child.stdout.write(`{"private":"${'x'.repeat(16 * 1024 * 1024)}"}`);
 
     await expect(request).rejects.toThrow('parakeet_protocol_invalid');
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
