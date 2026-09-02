@@ -37,6 +37,71 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.droppedMicWordCount).toBe(3);
   });
 
+  it('retains the mic phrase when sealed activity identifies the duplicate as local speech', () => {
+    const shared = [
+      { word: 'local', start: 1, end: 1.4 },
+      { word: 'speaker', start: 1.5, end: 1.9 },
+      { word: 'phrase', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [{ speaker: 'Me', startTime: 0.8, endTime: 2.6 }],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.droppedMicWordCount).toBe(0);
+  });
+
+  it('preserves an equal-activity word once as Unknown instead of inventing a speaker', () => {
+    const shared = [
+      { word: 'shared', start: 1, end: 1.4 },
+      { word: 'overlap', start: 1.5, end: 1.9 },
+      { word: 'phrase', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+        { speaker: 'Them', startTime: 0.8, endTime: 2.6 },
+      ],
+    });
+
+    expect(result.micSegments).toEqual([
+      expect.objectContaining({ speaker: 'Unknown' }),
+    ]);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.unresolvedAmbiguousSeconds).toBe(0);
+  });
+
+  it('uses sealed activity only to break a word-level acoustic tie', () => {
+    const shared = [
+      { word: 'local', start: 1, end: 1.4 },
+      { word: 'tie', start: 1.5, end: 1.9 },
+      { word: 'breaker', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+        { speaker: 'Them', startTime: 0.8, endTime: 2.6 },
+      ],
+      fallbackActivityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+      ],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.unresolvedAmbiguousSeconds).toBe(0);
+  });
+
   it('collapses phrases even when segment boundaries differ', () => {
     const result = collapseCrossChannelWordBleed({
       micSegments: [

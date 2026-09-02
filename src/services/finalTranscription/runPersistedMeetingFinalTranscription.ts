@@ -1,5 +1,6 @@
 import type { Meeting } from '../../types.ts';
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
+import { isVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust.ts';
 import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
@@ -168,9 +169,7 @@ export const runPersistedMeetingFinalTranscription = async (
         } = commit.metadata;
         if (
           !speakerAttribution ||
-          speakerAttribution.diarizationAttempted !== true ||
-          speakerAttribution.mappingApplied !== true ||
-          speakerAttribution.source === 'channel_fallback'
+          !isVerifiedSpeakerAttribution(speakerAttribution)
         ) {
           throw new Error(
             'invalid_transcript_trust_candidate:final_transcription_validated:speaker_attribution_unverified',
@@ -191,7 +190,9 @@ export const runPersistedMeetingFinalTranscription = async (
               computeType: commit.metadata.computeType,
               language: commit.metadata.language,
               canonicalSource: 'recovered_channels',
-              diarization: true,
+              diarization:
+                speakerAttribution.source !== 'recovered_channel_acoustic_v1' &&
+                speakerAttribution.diarizationAttempted,
               elapsedMs: commit.metadata.elapsedMs,
               providerLabel: commit.metadata.providerVersions.join(','),
               warnings: commit.metadata.warnings,
