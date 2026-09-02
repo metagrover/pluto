@@ -47,9 +47,7 @@ export interface IdleDreamingCoordinatorDeps {
     type: DreamingEntityType,
     output: ProjectDreamingOutput | PersonDreamingOutput,
   ) => Promise<void>;
-  getEntity?: (
-    entityId: string,
-  ) => { type: string } | null | undefined;
+  getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
 }
