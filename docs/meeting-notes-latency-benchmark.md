@@ -41,10 +41,14 @@ This flag affects the private benchmark only. Product generation retains an audi
 
 Reports contain opaque case keys, source counts, planned leaf and generated-node counts, writer/audit/merge and terminal-outcome counts, aggregate stage timings, repair/repartition counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, raw provider responses, and individual stage payloads.
 
-To summarize the newest 100 organic runs without reading meeting content:
+To summarize the newest 100 organic attempts without reading meeting content:
 
 ```bash
 PLUTO_DB_PATH="/absolute/path/to/pluto.db" pnpm run report:meeting-notes-latency
 ```
 
-Buckets with fewer than three samples report `not_enough_evidence` rather than an average.
+The schema-v2 organic report distinguishes attempt count from distinct-meeting count, shows the maximum attempts concentrated on one meeting, counts terminal failure codes and truncated stages, and calculates latency only from published attempts. Meeting and run identifiers are used only for in-memory grouping and are never printed. Databases created before stable failure-code persistence remain readable; their historical failure-code counts are empty rather than inferred from raw errors.
+
+Buckets with fewer than three attempts report `not_enough_evidence` rather than claiming a representative measurement. A bucket can have many attempts but only one distinct meeting; that concentration must be reported and must not be described as evidence across a corpus.
+
+Automatic production generation is capped at two failed attempts for the same current transcript, eligibility state, and user notes across app restarts. A source or user-note revision restores automatic eligibility. Manual retry remains available and does not consume the automatic-attempt budget.

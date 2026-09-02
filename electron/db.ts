@@ -266,6 +266,7 @@ export type MeetingAnalysisRun = {
   stage: string;
   queue_position: number | null;
   error_code: string | null;
+  automatic_attempt_count: number;
   started_at: string;
   updated_at: string;
 };
@@ -372,6 +373,7 @@ const initDb = () => {
         stage TEXT NOT NULL,
         queue_position INTEGER,
         error_code TEXT,
+        automatic_attempt_count INTEGER NOT NULL DEFAULT 0,
         started_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -381,6 +383,7 @@ const initDb = () => {
         meeting_id TEXT NOT NULL,
         reason TEXT NOT NULL,
         status TEXT NOT NULL,
+        error_code TEXT,
         metrics_json TEXT NOT NULL,
         started_at TEXT NOT NULL,
         completed_at TEXT,
@@ -730,6 +733,27 @@ const initDb = () => {
   ) {
     db.exec(
       'ALTER TABLE meeting_analysis_runs ADD COLUMN queue_position INTEGER',
+    );
+  }
+  const meetingAnalysisRunHistoryColumns = db
+    .prepare('PRAGMA table_info(meeting_analysis_run_history)')
+    .all() as TableInfoColumn[];
+  if (
+    !meetingAnalysisRunHistoryColumns.some(
+      (column) => column.name === 'error_code',
+    )
+  ) {
+    db.exec(
+      'ALTER TABLE meeting_analysis_run_history ADD COLUMN error_code TEXT',
+    );
+  }
+  if (
+    !meetingAnalysisRunColumns.some(
+      (column) => column.name === 'automatic_attempt_count',
+    )
+  ) {
+    db.exec(
+      'ALTER TABLE meeting_analysis_runs ADD COLUMN automatic_attempt_count INTEGER NOT NULL DEFAULT 0',
     );
   }
 
@@ -3288,6 +3312,7 @@ export const beginMeetingAnalysisRun = (input: {
   sourceRevision: string;
   eligibilityRevision: string;
   userNotesHash: string;
+  reason: 'automatic' | 'manual';
   stage?: 'queued' | 'notes_writer';
   queuePosition?: number | null;
 }): { status: 'started' } => {
@@ -3299,12 +3324,13 @@ export const beginMeetingAnalysisRun = (input: {
     (input.queuePosition ?? 0) > 0
       ? input.queuePosition!
       : null;
+  const reason = input.reason;
   db.prepare(
     `INSERT INTO meeting_analysis_runs (
       meeting_id, run_id, input_revision, source_revision, eligibility_revision,
       user_notes_hash, notes_status, secondary_status, stage, queue_position,
-      error_code, started_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?, NULL, ?, ?)
+      error_code, automatic_attempt_count, started_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?, NULL, ?, ?, ?)
     ON CONFLICT(meeting_id) DO UPDATE SET
       run_id = excluded.run_id,
       input_revision = excluded.input_revision,
@@ -3316,6 +3342,12 @@ export const beginMeetingAnalysisRun = (input: {
       stage = excluded.stage,
       queue_position = excluded.queue_position,
       error_code = NULL,
+      automatic_attempt_count = CASE
+        WHEN ? != 'automatic' THEN meeting_analysis_runs.automatic_attempt_count
+        WHEN meeting_analysis_runs.input_revision = excluded.input_revision
+          THEN meeting_analysis_runs.automatic_attempt_count + 1
+        ELSE 1
+      END,
       started_at = excluded.started_at,
       updated_at = excluded.updated_at`,
   ).run(
@@ -3327,8 +3359,10 @@ export const beginMeetingAnalysisRun = (input: {
     input.userNotesHash,
     stage,
     queuePosition,
+    reason === 'automatic' ? 1 : 0,
     now,
     now,
+    reason,
   );
   return { status: 'started' };
 };
@@ -3451,6 +3485,7 @@ export type MeetingAnalysisRunMetricRecord = {
   meetingId: string;
   reason: 'automatic' | 'manual';
   status: 'published' | 'failed' | 'cancelled';
+  errorCode: string | null;
   metrics: MeetingNotesRunMetric;
   startedAt: string;
   completedAt: string;
@@ -3465,6 +3500,7 @@ export const upsertMeetingAnalysisRunMetric = (input: {
   runId: string;
   reason: 'automatic' | 'manual';
   status: 'published' | 'failed' | 'cancelled';
+  errorCode?: string | null;
   metrics: MeetingNotesRunMetric;
   startedAt: string;
   completedAt: string;
@@ -3481,12 +3517,13 @@ export const upsertMeetingAnalysisRunMetric = (input: {
   db.transaction(() => {
     db.prepare(
       `INSERT INTO meeting_analysis_run_history (
-         run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         run_id, meeting_id, reason, status, error_code, metrics_json, started_at, completed_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(run_id) DO UPDATE SET
          meeting_id = excluded.meeting_id,
          reason = excluded.reason,
          status = excluded.status,
+         error_code = excluded.error_code,
          metrics_json = excluded.metrics_json,
          started_at = excluded.started_at,
          completed_at = excluded.completed_at`,
@@ -3495,6 +3532,7 @@ export const upsertMeetingAnalysisRunMetric = (input: {
       String(input.meetingId),
       input.reason,
       input.status,
+      input.errorCode ?? null,
       metricsJson,
       input.startedAt,
       input.completedAt,
@@ -3519,7 +3557,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
   );
   const rows = db
     .prepare(
-      `SELECT run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
+      `SELECT run_id, meeting_id, reason, status, error_code, metrics_json, started_at, completed_at
        FROM meeting_analysis_run_history
        WHERE completed_at IS NOT NULL
        ORDER BY completed_at DESC, rowid DESC
@@ -3530,6 +3568,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
     meeting_id: string;
     reason: 'automatic' | 'manual';
     status: 'published' | 'failed' | 'cancelled';
+    error_code: string | null;
     metrics_json: string;
     started_at: string;
     completed_at: string;
@@ -3539,6 +3578,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
     meetingId: row.meeting_id,
     reason: row.reason,
     status: row.status,
+    errorCode: row.error_code,
     metrics: parseMeetingNotesRunMetric(row.metrics_json),
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -3613,6 +3653,28 @@ export const getMeetingAnalysisPublicationRevisions = (
   } catch {
     return null;
   }
+};
+
+export const isMeetingAnalysisAutomaticRetryExhausted = (
+  meeting: PersistedMeeting | null | undefined,
+  existingRun?: MeetingAnalysisRun | null,
+): boolean => {
+  if (!meeting) return false;
+  const run = existingRun ?? getMeetingAnalysisRun(meeting.id);
+  if (
+    !run ||
+    run.notes_status !== 'failed' ||
+    run.automatic_attempt_count < 2
+  ) {
+    return false;
+  }
+  const revisions = getMeetingAnalysisPublicationRevisions(meeting);
+  return Boolean(
+    revisions &&
+      run.source_revision === revisions.sourceRevision &&
+      run.eligibility_revision === revisions.eligibilityRevision &&
+      run.user_notes_hash === revisions.userNotesHash,
+  );
 };
 
 /**
