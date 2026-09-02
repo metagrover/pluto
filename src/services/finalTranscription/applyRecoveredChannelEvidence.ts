@@ -5,6 +5,7 @@ import type {
 import type { StoredTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.ts';
 
 const MINIMUM_LOCAL_COVERAGE = 0.5;
+const MINIMUM_CONCURRENT_SYSTEM_COVERAGE = 0.5;
 const MINIMUM_ATTRIBUTION_CONFIDENCE = 0.8;
 
 const activitySeconds = (
@@ -41,14 +42,28 @@ export const applyRecoveredChannelEvidence = <
   attribution: StoredTranscriptSpeakerAttribution;
   reasons: ['low_attribution_confidence'] | [];
 } => {
+  const systemSegments = input.segments.filter(
+    (segment) => segment.speaker === 'Them',
+  );
   const segments = input.segments.map((segment) => {
     if (segment.speaker === 'Them' || segment.speaker === 'Unknown') {
       return { ...segment } as T;
     }
     const duration = Math.max(0.01, segment.endTime - segment.startTime);
+    const concurrentSystemSeconds = systemSegments.reduce(
+      (total, systemSegment) =>
+        total +
+        Math.max(
+          0,
+          Math.min(segment.endTime, systemSegment.endTime) -
+            Math.max(segment.startTime, systemSegment.startTime),
+        ),
+      0,
+    );
     if (
+      concurrentSystemSeconds / duration < MINIMUM_CONCURRENT_SYSTEM_COVERAGE ||
       activitySeconds(segment, input.activityWindows, 'Me') / duration >=
-      MINIMUM_LOCAL_COVERAGE
+        MINIMUM_LOCAL_COVERAGE
     ) {
       return { ...segment, speaker: 'Me', nearEndEvidence: true } as T;
     }
