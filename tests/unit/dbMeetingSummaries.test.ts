@@ -138,6 +138,7 @@ describe('meeting summary read model', () => {
         },
       }),
       transcript_integrity_json: JSON.stringify({
+        speakerAttributionVerified: true,
         finalTranscription: {
           policy: 'parakeet_final_v1',
           state: 'complete',
@@ -151,12 +152,31 @@ describe('meeting summary read model', () => {
     expect(getMeetingProcessingStatuses('speaker-trust-status')).toEqual([
       expect.objectContaining({
         id: 'speaker-trust-status',
-        speaker_attribution_verified: false,
+        speaker_attribution_verified: true,
       }),
     ]);
     expect(
       JSON.stringify(getMeetingProcessingStatuses('speaker-trust-status')),
     ).not.toContain('PRIVATE');
+  });
+
+  it('treats legacy completed attribution without a trust marker as unverified', () => {
+    saveMeeting({
+      id: 'legacy-speaker-trust-status',
+      title: 'Meeting',
+      started_at: '2026-09-01T12:36:00.000Z',
+      transcript_status: 'validated',
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+      }),
+    });
+
+    expect(getMeetingProcessingStatuses('legacy-speaker-trust-status')).toEqual(
+      [expect.objectContaining({ speaker_attribution_verified: false })],
+    );
   });
 
   it('searches private note text while returning result metadata only', () => {

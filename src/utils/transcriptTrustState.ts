@@ -44,6 +44,7 @@ export type TranscriptTrustEnvelopeV2 = {
   state: TranscriptLifecycleStatus;
   causes: TranscriptTrustCause[];
   evidenceProvenance: Record<string, unknown> & { kind: string };
+  speakerAttributionVerified?: boolean;
   activityEvidence?: unknown;
   evidence?: Record<string, number>;
   validationProof?: {
@@ -572,6 +573,7 @@ export const parseTranscriptTrustEnvelope = (
       [
         'activityEvidence',
         'evidence',
+        'speakerAttributionVerified',
         'validationProof',
         'retry',
         'finalTranscription',
@@ -584,6 +586,8 @@ export const parseTranscriptTrustEnvelope = (
     !STATES.has(raw.state as TranscriptLifecycleStatus) ||
     !Array.isArray(raw.causes) ||
     !raw.causes.every(validCause) ||
+    (raw.speakerAttributionVerified !== undefined &&
+      typeof raw.speakerAttributionVerified !== 'boolean') ||
     (raw.reasons !== undefined &&
       (!Array.isArray(raw.reasons) ||
         !raw.reasons.every((reason) => typeof reason === 'string'))) ||

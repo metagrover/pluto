@@ -213,6 +213,7 @@ export const runPersistedMeetingFinalTranscription = async (
           schemaVersion: 2,
           state: 'validated',
           causes: [],
+          speakerAttributionVerified: true,
           evidenceProvenance: integrity.evidenceProvenance,
           activityEvidence: integrity.activityEvidence,
           evidence: commit.integrity,

@@ -1,7 +1,7 @@
 # Diarization-First Speaker Attribution Restoration
 
-**Issue:** [#725](https://github.com/metagrover/pluto/issues/725)  
-**Status:** Approved  
+**Issue:** [#725](https://github.com/metagrover/pluto/issues/725)
+**Status:** Approved
 **Date:** 2026-09-02
 
 ## Problem

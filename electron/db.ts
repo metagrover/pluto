@@ -3438,7 +3438,6 @@ export const getMeetingSummaries = (
 
 const readMeetingProcessingStatus = (row: {
   id: string | number;
-  transcript_json: string | null;
   transcript_integrity_json: string | null;
   automatic_attempt_count: number | null;
   notes_status: string | null;
@@ -3491,7 +3490,7 @@ const readMeetingProcessingStatus = (row: {
     speaker_attribution_verified:
       finalTranscription?.policy === 'parakeet_final_v1' &&
       finalTranscription.state === 'complete'
-        ? hasVerifiedSpeakerAttribution(row.transcript_json)
+        ? integrity.speakerAttributionVerified === true
         : null,
     automatic_attempts_exhausted: automaticAttemptsExhausted,
   };
@@ -3501,7 +3500,7 @@ export const getMeetingProcessingStatuses = (
   meetingId?: string | number,
 ): MeetingProcessingStatus[] => {
   const statement = db.prepare(
-    `SELECT m.id, m.transcript_json, m.transcript_integrity_json,
+    `SELECT m.id, m.transcript_integrity_json,
             r.automatic_attempt_count, r.notes_status
      FROM meetings AS m
      LEFT JOIN meeting_analysis_runs AS r ON r.meeting_id = m.id
@@ -3520,7 +3519,6 @@ export const getMeetingProcessingStatuses = (
     meetingId === undefined ? statement.all() : statement.all(String(meetingId))
   ) as Array<{
     id: string | number;
-    transcript_json: string | null;
     transcript_integrity_json: string | null;
     automatic_attempt_count: number | null;
     notes_status: string | null;

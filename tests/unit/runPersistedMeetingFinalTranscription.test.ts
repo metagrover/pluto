@@ -209,6 +209,12 @@ describe('runPersistedMeetingFinalTranscription', () => {
       source: 'offline_diarization_acoustic_v1',
       mappingApplied: true,
     });
+    expect(
+      JSON.parse(
+        (commitCall?.[1] as { transcriptIntegrityJson: string })
+          .transcriptIntegrityJson,
+      ),
+    ).toMatchObject({ speakerAttributionVerified: true });
   });
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
