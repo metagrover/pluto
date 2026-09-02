@@ -355,6 +355,23 @@ describe('MID Generator', () => {
       expect(mid.participants[1].entity_id).toBe('speaker:them');
     });
 
+    it('does not treat unresolved speaker fragments as participants', () => {
+      const input = mockInput({
+        meeting_entities: [mockEntity({ type: 'topic', name: 'Some Topic' })],
+        transcript_segments: [
+          { text: 'Hello', speaker: 'Me' },
+          { text: 'Overlapping speech', speaker: 'Unknown' },
+          { text: 'Hi there', speaker: 'Them' },
+        ],
+      });
+      const mid = generateMid(input);
+
+      expect(mid.participants.map((participant) => participant.name)).toEqual([
+        'Me',
+        'Them',
+      ]);
+    });
+
     it('does not apply speaker fallback when person entities already exist', () => {
       const input = mockInput({
         meeting_entities: [
