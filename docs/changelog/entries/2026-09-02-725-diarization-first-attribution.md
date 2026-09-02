@@ -1,7 +1,7 @@
 ### Verify speakers acoustically before publishing a final transcript
 
 - **Issue:** [#725](https://github.com/metagrover/pluto/issues/725)
-- **PR:** [#729](https://github.com/metagrover/pluto/pull/729), [#735](https://github.com/metagrover/pluto/pull/735)
+- **PR:** [#729](https://github.com/metagrover/pluto/pull/729), [#735](https://github.com/metagrover/pluto/pull/735), [#736](https://github.com/metagrover/pluto/pull/736)
 - **Changed:** Pluto's local Parakeet finalization independently decodes microphone and system recordings, reconciles duplicate ownership per word with frame-level acoustic evidence, and uses sealed capture activity only to break acoustic ties. Irreducible timestamped ties are preserved once as `Unknown`; mixed-only or timestamp-poor ambiguity still fails closed.
 - **Why:** Whole-meeting diarization can collapse or fragment a two-person recording, while always retaining the system copy of cross-channel duplicates can turn a sentence spoken by the meeting owner into remote speech.
 - **Replaced:** Whole-cluster Me/Them assignment as the final authority for recovered dual-channel recordings, the hard-coded system-copy winner for every duplicate, and treating a bounded uncertain fragment as a reason to fail the entire retry.
