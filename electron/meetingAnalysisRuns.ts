@@ -33,6 +33,7 @@ type MeetingAnalysisRunRecord = {
   input_revision: string;
   notes_status: string;
   secondary_status?: string;
+  automatic_attempt_count?: number;
 };
 
 type EntityHint = { type: string; name: string };
@@ -54,6 +55,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
     sourceRevision: string;
     eligibilityRevision: string;
     userNotesHash: string;
+    reason: 'automatic' | 'manual';
     stage?: 'queued' | 'notes_writer';
     queuePosition?: number | null;
   }): unknown;
@@ -123,6 +125,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
     runId: string;
     reason: 'automatic' | 'manual';
     status: 'published' | 'failed' | 'cancelled';
+    errorCode?: string | null;
     metrics: MeetingNotesRunMetric;
     startedAt: string;
     completedAt: string;
@@ -212,6 +215,7 @@ type ActiveRun = {
 };
 
 const NOTES_CONTEXT_TOKENS = 16_384;
+export const MAX_AUTOMATIC_MEETING_NOTES_ATTEMPTS = 2;
 
 const hashFingerprint = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -622,6 +626,15 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
     if (
       input.reason === 'automatic' &&
+      persisted?.notes_status === 'failed' &&
+      persisted.input_revision === fingerprint &&
+      (persisted.automatic_attempt_count ?? 0) >=
+        MAX_AUTOMATIC_MEETING_NOTES_ATTEMPTS
+    ) {
+      throw new Error('meeting_notes_automatic_attempts_exhausted');
+    }
+    if (
+      input.reason === 'automatic' &&
       persisted?.notes_status === 'published' &&
       persisted.input_revision === fingerprint
     ) {
@@ -679,7 +692,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       startedAtMs: metricsStartedAtMs,
     });
     let metricFinalized = false;
-    const finalizeMetric = (status: 'published' | 'failed' | 'cancelled') => {
+    const finalizeMetric = (
+      status: 'published' | 'failed' | 'cancelled',
+      terminalErrorCode?: string | null,
+    ) => {
       if (metricFinalized) return;
       metricFinalized = true;
       const completedAtMs = Date.now();
@@ -688,6 +704,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         runId,
         reason: primaryReason,
         status,
+        errorCode: terminalErrorCode ?? null,
         metrics: runMetrics.snapshot(status, completedAtMs),
         startedAt: metricsStartedAt,
         completedAt: new Date(completedAtMs).toISOString(),
@@ -698,6 +715,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       runId,
       inputRevision: fingerprint,
       ...revisions,
+      reason: primaryReason,
       stage: 'queued',
       queuePosition: null,
     });
@@ -834,7 +852,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             stage: code === 'notes_cancelled' ? 'cancelled' : 'notes_failed',
             errorCode: code,
           });
-          finalizeMetric(code === 'notes_cancelled' ? 'cancelled' : 'failed');
+          finalizeMetric(
+            code === 'notes_cancelled' ? 'cancelled' : 'failed',
+            code,
+          );
           notify(meetingId);
           throw error;
         } finally {

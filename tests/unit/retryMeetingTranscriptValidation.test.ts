@@ -1693,4 +1693,16 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
       }),
     ).toBe(false);
   });
+
+  it('stops automatic analysis when the current notes run reports exhaustion', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        transcript_status: 'validated',
+        analysis_run_json: JSON.stringify({
+          automatic_attempts_exhausted: true,
+        }),
+      }),
+    ).toBe(false);
+  });
 });

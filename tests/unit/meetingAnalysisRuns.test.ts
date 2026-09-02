@@ -175,6 +175,166 @@ describe('meeting analysis run coordinator', () => {
     ).toBeGreaterThanOrEqual(25);
   });
 
+  it('stops automatic retries after two failures for the same fingerprint while allowing manual retry', async () => {
+    const generateStructuredAnalysis = vi.fn().mockResolvedValue({
+      analysis_schema_version: 3,
+      overview: 'Manually recovered notes.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    });
+    const revisions = {
+      sourceRevision: 'attempt-source',
+      eligibilityRevision: 'attempt-eligibility',
+      userNotesHash: 'attempt-notes',
+    };
+    const fingerprint = createHash('sha256')
+      .update(
+        JSON.stringify({
+          ...revisions,
+          terms: [],
+          template: 'auto',
+          provider: 'ollama',
+          model: 'gemma4:12b',
+          thinking: null,
+          seed: null,
+          contextTokens: 16384,
+          promptVersion: 'notes-v28',
+        }),
+        'utf8',
+      )
+      .digest('hex');
+    let persistedInputRevision = fingerprint;
+    const beginMeetingAnalysisRun = vi.fn();
+    const db = {
+      getMeeting: () => ({
+        id: 'attempt-cap',
+        transcript_json: JSON.stringify({
+          segments: [{ speaker: 1, text: 'Stable transcript.' }],
+        }),
+        transcript_status: 'validated',
+        transcript_integrity_json: JSON.stringify({ verified: true }),
+        user_notes: '',
+      }),
+      getMeetingAnalysisPublicationRevisions: () => revisions,
+      getMeetingAnalysisRun: () => ({
+        run_id: 'failed-run',
+        input_revision: persistedInputRevision,
+        notes_status: 'failed',
+        secondary_status: 'pending',
+        automatic_attempt_count: 2,
+      }),
+      beginMeetingAnalysisRun,
+      updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+      updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+      isMeetingAnalysisRunCurrent: () => true,
+      publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+      getAllEntities: () => [],
+    };
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db,
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      createRunId: () => 'retry-run',
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'attempt-cap',
+        requestId: 'automatic-request',
+        template: 'auto',
+        reason: 'automatic',
+      }),
+    ).rejects.toThrow('meeting_notes_automatic_attempts_exhausted');
+    expect(beginMeetingAnalysisRun).not.toHaveBeenCalled();
+    expect(generateStructuredAnalysis).not.toHaveBeenCalled();
+
+    persistedInputRevision = 'changed-input';
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'attempt-cap',
+        requestId: 'changed-automatic-request',
+        template: 'auto',
+        reason: 'automatic',
+      }),
+    ).resolves.toMatchObject({ status: 'published' });
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'automatic' }),
+    );
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'attempt-cap',
+        requestId: 'manual-request',
+        template: 'auto',
+        reason: 'manual',
+      }),
+    ).resolves.toMatchObject({ status: 'published' });
+    expect(beginMeetingAnalysisRun).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'manual' }),
+    );
+  });
+
+  it('records the stable terminal failure code in content-free run metrics', async () => {
+    const upsertMeetingAnalysisRunMetric = vi.fn();
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'failed-metric',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'Stable transcript.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'failed-source',
+          eligibilityRevision: 'failed-eligibility',
+          userNotesHash: 'failed-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+        upsertMeetingAnalysisRunMetric,
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: vi
+          .fn()
+          .mockRejectedValue(new Error('notes_context_exhausted')),
+      }),
+      createRunId: () => 'failed-metric-run',
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'failed-metric',
+        requestId: 'failed-metric-request',
+        template: 'auto',
+        reason: 'automatic',
+      }),
+    ).rejects.toThrow('notes_context_exhausted');
+    expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        errorCode: 'notes_context_exhausted',
+      }),
+    );
+  });
+
   it.each([false, true])(
     'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
     async (notificationFails) => {

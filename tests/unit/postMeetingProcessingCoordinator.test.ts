@@ -115,6 +115,21 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForProcessing([meeting], attempted)).toBeNull();
   });
 
+  it('changes the processing fingerprint when durable notes-run state changes', () => {
+    const meeting = incomplete('meeting');
+    const before = meetingProcessingFingerprint(meeting);
+
+    expect(
+      meetingProcessingFingerprint({
+        ...meeting,
+        analysis_run_json: JSON.stringify({
+          notes_status: 'failed',
+          automatic_attempt_count: 2,
+        }),
+      }),
+    ).not.toBe(before);
+  });
+
   it('does not skip an in-flight head meeting to start another local-model job', () => {
     const head = incomplete('newest');
     const next = incomplete('next');

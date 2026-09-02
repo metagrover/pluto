@@ -2498,11 +2498,18 @@ app.whenReady().then(async () => {
 
   const withNotesRun = (value: unknown) => {
     const meeting = value as db.PersistedMeeting | undefined;
+    const run = meeting ? db.getMeetingAnalysisRun(meeting.id) : null;
     return meeting
       ? {
           ...meeting,
           analysis_run_json: JSON.stringify(
-            db.getMeetingAnalysisRun(meeting.id),
+            run
+              ? {
+                  ...run,
+                  automatic_attempts_exhausted:
+                    db.isMeetingAnalysisAutomaticRetryExhausted(meeting, run),
+                }
+              : null,
           ),
         }
       : meeting;

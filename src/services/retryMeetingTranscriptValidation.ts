@@ -136,6 +136,7 @@ export const shouldAutoProcessMeetingAnalysis = (
   let downstreamStage: unknown = null;
   let downstreamAttempt = 0;
   let pendingParakeetFinal = false;
+  let automaticAttemptsExhausted = false;
   try {
     const downstream = JSON.parse(
       meeting?.downstream_processing_json || '{}',
@@ -149,6 +150,15 @@ export const shouldAutoProcessMeetingAnalysis = (
         : 0;
   } catch {
     downstreamState = null;
+  }
+  try {
+    const analysisRun = JSON.parse(meeting?.analysis_run_json || '{}') as {
+      automatic_attempts_exhausted?: unknown;
+    };
+    automaticAttemptsExhausted =
+      analysisRun.automatic_attempts_exhausted === true;
+  } catch {
+    automaticAttemptsExhausted = false;
   }
   try {
     const integrity = JSON.parse(
@@ -168,6 +178,7 @@ export const shouldAutoProcessMeetingAnalysis = (
     hasTranscriptText(meeting?.transcript_json);
   if (
     !meeting ||
+    automaticAttemptsExhausted ||
     pendingParakeetFinal ||
     (downstreamState === 'failed' &&
       downstreamStage === 'analysis' &&

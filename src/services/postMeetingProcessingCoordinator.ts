@@ -75,6 +75,7 @@ export const meetingProcessingFingerprint = (
     meeting.transcript_validated_at ?? null,
     meeting.transcript_integrity_json ?? null,
     meeting.downstream_processing_json ?? null,
+    meeting.analysis_run_json ?? null,
     Boolean(meeting.analysis_json || meeting.enhanced_notes),
   ]);
 

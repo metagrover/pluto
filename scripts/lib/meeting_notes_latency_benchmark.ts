@@ -28,6 +28,14 @@ export type MeetingNotesLatencySample = {
   errorCode?: string;
 };
 
+export type OrganicMeetingNotesLatencySample = Omit<
+  MeetingNotesLatencySample,
+  'caseKey' | 'durationBucket'
+> & {
+  meetingKey: string;
+  truncatedStageCount: number;
+};
+
 const latencyStageTasks = ['notesWriter', 'notesAudit', 'notesMerge'] as const;
 const latencyStageOutcomes = [
   'complete',
@@ -207,6 +215,54 @@ export const aggregateMeetingNotesLatencySamples = (
     publishedCount: published.length,
     failedCount: samples.filter((sample) => sample.status === 'failed').length,
     publishRate: samples.length ? published.length / samples.length : 0,
+    meanTotalMs: roundedMean(totals),
+    medianTotalMs: median(totals),
+    p90TotalMs: percentile(totals, 0.9),
+    meanQueueMs: roundedMean(published.map((sample) => sample.queueMs)),
+    meanModelMs: roundedMean(published.map((sample) => sample.modelMs)),
+    meanModelCallCount: roundedMean(
+      published.map((sample) => sample.modelCallCount),
+    ),
+  };
+};
+
+export const aggregateOrganicMeetingNotesLatencySamples = (
+  samples: readonly OrganicMeetingNotesLatencySample[],
+) => {
+  const published = samples.filter((sample) => sample.status === 'published');
+  const attemptsPerMeeting = new Map<string, number>();
+  const failureCodes = new Map<string, number>();
+  for (const sample of samples) {
+    attemptsPerMeeting.set(
+      sample.meetingKey,
+      (attemptsPerMeeting.get(sample.meetingKey) ?? 0) + 1,
+    );
+    if (sample.status === 'failed' && sample.errorCode) {
+      failureCodes.set(
+        sample.errorCode,
+        (failureCodes.get(sample.errorCode) ?? 0) + 1,
+      );
+    }
+  }
+  const totals = published.map((sample) => sample.totalMs);
+  return {
+    attemptCount: samples.length,
+    distinctMeetingCount: attemptsPerMeeting.size,
+    maxAttemptsPerMeeting: Math.max(0, ...attemptsPerMeeting.values()),
+    publishedCount: published.length,
+    failedCount: samples.filter((sample) => sample.status === 'failed').length,
+    cancelledCount: samples.filter((sample) => sample.status === 'cancelled')
+      .length,
+    publishRate: samples.length ? published.length / samples.length : 0,
+    truncatedStageCount: samples.reduce(
+      (total, sample) => total + sample.truncatedStageCount,
+      0,
+    ),
+    failureCodes: Object.fromEntries(
+      [...failureCodes.entries()].sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
     meanTotalMs: roundedMean(totals),
     medianTotalMs: median(totals),
     p90TotalMs: percentile(totals, 0.9),
