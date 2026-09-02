@@ -13,6 +13,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
+import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
@@ -27,7 +28,6 @@ import {
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
-import { hasVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust';
 import {
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
@@ -115,7 +115,7 @@ interface MeetingViewProps {
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
   onRetryTranscriptValidation?: () => void;
-  transcriptValidationRetrying?: boolean;
+  transcriptValidationRetryingMeetingId?: string | number | null;
   calendarContext?: MeetingCalendarContextValue | null;
 }
 
@@ -141,6 +141,7 @@ export const TranscriptIntegrityPanel = ({
   downstreamFailed = false,
   onRetry,
   retrying = false,
+  retryUnavailable = false,
 }: {
   status: Meeting['transcript_status'];
   finalizationStatus?: Meeting['finalization_status'];
@@ -155,6 +156,7 @@ export const TranscriptIntegrityPanel = ({
   downstreamFailed?: boolean;
   onRetry?: () => void;
   retrying?: boolean;
+  retryUnavailable?: boolean;
 }) => {
   let micActivitySeconds = 0;
   let systemActivitySeconds = 0;
@@ -223,13 +225,7 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
       integrity.finalTranscription.state === 'needs_attention';
     speakerAttributionFailure =
-      integrity.finalTranscription?.failure ===
-        'speaker_attribution_rejected' ||
-      (status === 'validated' &&
-        integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-        integrity.finalTranscription.state === 'complete' &&
-        Boolean(audioPath && systemAudioPath && mixedAudioPath) &&
-        !hasVerifiedSpeakerAttribution(transcriptJson));
+      integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
     canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
@@ -267,7 +263,7 @@ export const TranscriptIntegrityPanel = ({
           type="button"
           className="meeting-failure-notice__action"
           onClick={onRetry}
-          disabled={retrying}
+          disabled={retrying || retryUnavailable}
         >
           {retrying ? (
             <>
@@ -275,7 +271,11 @@ export const TranscriptIntegrityPanel = ({
                 aria-hidden="true"
                 className="h-3.5 w-3.5 animate-spin"
               />
-              Retrying analysis
+              {panelCopy.actionLabel === 'Improve labels'
+                ? 'Improving labels'
+                : panelCopy.actionLabel === 'Retry transcription'
+                  ? 'Retrying transcription'
+                  : 'Retrying analysis'}
             </>
           ) : (
             panelCopy.actionLabel
@@ -602,7 +602,7 @@ export const MeetingView = ({
   transcriptVisible,
   setTranscriptVisible,
   onRetryTranscriptValidation,
-  transcriptValidationRetrying = false,
+  transcriptValidationRetryingMeetingId = null,
   calendarContext = null,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
@@ -745,6 +745,14 @@ export const MeetingView = ({
       .map((segment) => String(segment.speaker || '').trim())
       .filter(Boolean),
   ).size;
+  const transcriptValidationRetrying =
+    transcriptValidationRetryingMeetingId !== null &&
+    String(transcriptValidationRetryingMeetingId) ===
+      String(selectedMeeting.id);
+  const transcriptValidationBusy =
+    transcriptValidationRetryingMeetingId !== null;
+  const canImproveHistoricalSpeakerLabelsForMeeting =
+    canImproveHistoricalSpeakerLabels(selectedMeeting);
 
   const canonicalAnalysisMarkdown = v3
     ? analysisDocumentV3ToMarkdown(v3)
@@ -1021,6 +1029,40 @@ export const MeetingView = ({
                     </label>
                   </div>
                   <div className="meeting-document-menu__section">
+                    {canImproveHistoricalSpeakerLabelsForMeeting &&
+                    onRetryTranscriptValidation ? (
+                      <button
+                        type="button"
+                        onClick={onRetryTranscriptValidation}
+                        className="meeting-toolbar-button"
+                        disabled={transcriptValidationBusy}
+                        aria-label={
+                          transcriptValidationRetrying
+                            ? 'Improving speaker labels'
+                            : 'Improve speaker labels'
+                        }
+                        title={
+                          transcriptValidationBusy &&
+                          !transcriptValidationRetrying
+                            ? 'Another meeting is being improved'
+                            : undefined
+                        }
+                      >
+                        {transcriptValidationRetrying ? (
+                          <Loader2
+                            aria-hidden="true"
+                            className="h-4 w-4 animate-spin"
+                          />
+                        ) : (
+                          <Sparkles aria-hidden="true" className="h-4 w-4" />
+                        )}
+                        <span>
+                          {transcriptValidationRetrying
+                            ? 'Improving labels'
+                            : 'Improve speaker labels'}
+                        </span>
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -1122,6 +1164,9 @@ export const MeetingView = ({
           downstreamFailed={downstreamPresentation.state === 'failed'}
           onRetry={onRetryTranscriptValidation}
           retrying={transcriptValidationRetrying}
+          retryUnavailable={
+            transcriptValidationBusy && !transcriptValidationRetrying
+          }
         />
         {regenerateNotesError ? (
           <section

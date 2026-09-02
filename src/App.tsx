@@ -116,8 +116,10 @@ function App() {
   const [selectedMeetingDetail, setSelectedMeetingDetail] =
     useState<Meeting | null>(null);
   const selectedMeetingIdRef = useRef<string | number | null>(null);
-  const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
-    useState(false);
+  const [
+    transcriptValidationRetryingMeetingId,
+    setTranscriptValidationRetryingMeetingId,
+  ] = useState<string | number | null>(null);
   const finalTranscriptionAbortRef = useRef<AbortController | null>(null);
   const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
     useState<string | number | null>(null);
@@ -766,8 +768,8 @@ function App() {
   const handleRetryTranscriptValidation = async (
     meetingId: string | number | null = selectedMeetingId,
   ) => {
-    if (!meetingId || transcriptValidationRetrying) return;
-    setTranscriptValidationRetrying(true);
+    if (!meetingId || transcriptValidationRetryingMeetingId !== null) return;
+    setTranscriptValidationRetryingMeetingId(meetingId);
     try {
       const summary = safeMeetings.find(
         (candidate) => String(candidate.id) === String(meetingId),
@@ -808,7 +810,9 @@ function App() {
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
-      setTranscriptValidationRetrying(false);
+      setTranscriptValidationRetryingMeetingId((current) =>
+        String(current) === String(meetingId) ? null : current,
+      );
     }
   };
 
@@ -920,7 +924,7 @@ function App() {
 
   useEffect(() => {
     if (
-      transcriptValidationRetrying ||
+      transcriptValidationRetryingMeetingId !== null ||
       finalTranscriptionAbortRef.current ||
       selectNextMeetingForFinalTranscription(safeMeetings)
     )
@@ -934,10 +938,10 @@ function App() {
       meetingProcessingFingerprint(candidate),
     );
     void handleRetryTranscriptValidation(candidate.id);
-  }, [safeMeetings, transcriptValidationRetrying]);
+  }, [safeMeetings, transcriptValidationRetryingMeetingId]);
 
   useEffect(() => {
-    if (transcriptValidationRetrying) return;
+    if (transcriptValidationRetryingMeetingId !== null) return;
     const candidate = safeMeetings.find(shouldAutoProcessMeetingAnalysis);
     if (!candidate?.id) return;
     const delay = nextMeetingProcessingWakeDelay(
@@ -967,7 +971,7 @@ function App() {
       }
     }, delay);
     return () => window.clearTimeout(timeout);
-  }, [safeMeetings, transcriptValidationRetrying]);
+  }, [safeMeetings, transcriptValidationRetryingMeetingId]);
 
   const searchPlutoResults = buildSearchPlutoResults({
     query: searchQuery,
@@ -1322,7 +1326,9 @@ function App() {
                 onRetryTranscriptValidation={() => {
                   void handleRetryTranscriptValidation();
                 }}
-                transcriptValidationRetrying={transcriptValidationRetrying}
+                transcriptValidationRetryingMeetingId={
+                  transcriptValidationRetryingMeetingId
+                }
                 calendarContext={meetingCalendarContext}
               />
             ) : activeTab === 'hub' ? (

@@ -279,6 +279,7 @@ describe('MeetingView transcript integrity', () => {
         systemAudioPath="/synthetic/system.wav"
         mixedAudioPath="/synthetic/mix.wav"
         onRetry={vi.fn()}
+        retrying
       />,
     );
 
@@ -286,10 +287,11 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).toContain(
       'Pluto can take another pass using the saved recording.',
     );
-    expect(markup).toContain('Improve labels');
+    expect(markup).toContain('Improving labels');
+    expect(markup).not.toContain('Retrying analysis');
   });
 
-  it('offers historical speaker repair even when analysis already exists', () => {
+  it('keeps historical speaker repair out of the inline notice', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="validated"
@@ -319,11 +321,84 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).toContain('Improve speaker labels');
-    expect(markup).toContain(
-      'Pluto can take another pass using the saved recording.',
-    );
-    expect(markup).toContain('Improve labels');
+    expect(markup).toBe('');
+  });
+
+  it('offers historical speaker repair in More without borrowing another meeting loading state', () => {
+    const historicalMeeting = {
+      id: 'meeting-historical-speakers',
+      title: 'Historical meeting',
+      meeting_type: 'Recording',
+      created_at: '2026-08-17T18:00:00.000Z',
+      started_at: '2026-08-17T18:00:00.000Z',
+      transcript_status: 'validated' as const,
+      transcript_validated_at: '2026-08-17T19:00:00.000Z',
+      finalization_status: 'finalized' as const,
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic' }],
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          mappingApplied: false,
+        },
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+      }),
+      audio_path: '/synthetic/mic.wav',
+      system_audio_path: '/synthetic/system.wav',
+      mixed_audio_path: '/synthetic/mix.wav',
+      capture_journal_generation: 'journal-historical-speakers',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'Existing analysis.',
+        topics: [],
+        all_action_items: [],
+        all_decisions: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    };
+    const renderMeeting = (retryingMeetingId: string | null) =>
+      renderToStaticMarkup(
+        <MeetingView
+          selectedMeeting={historicalMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue="Historical meeting"
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+          onRetryTranscriptValidation={vi.fn()}
+          transcriptValidationRetryingMeetingId={retryingMeetingId}
+        />,
+      );
+
+    const unrelatedMeetingActive = renderMeeting('meeting-other');
+    expect(unrelatedMeetingActive).toContain('Improve speaker labels');
+    expect(unrelatedMeetingActive).not.toContain('Improving labels');
+    expect(unrelatedMeetingActive).not.toContain('meeting-failure-notice');
+
+    const selectedMeetingActive = renderMeeting('meeting-historical-speakers');
+    expect(selectedMeetingActive).toContain('Improving labels');
+    expect(selectedMeetingActive).not.toContain('Retrying analysis');
   });
 
   it('uses the same notice for retryable analysis without a second alert', () => {

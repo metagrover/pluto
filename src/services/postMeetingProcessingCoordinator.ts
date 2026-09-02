@@ -37,12 +37,7 @@ export const canRetryMeetingFinalTranscription = (
   ) {
     return false;
   }
-  if (
-    meeting.transcript_status === 'validated' &&
-    !hasVerifiedSpeakerAttribution(meeting.transcript_json)
-  ) {
-    return true;
-  }
+  if (canImproveHistoricalSpeakerLabels(meeting)) return true;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: { policy?: unknown; state?: unknown };
@@ -57,6 +52,44 @@ export const canRetryMeetingFinalTranscription = (
     return false;
   }
 };
+
+export function canImproveHistoricalSpeakerLabels(
+  meeting: Partial<Meeting> | null | undefined,
+): boolean {
+  if (
+    !meeting ||
+    meeting.transcript_status !== 'validated' ||
+    !meeting.capture_journal_generation ||
+    !(
+      (meeting.audio_path &&
+        meeting.system_audio_path &&
+        meeting.mixed_audio_path &&
+        meeting.transcript_json) ||
+      (meeting.has_audio && meeting.has_transcript)
+    )
+  ) {
+    return false;
+  }
+  let completedParakeetFinal =
+    meeting.final_transcription_policy === 'parakeet_final_v1' &&
+    meeting.final_transcription_state === 'complete';
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+    };
+    completedParakeetFinal ||= Boolean(
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'complete',
+    );
+  } catch {
+    completedParakeetFinal = false;
+  }
+  if (!completedParakeetFinal) return false;
+  if (meeting.speaker_attribution_verified === true) return false;
+  return meeting.transcript_json
+    ? !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+    : meeting.speaker_attribution_verified === false;
+}
 
 export const isParakeetValidatedMeeting = (
   meeting: Partial<Meeting> | null | undefined,
