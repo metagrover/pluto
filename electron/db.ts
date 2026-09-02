@@ -9376,14 +9376,22 @@ export const recordEntityCorrection = (input: {
     ON CONFLICT(entity_id, item_type, fingerprint) DO UPDATE SET
       reason = excluded.reason,
       created_at = CURRENT_TIMESTAMP
-  `).run(id, normalizedId, normalizedType, normalizedFingerprint, input.reason ?? null);
+  `).run(
+    id,
+    normalizedId,
+    normalizedType,
+    normalizedFingerprint,
+    input.reason ?? null,
+  );
 
   return db
     .prepare('SELECT * FROM entity_corrections WHERE id = ?')
     .get(id) as EntityCorrectionRecord;
 };
 
-export const getEntityCorrections = (entityId: string): EntityCorrectionRecord[] => {
+export const getEntityCorrections = (
+  entityId: string,
+): EntityCorrectionRecord[] => {
   return db
     .prepare(
       'SELECT * FROM entity_corrections WHERE entity_id = ? ORDER BY datetime(created_at) DESC',
@@ -9408,5 +9416,63 @@ export const isItemDismissed = (
       String(fingerprint).trim().toLowerCase(),
     );
   return Boolean(row);
+};
+
+export interface EntityAliasSuggestion {
+  id: string;
+  entity_id: string;
+  suggested_name: string;
+  source_meeting_ids_json: string;
+  evidence_snippet?: string | null;
+  status: 'pending' | 'merged' | 'dismissed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const saveEntityAliasSuggestion = (input: {
+  entityId: string;
+  suggestedName: string;
+  sourceMeetingIds?: string[];
+  evidenceSnippet?: string;
+}): void => {
+  const entityId = String(input.entityId).trim();
+  const suggestedName = String(input.suggestedName).trim();
+  if (!entityId || !suggestedName) return;
+
+  const id = `alias_sug_${createHash('sha256')
+    .update(`${entityId}:${suggestedName.toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  const sourceMeetingIdsJson = JSON.stringify(input.sourceMeetingIds ?? []);
+
+  db.prepare(`
+    INSERT INTO entity_alias_suggestions (id, entity_id, suggested_name, source_meeting_ids_json, evidence_snippet, status, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+    ON CONFLICT(entity_id, suggested_name) DO UPDATE SET
+      source_meeting_ids_json = excluded.source_meeting_ids_json,
+      evidence_snippet = COALESCE(excluded.evidence_snippet, entity_alias_suggestions.evidence_snippet),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE status != 'dismissed'
+  `).run(id, entityId, suggestedName, sourceMeetingIdsJson, input.evidenceSnippet ?? null);
+};
+
+export const getEntityAliasSuggestions = (entityId: string): EntityAliasSuggestion[] => {
+  return db
+    .prepare(
+      "SELECT * FROM entity_alias_suggestions WHERE entity_id = ? AND status = 'pending' ORDER BY datetime(created_at) DESC",
+    )
+    .all(String(entityId)) as EntityAliasSuggestion[];
+};
+
+export const updateEntityAliasSuggestionStatus = (
+  id: string,
+  status: 'pending' | 'merged' | 'dismissed',
+): void => {
+  db.prepare(`
+    UPDATE entity_alias_suggestions
+    SET status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(status, id);
 };
 

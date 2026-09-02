@@ -610,6 +610,30 @@ export const getEntityCorrections = async (
   return invoke('GET_ENTITY_CORRECTIONS', entityId);
 };
 
+export interface EntityAliasSuggestion {
+  id: string;
+  entity_id: string;
+  suggested_name: string;
+  source_meeting_ids_json: string;
+  evidence_snippet?: string | null;
+  status: 'pending' | 'merged' | 'dismissed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const getEntityAliasSuggestions = async (
+  entityId: string,
+): Promise<EntityAliasSuggestion[]> => {
+  return invoke('GET_ENTITY_ALIAS_SUGGESTIONS', entityId);
+};
+
+export const updateEntityAliasSuggestionStatus = async (
+  id: string,
+  status: 'pending' | 'merged' | 'dismissed',
+): Promise<{ success: boolean }> => {
+  return invoke('UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS', { id, status });
+};
+
 /**
  * Parse entity metadata JSON
  */

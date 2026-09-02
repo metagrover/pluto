@@ -2962,13 +2962,31 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'RECORD_ENTITY_CORRECTION',
-    (_event, input: { entityId: string; itemType: string; fingerprint: string; reason?: string }) => {
+    (
+      _event,
+      input: {
+        entityId: string;
+        itemType: string;
+        fingerprint: string;
+        reason?: string;
+      },
+    ) => {
       return db.recordEntityCorrection(input);
     },
   );
   ipcMain.handle('GET_ENTITY_CORRECTIONS', (_event, entityId: string) => {
     return db.getEntityCorrections(String(entityId));
   });
+  ipcMain.handle('GET_ENTITY_ALIAS_SUGGESTIONS', (_event, entityId: string) => {
+    return db.getEntityAliasSuggestions(String(entityId));
+  });
+  ipcMain.handle(
+    'UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS',
+    (_event, { id, status }: { id: string; status: 'pending' | 'merged' | 'dismissed' }) => {
+      db.updateEntityAliasSuggestionStatus(id, status);
+      return { success: true };
+    },
+  );
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>
     db.getKnowledgeFeedSummary(params),
   );
