@@ -619,6 +619,9 @@ const getHeroLabel = (
 };
 
 const getMeetingDetail = (meeting: Meeting): string => {
+  if (meeting.dashboard_detail?.trim()) {
+    return meeting.dashboard_detail.trim();
+  }
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
     meeting.analysis_json,
   );
@@ -709,7 +712,12 @@ const buildCommitmentSourceSynthesis = (
   const analysis = parseJsonObject<MeetingAnalysisSource>(
     sourceMeeting.analysis_json,
   );
-  if (!analysis) return null;
+  if (!analysis) {
+    const overview = getTrimmedString(sourceMeeting.dashboard_detail);
+    return overview
+      ? { overview, topicTitle: null, topicSummary: null, evidence: null }
+      : null;
+  }
 
   const overview =
     getTrimmedString(analysis.overview) ??
@@ -1168,6 +1176,23 @@ interface MeetingRecentWinPayload {
 
 const buildRecentWin = (meetings: Meeting[]): DashboardRecentWin => {
   for (const meeting of sortByNewestTimestamp(meetings, getMeetingTimestamp)) {
+    if (
+      meeting.recent_win_title?.trim() &&
+      meeting.recent_win_why?.trim() &&
+      meeting.recent_win_evidence?.trim()
+    ) {
+      return {
+        state: 'populated',
+        kind: 'evidence',
+        title: meeting.recent_win_title.trim(),
+        whyItCounts: meeting.recent_win_why.trim(),
+        sourceLabel:
+          meeting.recent_win_source?.trim() ||
+          meeting.title ||
+          'Recent meeting',
+        meetingId: meeting.id,
+      };
+    }
     const analysis = parseJsonObject<MeetingAnalysisRecentWin>(
       meeting.analysis_json,
     );

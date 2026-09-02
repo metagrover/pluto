@@ -242,6 +242,48 @@ export interface PersistedMeeting {
   created_at?: string | null;
 }
 
+export interface MeetingSummary {
+  id: string | number;
+  title: string;
+  meeting_type: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  folder_id: string | null;
+  is_favorite: number;
+  end_reason: string | null;
+  created_at: string;
+  transcript_status: TranscriptLifecycleStatus | null;
+  transcript_validated_at: string | null;
+  finalization_status: MeetingFinalizationStatus | null;
+  finalization_error_category: string | null;
+  downstream_processing_json: string | null;
+  capture_journal_generation: string | null;
+  has_transcript: boolean;
+  has_transcript_text: boolean;
+  has_audio: boolean;
+  has_analysis: boolean;
+  analysis_run_json: string | null;
+}
+
+export interface MeetingProcessingStatus {
+  id: string | number;
+  has_capture_gap: boolean;
+  final_transcription_policy: string | null;
+  final_transcription_state: string | null;
+  final_transcription_engine: string | null;
+  automatic_attempts_exhausted: boolean;
+}
+
+export interface MeetingDashboardPreview {
+  id: string | number;
+  dashboard_detail: string | null;
+  recent_win_title: string | null;
+  recent_win_why: string | null;
+  recent_win_evidence: string | null;
+  recent_win_source: string | null;
+}
+
 export type MeetingAnalysisRunStatus =
   | 'running'
   | 'published'
@@ -3284,6 +3326,226 @@ export const getMeetings = () => {
       'SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC',
     )
     .all();
+};
+
+export const getMeetingSummaries = (
+  meetingId?: string | number,
+): MeetingSummary[] => {
+  recoverExpiredTranscriptValidationRetries();
+  const statement = db.prepare(
+    `SELECT
+         m.id,
+         m.title,
+         m.meeting_type,
+         COALESCE(m.started_at, m.created_at, '') AS started_at,
+         m.ended_at,
+         m.duration_seconds,
+         m.folder_id,
+         COALESCE(m.is_favorite, 0) AS is_favorite,
+         m.end_reason,
+         COALESCE(m.created_at, '') AS created_at,
+         m.transcript_status,
+         m.transcript_validated_at,
+         m.finalization_status,
+         m.finalization_error_category,
+         m.downstream_processing_json,
+         m.capture_journal_generation,
+         CASE WHEN m.transcript_json IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
+         CASE
+           WHEN m.transcript_json IS NOT NULL THEN 1
+           ELSE 0
+         END AS has_transcript_text,
+         CASE
+           WHEN COALESCE(m.audio_path, '') != '' OR COALESCE(m.system_audio_path, '') != '' OR COALESCE(m.mixed_audio_path, '') != '' THEN 1
+           ELSE 0
+         END AS has_audio,
+         CASE WHEN m.analysis_json IS NOT NULL OR m.enhanced_notes IS NOT NULL THEN 1 ELSE 0 END AS has_analysis,
+         CASE WHEN r.meeting_id IS NULL THEN NULL ELSE json_object(
+           'run_id', r.run_id,
+           'input_revision', r.input_revision,
+           'notes_status', r.notes_status,
+           'secondary_status', r.secondary_status,
+           'stage', r.stage,
+           'queue_position', r.queue_position,
+           'error_code', r.error_code,
+           'started_at', r.started_at,
+           'updated_at', r.updated_at
+         ) END AS analysis_run_json
+       FROM meetings AS m
+       LEFT JOIN meeting_analysis_runs AS r ON r.meeting_id = m.id
+       ${meetingId === undefined ? '' : 'WHERE m.id = ?'}
+       ORDER BY COALESCE(m.started_at, m.created_at) DESC`,
+  );
+  const rows = (
+    meetingId === undefined ? statement.all() : statement.all(String(meetingId))
+  ) as Array<
+    Omit<
+      MeetingSummary,
+      'has_transcript' | 'has_transcript_text' | 'has_audio' | 'has_analysis'
+    > & {
+      has_transcript: number;
+      has_transcript_text: number;
+      has_audio: number;
+      has_analysis: number;
+    }
+  >;
+  return rows.map((row) => ({
+    ...row,
+    has_transcript: Boolean(row.has_transcript),
+    has_transcript_text: Boolean(row.has_transcript_text),
+    has_audio: Boolean(row.has_audio),
+    has_analysis: Boolean(row.has_analysis),
+  }));
+};
+
+const readMeetingProcessingStatus = (row: {
+  id: string | number;
+  transcript_integrity_json: string | null;
+  automatic_attempt_count: number | null;
+  notes_status: string | null;
+}): MeetingProcessingStatus => {
+  const integrity = parseIntegrityRecord(row.transcript_integrity_json);
+  const finalTranscription =
+    integrity.finalTranscription &&
+    typeof integrity.finalTranscription === 'object'
+      ? (integrity.finalTranscription as Record<string, unknown>)
+      : null;
+  const finalResult =
+    integrity.finalTranscriptionResult &&
+    typeof integrity.finalTranscriptionResult === 'object'
+      ? (integrity.finalTranscriptionResult as Record<string, unknown>)
+      : null;
+  let automaticAttemptsExhausted = false;
+  if (
+    row.notes_status === 'failed' &&
+    (row.automatic_attempt_count ?? 0) >= 2
+  ) {
+    const meeting = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(String(row.id)) as PersistedMeeting | undefined;
+    const run = getMeetingAnalysisRun(row.id);
+    automaticAttemptsExhausted = isMeetingAnalysisAutomaticRetryExhausted(
+      meeting,
+      run,
+    );
+  }
+  return {
+    id: row.id,
+    has_capture_gap: Array.isArray(integrity.causes)
+      ? integrity.causes.some(
+          (cause) =>
+            cause &&
+            typeof cause === 'object' &&
+            (cause as { code?: unknown }).code === 'capture_gap_detected',
+        )
+      : false,
+    final_transcription_policy:
+      typeof finalTranscription?.policy === 'string'
+        ? finalTranscription.policy
+        : null,
+    final_transcription_state:
+      typeof finalTranscription?.state === 'string'
+        ? finalTranscription.state
+        : null,
+    final_transcription_engine:
+      typeof finalResult?.engine === 'string' ? finalResult.engine : null,
+    automatic_attempts_exhausted: automaticAttemptsExhausted,
+  };
+};
+
+export const getMeetingProcessingStatuses = (
+  meetingId?: string | number,
+): MeetingProcessingStatus[] => {
+  const statement = db.prepare(
+    `SELECT m.id, m.transcript_integrity_json,
+            r.automatic_attempt_count, r.notes_status
+     FROM meetings AS m
+     LEFT JOIN meeting_analysis_runs AS r ON r.meeting_id = m.id
+     WHERE ${
+       meetingId === undefined
+         ? `(m.transcript_status = 'needs_attention'
+            OR (m.transcript_status = 'validated' AND (
+              (m.analysis_json IS NULL AND m.enhanced_notes IS NULL)
+              OR m.downstream_processing_json IS NOT NULL
+              OR lower(trim(m.title)) IN ('meeting', 'new meeting', 'untitled meeting')
+            )))`
+         : 'm.id = ?'
+     }`,
+  );
+  const rows = (
+    meetingId === undefined ? statement.all() : statement.all(String(meetingId))
+  ) as Array<{
+    id: string | number;
+    transcript_integrity_json: string | null;
+    automatic_attempt_count: number | null;
+    notes_status: string | null;
+  }>;
+  return rows.map(readMeetingProcessingStatus);
+};
+
+export const getMeetingSummary = (
+  meetingId: string | number,
+): (MeetingSummary & Partial<MeetingProcessingStatus>) | null => {
+  const summary = getMeetingSummaries(meetingId)[0];
+  if (!summary) return null;
+  const processingStatus = getMeetingProcessingStatuses(meetingId)[0];
+  return processingStatus ? { ...summary, ...processingStatus } : summary;
+};
+
+export const getMeetingDashboardPreviews = (): MeetingDashboardPreview[] =>
+  db
+    .prepare(
+      `SELECT
+         id,
+         substr(COALESCE(
+           CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.overview') END,
+           enhanced_notes
+         ), 1, 280) AS dashboard_detail,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.win') END, 1, 160) AS recent_win_title,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.why_it_counts') END, 1, 240) AS recent_win_why,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.evidence') END, 1, 240) AS recent_win_evidence,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.source') END, 1, 160) AS recent_win_source
+       FROM meetings
+       WHERE analysis_json IS NOT NULL OR enhanced_notes IS NOT NULL
+       ORDER BY COALESCE(started_at, created_at) DESC`,
+    )
+    .all() as MeetingDashboardPreview[];
+
+export const searchMeetingSummaries = (
+  query: string,
+  requestedLimit = 5,
+): Array<{
+  id: string | number;
+  title: string;
+  started_at: string;
+  created_at: string;
+}> => {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return [];
+  const limit = Math.min(
+    20,
+    Math.max(1, Number.isSafeInteger(requestedLimit) ? requestedLimit : 5),
+  );
+  const pattern = `%${normalized}%`;
+  return db
+    .prepare(
+      `SELECT id, title,
+              COALESCE(started_at, created_at, '') AS started_at,
+              COALESCE(created_at, '') AS created_at
+       FROM meetings
+       WHERE lower(COALESCE(title, '')) LIKE ?
+          OR lower(COALESCE(enhanced_notes, '')) LIKE ?
+          OR lower(COALESCE(user_notes, '')) LIKE ?
+          OR lower(COALESCE(analysis_json, '')) LIKE ?
+       ORDER BY COALESCE(started_at, created_at) DESC
+       LIMIT ?`,
+    )
+    .all(pattern, pattern, pattern, pattern, limit) as Array<{
+    id: string | number;
+    title: string;
+    started_at: string;
+    created_at: string;
+  }>;
 };
 
 export const getMeeting = (id: string | number) => {

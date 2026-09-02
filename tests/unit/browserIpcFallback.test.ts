@@ -1,9 +1,48 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createBrowserIpcFallback } from '../../src/utils/browserIpcFallback';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('browser IPC capture journal fallback', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps preview meeting lists summary-only and detail explicit', async () => {
+    vi.stubGlobal('window', { location: { search: '?preview=meeting' } });
+    const ipc = createBrowserIpcFallback();
+
+    const summaries = (await ipc.invoke('GET_MEETINGS')) as Array<
+      Record<string, unknown>
+    >;
+    expect(summaries.length).toBeGreaterThan(0);
+    expect(summaries[0]).not.toHaveProperty('transcript_json');
+    expect(summaries[0]).not.toHaveProperty('analysis_json');
+
+    await expect(
+      ipc.invoke('GET_MEETING', 'preview-architecture-docs'),
+    ).resolves.toMatchObject({
+      id: 'preview-architecture-docs',
+      transcript_json: expect.any(String),
+      analysis_json: expect.any(String),
+    });
+    await expect(
+      ipc.invoke('GET_MEETING_STATUS', 'preview-architecture-docs'),
+    ).resolves.toMatchObject({
+      id: 'preview-architecture-docs',
+      transcript_status: 'validated',
+    });
+    await expect(
+      ipc.invoke('GET_MEETING_PROCESSING_STATUSES'),
+    ).resolves.toEqual(expect.any(Array));
+    await expect(ipc.invoke('GET_DASHBOARD_MEETING_PREVIEWS')).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'preview-architecture-docs',
+          dashboard_detail: expect.any(String),
+        }),
+      ]),
+    );
+  });
+
   it('provides a realistic connected calendar for dashboard previews', async () => {
     const ipc = createBrowserIpcFallback();
 

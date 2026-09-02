@@ -106,7 +106,7 @@ interface MeetingViewProps {
   setEditingTitle: (val: boolean) => void;
   titleValue: string;
   setTitleValue: (val: string) => void;
-  fetchMeetings: () => void;
+  fetchMeetings: () => Promise<void>;
   handleCopySummary: (text: string) => void;
   copySuccess: boolean;
   handleDeleteMeeting: (id: string | number) => void;
@@ -744,12 +744,6 @@ export const MeetingView = ({
     (downstreamPresentation.state === 'loading' ||
       downstreamPresentation.state === 'queued') &&
     !notesDocument.hasAnalysis;
-
-  useEffect(() => {
-    if (!isMeetingProcessing) return;
-    const interval = window.setInterval(() => fetchMeetings(), 2_000);
-    return () => window.clearInterval(interval);
-  }, [fetchMeetings, isMeetingProcessing]);
 
   const regenerateEnhancedNotes = async (
     reason: 'manual' | 'secondary' = 'manual',

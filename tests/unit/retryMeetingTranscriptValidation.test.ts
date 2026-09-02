@@ -1705,4 +1705,13 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
       }),
     ).toBe(false);
   });
+
+  it('stops automatic analysis when bounded processing status reports exhaustion', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        automatic_attempts_exhausted: true,
+      }),
+    ).toBe(false);
+  });
 });

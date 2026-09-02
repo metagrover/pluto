@@ -352,6 +352,40 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('preserves latest detail and recent win from bounded meeting summaries', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 'summary-meeting',
+          title: 'Summary source',
+          analysis_json: undefined,
+          enhanced_notes: undefined,
+          dashboard_detail: 'Bounded current read.',
+          recent_win_title: 'The launch cleared review.',
+          recent_win_why: 'The customer accepted the release.',
+          recent_win_evidence: 'Acceptance was recorded in the notes.',
+          recent_win_source: 'Launch review',
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.latestMeeting).toMatchObject({
+      detail: 'Bounded current read.',
+    });
+    expect(model.recentWin).toMatchObject({
+      title: 'The launch cleared review.',
+      whyItCounts: 'The customer accepted the release.',
+      sourceLabel: 'Launch review',
+    });
+  });
+
   it('uses five recorded meetings only as an empty-state checkpoint', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

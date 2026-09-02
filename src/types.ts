@@ -189,6 +189,7 @@ export interface Meeting {
   title: string;
   created_at: string;
   started_at: string;
+  ended_at?: string | null;
   duration_seconds?: number;
   audio_path?: string;
   meeting_type?: string;
@@ -223,4 +224,50 @@ export interface Meeting {
     | null;
   downstream_processing_json?: string | null;
   capture_journal_generation?: string | null;
+  has_transcript?: boolean;
+  has_transcript_text?: boolean;
+  has_audio?: boolean;
+  has_analysis?: boolean;
+  has_capture_gap?: boolean;
+  final_transcription_policy?: string | null;
+  final_transcription_state?: string | null;
+  final_transcription_engine?: string | null;
+  automatic_attempts_exhausted?: boolean;
+  dashboard_detail?: string | null;
+  recent_win_title?: string | null;
+  recent_win_why?: string | null;
+  recent_win_evidence?: string | null;
+  recent_win_source?: string | null;
+}
+
+export interface MeetingSummary
+  extends Pick<
+    Meeting,
+    | 'id'
+    | 'title'
+    | 'created_at'
+    | 'started_at'
+    | 'duration_seconds'
+    | 'meeting_type'
+    | 'transcript_status'
+    | 'transcript_validated_at'
+    | 'finalization_status'
+    | 'finalization_error_category'
+    | 'downstream_processing_json'
+    | 'capture_journal_generation'
+    | 'analysis_run_json'
+    | 'has_transcript'
+    | 'has_transcript_text'
+    | 'has_audio'
+    | 'has_analysis'
+    | 'has_capture_gap'
+    | 'final_transcription_policy'
+    | 'final_transcription_state'
+    | 'final_transcription_engine'
+    | 'automatic_attempts_exhausted'
+  > {
+  ended_at?: string | null;
+  folder_id?: string | null;
+  is_favorite?: number | boolean | null;
+  end_reason?: string | null;
 }

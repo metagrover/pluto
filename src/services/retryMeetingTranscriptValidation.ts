@@ -156,6 +156,7 @@ export const shouldAutoProcessMeetingAnalysis = (
       automatic_attempts_exhausted?: unknown;
     };
     automaticAttemptsExhausted =
+      meeting?.automatic_attempts_exhausted === true ||
       analysisRun.automatic_attempts_exhausted === true;
   } catch {
     automaticAttemptsExhausted = false;
@@ -167,15 +168,18 @@ export const shouldAutoProcessMeetingAnalysis = (
       finalTranscription?: { policy?: unknown; state?: unknown };
     };
     pendingParakeetFinal =
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'needs_attention';
+      (meeting?.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'needs_attention') ||
+      (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'needs_attention');
   } catch {
     pendingParakeetFinal = false;
   }
   const genericTitleRepairNeeded =
     typeof meeting?.title === 'string' &&
     meetingTitleNeedsGeneration(meeting?.title) &&
-    hasTranscriptText(meeting?.transcript_json);
+    (meeting?.has_transcript_text === true ||
+      hasTranscriptText(meeting?.transcript_json));
   if (
     !meeting ||
     automaticAttemptsExhausted ||
@@ -186,15 +190,18 @@ export const shouldAutoProcessMeetingAnalysis = (
     (meeting.transcript_status !== 'needs_attention' &&
       meeting.transcript_status !== 'validated') ||
     meeting.finalization_status === 'recovery_required' ||
-    (Boolean(meeting.analysis_json || meeting.enhanced_notes) &&
+    (Boolean(
+      meeting.analysis_json || meeting.enhanced_notes || meeting.has_analysis,
+    ) &&
       downstreamState !== 'processing' &&
       downstreamState !== 'failed' &&
       !meetingTitleNeedsGeneration(meeting.title)) ||
-    !meeting.transcript_json ||
+    !(meeting.transcript_json || meeting.has_transcript) ||
     !(
       meeting.audio_path ||
       meeting.system_audio_path ||
-      meeting.mixed_audio_path
+      meeting.mixed_audio_path ||
+      meeting.has_audio
     )
   ) {
     return false;
@@ -203,11 +210,12 @@ export const shouldAutoProcessMeetingAnalysis = (
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
     };
-    const hasCaptureGap = integrity.causes?.some(
-      (cause) => cause.code === 'capture_gap_detected',
-    );
+    const hasCaptureGap =
+      meeting.has_capture_gap === true ||
+      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected');
     const partialCaptureGapEligible =
-      hasTranscriptText(meeting.transcript_json) &&
+      (meeting.has_transcript_text === true ||
+        hasTranscriptText(meeting.transcript_json)) &&
       typeof meeting.capture_journal_generation === 'string' &&
       meeting.capture_journal_generation.length > 0;
     return (

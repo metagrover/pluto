@@ -192,6 +192,61 @@ const previewMeeting: Meeting = {
   }),
 };
 
+const previewMeetingSummary = (meeting: Meeting) => ({
+  id: meeting.id,
+  title: meeting.title,
+  meeting_type: meeting.meeting_type ?? null,
+  created_at: meeting.created_at,
+  started_at: meeting.started_at,
+  duration_seconds: meeting.duration_seconds ?? null,
+  transcript_status: meeting.transcript_status ?? null,
+  transcript_validated_at: meeting.transcript_validated_at ?? null,
+  finalization_status: meeting.finalization_status ?? null,
+  downstream_processing_json: meeting.downstream_processing_json ?? null,
+  capture_journal_generation: meeting.capture_journal_generation ?? null,
+  analysis_run_json: meeting.analysis_run_json ?? null,
+  has_transcript: Boolean(meeting.transcript_json),
+  has_transcript_text: Boolean(meeting.transcript_json),
+  has_audio: Boolean(meeting.audio_path || meeting.system_audio_path),
+  has_analysis: Boolean(meeting.analysis_json || meeting.enhanced_notes),
+});
+
+const previewMeetingProcessingStatus = (meeting: Meeting) => ({
+  id: meeting.id,
+  has_capture_gap: meeting.has_capture_gap ?? false,
+  final_transcription_policy: meeting.final_transcription_policy ?? null,
+  final_transcription_state: meeting.final_transcription_state ?? null,
+  final_transcription_engine: meeting.final_transcription_engine ?? null,
+  automatic_attempts_exhausted: meeting.automatic_attempts_exhausted ?? false,
+});
+
+const previewMeetingDashboard = (meeting: Meeting) => {
+  let analysis: Record<string, unknown> = {};
+  try {
+    analysis = JSON.parse(meeting.analysis_json || '{}') as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    analysis = {};
+  }
+  const recentWin =
+    analysis.recent_win && typeof analysis.recent_win === 'object'
+      ? (analysis.recent_win as Record<string, unknown>)
+      : {};
+  const bounded = (value: unknown, limit: number) =>
+    typeof value === 'string' ? value.slice(0, limit) : null;
+  return {
+    id: meeting.id,
+    dashboard_detail:
+      bounded(analysis.overview, 280) ?? bounded(meeting.enhanced_notes, 280),
+    recent_win_title: bounded(recentWin.win, 160),
+    recent_win_why: bounded(recentWin.why_it_counts, 240),
+    recent_win_evidence: bounded(recentWin.evidence, 240),
+    recent_win_source: bounded(recentWin.source, 160),
+  };
+};
+
 const previewTimelineMeetings: Meeting[] = [
   previewMeeting,
   {
@@ -705,7 +760,74 @@ const createInvokeFallback =
         };
         break;
       case 'GET_MEETINGS':
-        result = meetingPreviewEnabled() ? previewTimelineMeetings : [];
+        result = meetingPreviewEnabled()
+          ? previewTimelineMeetings.map(previewMeetingSummary)
+          : [];
+        break;
+      case 'GET_MEETING_PROCESSING_STATUSES':
+        result = meetingPreviewEnabled()
+          ? previewTimelineMeetings
+              .filter(
+                (meeting) =>
+                  meeting.transcript_status === 'needs_attention' ||
+                  (meeting.transcript_status === 'validated' &&
+                    !meeting.analysis_json &&
+                    !meeting.enhanced_notes),
+              )
+              .map(previewMeetingProcessingStatus)
+          : [];
+        break;
+      case 'GET_MEETING':
+        result =
+          previewTimelineMeetings.find(
+            (meeting) => String(meeting.id) === String(args[0]),
+          ) ?? null;
+        break;
+      case 'GET_MEETING_STATUS':
+        {
+          const meeting = previewTimelineMeetings.find(
+            (candidate) => String(candidate.id) === String(args[0]),
+          );
+          result = meeting
+            ? {
+                ...previewMeetingSummary(meeting),
+                ...previewMeetingProcessingStatus(meeting),
+              }
+            : null;
+        }
+        break;
+      case 'SEARCH_MEETING_SUMMARIES': {
+        const query = String(args[0] ?? '')
+          .trim()
+          .toLocaleLowerCase();
+        result = query
+          ? previewTimelineMeetings
+              .filter((meeting) =>
+                [
+                  meeting.title,
+                  meeting.enhanced_notes,
+                  meeting.user_notes,
+                  meeting.analysis_json,
+                ].some((value) =>
+                  String(value ?? '')
+                    .toLocaleLowerCase()
+                    .includes(query),
+                ),
+              )
+              .slice(0, 5)
+              .map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                started_at: meeting.started_at,
+                created_at: meeting.created_at,
+              }))
+          : [];
+        break;
+      }
+      case 'GET_DASHBOARD_MEETING_PREVIEWS':
+        result = meetingPreviewEnabled()
+          ? previewTimelineMeetings.map(previewMeetingDashboard)
+          : [];
         break;
       case 'CALENDAR_GET_STATE':
       case 'CALENDAR_CONNECT':
