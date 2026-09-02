@@ -232,10 +232,9 @@
         }
       },
       "expected": {
-        "status": "validated",
+        "status": "needs_attention",
         "requestOrder": ["mic", "system"],
-        "analysisStarted": true,
-        "committedSegmentCount": 1
+        "analysisStarted": false
       }
     }
   ],

@@ -97,9 +97,6 @@ export const runPersistedMeetingFinalTranscription = async (
   const runId = options.runId ?? crypto.randomUUID();
   const meetingId = String(meeting.id);
   const language = provisional.payload.transcription?.language || 'en';
-  const speakerAttribution = provisional.payload.speakerAttribution as
-    | StoredTranscriptSpeakerAttribution
-    | undefined;
   let vocabulary = readFinalTranscriptionVocabulary(meetingId);
   if (!vocabulary) {
     vocabulary = sanitizeVocabularyTerms(
@@ -128,6 +125,7 @@ export const runPersistedMeetingFinalTranscription = async (
       },
       recordingDurationSeconds: meeting.duration_seconds || 0,
       micAudioPath: meeting.audio_path || '',
+      mixedAudioPath: meeting.mixed_audio_path || '',
       systemAudioPath: meeting.system_audio_path || '',
       provisionalSegments: provisional.segments,
       activityWindows: activityEvidence?.windows || [],
@@ -155,9 +153,29 @@ export const runPersistedMeetingFinalTranscription = async (
         ),
       transcribe: async (request) =>
         (await invoke('TRANSCRIPTION_TRANSCRIBE_FINAL', request)) as never,
+      speakerEvidence: async (request) =>
+        (await invoke('TRANSCRIPTION_SPEAKER_EVIDENCE', request)) as never,
       probeDuration: async (audioPath) =>
         (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
       commitCanonical: async (commit) => {
+        const speakerAttribution = commit.metadata.speakerAttribution as
+          | StoredTranscriptSpeakerAttribution
+          | undefined;
+        const {
+          speakerAttribution: _speakerAttribution,
+          speakerEvidence: _speakerEvidence,
+          ...finalTranscriptionResult
+        } = commit.metadata;
+        if (
+          !speakerAttribution ||
+          speakerAttribution.diarizationAttempted !== true ||
+          speakerAttribution.mappingApplied !== true ||
+          speakerAttribution.source === 'channel_fallback'
+        ) {
+          throw new Error(
+            'invalid_transcript_trust_candidate:final_transcription_validated:speaker_attribution_unverified',
+          );
+        }
         committedSegments = commit.segments;
         const transcriptValidatedAt = new Date().toISOString();
         const canonicalTranscriptJson = JSON.stringify(
@@ -173,7 +191,7 @@ export const runPersistedMeetingFinalTranscription = async (
               computeType: commit.metadata.computeType,
               language: commit.metadata.language,
               canonicalSource: 'recovered_channels',
-              diarization: false,
+              diarization: true,
               elapsedMs: commit.metadata.elapsedMs,
               providerLabel: commit.metadata.providerVersions.join(','),
               warnings: commit.metadata.warnings,
@@ -202,7 +220,7 @@ export const runPersistedMeetingFinalTranscription = async (
             gateVersion: 'canonical_integrity_v1',
             validatedAt: transcriptValidatedAt,
           },
-          finalTranscriptionResult: commit.metadata,
+          finalTranscriptionResult,
         });
         assertValidTranscriptTrustCandidate(
           {
