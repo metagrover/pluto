@@ -150,6 +150,7 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
         }
         try ModelArtifactIntegrity.verify(
             directory: repositoryDirectory,
+            requiredArtifacts: manifest.requiredArtifacts,
             expectedSHA256: manifest.artifactSHA256
         )
     }

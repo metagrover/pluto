@@ -29,4 +29,42 @@ final class ModelArtifactIntegrityTests: XCTestCase {
             try ModelArtifactIntegrity.verify(directory: root, expectedSHA256: digest)
         )
     }
+
+    func testRequiredArtifactDigestIgnoresUnpinnedExtrasAndRejectsRequiredMutation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let model = root.appendingPathComponent("Model.mlmodelc", isDirectory: true)
+        try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("weights".utf8).write(to: model.appendingPathComponent("weights.bin"))
+        try Data("parameters".utf8).write(to: root.appendingPathComponent("parameters.json"))
+
+        let required = ["Model.mlmodelc", "parameters.json"]
+        let digest = try ModelArtifactIntegrity.digest(
+            directory: root,
+            requiredArtifacts: required
+        )
+        try Data("not-pinned".utf8).write(to: root.appendingPathComponent("config.json"))
+
+        XCTAssertEqual(
+            digest,
+            try ModelArtifactIntegrity.digest(directory: root, requiredArtifacts: required)
+        )
+        XCTAssertNoThrow(
+            try ModelArtifactIntegrity.verify(
+                directory: root,
+                requiredArtifacts: required,
+                expectedSHA256: digest
+            )
+        )
+
+        try Data("changed".utf8).write(to: model.appendingPathComponent("weights.bin"))
+        XCTAssertThrowsError(
+            try ModelArtifactIntegrity.verify(
+                directory: root,
+                requiredArtifacts: required,
+                expectedSHA256: digest
+            )
+        )
+    }
 }
