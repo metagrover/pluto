@@ -11,6 +11,7 @@ import type {
 } from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 import type { Meeting } from '../types';
+import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
 
 type IpcRendererLike = Window['ipcRenderer'];
 type BrowserCaptureJournal = {
@@ -217,6 +218,12 @@ const previewMeetingProcessingStatus = (meeting: Meeting) => ({
   final_transcription_policy: meeting.final_transcription_policy ?? null,
   final_transcription_state: meeting.final_transcription_state ?? null,
   final_transcription_engine: meeting.final_transcription_engine ?? null,
+  speaker_attribution_verified:
+    meeting.speaker_attribution_verified ??
+    (meeting.final_transcription_policy === 'parakeet_final_v1' &&
+    meeting.final_transcription_state === 'complete'
+      ? hasVerifiedSpeakerAttribution(meeting.transcript_json)
+      : null),
   automatic_attempts_exhausted: meeting.automatic_attempts_exhausted ?? false,
 });
 

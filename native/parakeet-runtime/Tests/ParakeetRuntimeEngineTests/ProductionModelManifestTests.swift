@@ -27,4 +27,28 @@ final class ProductionModelManifestTests: XCTestCase {
             "parakeet-eou-streaming/320ms"
         )
     }
+
+    func testOfflineDiarizationBundlePinsEveryRequiredArtifact() {
+        let manifest = ProductionDiarizationManifest.current
+
+        XCTAssertEqual(
+            manifest.repository,
+            "FluidInference/speaker-diarization-coreml"
+        )
+        XCTAssertEqual(manifest.revision.count, 40)
+        XCTAssertNotEqual(manifest.revision, "main")
+        XCTAssertEqual(manifest.artifactSHA256.count, 64)
+        XCTAssertEqual(
+            Set(manifest.requiredArtifacts),
+            [
+                "Segmentation.mlmodelc",
+                "FBank.mlmodelc",
+                "Embedding.mlmodelc",
+                "PldaRho.mlmodelc",
+                "plda-parameters.json",
+            ]
+        )
+        XCTAssertTrue(manifest.revision.allSatisfy(\.isHexDigit))
+        XCTAssertTrue(manifest.artifactSHA256.allSatisfy(\.isHexDigit))
+    }
 }

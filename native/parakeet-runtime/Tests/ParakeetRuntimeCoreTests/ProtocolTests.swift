@@ -48,6 +48,25 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(request.targetId, "request-2")
     }
 
+    func testDecodesSpeakerEvidenceRequestWithThreeSealedPaths() throws {
+        let data = Data(#"{"schemaVersion":1,"id":"speaker-1","method":"speaker_evidence","mixedAudioPath":"/approved/mixed.wav","micAudioPath":"/approved/mic.wav","systemAudioPath":"/approved/system.wav"}"#.utf8)
+
+        let request = try JSONDecoder().decode(RuntimeRequest.self, from: data)
+
+        XCTAssertEqual(request.method, .speakerEvidence)
+        XCTAssertEqual(request.mixedAudioPath, "/approved/mixed.wav")
+        XCTAssertEqual(request.micAudioPath, "/approved/mic.wav")
+        XCTAssertEqual(request.systemAudioPath, "/approved/system.wav")
+    }
+
+    func testRejectsIncompleteOrMethodIncompatibleSpeakerEvidencePaths() throws {
+        let incomplete = Data(#"{"schemaVersion":1,"id":"speaker-1","method":"speaker_evidence","mixedAudioPath":"/approved/mixed.wav","micAudioPath":"/approved/mic.wav"}"#.utf8)
+        let incompatible = Data(#"{"schemaVersion":1,"id":"transcribe-1","method":"transcribe","audioPath":"/approved/mixed.wav","micAudioPath":"/approved/mic.wav"}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RuntimeRequest.self, from: incomplete))
+        XCTAssertThrowsError(try JSONDecoder().decode(RuntimeRequest.self, from: incompatible))
+    }
+
     func testFailureResponseContainsOnlyStableCode() throws {
         let response = RuntimeResponse.failure(
             id: "request-2",
@@ -86,5 +105,46 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(decodedTranscribed.result?.transcription?.text, "hello")
         XCTAssertEqual(decodedTranscribed.result?.vocabularyCount, 2)
         XCTAssertNil(decodedTranscribed.error)
+    }
+
+    func testEncodesContentFreeSpeakerEvidenceSuccessPayload() throws {
+        let response = RuntimeResponse.speakerEvidence(
+            id: "speaker-1",
+            output: SpeakerEvidenceOutput(
+                turns: [
+                    SpeakerEvidenceTurn(startTime: 0, endTime: 1.25, cluster: "speaker-0")
+                ],
+                energyWindows: [
+                    SpeakerEnergyWindow(
+                        startTime: 0,
+                        endTime: 0.1,
+                        micRms: 0.2,
+                        systemRms: 0.01
+                    )
+                ],
+                provenance: SpeakerEvidenceProvenance(
+                    modelIdentifier: "offline-diarizer",
+                    modelRevision: String(repeating: "a", count: 40),
+                    artifactDigest: String(repeating: "b", count: 64),
+                    runtimeVersion: "fluidaudio-0.15.5"
+                ),
+                timings: SpeakerEvidenceTimings(
+                    diarizationMs: 10,
+                    energyAnalysisMs: 2,
+                    totalMs: 12
+                ),
+                windowSeconds: 0.1
+            )
+        )
+
+        let data = try JSONEncoder().encode(response)
+        let decoded = try JSONDecoder().decode(RuntimeResponse.self, from: data)
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(decoded.result?.speakerEvidence?.turns.first?.cluster, "speaker-0")
+        XCTAssertEqual(decoded.result?.speakerEvidence?.energyWindows.first?.micRms, 0.2)
+        XCTAssertFalse(encoded.contains("transcript"))
+        XCTAssertFalse(encoded.contains("audioPath"))
+        XCTAssertFalse(encoded.contains("embedding"))
     }
 }

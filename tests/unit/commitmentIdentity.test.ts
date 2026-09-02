@@ -189,6 +189,48 @@ describe('identity publication boundary', () => {
       { id: 't0', speaker: 'Me', text: "I'll send it." },
     ]);
   });
+  it('binds Me only from accepted offline acoustic attribution and local capture identity', () => {
+    db.upsertEntity({
+      id: 'offline-self-person',
+      type: 'person',
+      name: 'Local self',
+      dedupe_by_name: false,
+    });
+    db.saveMeeting({
+      id: 'offline-attribution-source',
+      title: 'Offline attribution',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: "I'll send it." }],
+        speakerAttribution: {
+          source: 'offline_diarization_acoustic_v1',
+          confidence: 0.9,
+          mappingApplied: true,
+        },
+      }),
+    });
+    db.identityStore.recordCapture(
+      'offline-attribution-source',
+      'local',
+      'offline-self-person',
+    );
+
+    const context = identity.getMeetingIdentityContext(
+      'offline-attribution-source',
+    );
+
+    expect(context.bindings).toContainEqual(
+      expect.objectContaining({
+        speaker: 'Me',
+        personId: 'offline-self-person',
+        source: 'capture',
+        captureEvidence: expect.objectContaining({
+          attributionSource: 'offline_diarization_acoustic_v1',
+          confidence: 0.9,
+          mappingApplied: true,
+        }),
+      }),
+    );
+  });
   it('uses source-backed resolutions and caches them without altering extracted ownership', async () => {
     db.saveMeeting({
       id: 'resolution-source',

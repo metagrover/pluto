@@ -232,10 +232,7 @@ export const mapDiarizationFromAcousticEvidence = (params: {
   for (const score of scores) {
     if (local?.cluster === score.cluster) {
       mapping[score.cluster] = 'Me';
-    } else if (
-      score.remote >= tuning.minRemoteEvidenceSeconds ||
-      local !== undefined
-    ) {
+    } else if (score.remote >= tuning.minRemoteEvidenceSeconds) {
       mapping[score.cluster] = 'Them';
     } else {
       mapping[score.cluster] = 'Unknown';

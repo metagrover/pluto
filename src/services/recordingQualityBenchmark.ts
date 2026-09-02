@@ -1112,6 +1112,7 @@ export const runFinalTranscriptionPolicyBenchmarkCase = async (
         },
         recordingDurationSeconds: scenario.recordingDurationSeconds,
         micAudioPath: `/benchmark/${scenario.id}-mic.wav`,
+        mixedAudioPath: `/benchmark/${scenario.id}-mixed.wav`,
         systemAudioPath: `/benchmark/${scenario.id}-system.wav`,
         provisionalSegments: [],
         activityWindows: scenario.activityWindows,
@@ -1132,6 +1133,43 @@ export const runFinalTranscriptionPolicyBenchmarkCase = async (
           return scenario.sources[request.source];
         },
         probeDuration: async () => scenario.recordingDurationSeconds,
+        speakerEvidence: async () => {
+          const windows =
+            scenario.activityWindows.length > 0
+              ? scenario.activityWindows
+              : [
+                  {
+                    startTime: 0,
+                    endTime: Math.max(0.1, scenario.recordingDurationSeconds),
+                    speaker: 'Them' as const,
+                  },
+                ];
+          return {
+            turns: windows.map((window) => ({
+              startTime: window.startTime,
+              endTime: window.endTime,
+              cluster: window.speaker === 'Me' ? 'S1' : 'S2',
+            })),
+            energyWindows: windows.map((window) => ({
+              startTime: window.startTime,
+              endTime: window.endTime,
+              micRms: window.speaker === 'Me' ? 0.03 : 0,
+              systemRms: window.speaker === 'Them' ? 0.02 : 0,
+            })),
+            provenance: {
+              modelIdentifier: 'benchmark-speaker-evidence',
+              modelRevision: 'a'.repeat(40),
+              artifactDigest: 'b'.repeat(64),
+              runtimeVersion: 'benchmark',
+            },
+            timings: {
+              diarizationMs: 0,
+              energyAnalysisMs: 0,
+              totalMs: 0,
+            },
+            windowSeconds: 0.1,
+          };
+        },
         commitCanonical: async (commit) => {
           committedSegmentCount = commit.segments.length;
           return {

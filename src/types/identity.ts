@@ -34,7 +34,9 @@ export interface IdentityEvidence {
 export interface IdentityCaptureEvidence {
   origin: 'local';
   selfPersonId: string;
-  attributionSource: 'local_diarization_acoustic';
+  attributionSource:
+    | 'local_diarization_acoustic'
+    | 'offline_diarization_acoustic_v1';
   confidence: number;
   mappingApplied: true;
   sourceRevision: string;

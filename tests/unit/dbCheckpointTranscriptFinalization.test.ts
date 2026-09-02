@@ -96,6 +96,62 @@ it('claims and commits final transcription only for the exact capture generation
   });
 });
 
+it('claims an explicit validated attribution repair and fences transcript or source changes', () => {
+  const id = 'parakeet-attribution-repair-fenced';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'validated',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'validated',
+      speakerAttribution: {
+        source: 'channel_fallback',
+        confidence: 0,
+        diarizationAttempted: false,
+        mappingApplied: false,
+      },
+      segments: [{ speaker: 'Them', text: 'visible transcript' }],
+    }),
+    transcript_integrity_json: '{}',
+    capture_journal_generation: journalGeneration,
+    audio_path: '/approved/mic.wav',
+    system_audio_path: '/approved/system.wav',
+    mixed_audio_path: '/approved/mixed.wav',
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'attribution-repair-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: Date.parse('2026-08-15T00:00:00.000Z'),
+  });
+
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+  const claimed = getMeeting(id);
+  saveMeeting({
+    ...claimed,
+    id,
+    transcript_json: JSON.stringify({
+      ...JSON.parse(String(claimed?.transcript_json)),
+      segments: [{ speaker: 'Me', text: 'user corrected while retry ran' }],
+    }),
+    audio_path: '/approved/replaced-mic.wav',
+  });
+
+  expect(
+    commitMeetingFinalTranscription({
+      meetingId: id,
+      runId: lease.runId,
+      captureGeneration: journalGeneration,
+      canonicalTranscriptJson,
+      transcriptIntegrityJson,
+      transcriptValidatedAt: validatedAt,
+    }),
+  ).toBe(false);
+  expect(JSON.parse(String(getMeeting(id)?.transcript_json)).segments).toEqual([
+    { speaker: 'Me', text: 'user corrected while retry ran' },
+  ]);
+});
+
 it('rejects an invalid v2 final commit without publishing the transcript', () => {
   const id = 'parakeet-final-invalid-trust';
   saveMeeting({

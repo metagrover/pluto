@@ -38,6 +38,7 @@ const baseInput = {
   captureEvidence: { sealed: true, generation: 'generation-1' },
   recordingDurationSeconds: 10,
   micAudioPath: '/recordings/mic.wav',
+  mixedAudioPath: '/recordings/mixed.wav',
   systemAudioPath: '/recordings/system.wav',
   provisionalSegments: [],
   activityWindows: [
@@ -58,6 +59,27 @@ const dependencies = () => {
       return result(request.source);
     }),
     probeDuration: vi.fn(async () => 10),
+    speakerEvidence: vi.fn(async () => {
+      events.push('speaker-evidence');
+      return {
+        turns: [
+          { startTime: 0, endTime: 4, cluster: 'S1' },
+          { startTime: 5, endTime: 9, cluster: 'S2' },
+        ],
+        energyWindows: [
+          { startTime: 0, endTime: 4, micRms: 0.03, systemRms: 0 },
+          { startTime: 5, endTime: 9, micRms: 0, systemRms: 0.02 },
+        ],
+        provenance: {
+          modelIdentifier: 'speaker-diarization-offline-v1',
+          modelRevision: 'a'.repeat(40),
+          artifactDigest: 'b'.repeat(64),
+          runtimeVersion: 'fluidaudio-test',
+        },
+        timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+        windowSeconds: 0.1,
+      };
+    }),
     commitCanonical: vi.fn(async (commit: { segments: unknown[] }) => {
       events.push('commit-canonical');
       return {
@@ -106,6 +128,7 @@ describe('runFinalTranscription', () => {
     expect(deps.events).toEqual([
       'transcribe-mic',
       'transcribe-system',
+      'speaker-evidence',
       'commit-canonical',
       'start-analysis',
     ]);
@@ -120,7 +143,7 @@ describe('runFinalTranscription', () => {
       computeType: 'int8',
       computeUnits: 'cpu_and_neural_engine',
       language: 'en',
-      elapsedMs: 20,
+      elapsedMs: 32,
       warnings: [],
       providerVersions: ['FluidAudio-0.15.5'],
       modelBundleVersions: ['bundle-v1'],
@@ -146,6 +169,10 @@ describe('runFinalTranscription', () => {
           segmentCount: 1,
           wordCount: 2,
         }),
+      },
+      speakerAttribution: {
+        source: 'offline_diarization_acoustic_v1',
+        mappingApplied: true,
       },
     });
     const committed = await deps.commitCanonical.mock.results[0].value;
@@ -217,6 +244,34 @@ describe('runFinalTranscription', () => {
     expect(deps.commitCanonical).not.toHaveBeenCalled();
     expect(deps.markNeedsAttention).toHaveBeenCalledWith(
       expect.objectContaining({ failure: 'integrity_rejected' }),
+    );
+  });
+
+  it('fails closed before commit and downstream when acoustic attribution is rejected', async () => {
+    const deps = dependencies();
+    deps.speakerEvidence.mockResolvedValue({
+      turns: [{ startTime: 0, endTime: 4, cluster: 'S1' }],
+      energyWindows: [
+        { startTime: 0, endTime: 2, micRms: 0.03, systemRms: 0 },
+        { startTime: 2, endTime: 4, micRms: 0, systemRms: 0.02 },
+      ],
+      provenance: {
+        modelIdentifier: 'speaker-diarization-offline-v1',
+        modelRevision: 'a'.repeat(40),
+        artifactDigest: 'b'.repeat(64),
+        runtimeVersion: 'fluidaudio-test',
+      },
+      timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+      windowSeconds: 0.1,
+    });
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('needs_attention');
+    expect(deps.commitCanonical).not.toHaveBeenCalled();
+    expect(deps.startAnalysis).not.toHaveBeenCalled();
+    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
+      expect.objectContaining({ failure: 'speaker_attribution_rejected' }),
     );
   });
 

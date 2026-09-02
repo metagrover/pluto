@@ -8,7 +8,18 @@ import {
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 const validationInputs = vi.hoisted(() => [] as unknown[]);
+const persistedFinalInputs = vi.hoisted(() => [] as unknown[]);
 const rejectedTrustTransitions = vi.hoisted(() => new Set<string>());
+
+vi.mock(
+  '../../src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+  () => ({
+    runPersistedMeetingFinalTranscription: async (...args: unknown[]) => {
+      persistedFinalInputs.push(args);
+      return { status: 'validated' as const };
+    },
+  }),
+);
 
 vi.mock('../../src/utils/transcriptTrustState.ts', async () => {
   const actual = await vi.importActual<
@@ -103,7 +114,40 @@ describe('meetingTitleNeedsGeneration', () => {
 describe('retryMeetingTranscriptValidation', () => {
   beforeEach(() => {
     validationInputs.length = 0;
+    persistedFinalInputs.length = 0;
     rejectedTrustTransitions.clear();
+  });
+
+  it('routes historical channel attribution through the canonical final worker', async () => {
+    const historical = {
+      ...meeting,
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-a',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic' }],
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          mappingApplied: false,
+        },
+      }),
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_MEETING') return historical;
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).resolves.toEqual({ status: 'validated' });
+
+    expect(persistedFinalInputs).toHaveLength(1);
+    expect(persistedFinalInputs[0]).toEqual([
+      historical,
+      invoke,
+      expect.objectContaining({ runId: expect.any(String) }),
+    ]);
   });
 
   it('does not generate downstream intelligence while validation still needs attention', async () => {
@@ -1713,5 +1757,31 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
         automatic_attempts_exhausted: true,
       }),
     ).toBe(false);
+  });
+
+  it('uses bounded speaker trust to gate thin Parakeet summaries', () => {
+    const summary = {
+      ...meeting,
+      transcript_json: undefined,
+      has_transcript: true,
+      has_transcript_text: true,
+      has_audio: true,
+      transcript_status: 'validated' as const,
+      final_transcription_policy: 'parakeet_final_v1',
+      final_transcription_state: 'complete',
+    };
+
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...summary,
+        speaker_attribution_verified: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...summary,
+        speaker_attribution_verified: true,
+      }),
+    ).toBe(true);
   });
 });

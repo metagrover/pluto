@@ -43,6 +43,21 @@ const finalMetadata = {
     droppedExactDuplicateSegmentCount: 0,
     droppedEmbeddedMicFragmentCount: 0,
   },
+  speakerAttribution: {
+    source: 'offline_diarization_acoustic_v1' as const,
+    confidence: 1,
+    diarizationAttempted: true,
+    mappingApplied: true,
+  },
+  speakerEvidence: {
+    provenance: {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+    },
+    timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+  },
 };
 
 vi.mock('../../src/utils/transcriptActivityEvidence', () => ({
@@ -78,6 +93,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
       started_at: '2026-08-15T00:00:00.000Z',
       duration_seconds: 60,
       audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       system_audio_path: '/approved/system.wav',
       capture_journal_generation: 'generation-1',
       transcript_status: 'provisional',
@@ -117,6 +133,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
           transcriptJson: request.canonicalTranscriptJson,
         };
       }
+      if (channel === 'TRANSCRIPTION_SPEAKER_EVIDENCE') {
+        return {
+          turns: [{ startTime: 0, endTime: 1, cluster: 'S1' }],
+          energyWindows: [
+            { startTime: 0, endTime: 0.1, micRms: 0.2, systemRms: 0 },
+          ],
+          provenance: finalMetadata.speakerEvidence.provenance,
+          timings: finalMetadata.speakerEvidence.timings,
+          windowSeconds: 0.1,
+        };
+      }
       return true;
     });
     mocks.runFinal.mockImplementation(async (input, dependencies) => {
@@ -124,10 +151,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
         meetingId: 'meeting-1',
         captureEvidence: { sealed: true, generation: 'generation-1' },
         micAudioPath: '/approved/mic.wav',
+        mixedAudioPath: '/approved/mixed.wav',
         systemAudioPath: '/approved/system.wav',
         language: 'en',
         vocabulary: ['Known Person'],
         vocabularyPolicyVersion: 'known-people-v1',
+      });
+      await dependencies.speakerEvidence({
+        meetingId: 'meeting-1',
+        mixedAudioPath: '/approved/mixed.wav',
+        micAudioPath: '/approved/mic.wav',
+        systemAudioPath: '/approved/system.wav',
       });
       const committed = await dependencies.commitCanonical({
         segments: [
@@ -170,6 +204,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
     expect(persisted.liveSegments).toEqual([
       { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
     ]);
+    expect(persisted.transcription.diarization).toBe(true);
+    expect(persisted.speakerAttribution).toMatchObject({
+      source: 'offline_diarization_acoustic_v1',
+      mappingApplied: true,
+    });
+    expect(
+      JSON.parse(
+        (commitCall?.[1] as { transcriptIntegrityJson: string })
+          .transcriptIntegrityJson,
+      ),
+    ).toMatchObject({ speakerAttributionVerified: true });
   });
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
@@ -180,6 +225,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
       started_at: '2026-08-15T00:00:00.000Z',
       duration_seconds: 60,
       audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       system_audio_path: '/approved/system.wav',
       capture_journal_generation: 'generation-1',
       transcript_status: 'provisional',

@@ -906,6 +906,25 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle('TRANSCRIPTION_SPEAKER_EVIDENCE', async (_event, request) => {
+    if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+    const meetingId = String(request?.meetingId || '');
+    const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    beginTranscriptionWork();
+    beginMeetingTranscription(meetingId || null);
+    try {
+      return await parakeetFinalClient.speakerEvidence({
+        mixedAudioPath: String(request?.mixedAudioPath || ''),
+        micAudioPath: String(request?.micAudioPath || ''),
+        systemAudioPath: String(request?.systemAudioPath || ''),
+        signal,
+      });
+    } finally {
+      endMeetingTranscription(meetingId || null);
+      endTranscriptionWork();
+    }
+  });
+
   ipcMain.handle('TRANSCRIPTION_CANCEL_FINAL', (_event, meetingId) => {
     abortMeetingTasks(String(meetingId));
     return { cancelled: true };

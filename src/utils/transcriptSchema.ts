@@ -51,6 +51,7 @@ export type TranscriptTranscriptionMeta = {
 export type TranscriptSpeakerAttributionSource =
   | 'diarization'
   | 'local_diarization_acoustic'
+  | 'offline_diarization_acoustic_v1'
   | 'channel_fallback';
 
 export type TranscriptSpeakerAttributionFallbackReason =

@@ -261,6 +261,67 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain("Couldn't finish the transcript");
   });
 
+  it('offers private speaker repair for a fresh attribution rejection', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [{ code: 'speaker_attribution_rejected' }],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'speaker_attribution_rejected',
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Pluto couldn&#x27;t verify who spoke');
+    expect(markup).toContain('privately on this Mac');
+    expect(markup).toContain('Retry transcription');
+  });
+
+  it('offers historical speaker repair even when analysis already exists', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          causes: [],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'complete',
+          },
+        })}
+        transcriptJson={JSON.stringify({
+          lifecycleStatus: 'validated',
+          segments: [{ speaker: 'Me', text: 'Synthetic' }],
+          speakerAttribution: {
+            source: 'channel_fallback',
+            confidence: 0,
+            mappingApplied: false,
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        hasExistingAnalysis
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Pluto couldn&#x27;t verify who spoke');
+    expect(markup).toContain('privately on this Mac');
+    expect(markup).toContain('Retry transcription');
+  });
+
   it('uses the same notice for retryable analysis without a second alert', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

@@ -9,6 +9,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -21,10 +22,29 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it('explains private on-device attribution retry without model internals', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        speakerAttributionFailure: true,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: "Pluto couldn't verify who spoke",
+      detail:
+        'Retry to re-check speaker attribution privately on this Mac from the saved recording.',
+      actionLabel: 'Retry transcription',
+    });
+  });
+
   it('keeps capture recovery honest when a retry would be unsafe', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: true,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -41,6 +61,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: true,
         hasExistingAnalysis: false,
@@ -57,6 +78,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,

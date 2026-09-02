@@ -68,6 +68,8 @@ describe('post-meeting processing coordinator', () => {
       transcript_status: 'needs_attention' as const,
       capture_journal_generation: 'generation-1',
       audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       transcript_json: JSON.stringify({ segments: [{ text: 'preview' }] }),
       transcript_integrity_json: JSON.stringify({
         finalTranscription: {
@@ -85,6 +87,15 @@ describe('post-meeting processing coordinator', () => {
     expect(
       isParakeetValidatedMeeting({
         transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          speakerAttribution: {
+            source: 'offline_diarization_acoustic_v1',
+            confidence: 1,
+            diarizationAttempted: true,
+            mappingApplied: true,
+          },
+          segments: [],
+        }),
         transcript_integrity_json: JSON.stringify({
           finalTranscription: {
             policy: 'parakeet_final_v1',
@@ -97,6 +108,39 @@ describe('post-meeting processing coordinator', () => {
         }),
       }),
     ).toBe(true);
+  });
+
+  it('offers explicit final-transcription retry for validated channel fallback', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          diarizationAttempted: false,
+          mappingApplied: false,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+    };
+
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(false);
+    expect(selectNextMeetingForFinalTranscription([meeting])).toBeNull();
   });
 
   it('selects incomplete meetings without relying on UI selection', () => {

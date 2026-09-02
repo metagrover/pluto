@@ -63,7 +63,7 @@ public actor RuntimeJSONLineRouter {
                 events: [],
                 response: .prepared(id: request.id, modelVersion: "shutdown")
             )
-        case .prepare, .transcribe, .cancel:
+        case .prepare, .transcribe, .speakerEvidence, .cancel:
             return RuntimeJSONLineOutput(
                 events: [],
                 response: await service.handle(request)

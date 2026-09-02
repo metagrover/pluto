@@ -38,6 +38,35 @@ type NativeTranscription = {
   noSpeech: boolean;
 };
 
+export type SpeakerEvidenceRequest = {
+  mixedAudioPath: string;
+  micAudioPath: string;
+  systemAudioPath: string;
+  signal?: AbortSignal;
+};
+
+export type SpeakerEvidenceResult = {
+  turns: Array<{ startTime: number; endTime: number; cluster: string }>;
+  energyWindows: Array<{
+    startTime: number;
+    endTime: number;
+    micRms: number;
+    systemRms: number;
+  }>;
+  provenance: {
+    modelIdentifier: string;
+    modelRevision: string;
+    artifactDigest: string;
+    runtimeVersion: string;
+  };
+  timings: {
+    diarizationMs: number;
+    energyAnalysisMs: number;
+    totalMs: number;
+  };
+  windowSeconds: number;
+};
+
 type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
 export type ParakeetPreparationProgress = Pick<
   NativePreparationProgressEvent,
@@ -221,6 +250,43 @@ export class ParakeetFinalClient {
     return run;
   }
 
+  speakerEvidence(
+    request: SpeakerEvidenceRequest,
+  ): Promise<SpeakerEvidenceResult> {
+    if (
+      !this.isApprovedAudioPath(request.mixedAudioPath) ||
+      !this.isApprovedAudioPath(request.micAudioPath) ||
+      !this.isApprovedAudioPath(request.systemAudioPath)
+    ) {
+      return Promise.reject(new Error('parakeet_path_not_allowed'));
+    }
+    const reservation: Promise<FinalLeaseReservation> = this.runtimeHost
+      .acquire('final')
+      .then(
+        (lease) => ({ lease }),
+        (error: unknown) => ({
+          error:
+            error instanceof Error
+              ? error
+              : new Error('parakeet_runtime_unavailable'),
+        }),
+      );
+    const queuedRun = this.queue.then(
+      () => this.runSpeakerEvidence(request, reservation),
+      () => this.runSpeakerEvidence(request, reservation),
+    );
+    const preemption = reservation.then((acquired) => {
+      if ('error' in acquired) throw acquired.error;
+      return new Promise<never>(() => undefined);
+    });
+    const run = Promise.race([queuedRun, preemption]);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   close(): void {
     this.preparePromise = null;
     this.preparedCapability = null;
@@ -337,6 +403,62 @@ export class ParakeetFinalClient {
     }
   }
 
+  private async runSpeakerEvidence(
+    request: SpeakerEvidenceRequest,
+    reservation: Promise<FinalLeaseReservation>,
+  ): Promise<SpeakerEvidenceResult> {
+    const acquired = await reservation;
+    if ('error' in acquired) throw acquired.error;
+    const lease = acquired.lease;
+    const id = this.requestID('speaker-evidence');
+    let settled: Promise<void> | null = null;
+    const cancel = () => {
+      const cancelID = this.requestID('cancel');
+      this.runtimeHost.transport.ignoreResponse(cancelID);
+      this.runtimeHost.transport.notify({
+        schemaVersion: 1,
+        id: cancelID,
+        method: 'cancel',
+        targetId: id,
+      });
+    };
+    try {
+      if (request.signal?.aborted) throw new Error('parakeet_cancelled');
+      lease.setPreemptionHandler(async () => {
+        const cancelID = this.requestID('cancel');
+        const response = await this.runtimeHost.transport.request({
+          schemaVersion: 1,
+          id: cancelID,
+          method: 'cancel',
+          targetId: id,
+        });
+        if (!response.ok && response.error?.code !== 'parakeet_cancelled') {
+          this.requireSuccess(response);
+        }
+        if (!settled) throw new Error('parakeet_protocol_invalid');
+        await settled;
+      });
+      request.signal?.addEventListener('abort', cancel, { once: true });
+      const nativeRequest = this.runtimeHost.transport.request({
+        schemaVersion: 1,
+        id,
+        method: 'speaker_evidence',
+        mixedAudioPath: request.mixedAudioPath,
+        micAudioPath: request.micAudioPath,
+        systemAudioPath: request.systemAudioPath,
+      });
+      settled = nativeRequest.then(
+        () => undefined,
+        () => undefined,
+      );
+      const result = this.requireSuccess(await nativeRequest);
+      return this.parseSpeakerEvidence(result.speakerEvidence);
+    } finally {
+      request.signal?.removeEventListener('abort', cancel);
+      await lease.release();
+    }
+  }
+
   private async cancelAndSettleActivePrepare(): Promise<void> {
     const activePrepare = this.activePrepare;
     if (!activePrepare) return;
@@ -381,6 +503,63 @@ export class ParakeetFinalClient {
     )
       throw new Error('parakeet_protocol_invalid');
     return candidate;
+  }
+
+  private parseSpeakerEvidence(value: unknown): SpeakerEvidenceResult {
+    if (!value || typeof value !== 'object') {
+      throw new Error('parakeet_protocol_invalid');
+    }
+    const candidate = value as Partial<SpeakerEvidenceResult>;
+    const finiteRange = (entry: { startTime?: unknown; endTime?: unknown }) =>
+      Number.isFinite(entry.startTime) &&
+      Number.isFinite(entry.endTime) &&
+      Number(entry.startTime) >= 0 &&
+      Number(entry.endTime) > Number(entry.startTime);
+    const turnsValid =
+      Array.isArray(candidate.turns) &&
+      candidate.turns.length > 0 &&
+      candidate.turns.every(
+        (turn) =>
+          finiteRange(turn) &&
+          typeof turn.cluster === 'string' &&
+          turn.cluster.length > 0,
+      );
+    const windowsValid =
+      Array.isArray(candidate.energyWindows) &&
+      candidate.energyWindows.length > 0 &&
+      candidate.energyWindows.every(
+        (window) =>
+          finiteRange(window) &&
+          Number.isFinite(window.micRms) &&
+          Number.isFinite(window.systemRms) &&
+          window.micRms >= 0 &&
+          window.systemRms >= 0,
+      );
+    const provenance = candidate.provenance;
+    const timings = candidate.timings;
+    const hex = (text: string, length: number) =>
+      text.length === length && /^[a-f0-9]+$/i.test(text);
+    if (
+      !turnsValid ||
+      !windowsValid ||
+      !provenance ||
+      typeof provenance.modelIdentifier !== 'string' ||
+      !hex(provenance.modelRevision, 40) ||
+      !hex(provenance.artifactDigest, 64) ||
+      typeof provenance.runtimeVersion !== 'string' ||
+      !timings ||
+      !Number.isFinite(timings.diarizationMs) ||
+      !Number.isFinite(timings.energyAnalysisMs) ||
+      !Number.isFinite(timings.totalMs) ||
+      timings.diarizationMs < 0 ||
+      timings.energyAnalysisMs < 0 ||
+      timings.totalMs < 0 ||
+      !Number.isFinite(candidate.windowSeconds) ||
+      Number(candidate.windowSeconds) <= 0
+    ) {
+      throw new Error('parakeet_protocol_invalid');
+    }
+    return candidate as SpeakerEvidenceResult;
   }
 
   private isApprovedAudioPath(audioPath: string): boolean {
