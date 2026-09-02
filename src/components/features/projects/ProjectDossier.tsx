@@ -38,6 +38,13 @@ const formatDate = (value: string | null | undefined): string => {
       });
 };
 
+const normalizeProjectCopy = (value: string): string =>
+  value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?]+$/, '')
+    .toLocaleLowerCase();
+
 export const ProjectDossier = ({
   projectId,
   projectName,
@@ -102,6 +109,18 @@ export const ProjectDossier = ({
 
   const current = loadedProjectId === projectId ? brief : null;
   const qualification = readProjectQualification(current?.project.metadata);
+  const projectOutcome =
+    current?.theme?.outcome ||
+    qualification?.outcome ||
+    'Pluto has not established a durable outcome for this suggestion.';
+  const projectCurrentFocus =
+    current?.theme?.currentFocus ||
+    qualification?.outcome ||
+    current?.meetings[0]?.context ||
+    'Review the source conversation and decide whether this belongs in your portfolio.';
+  const currentFocusRepeatsOutcome =
+    normalizeProjectCopy(projectCurrentFocus) ===
+    normalizeProjectCopy(projectOutcome);
   const isSuggestion =
     Boolean(current) &&
     !current?.theme &&
@@ -381,11 +400,11 @@ export const ProjectDossier = ({
                 </button>
               </div>
             )}
-            <p className="mt-3 max-w-[65ch] text-base leading-relaxed text-pro-text-muted">
-              {current.theme?.outcome ||
-                qualification?.outcome ||
-                'Pluto has not established a durable outcome for this suggestion.'}
-            </p>
+            {!currentFocusRepeatsOutcome && (
+              <p className="mt-3 max-w-[65ch] text-base leading-relaxed text-pro-text-muted">
+                {projectOutcome}
+              </p>
+            )}
             <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-pro-text-muted">
               <span>
                 {current.meetingStats.meetingCount} conversation
@@ -457,10 +476,7 @@ export const ProjectDossier = ({
                 id="project-current-focus"
                 className="mt-3 max-w-[46ch] text-xl font-semibold leading-snug"
               >
-                {current.theme?.currentFocus ||
-                  qualification?.outcome ||
-                  current.meetings[0]?.context ||
-                  'Review the source conversation and decide whether this belongs in your portfolio.'}
+                {projectCurrentFocus}
               </h2>
             </section>
 

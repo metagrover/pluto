@@ -213,6 +213,20 @@ it('leads with current focus, recent changes, and open threads', async () => {
   expect(host.textContent).not.toContain('Momentum');
 });
 
+it('does not repeat the project outcome when it matches the current focus', async () => {
+  const duplicateFocusBrief = brief();
+  duplicateFocusBrief.theme!.currentFocus =
+    'Make historical records searchable.';
+  api.getProjectBrief.mockResolvedValueOnce(duplicateFocusBrief);
+
+  await render();
+
+  expect(host.textContent).toContain('Current focus');
+  expect(
+    host.textContent?.match(/Make historical records searchable/g),
+  ).toHaveLength(1);
+});
+
 it('adds a user milestone from an inline form', async () => {
   await render();
   await click('Add milestone');
