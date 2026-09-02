@@ -87,7 +87,11 @@ const sanitizeVocabularyTerms = (value: unknown): string[] =>
 export const runPersistedMeetingFinalTranscription = async (
   meeting: Meeting,
   invoke: Invoke,
-  options: { signal?: AbortSignal; runId?: string } = {},
+  options: {
+    signal?: AbortSignal;
+    runId?: string;
+    onTranscriptCommitted?: () => Promise<void> | void;
+  } = {},
 ): Promise<FinalTranscriptionOutcome> => {
   const captureGeneration = meeting.capture_journal_generation || '';
   const integrity = parseObject(
@@ -129,6 +133,7 @@ export const runPersistedMeetingFinalTranscription = async (
       mixedAudioPath: meeting.mixed_audio_path || '',
       systemAudioPath: meeting.system_audio_path || '',
       provisionalSegments: provisional.segments,
+      preserveProvisionalText: meeting.transcript_status === 'validated',
       activityWindows: activityEvidence?.windows || [],
       language,
       vocabulary,
@@ -242,14 +247,16 @@ export const runPersistedMeetingFinalTranscription = async (
           transcriptIntegrityJson,
           transcriptValidatedAt,
         })) as { committed?: boolean; transcriptJson?: string } | false;
-        return outcome && outcome.committed === true
-          ? {
-              committed: true,
-              transcript: JSON.parse(
-                outcome.transcriptJson || canonicalTranscriptJson,
-              ),
-            }
-          : { committed: false };
+        if (outcome && outcome.committed === true) {
+          await options.onTranscriptCommitted?.();
+          return {
+            committed: true,
+            transcript: JSON.parse(
+              outcome.transcriptJson || canonicalTranscriptJson,
+            ),
+          };
+        }
+        return { committed: false };
       },
       markNeedsAttention: async ({ failure, lease }) => {
         if (lease) {

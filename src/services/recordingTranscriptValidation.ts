@@ -13,6 +13,7 @@ import {
   CROSS_CHANNEL_SKEW_POLICY_VERSION,
   type CrossChannelReconciliationMetadata,
 } from './finalTranscription/crossChannelSkew.ts';
+import { projectSpeakerLabelsOntoTranscript } from './finalTranscription/projectSpeakerLabelsOntoTranscript.ts';
 
 type RawWhisperSegment = {
   start: number;
@@ -236,6 +237,7 @@ export const runRecordingTranscriptValidation = async (input: {
   checkpointSourceSegments?: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
   canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
+  preserveProvisionalText?: boolean;
   transcriptionScheduling?: 'parallel' | 'sequential_channels';
   checkpointEvidenceVerified?: boolean;
   resolveAttributionWindows?: () => Promise<SpeakerActivityWindow[]>;
@@ -386,16 +388,27 @@ export const runRecordingTranscriptValidation = async (input: {
   const recoveredChannelSegments = [...micSegments, ...systemSegments].sort(
     (left, right) => left.startTime - right.startTime,
   );
-  const reconciliation = reconcileCanonicalTranscript({
-    mixedSegments:
-      input.canonicalMode === 'recovered_channels'
-        ? recoveredChannelSegments
-        : mixedSegments,
-    micSegments,
-    systemSegments,
-    provisionalSegments: input.provisionalSegments,
-    activityWindows: attributionWindows,
-  });
+  const reconciliation = input.preserveProvisionalText
+    ? {
+        segments: projectSpeakerLabelsOntoTranscript({
+          segments: input.provisionalSegments,
+          evidenceSegments: recoveredChannelSegments,
+        }).segments,
+        evidence: {
+          collapsedPassThroughSeconds: 0,
+          unresolvedAmbiguousSeconds: 0,
+        },
+      }
+    : reconcileCanonicalTranscript({
+        mixedSegments:
+          input.canonicalMode === 'recovered_channels'
+            ? recoveredChannelSegments
+            : mixedSegments,
+        micSegments,
+        systemSegments,
+        provisionalSegments: input.provisionalSegments,
+        activityWindows: attributionWindows,
+      });
   const collapsedPassThroughSeconds =
     reconciliation.evidence.collapsedPassThroughSeconds +
     collapsedChannels.droppedMicSeconds;

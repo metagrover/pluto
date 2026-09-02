@@ -353,6 +353,61 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.evidence.micActivitySeconds).toBe(60);
   });
 
+  it('repairs labels without replacing saved transcript text', async () => {
+    const savedWords = [
+      { word: 'I', start: 0, end: 0.4 },
+      { word: 'said', start: 0.4, end: 0.9 },
+      { word: 'this.', start: 0.9, end: 1.4 },
+    ];
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'speaker-label-repair',
+      recordingDurationSeconds: 2,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [
+        {
+          id: 'saved-segment',
+          startTime: 0,
+          endTime: 1.4,
+          text: 'I said this.',
+          speaker: 'Them',
+          words: savedWords,
+        },
+      ],
+      activityWindows: [{ speaker: 'Me', startTime: 0, endTime: 1.4 }],
+      canonicalMode: 'recovered_channels',
+      preserveProvisionalText: true,
+      transcriptionScheduling: 'sequential_channels',
+      resolveAttributionWindows: async () => [
+        { speaker: 'Me', startTime: 0, endTime: 1.4 },
+      ],
+      transcribe: async (_path, options) => ({
+        segments:
+          options.canonicalSource === 'mic'
+            ? [{ start: 0, end: 1.4, text: 'I said this', words: savedWords }]
+            : [],
+        vad:
+          options.canonicalSource === 'mic'
+            ? { status: 'speech' as const, speechSeconds: 1.4 }
+            : { status: 'no_speech' as const, speechSeconds: 0 },
+      }),
+      probeDuration: async () => 2,
+    });
+
+    expect(result.status).toBe('validated');
+    expect(result.segments).toEqual([
+      {
+        id: 'saved-segment',
+        startTime: 0,
+        endTime: 1.4,
+        text: 'I said this.',
+        speaker: 'Me',
+        words: savedWords,
+      },
+    ]);
+  });
+
   it('credits removed cross-channel pass-through as explained mic activity', async () => {
     const duplicate = timedRawSegment(
       0,

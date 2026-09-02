@@ -181,7 +181,9 @@ export function generateMid(input: MidGeneratorInput): MidFrontmatter {
     const speakerCounts = new Map<string, number>();
     for (const seg of segments) {
       const spk = seg.speaker?.trim();
-      if (spk) speakerCounts.set(spk, (speakerCounts.get(spk) ?? 0) + 1);
+      if (spk && spk.toLowerCase() !== 'unknown') {
+        speakerCounts.set(spk, (speakerCounts.get(spk) ?? 0) + 1);
+      }
     }
     participants = [...speakerCounts.entries()]
       .sort((a, b) => b[1] - a[1])

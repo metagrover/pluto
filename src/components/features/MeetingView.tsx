@@ -257,8 +257,15 @@ export const TranscriptIntegrityPanel = ({
     downstreamFailed,
   });
 
-  const progressCopy = retryOperationKind
-    ? resolveMeetingRetryProgressPresentation(retryOperationKind)
+  // Final transcription also regenerates notes. Once speaker attribution has
+  // committed, let the notes skeleton communicate that remaining work instead
+  // of leaving the speaker-label repair banner spinning until analysis ends.
+  const visibleRetryOperationKind =
+    retryOperationKind === 'speaker_labels' && !speakerAttributionFailure
+      ? null
+      : retryOperationKind;
+  const progressCopy = visibleRetryOperationKind
+    ? resolveMeetingRetryProgressPresentation(visibleRetryOperationKind)
     : null;
   if (!panelCopy && !progressCopy) return null;
   const title = progressCopy?.title ?? panelCopy?.title;
@@ -765,7 +772,9 @@ export const MeetingView = ({
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
-      .filter(Boolean),
+      .filter(
+        (speaker) => Boolean(speaker) && speaker.toLowerCase() !== 'unknown',
+      ),
   ).size;
   const selectedMeetingRetryOperation =
     transcriptValidationRetryOperation !== null &&

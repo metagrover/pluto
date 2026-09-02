@@ -182,13 +182,18 @@ describe('runPersistedMeetingFinalTranscription', () => {
       return { status: 'validated' };
     });
 
+    const onTranscriptCommitted = vi.fn(async () => undefined);
     const outcome = await runPersistedMeetingFinalTranscription(
       meeting,
       invoke,
-      { runId: 'run-1' },
+      { runId: 'run-1', onTranscriptCommitted },
     );
 
     expect(outcome).toEqual({ status: 'validated' });
+    expect(onTranscriptCommitted).toHaveBeenCalledOnce();
+    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+      preserveProvisionalText: false,
+    });
     expect(invoke).not.toHaveBeenCalledWith(
       'GET_TRANSCRIPTION_VOCABULARY',
       expect.anything(),
@@ -215,6 +220,48 @@ describe('runPersistedMeetingFinalTranscription', () => {
           .transcriptIntegrityJson,
       ),
     ).toMatchObject({ speakerAttributionVerified: true });
+  });
+
+  it('preserves saved transcript text during a validated speaker-label retry', async () => {
+    const meeting = {
+      id: 'meeting-speaker-retry',
+      title: 'Meeting',
+      created_at: '2026-08-15T00:00:00.000Z',
+      started_at: '2026-08-15T00:00:00.000Z',
+      duration_seconds: 60,
+      audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      system_audio_path: '/approved/system.wav',
+      capture_journal_generation: 'generation-1',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        segments: [
+          { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: 'digest',
+        },
+        activityEvidence: { private: 'verified by parser' },
+      }),
+    } as Meeting;
+    mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
+    );
+
+    await runPersistedMeetingFinalTranscription(meeting, invoke, {
+      runId: 'run-speaker-retry',
+    });
+
+    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+      preserveProvisionalText: true,
+      provisionalSegments: [
+        expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
+      ],
+    });
   });
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
