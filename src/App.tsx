@@ -114,6 +114,29 @@ const meetingPreviewEnabled =
 const dashboardPreviewEnabled =
   new URLSearchParams(window.location.search).get('preview') === 'dashboard';
 
+type MeetingRetryRoute =
+  | 'final_transcription'
+  | 'analysis'
+  | 'transcript_validation'
+  | 'unavailable';
+
+export const resolveMeetingRetryRoute = (
+  kind: MeetingRetryKind,
+  meeting: Partial<Meeting> | null | undefined,
+): MeetingRetryRoute => {
+  if (kind === 'analysis') {
+    return isParakeetValidatedMeeting(meeting) ? 'analysis' : 'unavailable';
+  }
+  if (kind === 'speaker_labels') {
+    return canRetryMeetingFinalTranscription(meeting)
+      ? 'final_transcription'
+      : 'unavailable';
+  }
+  return canRetryMeetingFinalTranscription(meeting)
+    ? 'final_transcription'
+    : 'transcript_validation';
+};
+
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
@@ -787,15 +810,25 @@ function App() {
               'GET_MEETING',
               summary?.id ?? meetingId,
             )) as Meeting | null);
-      if (meeting && canRetryMeetingFinalTranscription(meeting)) {
+      const route = resolveMeetingRetryRoute(kind, meeting);
+      if (route === 'final_transcription' && meeting) {
         await runMeetingFinalTranscription(meeting);
         return;
       }
-      if (meeting && isParakeetValidatedMeeting(meeting)) {
+      if (route === 'analysis' && meeting) {
         await processValidatedMeetingDownstream(
           meeting.id,
           (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+          { reason: 'manual' },
         );
+        await fetchMeetings();
+        return;
+      }
+      if (route === 'unavailable') {
+        console.warn('[Pluto] Meeting retry is no longer available', {
+          meetingId,
+          kind,
+        });
         await fetchMeetings();
         return;
       }

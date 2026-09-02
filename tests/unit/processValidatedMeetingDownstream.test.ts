@@ -65,6 +65,32 @@ describe('processValidatedMeetingDownstream', () => {
     );
   });
 
+  it('starts a user retry as a manual notes attempt', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_MEETING') return validatedMeeting;
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return {
+          meetingId: validatedMeeting.id,
+          runId: 'run-manual',
+          status: 'published',
+        };
+      }
+      throw new Error(`unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      processValidatedMeetingDownstream(validatedMeeting.id, invoke, {
+        reason: 'manual',
+      }),
+    ).resolves.toEqual({ status: 'published' });
+    expect(invoke).toHaveBeenCalledWith('GENERATE_MEETING_NOTES', {
+      meetingId: validatedMeeting.id,
+      requestId: expect.any(String),
+      template: 'auto',
+      reason: 'manual',
+    });
+  });
+
   it('returns a failed observation when publication rejects', async () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'GET_MEETING') return validatedMeeting;
