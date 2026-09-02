@@ -261,7 +261,7 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain("Couldn't finish the transcript");
   });
 
-  it('offers private speaker repair for a fresh attribution rejection', () => {
+  it('offers calm speaker label improvement for a fresh attribution rejection', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="needs_attention"
@@ -282,9 +282,11 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).toContain('Pluto couldn&#x27;t verify who spoke');
-    expect(markup).toContain('privately on this Mac');
-    expect(markup).toContain('Retry transcription');
+    expect(markup).toContain('Improve speaker labels');
+    expect(markup).toContain(
+      'Pluto can take another pass using the saved recording.',
+    );
+    expect(markup).toContain('Improve labels');
   });
 
   it('offers historical speaker repair even when analysis already exists', () => {
@@ -317,9 +319,11 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).toContain('Pluto couldn&#x27;t verify who spoke');
-    expect(markup).toContain('privately on this Mac');
-    expect(markup).toContain('Retry transcription');
+    expect(markup).toContain('Improve speaker labels');
+    expect(markup).toContain(
+      'Pluto can take another pass using the saved recording.',
+    );
+    expect(markup).toContain('Improve labels');
   });
 
   it('uses the same notice for retryable analysis without a second alert', () => {

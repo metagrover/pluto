@@ -1,7 +1,11 @@
 export type MeetingFailurePresentation = {
   title: string;
   detail: string;
-  actionLabel: 'Retry transcription' | 'Retry analysis' | null;
+  actionLabel:
+    | 'Improve labels'
+    | 'Retry transcription'
+    | 'Retry analysis'
+    | null;
 };
 
 export type MeetingRegenerationFailurePresentation = {
@@ -118,10 +122,9 @@ export const resolveMeetingFailurePresentation = (
 ): MeetingFailurePresentation | null => {
   if (input.retryableFinalTranscription && input.speakerAttributionFailure) {
     return {
-      title: "Pluto couldn't verify who spoke",
-      detail:
-        'Retry to re-check speaker attribution privately on this Mac from the saved recording.',
-      actionLabel: 'Retry transcription',
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      actionLabel: 'Improve labels',
     };
   }
   if (input.retryableFinalTranscription) {

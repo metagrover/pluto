@@ -22,7 +22,7 @@ describe('meeting failure presentation', () => {
     });
   });
 
-  it('explains private on-device attribution retry without model internals', () => {
+  it('offers a calm, outcome-focused speaker label improvement', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
@@ -33,10 +33,9 @@ describe('meeting failure presentation', () => {
         downstreamFailed: false,
       }),
     ).toEqual({
-      title: "Pluto couldn't verify who spoke",
-      detail:
-        'Retry to re-check speaker attribution privately on this Mac from the saved recording.',
-      actionLabel: 'Retry transcription',
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      actionLabel: 'Improve labels',
     });
   });
 
