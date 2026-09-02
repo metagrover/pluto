@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canImproveHistoricalSpeakerLabels,
   canRetryMeetingFinalTranscription,
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
@@ -139,8 +140,29 @@ describe('post-meeting processing coordinator', () => {
     };
 
     expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
     expect(isParakeetValidatedMeeting(meeting)).toBe(false);
     expect(selectNextMeetingForFinalTranscription([meeting])).toBeNull();
+  });
+
+  it('does not classify a fresh attribution rejection as historical repair', () => {
+    expect(
+      canImproveHistoricalSpeakerLabels({
+        transcript_status: 'needs_attention',
+        capture_journal_generation: 'generation-1',
+        audio_path: '/approved/mic.wav',
+        system_audio_path: '/approved/system.wav',
+        mixed_audio_path: '/approved/mixed.wav',
+        transcript_json: JSON.stringify({ segments: [{ text: 'preview' }] }),
+        transcript_integrity_json: JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'speaker_attribution_rejected',
+          },
+        }),
+      }),
+    ).toBe(false);
   });
 
   it('selects incomplete meetings without relying on UI selection', () => {
