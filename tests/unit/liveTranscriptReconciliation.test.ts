@@ -100,6 +100,33 @@ describe('live transcript reconciliation', () => {
     expect(result.presentation).toBeUndefined();
   });
 
+  it('suppresses a long aligned echo despite ordinary ASR substitutions', () => {
+    const mic = segment(
+      'mic-near-echo',
+      'mic',
+      'She is joining in a minute actually Dana and I were messaging each other for almost an hour so I tried setting it up locally and then you know tried adding the script and I could connect to the database',
+      1_100,
+      12_100,
+    );
+    const system = segment(
+      'system-near-echo',
+      'system',
+      'She is joining in a minute actually Dana and I were messaging each other for almost an hour so I tried setting it up locally and then you know tried running the script and I was able to connect to the database',
+      1_000,
+      12_000,
+    );
+
+    const [result] = reconcileLiveTranscriptSegments({
+      segments: [mic, system],
+      activityWindows: [{ startTime: 1, endTime: 12.2, speaker: 'Them' }],
+    });
+
+    expect(result.presentation).toMatchObject({
+      visibility: 'suppressed_echo',
+      matchedSegmentId: 'system-near-echo',
+    });
+  });
+
   it('suppresses a long ordered echo despite louder microphone activity', () => {
     const system = segment(
       'system',
