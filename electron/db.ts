@@ -91,6 +91,14 @@ import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
 import { getApplicationDatabase } from './database/applicationDatabase';
+import {
+  type SearchIndexIntegrity,
+  getMeetingFtsIntegrity as readMeetingFtsIntegrity,
+  getMeetingNotesFtsIntegrity as readMeetingNotesFtsIntegrity,
+  refreshMeetingFts as refreshMeetingSearchFts,
+  repairMeetingNotesFtsIndex as repairMeetingNotesSearchFtsIndex,
+  repairMeetingFtsIndex as repairMeetingSearchFtsIndex,
+} from './database/meetingSearchMaintenance';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -100,7 +108,6 @@ import type {
   AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
-import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { analysisDocumentV3ToMarkdown } from './llm/analysisDocumentV3';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
@@ -861,201 +868,29 @@ export const saveMeetingContextSnapshot = (
  * Meeting Management
  */
 function refreshMeetingFts(meeting: PersistedMeeting) {
-  const id = String(meeting.id);
-  let transcriptText = '';
-  try {
-    if (meeting.transcript_json) {
-      const transcript = JSON.parse(meeting.transcript_json);
-      const segments = Array.isArray(transcript)
-        ? transcript
-        : Array.isArray(transcript?.segments)
-          ? transcript.segments
-          : [];
-      transcriptText = segments
-        .map((segment: { text?: string }) =>
-          typeof segment?.text === 'string' ? segment.text.trim() : '',
-        )
-        .filter((text: string) => text.length > 0)
-        .join(' ');
-    }
-  } catch (e) {
-    console.warn('Failed to parse transcript_json for FTS', e);
-  }
-
-  let midParticipants = '';
-  let midTopics = '';
-  let midDecisions = '';
-  let midActionItems = '';
-  const midJsonRaw = (meeting as unknown as Record<string, unknown>).mid_json;
-  if (typeof midJsonRaw === 'string' && midJsonRaw.trim()) {
-    try {
-      const mid = JSON.parse(midJsonRaw) as MidFrontmatter;
-      midParticipants = (mid.participants || []).map((p) => p.name).join(', ');
-      midTopics = (mid.topics || []).map((t) => t.name).join(', ');
-      midDecisions = (mid.decisions || []).map((d) => d.description).join(', ');
-      midActionItems = (mid.action_items || [])
-        .map((a) => a.description)
-        .join(', ');
-    } catch {
-      // Ignore MID parse errors during FTS update.
-    }
-  }
-
-  console.log(`[DB] Updating FTS index for meeting: ${id}`);
-  db.transaction(() => {
-    db.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(id);
-    db.prepare(`
-      INSERT INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
-        mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      meeting.title,
-      transcriptText,
-      meeting.enhanced_notes || '',
-      meeting.user_notes || '',
-      midParticipants,
-      midTopics,
-      midDecisions,
-      midActionItems,
-      id,
-    );
-    refreshMeetingNotesFts(meeting);
-  })();
+  refreshMeetingSearchFts(db, meeting);
 }
 
-function refreshMeetingNotesFts(meeting: PersistedMeeting) {
-  const document = buildMeetingNotesEvidenceDocument(meeting);
-  db.prepare('DELETE FROM meeting_notes_fts WHERE meeting_id = ?').run(
-    document.meetingId,
-  );
-  db.prepare(
-    `INSERT INTO meeting_notes_fts (
-      title, notes_text, decisions_text, action_items_text,
-      topics_text, participants_text, meeting_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    document.title,
-    document.notesText,
-    document.decisionsText,
-    document.actionItemsText,
-    document.topicsText,
-    document.participantsText,
-    document.meetingId,
-  );
+export function getMeetingFtsIntegrity(): SearchIndexIntegrity {
+  return readMeetingFtsIntegrity(db);
 }
 
-export function getMeetingFtsIntegrity(): {
-  rowCount: number;
-  distinctMeetingCount: number;
-  duplicateRowCount: number;
-} {
-  const result = db
-    .prepare(
-      `SELECT COUNT(*) AS row_count,
-              COUNT(DISTINCT meeting_id) AS distinct_meeting_count
-       FROM meetings_fts`,
-    )
-    .get() as { row_count: number; distinct_meeting_count: number };
-  return {
-    rowCount: result.row_count,
-    distinctMeetingCount: result.distinct_meeting_count,
-    duplicateRowCount: result.row_count - result.distinct_meeting_count,
-  };
-}
-
-export function getMeetingNotesFtsIntegrity(): {
-  rowCount: number;
-  distinctMeetingCount: number;
-  duplicateRowCount: number;
-} {
-  const result = db
-    .prepare(
-      `SELECT COUNT(*) AS row_count,
-              COUNT(DISTINCT meeting_id) AS distinct_meeting_count
-       FROM meeting_notes_fts`,
-    )
-    .get() as { row_count: number; distinct_meeting_count: number };
-  return {
-    rowCount: result.row_count,
-    distinctMeetingCount: result.distinct_meeting_count,
-    duplicateRowCount: result.row_count - result.distinct_meeting_count,
-  };
+export function getMeetingNotesFtsIntegrity(): SearchIndexIntegrity {
+  return readMeetingNotesFtsIntegrity(db);
 }
 
 export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
   rebuilt: boolean;
   indexedMeetingCount: number;
 } {
-  const integrity = getMeetingFtsIntegrity();
-  const meetingCount = (
-    db.prepare('SELECT COUNT(*) AS count FROM meetings').get() as {
-      count: number;
-    }
-  ).count;
-  if (
-    !options.force &&
-    integrity.duplicateRowCount === 0 &&
-    integrity.distinctMeetingCount === meetingCount
-  ) {
-    return { rebuilt: false, indexedMeetingCount: meetingCount };
-  }
-
-  const meetings = db
-    .prepare('SELECT * FROM meetings')
-    .all() as PersistedMeeting[];
-  db.transaction(() => {
-    db.prepare('DELETE FROM meetings_fts').run();
-    for (const meeting of meetings) refreshMeetingFts(meeting);
-    const repaired = getMeetingFtsIntegrity();
-    if (
-      repaired.duplicateRowCount !== 0 ||
-      repaired.distinctMeetingCount !== meetings.length
-    ) {
-      throw new Error('meeting_fts_integrity_check_failed');
-    }
-  })();
-  console.log(
-    `[DB] Rebuilt meeting search index (${meetings.length} meetings)`,
-  );
-  return { rebuilt: true, indexedMeetingCount: meetings.length };
+  return repairMeetingSearchFtsIndex(db, options);
 }
 
 export function repairMeetingNotesFtsIndex(options: { force?: boolean } = {}): {
   rebuilt: boolean;
   indexedMeetingCount: number;
 } {
-  const integrity = getMeetingNotesFtsIntegrity();
-  const meetingCount = (
-    db.prepare('SELECT COUNT(*) AS count FROM meetings').get() as {
-      count: number;
-    }
-  ).count;
-  if (
-    !options.force &&
-    integrity.duplicateRowCount === 0 &&
-    integrity.distinctMeetingCount === meetingCount
-  ) {
-    return { rebuilt: false, indexedMeetingCount: meetingCount };
-  }
-
-  const meetings = db
-    .prepare('SELECT * FROM meetings')
-    .all() as PersistedMeeting[];
-  db.transaction(() => {
-    db.prepare('DELETE FROM meeting_notes_fts').run();
-    for (const meeting of meetings) refreshMeetingNotesFts(meeting);
-    const repaired = getMeetingNotesFtsIntegrity();
-    if (
-      repaired.duplicateRowCount !== 0 ||
-      repaired.distinctMeetingCount !== meetings.length
-    ) {
-      throw new Error('meeting_notes_fts_integrity_check_failed');
-    }
-  })();
-  console.log(
-    `[DB] Rebuilt meeting notes search index (${meetings.length} meetings)`,
-  );
-  return { rebuilt: true, indexedMeetingCount: meetings.length };
+  return repairMeetingNotesSearchFtsIndex(db, options);
 }
 
 const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
