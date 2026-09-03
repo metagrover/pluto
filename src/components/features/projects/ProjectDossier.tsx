@@ -693,6 +693,7 @@ export const ProjectDossier = ({
                 title: meeting.title,
                 date: meeting.started_at || meeting.created_at,
               }))}
+              onOpenMeeting={onOpenMeeting}
               onChange={(milestones) =>
                 setBrief((value) => (value ? { ...value, milestones } : value))
               }

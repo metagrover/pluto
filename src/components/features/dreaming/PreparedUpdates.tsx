@@ -175,7 +175,7 @@ export function PreparedUpdates({
     if (!focusAfterDecision.current) return;
     focusAfterDecision.current = false;
     const nextAction = sectionRef.current?.querySelector<HTMLButtonElement>(
-      'ol button:not(:disabled)',
+      'ol button[data-prepared-update-action]:not(:disabled)',
     );
     (nextAction ?? completionRef.current)?.focus();
   }, [proposals, decisionNotice]);
@@ -383,6 +383,7 @@ export function PreparedUpdates({
                 <div className="mt-3 flex flex-wrap gap-1">
                   <button
                     type="button"
+                    data-prepared-update-action="accept"
                     disabled={acceptDisabled}
                     onClick={() => void decide(proposal, 'accept')}
                     className={`${actionClass} text-pro-accent hover:bg-pro-hover`}
@@ -391,6 +392,7 @@ export function PreparedUpdates({
                   </button>
                   <button
                     type="button"
+                    data-prepared-update-action="reject"
                     disabled={rejectDisabled}
                     onClick={() => void decide(proposal, 'reject')}
                     className={`${actionClass} text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main`}

@@ -167,7 +167,15 @@ beforeEach(() => {
     createdAt: '2026-08-29T12:00:00Z',
     updatedAt: '2026-08-29T12:00:00Z',
   });
-  api.restoreProjectMilestone.mockResolvedValue({});
+  api.restoreProjectMilestone.mockResolvedValue({
+    id: 'user-1',
+    title: 'Private beta',
+    status: 'planned',
+    targetDate: '2026-09-10',
+    note: null,
+    createdAt: '2026-08-29T12:00:00Z',
+    updatedAt: '2026-08-29T12:00:00Z',
+  });
   api.mergeProject.mockResolvedValue(undefined);
   api.restoreProjectMerge.mockResolvedValue(undefined);
   api.setProjectPortfolioDisposition.mockResolvedValue({});
@@ -629,6 +637,7 @@ it('ignores a late preparation result after the open project changes', async () 
 });
 
 it('shows generated milestone provenance and keeps its durable remove action', async () => {
+  const openMeeting = vi.fn();
   api.getProjectBrief.mockResolvedValue(
     brief({
       milestones: [
@@ -647,7 +656,7 @@ it('shows generated milestone provenance and keeps its durable remove action', a
       ],
     }),
   );
-  await render();
+  await render({ onOpenMeeting: openMeeting });
 
   expect(host.textContent).toContain('Pluto-prepared');
   const source = Array.from(host.querySelectorAll('summary')).find((item) =>
@@ -656,6 +665,11 @@ it('shows generated milestone provenance and keeps its durable remove action', a
   await act(async () => source?.click());
   expect(host.textContent).toContain('Archive weekly review');
   expect(host.textContent).toContain('We launch the archive next week.');
+  const sourceMeeting = Array.from(
+    source?.parentElement?.querySelectorAll('button') ?? [],
+  ).find((button) => button.textContent?.includes('Archive weekly review'));
+  await act(async () => sourceMeeting?.click());
+  expect(openMeeting).toHaveBeenCalledWith('m1');
 
   await act(async () => {
     host

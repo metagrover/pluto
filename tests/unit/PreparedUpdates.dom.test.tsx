@@ -312,7 +312,19 @@ it('disables every proposal action while one decision is in flight', async () =>
   }>();
   api.getPendingDreamingProposals.mockResolvedValue([proposal, secondProposal]);
   api.acceptDreamingProposal.mockReturnValueOnce(pendingDecision.promise);
-  await render();
+  await act(async () => {
+    root.render(
+      <PreparedUpdates
+        entityId="project-1"
+        entityType="project"
+        evidenceMeetings={[
+          { id: 'meeting-1', title: 'Closed evidence source' },
+        ]}
+        onOpenMeeting={() => {}}
+      />,
+    );
+    await Promise.resolve();
+  });
 
   await act(async () => {
     Array.from(host.querySelectorAll('button'))
@@ -341,6 +353,9 @@ it('disables every proposal action while one decision is in flight', async () =>
     ),
   ).toBe(true);
   expect(document.activeElement?.textContent).toBe('Accept');
+  expect(document.activeElement?.textContent).not.toContain(
+    'Closed evidence source',
+  );
 });
 
 it('ignores a slow pending response from the previously open entity', async () => {

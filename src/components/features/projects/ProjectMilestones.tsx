@@ -104,6 +104,7 @@ export function ProjectMilestones({
   projectId,
   milestones,
   evidenceMeetings = [],
+  onOpenMeeting,
   onChange,
 }: {
   projectId: string;
@@ -113,6 +114,7 @@ export function ProjectMilestones({
     title?: string | null;
     date?: string | null;
   }>;
+  onOpenMeeting?: (meetingId: string) => void;
   onChange: (milestones: ProjectMilestone[]) => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
@@ -402,10 +404,21 @@ export function ProjectMilestones({
                             : null;
                           return (
                             <li key={`${milestone.id}-source-${index}`}>
-                              <p className="text-xs text-pro-text-muted">
-                                {meeting?.title || 'Linked meeting'}
-                                {meetingDate ? ` · ${meetingDate}` : ''}
-                              </p>
+                              {meeting && onOpenMeeting ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenMeeting(meeting.id)}
+                                  className="min-h-11 rounded text-left text-xs text-pro-text-muted hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent sm:min-h-10"
+                                >
+                                  {meeting.title || 'Linked meeting'}
+                                  {meetingDate ? ` · ${meetingDate}` : ''}
+                                </button>
+                              ) : (
+                                <p className="text-xs text-pro-text-muted">
+                                  {meeting?.title || 'Linked meeting'}
+                                  {meetingDate ? ` · ${meetingDate}` : ''}
+                                </p>
+                              )}
                               <q className="mt-1 block max-w-[56ch] leading-5 text-pro-text-main">
                                 {excerpt}
                               </q>
