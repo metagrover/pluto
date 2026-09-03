@@ -1,241 +1,113 @@
-# Design Spec: Idle Memory Dreaming for People and Projects
+# Stable Background Consolidation for People and Projects
 
 **Issue:** [#586](https://github.com/metagrover/pluto/issues/586)  
 **Date:** 2026-09-02  
-**Status:** Approved design; ready for implementation planning  
+**Status:** Approved for implementation
 
----
+## Outcome
 
-## 1. Problem & Context
+Pluto prepares grounded improvements to People and Project dossiers while the Mac is idle without allowing model output to mutate trusted knowledge directly. Each run is bounded, tied to a durable source revision, fully preemptible, and reviewable in the affected dossier.
 
-Pluto's knowledge engine synthesizes intelligence from individual meetings. However, consolidating this knowledge across meetings into rich **People** and **Project** dossiers is currently split between manual reconciliation and on-demand synthesis (e.g., `discoverProjectInitiative` running when a user opens the Projects tab).
+## Product boundary
 
-Running LLM synthesis on page open introduces noticeable latency, spinners, and CPU/GPU contention. Conversely, running background consolidation aggressively risks interfering with active meetings, hogging laptop battery, producing fan noise, or corrupting state if interrupted mid-stream. Furthermore, feeding raw transcripts (`transcript_json`) into local Ollama models is computationally prohibitive (15,000–40,000+ tokens per meeting).
+- Background generation creates proposals only.
+- Every proposed fact cites a supplied meeting ID and an exact normalized excerpt from structured meeting notes.
+- Users accept or reject pending proposals. Acceptance uses the canonical People, Projects, commitment, milestone, or reversible-alias persistence path. Rejection records a durable negative constraint.
+- Raw transcripts are not ordinary dreaming input and remain immutable.
+- Identity merges, deletions, archival, ownership assignment, and temporal-state rewrites are not automatic.
+- Gemma is the fixed model for this evidence-heavy synthesis. Phi remains available for lightweight foreground interactions. Qwen and cross-model evaluation are out of scope.
 
-## 2. Goals & Product Principles
+## Data model
 
-1. **Foreground Always Wins (Zero-Interruption Guarantee)**:
-   Dreaming only runs when the system is verifiably idle on AC power. Any foreground activity (meeting recording, post-meeting note processing, Ask Pluto query, or user keyboard/mouse input) preempts dreaming instantly (<50ms) via `AbortController`.
-2. **Notes-First, Never Raw Transcripts**:
-   Dreaming reads structured, distilled meeting notes (`enhanced_notes` and `analysis_json`), cutting context from ~30k tokens down to ~1k–2k tokens. This reduces local Ollama inference time, memory footprint, and thermal generation by over 90%.
-3. **Single-Entity Incremental Work Units**:
-   Work is queued and processed one entity at a time (one Project or one Person). Between entities, eligibility is re-verified. Generous per-entity timeouts (up to 3 minutes) ensure local models on slower hardware are not prematurely killed.
-4. **Frictionless Additive Enrichment**:
-   New milestones, executive summaries, and attributed commitments are automatically added to Project and People dossiers ahead of time. Opening a page is instantaneous (0ms model latency).
-5. **User-Driven Accuracy Control ("Remove / Report Inaccurate")**:
-   Users have complete control without upfront approval friction. Any synthesized milestone or fact can be removed with a single click ("Remove from project" / "Report inaccurate"), which records an immutable negative constraint so dreaming never re-adds it.
-6. **Non-Destructive Alias Suggestions**:
-   Identity merges (e.g., "Robert is Bob") are surfaced as subtle inline suggestion pills on the dossier rather than forced auto-merges, allowing the user to `[Merge]` or `[Keep Separate]`.
+### `entity_dreaming_runs`
 
----
+One row represents evaluation of one entity at one source revision.
 
-## 3. Architecture & Lifecycle
+- `id`, `entity_id`, `entity_type`, `source_revision`
+- `status`: `running`, `no_change`, `proposed`, `failed`, or `cancelled`
+- `model`, `prompt_version`, `attempt_count`, `error_code`
+- `lease_token`, `started_at`, `completed_at`, `next_retry_at`, `created_at`, `updated_at`
+- Unique `(entity_id, source_revision)` prevents duplicate completed work.
 
-```text
-               +--------------------------------------------+
-               |         Meeting Finalized Event            |
-               | (Dirty tags applied to People & Projects)  |
-               +--------------------------------------------+
-                                     |
-                                     v
-                        [ Dirty Entity Queue ]
-                                     |
-                                     v
-               +--------------------------------------------+
-               |         Idle Coordinator Check             |
-               | - System idle >= 5 mins                    |
-               | - AC wall power (not on battery)           |
-               | - Thermal state 'nominal' or 'fair'        |
-               | - knowledgeSynthesisPause locks == 0       |
-               +--------------------------------------------+
-                        |                          |
-                (If Ineligible)             (If Eligible)
-                        |                          |
-                   [ Sleep 60s ]                   v
-                                    +------------------------------+
-                                    | Dequeue Exactly ONE Entity   |
-                                    +------------------------------+
-                                                   |
-                                                   v
-                                    +------------------------------+
-                                    | Extract Notes-First Package  |
-                                    | (enhanced_notes + constraints)|
-                                    +------------------------------+
-                                                   |
-    User Activity / Meeting Start                  v
-  ================================> +------------------------------+
-   (controller.abort() <50ms)       | Invoke Local Ollama Stream   |
-                                    | (qwen3.5 / phi4-mini)        |
-                                    +------------------------------+
-                                                   |
-                                                   v
-                                    +------------------------------+
-                                    | Deterministic Validation     |
-                                    | - Citation & Evidence check  |
-                                    | - Negative constraint check  |
-                                    +------------------------------+
-                                                   |
-                                                   v
-                                    +------------------------------+
-                                    | Transactional SQLite Commit  |
-                                    | - Update dossier & snapshots |
-                                    | - Stage alias suggestions    |
-                                    +------------------------------+
-```
+The source revision is a SHA-256 digest of the canonical entity ID, the bounded ordered meeting IDs, the structured-note content used by the prompt, the current accepted dossier baseline, and current correction fingerprints. A new meeting, edited note, accepted proposal, or rejection produces a new revision without clearing work that arrived during a run.
 
-### 3.1 Eligibility & Guardrails
+### `entity_dreaming_proposals`
 
-The `IdleDreamingCoordinator` in the Electron main process checks system conditions before dequeuing any work:
-- **Idle Threshold**: `powerMonitor.getSystemIdleTime() >= 300` (5 minutes of system-wide inactivity) and no Pluto renderer activity for 5 minutes.
-- **Power Source**: `!powerMonitor.isOnBatteryPower()`. Automatic dreaming will not drain laptop battery.
-- **Thermal State**: `powerMonitor.getCurrentThermalState()` in `['nominal', 'fair']`.
-- **Foreground Locks**: All pause reasons in [`knowledgeSynthesisPause`](file:///Users/metagrover/Desktop/pluto/electron/knowledgeSynthesisPause.ts) must be zero:
-  - `capture` (meeting in progress)
-  - `transcription` (live or post-meeting transcription)
-  - `downstream` (note/action item generation)
-  - `ask_pluto_session` (user chatting with Ask Pluto)
-  - `llm_active` (foreground model generation)
+One row represents one reviewable claim.
 
-### 3.2 Instant Preemption Protocol
+- `id`, `run_id`, `entity_id`, `entity_type`, `kind`
+- `payload_json`, `evidence_json`, `fingerprint`
+- `status`: `pending`, `accepted`, `rejected`, or `stale`
+- `decided_at`, `created_at`, `updated_at`
+- Unique `(run_id, fingerprint)` prevents duplicate proposals within a run.
 
-To guarantee zero latency impact on user operations:
-1. Every Ollama HTTP request is passed an `AbortSignal` from an active `AbortController`.
-2. The coordinator listens for:
-   - `powerMonitor.on('user-did-become-active')`
-   - IPC message for window focus / mouse move / keystroke in the renderer
-   - Acquisition of any lock in `knowledgeSynthesisPause`
-3. On any event, `controller.abort()` fires immediately (<50ms).
-4. The running entity task is aborted without writing any changes to SQLite.
-5. The entity remains marked dirty so it can be resumed during the next idle period.
-6. The Ollama session is released.
+Proposal payloads contain display values only. Evidence contains supplied meeting IDs and excerpts. The model never supplies database identifiers other than meeting IDs already present in the input package.
 
----
+## Input and output contract
 
-## 4. Notes-First Data Flow & Prompt Contract
+The packager performs one bounded database read for the canonical entity family. It includes:
 
-### 4.1 Input Package Assembly
+- current canonical display baseline;
+- up to eight most recent linked meetings with non-empty structured notes;
+- at most 1,600 words of structured notes across the package;
+- current durable correction fingerprints;
+- stable meeting IDs, titles, and dates.
 
-For a dirty entity (e.g. Project `proj_123` or Person `person_456`):
-1. **Existing Baseline**:
-   - Current display title, headline, and executive summary.
-   - Known active milestones and commitments.
-2. **Unconsolidated Meeting Notes**:
-   - Gathers meetings referencing this entity that have occurred since the entity was last consolidated.
-   - Extracts sections from `enhanced_notes`:
-     - Meeting Title & Date
-     - Executive Overview
-     - Key Decisions
-     - Action Items & Attributed Commitments
-3. **Negative Constraints (Corrections)**:
-   - Fetches any previously dismissed facts, milestones, or rejected aliases from `entity_corrections` for this entity.
+The prompt instructs Gemma to return `no_change` or a list of independent proposals. Supported V0 proposal kinds are:
 
-Total prompt context is bounded between 800 and 2,000 tokens.
+- `project_summary`
+- `project_milestone`
+- `project_commitment`
+- `project_alias`
+- `person_headline`
+- `person_focus`
+- `person_collaborator`
+- `person_alias`
 
-### 4.2 Structured Output Schemas
+Every proposal has one or more evidence references. Each reference must name a supplied meeting and include a non-empty excerpt that matches its structured notes after conservative whitespace and punctuation normalization. Project summaries require evidence from two distinct meetings. Missing fields, unknown fields, unsupported kinds, unknown meeting IDs, unmatched excerpts, correction collisions, and malformed statuses reject the entire output before persistence.
 
-#### For Projects:
-```typescript
-interface ProjectDreamingOutput {
-  status: 'updated' | 'no_change';
-  dossier_summary?: string;
-  milestones?: Array<{
-    name: string;
-    status: 'planned' | 'in_progress' | 'completed';
-    source_meeting_id: string;
-    evidence_snippet: string;
-  }>;
-  associated_commitments?: Array<{
-    task: string;
-    owner_name: string;
-    source_meeting_id: string;
-  }>;
-  suggested_aliases?: string[];
-}
-```
+`no_change` persists only the terminal run state and cannot create proposals or mutate canonical data.
 
-#### For People:
-```typescript
-interface PersonDreamingOutput {
-  status: 'updated' | 'no_change';
-  headline?: string;
-  current_focus?: string;
-  recent_collaborators?: string[];
-  suggested_aliases?: string[];
-}
-```
+## Proposal review and canonical application
 
-### 4.3 Deterministic Validation Gate
+Pending proposals appear in a compact “Prepared updates” section in the affected dossier. Each card shows the proposed value, its meeting sources, and Accept and Reject actions. The overview-level action is removed; “Prepare updates” is always scoped to the open entity.
 
-Before any proposal is persisted:
-- **Source Verification**: All `source_meeting_id` references must resolve to IDs provided in the input bundle.
-- **Negative Constraint Filter**: Any milestone, commitment, or alias matching an entry in `entity_corrections` is automatically pruned.
-- **No Hallucinated Identifiers**: The model only suggests string labels; SQLite entity IDs are managed deterministically by Pluto.
+Accept and reject are transactions guarded by proposal status and source revision:
 
----
+- Project summaries update the existing project-theme synthesis structure while preserving cited source meetings.
+- Project milestones use a generated, evidence-bearing milestone source distinct from user-created milestones.
+- Commitments use the canonical commitment/entity-link path and never infer authoritative ownership.
+- People headline, focus, and collaborator claims update the evidence-bearing knowledge-document structure read by the People dossier.
+- Alias acceptance uses the existing reversible merge/alias workflow and displays the affected identity before confirmation. It never silently merges an existing entity.
+- Rejection marks the proposal rejected and records its fingerprint as an entity correction in the same transaction.
 
-## 5. People & Project Page Integration
+If the entity source revision changes before a decision, the proposal becomes stale and cannot be applied.
 
-### 5.1 Zero-Wait Page Loading
-- Removes on-mount synthesis triggers (e.g. replacing eager `discoverProjectInitiative` in [`ProjectsOverview.tsx`](file:///Users/metagrover/Desktop/pluto/src/components/features/projects/ProjectsOverview.tsx)).
-- Pages read compiled state directly from SQLite (`entities`, `entity_milestones`, `working_memory_snapshots`), rendering in <10ms.
+## Scheduling and failure behavior
 
-### 5.2 Frictionless Additions
-- **Project Dossier** (`ProjectDossier.tsx`):
-  - Displays pre-computed executive summary.
-  - Automatically lists new milestones under `ProjectMilestones.tsx` with a clickable meeting badge (`From "Sprint Kickoff" — Aug 24`).
-- **People Tab** (`PeopleTab.tsx`):
-  - Automatically updates the person headline and recent focus areas.
+- Automatic work requires five minutes of system and renderer inactivity, wall power, safe thermals, and no foreground synthesis pause reason.
+- The queue selects one dirty canonical entity at a time. Active project and person aliases are excluded.
+- All generation shares Pluto's serialized inference gate. Foreground work preempts it.
+- Each run has a three-minute deadline. Cancellation, timeout, malformed output, provider failure, or lease mismatch performs no proposal or canonical write.
+- Failed revisions retry at most twice automatically with persisted exponential backoff. Manual retry does not erase failure history.
+- The coordinator rechecks eligibility and lease ownership immediately before persisting proposals.
+- Gemma is unloaded at the end of an idle batch or after preemption.
+- Production logs contain identifiers only as local database keys and never include names, note text, excerpts, prompts, or output content.
 
-### 5.3 User Corrections ("Remove / Report Inaccurate")
-- Each milestone, commitment, and insight row features a subtle hover menu with:
-  - **"Remove from project"**
-  - **"Report inaccurate"**
-- Triggering this action:
-  1. Instantly deletes the item from the dossier.
-  2. Inserts a row into `entity_corrections`:
-     ```sql
-     CREATE TABLE IF NOT EXISTS entity_corrections (
-       id TEXT PRIMARY KEY,
-       entity_id TEXT NOT NULL,
-       item_type TEXT NOT NULL, -- 'milestone', 'commitment', 'alias', 'summary'
-       fingerprint TEXT NOT NULL,
-       reason TEXT,
-       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-     );
-     ```
-  3. All future dream runs for this entity load these fingerprints into negative constraints, preventing resurrection.
+## Quality gate
 
-### 5.4 Non-Destructive Alias Banners
-- When dreaming detects alternate naming (e.g. "Robert" for "Bob", "Payment Gateway" for "Billing V2"):
-  - Renders an unobtrusive card at the top of the dossier:
-    > 💡 **Suggested Alias**: 2 meetings refer to *"Robert"* who may be Bob.  
-    > `[Merge]` &nbsp;&nbsp; `[Keep Separate]`
-  - `[Merge]` links the alias via Pluto's existing `person_aliases` / `project_aliases`.
-  - `[Keep Separate]` writes to `entity_corrections` so it is never suggested again.
+The release gate tests the exact production prompt and schema, not a test-only prompt. Deterministic fixtures cover supported claims, unsupported claims, fake excerpts, unknown meetings, corrections, stale revisions, duplicate proposals, cancellation, timeout, and partial database failure.
 
----
+A production dogfood run may create pending proposals but does not accept them automatically. The release report records only content-free counts, validation outcomes, latency, cancellation, and whether every persisted proposal has resolvable evidence. There is no model comparison. Gemma remains the configured synthesis model.
 
-## 6. Error Handling & Resilience
+## Delivery boundary
 
-- **Preemption Handling**: An `AbortError` is treated as a normal operational event. No error toast is shown, no partial data is written, and the entity is left dirty for the next idle cycle.
-- **Model Timeout**: A 3-minute timeout per entity prevents infinite hangs. If reached, the entity is skipped with a recorded failure count and exponential backoff.
-- **Model Unloading**: Following completion or preemption, the coordinator issues an Ollama unload signal to ensure 5–6 GB of unified memory is freed when idle finishes.
+This branch removes the current direct reconciler and endless corpus loop. It ships only when:
 
----
-
-## 7. Test & Verification Plan
-
-### Automated Tests
-1. **Idle & Preemption Suite (`tests/unit/dreamingCoordinator.test.ts`)**:
-   - Coordinator does not run when `onBattery` is true.
-   - Coordinator does not run when `thermalState` is `serious` or `critical`.
-   - Coordinator aborts in-flight Ollama request within 50ms upon `user-did-become-active` or `knowledgeSynthesisPause.acquire('capture')`.
-   - Entity remains dirty following an abort.
-2. **Notes-First Packaging & Validation Suite (`tests/unit/dreamingValidation.test.ts`)**:
-   - Correctly extracts `enhanced_notes` and excludes raw `transcript_json`.
-   - Rejects payloads referencing invalid `source_meeting_id`.
-   - Prunes items present in `entity_corrections`.
-3. **UI & Removal Suite (`tests/unit/ProjectDossier.test.tsx`, `tests/unit/PeopleTab.test.tsx`)**:
-   - Synthesized milestones render with meeting provenance links.
-   - Clicking "Remove from project" removes the milestone and saves a correction row.
-   - Alias suggestions render `[Merge]` and `[Keep Separate]` buttons correctly.
+- all model output is proposal-only;
+- dirty revisions prevent repeated unchanged work;
+- canonical application is transactional and evidence-preserving;
+- corrections survive reload and prevent recurrence;
+- foreground preemption, timeout, retry, and late-result rejection are tested;
+- People and Project dossiers render and decide proposals correctly;
+- focused tests, the full suite, lint, typecheck, changelog validation, diff checks, and production proposal dogfood pass.
