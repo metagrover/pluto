@@ -79,7 +79,7 @@ const captureBound = (): IdentityContext => ({
       captureEvidence: {
         origin: 'local',
         selfPersonId: 'person-a',
-        attributionSource: 'local_diarization_acoustic',
+        attributionSource: 'offline_diarization_acoustic_v1',
         confidence: 0.9,
         mappingApplied: true,
         sourceRevision: 'revision-a',

@@ -10,6 +10,7 @@ describe('database schema ownership boundary', () => {
     for (const file of [
       'electron/db.ts',
       'electron/calendar/store.ts',
+      'electron/dreaming/proposalStore.ts',
       'electron/identityStore.ts',
     ]) {
       const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');

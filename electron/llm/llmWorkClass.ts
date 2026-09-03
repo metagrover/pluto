@@ -23,6 +23,8 @@ export const defaultLLMWorkClass = (task: string): LLMWorkClass => {
     return 'meeting_secondary';
   if (
     task === 'knowledgeDoc' ||
+    task === 'dreaming' ||
+    task === 'dreamingCleanup' ||
     task === 'commitmentReconciliation' ||
     task === 'title'
   )

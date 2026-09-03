@@ -15,6 +15,7 @@ type PublishedMeetingNotes = {
 export const processValidatedMeetingDownstream = async (
   meetingId: string | number,
   invoke: Invoke,
+  options: { reason?: 'automatic' | 'manual' } = {},
 ): Promise<{ status: 'published' | 'superseded' | 'failed' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (
@@ -30,7 +31,7 @@ export const processValidatedMeetingDownstream = async (
       meetingId,
       requestId: crypto.randomUUID(),
       template: 'auto',
-      reason: 'automatic',
+      reason: options.reason ?? 'automatic',
     })) as PublishedMeetingNotes;
     return result.status === 'published'
       ? { status: 'published' }

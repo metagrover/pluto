@@ -25,6 +25,8 @@ export type NativeFailureCode =
   | 'parakeet_path_missing'
   | 'parakeet_model_preparation_failed'
   | 'parakeet_transcription_failed'
+  | 'parakeet_audio_analysis_failed'
+  | 'parakeet_diarization_failed'
   | 'parakeet_cancelled';
 
 export type NativeResponse = {
@@ -141,7 +143,9 @@ export interface NativeJsonLineTransport {
   ignoreResponse(id: string): void;
 }
 
-const MAX_BUFFER_BYTES = 1024 * 1024;
+// Speaker evidence contains one compact energy record per 100 ms. Keep a hard
+// bound while allowing multi-hour meetings to cross the JSON-line transport.
+const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 export class NativeJsonLineProcess {
   private child: NativeChildProcess | null = null;

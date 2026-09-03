@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canImproveHistoricalSpeakerLabels,
   canRetryMeetingFinalTranscription,
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
@@ -68,6 +69,8 @@ describe('post-meeting processing coordinator', () => {
       transcript_status: 'needs_attention' as const,
       capture_journal_generation: 'generation-1',
       audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       transcript_json: JSON.stringify({ segments: [{ text: 'preview' }] }),
       transcript_integrity_json: JSON.stringify({
         finalTranscription: {
@@ -85,6 +88,15 @@ describe('post-meeting processing coordinator', () => {
     expect(
       isParakeetValidatedMeeting({
         transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          speakerAttribution: {
+            source: 'offline_diarization_acoustic_v1',
+            confidence: 1,
+            diarizationAttempted: true,
+            mappingApplied: true,
+          },
+          segments: [],
+        }),
         transcript_integrity_json: JSON.stringify({
           finalTranscription: {
             policy: 'parakeet_final_v1',
@@ -97,6 +109,126 @@ describe('post-meeting processing coordinator', () => {
         }),
       }),
     ).toBe(true);
+  });
+
+  it('offers explicit final-transcription retry for validated channel fallback', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          diarizationAttempted: false,
+          mappingApplied: false,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+    };
+
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(false);
+    expect(selectNextMeetingForFinalTranscription([meeting])).toBeNull();
+  });
+
+  it('offers a manual v2 upgrade for a completed v1 attribution', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v1',
+          confidence: 1,
+          mappingApplied: true,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(true);
+  });
+
+  it('does not offer another upgrade for a completed v2 attribution', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v2',
+          confidence: 0.95,
+          mappingApplied: true,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(false);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(true);
+  });
+
+  it('does not classify a fresh attribution rejection as historical repair', () => {
+    expect(
+      canImproveHistoricalSpeakerLabels({
+        transcript_status: 'needs_attention',
+        capture_journal_generation: 'generation-1',
+        audio_path: '/approved/mic.wav',
+        system_audio_path: '/approved/system.wav',
+        mixed_audio_path: '/approved/mixed.wav',
+        transcript_json: JSON.stringify({ segments: [{ text: 'preview' }] }),
+        transcript_integrity_json: JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'speaker_attribution_rejected',
+          },
+        }),
+      }),
+    ).toBe(false);
   });
 
   it('selects incomplete meetings without relying on UI selection', () => {
@@ -113,6 +245,21 @@ describe('post-meeting processing coordinator', () => {
     const meeting = incomplete('meeting');
     const attempted = new Set([meetingProcessingFingerprint(meeting)]);
     expect(selectNextMeetingForProcessing([meeting], attempted)).toBeNull();
+  });
+
+  it('changes the processing fingerprint when durable notes-run state changes', () => {
+    const meeting = incomplete('meeting');
+    const before = meetingProcessingFingerprint(meeting);
+
+    expect(
+      meetingProcessingFingerprint({
+        ...meeting,
+        analysis_run_json: JSON.stringify({
+          notes_status: 'failed',
+          automatic_attempt_count: 2,
+        }),
+      }),
+    ).not.toBe(before);
   });
 
   it('does not skip an in-flight head meeting to start another local-model job', () => {

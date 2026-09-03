@@ -37,6 +37,123 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.droppedMicWordCount).toBe(3);
   });
 
+  it('removes system-explained mic echo when the two ASR transcripts disagree', () => {
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [
+        segment('Me', [
+          { word: 'So', start: 82.24, end: 82.6 },
+          { word: 'deep', start: 84.1, end: 84.5 },
+          { word: 'arch', start: 86.2, end: 86.6 },
+          { word: 'forward', start: 89.1, end: 89.52 },
+        ]),
+      ],
+      systemSegments: [
+        segment(
+          'Them',
+          timedWords(
+            'the remote speaker says a substantially different sentence that parakeet recognizes without matching the leaked microphone words',
+            82.16,
+          ).map((word, index, words) => ({
+            ...word,
+            start: 82.16 + index * (7.36 / words.length),
+            end: 82.16 + (index + 1) * (7.36 / words.length) - 0.02,
+          })),
+        ),
+      ],
+      activityWindows: [{ speaker: 'Them', startTime: 82.16, endTime: 89.52 }],
+    });
+
+    expect(result.micSegments).toEqual([]);
+    expect(result.systemSegments).toHaveLength(1);
+    expect(result.droppedMicWordCount).toBe(4);
+    expect(result.reconciliation.droppedSystemExplainedMicSegmentCount).toBe(1);
+  });
+
+  it('preserves a divergent mic turn when near-end evidence overlaps remote speech', () => {
+    const mic = segment('Me', timedWords('my local interruption', 10.2));
+    const system = segment(
+      'Them',
+      timedWords('a completely different remote sentence continues', 10),
+    );
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [mic],
+      systemSegments: [system],
+      activityWindows: [
+        { speaker: 'Them', startTime: 10, endTime: 11 },
+        { speaker: 'Me', startTime: 10.2, endTime: 10.76 },
+      ],
+    });
+
+    expect(result.micSegments).toEqual([mic]);
+    expect(result.reconciliation.droppedSystemExplainedMicSegmentCount).toBe(0);
+  });
+
+  it('retains the mic phrase when sealed activity identifies the duplicate as local speech', () => {
+    const shared = [
+      { word: 'local', start: 1, end: 1.4 },
+      { word: 'speaker', start: 1.5, end: 1.9 },
+      { word: 'phrase', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [{ speaker: 'Me', startTime: 0.8, endTime: 2.6 }],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.droppedMicWordCount).toBe(0);
+  });
+
+  it('preserves an equal-activity word once as Unknown instead of inventing a speaker', () => {
+    const shared = [
+      { word: 'shared', start: 1, end: 1.4 },
+      { word: 'overlap', start: 1.5, end: 1.9 },
+      { word: 'phrase', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+        { speaker: 'Them', startTime: 0.8, endTime: 2.6 },
+      ],
+    });
+
+    expect(result.micSegments).toEqual([
+      expect.objectContaining({ speaker: 'Unknown' }),
+    ]);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.unresolvedAmbiguousSeconds).toBe(0);
+  });
+
+  it('uses sealed activity only to break a word-level acoustic tie', () => {
+    const shared = [
+      { word: 'local', start: 1, end: 1.4 },
+      { word: 'tie', start: 1.5, end: 1.9 },
+      { word: 'breaker', start: 2, end: 2.4 },
+    ];
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', shared)],
+      systemSegments: [segment('Them', shared)],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+        { speaker: 'Them', startTime: 0.8, endTime: 2.6 },
+      ],
+      fallbackActivityWindows: [
+        { speaker: 'Me', startTime: 0.8, endTime: 2.6 },
+      ],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.systemSegments).toEqual([]);
+    expect(result.unresolvedAmbiguousSeconds).toBe(0);
+  });
+
   it('collapses phrases even when segment boundaries differ', () => {
     const result = collapseCrossChannelWordBleed({
       micSegments: [

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2e09e4ab-ef63-48be-955f-13ef950b3340",
+  "id": "2b4bfdae-7377-41ee-b9ad-da4683b60bc8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "attention_items": {
@@ -602,6 +602,756 @@
         "entities_status_check": {
           "name": "entities_status_check",
           "value": "\"entities\".\"status\" IN ('active', 'completed', 'stale', 'overdue') OR \"entities\".\"status\" IS NULL"
+        }
+      }
+    },
+    "entity_alias_suggestions": {
+      "name": "entity_alias_suggestions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "suggested_name": {
+          "name": "suggested_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_meeting_ids_json": {
+          "name": "source_meeting_ids_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "evidence_snippet": {
+          "name": "evidence_snippet",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_entity_alias_suggestions_unique": {
+          "name": "idx_entity_alias_suggestions_unique",
+          "columns": ["entity_id", "suggested_name"],
+          "isUnique": true
+        },
+        "idx_entity_alias_suggestions_lookup": {
+          "name": "idx_entity_alias_suggestions_lookup",
+          "columns": ["entity_id", "status"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "entity_alias_suggestions_status_check": {
+          "name": "entity_alias_suggestions_status_check",
+          "value": "\"entity_alias_suggestions\".\"status\" IN ('pending','merged','dismissed')"
+        }
+      }
+    },
+    "entity_corrections": {
+      "name": "entity_corrections",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_type": {
+          "name": "item_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_entity_corrections_unique": {
+          "name": "idx_entity_corrections_unique",
+          "columns": ["entity_id", "item_type", "fingerprint"],
+          "isUnique": true
+        },
+        "idx_entity_corrections_lookup": {
+          "name": "idx_entity_corrections_lookup",
+          "columns": ["entity_id", "\"created_at\" desc"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "entity_dreaming_aliases": {
+      "name": "entity_dreaming_aliases",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "normalized_name": {
+          "name": "normalized_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_json": {
+          "name": "evidence_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "active": {
+          "name": "active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "removed_at": {
+          "name": "removed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entity_dreaming_aliases_proposal_id_unique": {
+          "name": "entity_dreaming_aliases_proposal_id_unique",
+          "columns": ["proposal_id"],
+          "isUnique": true
+        },
+        "idx_entity_dreaming_aliases_active_name": {
+          "name": "idx_entity_dreaming_aliases_active_name",
+          "columns": ["entity_type", "normalized_name"],
+          "isUnique": true,
+          "where": "\"entity_dreaming_aliases\".\"active\" = 1"
+        },
+        "idx_entity_dreaming_aliases_entity": {
+          "name": "idx_entity_dreaming_aliases_entity",
+          "columns": ["entity_id", "entity_type", "active"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "entity_dreaming_aliases_proposal_id_entity_dreaming_proposals_id_fk": {
+          "name": "entity_dreaming_aliases_proposal_id_entity_dreaming_proposals_id_fk",
+          "tableFrom": "entity_dreaming_aliases",
+          "tableTo": "entity_dreaming_proposals",
+          "columnsFrom": ["proposal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entity_dreaming_aliases_entity_id_entities_id_fk": {
+          "name": "entity_dreaming_aliases_entity_id_entities_id_fk",
+          "tableFrom": "entity_dreaming_aliases",
+          "tableTo": "entities",
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "entity_dreaming_aliases_entity_type_check": {
+          "name": "entity_dreaming_aliases_entity_type_check",
+          "value": "\"entity_dreaming_aliases\".\"entity_type\" IN ('project','person')"
+        },
+        "entity_dreaming_aliases_source_check": {
+          "name": "entity_dreaming_aliases_source_check",
+          "value": "\"entity_dreaming_aliases\".\"source\" = 'dreaming'"
+        },
+        "entity_dreaming_aliases_evidence_check": {
+          "name": "entity_dreaming_aliases_evidence_check",
+          "value": "json_valid(\"entity_dreaming_aliases\".\"evidence_json\")"
+        },
+        "entity_dreaming_aliases_active_check": {
+          "name": "entity_dreaming_aliases_active_check",
+          "value": "\"entity_dreaming_aliases\".\"active\" IN (0,1)"
+        },
+        "entity_dreaming_aliases_removed_check": {
+          "name": "entity_dreaming_aliases_removed_check",
+          "value": "(\"entity_dreaming_aliases\".\"active\" = 1 AND \"entity_dreaming_aliases\".\"removed_at\" IS NULL) OR (\"entity_dreaming_aliases\".\"active\" = 0 AND \"entity_dreaming_aliases\".\"removed_at\" IS NOT NULL)"
+        }
+      }
+    },
+    "entity_dreaming_person_claims": {
+      "name": "entity_dreaming_person_claims",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_json": {
+          "name": "evidence_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "entity_dreaming_person_claims_proposal_id_unique": {
+          "name": "entity_dreaming_person_claims_proposal_id_unique",
+          "columns": ["proposal_id"],
+          "isUnique": true
+        },
+        "idx_entity_dreaming_person_claims_entity": {
+          "name": "idx_entity_dreaming_person_claims_entity",
+          "columns": ["entity_id", "kind", "created_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "entity_dreaming_person_claims_proposal_id_entity_dreaming_proposals_id_fk": {
+          "name": "entity_dreaming_person_claims_proposal_id_entity_dreaming_proposals_id_fk",
+          "tableFrom": "entity_dreaming_person_claims",
+          "tableTo": "entity_dreaming_proposals",
+          "columnsFrom": ["proposal_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entity_dreaming_person_claims_entity_id_entities_id_fk": {
+          "name": "entity_dreaming_person_claims_entity_id_entities_id_fk",
+          "tableFrom": "entity_dreaming_person_claims",
+          "tableTo": "entities",
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "entity_dreaming_person_claims_kind_check": {
+          "name": "entity_dreaming_person_claims_kind_check",
+          "value": "\"entity_dreaming_person_claims\".\"kind\" IN ('person_headline','person_focus','person_collaborator')"
+        },
+        "entity_dreaming_person_claims_evidence_check": {
+          "name": "entity_dreaming_person_claims_evidence_check",
+          "value": "json_valid(\"entity_dreaming_person_claims\".\"evidence_json\")"
+        }
+      }
+    },
+    "entity_dreaming_proposals": {
+      "name": "entity_dreaming_proposals",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_json": {
+          "name": "evidence_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_entity_dreaming_proposals_entity_status": {
+          "name": "idx_entity_dreaming_proposals_entity_status",
+          "columns": ["entity_id", "status", "created_at"],
+          "isUnique": false
+        },
+        "idx_entity_dreaming_proposals_run": {
+          "name": "idx_entity_dreaming_proposals_run",
+          "columns": ["run_id"],
+          "isUnique": false
+        },
+        "entity_dreaming_proposals_run_fingerprint_unique": {
+          "name": "entity_dreaming_proposals_run_fingerprint_unique",
+          "columns": ["run_id", "fingerprint"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "entity_dreaming_proposals_run_id_entity_dreaming_runs_id_fk": {
+          "name": "entity_dreaming_proposals_run_id_entity_dreaming_runs_id_fk",
+          "tableFrom": "entity_dreaming_proposals",
+          "tableTo": "entity_dreaming_runs",
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "entity_dreaming_proposals_entity_type_check": {
+          "name": "entity_dreaming_proposals_entity_type_check",
+          "value": "\"entity_dreaming_proposals\".\"entity_type\" IN ('project','person')"
+        },
+        "entity_dreaming_proposals_kind_check": {
+          "name": "entity_dreaming_proposals_kind_check",
+          "value": "\"entity_dreaming_proposals\".\"kind\" IN ('project_summary','project_milestone','project_commitment','project_alias','person_headline','person_focus','person_collaborator','person_alias')"
+        },
+        "entity_dreaming_proposals_payload_check": {
+          "name": "entity_dreaming_proposals_payload_check",
+          "value": "json_valid(\"entity_dreaming_proposals\".\"payload_json\")"
+        },
+        "entity_dreaming_proposals_evidence_check": {
+          "name": "entity_dreaming_proposals_evidence_check",
+          "value": "json_valid(\"entity_dreaming_proposals\".\"evidence_json\")"
+        },
+        "entity_dreaming_proposals_fingerprint_check": {
+          "name": "entity_dreaming_proposals_fingerprint_check",
+          "value": "length(\"entity_dreaming_proposals\".\"fingerprint\") > 0"
+        },
+        "entity_dreaming_proposals_status_check": {
+          "name": "entity_dreaming_proposals_status_check",
+          "value": "\"entity_dreaming_proposals\".\"status\" IN ('pending','accepted','rejected','stale')"
+        },
+        "entity_dreaming_proposals_decision_check": {
+          "name": "entity_dreaming_proposals_decision_check",
+          "value": "(\"entity_dreaming_proposals\".\"status\" = 'pending' AND \"entity_dreaming_proposals\".\"decided_at\" IS NULL) OR (\"entity_dreaming_proposals\".\"status\" <> 'pending' AND \"entity_dreaming_proposals\".\"decided_at\" IS NOT NULL)"
+        }
+      }
+    },
+    "entity_dreaming_runs": {
+      "name": "entity_dreaming_runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_revision": {
+          "name": "source_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decision_revision": {
+          "name": "decision_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "failure_count": {
+          "name": "failure_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "start_mode": {
+          "name": "start_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "next_retry_at": {
+          "name": "next_retry_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_entity_dreaming_runs_status_retry": {
+          "name": "idx_entity_dreaming_runs_status_retry",
+          "columns": ["status", "next_retry_at"],
+          "isUnique": false
+        },
+        "idx_entity_dreaming_runs_entity_created": {
+          "name": "idx_entity_dreaming_runs_entity_created",
+          "columns": ["entity_id", "\"created_at\" desc"],
+          "isUnique": false
+        },
+        "entity_dreaming_runs_entity_revision_unique": {
+          "name": "entity_dreaming_runs_entity_revision_unique",
+          "columns": ["entity_id", "source_revision"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "entity_dreaming_runs_entity_type_check": {
+          "name": "entity_dreaming_runs_entity_type_check",
+          "value": "\"entity_dreaming_runs\".\"entity_type\" IN ('project','person')"
+        },
+        "entity_dreaming_runs_status_check": {
+          "name": "entity_dreaming_runs_status_check",
+          "value": "\"entity_dreaming_runs\".\"status\" IN ('running','no_change','proposed','failed','cancelled')"
+        },
+        "entity_dreaming_runs_attempt_count_check": {
+          "name": "entity_dreaming_runs_attempt_count_check",
+          "value": "\"entity_dreaming_runs\".\"attempt_count\" >= 0"
+        },
+        "entity_dreaming_runs_failure_count_check": {
+          "name": "entity_dreaming_runs_failure_count_check",
+          "value": "\"entity_dreaming_runs\".\"failure_count\" >= 0 AND \"entity_dreaming_runs\".\"failure_count\" <= \"entity_dreaming_runs\".\"attempt_count\""
+        },
+        "entity_dreaming_runs_start_mode_check": {
+          "name": "entity_dreaming_runs_start_mode_check",
+          "value": "\"entity_dreaming_runs\".\"start_mode\" IN ('automatic','manual')"
+        },
+        "entity_dreaming_runs_error_code_check": {
+          "name": "entity_dreaming_runs_error_code_check",
+          "value": "\"entity_dreaming_runs\".\"error_code\" IS NULL OR \"entity_dreaming_runs\".\"error_code\" IN ('provider_unavailable','generation_failed','validation_failed','persistence_failed','lease_expired')"
+        },
+        "entity_dreaming_runs_lease_check": {
+          "name": "entity_dreaming_runs_lease_check",
+          "value": "(\"entity_dreaming_runs\".\"status\" = 'running' AND \"entity_dreaming_runs\".\"lease_token\" IS NOT NULL AND \"entity_dreaming_runs\".\"completed_at\" IS NULL) OR (\"entity_dreaming_runs\".\"status\" <> 'running' AND \"entity_dreaming_runs\".\"lease_token\" IS NULL AND \"entity_dreaming_runs\".\"completed_at\" IS NOT NULL)"
+        },
+        "entity_dreaming_runs_failure_check": {
+          "name": "entity_dreaming_runs_failure_check",
+          "value": "(\"entity_dreaming_runs\".\"status\" = 'failed' AND \"entity_dreaming_runs\".\"error_code\" IS NOT NULL) OR (\"entity_dreaming_runs\".\"status\" <> 'failed' AND \"entity_dreaming_runs\".\"error_code\" IS NULL)"
+        },
+        "entity_dreaming_runs_retry_check": {
+          "name": "entity_dreaming_runs_retry_check",
+          "value": "\"entity_dreaming_runs\".\"next_retry_at\" IS NULL OR \"entity_dreaming_runs\".\"status\" = 'failed'"
         }
       }
     },
@@ -1753,6 +2503,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "metrics_json": {
           "name": "metrics_json",
           "type": "text",
@@ -1876,6 +2633,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "automatic_attempt_count": {
+          "name": "automatic_attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "started_at": {
           "name": "started_at",
@@ -2208,7 +2973,13 @@
           "default": "CURRENT_TIMESTAMP"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_meeting_entities_entity_meeting": {
+          "name": "idx_meeting_entities_entity_meeting",
+          "columns": ["entity_id", "meeting_id"],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "meeting_entities_meeting_id_meetings_id_fk": {
           "name": "meeting_entities_meeting_id_meetings_id_fk",
@@ -2920,6 +3691,20 @@
       "idx_attention_items_updated_at": {
         "columns": {
           "\"updated_at\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "idx_entity_corrections_lookup": {
+        "columns": {
+          "\"created_at\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "idx_entity_dreaming_runs_entity_created": {
+        "columns": {
+          "\"created_at\" desc": {
             "isExpression": true
           }
         }

@@ -29,6 +29,44 @@ public enum ProductionModelManifest {
     )
 }
 
+public struct DiarizationModelManifest: Equatable, Sendable {
+    public let identifier: String
+    public let repository: String
+    public let revision: String
+    public let requiredArtifacts: [String]
+    public let artifactSHA256: String
+
+    public init(
+        identifier: String,
+        repository: String,
+        revision: String,
+        requiredArtifacts: [String],
+        artifactSHA256: String
+    ) {
+        self.identifier = identifier
+        self.repository = repository
+        self.revision = revision
+        self.requiredArtifacts = requiredArtifacts
+        self.artifactSHA256 = artifactSHA256
+    }
+}
+
+public enum ProductionDiarizationManifest {
+    public static let current = DiarizationModelManifest(
+        identifier: "speaker-diarization-offline-v1",
+        repository: "FluidInference/speaker-diarization-coreml",
+        revision: "1ed7a662fdc7109e36d822db793ee6eebdaf8594",
+        requiredArtifacts: [
+            "Segmentation.mlmodelc",
+            "FBank.mlmodelc",
+            "Embedding.mlmodelc",
+            "PldaRho.mlmodelc",
+            "plda-parameters.json",
+        ],
+        artifactSHA256: "e0b6b63bdb2a12d087031067d61600f5e2b6b9a26f9c9e511118d2a6206349cd"
+    )
+}
+
 protocol RepositoryRevisionChecking: Sendable {
     func require(repository: String, revision: String) async throws
 }

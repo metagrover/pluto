@@ -37,6 +37,54 @@ const nonempty = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
+export type ProjectPortfolioDisposition = 'confirmed' | 'dismissed';
+
+export function readProjectPortfolioDisposition(
+  metadata: unknown,
+): ProjectPortfolioDisposition | null {
+  try {
+    const parsed: unknown =
+      typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+    if (!record(parsed)) return null;
+    return parsed.projectPortfolioDisposition === 'confirmed' ||
+      parsed.projectPortfolioDisposition === 'dismissed'
+      ? parsed.projectPortfolioDisposition
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function withProjectPortfolioDisposition(
+  metadata: string | null,
+  disposition: ProjectPortfolioDisposition,
+): string {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(metadata || '{}');
+    if (record(value)) parsed = value;
+  } catch {
+    parsed = {};
+  }
+  const current = readProjectQualification(parsed);
+  return JSON.stringify({
+    ...parsed,
+    projectPortfolioDisposition: disposition,
+    projectPortfolioDispositionUpdatedAt: new Date().toISOString(),
+    projectQualification: {
+      ...(current || {}),
+      version: 1,
+      state: disposition === 'confirmed' ? 'qualified' : 'subordinate',
+      source: 'user',
+      reason:
+        disposition === 'confirmed'
+          ? 'Confirmed by the user as a project.'
+          : 'Dismissed by the user from the project portfolio.',
+      assessedAt: new Date().toISOString(),
+    },
+  });
+}
+
 export function readProjectQualification(
   metadata: unknown,
 ): ProjectQualification | null {

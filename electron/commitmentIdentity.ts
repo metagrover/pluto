@@ -62,7 +62,8 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
     capture.origin === 'local' &&
     capture.selfPersonId &&
     people.some((person) => person.id === capture.selfPersonId) &&
-    attribution.source === 'local_diarization_acoustic' &&
+    (attribution.source === 'local_diarization_acoustic' ||
+      attribution.source === 'offline_diarization_acoustic_v1') &&
     attribution.mappingApplied === true &&
     typeof attribution.confidence === 'number' &&
     attribution.confidence >= 0.85 &&
@@ -80,7 +81,7 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
       captureEvidence: {
         origin: 'local',
         selfPersonId: capture.selfPersonId,
-        attributionSource: 'local_diarization_acoustic',
+        attributionSource: attribution.source,
         confidence: attribution.confidence,
         mappingApplied: true,
         sourceRevision,

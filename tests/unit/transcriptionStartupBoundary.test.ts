@@ -35,6 +35,10 @@ describe('transcription startup boundary', () => {
       'scripts/ensure_audio_cap_runtime.sh',
       'utf8',
     );
+    const buildParakeetScript = readFileSync(
+      'scripts/build_parakeet.sh',
+      'utf8',
+    );
 
     expect(packageJson.scripts?.predev).toBe('pnpm run ensure:dev-runtime');
     expect(packageJson.scripts?.['ensure:dev-runtime']).toBe(
@@ -59,6 +63,12 @@ describe('transcription startup boundary', () => {
     );
     expect(ensureAudioCapScript).toContain(
       'codesign --sign - --force "${OUTPUT_PATH}"',
+    );
+    expect(buildParakeetScript).toContain(
+      'node "${SCRIPT_DIR}/lib/swift_bin_path.mjs"',
+    );
+    expect(buildParakeetScript).not.toContain(
+      'SWIFT_BIN_DIRECTORY="$(swift build',
     );
   });
 

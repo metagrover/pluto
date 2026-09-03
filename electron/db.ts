@@ -51,12 +51,15 @@ import {
 } from '../src/utils/meetingNotesHistory';
 import {
   type PersonBriefingCommitment,
+  type PersonBriefingCommitmentCandidate,
   type PersonBriefingMeeting,
   type PersonBriefingSummary,
   type PersonCommitmentCandidate,
   type PersonMeetingRecord,
+  isUsablePersonName,
   mergePersonMeetingEvidence,
   parsePersonRole,
+  selectCandidatePersonCommitments,
   selectVerifiedPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
@@ -68,6 +71,7 @@ import {
   buildProjectMomentum,
   buildUserProjectMilestones,
   readProjectDisplayTitle,
+  readProjectThemeSynthesis,
   sortProjectMilestones,
   withProjectDisplayTitle,
 } from '../src/utils/projectBriefing';
@@ -76,11 +80,19 @@ import {
   type UserProjectMilestoneInput,
   restoreUserProjectMilestone,
   withSavedUserProjectMilestone,
-  withoutUserProjectMilestone,
+  withoutProjectMilestone,
 } from '../src/utils/projectMilestones';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
-import { readProjectQualification } from '../src/utils/projectQualification';
+import {
+  type ProjectPortfolioDisposition,
+  readProjectQualification,
+  withProjectPortfolioDisposition,
+} from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
+import {
+  hasVerifiedSpeakerAttribution,
+  readStoredSpeakerAttribution,
+} from '../src/utils/speakerAttributionTrust';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import {
@@ -99,6 +111,12 @@ import {
   repairMeetingNotesFtsIndex as repairMeetingNotesSearchFtsIndex,
   repairMeetingFtsIndex as repairMeetingSearchFtsIndex,
 } from './database/meetingSearchMaintenance';
+import {
+  type DreamingDecisionInput,
+  type DreamingDecisionResult,
+  createDreamingProposalStore,
+} from './dreaming/proposalStore';
+import { generateItemFingerprint } from './dreaming/validateDreamingOutput';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -228,6 +246,49 @@ export interface PersistedMeeting {
   created_at?: string | null;
 }
 
+export interface MeetingSummary {
+  id: string | number;
+  title: string;
+  meeting_type: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  folder_id: string | null;
+  is_favorite: number;
+  end_reason: string | null;
+  created_at: string;
+  transcript_status: TranscriptLifecycleStatus | null;
+  transcript_validated_at: string | null;
+  finalization_status: MeetingFinalizationStatus | null;
+  finalization_error_category: string | null;
+  downstream_processing_json: string | null;
+  capture_journal_generation: string | null;
+  has_transcript: boolean;
+  has_transcript_text: boolean;
+  has_audio: boolean;
+  has_analysis: boolean;
+  analysis_run_json: string | null;
+}
+
+export interface MeetingProcessingStatus {
+  id: string | number;
+  has_capture_gap: boolean;
+  final_transcription_policy: string | null;
+  final_transcription_state: string | null;
+  final_transcription_engine: string | null;
+  speaker_attribution_verified: boolean | null;
+  automatic_attempts_exhausted: boolean;
+}
+
+export interface MeetingDashboardPreview {
+  id: string | number;
+  dashboard_detail: string | null;
+  recent_win_title: string | null;
+  recent_win_why: string | null;
+  recent_win_evidence: string | null;
+  recent_win_source: string | null;
+}
+
 export type MeetingAnalysisRunStatus =
   | 'running'
   | 'published'
@@ -252,6 +313,7 @@ export type MeetingAnalysisRun = {
   stage: string;
   queue_position: number | null;
   error_code: string | null;
+  automatic_attempt_count: number;
   started_at: string;
   updated_at: string;
 };
@@ -343,6 +405,28 @@ export function repairExtractionAuthoredPersonRoles(): number {
 
 export const calendarStore = createCalendarStore(db);
 export const identityStore = createIdentityStore(db);
+export const dreamingProposalStore = createDreamingProposalStore(db, {
+  resolveCanonicalEntityId: (entityId, entityType) =>
+    entityType === 'person'
+      ? resolvePersonIdentityId(entityId)
+      : resolveProjectIdentityId(entityId),
+  upsertProjectCommitment: (input) =>
+    upsertCanonicalDreamingProjectCommitment(input),
+});
+export const acceptDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.acceptDreamingProposal(input);
+export const rejectDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.rejectDreamingProposal(input);
+export const removeDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.removeDreamingAlias(input);
+export const restoreDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.restoreDreamingAlias(input);
 
 export const getIdentityInputRevision = () =>
   (
@@ -1038,6 +1122,23 @@ const readMeetingFinalTranscriptionLease = (
   return readFinalTranscriptionLease(integrity.finalTranscription);
 };
 
+const finalTranscriptionDigest = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const finalTranscriptionSourcePathsDigest = (
+  meeting: Pick<
+    PersistedMeeting,
+    'audio_path' | 'system_audio_path' | 'mixed_audio_path'
+  >,
+): string =>
+  finalTranscriptionDigest(
+    JSON.stringify([
+      meeting.audio_path ?? null,
+      meeting.system_audio_path ?? null,
+      meeting.mixed_audio_path ?? null,
+    ]),
+  );
+
 export const claimMeetingFinalTranscription = (
   meetingId: string | number,
   lease: FinalTranscriptionLease,
@@ -1047,9 +1148,15 @@ export const claimMeetingFinalTranscription = (
     if (
       !current ||
       current.capture_journal_generation !== lease.captureGeneration ||
-      !['provisional', 'needs_attention'].includes(
+      (!['provisional', 'needs_attention'].includes(
         String(current.transcript_status),
-      )
+      ) &&
+        !(
+          current.transcript_status === 'validated' &&
+          (readStoredSpeakerAttribution(current.transcript_json)?.source ===
+            'recovered_channel_acoustic_v1' ||
+            !hasVerifiedSpeakerAttribution(current.transcript_json))
+        ))
     ) {
       return false;
     }
@@ -1061,13 +1168,22 @@ export const claimMeetingFinalTranscription = (
     }
     const priorIntegrity = current.transcript_integrity_json ?? null;
     const integrity = parseIntegrityRecord(priorIntegrity);
+    const claimedTranscriptJson = withTranscriptLifecycleStatus(
+      current.transcript_json,
+      'validating',
+    );
+    const claimedLease: FinalTranscriptionLease = {
+      ...lease,
+      expectedTranscriptSHA256: finalTranscriptionDigest(claimedTranscriptJson),
+      expectedSourcePathsSHA256: finalTranscriptionSourcePathsDigest(current),
+    };
     const nextIntegrity = JSON.stringify({
       ...integrity,
       state: 'validating',
       causes: [],
       validationProof: undefined,
       retry: undefined,
-      finalTranscription: lease,
+      finalTranscription: claimedLease,
     });
     return (
       db
@@ -1081,7 +1197,7 @@ export const claimMeetingFinalTranscription = (
              AND transcript_integrity_json IS ?`,
         )
         .run(
-          withTranscriptLifecycleStatus(current.transcript_json, 'validating'),
+          claimedTranscriptJson,
           nextIntegrity,
           String(meetingId),
           lease.captureGeneration,
@@ -1140,7 +1256,13 @@ export const commitMeetingFinalTranscription = (input: {
       lease.runId !== input.runId ||
       lease.captureGeneration !== input.captureGeneration ||
       current.capture_journal_generation !== input.captureGeneration ||
-      current.transcript_status !== 'validating'
+      current.transcript_status !== 'validating' ||
+      (lease.expectedTranscriptSHA256 !== undefined &&
+        finalTranscriptionDigest(current.transcript_json || '') !==
+          lease.expectedTranscriptSHA256) ||
+      (lease.expectedSourcePathsSHA256 !== undefined &&
+        finalTranscriptionSourcePathsDigest(current) !==
+          lease.expectedSourcePathsSHA256)
     ) {
       return false;
     }
@@ -1942,6 +2064,231 @@ export const getMeetings = () => {
     .all();
 };
 
+export const getMeetingSummaries = (
+  meetingId?: string | number,
+): MeetingSummary[] => {
+  recoverExpiredTranscriptValidationRetries();
+  const statement = db.prepare(
+    `SELECT
+         m.id,
+         m.title,
+         m.meeting_type,
+         COALESCE(m.started_at, m.created_at, '') AS started_at,
+         m.ended_at,
+         m.duration_seconds,
+         m.folder_id,
+         COALESCE(m.is_favorite, 0) AS is_favorite,
+         m.end_reason,
+         COALESCE(m.created_at, '') AS created_at,
+         m.transcript_status,
+         m.transcript_validated_at,
+         m.finalization_status,
+         m.finalization_error_category,
+         m.downstream_processing_json,
+         m.capture_journal_generation,
+         CASE WHEN m.transcript_json IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
+         CASE
+           WHEN m.transcript_json IS NOT NULL THEN 1
+           ELSE 0
+         END AS has_transcript_text,
+         CASE
+           WHEN COALESCE(m.audio_path, '') != '' OR COALESCE(m.system_audio_path, '') != '' OR COALESCE(m.mixed_audio_path, '') != '' THEN 1
+           ELSE 0
+         END AS has_audio,
+         CASE WHEN m.analysis_json IS NOT NULL OR m.enhanced_notes IS NOT NULL THEN 1 ELSE 0 END AS has_analysis,
+         CASE WHEN r.meeting_id IS NULL THEN NULL ELSE json_object(
+           'run_id', r.run_id,
+           'input_revision', r.input_revision,
+           'notes_status', r.notes_status,
+           'secondary_status', r.secondary_status,
+           'stage', r.stage,
+           'queue_position', r.queue_position,
+           'error_code', r.error_code,
+           'started_at', r.started_at,
+           'updated_at', r.updated_at
+         ) END AS analysis_run_json
+       FROM meetings AS m
+       LEFT JOIN meeting_analysis_runs AS r ON r.meeting_id = m.id
+       ${meetingId === undefined ? '' : 'WHERE m.id = ?'}
+       ORDER BY COALESCE(m.started_at, m.created_at) DESC`,
+  );
+  const rows = (
+    meetingId === undefined ? statement.all() : statement.all(String(meetingId))
+  ) as Array<
+    Omit<
+      MeetingSummary,
+      'has_transcript' | 'has_transcript_text' | 'has_audio' | 'has_analysis'
+    > & {
+      has_transcript: number;
+      has_transcript_text: number;
+      has_audio: number;
+      has_analysis: number;
+    }
+  >;
+  return rows.map((row) => ({
+    ...row,
+    has_transcript: Boolean(row.has_transcript),
+    has_transcript_text: Boolean(row.has_transcript_text),
+    has_audio: Boolean(row.has_audio),
+    has_analysis: Boolean(row.has_analysis),
+  }));
+};
+
+const readMeetingProcessingStatus = (row: {
+  id: string | number;
+  transcript_integrity_json: string | null;
+  automatic_attempt_count: number | null;
+  notes_status: string | null;
+}): MeetingProcessingStatus => {
+  const integrity = parseIntegrityRecord(row.transcript_integrity_json);
+  const finalTranscription =
+    integrity.finalTranscription &&
+    typeof integrity.finalTranscription === 'object'
+      ? (integrity.finalTranscription as Record<string, unknown>)
+      : null;
+  const finalResult =
+    integrity.finalTranscriptionResult &&
+    typeof integrity.finalTranscriptionResult === 'object'
+      ? (integrity.finalTranscriptionResult as Record<string, unknown>)
+      : null;
+  let automaticAttemptsExhausted = false;
+  if (
+    row.notes_status === 'failed' &&
+    (row.automatic_attempt_count ?? 0) >= 2
+  ) {
+    const meeting = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(String(row.id)) as PersistedMeeting | undefined;
+    const run = getMeetingAnalysisRun(row.id);
+    automaticAttemptsExhausted = isMeetingAnalysisAutomaticRetryExhausted(
+      meeting,
+      run,
+    );
+  }
+  return {
+    id: row.id,
+    has_capture_gap: Array.isArray(integrity.causes)
+      ? integrity.causes.some(
+          (cause) =>
+            cause &&
+            typeof cause === 'object' &&
+            (cause as { code?: unknown }).code === 'capture_gap_detected',
+        )
+      : false,
+    final_transcription_policy:
+      typeof finalTranscription?.policy === 'string'
+        ? finalTranscription.policy
+        : null,
+    final_transcription_state:
+      typeof finalTranscription?.state === 'string'
+        ? finalTranscription.state
+        : null,
+    final_transcription_engine:
+      typeof finalResult?.engine === 'string' ? finalResult.engine : null,
+    speaker_attribution_verified:
+      finalTranscription?.policy === 'parakeet_final_v1' &&
+      finalTranscription.state === 'complete'
+        ? integrity.speakerAttributionVerified === true
+        : null,
+    automatic_attempts_exhausted: automaticAttemptsExhausted,
+  };
+};
+
+export const getMeetingProcessingStatuses = (
+  meetingId?: string | number,
+): MeetingProcessingStatus[] => {
+  const statement = db.prepare(
+    `SELECT m.id, m.transcript_integrity_json,
+            r.automatic_attempt_count, r.notes_status
+     FROM meetings AS m
+     LEFT JOIN meeting_analysis_runs AS r ON r.meeting_id = m.id
+     WHERE ${
+       meetingId === undefined
+         ? `(m.transcript_status = 'needs_attention'
+            OR (m.transcript_status = 'validated' AND (
+              (m.analysis_json IS NULL AND m.enhanced_notes IS NULL)
+              OR m.downstream_processing_json IS NOT NULL
+              OR lower(trim(m.title)) IN ('meeting', 'new meeting', 'untitled meeting')
+            )))`
+         : 'm.id = ?'
+     }`,
+  );
+  const rows = (
+    meetingId === undefined ? statement.all() : statement.all(String(meetingId))
+  ) as Array<{
+    id: string | number;
+    transcript_integrity_json: string | null;
+    automatic_attempt_count: number | null;
+    notes_status: string | null;
+  }>;
+  return rows.map(readMeetingProcessingStatus);
+};
+
+export const getMeetingSummary = (
+  meetingId: string | number,
+): (MeetingSummary & Partial<MeetingProcessingStatus>) | null => {
+  const summary = getMeetingSummaries(meetingId)[0];
+  if (!summary) return null;
+  const processingStatus = getMeetingProcessingStatuses(meetingId)[0];
+  return processingStatus ? { ...summary, ...processingStatus } : summary;
+};
+
+export const getMeetingDashboardPreviews = (): MeetingDashboardPreview[] =>
+  db
+    .prepare(
+      `SELECT
+         id,
+         substr(COALESCE(
+           CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.overview') END,
+           enhanced_notes
+         ), 1, 280) AS dashboard_detail,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.win') END, 1, 160) AS recent_win_title,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.why_it_counts') END, 1, 240) AS recent_win_why,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.evidence') END, 1, 240) AS recent_win_evidence,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.source') END, 1, 160) AS recent_win_source
+       FROM meetings
+       WHERE analysis_json IS NOT NULL OR enhanced_notes IS NOT NULL
+       ORDER BY COALESCE(started_at, created_at) DESC`,
+    )
+    .all() as MeetingDashboardPreview[];
+
+export const searchMeetingSummaries = (
+  query: string,
+  requestedLimit = 5,
+): Array<{
+  id: string | number;
+  title: string;
+  started_at: string;
+  created_at: string;
+}> => {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return [];
+  const limit = Math.min(
+    20,
+    Math.max(1, Number.isSafeInteger(requestedLimit) ? requestedLimit : 5),
+  );
+  const pattern = `%${normalized}%`;
+  return db
+    .prepare(
+      `SELECT id, title,
+              COALESCE(started_at, created_at, '') AS started_at,
+              COALESCE(created_at, '') AS created_at
+       FROM meetings
+       WHERE lower(COALESCE(title, '')) LIKE ?
+          OR lower(COALESCE(enhanced_notes, '')) LIKE ?
+          OR lower(COALESCE(user_notes, '')) LIKE ?
+          OR lower(COALESCE(analysis_json, '')) LIKE ?
+       ORDER BY COALESCE(started_at, created_at) DESC
+       LIMIT ?`,
+    )
+    .all(pattern, pattern, pattern, pattern, limit) as Array<{
+    id: string | number;
+    title: string;
+    started_at: string;
+    created_at: string;
+  }>;
+};
+
 export const getMeeting = (id: string | number) => {
   recoverExpiredTranscriptValidationRetries();
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id));
@@ -1968,6 +2315,7 @@ export const beginMeetingAnalysisRun = (input: {
   sourceRevision: string;
   eligibilityRevision: string;
   userNotesHash: string;
+  reason: 'automatic' | 'manual';
   stage?: 'queued' | 'notes_writer';
   queuePosition?: number | null;
 }): { status: 'started' } => {
@@ -1979,12 +2327,13 @@ export const beginMeetingAnalysisRun = (input: {
     (input.queuePosition ?? 0) > 0
       ? input.queuePosition!
       : null;
+  const reason = input.reason;
   db.prepare(
     `INSERT INTO meeting_analysis_runs (
       meeting_id, run_id, input_revision, source_revision, eligibility_revision,
       user_notes_hash, notes_status, secondary_status, stage, queue_position,
-      error_code, started_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?, NULL, ?, ?)
+      error_code, automatic_attempt_count, started_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?, NULL, ?, ?, ?)
     ON CONFLICT(meeting_id) DO UPDATE SET
       run_id = excluded.run_id,
       input_revision = excluded.input_revision,
@@ -1996,6 +2345,12 @@ export const beginMeetingAnalysisRun = (input: {
       stage = excluded.stage,
       queue_position = excluded.queue_position,
       error_code = NULL,
+      automatic_attempt_count = CASE
+        WHEN ? != 'automatic' THEN meeting_analysis_runs.automatic_attempt_count
+        WHEN meeting_analysis_runs.input_revision = excluded.input_revision
+          THEN meeting_analysis_runs.automatic_attempt_count + 1
+        ELSE 1
+      END,
       started_at = excluded.started_at,
       updated_at = excluded.updated_at`,
   ).run(
@@ -2007,8 +2362,10 @@ export const beginMeetingAnalysisRun = (input: {
     input.userNotesHash,
     stage,
     queuePosition,
+    reason === 'automatic' ? 1 : 0,
     now,
     now,
+    reason,
   );
   return { status: 'started' };
 };
@@ -2131,6 +2488,7 @@ export type MeetingAnalysisRunMetricRecord = {
   meetingId: string;
   reason: 'automatic' | 'manual';
   status: 'published' | 'failed' | 'cancelled';
+  errorCode: string | null;
   metrics: MeetingNotesRunMetric;
   startedAt: string;
   completedAt: string;
@@ -2145,6 +2503,7 @@ export const upsertMeetingAnalysisRunMetric = (input: {
   runId: string;
   reason: 'automatic' | 'manual';
   status: 'published' | 'failed' | 'cancelled';
+  errorCode?: string | null;
   metrics: MeetingNotesRunMetric;
   startedAt: string;
   completedAt: string;
@@ -2161,12 +2520,13 @@ export const upsertMeetingAnalysisRunMetric = (input: {
   db.transaction(() => {
     db.prepare(
       `INSERT INTO meeting_analysis_run_history (
-         run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         run_id, meeting_id, reason, status, error_code, metrics_json, started_at, completed_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(run_id) DO UPDATE SET
          meeting_id = excluded.meeting_id,
          reason = excluded.reason,
          status = excluded.status,
+         error_code = excluded.error_code,
          metrics_json = excluded.metrics_json,
          started_at = excluded.started_at,
          completed_at = excluded.completed_at`,
@@ -2175,6 +2535,7 @@ export const upsertMeetingAnalysisRunMetric = (input: {
       String(input.meetingId),
       input.reason,
       input.status,
+      input.errorCode ?? null,
       metricsJson,
       input.startedAt,
       input.completedAt,
@@ -2199,7 +2560,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
   );
   const rows = db
     .prepare(
-      `SELECT run_id, meeting_id, reason, status, metrics_json, started_at, completed_at
+      `SELECT run_id, meeting_id, reason, status, error_code, metrics_json, started_at, completed_at
        FROM meeting_analysis_run_history
        WHERE completed_at IS NOT NULL
        ORDER BY completed_at DESC, rowid DESC
@@ -2210,6 +2571,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
     meeting_id: string;
     reason: 'automatic' | 'manual';
     status: 'published' | 'failed' | 'cancelled';
+    error_code: string | null;
     metrics_json: string;
     started_at: string;
     completed_at: string;
@@ -2219,6 +2581,7 @@ export const listMeetingAnalysisRunMetrics = (input: {
     meetingId: row.meeting_id,
     reason: row.reason,
     status: row.status,
+    errorCode: row.error_code,
     metrics: parseMeetingNotesRunMetric(row.metrics_json),
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -2293,6 +2656,28 @@ export const getMeetingAnalysisPublicationRevisions = (
   } catch {
     return null;
   }
+};
+
+export const isMeetingAnalysisAutomaticRetryExhausted = (
+  meeting: PersistedMeeting | null | undefined,
+  existingRun?: MeetingAnalysisRun | null,
+): boolean => {
+  if (!meeting) return false;
+  const run = existingRun ?? getMeetingAnalysisRun(meeting.id);
+  if (
+    !run ||
+    run.notes_status !== 'failed' ||
+    run.automatic_attempt_count < 2
+  ) {
+    return false;
+  }
+  const revisions = getMeetingAnalysisPublicationRevisions(meeting);
+  return Boolean(
+    revisions &&
+      run.source_revision === revisions.sourceRevision &&
+      run.eligibility_revision === revisions.eligibilityRevision &&
+      run.user_notes_hash === revisions.userNotesHash,
+  );
 };
 
 /**
@@ -5136,29 +5521,8 @@ export const upsertEntity = (entity: {
   domain_tag?: string;
 }): Entity => {
   const normalizedName = normalizeEntityName(entity.name);
-
-  // ── SANITY FILTER (V1.8 No-Nonsense) ──
-  const blocklist = [
-    'none',
-    'omit',
-    'unknown',
-    'none specified',
-    'unnamed',
-    'unknown project',
-  ];
-  if (
-    blocklist.includes(normalizedName) ||
-    normalizedName.includes('(unknown)')
-  ) {
-    console.log(`[DB] Sanity Filter: Blocking entity "${entity.name}"`);
-    // Return a dummy object or throw. To avoid breaking the pipeline, we return the existing or a partial.
-    // However, best is to return a "Trash" sentinel or just a minimal record that won't be rendered.
-    // For now, let's just use the "none" ID if it exists or create nothing.
-    // Better: throw a soft error or return a type that the caller handles.
-    // Re-evaluating: The simplest is to return a mock Entity and let the caller ignore it,
-    // or just return the record but prefix name with [BLOCKED].
-    // Actually, the user wants it BLOCKED from the UI. The UI already filters it.
-    // Adding it here ensures it's not even normalized into the graph.
+  if (entity.type === 'person' && !isUsablePersonName(entity.name)) {
+    throw new Error('person_name_invalid');
   }
 
   let existing: Entity | undefined;
@@ -5207,6 +5571,23 @@ export const upsertEntity = (entity: {
   ) {
     existing = db
       .prepare(
+        `SELECT project.* FROM entity_dreaming_aliases name_alias
+         JOIN entities project ON project.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'project'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolveProjectIdentityId(existing.id));
+    matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'project' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
         `SELECT canonical.* FROM project_aliases pa
          JOIN entities alias ON alias.id = pa.project_id
          JOIN entities canonical ON canonical.id = pa.canonical_id
@@ -5214,6 +5595,23 @@ export const upsertEntity = (entity: {
       )
       .get(normalizedName) as Entity | undefined;
     matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'person' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
+        `SELECT person.* FROM entity_dreaming_aliases name_alias
+         JOIN entities person ON person.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'person'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolvePersonIdentityId(existing.id));
+    matchedPersonAlias = Boolean(existing);
   }
 
   if (
@@ -5386,6 +5784,29 @@ export const updatePersonName = (personId: string, name: string): Entity =>
     }
     return getEntity(person.id)!;
   })();
+
+export const addPersonNameAlias = (
+  personId: string,
+  aliasName: string,
+): void => {
+  const canonicalId = resolvePersonIdentityId(personId);
+  const person = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!person || person.type !== 'person' || !trimmed) {
+    throw new Error('person_name_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === person.normalized_name) {
+    return;
+  }
+  db.prepare(
+    `INSERT INTO person_name_aliases(
+       person_id, normalized_name, display_name, source
+     ) VALUES (?, ?, ?, 'alias_suggestion')
+     ON CONFLICT(person_id, normalized_name) DO UPDATE SET
+       display_name = excluded.display_name`,
+  ).run(person.id, normalizedName, trimmed);
+};
 
 export const mergePerson = (
   personId: string,
@@ -5800,7 +6221,7 @@ export const restoreCommitmentAlias = (extractionId: string): void => {
 /**
  * Get all entities of a specific type
  */
-const resolveProjectIdentityId = (projectId: string): string => {
+export const resolveProjectIdentityId = (projectId: string): string => {
   let current = projectId;
   const seen = new Set<string>();
   while (!seen.has(current)) {
@@ -5828,6 +6249,23 @@ export const updateProjectDisplayTitle = (
   db.prepare(
     'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
   ).run(withProjectDisplayTitle(project.metadata, trimmed), canonicalId);
+  return getEntity(canonicalId)!;
+};
+
+export const setProjectPortfolioDisposition = (
+  projectId: string,
+  disposition: ProjectPortfolioDisposition,
+): Entity => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  if (!project || project.type !== 'project')
+    throw new Error('project_disposition_invalid');
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  ).run(
+    withProjectPortfolioDisposition(project.metadata, disposition),
+    canonicalId,
+  );
   return getEntity(canonicalId)!;
 };
 
@@ -5859,11 +6297,30 @@ export const deleteProjectMilestone = (
     const project = getEntity(canonicalId);
     if (!project || project.type !== 'project')
       throw new Error('project_milestone_project_invalid');
-    const deleted = withoutUserProjectMilestone(project.metadata, milestoneId);
+    const deleted = withoutProjectMilestone(project.metadata, milestoneId);
     if (!deleted.removed) throw new Error('project_milestone_not_found');
     db.prepare(
       'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).run(deleted.metadata, canonicalId);
+    if (
+      deleted.removed.source === 'dreaming' &&
+      deleted.removed.dreamingProposalId
+    ) {
+      const proposal = db
+        .prepare(
+          'SELECT fingerprint FROM entity_dreaming_proposals WHERE id = ?',
+        )
+        .get(deleted.removed.dreamingProposalId) as
+        | { fingerprint: string }
+        | undefined;
+      if (!proposal) throw new Error('dreaming_milestone_proposal_missing');
+      recordEntityCorrection({
+        entityId: canonicalId,
+        itemType: 'dreaming:project_milestone',
+        fingerprint: proposal.fingerprint,
+        reason: 'removed_by_user',
+      });
+    }
     return deleted.removed;
   })();
 
@@ -5921,6 +6378,43 @@ export const mergeProject = (
     db.prepare(
       'UPDATE project_aliases SET canonical_id = ? WHERE canonical_id = ? AND active = 1',
     ).run(destinationId, source.id);
+  })();
+};
+
+export const addProjectAlias = (projectId: string, aliasName: string): void => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!project || project.type !== 'project' || !trimmed) {
+    throw new Error('project_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === project.normalized_name) {
+    return;
+  }
+  db.transaction(() => {
+    let aliasEntity = db
+      .prepare('SELECT * FROM entities WHERE type = ? AND normalized_name = ?')
+      .get('project', normalizedName) as Entity | undefined;
+    if (!aliasEntity) {
+      const aliasId = `proj_${createHash('sha256')
+        .update(`alias:${canonicalId}:${normalizedName}`)
+        .digest('hex')
+        .slice(0, 12)}`;
+      aliasEntity = upsertEntity({
+        id: aliasId,
+        type: 'project',
+        name: trimmed,
+        status: 'active',
+        dedupe_by_name: false,
+      });
+    }
+    if (
+      aliasEntity.id !== canonicalId &&
+      resolveProjectIdentityId(aliasEntity.id) !== canonicalId
+    ) {
+      mergeProject(aliasEntity.id, canonicalId);
+    }
   })();
 };
 
@@ -6050,6 +6544,7 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
       metadata: project.metadata,
       status: project.status,
     },
+    theme: readProjectThemeSynthesis(project.metadata),
     meetingStats: buildProjectMeetingStats(briefingMeetings),
     momentum: buildProjectMomentum(briefingMeetings, tasks),
     health: buildProjectHealth(tasks, snapshot),
@@ -6118,6 +6613,9 @@ export const getProjectPortfolio = (): ProjectPortfolioEntry[] => {
             brief.milestones.find(
               (milestone) => milestone.status !== 'complete',
             )?.title ?? null,
+          current_focus: brief.theme?.currentFocus ?? null,
+          recent_change: brief.theme?.recentChanges[0]?.summary ?? null,
+          open_thread_count: brief.theme?.openThreads.length ?? 0,
         }
       : row;
   });
@@ -6202,6 +6700,23 @@ export const findEntity = (
     return getEntity(resolvePersonIdentityId(direct.id));
   }
   if (direct) return direct;
+  const dreamingAliasMatches = db
+    .prepare(
+      `SELECT DISTINCT entity_id FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND active = 1 AND normalized_name = ?`,
+    )
+    .all(type, normalizedName) as Array<{ entity_id: string }>;
+  if (dreamingAliasMatches.length === 1) {
+    const aliasEntityId = dreamingAliasMatches[0].entity_id;
+    return getEntity(
+      type === 'person'
+        ? resolvePersonIdentityId(aliasEntityId)
+        : type === 'project'
+          ? resolveProjectIdentityId(aliasEntityId)
+          : aliasEntityId,
+    );
+  }
+  if (dreamingAliasMatches.length > 1 || type === 'project') return undefined;
   if (type !== 'person') return undefined;
   const matches = db
     .prepare(
@@ -6382,6 +6897,96 @@ export const linkEntities = (link: {
     .prepare('SELECT * FROM entity_links WHERE id = ?')
     .get(id) as EntityLink;
 };
+
+function upsertCanonicalDreamingProjectCommitment(input: {
+  projectId: string;
+  task: string;
+  proposalId: string;
+  runId: string;
+  fingerprint: string;
+  evidence: Array<{ meetingId: string; excerpt: string }>;
+  timestamp: string;
+}): void {
+  const normalizedTask = normalizeEntityName(input.task);
+  const matchingRows = db
+    .prepare(
+      `SELECT id FROM entities
+       WHERE type = 'action_item' AND normalized_name = ? ORDER BY id`,
+    )
+    .all(normalizedTask) as Array<{ id: string }>;
+  const canonicalMatches = new Map<string, Entity>();
+  for (const row of matchingRows) {
+    const resolved = resolveCommitmentIdentity(row.id);
+    if (resolved?.type === 'action_item')
+      canonicalMatches.set(resolved.id, resolved);
+  }
+  if (canonicalMatches.size > 1)
+    throw new Error('dreaming_commitment_conflict');
+  const action =
+    canonicalMatches.values().next().value ??
+    upsertEntity({
+      type: 'action_item',
+      name: input.task.trim().replace(/\s+/g, ' '),
+      status: 'active',
+      assigned_to: null,
+      dedupe_by_name: true,
+    });
+  if (action.type !== 'action_item' || action.assigned_to !== null) {
+    throw new Error('dreaming_commitment_conflict');
+  }
+  let metadata: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(action.metadata || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      metadata = parsed as Record<string, unknown>;
+    }
+  } catch {
+    metadata = {};
+  }
+  const existingSources = Array.isArray(metadata.dreamingSources)
+    ? metadata.dreamingSources.filter(
+        (source): source is Record<string, unknown> =>
+          Boolean(source) &&
+          typeof source === 'object' &&
+          !Array.isArray(source),
+      )
+    : [];
+  const dreamingSources = existingSources.some(
+    (source) => source.proposalId === input.proposalId,
+  )
+    ? existingSources
+    : [
+        ...existingSources,
+        {
+          proposalId: input.proposalId,
+          runId: input.runId,
+          fingerprint: input.fingerprint,
+          meetingIds: input.evidence.map((item) => item.meetingId),
+          excerpts: input.evidence.map((item) => item.excerpt),
+        },
+      ];
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = ? WHERE id = ?',
+  ).run(
+    JSON.stringify({ ...metadata, dreamingSources }),
+    input.timestamp,
+    action.id,
+  );
+  const primaryEvidence = input.evidence[0];
+  const link = linkEntities({
+    source_entity_id: action.id,
+    target_entity_id: resolveProjectIdentityId(input.projectId),
+    relationship: 'belongs_to',
+    meeting_id: primaryEvidence.meetingId,
+    state: 'confirmed',
+    evidence_meeting_id: primaryEvidence.meetingId,
+    evidence_quote: primaryEvidence.excerpt,
+    source: 'synthesis',
+    confidence: 1,
+  });
+  if (link.state !== 'confirmed')
+    throw new Error('dreaming_commitment_conflict');
+}
 
 /**
  * Get all links for an entity (both directions)
@@ -6675,6 +7280,491 @@ export const getEntityMeetings = (
   })[];
 };
 
+export interface DreamingEntityNoteSource {
+  id: string;
+  title: string;
+  started_at: string | null;
+  created_at: string | null;
+  user_notes: string | null;
+  enhanced_notes: string | null;
+}
+
+const dreamingEntityNotesQuery = (
+  aliasTable: 'person_aliases' | 'project_aliases',
+  aliasIdColumn: 'person_id' | 'project_id',
+): string => `
+  WITH family(id) AS (
+    SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
+    WHERE a.canonical_id = ? AND a.active = 1
+  )
+  SELECT
+    m.id,
+    m.title,
+    m.started_at,
+    m.created_at,
+    m.user_notes,
+    m.enhanced_notes
+  FROM meeting_entities me INDEXED BY idx_meeting_entities_entity_meeting
+  JOIN meetings m ON m.id = me.meeting_id
+  WHERE me.entity_id IN (SELECT id FROM family)
+    AND (
+      TRIM(COALESCE(m.user_notes, '')) != ''
+      OR TRIM(COALESCE(m.enhanced_notes, '')) != ''
+    )
+  GROUP BY m.id
+  ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC
+  LIMIT ?
+`;
+
+const getDreamingEntityQueryContext = (entityId: string) => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return null;
+  }
+  return entity.type === 'person'
+    ? {
+        canonicalId: resolvePersonIdentityId(entity.id),
+        aliasTable: 'person_aliases' as const,
+        aliasIdColumn: 'person_id' as const,
+      }
+    : {
+        canonicalId: resolveProjectIdentityId(entity.id),
+        aliasTable: 'project_aliases' as const,
+        aliasIdColumn: 'project_id' as const,
+      };
+};
+
+/**
+ * Return the bounded, notes-only meeting projection used by idle dreaming.
+ * Keep this projection explicit: transcripts, audio paths, and analysis payloads
+ * are intentionally unavailable to the packager.
+ */
+export const getDreamingEntityNotes = (
+  entityId: string,
+  limit = 8,
+): DreamingEntityNoteSource[] => {
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
+  const boundedLimit = Math.max(1, Math.min(8, Math.trunc(limit)));
+
+  return db
+    .prepare(
+      dreamingEntityNotesQuery(context.aliasTable, context.aliasIdColumn),
+    )
+    .all(
+      context.canonicalId,
+      context.canonicalId,
+      boundedLimit,
+    ) as DreamingEntityNoteSource[];
+};
+
+export const getDreamingEntityNotesQueryPlan = (entityId: string): string[] => {
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
+  const rows = db
+    .prepare(
+      `EXPLAIN QUERY PLAN ${dreamingEntityNotesQuery(
+        context.aliasTable,
+        context.aliasIdColumn,
+      )}`,
+    )
+    .all(context.canonicalId, context.canonicalId, 8) as Array<{
+    detail: string;
+  }>;
+  return rows.map((row) => row.detail);
+};
+
+interface AcceptedDreamingPersonClaim {
+  proposalId: string;
+  runId: string;
+  kind: 'person_headline' | 'person_focus' | 'person_collaborator';
+  value: string;
+  sourceMeetingIds: string[];
+  excerpts: string[];
+  createdAt: string;
+}
+
+const getAcceptedDreamingPersonClaims = (
+  canonicalId: string,
+): AcceptedDreamingPersonClaim[] => {
+  const rows = db
+    .prepare(`WITH family(id) AS (
+      SELECT ? UNION SELECT person_id FROM person_aliases
+      WHERE canonical_id = ? AND active = 1
+    )
+    SELECT claim.proposal_id, proposal.run_id, claim.kind, claim.value,
+      claim.evidence_json, claim.created_at
+    FROM entity_dreaming_person_claims claim
+    JOIN entity_dreaming_proposals proposal ON proposal.id = claim.proposal_id
+    WHERE claim.entity_id IN (SELECT id FROM family)
+    ORDER BY claim.created_at, claim.proposal_id`)
+    .all(canonicalId, canonicalId) as Array<{
+    proposal_id: string;
+    run_id: string;
+    kind: AcceptedDreamingPersonClaim['kind'];
+    value: string;
+    evidence_json: string;
+    created_at: string;
+  }>;
+  return rows.map((row) => {
+    let evidence: Array<{ meetingId: string; excerpt: string }> = [];
+    try {
+      const parsed = JSON.parse(row.evidence_json) as unknown;
+      if (Array.isArray(parsed)) {
+        evidence = parsed.filter(
+          (item): item is { meetingId: string; excerpt: string } =>
+            Boolean(item) &&
+            typeof item === 'object' &&
+            typeof (item as { meetingId?: unknown }).meetingId === 'string' &&
+            typeof (item as { excerpt?: unknown }).excerpt === 'string',
+        );
+      }
+    } catch {
+      evidence = [];
+    }
+    return {
+      proposalId: row.proposal_id,
+      runId: row.run_id,
+      kind: row.kind,
+      value: row.value,
+      sourceMeetingIds: evidence.map((item) => item.meetingId),
+      excerpts: evidence.map((item) => item.excerpt),
+      createdAt: row.created_at,
+    };
+  });
+};
+
+const acceptedPersonRead = (
+  claims: AcceptedDreamingPersonClaim[],
+  fallbackHeadline: string,
+  fallbackBullets: string[],
+) => {
+  const acceptedHeadline = claims
+    .filter((claim) => claim.kind === 'person_headline')
+    .at(-1)?.value;
+  const acceptedBullets = claims
+    .filter((claim) => claim.kind !== 'person_headline')
+    .map((claim) => claim.value);
+  return {
+    headline: acceptedHeadline ?? fallbackHeadline,
+    supportingBullets: [...new Set([...fallbackBullets, ...acceptedBullets])],
+  };
+};
+
+const overlayAcceptedClaimsOnKnowledgeDoc = (
+  doc: KnowledgeDoc | null,
+  claims: AcceptedDreamingPersonClaim[],
+): KnowledgeDoc | null => {
+  if (!doc || claims.length === 0) return doc;
+  let structured: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(doc.structured_json || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      structured = parsed as Record<string, unknown>;
+    }
+  } catch {
+    structured = {};
+  }
+  const current =
+    structured.current_read &&
+    typeof structured.current_read === 'object' &&
+    !Array.isArray(structured.current_read)
+      ? (structured.current_read as Record<string, unknown>)
+      : {};
+  const read = acceptedPersonRead(
+    claims,
+    typeof current.headline === 'string' ? current.headline : '',
+    Array.isArray(current.supporting_bullets)
+      ? current.supporting_bullets.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct',
+      confidence: 1,
+    })),
+  );
+  const existingEvidence = Array.isArray(structured.evidence_index)
+    ? structured.evidence_index
+    : [];
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...doc,
+    structured_json: JSON.stringify({
+      ...structured,
+      current_read: {
+        ...current,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          typeof current.source_count === 'number' ? current.source_count : 0,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          typeof current.cited_item_count === 'number'
+            ? current.cited_item_count
+            : 0,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          typeof current.cited_meeting_count === 'number'
+            ? current.cited_meeting_count
+            : 0,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...existingEvidence, ...acceptedEvidence],
+    }),
+  };
+};
+
+const overlayAcceptedClaimsOnSnapshot = (
+  snapshot: WorkingMemorySnapshot | null,
+  claims: AcceptedDreamingPersonClaim[],
+): WorkingMemorySnapshot | null => {
+  if (!snapshot || claims.length === 0) return snapshot;
+  const read = acceptedPersonRead(
+    claims,
+    snapshot.payload.current_read.headline,
+    snapshot.payload.current_read.supporting_bullets,
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct' as const,
+      confidence: 1,
+    })),
+  );
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...snapshot,
+    payload: {
+      ...snapshot.payload,
+      current_read: {
+        ...snapshot.payload.current_read,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          snapshot.payload.current_read.source_count,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          snapshot.payload.current_read.cited_item_count,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          snapshot.payload.current_read.cited_meeting_count,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...snapshot.payload.evidence_index, ...acceptedEvidence],
+    },
+  };
+};
+
+/** Compact accepted state supplied to dreaming so proposals do not repeat it. */
+export const getDreamingEntityBaseline = (
+  entityId: string,
+): Record<string, unknown> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return {};
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const canonical = getEntity(canonicalId);
+  if (!canonical) return {};
+  const aliasTable =
+    canonical.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn =
+    canonical.type === 'person' ? 'person_id' : 'project_id';
+  const identityAliases = db
+    .prepare(`
+      SELECT alias.id, alias.name
+      FROM ${aliasTable} identity
+      JOIN entities alias ON alias.id = identity.${aliasIdColumn}
+      WHERE identity.canonical_id = ? AND identity.active = 1
+      ORDER BY alias.id
+      LIMIT 24
+    `)
+    .all(canonicalId) as Array<{ id: string; name: string }>;
+  const dreamingAliases = db
+    .prepare(
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+         WHERE canonical_id = ? AND active = 1
+       )
+       SELECT normalized_name AS id, MIN(display_name) AS name
+       FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND entity_id IN (SELECT id FROM family)
+         AND active = 1
+       GROUP BY normalized_name
+       ORDER BY normalized_name LIMIT 24`,
+    )
+    .all(canonicalId, canonicalId, canonical.type) as Array<{
+    id: string;
+    name: string;
+  }>;
+  const userNameAliases =
+    canonical.type === 'person'
+      ? (db
+          .prepare(`SELECT normalized_name AS id, display_name AS name
+            FROM person_name_aliases WHERE person_id = ?
+            ORDER BY normalized_name LIMIT 24`)
+          .all(canonicalId) as Array<{ id: string; name: string }>)
+      : [];
+  const aliases = [
+    ...identityAliases,
+    ...userNameAliases,
+    ...dreamingAliases,
+  ].slice(0, 24);
+  const commitments =
+    canonical.type === 'project'
+      ? (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT project_id FROM project_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT DISTINCT action.id, action.name, action.status, action.due_date
+            FROM entities action
+            JOIN entity_links link ON link.source_entity_id = action.id
+            WHERE action.type = 'action_item'
+              AND link.relationship = 'belongs_to'
+              AND link.state = 'confirmed'
+              AND link.target_entity_id IN (SELECT id FROM family)
+            ORDER BY action.id
+            LIMIT 24
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>)
+      : (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT person_id FROM person_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT id, name, status, due_date
+            FROM entities
+            WHERE type = 'action_item' AND assigned_to IN (SELECT id FROM family)
+            ORDER BY id
+            LIMIT 24
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>);
+  const scopeType = canonical.type === 'person' ? 'person_context' : 'project';
+  const snapshot = getWorkingMemorySnapshot(scopeType, canonicalId);
+  let acceptedPersonCurrentRead: {
+    headline: string;
+    supportingBullets: string[];
+  } | null = null;
+  const acceptedPersonClaims =
+    canonical.type === 'person'
+      ? getAcceptedDreamingPersonClaims(canonicalId)
+      : [];
+  if (canonical.type === 'person') {
+    const personDoc = getKnowledgeDocByScope('person_context', canonicalId);
+    try {
+      const structured = JSON.parse(personDoc?.structured_json || '{}') as {
+        current_read?: {
+          headline?: unknown;
+          supporting_bullets?: unknown;
+        };
+      };
+      if (
+        typeof structured.current_read?.headline === 'string' &&
+        Array.isArray(structured.current_read.supporting_bullets)
+      ) {
+        acceptedPersonCurrentRead = {
+          headline: structured.current_read.headline,
+          supportingBullets: structured.current_read.supporting_bullets.filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        };
+      }
+    } catch {
+      acceptedPersonCurrentRead = null;
+    }
+    if (acceptedPersonClaims.length > 0) {
+      acceptedPersonCurrentRead = acceptedPersonRead(
+        acceptedPersonClaims,
+        acceptedPersonCurrentRead?.headline ??
+          snapshot?.payload.current_read.headline ??
+          '',
+        acceptedPersonCurrentRead?.supportingBullets ??
+          snapshot?.payload.current_read.supporting_bullets ??
+          [],
+      );
+    }
+  }
+
+  const common = {
+    status: canonical.status,
+    aliases,
+    commitments,
+    ...(canonical.type === 'person' ? { acceptedPersonClaims } : {}),
+    currentRead:
+      acceptedPersonCurrentRead ??
+      (snapshot
+        ? {
+            headline: snapshot.payload.current_read.headline,
+            supportingBullets: snapshot.payload.current_read.supporting_bullets,
+          }
+        : null),
+  };
+  if (canonical.type === 'person') {
+    return {
+      ...common,
+      role: parsePersonRole(canonical.metadata),
+    };
+  }
+  const theme = readProjectThemeSynthesis(canonical.metadata);
+  return {
+    ...common,
+    displayTitle: readProjectDisplayTitle(canonical.metadata, canonical.name),
+    theme: theme
+      ? { outcome: theme.outcome, currentFocus: theme.currentFocus }
+      : null,
+    milestones: buildUserProjectMilestones(canonical.metadata)
+      .slice(0, 24)
+      .map(({ title, status, targetDate, note }) => ({
+        title,
+        status,
+        targetDate,
+        note,
+      })),
+  };
+};
+
 type PeopleBriefingSummaryRow = {
   id: string;
   name: string;
@@ -6686,6 +7776,10 @@ type PeopleBriefingSummaryRow = {
   latest_meeting_at: string | null;
   latest_context: string | null;
   open_commitment_count: number;
+  candidate_commitment_count: number;
+  brief_headline: string | null;
+  brief_status: string | null;
+  brief_updated_at: string | null;
   possible_duplicate_count: number;
 };
 
@@ -6750,6 +7844,39 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
             '$.source_meeting_id'
           ) = 'text'
         GROUP BY identity.canonical_id
+      ), person_names AS (
+        SELECT identity.canonical_id AS person_id, person.normalized_name
+        FROM entities person
+        JOIN person_identity identity ON identity.source_id = person.id
+        WHERE person.type = 'person'
+        UNION
+        SELECT identity.canonical_id AS person_id, name_alias.normalized_name
+        FROM person_name_aliases name_alias
+        JOIN person_identity identity ON identity.source_id = name_alias.person_id
+      ), candidate_commitments AS (
+        SELECT names.person_id, COUNT(DISTINCT action.id) AS candidate_commitment_count
+        FROM person_names names
+        JOIN entities action
+          ON action.type = 'action_item'
+          AND action.assigned_to IS NULL
+          AND LOWER(TRIM(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.assignee_name'
+          ))) = names.normalized_name
+        WHERE action.status IN ('active', 'overdue')
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.owner_source'
+          ), '') != 'user'
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.commitment_state'
+          ), '') != 'rejected'
+          AND json_type(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.source_meeting_id'
+          ) = 'text'
+        GROUP BY names.person_id
       )
       SELECT
         person.id,
@@ -6762,6 +7889,15 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latest.meeting_at AS latest_meeting_at,
         latest.context AS latest_context,
         COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count,
+        COALESCE(candidates.candidate_commitment_count, 0) AS candidate_commitment_count,
+        CASE
+          WHEN json_valid(brief.structured_json)
+            AND json_type(brief.structured_json, '$.current_read.headline') = 'text'
+          THEN json_extract(brief.structured_json, '$.current_read.headline')
+          ELSE NULL
+        END AS brief_headline,
+        brief.status AS brief_status,
+        COALESCE(brief.last_synthesized_at, brief.updated_at) AS brief_updated_at,
         (
           SELECT COUNT(*) FROM entities possible
           WHERE possible.type = 'person'
@@ -6777,6 +7913,9 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
       LEFT JOIN ranked_meetings latest
         ON latest.person_id = person.id AND latest.recency_rank = 1
       LEFT JOIN open_commitments commitments ON commitments.person_id = person.id
+      LEFT JOIN candidate_commitments candidates ON candidates.person_id = person.id
+      LEFT JOIN knowledge_docs brief
+        ON brief.scope_type = 'person_context' AND brief.scope_key = person.id
       WHERE person.type = 'person'
         AND NOT EXISTS (SELECT 1 FROM person_aliases alias
           WHERE alias.person_id = person.id AND alias.active = 1)
@@ -6787,19 +7926,25 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
     `)
     .all() as PeopleBriefingSummaryRow[];
 
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    role: parsePersonRole(row.metadata),
-    meetingCount: Number(row.meeting_count),
-    mentionCount: Number(row.mention_count),
-    latestMeetingId: row.latest_meeting_id,
-    latestMeetingTitle: row.latest_meeting_title,
-    latestMeetingAt: row.latest_meeting_at,
-    context: row.latest_context,
-    openCommitmentCount: Number(row.open_commitment_count),
-    possibleDuplicateCount: Number(row.possible_duplicate_count),
-  }));
+  return rows
+    .filter((row) => isUsablePersonName(row.name))
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: parsePersonRole(row.metadata),
+      meetingCount: Number(row.meeting_count),
+      mentionCount: Number(row.mention_count),
+      latestMeetingId: row.latest_meeting_id,
+      latestMeetingTitle: row.latest_meeting_title,
+      latestMeetingAt: row.latest_meeting_at,
+      context: row.latest_context,
+      openCommitmentCount: Number(row.open_commitment_count),
+      candidateCommitmentCount: Number(row.candidate_commitment_count),
+      briefHeadline: row.brief_headline,
+      briefStatus: row.brief_status,
+      briefUpdatedAt: row.brief_updated_at,
+      possibleDuplicateCount: Number(row.possible_duplicate_count),
+    }));
 };
 
 export interface PersonBriefingDetail {
@@ -6808,7 +7953,9 @@ export interface PersonBriefingDetail {
   commitments: {
     open: PersonBriefingCommitment[];
     delivered: PersonBriefingCommitment[];
+    candidates: PersonBriefingCommitmentCandidate[];
   };
+  isSelf: boolean;
   knowledgeDoc: KnowledgeDoc | null;
   workingMemorySnapshot: WorkingMemorySnapshot | null;
   mergedPeople: Array<{ id: string; name: string; mergedAt: string }>;
@@ -6856,7 +8003,8 @@ export const getPersonBriefing = (
 ): PersonBriefingDetail | undefined => {
   const canonicalId = resolvePersonIdentityId(personId);
   const person = getEntity(canonicalId);
-  if (!person || person.type !== 'person') return undefined;
+  if (!person || person.type !== 'person' || !isUsablePersonName(person.name))
+    return undefined;
 
   const mentionedMeetings = (
     db
@@ -6987,6 +8135,52 @@ export const getPersonBriefing = (
     `)
     .all(canonicalId, canonicalId, canonicalId) as PersonCommitmentCandidate[];
 
+  const candidateOwnerActions = db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT person_id FROM person_aliases
+        WHERE canonical_id = ? AND active = 1
+      ), names(normalized_name) AS (
+        SELECT normalized_name FROM entities WHERE id IN (SELECT id FROM family)
+        UNION
+        SELECT normalized_name FROM person_name_aliases
+        WHERE person_id IN (SELECT id FROM family)
+      )
+      SELECT
+        action.id,
+        action.name,
+        action.status,
+        action.due_date,
+        action.assigned_to,
+        action.metadata,
+        action.updated_at,
+        source.title AS sourceMeetingTitle
+      FROM entities action
+      LEFT JOIN meetings source ON source.id = json_extract(
+        CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+        '$.source_meeting_id'
+      )
+      WHERE action.type = 'action_item'
+        AND action.assigned_to IS NULL
+        AND LOWER(TRIM(json_extract(
+          CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.assignee_name'
+        ))) IN (SELECT normalized_name FROM names)
+    `)
+    .all(canonicalId, canonicalId) as PersonCommitmentCandidate[];
+
+  const personNames = db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT person_id FROM person_aliases
+        WHERE canonical_id = ? AND active = 1
+      )
+      SELECT name FROM entities WHERE id IN (SELECT id FROM family)
+      UNION SELECT display_name AS name FROM person_name_aliases
+      WHERE person_id IN (SELECT id FROM family)
+    `)
+    .all(canonicalId, canonicalId) as Array<{ name: string }>;
+
   const mergedPeople = db
     .prepare(
       `SELECT person.id, person.name, alias.created_at AS mergedAt
@@ -7000,6 +8194,16 @@ export const getPersonBriefing = (
     name: string;
     mergedAt: string;
   }>;
+  const selfPersonId = identityStore.getSelfPersonId();
+  const acceptedClaims = getAcceptedDreamingPersonClaims(canonicalId);
+  const knowledgeDoc = overlayAcceptedClaimsOnKnowledgeDoc(
+    getKnowledgeDocByScope('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
+  const workingMemorySnapshot = overlayAcceptedClaimsOnSnapshot(
+    getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
 
   return {
     person,
@@ -7008,13 +8212,21 @@ export const getPersonBriefing = (
       scheduled,
       mentioned: mentionedMeetings,
     }),
-    commitments: selectVerifiedPersonCommitments({
-      personId: canonicalId,
-      actions: actionCandidates,
-    }),
-    knowledgeDoc: getKnowledgeDocByScope('person_context', canonicalId) ?? null,
-    workingMemorySnapshot:
-      getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    commitments: {
+      ...selectVerifiedPersonCommitments({
+        personId: canonicalId,
+        actions: actionCandidates,
+      }),
+      candidates: selectCandidatePersonCommitments({
+        personNames: personNames.map((row) => row.name),
+        actions: candidateOwnerActions,
+      }),
+    },
+    isSelf:
+      selfPersonId !== null &&
+      resolvePersonIdentityId(selfPersonId) === canonicalId,
+    knowledgeDoc,
+    workingMemorySnapshot,
     mergedPeople,
   };
 };
@@ -7283,6 +8495,12 @@ export const resetKnowledge = () => {
     'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
+    'entity_dreaming_person_claims',
+    'entity_dreaming_aliases',
+    'entity_dreaming_proposals',
+    'entity_dreaming_runs',
+    'entity_alias_suggestions',
+    'entity_corrections',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',
@@ -7520,4 +8738,175 @@ export const getMeetingsForEntity = (entityId: string) => {
     mention_count: number;
     context: string | null;
   }>;
+};
+
+export interface EntityCorrectionRecord {
+  id: string;
+  entity_id: string;
+  item_type: string;
+  fingerprint: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export const recordEntityCorrection = (input: {
+  entityId: string;
+  itemType: string;
+  fingerprint: string;
+  reason?: string;
+}): EntityCorrectionRecord => {
+  const normalizedId = String(input.entityId).trim();
+  const normalizedType = String(input.itemType).trim();
+  const normalizedFingerprint = generateItemFingerprint(
+    String(input.fingerprint),
+  );
+  const id = `corr_${createHash('sha256')
+    .update(`${normalizedId}:${normalizedType}:${normalizedFingerprint}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  db.prepare(`
+    INSERT INTO entity_corrections (id, entity_id, item_type, fingerprint, reason)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(entity_id, item_type, fingerprint) DO UPDATE SET
+      reason = excluded.reason,
+      created_at = CURRENT_TIMESTAMP
+  `).run(
+    id,
+    normalizedId,
+    normalizedType,
+    normalizedFingerprint,
+    input.reason ?? null,
+  );
+
+  return db
+    .prepare('SELECT * FROM entity_corrections WHERE id = ?')
+    .get(id) as EntityCorrectionRecord;
+};
+
+export const getEntityCorrections = (
+  entityId: string,
+): EntityCorrectionRecord[] => {
+  return db
+    .prepare(
+      'SELECT * FROM entity_corrections WHERE entity_id = ? ORDER BY datetime(created_at) DESC',
+    )
+    .all(String(entityId)) as EntityCorrectionRecord[];
+};
+
+/** Include corrections recorded on the canonical entity or any active alias. */
+export const getDreamingEntityCorrections = (
+  entityId: string,
+): Array<{ fingerprint: string }> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return [];
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const aliasTable =
+    entity.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn = entity.type === 'person' ? 'person_id' : 'project_id';
+  return db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+        WHERE canonical_id = ? AND active = 1
+      )
+      SELECT DISTINCT correction.fingerprint
+      FROM entity_corrections correction
+      WHERE correction.entity_id IN (SELECT id FROM family)
+      ORDER BY correction.fingerprint COLLATE BINARY
+      LIMIT 64
+    `)
+    .all(canonicalId, canonicalId) as Array<{ fingerprint: string }>;
+};
+
+export const isItemDismissed = (
+  entityId: string,
+  itemType: string,
+  fingerprint: string,
+): boolean => {
+  const row = db
+    .prepare(`
+      SELECT 1 FROM entity_corrections
+      WHERE entity_id = ? AND item_type = ? AND fingerprint = ?
+      LIMIT 1
+    `)
+    .get(
+      String(entityId),
+      String(itemType),
+      generateItemFingerprint(String(fingerprint)),
+    );
+  return Boolean(row);
+};
+
+export { generateItemFingerprint };
+
+export interface EntityAliasSuggestion {
+  id: string;
+  entity_id: string;
+  suggested_name: string;
+  source_meeting_ids_json: string;
+  evidence_snippet?: string | null;
+  status: 'pending' | 'merged' | 'dismissed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const saveEntityAliasSuggestion = (input: {
+  entityId: string;
+  suggestedName: string;
+  sourceMeetingIds?: string[];
+  evidenceSnippet?: string;
+}): void => {
+  const entityId = String(input.entityId).trim();
+  const suggestedName = String(input.suggestedName).trim();
+  if (!entityId || !suggestedName) return;
+
+  const id = `alias_sug_${createHash('sha256')
+    .update(`${entityId}:${suggestedName.toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  const sourceMeetingIdsJson = JSON.stringify(input.sourceMeetingIds ?? []);
+
+  db.prepare(`
+    INSERT INTO entity_alias_suggestions (id, entity_id, suggested_name, source_meeting_ids_json, evidence_snippet, status, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+    ON CONFLICT(entity_id, suggested_name) DO UPDATE SET
+      source_meeting_ids_json = excluded.source_meeting_ids_json,
+      evidence_snippet = COALESCE(excluded.evidence_snippet, entity_alias_suggestions.evidence_snippet),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE status != 'dismissed'
+  `).run(
+    id,
+    entityId,
+    suggestedName,
+    sourceMeetingIdsJson,
+    input.evidenceSnippet ?? null,
+  );
+};
+
+export const getEntityAliasSuggestions = (
+  entityId: string,
+): EntityAliasSuggestion[] => {
+  return db
+    .prepare(
+      "SELECT * FROM entity_alias_suggestions WHERE entity_id = ? AND status = 'pending' ORDER BY datetime(created_at) DESC",
+    )
+    .all(String(entityId)) as EntityAliasSuggestion[];
+};
+
+export const updateEntityAliasSuggestionStatus = (
+  id: string,
+  status: 'pending' | 'merged' | 'dismissed',
+): void => {
+  db.prepare(`
+    UPDATE entity_alias_suggestions
+    SET status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(status, id);
 };

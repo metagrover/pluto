@@ -261,6 +261,242 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain("Couldn't finish the transcript");
   });
 
+  it('offers calm speaker label improvement for a fresh attribution rejection', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [{ code: 'speaker_attribution_rejected' }],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'speaker_attribution_rejected',
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        onRetry={vi.fn()}
+        retrying
+      />,
+    );
+
+    expect(markup).toContain('Improve speaker labels');
+    expect(markup).toContain(
+      'Pluto can take another pass using the saved recording.',
+    );
+    expect(markup).toContain('Improving labels');
+    expect(markup).not.toContain('Retrying analysis');
+  });
+
+  it('keeps historical speaker repair out of the inline notice', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          causes: [],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'complete',
+          },
+        })}
+        transcriptJson={JSON.stringify({
+          lifecycleStatus: 'validated',
+          segments: [{ speaker: 'Me', text: 'Synthetic' }],
+          speakerAttribution: {
+            source: 'channel_fallback',
+            confidence: 0,
+            mappingApplied: false,
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        hasExistingAnalysis
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toBe('');
+  });
+
+  it('offers historical speaker repair in More without borrowing another meeting loading state', () => {
+    const historicalMeeting = {
+      id: 'meeting-historical-speakers',
+      title: 'Historical meeting',
+      meeting_type: 'Recording',
+      created_at: '2026-08-17T18:00:00.000Z',
+      started_at: '2026-08-17T18:00:00.000Z',
+      transcript_status: 'validated' as const,
+      transcript_validated_at: '2026-08-17T19:00:00.000Z',
+      finalization_status: 'finalized' as const,
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic' }],
+        speakerAttribution: {
+          source: 'channel_fallback',
+          confidence: 0,
+          mappingApplied: false,
+        },
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+      }),
+      audio_path: '/synthetic/mic.wav',
+      system_audio_path: '/synthetic/system.wav',
+      mixed_audio_path: '/synthetic/mix.wav',
+      capture_journal_generation: 'journal-historical-speakers',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'Existing analysis.',
+        topics: [],
+        all_action_items: [],
+        all_decisions: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    };
+    const renderMeeting = (retryingMeetingId: string | null) =>
+      renderToStaticMarkup(
+        <MeetingView
+          selectedMeeting={historicalMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue="Historical meeting"
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+          onRetryTranscriptValidation={vi.fn()}
+          transcriptValidationRetryOperation={
+            retryingMeetingId
+              ? { meetingId: retryingMeetingId, kind: 'speaker_labels' }
+              : null
+          }
+        />,
+      );
+
+    const unrelatedMeetingActive = renderMeeting('meeting-other');
+    expect(unrelatedMeetingActive).toContain('Improve speaker labels');
+    expect(unrelatedMeetingActive).not.toContain('Improving labels');
+    expect(unrelatedMeetingActive).not.toContain('meeting-failure-notice');
+
+    const selectedMeetingActive = renderMeeting('meeting-historical-speakers');
+    expect(selectedMeetingActive).toContain('Improving labels');
+    expect(selectedMeetingActive).not.toContain('Retrying analysis');
+  });
+
+  it('keeps the initiating retry message after leaving and returning', () => {
+    const beforeNavigation = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'required_source_failed',
+          },
+        })}
+        onRetry={vi.fn()}
+        retryOperationKind="transcript"
+      />,
+    );
+    const afterReturning = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        downstreamFailed
+        onRetry={vi.fn()}
+        retryOperationKind="transcript"
+      />,
+    );
+
+    for (const markup of [beforeNavigation, afterReturning]) {
+      expect(markup).toContain('Transcript needs another pass');
+      expect(markup).toContain('Your recording is safe.');
+      expect(markup).toContain('Retrying transcription');
+      expect(markup).not.toContain('Analysis needs another pass');
+      expect(markup).not.toContain('Retrying analysis');
+    }
+  });
+
+  it('shows the speaker-label prerequisite instead of an inert analysis retry', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-legacy-analysis-failure',
+          title: 'Meeting',
+          meeting_type: 'Recording',
+          created_at: '2026-08-17T18:00:00.000Z',
+          started_at: '2026-08-17T18:00:00.000Z',
+          transcript_status: 'validated',
+          transcript_validated_at: '2026-08-17T18:05:00.000Z',
+          finalization_status: 'finalized',
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'validated',
+            speakerAttribution: {
+              source: 'channel_fallback',
+              confidence: 0,
+              diarizationAttempted: false,
+              mappingApplied: false,
+            },
+            segments: [],
+          }),
+          transcript_integrity_json: JSON.stringify({
+            finalTranscription: {
+              policy: 'parakeet_final_v1',
+              state: 'complete',
+            },
+          }),
+          capture_journal_generation: 'journal-legacy-analysis-failure',
+          audio_path: '/synthetic/mic.wav',
+          system_audio_path: '/synthetic/system.wav',
+          mixed_audio_path: '/synthetic/mix.wav',
+          downstream_processing_json: JSON.stringify({
+            state: 'failed',
+            stage: 'analysis',
+            attempt: 2,
+            failure: 'generation_failed',
+          }),
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Meeting"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+        onRetryTranscriptValidation={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Improve speaker labels');
+    expect(markup).toContain('Improve labels');
+    expect(markup).not.toContain('Retry analysis');
+  });
+
   it('uses the same notice for retryable analysis without a second alert', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

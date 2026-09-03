@@ -1,5 +1,8 @@
 import { isEmbeddedMicFragment } from '../../utils/readableTranscript.ts';
-import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
+import type {
+  AttributionSegment,
+  SpeakerActivityWindow,
+} from '../../utils/speakerAttribution.ts';
 import {
   CROSS_CHANNEL_SKEW_POLICY_VERSION,
   type CrossChannelReconciliationMetadata,
@@ -52,6 +55,47 @@ const renderWords = (
   return text;
 };
 
+const rebuildWordSegments = (
+  segments: AttributionSegment[],
+  droppedWords: Set<string>,
+  speakerForWord?: (key: string, fallback: string) => string,
+): AttributionSegment[] =>
+  segments.flatMap((segment, segmentIndex) => {
+    if (!segment.words?.length) return [segment];
+    const retained = segment.words.flatMap((word, wordIndex) => {
+      const key = `${segmentIndex}:${wordIndex}`;
+      return droppedWords.has(key)
+        ? []
+        : [
+            {
+              word,
+              speaker:
+                speakerForWord?.(key, segment.speaker) ?? segment.speaker,
+            },
+          ];
+    });
+    const chunks: Array<{
+      speaker: string;
+      words: NonNullable<AttributionSegment['words']>;
+    }> = [];
+    for (const entry of retained) {
+      const current = chunks.at(-1);
+      if (!current || current.speaker !== entry.speaker) {
+        chunks.push({ speaker: entry.speaker, words: [entry.word] });
+      } else {
+        current.words.push(entry.word);
+      }
+    }
+    return chunks.map((chunk) => ({
+      ...segment,
+      speaker: chunk.speaker,
+      startTime: chunk.words[0].start,
+      endTime: chunk.words.at(-1)?.end ?? chunk.words[0].end,
+      text: renderWords(chunk.words),
+      words: chunk.words,
+    }));
+  });
+
 const segmentText = (segment: AttributionSegment): string =>
   segment.text
     .toLocaleLowerCase('en')
@@ -73,6 +117,73 @@ const coveredSeconds = (words: WordLocation[]): number => {
     }
   }
   return activeStart === null ? total : total + activeEnd - activeStart;
+};
+
+const activitySeconds = (
+  windows: SpeakerActivityWindow[],
+  speaker: SpeakerActivityWindow['speaker'],
+  startTime: number,
+  endTime: number,
+): number =>
+  windows
+    .filter((window) => window.speaker === speaker)
+    .reduce(
+      (total, window) =>
+        total +
+        Math.max(
+          0,
+          Math.min(endTime, window.endTime) -
+            Math.max(startTime, window.startTime),
+        ),
+      0,
+    );
+
+const coveredOverlapSeconds = (
+  segment: AttributionSegment,
+  candidates: AttributionSegment[],
+): number => {
+  const intervals = candidates
+    .map((candidate) => ({
+      start: Math.max(segment.startTime, candidate.startTime),
+      end: Math.min(segment.endTime, candidate.endTime),
+    }))
+    .filter((interval) => interval.end > interval.start)
+    .sort((left, right) => left.start - right.start);
+  let total = 0;
+  let coveredThrough = segment.startTime;
+  for (const interval of intervals) {
+    const start = Math.max(interval.start, coveredThrough);
+    if (interval.end <= start) continue;
+    total += interval.end - start;
+    coveredThrough = interval.end;
+  }
+  return total;
+};
+
+export const isSystemExplainedMicSegment = (
+  segment: AttributionSegment,
+  systemSegments: AttributionSegment[],
+  activityWindows: SpeakerActivityWindow[],
+): boolean => {
+  const duration = segment.endTime - segment.startTime;
+  if (duration < 1 || (segment.words?.length ?? 0) < 3) return false;
+  const localCoverage = activitySeconds(
+    activityWindows,
+    'Me',
+    segment.startTime,
+    segment.endTime,
+  );
+  const remoteCoverage = activitySeconds(
+    activityWindows,
+    'Them',
+    segment.startTime,
+    segment.endTime,
+  );
+  return (
+    localCoverage / duration <= 0.1 &&
+    remoteCoverage / duration >= 0.7 &&
+    coveredOverlapSeconds(segment, systemSegments) / duration >= 0.7
+  );
 };
 
 const dedupeExactSegments = (segments: AttributionSegment[]) => {
@@ -107,6 +218,8 @@ const removeEmbeddedMicFragments = (
 export const collapseCrossChannelWordBleed = (input: {
   micSegments: AttributionSegment[];
   systemSegments: AttributionSegment[];
+  activityWindows?: SpeakerActivityWindow[];
+  fallbackActivityWindows?: SpeakerActivityWindow[];
   minimumSequenceWords?: number;
   timingToleranceSeconds?: number;
 }) => {
@@ -135,9 +248,35 @@ export const collapseCrossChannelWordBleed = (input: {
     systemStartsByToken.set(word.token, starts);
   });
   const droppedMicWords = new Set<string>();
+  const droppedSystemWords = new Set<string>();
+  const ambiguousMicWords = new Set<string>();
+  let droppedSystemExplainedMicSegmentCount = 0;
   let collapsedSequenceCount = 0;
 
+  micSourceSegments.forEach((segment, segmentIndex) => {
+    if (
+      !isSystemExplainedMicSegment(
+        segment,
+        systemSourceSegments,
+        input.activityWindows ?? [],
+      )
+    ) {
+      return;
+    }
+    droppedSystemExplainedMicSegmentCount += 1;
+    segment.words?.forEach((_word, wordIndex) => {
+      droppedMicWords.add(`${segmentIndex}:${wordIndex}`);
+    });
+  });
+
   for (let micStart = 0; micStart < micWords.length; micStart += 1) {
+    if (
+      droppedMicWords.has(
+        `${micWords[micStart].segmentIndex}:${micWords[micStart].wordIndex}`,
+      )
+    ) {
+      continue;
+    }
     let collapsed = false;
     for (const alignmentOffsetSeconds of alignmentOffsets) {
       for (const systemStart of systemStartsByToken.get(
@@ -169,10 +308,55 @@ export const collapseCrossChannelWordBleed = (input: {
         if (length < minimumSequenceWords) continue;
         let added = false;
         for (let offset = 0; offset < length; offset += 1) {
-          const word = micWords[micStart + offset];
+          const micWord = micWords[micStart + offset];
+          const systemWord = systemWords[systemStart + offset];
+          const localActivity = activitySeconds(
+            input.activityWindows ?? [],
+            'Me',
+            micWord.start,
+            micWord.end,
+          );
+          const remoteActivity = activitySeconds(
+            input.activityWindows ?? [],
+            'Them',
+            micWord.start,
+            micWord.end,
+          );
+          let duplicateIsLocal = localActivity > remoteActivity;
+          if (
+            localActivity > 0 &&
+            Math.abs(localActivity - remoteActivity) <= 0.01
+          ) {
+            const fallbackLocalActivity = activitySeconds(
+              input.fallbackActivityWindows ?? [],
+              'Me',
+              micWord.start,
+              micWord.end,
+            );
+            const fallbackRemoteActivity = activitySeconds(
+              input.fallbackActivityWindows ?? [],
+              'Them',
+              micWord.start,
+              micWord.end,
+            );
+            if (fallbackLocalActivity === fallbackRemoteActivity) {
+              ambiguousMicWords.add(
+                `${micWord.segmentIndex}:${micWord.wordIndex}`,
+              );
+              droppedSystemWords.add(
+                `${systemWord.segmentIndex}:${systemWord.wordIndex}`,
+              );
+              continue;
+            }
+            duplicateIsLocal = fallbackLocalActivity > fallbackRemoteActivity;
+          }
+          const word = duplicateIsLocal ? systemWord : micWord;
           const key = `${word.segmentIndex}:${word.wordIndex}`;
-          if (!droppedMicWords.has(key)) added = true;
-          droppedMicWords.add(key);
+          const droppedWords = duplicateIsLocal
+            ? droppedSystemWords
+            : droppedMicWords;
+          if (!droppedWords.has(key)) added = true;
+          droppedWords.add(key);
         }
         if (added) collapsedSequenceCount += 1;
         micStart += length - 1;
@@ -183,24 +367,15 @@ export const collapseCrossChannelWordBleed = (input: {
     }
   }
 
-  const micSegments = micSourceSegments.flatMap((segment, segmentIndex) => {
-    if (!segment.words?.length) return [segment];
-    const words = segment.words.filter(
-      (_word, wordIndex) =>
-        !droppedMicWords.has(`${segmentIndex}:${wordIndex}`),
-    );
-    if (words.length === 0) return [];
-    if (words.length === segment.words.length) return [segment];
-    return [
-      {
-        ...segment,
-        startTime: words[0].start,
-        endTime: words.at(-1)?.end ?? words[0].end,
-        text: renderWords(words),
-        words,
-      },
-    ];
-  });
+  const micSegments = rebuildWordSegments(
+    micSourceSegments,
+    droppedMicWords,
+    (key, fallback) => (ambiguousMicWords.has(key) ? 'Unknown' : fallback),
+  );
+  const systemSegments = rebuildWordSegments(
+    systemSourceSegments,
+    droppedSystemWords,
+  );
 
   const reconciliation: CrossChannelReconciliationMetadata = {
     policyVersion: CROSS_CHANNEL_SKEW_POLICY_VERSION,
@@ -215,11 +390,12 @@ export const collapseCrossChannelWordBleed = (input: {
     droppedExactDuplicateSegmentCount:
       dedupedMic.dropped + dedupedSystem.dropped,
     droppedEmbeddedMicFragmentCount: filteredMic.dropped,
+    droppedSystemExplainedMicSegmentCount,
   };
 
   return {
     micSegments,
-    systemSegments: systemSourceSegments,
+    systemSegments,
     droppedMicWordCount: droppedMicWords.size,
     droppedMicSeconds: coveredSeconds(
       micWords.filter((word) =>
@@ -227,6 +403,7 @@ export const collapseCrossChannelWordBleed = (input: {
       ),
     ),
     collapsedSequenceCount,
+    unresolvedAmbiguousSeconds: 0,
     reconciliation,
   };
 };

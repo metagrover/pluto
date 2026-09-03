@@ -43,6 +43,21 @@ const finalMetadata = {
     droppedExactDuplicateSegmentCount: 0,
     droppedEmbeddedMicFragmentCount: 0,
   },
+  speakerAttribution: {
+    source: 'recovered_channel_acoustic_v1' as const,
+    confidence: 1,
+    diarizationAttempted: true,
+    mappingApplied: true,
+  },
+  speakerEvidence: {
+    provenance: {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+    },
+    timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+  },
 };
 
 vi.mock('../../src/utils/transcriptActivityEvidence', () => ({
@@ -78,6 +93,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
       started_at: '2026-08-15T00:00:00.000Z',
       duration_seconds: 60,
       audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       system_audio_path: '/approved/system.wav',
       capture_journal_generation: 'generation-1',
       transcript_status: 'provisional',
@@ -117,6 +133,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
           transcriptJson: request.canonicalTranscriptJson,
         };
       }
+      if (channel === 'TRANSCRIPTION_SPEAKER_EVIDENCE') {
+        return {
+          turns: [{ startTime: 0, endTime: 1, cluster: 'S1' }],
+          energyWindows: [
+            { startTime: 0, endTime: 0.1, micRms: 0.2, systemRms: 0 },
+          ],
+          provenance: finalMetadata.speakerEvidence.provenance,
+          timings: finalMetadata.speakerEvidence.timings,
+          windowSeconds: 0.1,
+        };
+      }
       return true;
     });
     mocks.runFinal.mockImplementation(async (input, dependencies) => {
@@ -124,10 +151,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
         meetingId: 'meeting-1',
         captureEvidence: { sealed: true, generation: 'generation-1' },
         micAudioPath: '/approved/mic.wav',
+        mixedAudioPath: '/approved/mixed.wav',
         systemAudioPath: '/approved/system.wav',
         language: 'en',
         vocabulary: ['Known Person'],
         vocabularyPolicyVersion: 'known-people-v1',
+      });
+      await dependencies.speakerEvidence({
+        meetingId: 'meeting-1',
+        mixedAudioPath: '/approved/mixed.wav',
+        micAudioPath: '/approved/mic.wav',
+        systemAudioPath: '/approved/system.wav',
       });
       const committed = await dependencies.commitCanonical({
         segments: [
@@ -148,13 +182,31 @@ describe('runPersistedMeetingFinalTranscription', () => {
       return { status: 'validated' };
     });
 
-    const outcome = await runPersistedMeetingFinalTranscription(
-      meeting,
-      invoke,
-      { runId: 'run-1' },
+    let releaseDownstream: (() => void) | undefined;
+    mocks.processDownstream.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseDownstream = () => resolve({ status: 'published' });
+      }),
     );
+    const onTranscriptCommitted = vi.fn(async () => undefined);
+    const attempt = runPersistedMeetingFinalTranscription(meeting, invoke, {
+      runId: 'run-1',
+      onTranscriptCommitted,
+    });
+    const outcome = await Promise.race([
+      attempt,
+      new Promise<'downstream-still-running'>((resolve) =>
+        setTimeout(() => resolve('downstream-still-running'), 25),
+      ),
+    ]);
+    releaseDownstream?.();
 
     expect(outcome).toEqual({ status: 'validated' });
+    await attempt;
+    expect(onTranscriptCommitted).toHaveBeenCalledOnce();
+    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+      preserveProvisionalText: false,
+    });
     expect(invoke).not.toHaveBeenCalledWith(
       'GET_TRANSCRIPTION_VOCABULARY',
       expect.anything(),
@@ -170,6 +222,59 @@ describe('runPersistedMeetingFinalTranscription', () => {
     expect(persisted.liveSegments).toEqual([
       { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
     ]);
+    expect(persisted.transcription.diarization).toBe(false);
+    expect(persisted.speakerAttribution).toMatchObject({
+      source: 'recovered_channel_acoustic_v1',
+      mappingApplied: true,
+    });
+    expect(
+      JSON.parse(
+        (commitCall?.[1] as { transcriptIntegrityJson: string })
+          .transcriptIntegrityJson,
+      ),
+    ).toMatchObject({ speakerAttributionVerified: true });
+  });
+
+  it('preserves saved transcript text during a validated speaker-label retry', async () => {
+    const meeting = {
+      id: 'meeting-speaker-retry',
+      title: 'Meeting',
+      created_at: '2026-08-15T00:00:00.000Z',
+      started_at: '2026-08-15T00:00:00.000Z',
+      duration_seconds: 60,
+      audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      system_audio_path: '/approved/system.wav',
+      capture_journal_generation: 'generation-1',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        segments: [
+          { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: 'digest',
+        },
+        activityEvidence: { private: 'verified by parser' },
+      }),
+    } as Meeting;
+    mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
+    );
+
+    await runPersistedMeetingFinalTranscription(meeting, invoke, {
+      runId: 'run-speaker-retry',
+    });
+
+    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+      preserveProvisionalText: true,
+      provisionalSegments: [
+        expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
+      ],
+    });
   });
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
@@ -180,6 +285,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
       started_at: '2026-08-15T00:00:00.000Z',
       duration_seconds: 60,
       audio_path: '/approved/mic.wav',
+      mixed_audio_path: '/approved/mixed.wav',
       system_audio_path: '/approved/system.wav',
       capture_journal_generation: 'generation-1',
       transcript_status: 'provisional',

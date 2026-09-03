@@ -135,13 +135,33 @@ export const reconcileCanonicalTranscript = <
   const deduplicatedMixed = resolveCrossChannelDuplicates(
     input.mixedSegments,
   ).segments;
+  let unresolvedAmbiguousSeconds = 0;
   const attributed = deduplicatedMixed.map((canonical) => {
+    const preservedUnknown =
+      canonical.speaker === 'Unknown' &&
+      input.micSegments.some(
+        (mic) =>
+          mic.speaker === 'Unknown' &&
+          overlapSeconds(canonical, mic) >= 0.25 &&
+          tokenSimilarity(canonical.text, mic.text) >= 0.5,
+      );
+    if (preservedUnknown) return { ...canonical } as T;
+    const micActivity = activityOverlapSeconds(
+      canonical,
+      'Me',
+      input.activityWindows,
+    );
+    const systemActivity = activityOverlapSeconds(
+      canonical,
+      'Them',
+      input.activityWindows,
+    );
     const micEvidence = Math.max(
-      activityOverlapSeconds(canonical, 'Me', input.activityWindows),
+      micActivity,
       maxOverlapSeconds(canonical, input.micSegments),
     );
     const systemEvidence = Math.max(
-      activityOverlapSeconds(canonical, 'Them', input.activityWindows),
+      systemActivity,
       maxOverlapSeconds(canonical, input.systemSegments),
     );
     const provisionalSpeaker = input.provisionalSegments.find(
@@ -152,9 +172,19 @@ export const reconcileCanonicalTranscript = <
         overlapSeconds(canonical, system) >= 0.25 &&
         tokenSimilarity(canonical.text, system.text) >= 0.5,
     );
-    const speaker =
-      systemEvidence > micEvidence ||
-      (systemPassThrough && systemEvidence >= micEvidence)
+    const ambiguousPassThrough =
+      systemPassThrough &&
+      !canonical.words?.length &&
+      micActivity > 0 &&
+      Math.abs(micActivity - systemActivity) <= 0.05;
+    if (ambiguousPassThrough) {
+      unresolvedAmbiguousSeconds += canonical.endTime - canonical.startTime;
+    }
+    const speaker = systemPassThrough
+      ? micActivity > systemActivity
+        ? 'Me'
+        : 'Them'
+      : systemEvidence > micEvidence
         ? 'Them'
         : micEvidence > 0
           ? 'Me'
@@ -200,7 +230,7 @@ export const reconcileCanonicalTranscript = <
     segments,
     evidence: {
       collapsedPassThroughSeconds,
-      unresolvedAmbiguousSeconds: 0,
+      unresolvedAmbiguousSeconds,
     },
   };
 };

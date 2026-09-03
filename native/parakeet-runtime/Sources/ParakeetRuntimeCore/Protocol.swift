@@ -3,6 +3,7 @@ import Foundation
 public enum RuntimeMethod: String, Codable, Sendable {
     case prepare
     case transcribe
+    case speakerEvidence = "speaker_evidence"
     case cancel
     case shutdown
     case streamOpen = "stream_open"
@@ -23,6 +24,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     public let method: RuntimeMethod
     public let modelRoot: String?
     public let audioPath: String?
+    public let mixedAudioPath: String?
+    public let micAudioPath: String?
+    public let systemAudioPath: String?
     public let language: String?
     public let vocabulary: [String]?
     public let targetId: String?
@@ -35,6 +39,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         method: RuntimeMethod,
         modelRoot: String? = nil,
         audioPath: String? = nil,
+        mixedAudioPath: String? = nil,
+        micAudioPath: String? = nil,
+        systemAudioPath: String? = nil,
         language: String? = nil,
         vocabulary: [String]? = nil,
         targetId: String? = nil,
@@ -46,6 +53,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         self.method = method
         self.modelRoot = modelRoot
         self.audioPath = audioPath
+        self.mixedAudioPath = mixedAudioPath
+        self.micAudioPath = micAudioPath
+        self.systemAudioPath = systemAudioPath
         self.language = language
         self.vocabulary = vocabulary
         self.targetId = targetId
@@ -59,6 +69,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case method
         case modelRoot
         case audioPath
+        case mixedAudioPath
+        case micAudioPath
+        case systemAudioPath
         case language
         case vocabulary
         case targetId
@@ -87,6 +100,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         }
         modelRoot = try container.decodeIfPresent(String.self, forKey: .modelRoot)
         audioPath = try container.decodeIfPresent(String.self, forKey: .audioPath)
+        mixedAudioPath = try container.decodeIfPresent(String.self, forKey: .mixedAudioPath)
+        micAudioPath = try container.decodeIfPresent(String.self, forKey: .micAudioPath)
+        systemAudioPath = try container.decodeIfPresent(String.self, forKey: .systemAudioPath)
         language = try container.decodeIfPresent(String.self, forKey: .language)
         vocabulary = try container.decodeIfPresent([String].self, forKey: .vocabulary)
         targetId = try container.decodeIfPresent(String.self, forKey: .targetId)
@@ -95,6 +111,16 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case .prepare, .transcribe, .cancel, .shutdown:
             live = nil
             eou = nil
+        case .speakerEvidence:
+            live = nil
+            eou = nil
+            guard schemaVersion == 1,
+                Self.isPresentPath(mixedAudioPath),
+                Self.isPresentPath(micAudioPath),
+                Self.isPresentPath(systemAudioPath)
+            else {
+                throw protocolDecodingError(CodingKeys.mixedAudioPath, "missing approved audio path")
+            }
         case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset:
             eou = nil
             guard schemaVersion == 1 else {
@@ -218,6 +244,17 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         switch method {
         case .prepare, .transcribe, .cancel, .shutdown:
             break
+        case .speakerEvidence:
+            guard schemaVersion == 1,
+                Self.isPresentPath(mixedAudioPath),
+                Self.isPresentPath(micAudioPath),
+                Self.isPresentPath(systemAudioPath)
+            else {
+                throw EncodingError.invalidValue(
+                    method,
+                    .init(codingPath: [], debugDescription: "speaker evidence requires three audio paths")
+                )
+            }
         case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset:
             guard schemaVersion == 1, let live else {
                 throw EncodingError.invalidValue(
@@ -285,6 +322,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         try container.encode(method, forKey: .method)
         try container.encodeIfPresent(modelRoot, forKey: .modelRoot)
         try container.encodeIfPresent(audioPath, forKey: .audioPath)
+        try container.encodeIfPresent(mixedAudioPath, forKey: .mixedAudioPath)
+        try container.encodeIfPresent(micAudioPath, forKey: .micAudioPath)
+        try container.encodeIfPresent(systemAudioPath, forKey: .systemAudioPath)
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(vocabulary, forKey: .vocabulary)
         try container.encodeIfPresent(targetId, forKey: .targetId)
@@ -316,6 +356,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         var keys: Set<CodingKeys> = [.schemaVersion, .id, .method]
         if modelRoot != nil { keys.insert(.modelRoot) }
         if audioPath != nil { keys.insert(.audioPath) }
+        if mixedAudioPath != nil { keys.insert(.mixedAudioPath) }
+        if micAudioPath != nil { keys.insert(.micAudioPath) }
+        if systemAudioPath != nil { keys.insert(.systemAudioPath) }
         if language != nil { keys.insert(.language) }
         if vocabulary != nil { keys.insert(.vocabulary) }
         if targetId != nil { keys.insert(.targetId) }
@@ -355,6 +398,8 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             return common.union([.modelRoot])
         case .transcribe:
             return common.union([.audioPath, .language, .vocabulary])
+        case .speakerEvidence:
+            return common.union([.mixedAudioPath, .micAudioPath, .systemAudioPath])
         case .cancel:
             return common.union([.targetId])
         case .shutdown:
@@ -381,6 +426,11 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             ])
         }
     }
+
+    private static func isPresentPath(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 public enum RuntimeFailure: String, Error, Codable, Equatable, Sendable, CustomStringConvertible {
@@ -389,6 +439,8 @@ public enum RuntimeFailure: String, Error, Codable, Equatable, Sendable, CustomS
     case pathMissing = "parakeet_path_missing"
     case modelPreparationFailed = "parakeet_model_preparation_failed"
     case transcriptionFailed = "parakeet_transcription_failed"
+    case audioAnalysisFailed = "parakeet_audio_analysis_failed"
+    case diarizationFailed = "parakeet_diarization_failed"
     case cancelled = "parakeet_cancelled"
 
     public var description: String { rawValue }
@@ -463,6 +515,19 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
         )
     }
 
+    public static func speakerEvidence(
+        id: String,
+        output: SpeakerEvidenceOutput
+    ) -> RuntimeResponse {
+        RuntimeResponse(
+            schemaVersion: 1,
+            id: id,
+            ok: true,
+            result: RuntimeResultPayload(speakerEvidence: output),
+            error: nil
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case id
@@ -501,6 +566,7 @@ public struct RuntimeResultPayload: Codable, Equatable, Sendable {
     public let degradations: [LiveStreamDegraded]?
     public let transcription: TranscriptionOutput?
     public let vocabularyCount: Int?
+    public let speakerEvidence: SpeakerEvidenceOutput?
 
     public init(
         modelVersion: String? = nil,
@@ -508,7 +574,8 @@ public struct RuntimeResultPayload: Codable, Equatable, Sendable {
         finalPreview: String? = nil,
         degradations: [LiveStreamDegraded]? = nil,
         transcription: TranscriptionOutput? = nil,
-        vocabularyCount: Int? = nil
+        vocabularyCount: Int? = nil,
+        speakerEvidence: SpeakerEvidenceOutput? = nil
     ) {
         self.modelVersion = modelVersion
         self.liveConfigId = liveConfigId
@@ -516,5 +583,90 @@ public struct RuntimeResultPayload: Codable, Equatable, Sendable {
         self.degradations = degradations
         self.transcription = transcription
         self.vocabularyCount = vocabularyCount
+        self.speakerEvidence = speakerEvidence
+    }
+}
+
+public struct SpeakerEvidenceTurn: Codable, Equatable, Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let cluster: String
+
+    public init(startTime: Double, endTime: Double, cluster: String) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.cluster = cluster
+    }
+}
+
+public struct SpeakerEnergyWindow: Codable, Equatable, Sendable {
+    public let startTime: Double
+    public let endTime: Double
+    public let micRms: Double
+    public let systemRms: Double
+
+    public init(
+        startTime: Double,
+        endTime: Double,
+        micRms: Double,
+        systemRms: Double
+    ) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.micRms = micRms
+        self.systemRms = systemRms
+    }
+}
+
+public struct SpeakerEvidenceProvenance: Codable, Equatable, Sendable {
+    public let modelIdentifier: String
+    public let modelRevision: String
+    public let artifactDigest: String
+    public let runtimeVersion: String
+
+    public init(
+        modelIdentifier: String,
+        modelRevision: String,
+        artifactDigest: String,
+        runtimeVersion: String
+    ) {
+        self.modelIdentifier = modelIdentifier
+        self.modelRevision = modelRevision
+        self.artifactDigest = artifactDigest
+        self.runtimeVersion = runtimeVersion
+    }
+}
+
+public struct SpeakerEvidenceTimings: Codable, Equatable, Sendable {
+    public let diarizationMs: Int
+    public let energyAnalysisMs: Int
+    public let totalMs: Int
+
+    public init(diarizationMs: Int, energyAnalysisMs: Int, totalMs: Int) {
+        self.diarizationMs = diarizationMs
+        self.energyAnalysisMs = energyAnalysisMs
+        self.totalMs = totalMs
+    }
+}
+
+public struct SpeakerEvidenceOutput: Codable, Equatable, Sendable {
+    public let turns: [SpeakerEvidenceTurn]
+    public let energyWindows: [SpeakerEnergyWindow]
+    public let provenance: SpeakerEvidenceProvenance
+    public let timings: SpeakerEvidenceTimings
+    public let windowSeconds: Double
+
+    public init(
+        turns: [SpeakerEvidenceTurn],
+        energyWindows: [SpeakerEnergyWindow],
+        provenance: SpeakerEvidenceProvenance,
+        timings: SpeakerEvidenceTimings,
+        windowSeconds: Double
+    ) {
+        self.turns = turns
+        self.energyWindows = energyWindows
+        self.provenance = provenance
+        self.timings = timings
+        self.windowSeconds = windowSeconds
     }
 }

@@ -201,7 +201,10 @@ function activeBindings(context: IdentityContext): IdentityBinding[] {
         proof.selfPersonId !== context.capture.selfPersonId ||
         proof.sourceRevision !== context.sourceRevision ||
         proof.sourceRevision !== binding.sourceRevision ||
-        proof.attributionSource !== 'local_diarization_acoustic' ||
+        ![
+          'local_diarization_acoustic',
+          'offline_diarization_acoustic_v1',
+        ].includes(proof.attributionSource) ||
         proof.mappingApplied !== true ||
         !Number.isFinite(proof.confidence) ||
         proof.confidence < 0.85 ||

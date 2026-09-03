@@ -3,18 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   discoverProjectInitiative,
   getProjectPortfolio,
-  reviewProjectScope,
 } from '../../../api/knowledgeGraph';
 import { readProjectDisplayTitle } from '../../../utils/projectBriefing';
 import {
   type ProjectPortfolioEntry,
   buildProjectPortfolio,
 } from '../../../utils/projectPortfolio';
-import {
-  isProjectScopeReviewPending,
-  readProjectQualification,
-  shouldAutomaticallyReviewProjectScope,
-} from '../../../utils/projectQualification';
+import { readProjectQualification } from '../../../utils/projectQualification';
 import { PageHeader } from '../../ui/PageHeader';
 import { ProjectCommitments } from './ProjectCommitments';
 import { ProjectDossier } from './ProjectDossier';
@@ -27,6 +22,8 @@ const activityDate = (value: string | null) => {
   });
 };
 
+type SynthesisState = 'idle' | 'running' | 'paused' | 'failed' | 'incomplete';
+
 export function ProjectsOverview({
   selectedProjectId = null,
   onOpenMeeting,
@@ -38,47 +35,25 @@ export function ProjectsOverview({
   const [entries, setEntries] = useState<ProjectPortfolioEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [reviewState, setReviewState] = useState<
-    'idle' | 'running' | 'paused' | 'failed' | 'incomplete'
-  >('idle');
-  const [discoveryState, setDiscoveryState] = useState<
-    'idle' | 'running' | 'paused' | 'failed' | 'incomplete'
-  >('idle');
-  const [discoveryRemaining, setDiscoveryRemaining] = useState(0);
-  const [discoveryFailed, setDiscoveryFailed] = useState(0);
-  const [remaining, setRemaining] = useState(0);
+  const [synthesisState, setSynthesisState] = useState<SynthesisState>('idle');
   const [search, setSearch] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const skipped = useRef(new Set<string>());
-  const retryCurrentRevision = useRef(false);
+  const explicitRetry = useRef(false);
+
   const retry = () => {
-    skipped.current.clear();
-    retryCurrentRevision.current = true;
+    explicitRetry.current = true;
     setAttempt((value) => value + 1);
   };
+
   useEffect(() => setActiveId(selectedProjectId), [selectedProjectId]);
 
   useEffect(() => {
-    const explicitRetry = retryCurrentRevision.current;
-    retryCurrentRevision.current = false;
-    let retryDiscoveryFailures = explicitRetry;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let latestData: ProjectPortfolioEntry[] = [];
-    const updatePending = (data: ProjectPortfolioEntry[]) => {
-      const pendingIds = new Set(
-        data
-          .filter((entry) => isProjectScopeReviewPending(entry.metadata))
-          .map((entry) => entry.id),
-      );
-      for (const id of skipped.current)
-        if (!pendingIds.has(id)) skipped.current.delete(id);
-      setRemaining(pendingIds.size);
-      return pendingIds.size;
-    };
+    const shouldRetry = explicitRetry.current;
+    explicitRetry.current = false;
     const refresh = async () => {
       const data = await getProjectPortfolio();
-      latestData = data;
       if (!cancelled) {
         setEntries(data);
         setLoading(false);
@@ -86,85 +61,27 @@ export function ProjectsOverview({
       }
       return data;
     };
-    const reviewNext = async () => {
+    const synthesize = async () => {
       if (cancelled || activeId) return;
-      setReviewState('running');
-      try {
-        const result = await reviewProjectScope({
-          excludeProjectIds: [...skipped.current],
-        });
-        if (cancelled) return;
-        const data = await refresh();
-        if (cancelled) return;
-        if (result.attemptedProjectId)
-          skipped.current.add(result.attemptedProjectId);
-        if (result.failedProjectId) skipped.current.add(result.failedProjectId);
-        if (result.unresolvedProjectId)
-          skipped.current.add(result.unresolvedProjectId);
-        const pending = updatePending(data);
-        const canContinue = pending > skipped.current.size;
-        setReviewState(
-          !pending
-            ? 'idle'
-            : !canContinue
-              ? 'incomplete'
-              : result.deferred
-                ? 'paused'
-                : 'running',
-        );
-        if (canContinue)
-          timer = setTimeout(reviewNext, result.deferred ? 5000 : 500);
-      } catch {
-        if (!cancelled) setReviewState('failed');
-      }
-    };
-    const beginReview = (data: ProjectPortfolioEntry[]) => {
-      if (!explicitRetry) {
-        for (const entry of data) {
-          if (
-            isProjectScopeReviewPending(entry.metadata) &&
-            !shouldAutomaticallyReviewProjectScope(entry.metadata)
-          )
-            skipped.current.add(entry.id);
-        }
-      }
-      const pending = updatePending(data);
-      if (pending > skipped.current.size && !activeId) void reviewNext();
-      else setReviewState(pending ? 'incomplete' : 'idle');
-    };
-    const discoverNext = async () => {
-      if (cancelled || activeId) return;
-      setDiscoveryState('running');
+      setSynthesisState('running');
       try {
         const result = await discoverProjectInitiative({
-          retryFailed: retryDiscoveryFailures,
+          retryFailed: shouldRetry,
         });
-        retryDiscoveryFailures = false;
         if (cancelled) return;
-        const data = result.discovered > 0 ? await refresh() : latestData;
-        if (cancelled) return;
-        setDiscoveryRemaining(result.remaining);
-        setDiscoveryFailed(result.failed);
-        if (result.failed > 0) {
-          setDiscoveryState('incomplete');
-        } else if (result.deferred) {
-          setDiscoveryState('paused');
-          timer = setTimeout(discoverNext, 5000);
-        } else if (result.remaining > 0) {
-          setDiscoveryState('running');
-          timer = setTimeout(discoverNext, 500);
-        } else {
-          setDiscoveryState(result.failed > 0 ? 'incomplete' : 'idle');
-          beginReview(data);
-        }
+        if (result.discovered > 0) await refresh();
+        if (result.failed > 0) setSynthesisState('incomplete');
+        else if (result.deferred) {
+          setSynthesisState('paused');
+          timer = setTimeout(synthesize, 5000);
+        } else setSynthesisState('idle');
       } catch {
-        if (!cancelled) setDiscoveryState('failed');
+        if (!cancelled) setSynthesisState('failed');
       }
     };
     refresh()
       .then(() => {
-        if (cancelled) return;
-        if (!activeId) void discoverNext();
+        if (!cancelled && !activeId) void synthesize();
       })
       .catch(() => {
         if (!cancelled) {
@@ -176,28 +93,18 @@ export function ProjectsOverview({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [attempt, activeId]);
+  }, [activeId, attempt]);
 
   const portfolio = useMemo(
     () => buildProjectPortfolio(entries, search),
     [entries, search],
-  );
-  const needsAttention = portfolio.current.filter(
-    (entry) =>
-      entry.health_state === 'falling_behind' || entry.health_state === 'watch',
-  );
-  const inMotion = portfolio.current.filter(
-    (entry) => entry.health_state === 'appears_on_track',
-  );
-  const awaitingSignal = portfolio.current.filter(
-    (entry) =>
-      !entry.health_state || entry.health_state === 'not_enough_evidence',
   );
   const reloadPortfolio = async () => {
     const data = await getProjectPortfolio();
     setEntries(data);
     setLoadError(false);
   };
+
   if (activeId)
     return (
       <ProjectDossier
@@ -219,60 +126,69 @@ export function ProjectsOverview({
       />
     );
 
-  const renderRow = (entry: ProjectPortfolioEntry, secondary = false) => {
+  const renderRow = (
+    entry: ProjectPortfolioEntry,
+    mode: 'current' | 'suggested' | 'discussed',
+  ) => {
     const qualification = readProjectQualification(entry.metadata);
     const displayTitle = readProjectDisplayTitle(entry.metadata, entry.name);
     const date = activityDate(entry.last_mentioned_at);
-    const context = secondary
-      ? entry.latest_context
-      : entry.health_summary || qualification?.outcome || entry.latest_context;
+    const currentFocus =
+      entry.current_focus || qualification?.outcome || entry.latest_context;
     return (
       <button
         type="button"
         key={entry.id}
         data-project-id={entry.id}
         onClick={() => setActiveId(entry.id)}
-        className="group -mx-3 flex w-[calc(100%+1.5rem)] items-start gap-5 rounded-lg border-b border-pro-border/30 px-3 py-5 text-left transition-colors duration-150 hover:bg-pro-hover/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+        className="group -mx-3 grid w-[calc(100%+1.5rem)] grid-cols-[minmax(0,1fr)_auto] gap-x-6 rounded-lg border-b border-pro-border/35 px-3 py-5 text-left transition-colors duration-150 hover:bg-pro-hover/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
       >
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <h3
-            className={`${secondary ? 'text-sm font-medium' : 'text-[17px] font-medium'} leading-snug text-pro-text-main`}
+            className={`${mode === 'current' ? 'text-[17px]' : 'text-sm'} font-medium leading-snug text-pro-text-main`}
           >
             {displayTitle}
           </h3>
-          {context && (
-            <p className="mt-1.5 max-w-[65ch] text-[13px] leading-relaxed text-pro-text-muted line-clamp-2">
-              {context}
+          {currentFocus && (
+            <p className="mt-1.5 max-w-[68ch] text-[13px] leading-relaxed text-pro-text-muted line-clamp-2">
+              {currentFocus}
             </p>
           )}
-          {secondary && (
-            <p className="mt-1.5 text-xs text-pro-text-muted">
-              {qualification?.state === 'subordinate'
-                ? 'Task or topic'
-                : qualification?.reason || 'Project scope not established'}
-            </p>
-          )}
-          {!secondary && (
-            <p className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs tabular-nums text-pro-text-muted">
-              {entry.health_headline && <span>{entry.health_headline}</span>}
-              <span>
-                {entry.meeting_count} meeting
-                {entry.meeting_count === 1 ? '' : 's'}
+          {mode === 'current' && entry.recent_change && (
+            <p className="mt-2 max-w-[68ch] text-xs leading-relaxed text-pro-text-main/80">
+              <span className="mr-1.5 font-medium text-pro-text-muted">
+                Since last time
               </span>
-              {entry.typical_participant_count !== null &&
-                entry.typical_participant_count !== undefined && (
+              {entry.recent_change}
+            </p>
+          )}
+          <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-pro-text-muted">
+            {mode === 'suggested' ? (
+              <span>One conversation, review before adding</span>
+            ) : mode === 'discussed' ? (
+              <span>
+                {qualification?.state === 'subordinate'
+                  ? 'Task or topic'
+                  : 'Project scope not established'}
+              </span>
+            ) : (
+              <>
+                <span>
+                  {entry.meeting_count} conversation
+                  {entry.meeting_count === 1 ? '' : 's'}
+                </span>
+                {Boolean(entry.open_thread_count) && (
                   <span>
-                    Typically {entry.typical_participant_count} people
+                    {entry.open_thread_count} open thread
+                    {entry.open_thread_count === 1 ? '' : 's'}
                   </span>
                 )}
-              {entry.recurring_cadence && (
-                <span>{entry.recurring_cadence}</span>
-              )}
-              {entry.next_milestone && (
-                <span>Next: {entry.next_milestone}</span>
-              )}
-            </p>
-          )}
+                {entry.next_milestone && (
+                  <span>Next: {entry.next_milestone}</span>
+                )}
+              </>
+            )}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-4 pt-0.5">
           {date && (
@@ -295,38 +211,48 @@ export function ProjectsOverview({
   return (
     <div data-testid="projects-briefing">
       <PageHeader title="Projects" />
-      <div className="mb-7 flex flex-wrap items-center justify-between gap-4">
-        <p className="text-[13px] text-pro-text-muted">
-          {portfolio.current.length
-            ? `${portfolio.current.length} initiative${portfolio.current.length === 1 ? '' : 's'} in view`
-            : 'Independent outcomes, with the work behind them.'}
-        </p>
-        <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
-          <Search
-            aria-hidden="true"
-            className="h-3.5 w-3.5 text-pro-text-muted"
-          />
-          <input
-            aria-label="Search projects and discussed work"
-            placeholder="Search projects"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
-          />
-        </label>
+      <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[13px] font-medium text-pro-text-main">
+            {portfolio.current.length
+              ? `${portfolio.current.length} focus theme${portfolio.current.length === 1 ? '' : 's'}`
+              : 'Your durable focus themes'}
+          </p>
+          <p className="mt-1 text-xs text-pro-text-muted">
+            Established across conversations, with suggestions kept separate.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
+            <Search
+              aria-hidden="true"
+              className="h-3.5 w-3.5 text-pro-text-muted"
+            />
+            <input
+              aria-label="Search projects and discussed work"
+              placeholder="Search projects"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
+            />
+          </label>
+        </div>
       </div>
+
       {loadError && (
         <p role="alert" className="mb-5 text-sm text-pro-text-muted">
-          Couldn’t refresh projects. Your saved context is unchanged.{' '}
+          Pluto couldn’t refresh project context. Your saved information is
+          unchanged.{' '}
           <button
             type="button"
             onClick={retry}
             className="underline underline-offset-4"
           >
-            Retry
+            Retry refresh
           </button>
         </p>
       )}
+
       {loading ? (
         <div
           aria-label="Loading projects"
@@ -342,113 +268,75 @@ export function ProjectsOverview({
       ) : (
         <>
           <section data-testid="current-projects" aria-label="Current projects">
-            {needsAttention.length > 0 && (
-              <div className="mb-8">
-                <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
-                  Needs attention
-                </h2>
-                {needsAttention.map((entry) => renderRow(entry))}
-              </div>
-            )}
-            {inMotion.length > 0 && (
-              <div className={awaitingSignal.length > 0 ? 'mb-8' : undefined}>
-                {(needsAttention.length > 0 || awaitingSignal.length > 0) && (
-                  <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
-                    In motion
-                  </h2>
-                )}
-                {inMotion.map((entry) => renderRow(entry))}
-              </div>
-            )}
-            {awaitingSignal.length > 0 && (
-              <div>
-                <h2 className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
-                  Awaiting signal
-                </h2>
-                {awaitingSignal.map((entry) => renderRow(entry))}
-              </div>
-            )}
+            {portfolio.current.map((entry) => renderRow(entry, 'current'))}
             {!portfolio.current.length && (
-              <div className="py-10">
+              <div className="border-y border-pro-border/35 py-9">
                 <h2 className="font-serif text-xl text-pro-text-main">
                   {search
-                    ? 'No matching initiatives'
-                    : entries.length
-                      ? reviewState === 'failed' || reviewState === 'incomplete'
-                        ? 'Project review is incomplete'
-                        : discoveryState === 'running'
-                          ? 'Looking for established initiatives'
-                          : discoveryState === 'paused'
-                            ? 'Initiative discovery is paused'
-                            : reviewState === 'running'
-                              ? 'Reviewing your discussed work'
-                              : reviewState === 'paused'
-                                ? 'Project review is paused'
-                                : 'No initiatives established yet'
-                      : 'No projects yet'}
+                    ? 'No matching focus themes'
+                    : synthesisState === 'running'
+                      ? 'Finding the themes that persist across conversations'
+                      : 'No durable themes established yet'}
                 </h2>
-                <p className="mt-3 max-w-[55ch] text-sm leading-relaxed text-pro-text-muted">
+                <p className="mt-3 max-w-[58ch] text-sm leading-relaxed text-pro-text-muted">
                   {search
-                    ? 'Other discussed work remains searchable below.'
-                    : entries.length
-                      ? 'Your discussed work is preserved below. Only initiatives supported by your conversations appear here.'
-                      : 'Projects emerge when a conversation establishes a distinct outcome and the work needed to get there.'}
+                    ? 'Suggestions and discussed work remain searchable below.'
+                    : 'Pluto keeps one-off plans and topics out of your portfolio until another conversation reinforces them or you confirm them.'}
                 </p>
               </div>
             )}
           </section>
-          {(discoveryState !== 'idle' || discoveryRemaining > 0) && (
+
+          {synthesisState !== 'idle' && (
             <div
               className="mt-5 flex items-center gap-2 text-xs text-pro-text-muted"
               aria-live="polite"
             >
               <span>
-                {discoveryState === 'failed'
-                  ? 'Initiative discovery couldn’t finish. Existing context is still available.'
-                  : discoveryState === 'incomplete'
-                    ? `${discoveryFailed} source${discoveryFailed === 1 ? '' : 's'} need another discovery attempt.`
-                    : discoveryState === 'paused'
-                      ? 'Initiative discovery will resume when Pluto is free.'
-                      : discoveryRemaining > 0
-                        ? `Looking for established initiatives · ${discoveryRemaining} source${discoveryRemaining === 1 ? '' : 's'} remaining`
-                        : 'Checking conversations for established initiatives.'}
+                {synthesisState === 'failed'
+                  ? 'Pluto couldn’t refresh themes. Existing project context is unchanged.'
+                  : synthesisState === 'incomplete'
+                    ? 'Theme synthesis needs another attempt. Existing project context is unchanged.'
+                    : synthesisState === 'paused'
+                      ? 'Theme synthesis will resume when Pluto is free.'
+                      : 'Reviewing structured notes for durable themes.'}
               </span>
-              {(discoveryState === 'failed' || discoveryFailed > 0) && (
+              {(synthesisState === 'failed' ||
+                synthesisState === 'incomplete') && (
                 <button
                   type="button"
                   className="shrink-0 underline underline-offset-4"
                   onClick={retry}
                 >
-                  Retry
+                  Retry synthesis
                 </button>
               )}
             </div>
           )}
-          {(reviewState !== 'idle' || remaining > 0) && (
-            <div
-              className="mt-5 flex items-center gap-2 text-xs text-pro-text-muted"
-              aria-live="polite"
+
+          {portfolio.suggested.length > 0 && (
+            <section
+              className="mt-10 border-t border-pro-border/45 pt-6"
+              aria-labelledby="suggested-projects"
             >
-              <span>
-                {reviewState === 'failed'
-                  ? 'Scope review couldn’t finish. Existing context is still available.'
-                  : reviewState === 'incomplete'
-                    ? `${remaining} item${remaining === 1 ? '' : 's'} still need${remaining === 1 ? 's' : ''} review. Your saved context is unchanged.`
-                    : reviewState === 'paused'
-                      ? 'Scope review will resume when Pluto is free.'
-                      : `Reviewing project scope from your conversations · ${Math.max(0, remaining - skipped.current.size)} remaining this pass`}
-              </span>
-              {(reviewState === 'failed' || reviewState === 'incomplete') && (
-                <button
-                  type="button"
-                  className="shrink-0 underline underline-offset-4"
-                  onClick={retry}
-                >
-                  Retry
-                </button>
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="suggested-projects" className="text-sm font-semibold">
+                  Suggested themes
+                </h2>
+                <span className="text-xs text-pro-text-muted">
+                  {portfolio.suggested.length} to review
+                </span>
+              </div>
+              <p className="mb-2 max-w-[65ch] text-xs leading-relaxed text-pro-text-muted">
+                These came from one conversation. Confirm the ones that reflect
+                real ongoing work, or dismiss them.
+              </p>
+              {portfolio.suggested.map((entry) =>
+                renderRow(entry, 'suggested'),
               )}
-            </div>
+            </section>
           )}
+
           {portfolio.completed.length > 0 && (
             <details
               className="mt-8 border-t border-pro-border/40 pt-5"
@@ -459,25 +347,28 @@ export function ProjectsOverview({
                 <span className="ml-2">{portfolio.completed.length}</span>
               </summary>
               <div className="mt-2">
-                {portfolio.completed.map((entry) => renderRow(entry))}
+                {portfolio.completed.map((entry) =>
+                  renderRow(entry, 'current'),
+                )}
               </div>
             </details>
           )}
+
           {portfolio.other.length > 0 && (
             <details
               className="mt-8 border-t border-pro-border/40 pt-5"
               open={search ? true : undefined}
             >
               <summary className="cursor-pointer text-[13px] text-pro-text-muted">
-                Other discussed work{' '}
+                Discussed work{' '}
                 <span className="ml-2">{portfolio.other.length}</span>
               </summary>
               <p className="mt-3 max-w-[65ch] text-xs leading-relaxed text-pro-text-muted">
-                Tasks, topics, and work whose project scope is not yet
-                established. Nothing has been deleted.
+                Tasks, topics, and possible themes remain available without
+                crowding your project portfolio.
               </p>
               <div className="mt-2">
-                {portfolio.other.map((entry) => renderRow(entry, true))}
+                {portfolio.other.map((entry) => renderRow(entry, 'discussed'))}
               </div>
             </details>
           )}

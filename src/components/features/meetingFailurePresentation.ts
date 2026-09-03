@@ -1,7 +1,48 @@
 export type MeetingFailurePresentation = {
   title: string;
   detail: string;
-  actionLabel: 'Retry transcription' | 'Retry analysis' | null;
+  actionLabel:
+    | 'Improve labels'
+    | 'Retry transcription'
+    | 'Retry analysis'
+    | null;
+};
+
+export type MeetingRetryKind = 'speaker_labels' | 'transcript' | 'analysis';
+
+export type MeetingRetryOperation = {
+  meetingId: string | number;
+  kind: MeetingRetryKind;
+};
+
+export type MeetingRetryProgressPresentation = {
+  title: string;
+  detail: string;
+  loadingLabel: string;
+};
+
+export const resolveMeetingRetryProgressPresentation = (
+  kind: MeetingRetryKind,
+): MeetingRetryProgressPresentation => {
+  if (kind === 'speaker_labels') {
+    return {
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      loadingLabel: 'Improving labels',
+    };
+  }
+  if (kind === 'transcript') {
+    return {
+      title: 'Transcript needs another pass',
+      detail: 'Your recording is safe.',
+      loadingLabel: 'Retrying transcription',
+    };
+  }
+  return {
+    title: 'Analysis needs another pass',
+    detail: 'Your transcript is ready.',
+    loadingLabel: 'Retrying analysis',
+  };
 };
 
 export type MeetingRegenerationFailurePresentation = {
@@ -106,6 +147,7 @@ export const resolveMeetingRegenerationFailurePresentation = (
 
 type MeetingFailurePresentationInput = {
   retryableFinalTranscription: boolean;
+  speakerAttributionFailure: boolean;
   captureRecoveryRequired: boolean;
   captureGap: boolean;
   hasExistingAnalysis: boolean;
@@ -115,6 +157,13 @@ type MeetingFailurePresentationInput = {
 export const resolveMeetingFailurePresentation = (
   input: MeetingFailurePresentationInput,
 ): MeetingFailurePresentation | null => {
+  if (input.retryableFinalTranscription && input.speakerAttributionFailure) {
+    return {
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      actionLabel: 'Improve labels',
+    };
+  }
   if (input.retryableFinalTranscription) {
     return {
       title: 'Transcript needs another pass',

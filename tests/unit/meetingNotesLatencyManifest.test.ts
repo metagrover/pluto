@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MeetingNotesError } from '../../electron/llm/meetingNotesTypes';
 import {
   aggregateMeetingNotesLatencySamples,
+  aggregateOrganicMeetingNotesLatencySamples,
   assertContentFreeMeetingNotesLatencyReport,
   classifyMeetingNotesLatencyError,
   parsePrivateMeetingNotesLatencyManifest,
@@ -136,6 +137,67 @@ describe('private meeting-notes latency manifest', () => {
         cancelled: 0,
         failed: 1,
       },
+    });
+  });
+
+  it('separates organic attempts from distinct meetings and reports failure patterns', () => {
+    expect(
+      aggregateOrganicMeetingNotesLatencySamples([
+        {
+          meetingKey: 'private-meeting-a',
+          status: 'failed',
+          totalMs: 500,
+          queueMs: 10,
+          modelMs: 480,
+          modelCallCount: 2,
+          truncatedStageCount: 1,
+          errorCode: 'notes_context_exhausted',
+        },
+        {
+          meetingKey: 'private-meeting-a',
+          status: 'failed',
+          totalMs: 600,
+          queueMs: 10,
+          modelMs: 580,
+          modelCallCount: 2,
+          truncatedStageCount: 1,
+          errorCode: 'notes_context_exhausted',
+        },
+        {
+          meetingKey: 'private-meeting-a',
+          status: 'published',
+          totalMs: 300,
+          queueMs: 40,
+          modelMs: 240,
+          modelCallCount: 3,
+          truncatedStageCount: 0,
+        },
+        {
+          meetingKey: 'private-meeting-b',
+          status: 'published',
+          totalMs: 100,
+          queueMs: 20,
+          modelMs: 70,
+          modelCallCount: 1,
+          truncatedStageCount: 0,
+        },
+      ]),
+    ).toEqual({
+      attemptCount: 4,
+      distinctMeetingCount: 2,
+      maxAttemptsPerMeeting: 3,
+      publishedCount: 2,
+      failedCount: 2,
+      cancelledCount: 0,
+      publishRate: 0.5,
+      truncatedStageCount: 2,
+      failureCodes: { notes_context_exhausted: 2 },
+      meanTotalMs: 200,
+      medianTotalMs: 200,
+      p90TotalMs: 300,
+      meanQueueMs: 30,
+      meanModelMs: 155,
+      meanModelCallCount: 2,
     });
   });
 

@@ -1,6 +1,9 @@
 import type { Entity } from '../api/knowledgeGraph';
 import type { ProjectHealthState } from './projectBriefing';
-import { readProjectQualification } from './projectQualification';
+import {
+  readProjectPortfolioDisposition,
+  readProjectQualification,
+} from './projectQualification';
 
 export interface ProjectPortfolioEntry extends Entity {
   meeting_count: number;
@@ -14,6 +17,9 @@ export interface ProjectPortfolioEntry extends Entity {
   participant_coverage?: number;
   recurring_cadence?: string | null;
   next_milestone?: string | null;
+  current_focus?: string | null;
+  recent_change?: string | null;
+  open_thread_count?: number;
 }
 
 export function buildProjectPortfolio(
@@ -23,7 +29,9 @@ export function buildProjectPortfolio(
   const query = search.trim().toLocaleLowerCase();
   const current: ProjectPortfolioEntry[] = [];
   const completed: ProjectPortfolioEntry[] = [];
+  const suggested: ProjectPortfolioEntry[] = [];
   const other: ProjectPortfolioEntry[] = [];
+  const dismissed: ProjectPortfolioEntry[] = [];
   const ordered = [...entries].sort(
     (a, b) =>
       (Date.parse(b.last_mentioned_at || b.updated_at) || 0) -
@@ -32,6 +40,15 @@ export function buildProjectPortfolio(
   );
   for (const entry of ordered) {
     const qualification = readProjectQualification(entry.metadata);
+    const disposition = readProjectPortfolioDisposition(entry.metadata);
+    let metadata: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(entry.metadata || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+        metadata = parsed;
+    } catch {
+      metadata = {};
+    }
     if (
       query &&
       ![
@@ -42,9 +59,17 @@ export function buildProjectPortfolio(
       ].some((value) => value?.toLocaleLowerCase().includes(query))
     )
       continue;
-    if (qualification?.state !== 'qualified') other.push(entry);
+    const legacySingleSource =
+      qualification?.state === 'qualified' &&
+      qualification.source !== 'user' &&
+      Boolean(metadata.projectInitiativeDiscovery) &&
+      !metadata.projectThemeSynthesis &&
+      entry.meeting_count < 2;
+    if (disposition === 'dismissed') dismissed.push(entry);
+    else if (legacySingleSource) suggested.push(entry);
+    else if (qualification?.state !== 'qualified') other.push(entry);
     else if (entry.status === 'completed') completed.push(entry);
     else current.push(entry);
   }
-  return { current, completed, other };
+  return { current, completed, suggested, other, dismissed };
 }

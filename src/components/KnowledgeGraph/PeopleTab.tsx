@@ -1,8 +1,12 @@
 import {
   ArrowLeft,
+  CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  CircleHelp,
   Clock3,
+  ListChecks,
   MessageCircle,
   MoreHorizontal,
   Pencil,
@@ -20,16 +24,25 @@ import {
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
+  recordEntityCorrection,
+  resolvePersonCommitmentOwner,
   restorePersonMerge,
+  triggerDreamingNow,
   updatePersonName,
 } from '../../api/knowledgeGraph';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../utils/dreamingStatus';
 import type {
   PersonBriefingCommitment,
+  PersonBriefingCommitmentCandidate,
   PersonBriefingMeeting,
   PersonBriefingSummary,
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
+import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
@@ -60,6 +73,10 @@ export const buildPersonBriefingRow = (
     latestMeetingAt: latest?.started_at ?? latest?.created_at ?? null,
     context: latest?.context ?? null,
     openCommitmentCount,
+    candidateCommitmentCount: 0,
+    briefHeadline: null,
+    briefStatus: null,
+    briefUpdatedAt: null,
     possibleDuplicateCount: 0,
   };
 };
@@ -86,7 +103,7 @@ export const PeopleBriefing = ({
     const normalized = query.trim().toLowerCase();
     return normalized
       ? rows.filter((row) =>
-          `${row.name} ${row.role} ${row.latestMeetingTitle ?? ''}`
+          `${row.name} ${row.role} ${row.briefHeadline ?? ''} ${row.latestMeetingTitle ?? ''}`
             .toLowerCase()
             .includes(normalized),
         )
@@ -97,14 +114,35 @@ export const PeopleBriefing = ({
       [...filtered].sort(
         (a, b) =>
           b.openCommitmentCount - a.openCommitmentCount ||
+          b.candidateCommitmentCount - a.candidateCommitmentCount ||
+          (Date.parse(b.briefUpdatedAt || '') || 0) -
+            (Date.parse(a.briefUpdatedAt || '') || 0) ||
           (Date.parse(b.latestMeetingAt || '') || 0) -
             (Date.parse(a.latestMeetingAt || '') || 0),
       ),
     [filtered],
   );
-  const linkedRows = useMemo(
-    () => prioritized.filter((row) => row.meetingCount > 0),
+  const briefingRows = useMemo(
+    () =>
+      prioritized.filter(
+        (row) =>
+          row.meetingCount > 0 &&
+          (row.openCommitmentCount > 0 ||
+            row.candidateCommitmentCount > 0 ||
+            Boolean(row.briefHeadline)),
+      ),
     [prioritized],
+  );
+  const briefingIds = useMemo(
+    () => new Set(briefingRows.map((row) => row.id)),
+    [briefingRows],
+  );
+  const recentRows = useMemo(
+    () =>
+      prioritized.filter(
+        (row) => row.meetingCount > 0 && !briefingIds.has(row.id),
+      ),
+    [briefingIds, prioritized],
   );
   const unlinkedRows = useMemo(
     () => prioritized.filter((row) => row.meetingCount === 0),
@@ -112,6 +150,14 @@ export const PeopleBriefing = ({
   );
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
+    const cue =
+      person.briefHeadline ??
+      (person.context && !person.context.startsWith('Role:')
+        ? person.context
+        : null) ??
+      person.latestMeetingTitle ??
+      'No linked conversation yet';
+    const showRole = person.role !== 'Known from conversations';
     return (
       <article
         className={`person-row ${selected ? 'person-row--selected' : ''}`}
@@ -129,28 +175,35 @@ export const PeopleBriefing = ({
           </span>
           <span className="person-identity">
             <strong>{person.name}</strong>
-            <span>{person.role}</span>
+            {showRole ? <span>{person.role}</span> : null}
           </span>
-          <span className="person-context">
-            {person.latestMeetingTitle ?? 'No linked conversation yet'}
-          </span>
+          <span className="person-context">{cue}</span>
           <span className="person-meta">
             {person.possibleDuplicateCount > 0 ? (
               <span className="person-possible-duplicate">
                 Possible duplicate
               </span>
-            ) : person.openCommitmentCount > 0 ? (
+            ) : null}
+            {person.openCommitmentCount > 0 ? (
               <span className="person-commitments">
-                {person.openCommitmentCount} open commitment
+                {person.openCommitmentCount} open loop
                 {person.openCommitmentCount === 1 ? '' : 's'}
               </span>
-            ) : (
+            ) : null}
+            {person.candidateCommitmentCount > 0 ? (
+              <span className="person-candidates">
+                {person.candidateCommitmentCount} to confirm
+              </span>
+            ) : null}
+            {person.possibleDuplicateCount === 0 &&
+            person.openCommitmentCount === 0 &&
+            person.candidateCommitmentCount === 0 ? (
               <span className="person-meeting-count">
                 <MessageCircle aria-hidden="true" size={12} />
                 {person.meetingCount} meeting link
                 {person.meetingCount === 1 ? '' : 's'}
               </span>
-            )}
+            ) : null}
             <span className="person-date">
               <Clock3 aria-hidden="true" size={12} />
               {formatDate(person.latestMeetingAt)}
@@ -169,17 +222,19 @@ export const PeopleBriefing = ({
   return (
     <section aria-label="People" className="people-briefing">
       <PageHeader title="People">
-        {rows.length > 0 && (
-          <label className="people-search">
-            <Search aria-hidden="true" size={13} />
-            <span className="sr-only">Search people</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search people"
-            />
-          </label>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {rows.length > 0 && (
+            <label className="people-search">
+              <Search aria-hidden="true" size={13} />
+              <span className="sr-only">Search people</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search people"
+              />
+            </label>
+          )}
+        </div>
       </PageHeader>
 
       {rows.length === 0 ? (
@@ -189,19 +244,43 @@ export const PeopleBriefing = ({
           <p>People will appear as Pluto connects them to conversations.</p>
         </div>
       ) : (
-        <div className="people-list" aria-label="Relationship priorities">
-          {linkedRows.map(renderPerson)}
-          {unlinkedRows.length > 0 && (
+        <div className="people-list" aria-label="People relationships">
+          {briefingRows.length > 0 ? (
+            <section aria-label="Relationship briefs">
+              <div className="people-list__heading">
+                <h2>Relationship briefs</h2>
+                <span>{briefingRows.length}</span>
+              </div>
+              {briefingRows.map(renderPerson)}
+            </section>
+          ) : null}
+          {recentRows.length > 0 ? (
             <section
+              aria-label="Recent conversations"
+              className="people-recent"
+            >
+              <div className="people-list__heading">
+                <h2>Recent conversations</h2>
+                <span>{recentRows.length}</span>
+              </div>
+              {recentRows.map(renderPerson)}
+            </section>
+          ) : null}
+          {unlinkedRows.length > 0 && (
+            <details
               aria-label="People without linked conversations"
               className="people-unlinked"
             >
-              <div className="people-list__heading">
-                <h2>No linked conversations</h2>
-                <div aria-hidden="true" />
-              </div>
+              <summary>
+                <span>
+                  <strong>Low-context people</strong>
+                  <small>No linked conversations yet</small>
+                </span>
+                <span>{unlinkedRows.length}</span>
+                <ChevronDown aria-hidden="true" size={14} />
+              </summary>
               {unlinkedRows.map(renderPerson)}
-            </section>
+            </details>
           )}
           {filtered.length === 0 && (
             <p className="people-no-results">No people match “{query}”.</p>
@@ -277,6 +356,66 @@ const CommitmentList = ({
   </ul>
 );
 
+const CandidateCommitmentList = ({
+  items,
+  states,
+  onOpenMeeting,
+  onResolve,
+}: {
+  items: PersonBriefingCommitmentCandidate[];
+  states: Record<string, 'saving' | 'error'>;
+  onOpenMeeting: (meetingId: string) => void;
+  onResolve: (
+    candidate: PersonBriefingCommitmentCandidate,
+    accepted: boolean,
+  ) => void;
+}) => (
+  <ul className="person-dossier__candidates">
+    {items.slice(0, 3).map((item) => {
+      const saving = states[item.id] === 'saving';
+      return (
+        <li key={item.id}>
+          <span className="person-dossier__commitment-icon" aria-hidden="true">
+            <CircleHelp size={15} />
+          </span>
+          <span className="person-dossier__commitment-copy">
+            <strong>{item.text}</strong>
+            <span>Suggested owner: {item.suggestedOwnerName}</span>
+            {item.evidence ? <q>{item.evidence}</q> : null}
+          </span>
+          <div className="person-dossier__candidate-actions">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => onResolve(item, true)}
+            >
+              {saving ? 'Saving…' : 'Confirm owner'}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => onResolve(item, false)}
+            >
+              Not theirs
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenMeeting(item.sourceMeetingId)}
+            >
+              Source: {item.sourceMeetingTitle ?? 'Meeting'}
+            </button>
+          </div>
+          {states[item.id] === 'error' ? (
+            <p role="alert">
+              Pluto could not save this owner decision. Try again.
+            </p>
+          ) : null}
+        </li>
+      );
+    })}
+  </ul>
+);
+
 const MeetingGroup = ({
   evidence,
   meetings,
@@ -348,16 +487,35 @@ export const PersonDossier = ({
   const [mergeState, setMergeState] = useState<
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
+  const [candidateState, setCandidateState] = useState<
+    Record<string, 'saving' | 'error'>
+  >({});
   const [lastMerged, setLastMerged] = useState<{
     id: string;
     name: string;
   } | null>(null);
+  const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
+  const prepareGeneration = useRef(0);
+  const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
   }, [detail]);
+
+  useEffect(() => {
+    prepareGeneration.current += 1;
+    setDreamingState('idle');
+  }, [detail.person.id]);
+
+  useEffect(
+    () => () => {
+      prepareGeneration.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.focus();
@@ -373,22 +531,36 @@ export const PersonDossier = ({
       .filter((meeting) => meeting.evidence === 'confirmed')
       .map((meeting) => meeting.id),
   );
-  const confirmedEvidence = brief.evidenceIndex.filter((entry) =>
-    confirmedIds.has(entry.meeting_id),
-  );
   const insights = brief.patterns
     .filter(
       (pattern) =>
         pattern.evidence_quality.mode === 'direct' &&
         pattern.evidence_quality.confidence >= 0.7 &&
-        pattern.citations.length > 0 &&
-        pattern.citations.every((citation) =>
-          confirmedIds.has(citation.meeting_id),
-        ),
+        pattern.citations.length > 0,
     )
     .slice(0, 2);
-  const showContext =
-    brief.isCompiled && brief.trustStatus === 'grounded' && insights.length > 0;
+  const hasReliableRead =
+    brief.isCompiled &&
+    ![
+      'No reliable compiled brief yet.',
+      'Indexed knowledge needs a stronger synthesis.',
+    ].includes(brief.headline);
+  const confirmedContext =
+    hasReliableRead &&
+    brief.trustStatus === 'grounded' &&
+    brief.evidenceIndex.some((entry) => confirmedIds.has(entry.meeting_id));
+  const readEvidence = brief.evidenceIndex.slice(0, 2);
+  const meetingCount = currentDetail.meetings.length;
+  const briefConversationCount =
+    brief.coverage.sourceCount ??
+    brief.coverage.citedMeetingCount ??
+    meetingCount;
+  const mentionedCount = currentDetail.meetings.filter(
+    (meeting) => meeting.evidence === 'mentioned',
+  ).length;
+  const scheduledMeeting = currentDetail.meetings.find(
+    (meeting) => meeting.evidence === 'scheduled',
+  );
   const eligibleMergeCandidates = mergeCandidates.filter(
     (candidate) => candidate.id !== currentDetail.person.id,
   );
@@ -446,6 +618,96 @@ export const PersonDossier = ({
     }
   };
 
+  const resolveCandidate = async (
+    candidate: PersonBriefingCommitmentCandidate,
+    personId: string | null,
+  ) => {
+    setCandidateState((current) => ({
+      ...current,
+      [candidate.id]: 'saving',
+    }));
+    try {
+      await resolvePersonCommitmentOwner(candidate.id, personId);
+      const { suggestedOwnerName: _suggestedOwnerName, ...verifiedCommitment } =
+        candidate;
+      setCurrentDetail((current) => ({
+        ...current,
+        commitments: {
+          ...current.commitments,
+          candidates: current.commitments.candidates.filter(
+            (item) => item.id !== candidate.id,
+          ),
+          open:
+            personId === current.person.id
+              ? [...current.commitments.open, verifiedCommitment]
+              : current.commitments.open,
+        },
+      }));
+      setCandidateState((current) => {
+        const next = { ...current };
+        delete next[candidate.id];
+        return next;
+      });
+      await onIdentityChanged();
+    } catch {
+      setCandidateState((current) => ({
+        ...current,
+        [candidate.id]: 'error',
+      }));
+    }
+  };
+
+  const handleDreamNow = async () => {
+    const generation = ++prepareGeneration.current;
+    const preparedPersonId = currentDetail.person.id;
+    setDreamingState('running');
+    try {
+      const result = await triggerDreamingNow({
+        entityId: preparedPersonId,
+      });
+      if (
+        generation !== prepareGeneration.current ||
+        preparedPersonId !== currentDetail.person.id
+      )
+        return;
+      if (result.status === 'proposed') {
+        await onIdentityChanged();
+        if (
+          generation !== prepareGeneration.current ||
+          preparedPersonId !== currentDetail.person.id
+        )
+          return;
+        setPreparedUpdatesReload((value) => value + 1);
+        setDreamingState('proposed');
+      } else {
+        if (result.status === 'existing') {
+          setPreparedUpdatesReload((value) => value + 1);
+        }
+        setDreamingState(result.status);
+      }
+    } catch {
+      if (
+        generation === prepareGeneration.current &&
+        preparedPersonId === currentDetail.person.id
+      )
+        setDreamingState('error');
+    }
+  };
+
+  const handleDismissInsight = async (observation: string) => {
+    try {
+      await recordEntityCorrection({
+        entityId: currentDetail.person.id,
+        itemType: 'insight',
+        fingerprint: observation,
+        reason: 'reported_inaccurate',
+      });
+      setDismissedInsights((prev) => [...prev, observation]);
+    } catch {
+      // keep on error
+    }
+  };
+
   return (
     <article className="person-dossier">
       <div className="person-dossier__topline">
@@ -481,8 +743,43 @@ export const PersonDossier = ({
             >
               Merge another person
             </button>
+            <button
+              type="button"
+              disabled={dreamingState === 'running'}
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
+                void handleDreamNow();
+              }}
+            >
+              {DREAMING_STATUS_LABEL[dreamingState]}
+            </button>
           </div>
         </details>
+      </div>
+      <div
+        className="person-dossier__prepare-status flex min-h-6 items-center gap-3 text-sm text-pro-text-muted"
+        aria-live="polite"
+      >
+        {dreamingState !== 'idle' ? (
+          <>
+            <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
+            {dreamingState === 'proposed' ? (
+              <button
+                type="button"
+                className="rounded font-medium text-pro-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                onClick={() => {
+                  const heading = document.getElementById(
+                    `prepared-updates-person-${currentDetail.person.id}`,
+                  );
+                  heading?.focus();
+                  heading?.scrollIntoView?.({ block: 'start' });
+                }}
+              >
+                Review prepared updates
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </div>
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
@@ -579,7 +876,7 @@ export const PersonDossier = ({
             <h2 id="merge-person-heading">Merge duplicate person</h2>
           </div>
           <p>
-            Choose the duplicate record. Meetings and expectations will appear
+            Choose the duplicate record. Meetings and open loops will appear
             under one person, and the original evidence will remain intact.
           </p>
           <label htmlFor="merge-person-source">Duplicate record</label>
@@ -605,7 +902,7 @@ export const PersonDossier = ({
                 <span>
                   {selectedMergeSource.meetingCount} meeting
                   {selectedMergeSource.meetingCount === 1 ? '' : 's'} ·{' '}
-                  {selectedMergeSource.openCommitmentCount} open expectation
+                  {selectedMergeSource.openCommitmentCount} open loop
                   {selectedMergeSource.openCommitmentCount === 1 ? '' : 's'}
                 </span>
                 <small>
@@ -679,79 +976,250 @@ export const PersonDossier = ({
         </details>
       ) : null}
 
-      {showContext ? (
-        <section className="person-dossier__context">
-          <div className="person-dossier__eyebrow">
-            <Quote aria-hidden="true" size={13} />
-            Current context
+      <section className="person-dossier__current-read">
+        <div className="person-dossier__current-read-heading">
+          <div>
+            <Quote aria-hidden="true" size={14} />
+            <h2>Current read</h2>
           </div>
-          <ul className="person-dossier__insights">
-            {insights.map((insight) => {
-              const citation = insight.citations.find((item) =>
-                confirmedIds.has(item.meeting_id),
-              );
-              const source = confirmedEvidence.find(
-                (entry) => entry.meeting_id === citation?.meeting_id,
-              );
-              return (
-                <li key={insight.id}>
-                  <strong>{insight.title}</strong>
-                  <p>{insight.summary}</p>
-                  {citation ? <q>{citation.quote}</q> : null}
-                  {citation ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenMeeting(citation.meeting_id)}
-                    >
-                      Source: {source?.meeting_title ?? 'Meeting'}
-                    </button>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ) : null}
-
-      <div className="person-dossier__activity">
-        {currentDetail.commitments.open.length > 0 ? (
-          <section className="person-dossier__section">
-            <div className="person-dossier__section-heading">
-              <h2>Open expectations</h2>
-              <span>{currentDetail.commitments.open.length}</span>
+          <span>
+            {confirmedContext ? 'Confirmed context' : 'Mention-backed context'}
+          </span>
+        </div>
+        {hasReliableRead ? (
+          <>
+            <p className="person-dossier__headline">{brief.headline}</p>
+            <div className="person-dossier__read-meta">
+              <span>
+                Updated from {briefConversationCount || meetingCount}{' '}
+                conversation
+                {(briefConversationCount || meetingCount) === 1 ? '' : 's'}
+              </span>
+              {brief.freshnessAt ? (
+                <span>{formatDate(brief.freshnessAt)}</span>
+              ) : null}
+              {currentDetail.knowledgeDoc?.status === 'stale' ? (
+                <span>Brief needs refresh</span>
+              ) : null}
             </div>
-            <CommitmentList
-              items={currentDetail.commitments.open}
-              onOpenMeeting={onOpenMeeting}
-            />
-          </section>
+            {readEvidence.length > 0 ? (
+              <div className="person-dossier__read-sources">
+                {readEvidence.map((entry) => (
+                  <button
+                    type="button"
+                    key={entry.id}
+                    onClick={() => onOpenMeeting(entry.meeting_id)}
+                  >
+                    Source: {entry.meeting_title ?? 'Meeting'}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="person-dossier__read-empty">
+            <strong>No reliable relationship brief yet</strong>
+            <p>
+              {meetingCount > 0
+                ? 'Pluto has conversation links, but not enough verified context for a current read.'
+                : 'Link a conversation or confirm this identity before Pluto summarizes the relationship.'}
+            </p>
+            {meetingCount > 0 ? (
+              <span>Conversation links available: {meetingCount}</span>
+            ) : null}
+          </div>
+        )}
+        {insights.length > 0 ? (
+          <div className="person-dossier__patterns">
+            <h3>Recent patterns</h3>
+            <ul className="person-dossier__insights">
+              {insights
+                .filter((insight) => !dismissedInsights.includes(insight.title))
+                .map((insight) => {
+                  const citation = insight.citations[0];
+                  const source = brief.evidenceIndex.find(
+                    (entry) => entry.meeting_id === citation?.meeting_id,
+                  );
+                  return (
+                    <li key={insight.id}>
+                      <div className="flex items-start justify-between gap-2">
+                        <strong>{insight.title}</strong>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDismissInsight(insight.title)
+                          }
+                          title="Report inaccurate"
+                          className="text-xs text-pro-text-muted hover:text-pro-urgent"
+                        >
+                          Report inaccurate
+                        </button>
+                      </div>
+                      <p>{insight.summary}</p>
+                      {citation ? <q>{citation.quote}</q> : null}
+                      {citation ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenMeeting(citation.meeting_id)}
+                        >
+                          Source: {source?.meeting_title ?? 'Meeting'}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+            </ul>
+          </div>
         ) : null}
+      </section>
+
+      <PreparedUpdates
+        key={currentDetail.person.id}
+        entityId={currentDetail.person.id}
+        entityType="person"
+        reloadToken={preparedUpdatesReload}
+        evidenceMeetings={currentDetail.meetings.map((meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          date: meeting.started_at || meeting.created_at,
+        }))}
+        onCanonicalChange={onIdentityChanged}
+        onOpenMeeting={onOpenMeeting}
+        onReviewIdentity={() => {
+          setMergeOpen(true);
+          setMergeState('idle');
+        }}
+      />
+
+      <section className="person-dossier__open-loops">
+        <div className="person-dossier__major-heading">
+          <div>
+            <ListChecks aria-hidden="true" size={16} />
+            <h2>Open loops</h2>
+          </div>
+          <span>
+            {currentDetail.commitments.open.length +
+              currentDetail.commitments.candidates.length}
+          </span>
+        </div>
+        {currentDetail.commitments.open.length === 0 &&
+        currentDetail.commitments.candidates.length === 0 ? (
+          <p className="person-dossier__section-empty">
+            No verified open loops or ownership candidates.
+          </p>
+        ) : (
+          <div className="person-dossier__activity">
+            {currentDetail.commitments.open.length > 0 ? (
+              <section className="person-dossier__section">
+                <div className="person-dossier__section-heading">
+                  <h3>{currentDetail.isSelf ? 'You owe' : 'They owe'}</h3>
+                  <span>{currentDetail.commitments.open.length}</span>
+                </div>
+                <CommitmentList
+                  items={currentDetail.commitments.open}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </section>
+            ) : null}
+            {currentDetail.commitments.candidates.length > 0 ? (
+              <section className="person-dossier__section person-dossier__section--candidate">
+                <div className="person-dossier__section-heading">
+                  <h3>Needs confirmation</h3>
+                  <span>{currentDetail.commitments.candidates.length}</span>
+                </div>
+                <p className="person-dossier__disclosure">
+                  Extracted ownership is not treated as fact until you confirm
+                  it.
+                </p>
+                <CandidateCommitmentList
+                  items={currentDetail.commitments.candidates}
+                  states={candidateState}
+                  onOpenMeeting={onOpenMeeting}
+                  onResolve={(candidate, accepted) =>
+                    void resolveCandidate(
+                      candidate,
+                      accepted ? currentDetail.person.id : null,
+                    )
+                  }
+                />
+              </section>
+            ) : null}
+          </div>
+        )}
         {currentDetail.commitments.delivered.length > 0 ? (
-          <section className="person-dossier__section">
-            <div className="person-dossier__section-heading">
-              <h2>Recently delivered</h2>
+          <details className="person-dossier__delivered">
+            <summary>
+              Recently delivered
               <span>{currentDetail.commitments.delivered.length}</span>
-            </div>
+              <ChevronDown aria-hidden="true" size={14} />
+            </summary>
             <CommitmentList
               items={currentDetail.commitments.delivered}
               onOpenMeeting={onOpenMeeting}
             />
-          </section>
+          </details>
         ) : null}
-      </div>
+      </section>
 
-      <div className="person-dossier__history">
-        {(['confirmed', 'scheduled', 'mentioned'] as const).map((evidence) => (
-          <MeetingGroup
-            key={evidence}
-            evidence={evidence}
-            meetings={currentDetail.meetings.filter(
+      {scheduledMeeting ? (
+        <section className="person-dossier__upcoming">
+          <div className="person-dossier__major-heading">
+            <div>
+              <CalendarDays aria-hidden="true" size={16} />
+              <h2>Scheduled or invited</h2>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onOpenMeeting(scheduledMeeting.id)}
+          >
+            <span>
+              <strong>{scheduledMeeting.title}</strong>
+              <small>Attendance is not confirmed.</small>
+            </span>
+            <span>
+              {formatDate(
+                scheduledMeeting.started_at || scheduledMeeting.created_at,
+              )}
+            </span>
+          </button>
+        </section>
+      ) : null}
+
+      <details className="person-dossier__history">
+        <summary>
+          <span>
+            <MessageCircle aria-hidden="true" size={15} />
+            <strong>Evidence and conversation history</strong>
+          </span>
+          <span>{meetingCount}</span>
+          <ChevronDown aria-hidden="true" size={14} />
+        </summary>
+        {meetingCount === 0 ? (
+          <p className="person-dossier__section-empty">
+            No conversations are linked to this identity.
+          </p>
+        ) : (
+          (['confirmed', 'scheduled', 'mentioned'] as const).map((evidence) => {
+            const meetings = currentDetail.meetings.filter(
               (meeting) => meeting.evidence === evidence,
-            )}
-            onOpenMeeting={onOpenMeeting}
-          />
-        ))}
-      </div>
+            );
+            return meetings.length > 0 ? (
+              <MeetingGroup
+                key={evidence}
+                evidence={evidence}
+                meetings={meetings}
+                onOpenMeeting={onOpenMeeting}
+              />
+            ) : null;
+          })
+        )}
+        {mentionedCount > 0 ? (
+          <p className="person-dossier__history-note">
+            Mention-only links do not confirm participation or ownership.
+          </p>
+        ) : null}
+      </details>
     </article>
   );
 };

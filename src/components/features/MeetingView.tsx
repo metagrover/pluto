@@ -13,6 +13,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
+import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
@@ -43,8 +44,11 @@ import { getDownstreamProcessingPresentation } from './downstreamProcessingPrese
 import type { MeetingActionItemCard } from './meetingActionItems';
 import {
   type MeetingRegenerationFailurePresentation,
+  type MeetingRetryKind,
+  type MeetingRetryOperation,
   resolveMeetingFailurePresentation,
   resolveMeetingRegenerationFailurePresentation,
+  resolveMeetingRetryProgressPresentation,
 } from './meetingFailurePresentation';
 import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
 
@@ -106,15 +110,15 @@ interface MeetingViewProps {
   setEditingTitle: (val: boolean) => void;
   titleValue: string;
   setTitleValue: (val: string) => void;
-  fetchMeetings: () => void;
+  fetchMeetings: () => Promise<void>;
   handleCopySummary: (text: string) => void;
   copySuccess: boolean;
   handleDeleteMeeting: (id: string | number) => void;
   highlightEntities: (text: string) => ReactNode;
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
-  onRetryTranscriptValidation?: () => void;
-  transcriptValidationRetrying?: boolean;
+  onRetryTranscriptValidation?: (kind: MeetingRetryKind) => void;
+  transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
 }
 
@@ -138,8 +142,11 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
   downstreamFailed = false,
+  speakerLabelsRequired = false,
   onRetry,
   retrying = false,
+  retryOperationKind = null,
+  retryUnavailable = false,
 }: {
   status: Meeting['transcript_status'];
   finalizationStatus?: Meeting['finalization_status'];
@@ -152,8 +159,11 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable?: boolean;
   hasExistingAnalysis?: boolean;
   downstreamFailed?: boolean;
-  onRetry?: () => void;
+  speakerLabelsRequired?: boolean;
+  onRetry?: (kind: MeetingRetryKind) => void;
   retrying?: boolean;
+  retryOperationKind?: MeetingRetryKind | null;
+  retryUnavailable?: boolean;
 }) => {
   let micActivitySeconds = 0;
   let systemActivitySeconds = 0;
@@ -208,29 +218,64 @@ export const TranscriptIntegrityPanel = ({
     },
     capabilities,
   );
-  if (hasExistingAnalysis && trust.kind !== 'capture_gap') return null;
-
   let canRetryFinalTranscription = false;
+  let speakerAttributionFailure = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
-      finalTranscription?: { policy?: unknown; state?: unknown };
+      finalTranscription?: {
+        policy?: unknown;
+        state?: unknown;
+        failure?: unknown;
+      };
     };
     canRetryFinalTranscription =
       integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
       integrity.finalTranscription.state === 'needs_attention';
+    speakerAttributionFailure =
+      integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
+    canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
+    speakerAttributionFailure = false;
   }
+  canRetryFinalTranscription ||= speakerLabelsRequired;
+  speakerAttributionFailure ||= speakerLabelsRequired;
+  if (
+    hasExistingAnalysis &&
+    trust.kind !== 'capture_gap' &&
+    !speakerAttributionFailure &&
+    !retryOperationKind
+  )
+    return null;
 
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
+    speakerAttributionFailure,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,
     downstreamFailed,
   });
 
-  if (!panelCopy) return null;
+  // Final transcription also regenerates notes. Once speaker attribution has
+  // committed, let the notes skeleton communicate that remaining work instead
+  // of leaving the speaker-label repair banner spinning until analysis ends.
+  const visibleRetryOperationKind =
+    retryOperationKind === 'speaker_labels' && !speakerAttributionFailure
+      ? null
+      : retryOperationKind;
+  const progressCopy = visibleRetryOperationKind
+    ? resolveMeetingRetryProgressPresentation(visibleRetryOperationKind)
+    : null;
+  if (!panelCopy && !progressCopy) return null;
+  const title = progressCopy?.title ?? panelCopy?.title;
+  const detail = progressCopy?.detail ?? panelCopy?.detail;
+  const actionLabel = panelCopy?.actionLabel ?? null;
+  const retryKind: MeetingRetryKind = speakerAttributionFailure
+    ? 'speaker_labels'
+    : canRetryFinalTranscription
+      ? 'transcript'
+      : 'analysis';
 
   return (
     <section aria-live="polite" className="meeting-failure-notice">
@@ -238,26 +283,31 @@ export const TranscriptIntegrityPanel = ({
         <Sparkles className="h-3.5 w-3.5" />
       </span>
       <div className="meeting-failure-notice__copy">
-        <strong>{panelCopy.title}</strong>
-        <p>{panelCopy.detail}</p>
+        <strong>{title}</strong>
+        <p>{detail}</p>
       </div>
-      {panelCopy.actionLabel && onRetry ? (
+      {(progressCopy || actionLabel) && onRetry ? (
         <button
           type="button"
           className="meeting-failure-notice__action"
-          onClick={onRetry}
-          disabled={retrying}
+          onClick={() => onRetry(retryKind)}
+          disabled={Boolean(progressCopy) || retrying || retryUnavailable}
         >
-          {retrying ? (
+          {progressCopy || retrying ? (
             <>
               <Loader2
                 aria-hidden="true"
                 className="h-3.5 w-3.5 animate-spin"
               />
-              Retrying analysis
+              {progressCopy?.loadingLabel ??
+                (actionLabel === 'Improve labels'
+                  ? 'Improving labels'
+                  : actionLabel === 'Retry transcription'
+                    ? 'Retrying transcription'
+                    : 'Retrying analysis')}
             </>
           ) : (
-            panelCopy.actionLabel
+            actionLabel
           )}
         </button>
       ) : null}
@@ -581,7 +631,7 @@ export const MeetingView = ({
   transcriptVisible,
   setTranscriptVisible,
   onRetryTranscriptValidation,
-  transcriptValidationRetrying = false,
+  transcriptValidationRetryOperation = null,
   calendarContext = null,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
@@ -722,8 +772,18 @@ export const MeetingView = ({
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
-      .filter(Boolean),
+      .filter(
+        (speaker) => Boolean(speaker) && speaker.toLowerCase() !== 'unknown',
+      ),
   ).size;
+  const selectedMeetingRetryOperation =
+    transcriptValidationRetryOperation !== null &&
+    String(transcriptValidationRetryOperation.meetingId) ===
+      String(selectedMeeting.id);
+  const transcriptValidationRetrying = Boolean(selectedMeetingRetryOperation);
+  const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
+  const canImproveHistoricalSpeakerLabelsForMeeting =
+    canImproveHistoricalSpeakerLabels(selectedMeeting);
 
   const canonicalAnalysisMarkdown = v3
     ? analysisDocumentV3ToMarkdown(v3)
@@ -737,6 +797,10 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
+  const inlineSpeakerLabelRepairRequired =
+    downstreamPresentation.state === 'failed' &&
+    !notesDocument.hasAnalysis &&
+    canImproveHistoricalSpeakerLabelsForMeeting;
   const pendingUserNotes = !notesDocument.hasAnalysis
     ? selectedMeeting.user_notes?.trim()
     : '';
@@ -744,12 +808,6 @@ export const MeetingView = ({
     (downstreamPresentation.state === 'loading' ||
       downstreamPresentation.state === 'queued') &&
     !notesDocument.hasAnalysis;
-
-  useEffect(() => {
-    if (!isMeetingProcessing) return;
-    const interval = window.setInterval(() => fetchMeetings(), 2_000);
-    return () => window.clearInterval(interval);
-  }, [fetchMeetings, isMeetingProcessing]);
 
   const regenerateEnhancedNotes = async (
     reason: 'manual' | 'secondary' = 'manual',
@@ -1006,6 +1064,43 @@ export const MeetingView = ({
                     </label>
                   </div>
                   <div className="meeting-document-menu__section">
+                    {canImproveHistoricalSpeakerLabelsForMeeting &&
+                    !inlineSpeakerLabelRepairRequired &&
+                    onRetryTranscriptValidation ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onRetryTranscriptValidation('speaker_labels')
+                        }
+                        className="meeting-toolbar-button"
+                        disabled={transcriptValidationBusy}
+                        aria-label={
+                          transcriptValidationRetrying
+                            ? 'Improving speaker labels'
+                            : 'Improve speaker labels'
+                        }
+                        title={
+                          transcriptValidationBusy &&
+                          !transcriptValidationRetrying
+                            ? 'Another meeting is being improved'
+                            : undefined
+                        }
+                      >
+                        {transcriptValidationRetrying ? (
+                          <Loader2
+                            aria-hidden="true"
+                            className="h-4 w-4 animate-spin"
+                          />
+                        ) : (
+                          <Sparkles aria-hidden="true" className="h-4 w-4" />
+                        )}
+                        <span>
+                          {transcriptValidationRetrying
+                            ? 'Improving labels'
+                            : 'Improve speaker labels'}
+                        </span>
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -1105,8 +1200,17 @@ export const MeetingView = ({
             selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
           )}
           downstreamFailed={downstreamPresentation.state === 'failed'}
+          speakerLabelsRequired={inlineSpeakerLabelRepairRequired}
           onRetry={onRetryTranscriptValidation}
           retrying={transcriptValidationRetrying}
+          retryOperationKind={
+            selectedMeetingRetryOperation
+              ? transcriptValidationRetryOperation.kind
+              : null
+          }
+          retryUnavailable={
+            transcriptValidationBusy && !transcriptValidationRetrying
+          }
         />
         {regenerateNotesError ? (
           <section

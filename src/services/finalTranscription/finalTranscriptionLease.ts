@@ -2,6 +2,7 @@ export type FinalTranscriptionStage =
   | 'preparing'
   | 'transcribing_mic'
   | 'transcribing_system'
+  | 'attributing_speakers'
   | 'reviewing_integrity'
   | 'saving';
 
@@ -11,6 +12,7 @@ export type FinalTranscriptionFailure =
   | 'resource_policy_denied'
   | 'required_source_failed'
   | 'integrity_rejected'
+  | 'speaker_attribution_rejected'
   | 'conditional_save_conflict'
   | 'cancelled';
 
@@ -23,6 +25,8 @@ export type FinalTranscriptionLease = {
   startedAt: string;
   deadlineAt: string;
   stage: FinalTranscriptionStage;
+  expectedTranscriptSHA256?: string;
+  expectedSourcePathsSHA256?: string;
 };
 
 const MINIMUM_FINAL_TRANSCRIPTION_MS = 15 * 60_000;
@@ -71,9 +75,14 @@ export const readFinalTranscriptionLease = (
       'preparing',
       'transcribing_mic',
       'transcribing_system',
+      'attributing_speakers',
       'reviewing_integrity',
       'saving',
-    ].includes(String(lease.stage))
+    ].includes(String(lease.stage)) ||
+    (lease.expectedTranscriptSHA256 !== undefined &&
+      !/^[a-f0-9]{64}$/i.test(String(lease.expectedTranscriptSHA256))) ||
+    (lease.expectedSourcePathsSHA256 !== undefined &&
+      !/^[a-f0-9]{64}$/i.test(String(lease.expectedSourcePathsSHA256)))
   ) {
     return null;
   }

@@ -764,7 +764,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     expect(reviewProjectScopeMock).not.toHaveBeenCalled();
   });
 
-  it('keeps projects without a reliable signal out of In motion', async () => {
+  it('lists durable themes without inventing health-based groups', async () => {
     getProjectPortfolioMock.mockResolvedValue([
       {
         ...qualified(),
@@ -794,14 +794,14 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
 
     await act(async () => root.render(<ProjectsExecutionTab />));
 
-    const group = (heading: string) =>
-      Array.from(container.querySelectorAll('h2')).find(
-        (element) => element.textContent === heading,
-      )?.parentElement?.textContent;
-    expect(group('Needs attention')).toContain('Migration readiness');
-    expect(group('In motion')).toContain('Archive launch');
-    expect(group('In motion')).not.toContain('Sandbox readiness');
-    expect(group('Awaiting signal')).toContain('Sandbox readiness');
+    const current = container.querySelector(
+      '[data-testid="current-projects"]',
+    )?.textContent;
+    expect(current).toContain('Migration readiness');
+    expect(current).toContain('Archive launch');
+    expect(current).toContain('Sandbox readiness');
+    expect(container.textContent).not.toContain('Awaiting signal');
+    expect(container.textContent).not.toContain('In motion');
   });
 
   it('keeps unqualified records in a secondary disclosure', async () => {
@@ -834,35 +834,81 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     ).toBeNull();
   });
 
-  it('reviews legacy scope automatically and renders the returned qualification', async () => {
+  it('does not auto-review legacy fragments one at a time', async () => {
     getProjectPortfolioMock
       .mockResolvedValueOnce([{ ...qualified(), metadata: null }])
       .mockResolvedValue([qualified()]);
-    reviewProjectScopeMock.mockResolvedValue({
-      reviewed: 1,
-      remaining: 0,
-      deferred: false,
-    });
     await act(async () => root.render(<ProjectsExecutionTab />));
-    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
-    expect(
-      container.querySelector('[data-testid="current-projects"]')?.textContent,
-    ).toContain('Project Orion');
+    expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Discussed work');
   });
 
-  it('publishes a discovered initiative before starting legacy candidate review', async () => {
+  it('publishes synthesized themes in one portfolio-level pass', async () => {
     vi.useFakeTimers();
     try {
       getProjectPortfolioMock
         .mockResolvedValueOnce([])
         .mockResolvedValue([qualified()]);
+      discoverProjectInitiativeMock.mockResolvedValueOnce({
+        discovered: 1,
+        discoveredProjectId: 'project-1',
+        remaining: 0,
+        failed: 0,
+        deferred: false,
+      });
+      await act(async () => root.render(<ProjectsExecutionTab />));
+      expect(container.textContent).toContain('Project Orion');
+      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(discoverProjectInitiativeMock).toHaveBeenCalledOnce();
+      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains loaded records when theme synthesis fails and offers retry', async () => {
+    discoverProjectInitiativeMock.mockRejectedValue(new Error('offline'));
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain('Project Orion');
+    expect(container.textContent).toContain('Retry synthesis');
+    expect(container.textContent).not.toContain('No projects');
+  });
+
+  it('retries a failed portfolio synthesis only after an explicit action', async () => {
+    discoverProjectInitiativeMock.mockResolvedValueOnce({
+      discovered: 0,
+      remaining: 1,
+      failed: 1,
+      deferred: false,
+    });
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(discoverProjectInitiativeMock).toHaveBeenCalledOnce();
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Retry synthesis',
+    );
+    discoverProjectInitiativeMock.mockResolvedValueOnce({
+      discovered: 0,
+      remaining: 0,
+      failed: 0,
+      deferred: false,
+    });
+    await act(async () => retry?.click());
+    expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
+    expect(discoverProjectInitiativeMock).toHaveBeenLastCalledWith({
+      retryFailed: true,
+    });
+  });
+
+  it('waits and retries when synthesis is deferred by foreground work', async () => {
+    vi.useFakeTimers();
+    try {
       discoverProjectInitiativeMock
         .mockResolvedValueOnce({
-          discovered: 1,
-          discoveredProjectId: 'project-1',
+          discovered: 0,
           remaining: 1,
           failed: 0,
-          deferred: false,
+          deferred: true,
         })
         .mockResolvedValueOnce({
           discovered: 0,
@@ -871,10 +917,8 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
           deferred: false,
         });
       await act(async () => root.render(<ProjectsExecutionTab />));
-      expect(container.textContent).toContain('Project Orion');
-      expect(container.textContent).toContain('1 source remaining');
-      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
-      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(container.textContent).toContain('resume when Pluto is free');
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
       expect(discoverProjectInitiativeMock).toHaveBeenCalledTimes(2);
       expect(reviewProjectScopeMock).not.toHaveBeenCalled();
     } finally {
@@ -882,248 +926,68 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     }
   });
 
-  it('retains loaded records when scope review fails and offers retry', async () => {
-    getProjectPortfolioMock.mockResolvedValue([
-      { ...qualified(), metadata: null },
-    ]);
-    reviewProjectScopeMock.mockRejectedValue(new Error('offline'));
+  it('describes a synthesis failure without hiding saved context', async () => {
+    discoverProjectInitiativeMock.mockRejectedValue(new Error('offline'));
     await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain('couldn’t refresh themes');
     expect(container.textContent).toContain('Project Orion');
-    expect(container.textContent).toContain('Retry');
-    expect(container.textContent).not.toContain('No projects');
   });
 
-  it('continues after a malformed candidate and stops once only failed candidates remain', async () => {
-    vi.useFakeTimers();
-    try {
-      const failed = { ...qualified(), metadata: null };
-      const pending = { ...qualified(), id: 'project-2', metadata: null };
-      getProjectPortfolioMock
-        .mockResolvedValueOnce([failed, pending])
-        .mockResolvedValueOnce([failed, pending])
-        .mockResolvedValue([failed, { ...qualified(), id: 'project-2' }]);
-      reviewProjectScopeMock
-        .mockResolvedValueOnce({
-          reviewed: 0,
-          remaining: 2,
-          deferred: false,
-          failedProjectId: 'project-1',
-        })
-        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false });
-      await act(async () => root.render(<ProjectsExecutionTab />));
-      await act(async () => vi.advanceTimersByTimeAsync(500));
-      expect(reviewProjectScopeMock).toHaveBeenNthCalledWith(2, {
-        excludeProjectIds: ['project-1'],
-      });
-      expect(
-        container.querySelector('[data-testid="current-projects"]')
-          ?.textContent,
-      ).toContain('Project Orion');
-      expect(container.textContent).toContain('1 item still needs review');
-      expect(container.textContent).not.toContain('Pluto is looking');
-      await act(async () => vi.advanceTimersByTimeAsync(10000));
-      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(2);
-      const retry = Array.from(container.querySelectorAll('button')).find(
-        (button) => button.textContent === 'Retry',
-      );
-      reviewProjectScopeMock.mockResolvedValue({
-        reviewed: 1,
-        remaining: 0,
-        deferred: false,
-      });
-      await act(async () => retry?.click());
-      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
-        excludeProjectIds: [],
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('reconciles skipped candidates after concurrent classification and continues untouched work', async () => {
-    vi.useFakeTimers();
-    try {
-      const a = { ...qualified(), metadata: null };
-      const b = { ...a, id: 'b' };
-      const c = { ...a, id: 'c' };
-      getProjectPortfolioMock
-        .mockResolvedValueOnce([a, b, c])
-        .mockResolvedValueOnce([a, b, c])
-        .mockResolvedValueOnce([qualified(), { ...qualified(), id: 'b' }, c])
-        .mockResolvedValue([
-          qualified(),
-          { ...qualified(), id: 'b' },
-          { ...qualified(), id: 'c' },
-        ]);
-      reviewProjectScopeMock
-        .mockResolvedValueOnce({
-          reviewed: 0,
-          remaining: 3,
-          deferred: false,
-          failedProjectId: a.id,
-        })
-        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false })
-        .mockResolvedValueOnce({ reviewed: 1, remaining: 0, deferred: false });
-      await act(async () => root.render(<ProjectsExecutionTab />));
-      await act(async () => vi.advanceTimersByTimeAsync(1000));
-      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(3);
-      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
-        excludeProjectIds: [],
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not describe a failed review as active discovery', async () => {
-    getProjectPortfolioMock.mockResolvedValue([
-      { ...qualified(), metadata: null },
-    ]);
-    reviewProjectScopeMock.mockRejectedValue(new Error('offline'));
-    await act(async () => root.render(<ProjectsExecutionTab />));
-    expect(container.textContent).toContain('Project review is incomplete');
-    expect(container.textContent).not.toContain('Pluto is looking');
-  });
-
-  it('offers explicit retry for current unresolved reviews without an automatic loop', async () => {
-    vi.useFakeTimers();
-    try {
-      const unresolved = {
-        ...qualified(),
-        metadata: JSON.stringify({
-          projectQualification: {
-            version: 1,
-            reviewVersion: 2,
-            state: 'unassessed',
-            source: 'review',
-            reason: 'The earlier plan is missing.',
-            issue: 'model_uncertain',
-            assessedAt: '2026-08-28',
-          },
-        }),
-      };
-      getProjectPortfolioMock.mockResolvedValue([unresolved]);
-      reviewProjectScopeMock.mockResolvedValue({
-        reviewed: 1,
-        remaining: 1,
-        deferred: false,
-        unresolvedProjectId: unresolved.id,
-      });
-      await act(async () => root.render(<ProjectsExecutionTab />));
-      expect(reviewProjectScopeMock).not.toHaveBeenCalled();
-      expect(container.textContent).toContain('1 item still needs review');
-      expect(container.textContent).toContain('The earlier plan is missing.');
-      const retry = Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent === 'Retry',
-      );
-      await act(async () => retry?.click());
-      expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
-      await act(async () => vi.advanceTimersByTimeAsync(10000));
-      expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
-      expect(container.textContent).toContain('Project review is incomplete');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not restart an unresolved explicit retry after navigation', async () => {
-    const unresolved = {
+  it('separates one-meeting auto-discoveries into suggested themes', async () => {
+    const suggestion = {
       ...qualified(),
+      meeting_count: 1,
       metadata: JSON.stringify({
         projectQualification: {
           version: 1,
-          reviewVersion: 2,
-          state: 'unassessed',
+          state: 'qualified',
           source: 'review',
-          reason: 'Still missing context.',
+          reason: 'Generated from one meeting.',
           assessedAt: '2026-08-28',
+          outcome: 'Replace legacy billing',
         },
+        projectInitiativeDiscovery: { version: 12, sourceMeetingId: 'm1' },
       }),
     };
-    getProjectPortfolioMock.mockResolvedValue([unresolved]);
-    let finish!: (value: any) => void;
-    reviewProjectScopeMock.mockReturnValue(
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-    );
+    getProjectPortfolioMock.mockResolvedValue([suggestion]);
     await act(async () => root.render(<ProjectsExecutionTab />));
-    const retry = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Retry',
+    expect(container.textContent).toContain('Suggested themes');
+    expect(container.textContent).toContain(
+      'One conversation, review before adding',
     );
-    await act(async () => retry?.click());
-    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
-    await act(async () =>
-      root.render(<ProjectsExecutionTab selectedProjectId={unresolved.id} />),
-    );
-    await act(async () =>
-      finish({
-        reviewed: 1,
-        remaining: 1,
-        deferred: false,
-        unresolvedProjectId: unresolved.id,
-        attemptedProjectId: unresolved.id,
-      }),
-    );
-    await act(async () =>
-      root.render(<ProjectsExecutionTab selectedProjectId={null} />),
-    );
-    expect(reviewProjectScopeMock).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('1 item still needs review');
+    expect(
+      container.querySelector(
+        '[data-testid="current-projects"] [data-project-id="project-1"]',
+      ),
+    ).toBeNull();
   });
 
-  it('automatically revisits legacy uncertainty once and continues with other candidates', async () => {
-    vi.useFakeTimers();
-    try {
-      const legacy = {
+  it('does not start theme synthesis while a dossier is selected', async () => {
+    await act(async () =>
+      root.render(<ProjectsExecutionTab selectedProjectId="project-1" />),
+    );
+    expect(getProjectBriefMock).toHaveBeenCalledWith('project-1');
+    expect(discoverProjectInitiativeMock).not.toHaveBeenCalled();
+  });
+
+  it('shows synthesized current focus and recent change on the overview', async () => {
+    getProjectPortfolioMock.mockResolvedValue([
+      {
         ...qualified(),
-        metadata: JSON.stringify({
-          projectQualification: {
-            version: 1,
-            state: 'unassessed',
-            source: 'review',
-            reason: 'Insufficient grounded evidence for project scope.',
-            assessedAt: '2026-08-28',
-          },
-        }),
-      };
-      const unresolved = {
-        ...legacy,
-        metadata: JSON.stringify({
-          projectQualification: {
-            version: 1,
-            reviewVersion: 2,
-            state: 'unassessed',
-            source: 'review',
-            reason: 'Still missing context.',
-            assessedAt: '2026-08-28',
-          },
-        }),
-      };
-      const pending = { ...qualified(), id: 'next', metadata: null };
-      getProjectPortfolioMock
-        .mockResolvedValueOnce([legacy, pending])
-        .mockResolvedValueOnce([unresolved, pending])
-        .mockResolvedValue([unresolved, { ...qualified(), id: 'next' }]);
-      reviewProjectScopeMock
-        .mockResolvedValueOnce({
-          reviewed: 1,
-          remaining: 2,
-          deferred: false,
-          unresolvedProjectId: legacy.id,
-        })
-        .mockResolvedValueOnce({ reviewed: 1, remaining: 1, deferred: false });
-      await act(async () => root.render(<ProjectsExecutionTab />));
-      expect(container.textContent).toContain('· 1 remaining');
-      await act(async () => vi.advanceTimersByTimeAsync(10000));
-      expect(reviewProjectScopeMock).toHaveBeenCalledTimes(2);
-      expect(reviewProjectScopeMock).toHaveBeenLastCalledWith({
-        excludeProjectIds: [legacy.id],
-      });
-      expect(container.textContent).toContain('1 item still needs review');
-    } finally {
-      vi.useRealTimers();
-    }
+        current_focus: 'Validate access rules before launch',
+        recent_change: 'The first collection is now indexed.',
+        open_thread_count: 2,
+      },
+    ]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+    expect(container.textContent).toContain(
+      'Validate access rules before launch',
+    );
+    expect(container.textContent).toContain('Since last time');
+    expect(container.textContent).toContain(
+      'The first collection is now indexed.',
+    );
+    expect(container.textContent).toContain('2 open threads');
   });
 
   it('opens real dossier and returns to the overview', async () => {
@@ -1135,7 +999,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
         ) as HTMLButtonElement
       ).click(),
     );
-    expect(container.textContent).toContain('Source');
+    expect(container.textContent).toContain('Conversation history');
     const back = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.includes('Back'),
     );

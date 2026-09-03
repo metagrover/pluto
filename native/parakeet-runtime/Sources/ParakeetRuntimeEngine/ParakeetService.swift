@@ -9,6 +9,7 @@ public actor ParakeetService {
     private let transcriber: ParakeetTranscriber
     private let liveDriver: any ParakeetLiveDriving
     private let eouDriver: any ParakeetEouDriving
+    private let speakerEvidenceDriver: any SpeakerEvidenceDriving
     private let liveConfigurationID: ParakeetLiveConfigurationID
     private let preparationProgressSink:
         (@Sendable (String, ModelPreparationProgress) -> Void)?
@@ -24,6 +25,7 @@ public actor ParakeetService {
         inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver(),
         liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver(),
         eouDriver: any ParakeetEouDriving = FluidAudioEouDriver(),
+        speakerEvidenceDriver: (any SpeakerEvidenceDriving)? = nil,
         liveConfigurationID: ParakeetLiveConfigurationID = .pinnedDefault,
         preparationProgressSink:
             (@Sendable (String, ModelPreparationProgress) -> Void)? = nil
@@ -35,6 +37,14 @@ public actor ParakeetService {
         self.transcriber = ParakeetTranscriber(driver: inferenceDriver)
         self.liveDriver = liveDriver
         self.eouDriver = eouDriver
+        self.speakerEvidenceDriver = speakerEvidenceDriver ?? SpeakerEvidenceCoordinator(
+            diarizer: FluidAudioOfflineDiarizer(
+                modelsRoot: self.modelRoot.appendingPathComponent("diarization", isDirectory: true)
+            ),
+            energyAnalyzer: SpeakerEnergyAnalyzer(),
+            manifest: ProductionDiarizationManifest.current,
+            runtimeVersion: "fluidaudio-0.15.5"
+        )
         self.liveConfigurationID = liveConfigurationID
         self.preparationProgressSink = preparationProgressSink
     }
@@ -116,7 +126,7 @@ public actor ParakeetService {
                     generation: metadata.generation
                 )
                 return .success(id: request.id)
-            case .prepare, .transcribe, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
+            case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
                 .eouCancel, .eouReset:
                 return .failure(id: request.id, code: .invalidRequest)
             }
@@ -167,6 +177,8 @@ public actor ParakeetService {
             return await prepare(request)
         case .transcribe:
             return await transcribe(request)
+        case .speakerEvidence:
+            return await analyzeSpeakerEvidence(request)
         case .cancel, .shutdown, .streamOpen, .streamAppend, .streamFlush, .streamCancel,
             .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
             return .failure(id: request.id, code: .invalidRequest)
@@ -248,6 +260,33 @@ public actor ParakeetService {
         }
     }
 
+    private func analyzeSpeakerEvidence(_ request: RuntimeRequest) async -> RuntimeResponse {
+        guard
+            let mixedAudioPath = request.mixedAudioPath,
+            let micAudioPath = request.micAudioPath,
+            let systemAudioPath = request.systemAudioPath
+        else { return .failure(id: request.id, code: .invalidRequest) }
+        do {
+            let policy = PathPolicy(root: audioRoot.path)
+            let mixedURL = try policy.approve(path: mixedAudioPath, kind: .regularFile)
+            let micURL = try policy.approve(path: micAudioPath, kind: .regularFile)
+            let systemURL = try policy.approve(path: systemAudioPath, kind: .regularFile)
+            let output = try await speakerEvidenceDriver.analyze(
+                mixedURL: mixedURL,
+                micURL: micURL,
+                systemURL: systemURL
+            )
+            try Task.checkCancellation()
+            return .speakerEvidence(id: request.id, output: output)
+        } catch is CancellationError {
+            return .failure(id: request.id, code: .cancelled)
+        } catch let failure as RuntimeFailure {
+            return .failure(id: request.id, code: failure)
+        } catch {
+            return .failure(id: request.id, code: .diarizationFailed)
+        }
+    }
+
     private func handleEou(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
         guard
             request.schemaVersion == 1,
@@ -309,7 +348,7 @@ public actor ParakeetService {
                     generation: metadata.generation
                 )
                 events = []
-            case .prepare, .transcribe, .cancel, .shutdown, .streamOpen, .streamAppend,
+            case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .streamOpen, .streamAppend,
                 .streamFlush, .streamCancel, .streamReset:
                 return .failure(id: request.id, code: .invalidRequest)
             }

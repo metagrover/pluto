@@ -46,6 +46,7 @@
     "benchmark:production-speaker-attribution": "node --experimental-strip-types scripts/run_production_speaker_attribution_acceptance.ts",
     "benchmark:meeting-notes-quality": "RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 vitest run --config vitest.benchmark.config.ts --reporter=verbose",
     "benchmark:meeting-notes-latency:validate": "tsx scripts/validate_private_meeting_notes_latency_manifest.ts",
+    "benchmark:meeting-summaries": "tsx scripts/benchmark_meeting_summaries.ts",
     "benchmark:meeting-notes-latency": "tsx scripts/run_meeting_notes_latency_benchmark.ts",
     "report:meeting-notes-latency": "tsx scripts/report_meeting_notes_latency.ts",
     "benchmark:ask-pluto": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/run_ask_pluto_benchmark.ts",

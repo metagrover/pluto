@@ -16,6 +16,7 @@ export const SEARCH_PLUTO_LIMIT_PER_KIND = 5;
 interface BuildSearchPlutoResultsInput {
   query: string;
   meetings: Meeting[];
+  meetingMatches?: Meeting[];
   entities: Entity[];
 }
 
@@ -37,6 +38,7 @@ const sortLatestCreated = <T extends { created_at?: string | null }>(
 export const buildSearchPlutoResults = ({
   query,
   meetings,
+  meetingMatches,
   entities,
 }: BuildSearchPlutoResultsInput): SearchPlutoResult[] => {
   const normalizedQuery = normalize(query);
@@ -75,14 +77,15 @@ export const buildSearchPlutoResults = ({
     }));
 
   const meetingResults = sortLatestCreated(
-    meetings.filter((meeting) =>
-      matchesQuery(
-        normalizedQuery,
-        meeting.title,
-        meeting.enhanced_notes,
-        meeting.user_notes,
+    meetingMatches ??
+      meetings.filter((meeting) =>
+        matchesQuery(
+          normalizedQuery,
+          meeting.title,
+          meeting.enhanced_notes,
+          meeting.user_notes,
+        ),
       ),
-    ),
   )
     .slice(0, SEARCH_PLUTO_LIMIT_PER_KIND)
     .map<SearchPlutoResult>((meeting) => ({

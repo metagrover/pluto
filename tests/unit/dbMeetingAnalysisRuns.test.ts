@@ -16,6 +16,7 @@ import {
   getMeeting,
   getMeetingAnalysisPublicationRevisions,
   getMeetingAnalysisRun,
+  isMeetingAnalysisAutomaticRetryExhausted,
   listMeetingAnalysisRunMetrics,
   publishMeetingNotesIfCurrent,
   recoverInterruptedMeetingAnalysisRuns,
@@ -139,11 +140,13 @@ const start = (
   revisions: NonNullable<
     ReturnType<typeof getMeetingAnalysisPublicationRevisions>
   >,
+  reason: 'automatic' | 'manual' = 'manual',
 ) =>
   beginMeetingAnalysisRun({
     meetingId,
     runId,
     inputRevision,
+    reason,
     ...revisions,
   });
 
@@ -165,6 +168,54 @@ const publish = (
   });
 
 describe('meeting analysis run publication', () => {
+  it('counts automatic attempts for one input revision and resets for changed input', () => {
+    const meetingId = 'automatic-attempt-count';
+    const revisions = fixture(meetingId);
+
+    start(meetingId, 'automatic-1', 'fingerprint-a', revisions, 'automatic');
+    expect(getMeetingAnalysisRun(meetingId)?.automatic_attempt_count).toBe(1);
+
+    start(meetingId, 'automatic-2', 'fingerprint-a', revisions, 'automatic');
+    expect(getMeetingAnalysisRun(meetingId)?.automatic_attempt_count).toBe(2);
+
+    start(meetingId, 'automatic-3', 'fingerprint-b', revisions, 'automatic');
+    expect(getMeetingAnalysisRun(meetingId)?.automatic_attempt_count).toBe(1);
+  });
+
+  it('does not consume the automatic-attempt budget for manual runs', () => {
+    const meetingId = 'manual-attempt-count';
+    const revisions = fixture(meetingId);
+
+    start(meetingId, 'automatic-1', 'fingerprint-a', revisions, 'automatic');
+    start(meetingId, 'manual-1', 'fingerprint-a', revisions, 'manual');
+
+    expect(getMeetingAnalysisRun(meetingId)?.automatic_attempt_count).toBe(1);
+  });
+
+  it('derives automatic exhaustion only while the failed source revisions remain current', () => {
+    const meetingId = 'automatic-exhaustion';
+    const revisions = fixture(meetingId);
+    start(meetingId, 'automatic-1', 'fingerprint-a', revisions, 'automatic');
+    start(meetingId, 'automatic-2', 'fingerprint-a', revisions, 'automatic');
+    updateMeetingAnalysisRunStatus({
+      meetingId,
+      runId: 'automatic-2',
+      notesStatus: 'failed',
+      secondaryStatus: 'pending',
+      stage: 'notes_writer',
+      errorCode: 'notes_writer_failed',
+    });
+
+    expect(
+      isMeetingAnalysisAutomaticRetryExhausted(getMeeting(meetingId)),
+    ).toBe(true);
+
+    saveMeeting({ ...getMeeting(meetingId), user_notes: 'Changed input.' });
+    expect(
+      isMeetingAnalysisAutomaticRetryExhausted(getMeeting(meetingId)),
+    ).toBe(false);
+  });
+
   it('derives a placeholder title from reviewed notes without a separate model call', () => {
     const id = 'placeholder-title';
     const revisions = fixture(id);
@@ -661,6 +712,7 @@ describe('meeting analysis run publication', () => {
       runId: 'run-queued',
       inputRevision: 'input-queued',
       ...revisions,
+      reason: 'manual',
       stage: 'queued',
       queuePosition: 3,
     });
@@ -701,6 +753,7 @@ describe('meeting analysis run publication', () => {
       runId: 'run-snapshot-first',
       inputRevision: 'input-first',
       ...first,
+      reason: 'manual',
       stage: 'queued',
       queuePosition: 2,
     });
@@ -709,6 +762,7 @@ describe('meeting analysis run publication', () => {
       runId: 'run-snapshot-second',
       inputRevision: 'input-second',
       ...second,
+      reason: 'manual',
       stage: 'queued',
       queuePosition: 3,
     });
@@ -799,6 +853,34 @@ describe('meeting analysis run publication', () => {
         (entry) => entry.runId === 'deleted-history-run',
       ),
     ).toBe(false);
+  });
+
+  it('persists a stable failure code with failed run metrics', () => {
+    const meetingId = 'metric-failure-code';
+    fixture(meetingId);
+    const metrics = createMeetingNotesRunMetrics({
+      reason: 'automatic',
+      sourceSegmentCount: 1,
+      sourceCharacterCount: 34,
+      startedAtMs: 0,
+    }).snapshot('failed', 500);
+
+    upsertMeetingAnalysisRunMetric({
+      meetingId,
+      runId: 'metric-failed',
+      reason: 'automatic',
+      status: 'failed',
+      errorCode: 'notes_context_exhausted',
+      metrics,
+      startedAt: '2100-01-01T00:00:00.000Z',
+      completedAt: '2100-01-01T00:00:00.500Z',
+    });
+
+    expect(listMeetingAnalysisRunMetrics({ limit: 1 })[0]).toMatchObject({
+      runId: 'metric-failed',
+      status: 'failed',
+      errorCode: 'notes_context_exhausted',
+    });
   });
 
   it('does not write secondary fields after the source revision is stale', () => {

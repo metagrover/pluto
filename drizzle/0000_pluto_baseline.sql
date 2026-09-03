@@ -93,6 +93,132 @@ CREATE TABLE `entities` (
 CREATE INDEX `idx_entities_type` ON `entities` (`type`);--> statement-breakpoint
 CREATE INDEX `idx_entities_normalized_name` ON `entities` (`normalized_name`);--> statement-breakpoint
 CREATE INDEX `idx_entities_status` ON `entities` (`status`);--> statement-breakpoint
+CREATE TABLE `entity_alias_suggestions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`entity_id` text NOT NULL,
+	`suggested_name` text NOT NULL,
+	`source_meeting_ids_json` text DEFAULT '[]' NOT NULL,
+	`evidence_snippet` text,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	`updated_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	CONSTRAINT "entity_alias_suggestions_status_check" CHECK("entity_alias_suggestions"."status" IN ('pending','merged','dismissed'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_entity_alias_suggestions_unique` ON `entity_alias_suggestions` (`entity_id`,`suggested_name`);--> statement-breakpoint
+CREATE INDEX `idx_entity_alias_suggestions_lookup` ON `entity_alias_suggestions` (`entity_id`,`status`);--> statement-breakpoint
+CREATE TABLE `entity_corrections` (
+	`id` text PRIMARY KEY NOT NULL,
+	`entity_id` text NOT NULL,
+	`item_type` text NOT NULL,
+	`fingerprint` text NOT NULL,
+	`reason` text,
+	`created_at` datetime DEFAULT CURRENT_TIMESTAMP
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_entity_corrections_unique` ON `entity_corrections` (`entity_id`,`item_type`,`fingerprint`);--> statement-breakpoint
+CREATE INDEX `idx_entity_corrections_lookup` ON `entity_corrections` (`entity_id`,"created_at" desc);--> statement-breakpoint
+CREATE TABLE `entity_dreaming_aliases` (
+	`id` text PRIMARY KEY NOT NULL,
+	`proposal_id` text NOT NULL,
+	`entity_id` text NOT NULL,
+	`entity_type` text NOT NULL,
+	`normalized_name` text NOT NULL,
+	`display_name` text NOT NULL,
+	`source` text NOT NULL,
+	`evidence_json` text NOT NULL,
+	`active` integer DEFAULT 1 NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`removed_at` text,
+	FOREIGN KEY (`proposal_id`) REFERENCES `entity_dreaming_proposals`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`entity_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "entity_dreaming_aliases_entity_type_check" CHECK("entity_dreaming_aliases"."entity_type" IN ('project','person')),
+	CONSTRAINT "entity_dreaming_aliases_source_check" CHECK("entity_dreaming_aliases"."source" = 'dreaming'),
+	CONSTRAINT "entity_dreaming_aliases_evidence_check" CHECK(json_valid("entity_dreaming_aliases"."evidence_json")),
+	CONSTRAINT "entity_dreaming_aliases_active_check" CHECK("entity_dreaming_aliases"."active" IN (0,1)),
+	CONSTRAINT "entity_dreaming_aliases_removed_check" CHECK(("entity_dreaming_aliases"."active" = 1 AND "entity_dreaming_aliases"."removed_at" IS NULL) OR ("entity_dreaming_aliases"."active" = 0 AND "entity_dreaming_aliases"."removed_at" IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `entity_dreaming_aliases_proposal_id_unique` ON `entity_dreaming_aliases` (`proposal_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_entity_dreaming_aliases_active_name` ON `entity_dreaming_aliases` (`entity_type`,`normalized_name`) WHERE "entity_dreaming_aliases"."active" = 1;--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_aliases_entity` ON `entity_dreaming_aliases` (`entity_id`,`entity_type`,`active`);--> statement-breakpoint
+CREATE TABLE `entity_dreaming_person_claims` (
+	`id` text PRIMARY KEY NOT NULL,
+	`proposal_id` text NOT NULL,
+	`entity_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`value` text NOT NULL,
+	`evidence_json` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`proposal_id`) REFERENCES `entity_dreaming_proposals`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`entity_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "entity_dreaming_person_claims_kind_check" CHECK("entity_dreaming_person_claims"."kind" IN ('person_headline','person_focus','person_collaborator')),
+	CONSTRAINT "entity_dreaming_person_claims_evidence_check" CHECK(json_valid("entity_dreaming_person_claims"."evidence_json"))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `entity_dreaming_person_claims_proposal_id_unique` ON `entity_dreaming_person_claims` (`proposal_id`);--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_person_claims_entity` ON `entity_dreaming_person_claims` (`entity_id`,`kind`,`created_at`);--> statement-breakpoint
+CREATE TABLE `entity_dreaming_proposals` (
+	`id` text PRIMARY KEY NOT NULL,
+	`run_id` text NOT NULL,
+	`entity_id` text NOT NULL,
+	`entity_type` text NOT NULL,
+	`kind` text NOT NULL,
+	`payload_json` text NOT NULL,
+	`evidence_json` text NOT NULL,
+	`fingerprint` text NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`decided_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`run_id`) REFERENCES `entity_dreaming_runs`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "entity_dreaming_proposals_entity_type_check" CHECK("entity_dreaming_proposals"."entity_type" IN ('project','person')),
+	CONSTRAINT "entity_dreaming_proposals_kind_check" CHECK("entity_dreaming_proposals"."kind" IN ('project_summary','project_milestone','project_commitment','project_alias','person_headline','person_focus','person_collaborator','person_alias')),
+	CONSTRAINT "entity_dreaming_proposals_payload_check" CHECK(json_valid("entity_dreaming_proposals"."payload_json")),
+	CONSTRAINT "entity_dreaming_proposals_evidence_check" CHECK(json_valid("entity_dreaming_proposals"."evidence_json")),
+	CONSTRAINT "entity_dreaming_proposals_fingerprint_check" CHECK(length("entity_dreaming_proposals"."fingerprint") > 0),
+	CONSTRAINT "entity_dreaming_proposals_status_check" CHECK("entity_dreaming_proposals"."status" IN ('pending','accepted','rejected','stale')),
+	CONSTRAINT "entity_dreaming_proposals_decision_check" CHECK(("entity_dreaming_proposals"."status" = 'pending' AND "entity_dreaming_proposals"."decided_at" IS NULL) OR ("entity_dreaming_proposals"."status" <> 'pending' AND "entity_dreaming_proposals"."decided_at" IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_proposals_entity_status` ON `entity_dreaming_proposals` (`entity_id`,`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_proposals_run` ON `entity_dreaming_proposals` (`run_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `entity_dreaming_proposals_run_fingerprint_unique` ON `entity_dreaming_proposals` (`run_id`,`fingerprint`);--> statement-breakpoint
+CREATE TABLE `entity_dreaming_runs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`entity_id` text NOT NULL,
+	`entity_type` text NOT NULL,
+	`source_revision` text NOT NULL,
+	`decision_revision` text,
+	`status` text NOT NULL,
+	`model` text NOT NULL,
+	`prompt_version` text NOT NULL,
+	`attempt_count` integer DEFAULT 0 NOT NULL,
+	`failure_count` integer DEFAULT 0 NOT NULL,
+	`start_mode` text NOT NULL,
+	`error_code` text,
+	`lease_token` text,
+	`started_at` text NOT NULL,
+	`completed_at` text,
+	`next_retry_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	CONSTRAINT "entity_dreaming_runs_entity_type_check" CHECK("entity_dreaming_runs"."entity_type" IN ('project','person')),
+	CONSTRAINT "entity_dreaming_runs_status_check" CHECK("entity_dreaming_runs"."status" IN ('running','no_change','proposed','failed','cancelled')),
+	CONSTRAINT "entity_dreaming_runs_attempt_count_check" CHECK("entity_dreaming_runs"."attempt_count" >= 0),
+	CONSTRAINT "entity_dreaming_runs_failure_count_check" CHECK("entity_dreaming_runs"."failure_count" >= 0 AND "entity_dreaming_runs"."failure_count" <= "entity_dreaming_runs"."attempt_count"),
+	CONSTRAINT "entity_dreaming_runs_start_mode_check" CHECK("entity_dreaming_runs"."start_mode" IN ('automatic','manual')),
+	CONSTRAINT "entity_dreaming_runs_error_code_check" CHECK("entity_dreaming_runs"."error_code" IS NULL OR "entity_dreaming_runs"."error_code" IN ('provider_unavailable','generation_failed','validation_failed','persistence_failed','lease_expired')),
+	CONSTRAINT "entity_dreaming_runs_lease_check" CHECK(("entity_dreaming_runs"."status" = 'running' AND "entity_dreaming_runs"."lease_token" IS NOT NULL AND "entity_dreaming_runs"."completed_at" IS NULL) OR ("entity_dreaming_runs"."status" <> 'running' AND "entity_dreaming_runs"."lease_token" IS NULL AND "entity_dreaming_runs"."completed_at" IS NOT NULL)),
+	CONSTRAINT "entity_dreaming_runs_failure_check" CHECK(("entity_dreaming_runs"."status" = 'failed' AND "entity_dreaming_runs"."error_code" IS NOT NULL) OR ("entity_dreaming_runs"."status" <> 'failed' AND "entity_dreaming_runs"."error_code" IS NULL)),
+	CONSTRAINT "entity_dreaming_runs_retry_check" CHECK("entity_dreaming_runs"."next_retry_at" IS NULL OR "entity_dreaming_runs"."status" = 'failed')
+);
+--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_runs_status_retry` ON `entity_dreaming_runs` (`status`,`next_retry_at`);--> statement-breakpoint
+CREATE INDEX `idx_entity_dreaming_runs_entity_created` ON `entity_dreaming_runs` (`entity_id`,"created_at" desc);--> statement-breakpoint
+CREATE UNIQUE INDEX `entity_dreaming_runs_entity_revision_unique` ON `entity_dreaming_runs` (`entity_id`,`source_revision`);--> statement-breakpoint
 CREATE TABLE `entity_links` (
 	`id` text PRIMARY KEY NOT NULL,
 	`source_entity_id` text NOT NULL,
@@ -285,6 +411,7 @@ CREATE TABLE `meeting_analysis_run_history` (
 	`meeting_id` text NOT NULL,
 	`reason` text NOT NULL,
 	`status` text NOT NULL,
+	`error_code` text,
 	`metrics_json` text NOT NULL,
 	`started_at` text NOT NULL,
 	`completed_at` text,
@@ -304,6 +431,7 @@ CREATE TABLE `meeting_analysis_runs` (
 	`stage` text NOT NULL,
 	`queue_position` integer,
 	`error_code` text,
+	`automatic_attempt_count` integer DEFAULT 0 NOT NULL,
 	`started_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );
@@ -363,6 +491,7 @@ CREATE TABLE `meeting_entities` (
 	FOREIGN KEY (`entity_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `idx_meeting_entities_entity_meeting` ON `meeting_entities` (`entity_id`,`meeting_id`);--> statement-breakpoint
 CREATE TABLE `meetings` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,

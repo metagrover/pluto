@@ -6,7 +6,14 @@
  */
 
 import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
+import type { IdleDreamingResult } from '../../electron/dreaming/idleDreamingCoordinator';
+import type {
+  DreamingDecisionResult,
+  DreamingProposalRecord,
+} from '../../electron/dreaming/proposalStore';
+import type { DreamingEntityType } from '../../electron/dreaming/types';
 import type { PersonBriefingSummary } from '../utils/personBriefing';
+import type { ProjectPortfolioDisposition } from '../utils/projectQualification';
 
 // Type definitions matching the database schema
 export type EntityType =
@@ -306,6 +313,12 @@ export const updateProjectDisplayTitle = async (
 ): Promise<Entity> =>
   invoke('UPDATE_PROJECT_DISPLAY_TITLE', { projectId, title });
 
+export const setProjectPortfolioDisposition = async (
+  projectId: string,
+  disposition: ProjectPortfolioDisposition,
+): Promise<Entity> =>
+  invoke('SET_PROJECT_PORTFOLIO_DISPOSITION', { projectId, disposition });
+
 export const saveProjectMilestone = async (
   projectId: string,
   milestone: import('../utils/projectMilestones').UserProjectMilestoneInput,
@@ -330,6 +343,11 @@ export const mergeProject = async (
 ): Promise<void> =>
   invoke('MERGE_PROJECT', { projectId, destinationProjectId });
 
+export const addProjectAlias = async (
+  projectId: string,
+  aliasName: string,
+): Promise<void> => invoke('ADD_PROJECT_ALIAS', { projectId, aliasName });
+
 export const restoreProjectMerge = async (projectId: string): Promise<void> =>
   invoke('RESTORE_PROJECT_MERGE', projectId);
 
@@ -337,6 +355,11 @@ export const updatePersonName = async (
   personId: string,
   name: string,
 ): Promise<Entity> => invoke('UPDATE_PERSON_NAME', { personId, name });
+
+export const addPersonNameAlias = async (
+  personId: string,
+  aliasName: string,
+): Promise<void> => invoke('ADD_PERSON_NAME_ALIAS', { personId, aliasName });
 
 export const mergePerson = async (
   personId: string,
@@ -346,7 +369,7 @@ export const mergePerson = async (
 export const restorePersonMerge = async (personId: string): Promise<void> =>
   invoke('RESTORE_PERSON_MERGE', personId);
 
-/** Discover at most one source-grounded initiative from one conversation. */
+/** Synthesize durable project themes across structured meeting notes. */
 export const discoverProjectInitiative = async (
   options: { retryFailed?: boolean } = {},
 ): Promise<{
@@ -518,6 +541,13 @@ export const getPersonBriefing = async (
   return invoke('GET_PERSON_BRIEFING', personId);
 };
 
+export const resolvePersonCommitmentOwner = async (
+  actionId: string,
+  personId: string | null,
+): Promise<Entity> => {
+  return invoke('RESOLVE_PERSON_COMMITMENT_OWNER', { actionId, personId });
+};
+
 // =============================================
 // ACTION ITEM QUERIES
 // =============================================
@@ -571,6 +601,86 @@ export const getKnowledgeFeedSummary = async (
 // =============================================
 // HELPER FUNCTIONS
 // =============================================
+
+export interface EntityCorrectionRecord {
+  id: string;
+  entity_id: string;
+  item_type: string;
+  fingerprint: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export const recordEntityCorrection = async (input: {
+  entityId: string;
+  itemType: string;
+  fingerprint: string;
+  reason?: string;
+}): Promise<EntityCorrectionRecord> => {
+  return invoke('RECORD_ENTITY_CORRECTION', input);
+};
+
+export const getEntityCorrections = async (
+  entityId: string,
+): Promise<EntityCorrectionRecord[]> => {
+  return invoke('GET_ENTITY_CORRECTIONS', entityId);
+};
+
+export interface EntityAliasSuggestion {
+  id: string;
+  entity_id: string;
+  suggested_name: string;
+  source_meeting_ids_json: string;
+  evidence_snippet?: string | null;
+  status: 'pending' | 'merged' | 'dismissed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const getEntityAliasSuggestions = async (
+  entityId: string,
+): Promise<EntityAliasSuggestion[]> => {
+  return invoke('GET_ENTITY_ALIAS_SUGGESTIONS', entityId);
+};
+
+export const updateEntityAliasSuggestionStatus = async (
+  id: string,
+  status: 'pending' | 'merged' | 'dismissed',
+): Promise<{ success: boolean }> => {
+  return invoke('UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS', { id, status });
+};
+
+export const triggerDreamingNow = async (options: {
+  entityId: string;
+}): Promise<IdleDreamingResult> => {
+  return invoke('TRIGGER_DREAMING_NOW', options);
+};
+
+export interface DreamingProposalScope {
+  entityId: string;
+  entityType: DreamingEntityType;
+}
+
+export interface DreamingProposalDecision extends DreamingProposalScope {
+  proposalId: string;
+}
+
+export type { DreamingDecisionResult, DreamingProposalRecord };
+
+export const getPendingDreamingProposals = async (
+  scope: DreamingProposalScope,
+): Promise<DreamingProposalRecord[]> =>
+  invoke('GET_PENDING_DREAMING_PROPOSALS', scope);
+
+export const acceptDreamingProposal = async (
+  decision: DreamingProposalDecision,
+): Promise<DreamingDecisionResult> =>
+  invoke('ACCEPT_DREAMING_PROPOSAL', decision);
+
+export const rejectDreamingProposal = async (
+  decision: DreamingProposalDecision,
+): Promise<DreamingDecisionResult> =>
+  invoke('REJECT_DREAMING_PROPOSAL', decision);
 
 /**
  * Parse entity metadata JSON

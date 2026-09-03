@@ -1,4 +1,8 @@
 import type { Meeting } from '../types.ts';
+import {
+  hasVerifiedSpeakerAttribution,
+  readStoredSpeakerAttribution,
+} from '../utils/speakerAttributionTrust.ts';
 import { readDownstreamProcessingLease } from './downstreamProcessingLease.ts';
 import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValidation.ts';
 
@@ -13,8 +17,8 @@ export const shouldRunMeetingFinalTranscription = (
       meeting.finalization_status !== 'recovery_required' &&
       meeting.transcript_status === 'provisional' &&
       meeting.capture_journal_generation &&
-      meeting.transcript_json &&
-      (meeting.audio_path || meeting.system_audio_path),
+      (meeting.transcript_json || meeting.has_transcript) &&
+      (meeting.audio_path || meeting.system_audio_path || meeting.has_audio),
   );
 
 export const canRetryMeetingFinalTranscription = (
@@ -22,39 +26,99 @@ export const canRetryMeetingFinalTranscription = (
 ): boolean => {
   if (
     !meeting ||
-    meeting.transcript_status !== 'needs_attention' ||
+    !['needs_attention', 'validated'].includes(
+      String(meeting.transcript_status),
+    ) ||
     !meeting.capture_journal_generation ||
-    !(meeting.audio_path || meeting.system_audio_path)
+    !(
+      (meeting.audio_path &&
+        meeting.system_audio_path &&
+        meeting.mixed_audio_path &&
+        meeting.transcript_json) ||
+      (meeting.has_audio && meeting.has_transcript)
+    )
   ) {
     return false;
   }
+  if (canImproveHistoricalSpeakerLabels(meeting)) return true;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: { policy?: unknown; state?: unknown };
     };
-    return (
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'needs_attention'
+    return Boolean(
+      (meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'needs_attention') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'needs_attention'),
     );
   } catch {
     return false;
   }
 };
 
+export function canImproveHistoricalSpeakerLabels(
+  meeting: Partial<Meeting> | null | undefined,
+): boolean {
+  if (
+    !meeting ||
+    meeting.transcript_status !== 'validated' ||
+    !meeting.capture_journal_generation ||
+    !(
+      (meeting.audio_path &&
+        meeting.system_audio_path &&
+        meeting.mixed_audio_path &&
+        meeting.transcript_json) ||
+      (meeting.has_audio && meeting.has_transcript)
+    )
+  ) {
+    return false;
+  }
+  let completedParakeetFinal =
+    meeting.final_transcription_policy === 'parakeet_final_v1' &&
+    meeting.final_transcription_state === 'complete';
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+    };
+    completedParakeetFinal ||= Boolean(
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'complete',
+    );
+  } catch {
+    completedParakeetFinal = false;
+  }
+  if (!completedParakeetFinal) return false;
+  if (meeting.transcript_json) {
+    const attribution = readStoredSpeakerAttribution(meeting.transcript_json);
+    return (
+      attribution?.source === 'recovered_channel_acoustic_v1' ||
+      !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+    );
+  }
+  return meeting.speaker_attribution_verified === false;
+}
+
 export const isParakeetValidatedMeeting = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
-  if (meeting?.transcript_status !== 'validated') return false;
+  if (
+    meeting?.transcript_status !== 'validated' ||
+    !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+  )
+    return false;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: { policy?: unknown; state?: unknown };
       finalTranscriptionResult?: { policy?: unknown; engine?: unknown };
     };
-    return (
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'complete' &&
-      integrity.finalTranscriptionResult?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscriptionResult.engine === 'parakeet_coreml'
+    return Boolean(
+      (meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'complete' &&
+        meeting.final_transcription_engine === 'parakeet_coreml') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'complete' &&
+          integrity.finalTranscriptionResult?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscriptionResult.engine === 'parakeet_coreml'),
     );
   } catch {
     return false;
@@ -75,7 +139,10 @@ export const meetingProcessingFingerprint = (
     meeting.transcript_validated_at ?? null,
     meeting.transcript_integrity_json ?? null,
     meeting.downstream_processing_json ?? null,
-    Boolean(meeting.analysis_json || meeting.enhanced_notes),
+    meeting.analysis_run_json ?? null,
+    Boolean(
+      meeting.analysis_json || meeting.enhanced_notes || meeting.has_analysis,
+    ),
   ]);
 
 export const selectNextMeetingForProcessing = (

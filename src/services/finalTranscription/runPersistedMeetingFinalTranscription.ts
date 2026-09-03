@@ -1,5 +1,6 @@
 import type { Meeting } from '../../types.ts';
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
+import { isVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust.ts';
 import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
@@ -86,7 +87,11 @@ const sanitizeVocabularyTerms = (value: unknown): string[] =>
 export const runPersistedMeetingFinalTranscription = async (
   meeting: Meeting,
   invoke: Invoke,
-  options: { signal?: AbortSignal; runId?: string } = {},
+  options: {
+    signal?: AbortSignal;
+    runId?: string;
+    onTranscriptCommitted?: () => Promise<void> | void;
+  } = {},
 ): Promise<FinalTranscriptionOutcome> => {
   const captureGeneration = meeting.capture_journal_generation || '';
   const integrity = parseObject(
@@ -97,9 +102,6 @@ export const runPersistedMeetingFinalTranscription = async (
   const runId = options.runId ?? crypto.randomUUID();
   const meetingId = String(meeting.id);
   const language = provisional.payload.transcription?.language || 'en';
-  const speakerAttribution = provisional.payload.speakerAttribution as
-    | StoredTranscriptSpeakerAttribution
-    | undefined;
   let vocabulary = readFinalTranscriptionVocabulary(meetingId);
   if (!vocabulary) {
     vocabulary = sanitizeVocabularyTerms(
@@ -128,8 +130,10 @@ export const runPersistedMeetingFinalTranscription = async (
       },
       recordingDurationSeconds: meeting.duration_seconds || 0,
       micAudioPath: meeting.audio_path || '',
+      mixedAudioPath: meeting.mixed_audio_path || '',
       systemAudioPath: meeting.system_audio_path || '',
       provisionalSegments: provisional.segments,
+      preserveProvisionalText: meeting.transcript_status === 'validated',
       activityWindows: activityEvidence?.windows || [],
       language,
       vocabulary,
@@ -155,9 +159,27 @@ export const runPersistedMeetingFinalTranscription = async (
         ),
       transcribe: async (request) =>
         (await invoke('TRANSCRIPTION_TRANSCRIBE_FINAL', request)) as never,
+      speakerEvidence: async (request) =>
+        (await invoke('TRANSCRIPTION_SPEAKER_EVIDENCE', request)) as never,
       probeDuration: async (audioPath) =>
         (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
       commitCanonical: async (commit) => {
+        const speakerAttribution = commit.metadata.speakerAttribution as
+          | StoredTranscriptSpeakerAttribution
+          | undefined;
+        const {
+          speakerAttribution: _speakerAttribution,
+          speakerEvidence: _speakerEvidence,
+          ...finalTranscriptionResult
+        } = commit.metadata;
+        if (
+          !speakerAttribution ||
+          !isVerifiedSpeakerAttribution(speakerAttribution)
+        ) {
+          throw new Error(
+            'invalid_transcript_trust_candidate:final_transcription_validated:speaker_attribution_unverified',
+          );
+        }
         committedSegments = commit.segments;
         const transcriptValidatedAt = new Date().toISOString();
         const canonicalTranscriptJson = JSON.stringify(
@@ -173,7 +195,10 @@ export const runPersistedMeetingFinalTranscription = async (
               computeType: commit.metadata.computeType,
               language: commit.metadata.language,
               canonicalSource: 'recovered_channels',
-              diarization: false,
+              diarization:
+                speakerAttribution.source !== 'recovered_channel_acoustic_v1' &&
+                speakerAttribution.source !== 'recovered_channel_acoustic_v2' &&
+                speakerAttribution.diarizationAttempted,
               elapsedMs: commit.metadata.elapsedMs,
               providerLabel: commit.metadata.providerVersions.join(','),
               warnings: commit.metadata.warnings,
@@ -195,6 +220,7 @@ export const runPersistedMeetingFinalTranscription = async (
           schemaVersion: 2,
           state: 'validated',
           causes: [],
+          speakerAttributionVerified: true,
           evidenceProvenance: integrity.evidenceProvenance,
           activityEvidence: integrity.activityEvidence,
           evidence: commit.integrity,
@@ -202,7 +228,7 @@ export const runPersistedMeetingFinalTranscription = async (
             gateVersion: 'canonical_integrity_v1',
             validatedAt: transcriptValidatedAt,
           },
-          finalTranscriptionResult: commit.metadata,
+          finalTranscriptionResult,
         });
         assertValidTranscriptTrustCandidate(
           {
@@ -222,14 +248,16 @@ export const runPersistedMeetingFinalTranscription = async (
           transcriptIntegrityJson,
           transcriptValidatedAt,
         })) as { committed?: boolean; transcriptJson?: string } | false;
-        return outcome && outcome.committed === true
-          ? {
-              committed: true,
-              transcript: JSON.parse(
-                outcome.transcriptJson || canonicalTranscriptJson,
-              ),
-            }
-          : { committed: false };
+        if (outcome && outcome.committed === true) {
+          await options.onTranscriptCommitted?.();
+          return {
+            committed: true,
+            transcript: JSON.parse(
+              outcome.transcriptJson || canonicalTranscriptJson,
+            ),
+          };
+        }
+        return { committed: false };
       },
       markNeedsAttention: async ({ failure, lease }) => {
         if (lease) {
@@ -242,7 +270,14 @@ export const runPersistedMeetingFinalTranscription = async (
         }
       },
       startAnalysis: async () => {
-        await processValidatedMeetingDownstream(meetingId, invoke);
+        void processValidatedMeetingDownstream(meetingId, invoke).catch(
+          (error) => {
+            console.error(
+              '[Pluto] Post-transcription notes processing failed',
+              error,
+            );
+          },
+        );
         return committedSegments.length;
       },
     },

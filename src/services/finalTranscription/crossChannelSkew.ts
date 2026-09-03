@@ -20,6 +20,7 @@ export type CrossChannelReconciliationMetadata = {
   collapsedSequenceCount: number;
   droppedExactDuplicateSegmentCount: number;
   droppedEmbeddedMicFragmentCount: number;
+  droppedSystemExplainedMicSegmentCount?: number;
 };
 
 type Anchor = {

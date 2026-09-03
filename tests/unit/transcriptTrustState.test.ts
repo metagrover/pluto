@@ -125,6 +125,7 @@ describe('transcriptTrustState', () => {
               collapsedSequenceCount: 6,
               droppedExactDuplicateSegmentCount: 2,
               droppedEmbeddedMicFragmentCount: 3,
+              droppedSystemExplainedMicSegmentCount: 1,
             },
           },
         }),

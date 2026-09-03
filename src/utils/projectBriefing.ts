@@ -1,6 +1,6 @@
 import {
   type UserProjectMilestoneStatus,
-  readUserProjectMilestones,
+  readProjectMilestones,
 } from './projectMilestones';
 
 export interface ProjectBriefingParticipant {
@@ -93,10 +93,32 @@ export interface ProjectMilestone {
   status: 'complete' | 'overdue' | 'upcoming' | 'in_progress' | 'planned';
   timing: string | null;
   evidenceQuote: string | null;
-  source: 'user' | 'commitment';
+  source: 'user' | 'dreaming' | 'commitment';
   userStatus?: UserProjectMilestoneStatus;
   targetDate: string | null;
   note: string | null;
+  sourceMeetingIds?: string[];
+  sourceExcerpts?: string[];
+}
+
+export interface ProjectThemeSynthesisRead {
+  version: 1;
+  sourceMeetingIds: string[];
+  candidateProjectIds: string[];
+  outcome: string;
+  currentFocus: string;
+  recentChanges: Array<{
+    sourceMeetingId: string;
+    summary: string;
+    evidenceQuote: string;
+  }>;
+  openThreads: Array<{
+    sourceMeetingId: string;
+    kind: 'decision' | 'action' | 'question' | 'risk';
+    text: string;
+    evidenceQuote: string;
+  }>;
+  synthesizedAt: string;
 }
 
 export interface ProjectBrief {
@@ -107,6 +129,7 @@ export interface ProjectBrief {
     metadata: string | null;
     status: string | null;
   };
+  theme: ProjectThemeSynthesisRead | null;
   meetingStats: ProjectMeetingStats;
   momentum: ProjectMomentum;
   health: ProjectHealthRead;
@@ -133,6 +156,28 @@ const parseMetadata = (metadata: string | null): Record<string, unknown> => {
   } catch {
     return {};
   }
+};
+
+export const readProjectThemeSynthesis = (
+  metadata: string | null,
+): ProjectThemeSynthesisRead | null => {
+  const theme = parseMetadata(metadata).projectThemeSynthesis;
+  if (!theme || typeof theme !== 'object' || Array.isArray(theme)) return null;
+  const value = theme as Record<string, unknown>;
+  if (
+    value.version !== 1 ||
+    !Array.isArray(value.sourceMeetingIds) ||
+    !value.sourceMeetingIds.every((id) => typeof id === 'string') ||
+    !Array.isArray(value.candidateProjectIds) ||
+    !value.candidateProjectIds.every((id) => typeof id === 'string') ||
+    typeof value.outcome !== 'string' ||
+    typeof value.currentFocus !== 'string' ||
+    !Array.isArray(value.recentChanges) ||
+    !Array.isArray(value.openThreads) ||
+    typeof value.synthesizedAt !== 'string'
+  )
+    return null;
+  return value as unknown as ProjectThemeSynthesisRead;
 };
 
 export const readProjectDisplayTitle = (
@@ -429,7 +474,7 @@ export const buildUserProjectMilestones = (
   metadata: string | null,
   now = Date.now(),
 ): ProjectMilestone[] =>
-  readUserProjectMilestones(metadata).map((milestone) => {
+  readProjectMilestones(metadata).map((milestone) => {
     const dueAt = milestone.targetDate
       ? dateValue(`${milestone.targetDate}T23:59:59.999Z`)
       : null;
@@ -446,11 +491,16 @@ export const buildUserProjectMilestones = (
       title: milestone.title,
       status,
       timing: formatTiming(milestone.targetDate),
-      evidenceQuote: null,
-      source: 'user',
+      evidenceQuote:
+        milestone.source === 'dreaming'
+          ? (milestone.sourceExcerpts?.[0] ?? null)
+          : null,
+      source: milestone.source === 'dreaming' ? 'dreaming' : 'user',
       userStatus: milestone.status,
       targetDate: milestone.targetDate,
       note: milestone.note,
+      sourceMeetingIds: milestone.sourceMeetingIds,
+      sourceExcerpts: milestone.sourceExcerpts,
     };
   });
 

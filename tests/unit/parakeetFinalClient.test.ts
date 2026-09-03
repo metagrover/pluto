@@ -56,6 +56,28 @@ const prepared = (id: string) => ({
   result: { modelVersion: 'test-model-v1' },
 });
 
+const speakerEvidenceSuccess = (id: string) => ({
+  schemaVersion: 1,
+  id,
+  ok: true,
+  result: {
+    speakerEvidence: {
+      turns: [{ startTime: 0, endTime: 1, cluster: 'S1' }],
+      energyWindows: [
+        { startTime: 0, endTime: 0.1, micRms: 0.2, systemRms: 0.01 },
+      ],
+      provenance: {
+        modelIdentifier: 'speaker-diarization-offline-v1',
+        modelRevision: 'a'.repeat(40),
+        artifactDigest: 'b'.repeat(64),
+        runtimeVersion: 'fluidaudio-test',
+      },
+      timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+      windowSeconds: 0.1,
+    },
+  },
+});
+
 describe('ParakeetFinalClient', () => {
   it('forwards only progress correlated to its active prepare request', async () => {
     const child = new FakeChild();
@@ -221,6 +243,57 @@ describe('ParakeetFinalClient', () => {
       }),
     ).rejects.toThrow('parakeet_path_not_allowed');
     expect(child.writes).toHaveLength(0);
+  });
+
+  it('requests and strictly validates sealed speaker evidence under the final lease', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    expect(child.writes[0]).toMatchObject({
+      method: 'speaker_evidence',
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    child.respond(speakerEvidenceSuccess(String(child.writes[0].id)));
+
+    await expect(request).resolves.toMatchObject({
+      turns: [{ cluster: 'S1' }],
+      energyWindows: [{ micRms: 0.2, systemRms: 0.01 }],
+      provenance: { modelIdentifier: 'speaker-diarization-offline-v1' },
+    });
+  });
+
+  it('rejects malformed speaker evidence and out-of-root evidence paths', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+
+    await expect(
+      client.speakerEvidence({
+        mixedAudioPath: '/private/mixed.wav',
+        micAudioPath: '/user/recordings/mic.wav',
+        systemAudioPath: '/user/recordings/system.wav',
+      }),
+    ).rejects.toThrow('parakeet_path_not_allowed');
+    expect(child.writes).toHaveLength(0);
+
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    child.respond({
+      ...speakerEvidenceSuccess(String(child.writes[0].id)),
+      result: { speakerEvidence: { turns: [], energyWindows: [] } },
+    });
+    await expect(request).rejects.toThrow('parakeet_protocol_invalid');
   });
 
   it('rejects pending requests on malformed stdout without exposing the line', async () => {

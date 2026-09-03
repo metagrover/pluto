@@ -4,6 +4,7 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
+import { hasVerifiedSpeakerAttribution } from '../utils/speakerAttributionTrust.ts';
 import { parseStopToValidatedLatencySummary } from '../utils/stopToValidatedLatency.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
@@ -21,6 +22,7 @@ import {
   buildPartialCaptureGapProcessingLease,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
+import { runPersistedMeetingFinalTranscription } from './finalTranscription/runPersistedMeetingFinalTranscription.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 import {
@@ -136,6 +138,8 @@ export const shouldAutoProcessMeetingAnalysis = (
   let downstreamStage: unknown = null;
   let downstreamAttempt = 0;
   let pendingParakeetFinal = false;
+  let automaticAttemptsExhausted = false;
+  let unverifiedCompletedParakeetFinal = false;
   try {
     const downstream = JSON.parse(
       meeting?.downstream_processing_json || '{}',
@@ -151,39 +155,67 @@ export const shouldAutoProcessMeetingAnalysis = (
     downstreamState = null;
   }
   try {
+    const analysisRun = JSON.parse(meeting?.analysis_run_json || '{}') as {
+      automatic_attempts_exhausted?: unknown;
+    };
+    automaticAttemptsExhausted =
+      meeting?.automatic_attempts_exhausted === true ||
+      analysisRun.automatic_attempts_exhausted === true;
+  } catch {
+    automaticAttemptsExhausted = false;
+  }
+  try {
     const integrity = JSON.parse(
       meeting?.transcript_integrity_json || '{}',
     ) as {
       finalTranscription?: { policy?: unknown; state?: unknown };
     };
     pendingParakeetFinal =
-      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
-      integrity.finalTranscription.state === 'needs_attention';
+      (meeting?.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'needs_attention') ||
+      (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'needs_attention');
+    unverifiedCompletedParakeetFinal =
+      meeting?.transcript_status === 'validated' &&
+      ((meeting.final_transcription_policy === 'parakeet_final_v1' &&
+        meeting.final_transcription_state === 'complete') ||
+        (integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+          integrity.finalTranscription.state === 'complete')) &&
+      (meeting.speaker_attribution_verified === false ||
+        (typeof meeting.transcript_json === 'string' &&
+          !hasVerifiedSpeakerAttribution(meeting.transcript_json)));
   } catch {
     pendingParakeetFinal = false;
+    unverifiedCompletedParakeetFinal = false;
   }
   const genericTitleRepairNeeded =
     typeof meeting?.title === 'string' &&
     meetingTitleNeedsGeneration(meeting?.title) &&
-    hasTranscriptText(meeting?.transcript_json);
+    (meeting?.has_transcript_text === true ||
+      hasTranscriptText(meeting?.transcript_json));
   if (
     !meeting ||
+    automaticAttemptsExhausted ||
     pendingParakeetFinal ||
+    unverifiedCompletedParakeetFinal ||
     (downstreamState === 'failed' &&
       downstreamStage === 'analysis' &&
       downstreamAttempt >= MAX_AUTOMATIC_ANALYSIS_ATTEMPTS) ||
     (meeting.transcript_status !== 'needs_attention' &&
       meeting.transcript_status !== 'validated') ||
     meeting.finalization_status === 'recovery_required' ||
-    (Boolean(meeting.analysis_json || meeting.enhanced_notes) &&
+    (Boolean(
+      meeting.analysis_json || meeting.enhanced_notes || meeting.has_analysis,
+    ) &&
       downstreamState !== 'processing' &&
       downstreamState !== 'failed' &&
       !meetingTitleNeedsGeneration(meeting.title)) ||
-    !meeting.transcript_json ||
+    !(meeting.transcript_json || meeting.has_transcript) ||
     !(
       meeting.audio_path ||
       meeting.system_audio_path ||
-      meeting.mixed_audio_path
+      meeting.mixed_audio_path ||
+      meeting.has_audio
     )
   ) {
     return false;
@@ -192,11 +224,12 @@ export const shouldAutoProcessMeetingAnalysis = (
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
     };
-    const hasCaptureGap = integrity.causes?.some(
-      (cause) => cause.code === 'capture_gap_detected',
-    );
+    const hasCaptureGap =
+      meeting.has_capture_gap === true ||
+      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected');
     const partialCaptureGapEligible =
-      hasTranscriptText(meeting.transcript_json) &&
+      (meeting.has_transcript_text === true ||
+        hasTranscriptText(meeting.transcript_json)) &&
       typeof meeting.capture_journal_generation === 'string' &&
       meeting.capture_journal_generation.length > 0;
     return (
@@ -422,6 +455,26 @@ export const retryMeetingTranscriptValidation = async (
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
+  if (
+    meeting.transcript_status === 'validated' &&
+    !hasVerifiedSpeakerAttribution(meeting.transcript_json) &&
+    meeting.capture_journal_generation &&
+    meeting.audio_path &&
+    meeting.system_audio_path &&
+    meeting.mixed_audio_path &&
+    meeting.transcript_json
+  ) {
+    const outcome = await runPersistedMeetingFinalTranscription(
+      meeting,
+      invoke,
+      {
+        runId: crypto.randomUUID(),
+      },
+    );
+    return {
+      status: outcome.status === 'cancelled' ? 'superseded' : outcome.status,
+    };
+  }
   let hasCaptureGap = false;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {

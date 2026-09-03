@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveMeetingFailurePresentation,
   resolveMeetingRegenerationFailurePresentation,
+  resolveMeetingRetryProgressPresentation,
 } from '../../src/components/features/meetingFailurePresentation';
 
 describe('meeting failure presentation', () => {
@@ -9,6 +10,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -21,10 +23,28 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it('offers a calm, outcome-focused speaker label improvement', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        speakerAttributionFailure: true,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Improve speaker labels',
+      detail: 'Pluto can take another pass using the saved recording.',
+      actionLabel: 'Improve labels',
+    });
+  });
+
   it('keeps capture recovery honest when a retry would be unsafe', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: true,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -41,6 +61,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: true,
         hasExistingAnalysis: false,
@@ -57,6 +78,7 @@ describe('meeting failure presentation', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -67,6 +89,37 @@ describe('meeting failure presentation', () => {
       detail: 'Your transcript is ready.',
       actionLabel: 'Retry analysis',
     });
+  });
+});
+
+describe('meeting retry progress presentation', () => {
+  it.each([
+    [
+      'speaker_labels',
+      {
+        title: 'Improve speaker labels',
+        detail: 'Pluto can take another pass using the saved recording.',
+        loadingLabel: 'Improving labels',
+      },
+    ],
+    [
+      'transcript',
+      {
+        title: 'Transcript needs another pass',
+        detail: 'Your recording is safe.',
+        loadingLabel: 'Retrying transcription',
+      },
+    ],
+    [
+      'analysis',
+      {
+        title: 'Analysis needs another pass',
+        detail: 'Your transcript is ready.',
+        loadingLabel: 'Retrying analysis',
+      },
+    ],
+  ] as const)('keeps %s progress stable', (kind, expected) => {
+    expect(resolveMeetingRetryProgressPresentation(kind)).toEqual(expected);
   });
 });
 

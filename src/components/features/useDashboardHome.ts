@@ -55,6 +55,19 @@ interface DashboardHomeData {
   workspace: KnowledgeWorkspacePayload | null;
   workingMemorySnapshots: WorkingMemorySnapshot[];
   graphStats: KnowledgeGraphStats | null;
+  meetingPreviews: Array<
+    Pick<Meeting, 'id'> &
+      Partial<
+        Pick<
+          Meeting,
+          | 'dashboard_detail'
+          | 'recent_win_title'
+          | 'recent_win_why'
+          | 'recent_win_evidence'
+          | 'recent_win_source'
+        >
+      >
+  >;
 }
 
 interface DashboardHomeLoaders {
@@ -65,6 +78,7 @@ interface DashboardHomeLoaders {
   getKnowledgeWorkspace: () => Promise<KnowledgeWorkspacePayload | null>;
   listWorkingMemorySnapshots: () => Promise<WorkingMemorySnapshot[]>;
   getKnowledgeGraphStats: () => Promise<KnowledgeGraphStats | null>;
+  getMeetingPreviews?: () => Promise<DashboardHomeData['meetingPreviews']>;
 }
 
 interface UseDashboardHomeParams {
@@ -118,6 +132,7 @@ export const loadDashboardHomeData = async (
     workspace,
     workingMemorySnapshots,
     graphStats,
+    meetingPreviews,
   ] = await Promise.all([
     loaders.getOverdueActionItems(),
     loaders.getStaleActionItems(),
@@ -142,6 +157,11 @@ export const loadDashboardHomeData = async (
       loaders.getKnowledgeGraphStats,
       null,
     ),
+    loadOptional<DashboardHomeData['meetingPreviews']>(
+      'meeting previews',
+      loaders.getMeetingPreviews ?? (async () => []),
+      [],
+    ),
   ]);
 
   return {
@@ -152,6 +172,7 @@ export const loadDashboardHomeData = async (
     workspace,
     workingMemorySnapshots,
     graphStats,
+    meetingPreviews,
   };
 };
 
@@ -240,14 +261,29 @@ export const useDashboardHome = ({
           getKnowledgeWorkspace,
           listWorkingMemorySnapshots,
           getKnowledgeGraphStats,
+          getMeetingPreviews: async () => {
+            const previews = await window.ipcRenderer.invoke(
+              'GET_DASHBOARD_MEETING_PREVIEWS',
+            );
+            return Array.isArray(previews)
+              ? (previews as DashboardHomeData['meetingPreviews'])
+              : [];
+          },
         });
 
         if (cancelled) return;
 
+        const previewsByMeeting = new Map(
+          data.meetingPreviews.map((preview) => [String(preview.id), preview]),
+        );
+        const meetingsWithDashboardPreviews = meetings.map((meeting) => ({
+          ...meeting,
+          ...previewsByMeeting.get(String(meeting.id)),
+        }));
         setState({
           model: buildDashboardHomeModel({
             isRecording,
-            meetings,
+            meetings: meetingsWithDashboardPreviews,
             dateKey,
             ...data,
           }),

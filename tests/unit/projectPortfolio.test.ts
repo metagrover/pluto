@@ -46,6 +46,64 @@ describe('project portfolio', () => {
       buildProjectPortfolio([entry('Aurora', 'qualified')]).current,
     ).toHaveLength(1);
   });
+  it('quarantines legacy one-meeting auto-discoveries as suggestions', () => {
+    const legacy = {
+      ...entry('Generated guess', 'qualified'),
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'review',
+          reason: 'Generated from one meeting',
+          assessedAt: '2026-08-28',
+        },
+        projectInitiativeDiscovery: { version: 12, sourceMeetingId: 'm1' },
+      }),
+      meeting_count: 1,
+    };
+    const result = buildProjectPortfolio([legacy]);
+    expect(result.current).toEqual([]);
+    expect(result.suggested.map((project) => project.id)).toEqual([
+      'Generated guess',
+    ]);
+  });
+  it('keeps cross-conversation synthesized themes in the main portfolio', () => {
+    const theme = {
+      ...entry('Durable theme', 'qualified'),
+      meeting_count: 3,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'review',
+          reason: 'Supported across conversations',
+          assessedAt: '2026-08-28',
+        },
+        projectThemeSynthesis: { version: 1, sourceMeetingIds: ['m1', 'm2'] },
+      }),
+    };
+    expect(buildProjectPortfolio([theme]).current).toHaveLength(1);
+  });
+  it('keeps dismissed suggestions out of the active review surface', () => {
+    const dismissed = {
+      ...entry('Dismissed guess', 'subordinate'),
+      metadata: JSON.stringify({
+        projectPortfolioDisposition: 'dismissed',
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          source: 'user',
+          reason: 'Dismissed by the user',
+          assessedAt: '2026-08-28',
+        },
+      }),
+    };
+    const result = buildProjectPortfolio([dismissed]);
+    expect(result.current).toEqual([]);
+    expect(result.suggested).toEqual([]);
+    expect(result.other).toEqual([]);
+    expect(result.dismissed).toHaveLength(1);
+  });
   it('sorts real activity and separates explicit project completion', () => {
     const rows = [
       entry('Older', 'qualified', '2026-08-01'),

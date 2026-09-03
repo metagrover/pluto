@@ -48,6 +48,10 @@ import {
   persistDashboardPriorityOrder,
 } from './components/features/dashboardActionCompletion';
 import type {
+  MeetingRetryKind,
+  MeetingRetryOperation,
+} from './components/features/meetingFailurePresentation';
+import type {
   CaptureHealthState,
   LiveTranscriptIntegrity,
   LiveTranscriptSegment,
@@ -70,7 +74,12 @@ import {
   selectNextMeetingForProcessing,
 } from './services/postMeetingProcessingCoordinator';
 import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
+import { shouldAutoProcessMeetingAnalysis } from './services/retryMeetingTranscriptValidation';
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
+import {
+  loadSelectedMeetingDetail,
+  mergeMeetingStatus,
+} from './services/selectedMeetingDetail';
 
 import {
   getEntity,
@@ -91,7 +100,7 @@ import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
 // Types
-import type { Meeting } from './types';
+import type { Meeting, MeetingSummary } from './types';
 import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
 import {
   isGrantedStatus,
@@ -105,11 +114,39 @@ const meetingPreviewEnabled =
 const dashboardPreviewEnabled =
   new URLSearchParams(window.location.search).get('preview') === 'dashboard';
 
+type MeetingRetryRoute =
+  | 'final_transcription'
+  | 'analysis'
+  | 'transcript_validation'
+  | 'unavailable';
+
+export const resolveMeetingRetryRoute = (
+  kind: MeetingRetryKind,
+  meeting: Partial<Meeting> | null | undefined,
+): MeetingRetryRoute => {
+  if (kind === 'analysis') {
+    return isParakeetValidatedMeeting(meeting) ? 'analysis' : 'unavailable';
+  }
+  if (kind === 'speaker_labels') {
+    return canRetryMeetingFinalTranscription(meeting)
+      ? 'final_transcription'
+      : 'unavailable';
+  }
+  return canRetryMeetingFinalTranscription(meeting)
+    ? 'final_transcription'
+    : 'transcript_validation';
+};
+
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
-    useState(false);
+  const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
+  const [selectedMeetingDetail, setSelectedMeetingDetail] =
+    useState<Meeting | null>(null);
+  const selectedMeetingIdRef = useRef<string | number | null>(null);
+  const [
+    transcriptValidationRetryOperation,
+    setTranscriptValidationRetryOperation,
+  ] = useState<MeetingRetryOperation | null>(null);
   const finalTranscriptionAbortRef = useRef<AbortController | null>(null);
   const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
     useState<string | number | null>(null);
@@ -154,6 +191,9 @@ function App() {
   );
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
+    [],
+  );
+  const [searchMeetingResults, setSearchMeetingResults] = useState<Meeting[]>(
     [],
   );
   const searchRequestIdRef = useRef(0);
@@ -321,7 +361,7 @@ function App() {
     return () => {
       current = false;
     };
-  }, [selectedMeetingId]);
+  }, [selectedMeetingId, selectedPersonId]);
 
   useActiveCallMonitor({
     setupNeeded,
@@ -649,10 +689,25 @@ function App() {
 
   const fetchMeetings = async () => {
     try {
-      const data = await window.ipcRenderer.invoke('GET_MEETINGS');
-      const fetchedMeetings = Array.isArray(data) ? (data as Meeting[]) : [];
-      setMeetings(fetchedMeetings);
-      return fetchedMeetings;
+      const [data, processingData] = await Promise.all([
+        window.ipcRenderer.invoke('GET_MEETINGS'),
+        window.ipcRenderer.invoke('GET_MEETING_PROCESSING_STATUSES'),
+      ]);
+      const fetchedMeetings = Array.isArray(data)
+        ? (data as MeetingSummary[])
+        : [];
+      const processingById = new Map(
+        (Array.isArray(processingData) ? processingData : []).map((status) => [
+          String(status.id),
+          status,
+        ]),
+      );
+      const meetingsWithProcessingStatus = fetchedMeetings.map((meeting) => ({
+        ...meeting,
+        ...processingById.get(String(meeting.id)),
+      }));
+      setMeetings(meetingsWithProcessingStatus);
+      return meetingsWithProcessingStatus;
     } catch (e) {
       console.error('Failed to fetch meetings', e);
       setMeetings([]);
@@ -660,32 +715,120 @@ function App() {
     }
   };
 
+  const refreshSelectedMeeting = async () => {
+    const meetingId = selectedMeetingIdRef.current;
+    if (meetingId == null) return null;
+    const detail = await loadSelectedMeetingDetail<Meeting>({
+      meetingId,
+      load: async () =>
+        (await window.ipcRenderer.invoke(
+          'GET_MEETING',
+          meetingId,
+        )) as Meeting | null,
+      isCurrent: (candidateId) =>
+        String(selectedMeetingIdRef.current) === String(candidateId),
+    });
+    if (detail) setSelectedMeetingDetail(detail);
+    return detail;
+  };
+
+  const refreshSelectedMeetingState = async (): Promise<void> => {
+    await Promise.all([fetchMeetings(), refreshSelectedMeeting()]);
+  };
+
+  useEffect(() => {
+    selectedMeetingIdRef.current = selectedMeetingId;
+    const legacyEmbeddedDetail = (meetings as unknown as Meeting[]).find(
+      (meeting) =>
+        String(meeting.id) === String(selectedMeetingId) &&
+        (Object.hasOwn(meeting, 'transcript_json') ||
+          Object.hasOwn(meeting, 'analysis_json')),
+    );
+    setSelectedMeetingDetail(legacyEmbeddedDetail ?? null);
+    if (selectedMeetingId != null) void refreshSelectedMeeting();
+  }, [selectedMeetingId]);
+
   useEffect(
     () =>
-      window.ipcRenderer.on('MEETING_NOTES_UPDATED', () => {
-        void fetchMeetings();
+      window.ipcRenderer.on('MEETING_NOTES_UPDATED', (meetingId) => {
+        if (meetingId == null) {
+          void fetchMeetings();
+          return;
+        }
+        void window.ipcRenderer
+          .invoke('GET_MEETING_STATUS', meetingId)
+          .then((status) => {
+            if (!status) return;
+            setMeetings((current) => {
+              const index = current.findIndex(
+                (meeting) => String(meeting.id) === String(status.id),
+              );
+              if (index < 0) return [status as MeetingSummary, ...current];
+              return current.map((meeting, meetingIndex) =>
+                meetingIndex === index ? (status as MeetingSummary) : meeting,
+              );
+            });
+            if (String(selectedMeetingIdRef.current) === String(meetingId)) {
+              setSelectedMeetingDetail((current) =>
+                current
+                  ? (mergeMeetingStatus(
+                      current as unknown as Record<string, unknown>,
+                      status as Record<string, unknown>,
+                    ) as unknown as Meeting)
+                  : current,
+              );
+              const run = JSON.parse(status.analysis_run_json || '{}') as {
+                notes_status?: unknown;
+              };
+              if (run.notes_status === 'published') {
+                void refreshSelectedMeeting();
+              }
+            }
+          })
+          .catch((error) => {
+            console.error('Failed to refresh meeting status', error);
+          });
       }),
     [],
   );
 
   const handleRetryTranscriptValidation = async (
     meetingId: string | number | null = selectedMeetingId,
+    kind: MeetingRetryKind = 'analysis',
   ) => {
-    if (!meetingId || transcriptValidationRetrying) return;
-    setTranscriptValidationRetrying(true);
+    if (!meetingId || transcriptValidationRetryOperation !== null) return;
+    setTranscriptValidationRetryOperation({ meetingId, kind });
     try {
-      const meeting = safeMeetings.find(
+      const summary = safeMeetings.find(
         (candidate) => String(candidate.id) === String(meetingId),
       );
-      if (meeting && canRetryMeetingFinalTranscription(meeting)) {
+      const meeting =
+        selectedMeetingDetail &&
+        String(selectedMeetingDetail.id) === String(meetingId)
+          ? selectedMeetingDetail
+          : ((await window.ipcRenderer.invoke(
+              'GET_MEETING',
+              summary?.id ?? meetingId,
+            )) as Meeting | null);
+      const route = resolveMeetingRetryRoute(kind, meeting);
+      if (route === 'final_transcription' && meeting) {
         await runMeetingFinalTranscription(meeting);
         return;
       }
-      if (meeting && isParakeetValidatedMeeting(meeting)) {
+      if (route === 'analysis' && meeting) {
         await processValidatedMeetingDownstream(
           meeting.id,
           (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+          { reason: 'manual' },
         );
+        await fetchMeetings();
+        return;
+      }
+      if (route === 'unavailable') {
+        console.warn('[Pluto] Meeting retry is no longer available', {
+          meetingId,
+          kind,
+        });
         await fetchMeetings();
         return;
       }
@@ -705,7 +848,11 @@ function App() {
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
-      setTranscriptValidationRetrying(false);
+      setTranscriptValidationRetryOperation((current) =>
+        current && String(current.meetingId) === String(meetingId)
+          ? null
+          : current,
+      );
     }
   };
 
@@ -746,9 +893,11 @@ function App() {
     isRecording,
     meetings: safeMeetings,
   });
-  const selectedMeeting = safeMeetings.find(
-    (m) => String(m.id) === String(selectedMeetingId),
-  );
+  const selectedMeeting =
+    selectedMeetingDetail &&
+    String(selectedMeetingDetail.id) === String(selectedMeetingId)
+      ? selectedMeetingDetail
+      : undefined;
   const activeRecording = isStartingRecording || isRecording;
   const showZenMode = activeRecording && zenVisible;
   const activeCalendarEvent = recordingStartedAtMs
@@ -768,16 +917,24 @@ function App() {
     setSidebarVisible(true);
   };
 
-  const runMeetingFinalTranscription = async (meeting: Meeting) => {
+  const runMeetingFinalTranscription = async (meeting: Pick<Meeting, 'id'>) => {
     if (finalTranscriptionAbortRef.current) return;
+    const detail = (await window.ipcRenderer.invoke(
+      'GET_MEETING',
+      meeting.id,
+    )) as Meeting | null;
+    if (!detail) return;
     const controller = new AbortController();
     finalTranscriptionAbortRef.current = controller;
     setFinalTranscriptionMeetingId(meeting.id);
     try {
       await runPersistedMeetingFinalTranscription(
-        meeting,
+        detail,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          onTranscriptCommitted: refreshSelectedMeetingState,
+        },
       );
     } catch (error) {
       console.error('[Pluto] Final transcription worker failed', error);
@@ -794,7 +951,7 @@ function App() {
     if (activeRecording || finalTranscriptionAbortRef.current) return;
     const candidate = selectNextMeetingForFinalTranscription(safeMeetings);
     if (!candidate?.id) return;
-    void runMeetingFinalTranscription(candidate as Meeting);
+    void runMeetingFinalTranscription({ id: candidate.id });
   }, [activeRecording, safeMeetings, finalTranscriptionMeetingId]);
 
   useEffect(() => {
@@ -810,7 +967,7 @@ function App() {
 
   useEffect(() => {
     if (
-      transcriptValidationRetrying ||
+      transcriptValidationRetryOperation !== null ||
       finalTranscriptionAbortRef.current ||
       selectNextMeetingForFinalTranscription(safeMeetings)
     )
@@ -823,30 +980,62 @@ function App() {
     autoAnalysisAttemptsRef.current.add(
       meetingProcessingFingerprint(candidate),
     );
-    void handleRetryTranscriptValidation(candidate.id);
-  }, [safeMeetings, transcriptValidationRetrying]);
+    void processValidatedMeetingDownstream(
+      candidate.id,
+      (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      { reason: 'automatic' },
+    )
+      .then(async () => {
+        const refreshedMeetings = await fetchMeetings();
+        rememberMeetingProcessingOutcome(
+          autoAnalysisAttemptsRef.current,
+          refreshedMeetings.find(
+            (meeting) => String(meeting.id) === String(candidate.id),
+          ),
+        );
+      })
+      .catch((error) => {
+        console.error('[Pluto] Automatic meeting processing failed', error);
+      });
+  }, [safeMeetings, transcriptValidationRetryOperation]);
 
   useEffect(() => {
-    if (transcriptValidationRetrying) return;
+    if (transcriptValidationRetryOperation !== null) return;
+    const candidate = safeMeetings.find(shouldAutoProcessMeetingAnalysis);
+    if (!candidate?.id) return;
     const delay = nextMeetingProcessingWakeDelay(
       safeMeetings,
       Date.now(),
       autoAnalysisAttemptsRef.current,
     );
     if (delay === null) return;
-    const timeout = window.setTimeout(() => {
+    const timeout = window.setTimeout(async () => {
       forgetExpiredMeetingProcessingAttempts(
         safeMeetings,
         autoAnalysisAttemptsRef.current,
       );
-      void fetchMeetings();
+      try {
+        const status = (await window.ipcRenderer.invoke(
+          'GET_MEETING_STATUS',
+          candidate.id,
+        )) as MeetingSummary | null;
+        if (!status) return;
+        setMeetings((current) =>
+          current.map((meeting) =>
+            String(meeting.id) === String(status.id) ? status : meeting,
+          ),
+        );
+      } catch (error) {
+        console.error('Failed to refresh meeting processing status', error);
+      }
     }, delay);
     return () => window.clearTimeout(timeout);
-  }, [safeMeetings, transcriptValidationRetrying]);
+  }, [safeMeetings, transcriptValidationRetryOperation]);
 
   const searchPlutoResults = buildSearchPlutoResults({
     query: searchQuery,
     meetings: safeMeetings,
+    meetingMatches: searchMeetingResults,
     entities: searchEntitiesResults,
   });
 
@@ -855,6 +1044,7 @@ function App() {
     if (!searchVisible || !trimmed) {
       searchRequestIdRef.current += 1;
       setSearchEntitiesResults([]);
+      setSearchMeetingResults([]);
       return;
     }
 
@@ -871,6 +1061,21 @@ function App() {
           console.error('Failed to search entities', error);
           if (searchRequestIdRef.current === requestId) {
             setSearchEntitiesResults([]);
+          }
+        });
+      window.ipcRenderer
+        .invoke('SEARCH_MEETING_SUMMARIES', trimmed)
+        .then((meetings) => {
+          if (searchRequestIdRef.current === requestId) {
+            setSearchMeetingResults(
+              Array.isArray(meetings) ? (meetings as Meeting[]) : [],
+            );
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to search meetings', error);
+          if (searchRequestIdRef.current === requestId) {
+            setSearchMeetingResults([]);
           }
         });
     }, 200);
@@ -1081,7 +1286,6 @@ function App() {
               setZenVisible(true);
             }}
             onOpenSearch={() => setSearchVisible(true)}
-            handleDeleteMeeting={handleDeleteMeeting}
             theme={theme}
             setTheme={(newTheme) => {
               setTheme(newTheme);
@@ -1171,17 +1375,19 @@ function App() {
                 setEditingTitle={setEditingTitle}
                 titleValue={titleValue}
                 setTitleValue={setTitleValue}
-                fetchMeetings={fetchMeetings}
+                fetchMeetings={refreshSelectedMeetingState}
                 handleCopySummary={handleCopySummary}
                 copySuccess={copySuccess}
                 handleDeleteMeeting={handleDeleteMeeting}
                 highlightEntities={highlightEntities}
                 transcriptVisible={transcriptVisible}
                 setTranscriptVisible={setTranscriptVisible}
-                onRetryTranscriptValidation={() => {
-                  void handleRetryTranscriptValidation();
+                onRetryTranscriptValidation={(kind) => {
+                  void handleRetryTranscriptValidation(undefined, kind);
                 }}
-                transcriptValidationRetrying={transcriptValidationRetrying}
+                transcriptValidationRetryOperation={
+                  transcriptValidationRetryOperation
+                }
                 calendarContext={meetingCalendarContext}
               />
             ) : activeTab === 'hub' ? (

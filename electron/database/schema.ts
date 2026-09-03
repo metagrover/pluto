@@ -76,6 +76,9 @@ export const meetingAnalysisRuns = sqliteTable('meeting_analysis_runs', {
   stage: text('stage').notNull(),
   queuePosition: integer('queue_position'),
   errorCode: text('error_code'),
+  automaticAttemptCount: integer('automatic_attempt_count')
+    .notNull()
+    .default(0),
   startedAt: text('started_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -89,6 +92,7 @@ export const meetingAnalysisRunHistory = sqliteTable(
       .references(() => meetings.id, { onDelete: 'cascade' }),
     reason: text('reason').notNull(),
     status: text('status').notNull(),
+    errorCode: text('error_code'),
     metricsJson: text('metrics_json').notNull(),
     startedAt: text('started_at').notNull(),
     completedAt: text('completed_at'),
@@ -398,7 +402,287 @@ export const meetingEntities = sqliteTable(
     context: text('context'),
     createdAt: datetime('created_at').default(now),
   },
-  (table) => [primaryKey({ columns: [table.meetingId, table.entityId] })],
+  (table) => [
+    primaryKey({ columns: [table.meetingId, table.entityId] }),
+    index('idx_meeting_entities_entity_meeting').on(
+      table.entityId,
+      table.meetingId,
+    ),
+  ],
+);
+
+export const entityCorrections = sqliteTable(
+  'entity_corrections',
+  {
+    id: text('id').primaryKey(),
+    entityId: text('entity_id').notNull(),
+    itemType: text('item_type').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    reason: text('reason'),
+    createdAt: datetime('created_at').default(now),
+  },
+  (table) => [
+    uniqueIndex('idx_entity_corrections_unique').on(
+      table.entityId,
+      table.itemType,
+      table.fingerprint,
+    ),
+    index('idx_entity_corrections_lookup').on(
+      table.entityId,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+export const entityAliasSuggestions = sqliteTable(
+  'entity_alias_suggestions',
+  {
+    id: text('id').primaryKey(),
+    entityId: text('entity_id').notNull(),
+    suggestedName: text('suggested_name').notNull(),
+    sourceMeetingIdsJson: text('source_meeting_ids_json')
+      .notNull()
+      .default('[]'),
+    evidenceSnippet: text('evidence_snippet'),
+    status: text('status').notNull().default('pending'),
+    createdAt: datetime('created_at').default(now),
+    updatedAt: datetime('updated_at').default(now),
+  },
+  (table) => [
+    check(
+      'entity_alias_suggestions_status_check',
+      sql`${table.status} IN ('pending','merged','dismissed')`,
+    ),
+    uniqueIndex('idx_entity_alias_suggestions_unique').on(
+      table.entityId,
+      table.suggestedName,
+    ),
+    index('idx_entity_alias_suggestions_lookup').on(
+      table.entityId,
+      table.status,
+    ),
+  ],
+);
+
+export const entityDreamingRuns = sqliteTable(
+  'entity_dreaming_runs',
+  {
+    id: text('id').primaryKey(),
+    entityId: text('entity_id').notNull(),
+    entityType: text('entity_type').notNull(),
+    sourceRevision: text('source_revision').notNull(),
+    decisionRevision: text('decision_revision'),
+    status: text('status').notNull(),
+    model: text('model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    failureCount: integer('failure_count').notNull().default(0),
+    startMode: text('start_mode').notNull(),
+    errorCode: text('error_code'),
+    leaseToken: text('lease_token'),
+    startedAt: text('started_at').notNull(),
+    completedAt: text('completed_at'),
+    nextRetryAt: text('next_retry_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check(
+      'entity_dreaming_runs_entity_type_check',
+      sql`${table.entityType} IN ('project','person')`,
+    ),
+    check(
+      'entity_dreaming_runs_status_check',
+      sql`${table.status} IN ('running','no_change','proposed','failed','cancelled')`,
+    ),
+    check(
+      'entity_dreaming_runs_attempt_count_check',
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      'entity_dreaming_runs_failure_count_check',
+      sql`${table.failureCount} >= 0 AND ${table.failureCount} <= ${table.attemptCount}`,
+    ),
+    check(
+      'entity_dreaming_runs_start_mode_check',
+      sql`${table.startMode} IN ('automatic','manual')`,
+    ),
+    check(
+      'entity_dreaming_runs_error_code_check',
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} IN ('provider_unavailable','generation_failed','validation_failed','persistence_failed','lease_expired')`,
+    ),
+    check(
+      'entity_dreaming_runs_lease_check',
+      sql`(${table.status} = 'running' AND ${table.leaseToken} IS NOT NULL AND ${table.completedAt} IS NULL) OR (${table.status} <> 'running' AND ${table.leaseToken} IS NULL AND ${table.completedAt} IS NOT NULL)`,
+    ),
+    check(
+      'entity_dreaming_runs_failure_check',
+      sql`(${table.status} = 'failed' AND ${table.errorCode} IS NOT NULL) OR (${table.status} <> 'failed' AND ${table.errorCode} IS NULL)`,
+    ),
+    check(
+      'entity_dreaming_runs_retry_check',
+      sql`${table.nextRetryAt} IS NULL OR ${table.status} = 'failed'`,
+    ),
+    unique('entity_dreaming_runs_entity_revision_unique').on(
+      table.entityId,
+      table.sourceRevision,
+    ),
+    index('idx_entity_dreaming_runs_status_retry').on(
+      table.status,
+      table.nextRetryAt,
+    ),
+    index('idx_entity_dreaming_runs_entity_created').on(
+      table.entityId,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+export const entityDreamingProposals = sqliteTable(
+  'entity_dreaming_proposals',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => entityDreamingRuns.id, { onDelete: 'cascade' }),
+    entityId: text('entity_id').notNull(),
+    entityType: text('entity_type').notNull(),
+    kind: text('kind').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    evidenceJson: text('evidence_json').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    status: text('status').notNull().default('pending'),
+    decidedAt: text('decided_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check(
+      'entity_dreaming_proposals_entity_type_check',
+      sql`${table.entityType} IN ('project','person')`,
+    ),
+    check(
+      'entity_dreaming_proposals_kind_check',
+      sql`${table.kind} IN ('project_summary','project_milestone','project_commitment','project_alias','person_headline','person_focus','person_collaborator','person_alias')`,
+    ),
+    check(
+      'entity_dreaming_proposals_payload_check',
+      sql`json_valid(${table.payloadJson})`,
+    ),
+    check(
+      'entity_dreaming_proposals_evidence_check',
+      sql`json_valid(${table.evidenceJson})`,
+    ),
+    check(
+      'entity_dreaming_proposals_fingerprint_check',
+      sql`length(${table.fingerprint}) > 0`,
+    ),
+    check(
+      'entity_dreaming_proposals_status_check',
+      sql`${table.status} IN ('pending','accepted','rejected','stale')`,
+    ),
+    check(
+      'entity_dreaming_proposals_decision_check',
+      sql`(${table.status} = 'pending' AND ${table.decidedAt} IS NULL) OR (${table.status} <> 'pending' AND ${table.decidedAt} IS NOT NULL)`,
+    ),
+    unique('entity_dreaming_proposals_run_fingerprint_unique').on(
+      table.runId,
+      table.fingerprint,
+    ),
+    index('idx_entity_dreaming_proposals_entity_status').on(
+      table.entityId,
+      table.status,
+      table.createdAt,
+    ),
+    index('idx_entity_dreaming_proposals_run').on(table.runId),
+  ],
+);
+
+export const entityDreamingAliases = sqliteTable(
+  'entity_dreaming_aliases',
+  {
+    id: text('id').primaryKey(),
+    proposalId: text('proposal_id')
+      .notNull()
+      .unique()
+      .references(() => entityDreamingProposals.id),
+    entityId: text('entity_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    entityType: text('entity_type').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    displayName: text('display_name').notNull(),
+    source: text('source').notNull(),
+    evidenceJson: text('evidence_json').notNull(),
+    active: integer('active').notNull().default(1),
+    createdAt: text('created_at').notNull().default(now),
+    updatedAt: text('updated_at').notNull().default(now),
+    removedAt: text('removed_at'),
+  },
+  (table) => [
+    check(
+      'entity_dreaming_aliases_entity_type_check',
+      sql`${table.entityType} IN ('project','person')`,
+    ),
+    check(
+      'entity_dreaming_aliases_source_check',
+      sql`${table.source} = 'dreaming'`,
+    ),
+    check(
+      'entity_dreaming_aliases_evidence_check',
+      sql`json_valid(${table.evidenceJson})`,
+    ),
+    check(
+      'entity_dreaming_aliases_active_check',
+      sql`${table.active} IN (0,1)`,
+    ),
+    check(
+      'entity_dreaming_aliases_removed_check',
+      sql`(${table.active} = 1 AND ${table.removedAt} IS NULL) OR (${table.active} = 0 AND ${table.removedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex('idx_entity_dreaming_aliases_active_name')
+      .on(table.entityType, table.normalizedName)
+      .where(sql`${table.active} = 1`),
+    index('idx_entity_dreaming_aliases_entity').on(
+      table.entityId,
+      table.entityType,
+      table.active,
+    ),
+  ],
+);
+
+export const entityDreamingPersonClaims = sqliteTable(
+  'entity_dreaming_person_claims',
+  {
+    id: text('id').primaryKey(),
+    proposalId: text('proposal_id')
+      .notNull()
+      .unique()
+      .references(() => entityDreamingProposals.id),
+    entityId: text('entity_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    value: text('value').notNull(),
+    evidenceJson: text('evidence_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    check(
+      'entity_dreaming_person_claims_kind_check',
+      sql`${table.kind} IN ('person_headline','person_focus','person_collaborator')`,
+    ),
+    check(
+      'entity_dreaming_person_claims_evidence_check',
+      sql`json_valid(${table.evidenceJson})`,
+    ),
+    index('idx_entity_dreaming_person_claims_entity').on(
+      table.entityId,
+      table.kind,
+      table.createdAt,
+    ),
+  ],
 );
 
 export const knowledgeDocs = sqliteTable(

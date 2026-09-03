@@ -21,6 +21,8 @@ export type LocalInferenceTask =
   | 'entities'
   | 'valueSignals'
   | 'knowledgeDoc'
+  | 'dreaming'
+  | 'dreamingCleanup'
   | 'projectScopeReview'
   | 'commitmentReconciliation'
   | 'askPluto'
