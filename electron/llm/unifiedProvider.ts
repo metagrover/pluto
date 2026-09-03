@@ -372,6 +372,7 @@ export const collapseOversizedTopics = (
 
 let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
+let ollamaActivityEpoch = 0;
 
 type LLMTask = LocalInferenceTask;
 
@@ -868,9 +869,19 @@ export class UnifiedLLMProvider implements LLMProvider {
     });
   }
 
-  async unloadModel(model: string): Promise<void> {
+  async unloadModel(model: string, signal?: AbortSignal): Promise<void> {
     if (this.providerType !== 'ollama' || !model.trim()) return;
-    await this.unloadOllamaModel(model.trim());
+    const epoch = ollamaActivityEpoch;
+    await runWithLocalInferenceCoordinator({
+      key: Symbol('dreamingCleanup'),
+      task: 'dreamingCleanup',
+      workClass: 'background',
+      signal,
+      run: async (gateSignal) => {
+        if (epoch !== ollamaActivityEpoch) return;
+        await this.unloadOllamaModel(model.trim(), gateSignal);
+      },
+    });
   }
 
   async answerAskPluto(
@@ -1299,6 +1310,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     modelOverride,
     onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
+    ollamaActivityEpoch += 1;
     const model = modelOverride
       ? modelOverride
       : notesBudget && notesModel
@@ -1538,7 +1550,10 @@ export class UnifiedLLMProvider implements LLMProvider {
     return data.response ?? '';
   }
 
-  private async unloadOllamaModel(model: string): Promise<void> {
+  private async unloadOllamaModel(
+    model: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
       await this.ollamaFetch(
         '/api/generate',
@@ -1552,6 +1567,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           }),
         },
         30_000,
+        signal,
       );
       if (this.activeOllamaModel === model) {
         this.activeOllamaModel = null;

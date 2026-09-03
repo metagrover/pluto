@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDirtyEntityQueue } from '../../electron/dreaming/entityQueue';
+import {
+  createDirtyEntityQueue,
+  invalidateDreamingWork,
+} from '../../electron/dreaming/entityQueue';
 
 describe('createDirtyEntityQueue', () => {
   it('scans one bounded epoch and stays quiescent until invalidated', () => {
@@ -45,5 +48,21 @@ describe('createDirtyEntityQueue', () => {
     queue.invalidate({ entityId: 'project-1', type: 'project' });
     queue.invalidate({ entityId: 'project-1', type: 'project' });
     expect(queue.getPendingCount()).toBe(1);
+  });
+
+  it('reschedules executable work after the queue became quiescent', () => {
+    const queue = createDirtyEntityQueue({
+      getProjects: () => [{ id: 'project-1' }],
+      getPeople: () => [],
+    });
+    expect(queue.getNextCandidate()).not.toBeNull();
+    expect(queue.getNextCandidate()).toBeNull();
+    const schedule = vi.fn();
+    invalidateDreamingWork(queue, schedule);
+    expect(schedule).toHaveBeenCalledOnce();
+    expect(queue.getNextCandidate()).toEqual({
+      entityId: 'project-1',
+      type: 'project',
+    });
   });
 });

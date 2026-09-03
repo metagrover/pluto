@@ -13,6 +13,10 @@ import {
   updateEntityAliasSuggestionStatus,
   updateProjectDisplayTitle,
 } from '../../../api/knowledgeGraph';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../../utils/dreamingStatus';
 import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
@@ -88,9 +92,7 @@ export const ProjectDossier = ({
   const [aliasSuggestions, setAliasSuggestions] = useState<
     EntityAliasSuggestion[]
   >([]);
-  const [dreamingState, setDreamingState] = useState<
-    'idle' | 'running' | 'proposed' | 'no_change' | 'cancelled' | 'error'
-  >('idle');
+  const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -137,12 +139,8 @@ export const ProjectDossier = ({
         const updatedAliases = await getEntityAliasSuggestions(projectId);
         setAliasSuggestions(updatedAliases);
         setDreamingState('proposed');
-      } else if (result.status === 'no_change') {
-        setDreamingState('no_change');
-      } else if (result.status === 'cancelled') {
-        setDreamingState('cancelled');
       } else {
-        setDreamingState('error');
+        setDreamingState(result.status);
       }
     } catch {
       setDreamingState('error');
@@ -362,17 +360,7 @@ export const ProjectDossier = ({
               onClick={() => void handleDreamNow()}
               className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
             >
-              {dreamingState === 'running'
-                ? 'Dreaming in progress…'
-                : dreamingState === 'proposed'
-                  ? 'Updates prepared'
-                  : dreamingState === 'no_change'
-                    ? 'No new updates'
-                    : dreamingState === 'cancelled'
-                      ? 'Preparation cancelled'
-                      : dreamingState === 'error'
-                        ? 'Preparation failed'
-                        : 'Dream Now'}
+              {DREAMING_STATUS_LABEL[dreamingState]}
             </button>
           </div>
         </details>

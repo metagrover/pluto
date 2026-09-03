@@ -34,6 +34,10 @@ import {
   updateEntityAliasSuggestionStatus,
   updatePersonName,
 } from '../../api/knowledgeGraph';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../utils/dreamingStatus';
 import type {
   PersonBriefingCommitment,
   PersonBriefingCommitmentCandidate,
@@ -496,9 +500,7 @@ export const PersonDossier = ({
   const [aliasSuggestions, setAliasSuggestions] = useState<
     EntityAliasSuggestion[]
   >([]);
-  const [dreamingState, setDreamingState] = useState<
-    'idle' | 'running' | 'proposed' | 'no_change' | 'cancelled' | 'error'
-  >('idle');
+  const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -672,12 +674,8 @@ export const PersonDossier = ({
         );
         setAliasSuggestions(updatedAliases);
         setDreamingState('proposed');
-      } else if (result.status === 'no_change') {
-        setDreamingState('no_change');
-      } else if (result.status === 'cancelled') {
-        setDreamingState('cancelled');
       } else {
-        setDreamingState('error');
+        setDreamingState(result.status);
       }
     } catch {
       setDreamingState('error');
@@ -770,17 +768,7 @@ export const PersonDossier = ({
                 void handleDreamNow();
               }}
             >
-              {dreamingState === 'running'
-                ? 'Dreaming in progress…'
-                : dreamingState === 'proposed'
-                  ? 'Updates prepared'
-                  : dreamingState === 'no_change'
-                    ? 'No new updates'
-                    : dreamingState === 'cancelled'
-                      ? 'Preparation cancelled'
-                      : dreamingState === 'error'
-                        ? 'Preparation failed'
-                        : 'Dream Now'}
+              {DREAMING_STATUS_LABEL[dreamingState]}
             </button>
           </div>
         </details>

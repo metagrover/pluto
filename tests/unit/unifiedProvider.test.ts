@@ -627,6 +627,31 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('lets foreground inference preempt serialized dreaming cleanup', async () => {
+    let calls = 0;
+    const fetchMock = installFetchMock((_url, init) => {
+      calls += 1;
+      if (calls > 1) return jsonResponse({ response: 'Ready' });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(init.signal?.reason),
+          { once: true },
+        );
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const cleanup = provider.unloadModel('gemma4:12b');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const answer = provider.answerAskPluto('Are you ready?');
+
+    await expect(cleanup).resolves.toBeUndefined();
+    await expect(answer).resolves.toBe('Ready');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('preempts background title generation for Ask Pluto', async () => {
     let generationCalls = 0;
     const fetchMock = installFetchMock((_url, init) => {

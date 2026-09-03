@@ -526,6 +526,36 @@ describe('IdleDreamingCoordinator', () => {
     expect(generateMock).toHaveBeenCalledOnce();
   });
 
+  it('never recovers leases while a manual run is active at the stale boundary', async () => {
+    let release!: (value: string) => void;
+    generateMock.mockReturnValue(
+      new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const recoverStaleRuns = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-2', type: 'project' }),
+      getEntity: () => ({ type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      recoverStaleRuns,
+    });
+    const manual = coordinator.triggerNow({ entityId: 'proj-1' });
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+
+    await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
+      status: 'busy',
+      entityId: 'proj-1',
+    });
+    expect(recoverStaleRuns).not.toHaveBeenCalled();
+    expect(proposalStore.failRun).not.toHaveBeenCalled();
+    release(JSON.stringify({ status: 'no_change', proposals: [] }));
+    await manual;
+  });
+
   it('cancels and requeues when authoritative source changes during generation', async () => {
     packageNotesMock
       .mockReturnValueOnce({
@@ -673,6 +703,49 @@ describe('IdleDreamingCoordinator', () => {
     finishUnload();
     await closing;
     expect(closed).toBe(true);
+  });
+
+  it('unloads once at the end of a multi-entity dirty batch', async () => {
+    const candidates = [
+      { entityId: 'proj-1', type: 'project' as const },
+      { entityId: 'proj-2', type: 'project' as const },
+    ];
+    const unloadModel = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => candidates.shift(),
+      packageNotes: (entityId) => ({ ...packageNotesMock(), entityId }),
+      generate: generateMock,
+      proposalStore,
+      hasPendingWork: () => candidates.length > 0,
+      unloadModel,
+    });
+
+    await coordinator.attemptIdleRun();
+    expect(unloadModel).not.toHaveBeenCalled();
+    proposalStore.startRun.mockReturnValue({
+      status: 'started',
+      run: { id: 'run-2', leaseToken: 'lease-2' },
+    });
+    await coordinator.attemptIdleRun();
+    expect(unloadModel).toHaveBeenCalledOnce();
+  });
+
+  it('bounds an ignored shutdown unload', async () => {
+    vi.useFakeTimers();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      unloadModel: () => new Promise(() => {}),
+      cleanupDeadlineMs: 50,
+    });
+    const closing = coordinator.close();
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(closing).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 
   it('cancels an active run and awaits its unload when closed', async () => {

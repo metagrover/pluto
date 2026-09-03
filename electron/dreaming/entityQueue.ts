@@ -16,6 +16,15 @@ export interface DirtyEntityQueue {
   getPendingCount: () => number;
 }
 
+export const invalidateDreamingWork = (
+  queue: Pick<DirtyEntityQueue, 'invalidate'>,
+  schedule: () => void,
+  candidate?: DirtyEntityCandidate,
+) => {
+  queue.invalidate(candidate);
+  schedule();
+};
+
 const candidateKey = ({ entityId, type }: DirtyEntityCandidate) =>
   `${type}:${entityId}`;
 

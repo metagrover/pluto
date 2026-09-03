@@ -19,6 +19,10 @@ describe('createSerializedTaskGate', () => {
       priority: LLM_WORK_CLASS_PRIORITY.background,
       preemptible: true,
     });
+    expect(getLocalInferenceAdmission('dreamingCleanup')).toEqual({
+      priority: LLM_WORK_CLASS_PRIORITY.background,
+      preemptible: true,
+    });
   });
   it('cancels queued work before the active task finishes and permits retry', async () => {
     const run = createSerializedTaskGate<string, string>();

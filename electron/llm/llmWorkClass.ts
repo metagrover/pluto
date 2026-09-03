@@ -24,6 +24,7 @@ export const defaultLLMWorkClass = (task: string): LLMWorkClass => {
   if (
     task === 'knowledgeDoc' ||
     task === 'dreaming' ||
+    task === 'dreamingCleanup' ||
     task === 'commitmentReconciliation' ||
     task === 'title'
   )

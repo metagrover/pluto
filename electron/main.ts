@@ -347,7 +347,10 @@ import {
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
-import type { DirtyEntityQueue } from './dreaming/entityQueue';
+import {
+  type DirtyEntityQueue,
+  invalidateDreamingWork,
+} from './dreaming/entityQueue';
 import {
   DREAMING_ENTITY_DEADLINE_MS,
   type IdleDreamingResult,
@@ -488,8 +491,8 @@ const notifyRendererActivity = () => {
 };
 
 const invalidateDreamingCatalog = () => {
-  dreamingEntityQueue?.invalidate();
-  scheduleDreamingRun?.();
+  if (!dreamingEntityQueue) return;
+  invalidateDreamingWork(dreamingEntityQueue, () => scheduleDreamingRun?.());
 };
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
@@ -769,6 +772,13 @@ app.on('before-quit', (event) => {
   if (shutdownStarted) return;
   shutdownStarted = true;
   void (async () => {
+    for (const controller of activeMeetingTasks.values()) controller.abort();
+    activeMeetingTasks.clear();
+    for (const task of activeAnalysisGenerations.values())
+      task.controller.abort();
+    for (const task of activeAskPlutoQueries.values()) task.controller.abort();
+    for (const task of activeMeetingAskPlutoQueries.values())
+      task.controller.abort();
     backgroundKnowledgeRefresh?.close();
     backgroundKnowledgeRefresh = null;
     await idleDreamingCoordinator?.close();
@@ -778,11 +788,6 @@ app.on('before-quit', (event) => {
     stopIdentityReconciliation?.();
     calendarService.stop();
     console.log('[Pluto] Shutting down...');
-    // Abort all active tasks
-    for (const controller of activeMeetingTasks.values()) {
-      controller.abort();
-    }
-    activeMeetingTasks.clear();
     parakeetFinalClient?.close();
     parakeetFinalClient = null;
     await parakeetEouCoordinator?.fail('parakeet_app_quit');
@@ -821,6 +826,7 @@ app.whenReady().then(async () => {
         if (!refreshed || refreshed.status !== 'up_to_date') {
           throw new Error('knowledge_document_refresh_incomplete');
         }
+        invalidateDreamingCatalog();
         return;
       }
       await refreshKnowledgeDocsForMeetingNow(
@@ -829,6 +835,7 @@ app.whenReady().then(async () => {
           : workId,
         { signal },
       );
+      invalidateDreamingCatalog();
     },
     onError: (error, workId) => {
       console.warn(
@@ -872,6 +879,7 @@ app.whenReady().then(async () => {
       dreamingEntityQueue?.invalidate(candidate);
       scheduleDreamingRun?.(delayMs);
     },
+    hasPendingWork: () => dreamingEntityQueue?.hasPendingWork() === true,
     generate: async (prompt, responseSchema, signal, model, promptVersion) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
@@ -887,12 +895,12 @@ app.whenReady().then(async () => {
         promptVersion,
       );
     },
-    unloadModel: async () => {
+    unloadModel: async (signal) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
         await getAllSettings(db),
       );
-      await provider.unloadModel(DREAMING_MODEL);
+      await provider.unloadModel(DREAMING_MODEL, signal);
     },
   });
 
@@ -931,13 +939,21 @@ app.whenReady().then(async () => {
   scheduleDreamingRun = scheduleDreaming;
   scheduleDreaming(0);
   for (const channel of IDENTITY_CHANNELS) {
-    ipcMain.handle(channel, (_event, payload) =>
-      handleIdentityRequest(channel, payload),
-    );
+    ipcMain.handle(channel, (_event, payload) => {
+      const result = handleIdentityRequest(channel, payload);
+      if (
+        channel !== 'GET_IDENTITY_STATE' &&
+        channel !== 'GET_MEETING_IDENTITY'
+      ) {
+        invalidateDreamingCatalog();
+      }
+      return result;
+    });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
     pauseReasons: () => knowledgeSynthesisPause.snapshot(),
     onChange: () => {
+      invalidateDreamingCatalog();
       if (win && !win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED');
     },
@@ -2524,9 +2540,11 @@ app.whenReady().then(async () => {
     }
     return claimed;
   });
-  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
-    db.updateMeetingTitleIfCurrent(input),
-  );
+  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) => {
+    const result = db.updateMeetingTitleIfCurrent(input);
+    if (result) invalidateDreamingCatalog();
+    return result;
+  });
   ipcMain.handle(
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
     (_event, meetingId, lease) =>
@@ -2797,8 +2815,11 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'UPDATE_PROJECT_DISPLAY_TITLE',
-    (_event, { projectId, title }) =>
-      db.updateProjectDisplayTitle(projectId, title),
+    (_event, { projectId, title }) => {
+      const result = db.updateProjectDisplayTitle(projectId, title);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
   ipcMain.handle(
     'SET_PROJECT_PORTFOLIO_DISPOSITION',
