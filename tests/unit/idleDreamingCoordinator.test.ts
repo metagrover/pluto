@@ -211,6 +211,28 @@ describe('IdleDreamingCoordinator', () => {
     });
   });
 
+  it('records provider_unavailable for a failed local provider connection', async () => {
+    generateMock.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1'));
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+    });
+
+    expect(await coordinator.attemptIdleRun()).toEqual({
+      status: 'failed',
+      entityId: 'proj-1',
+      errorCode: 'provider_unavailable',
+    });
+    expect(proposalStore.failRun).toHaveBeenCalledWith({
+      runId: 'run-1',
+      leaseToken: 'lease-1',
+      errorCode: 'provider_unavailable',
+    });
+  });
+
   it('cancels the lease when automatic eligibility changes before persistence', async () => {
     generateMock.mockImplementation(async () => {
       policy.onBattery = true;

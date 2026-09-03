@@ -862,6 +862,59 @@ describe('dreaming proposal persistence', () => {
     ).toEqual({ count: 1 });
   });
 
+  it('restores only one of two removed same-name alias rows', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const proposalIds: string[] = [];
+    for (const revision of ['alias-history-one', 'alias-history-two']) {
+      const started = startProject(store, revision);
+      expect(started.status).toBe('started');
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_alias',
+            payload: { alias: 'Historical Alias' },
+            evidence: [{ meetingId: 'meeting-1', excerpt: 'Historical Alias' }],
+            fingerprint: revision,
+          },
+        ],
+      });
+      const proposal = store
+        .listPendingProposals('project-1', 'project')
+        .at(-1)!;
+      expect(
+        store.acceptDreamingProposal({
+          proposalId: proposal.id,
+          getCurrentSourceRevision: () => revision,
+        }).status,
+      ).toBe('accepted');
+      proposalIds.push(proposal.id);
+      expect(
+        store.removeDreamingAlias({ proposalId: proposal.id }).status,
+      ).toBe('removed');
+    }
+
+    expect(
+      store.restoreDreamingAlias({ proposalId: proposalIds[0] }).status,
+    ).toBe('restored');
+    expect(
+      store.restoreDreamingAlias({ proposalId: proposalIds[1] }).status,
+    ).toBe('review_required');
+    expect(
+      sql
+        .prepare(
+          'SELECT COUNT(*) count FROM entity_dreaming_aliases WHERE active = 1',
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+  });
+
   it('accepts a non-colliding project alias without creating or merging an entity', () => {
     const { sql, store } = fixture();
     sql

@@ -238,6 +238,24 @@ export const withoutUserProjectMilestone = (
   };
 };
 
+export const withoutProjectMilestone = (
+  metadata: string | null,
+  milestoneId: string,
+): { metadata: string; removed: UserProjectMilestone | null } => {
+  const all = readProjectMilestones(metadata);
+  const removed = all.find((milestone) => milestone.id === milestoneId) ?? null;
+  return {
+    removed,
+    metadata: JSON.stringify({
+      ...parseMetadata(metadata),
+      projectMilestonesVersion: 1,
+      projectMilestones: all.filter(
+        (milestone) => milestone.id !== milestoneId,
+      ),
+    }),
+  };
+};
+
 export const restoreUserProjectMilestone = (
   metadata: string | null,
   milestone: UserProjectMilestone,

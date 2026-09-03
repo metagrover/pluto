@@ -83,7 +83,7 @@ import {
   type UserProjectMilestoneInput,
   restoreUserProjectMilestone,
   withSavedUserProjectMilestone,
-  withoutUserProjectMilestone,
+  withoutProjectMilestone,
 } from '../src/utils/projectMilestones';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import {
@@ -1570,6 +1570,8 @@ export const dreamingProposalStore = createDreamingProposalStore(db, {
     entityType === 'person'
       ? resolvePersonIdentityId(entityId)
       : resolveProjectIdentityId(entityId),
+  upsertProjectCommitment: (input) =>
+    upsertCanonicalDreamingProjectCommitment(input),
 });
 export const acceptDreamingProposal = (
   input: DreamingDecisionInput,
@@ -7653,11 +7655,30 @@ export const deleteProjectMilestone = (
     const project = getEntity(canonicalId);
     if (!project || project.type !== 'project')
       throw new Error('project_milestone_project_invalid');
-    const deleted = withoutUserProjectMilestone(project.metadata, milestoneId);
+    const deleted = withoutProjectMilestone(project.metadata, milestoneId);
     if (!deleted.removed) throw new Error('project_milestone_not_found');
     db.prepare(
       'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).run(deleted.metadata, canonicalId);
+    if (
+      deleted.removed.source === 'dreaming' &&
+      deleted.removed.dreamingProposalId
+    ) {
+      const proposal = db
+        .prepare(
+          'SELECT fingerprint FROM entity_dreaming_proposals WHERE id = ?',
+        )
+        .get(deleted.removed.dreamingProposalId) as
+        | { fingerprint: string }
+        | undefined;
+      if (!proposal) throw new Error('dreaming_milestone_proposal_missing');
+      recordEntityCorrection({
+        entityId: canonicalId,
+        itemType: 'dreaming:project_milestone',
+        fingerprint: proposal.fingerprint,
+        reason: 'removed_by_user',
+      });
+    }
     return deleted.removed;
   })();
 
@@ -8235,6 +8256,96 @@ export const linkEntities = (link: {
     .get(id) as EntityLink;
 };
 
+function upsertCanonicalDreamingProjectCommitment(input: {
+  projectId: string;
+  task: string;
+  proposalId: string;
+  runId: string;
+  fingerprint: string;
+  evidence: Array<{ meetingId: string; excerpt: string }>;
+  timestamp: string;
+}): void {
+  const normalizedTask = normalizeEntityName(input.task);
+  const matchingRows = db
+    .prepare(
+      `SELECT id FROM entities
+       WHERE type = 'action_item' AND normalized_name = ? ORDER BY id`,
+    )
+    .all(normalizedTask) as Array<{ id: string }>;
+  const canonicalMatches = new Map<string, Entity>();
+  for (const row of matchingRows) {
+    const resolved = resolveCommitmentIdentity(row.id);
+    if (resolved?.type === 'action_item')
+      canonicalMatches.set(resolved.id, resolved);
+  }
+  if (canonicalMatches.size > 1)
+    throw new Error('dreaming_commitment_conflict');
+  const action =
+    canonicalMatches.values().next().value ??
+    upsertEntity({
+      type: 'action_item',
+      name: input.task.trim().replace(/\s+/g, ' '),
+      status: 'active',
+      assigned_to: null,
+      dedupe_by_name: true,
+    });
+  if (action.type !== 'action_item' || action.assigned_to !== null) {
+    throw new Error('dreaming_commitment_conflict');
+  }
+  let metadata: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(action.metadata || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      metadata = parsed as Record<string, unknown>;
+    }
+  } catch {
+    metadata = {};
+  }
+  const existingSources = Array.isArray(metadata.dreamingSources)
+    ? metadata.dreamingSources.filter(
+        (source): source is Record<string, unknown> =>
+          Boolean(source) &&
+          typeof source === 'object' &&
+          !Array.isArray(source),
+      )
+    : [];
+  const dreamingSources = existingSources.some(
+    (source) => source.proposalId === input.proposalId,
+  )
+    ? existingSources
+    : [
+        ...existingSources,
+        {
+          proposalId: input.proposalId,
+          runId: input.runId,
+          fingerprint: input.fingerprint,
+          meetingIds: input.evidence.map((item) => item.meetingId),
+          excerpts: input.evidence.map((item) => item.excerpt),
+        },
+      ];
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = ? WHERE id = ?',
+  ).run(
+    JSON.stringify({ ...metadata, dreamingSources }),
+    input.timestamp,
+    action.id,
+  );
+  const primaryEvidence = input.evidence[0];
+  const link = linkEntities({
+    source_entity_id: action.id,
+    target_entity_id: resolveProjectIdentityId(input.projectId),
+    relationship: 'belongs_to',
+    meeting_id: primaryEvidence.meetingId,
+    state: 'confirmed',
+    evidence_meeting_id: primaryEvidence.meetingId,
+    evidence_quote: primaryEvidence.excerpt,
+    source: 'synthesis',
+    confidence: 1,
+  });
+  if (link.state !== 'confirmed')
+    throw new Error('dreaming_commitment_conflict');
+}
+
 /**
  * Get all links for an entity (both directions)
  */
@@ -8621,6 +8732,213 @@ export const getDreamingEntityNotesQueryPlan = (entityId: string): string[] => {
   return rows.map((row) => row.detail);
 };
 
+interface AcceptedDreamingPersonClaim {
+  proposalId: string;
+  runId: string;
+  kind: 'person_headline' | 'person_focus' | 'person_collaborator';
+  value: string;
+  sourceMeetingIds: string[];
+  excerpts: string[];
+  createdAt: string;
+}
+
+const getAcceptedDreamingPersonClaims = (
+  canonicalId: string,
+): AcceptedDreamingPersonClaim[] => {
+  const rows = db
+    .prepare(`WITH family(id) AS (
+      SELECT ? UNION SELECT person_id FROM person_aliases
+      WHERE canonical_id = ? AND active = 1
+    )
+    SELECT claim.proposal_id, proposal.run_id, claim.kind, claim.value,
+      claim.evidence_json, claim.created_at
+    FROM entity_dreaming_person_claims claim
+    JOIN entity_dreaming_proposals proposal ON proposal.id = claim.proposal_id
+    WHERE claim.entity_id IN (SELECT id FROM family)
+    ORDER BY claim.created_at, claim.proposal_id`)
+    .all(canonicalId, canonicalId) as Array<{
+    proposal_id: string;
+    run_id: string;
+    kind: AcceptedDreamingPersonClaim['kind'];
+    value: string;
+    evidence_json: string;
+    created_at: string;
+  }>;
+  return rows.map((row) => {
+    let evidence: Array<{ meetingId: string; excerpt: string }> = [];
+    try {
+      const parsed = JSON.parse(row.evidence_json) as unknown;
+      if (Array.isArray(parsed)) {
+        evidence = parsed.filter(
+          (item): item is { meetingId: string; excerpt: string } =>
+            Boolean(item) &&
+            typeof item === 'object' &&
+            typeof (item as { meetingId?: unknown }).meetingId === 'string' &&
+            typeof (item as { excerpt?: unknown }).excerpt === 'string',
+        );
+      }
+    } catch {
+      evidence = [];
+    }
+    return {
+      proposalId: row.proposal_id,
+      runId: row.run_id,
+      kind: row.kind,
+      value: row.value,
+      sourceMeetingIds: evidence.map((item) => item.meetingId),
+      excerpts: evidence.map((item) => item.excerpt),
+      createdAt: row.created_at,
+    };
+  });
+};
+
+const acceptedPersonRead = (
+  claims: AcceptedDreamingPersonClaim[],
+  fallbackHeadline: string,
+  fallbackBullets: string[],
+) => {
+  const acceptedHeadline = claims
+    .filter((claim) => claim.kind === 'person_headline')
+    .at(-1)?.value;
+  const acceptedBullets = claims
+    .filter((claim) => claim.kind !== 'person_headline')
+    .map((claim) => claim.value);
+  return {
+    headline: acceptedHeadline ?? fallbackHeadline,
+    supportingBullets: [...new Set([...fallbackBullets, ...acceptedBullets])],
+  };
+};
+
+const overlayAcceptedClaimsOnKnowledgeDoc = (
+  doc: KnowledgeDoc | null,
+  claims: AcceptedDreamingPersonClaim[],
+): KnowledgeDoc | null => {
+  if (!doc || claims.length === 0) return doc;
+  let structured: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(doc.structured_json || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      structured = parsed as Record<string, unknown>;
+    }
+  } catch {
+    structured = {};
+  }
+  const current =
+    structured.current_read &&
+    typeof structured.current_read === 'object' &&
+    !Array.isArray(structured.current_read)
+      ? (structured.current_read as Record<string, unknown>)
+      : {};
+  const read = acceptedPersonRead(
+    claims,
+    typeof current.headline === 'string' ? current.headline : '',
+    Array.isArray(current.supporting_bullets)
+      ? current.supporting_bullets.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct',
+      confidence: 1,
+    })),
+  );
+  const existingEvidence = Array.isArray(structured.evidence_index)
+    ? structured.evidence_index
+    : [];
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...doc,
+    structured_json: JSON.stringify({
+      ...structured,
+      current_read: {
+        ...current,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          typeof current.source_count === 'number' ? current.source_count : 0,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          typeof current.cited_item_count === 'number'
+            ? current.cited_item_count
+            : 0,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          typeof current.cited_meeting_count === 'number'
+            ? current.cited_meeting_count
+            : 0,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...existingEvidence, ...acceptedEvidence],
+    }),
+  };
+};
+
+const overlayAcceptedClaimsOnSnapshot = (
+  snapshot: WorkingMemorySnapshot | null,
+  claims: AcceptedDreamingPersonClaim[],
+): WorkingMemorySnapshot | null => {
+  if (!snapshot || claims.length === 0) return snapshot;
+  const read = acceptedPersonRead(
+    claims,
+    snapshot.payload.current_read.headline,
+    snapshot.payload.current_read.supporting_bullets,
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct' as const,
+      confidence: 1,
+    })),
+  );
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...snapshot,
+    payload: {
+      ...snapshot.payload,
+      current_read: {
+        ...snapshot.payload.current_read,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          snapshot.payload.current_read.source_count,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          snapshot.payload.current_read.cited_item_count,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          snapshot.payload.current_read.cited_meeting_count,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...snapshot.payload.evidence_index, ...acceptedEvidence],
+    },
+  };
+};
+
 /** Compact accepted state supplied to dreaming so proposals do not repeat it. */
 export const getDreamingEntityBaseline = (
   entityId: string,
@@ -8727,6 +9045,10 @@ export const getDreamingEntityBaseline = (
     headline: string;
     supportingBullets: string[];
   } | null = null;
+  const acceptedPersonClaims =
+    canonical.type === 'person'
+      ? getAcceptedDreamingPersonClaims(canonicalId)
+      : [];
   if (canonical.type === 'person') {
     const personDoc = getKnowledgeDocByScope('person_context', canonicalId);
     try {
@@ -8750,12 +9072,24 @@ export const getDreamingEntityBaseline = (
     } catch {
       acceptedPersonCurrentRead = null;
     }
+    if (acceptedPersonClaims.length > 0) {
+      acceptedPersonCurrentRead = acceptedPersonRead(
+        acceptedPersonClaims,
+        acceptedPersonCurrentRead?.headline ??
+          snapshot?.payload.current_read.headline ??
+          '',
+        acceptedPersonCurrentRead?.supportingBullets ??
+          snapshot?.payload.current_read.supporting_bullets ??
+          [],
+      );
+    }
   }
 
   const common = {
     status: canonical.status,
     aliases,
     commitments,
+    ...(canonical.type === 'person' ? { acceptedPersonClaims } : {}),
     currentRead:
       acceptedPersonCurrentRead ??
       (snapshot
@@ -9219,6 +9553,15 @@ export const getPersonBriefing = (
     mergedAt: string;
   }>;
   const selfPersonId = identityStore.getSelfPersonId();
+  const acceptedClaims = getAcceptedDreamingPersonClaims(canonicalId);
+  const knowledgeDoc = overlayAcceptedClaimsOnKnowledgeDoc(
+    getKnowledgeDocByScope('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
+  const workingMemorySnapshot = overlayAcceptedClaimsOnSnapshot(
+    getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
 
   return {
     person,
@@ -9240,9 +9583,8 @@ export const getPersonBriefing = (
     isSelf:
       selfPersonId !== null &&
       resolvePersonIdentityId(selfPersonId) === canonicalId,
-    knowledgeDoc: getKnowledgeDocByScope('person_context', canonicalId) ?? null,
-    workingMemorySnapshot:
-      getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    knowledgeDoc,
+    workingMemorySnapshot,
     mergedPeople,
   };
 };
@@ -9511,11 +9853,12 @@ export const resetKnowledge = () => {
     'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
+    'entity_dreaming_person_claims',
+    'entity_dreaming_aliases',
     'entity_dreaming_proposals',
     'entity_dreaming_runs',
     'entity_alias_suggestions',
     'entity_corrections',
-    'entity_dreaming_aliases',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',

@@ -183,19 +183,20 @@ export function ProjectMilestones({
     setBusy(true);
     setError('');
     try {
-      if (milestone.source === 'user') {
-        const removed = await deleteProjectMilestone(projectId, milestone.id);
-        onChange(milestones.filter((item) => item.id !== milestone.id));
-        setDeleted(removed);
-      } else {
-        onChange(milestones.filter((item) => item.id !== milestone.id));
+      const removed =
+        milestone.source === 'commitment'
+          ? null
+          : await deleteProjectMilestone(projectId, milestone.id);
+      onChange(milestones.filter((item) => item.id !== milestone.id));
+      if (milestone.source === 'user' && removed) setDeleted(removed);
+      if (milestone.source !== 'dreaming') {
+        await recordEntityCorrection({
+          entityId: projectId,
+          itemType: 'milestone',
+          fingerprint: milestone.title,
+          reason: 'removed_by_user',
+        });
       }
-      await recordEntityCorrection({
-        entityId: projectId,
-        itemType: 'milestone',
-        fingerprint: milestone.title,
-        reason: 'removed_by_user',
-      });
       setNotice('Milestone deleted');
     } catch {
       setError('We couldn’t delete this milestone. Please try again.');

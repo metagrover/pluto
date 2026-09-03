@@ -319,6 +319,44 @@ it('completes, deletes and restores a user-created milestone', async () => {
   );
 });
 
+it('persists generated milestone removal through the backend without a broad text correction', async () => {
+  const generatedMilestone = {
+    id: 'dream-ms-1',
+    title: 'Evidence milestone',
+    status: 'upcoming' as const,
+    timing: null,
+    evidenceQuote: 'Evidence milestone is next.',
+    source: 'dreaming' as const,
+    targetDate: null,
+    note: null,
+  };
+  api.getProjectBrief.mockResolvedValue(
+    brief({ milestones: [generatedMilestone] }),
+  );
+  api.deleteProjectMilestone.mockResolvedValue({
+    id: generatedMilestone.id,
+    title: generatedMilestone.title,
+    status: 'planned',
+    targetDate: null,
+    note: null,
+    createdAt: '2026-08-29T12:00:00Z',
+    updatedAt: '2026-08-29T12:00:00Z',
+    source: 'dreaming',
+  });
+  await render();
+
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Remove Evidence milestone"]',
+      )
+      ?.click(),
+  );
+
+  expect(api.deleteProjectMilestone).toHaveBeenCalledWith('p1', 'dream-ms-1');
+  expect(api.recordEntityCorrection).not.toHaveBeenCalled();
+});
+
 it('edits a user-created milestone inline', async () => {
   const userMilestone = {
     id: 'user-1',

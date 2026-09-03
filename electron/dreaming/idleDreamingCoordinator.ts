@@ -1,3 +1,4 @@
+import { classifyAskPlutoFailure } from '../intelligence/askPlutoFailures';
 import { buildDreamingGenerationRequest } from './prompt';
 import type {
   DreamingLeasedRunRecord,
@@ -298,17 +299,21 @@ export const createIdleDreamingCoordinator = (
         }
         return { status: 'cancelled', entityId: candidate.entityId };
       }
+      const errorCode =
+        classifyAskPlutoFailure(err).reason === 'provider_unavailable'
+          ? 'provider_unavailable'
+          : 'generation_failed';
       if (lease) {
         deps.proposalStore.failRun({
           runId: lease.id,
           leaseToken: lease.leaseToken,
-          errorCode: 'generation_failed',
+          errorCode,
         });
       }
       return {
         status: 'failed',
         entityId: candidate.entityId,
-        errorCode: 'generation_failed',
+        errorCode,
       };
     }
   };

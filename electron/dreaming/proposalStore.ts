@@ -92,6 +92,7 @@ interface DreamingRunRow {
   entity_id: string;
   entity_type: DreamingEntityType;
   source_revision: string;
+  decision_revision: string | null;
   status: DreamingRunStatus;
   model: string;
   prompt_version: string;
@@ -133,6 +134,15 @@ export interface DreamingProposalStoreDependencies {
     entityType: DreamingEntityType,
     fingerprint: string,
   ) => boolean;
+  upsertProjectCommitment?: (input: {
+    projectId: string;
+    task: string;
+    proposalId: string;
+    runId: string;
+    fingerprint: string;
+    evidence: ValidatedDreamingProposal['evidence'];
+    timestamp: string;
+  }) => void;
 }
 
 export type DreamingDecisionResult =
@@ -160,6 +170,7 @@ export function ensureDreamingProposalSchema(sql: Database.Database): void {
       entity_id TEXT NOT NULL,
       entity_type TEXT NOT NULL CHECK(entity_type IN ('project', 'person')),
       source_revision TEXT NOT NULL,
+      decision_revision TEXT,
       status TEXT NOT NULL CHECK(status IN ('running', 'no_change', 'proposed', 'failed', 'cancelled')),
       model TEXT NOT NULL,
       prompt_version TEXT NOT NULL,
@@ -239,7 +250,30 @@ export function ensureDreamingProposalSchema(sql: Database.Database): void {
       ON entity_dreaming_aliases(entity_type, normalized_name) WHERE active = 1;
     CREATE INDEX IF NOT EXISTS idx_entity_dreaming_aliases_entity
       ON entity_dreaming_aliases(entity_id, entity_type, active);
+
+    CREATE TABLE IF NOT EXISTS entity_dreaming_person_claims (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE REFERENCES entity_dreaming_proposals(id),
+      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN (
+        'person_headline', 'person_focus', 'person_collaborator'
+      )),
+      value TEXT NOT NULL,
+      evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_person_claims_entity
+      ON entity_dreaming_person_claims(entity_id, kind, created_at);
   `);
+  const runColumns = sql
+    .prepare('PRAGMA table_info(entity_dreaming_runs)')
+    .all() as Array<{ name: string }>;
+  if (!runColumns.some((column) => column.name === 'decision_revision')) {
+    sql.exec(
+      'ALTER TABLE entity_dreaming_runs ADD COLUMN decision_revision TEXT',
+    );
+  }
 }
 
 const toRunRecord = (row: DreamingRunRow): DreamingRunRecord => ({
@@ -353,6 +387,7 @@ export function createDreamingProposalStore(
           resolveCanonicalEntityId(row.entity_id, entityType) === entityId,
       );
     });
+  const upsertProjectCommitment = dependencies.upsertProjectCommitment;
   const readRun = (id: string): DreamingRunRecord | null => {
     const row = sql
       .prepare('SELECT * FROM entity_dreaming_runs WHERE id = ?')
@@ -404,7 +439,8 @@ export function createDreamingProposalStore(
           status = 'running', model = ?, prompt_version = ?,
           attempt_count = attempt_count + 1, error_code = NULL,
           lease_token = ?, started_at = ?, completed_at = NULL,
-          next_retry_at = NULL, start_mode = ?, updated_at = ? WHERE id = ?`)
+          next_retry_at = NULL, decision_revision = NULL,
+          start_mode = ?, updated_at = ? WHERE id = ?`)
         .run(
           input.model,
           input.promptVersion,
@@ -529,7 +565,8 @@ export function createDreamingProposalStore(
       }
       sql
         .prepare(`UPDATE entity_dreaming_runs SET status = ?, error_code = NULL,
-        lease_token = NULL, completed_at = ?, next_retry_at = NULL, updated_at = ?
+        lease_token = NULL, completed_at = ?, next_retry_at = NULL,
+        decision_revision = source_revision, updated_at = ?
         WHERE id = ?`)
         .run(input.status, timestamp, timestamp, row.id);
       return readRun(row.id);
@@ -772,6 +809,18 @@ export function createDreamingProposalStore(
       .get(proposal.entityId) as { type: string } | undefined;
     if (!project || project.type !== 'project')
       throw new Error('dreaming_entity_invalid');
+    if (upsertProjectCommitment) {
+      upsertProjectCommitment({
+        projectId: proposal.entityId,
+        task: proposal.payload.task,
+        proposalId: proposal.id,
+        runId: proposal.runId,
+        fingerprint: proposal.fingerprint,
+        evidence: proposal.evidence,
+        timestamp,
+      });
+      return;
+    }
     const actionId = deterministicId(
       'dream_action',
       `${proposal.entityId}:${proposal.fingerprint}`,
@@ -856,6 +905,23 @@ export function createDreamingProposalStore(
         : proposal.kind === 'person_focus'
           ? proposal.payload.focus
           : proposal.payload.name;
+    sql
+      .prepare(`INSERT INTO entity_dreaming_person_claims(
+        id, proposal_id, entity_id, kind, value, evidence_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(proposal_id) DO UPDATE SET value=excluded.value,
+        evidence_json=excluded.evidence_json, updated_at=excluded.updated_at`)
+      .run(
+        deterministicId('dream_claim', proposal.id),
+        proposal.id,
+        proposal.entityId,
+        proposal.kind,
+        value,
+        JSON.stringify(proposal.evidence),
+        timestamp,
+        timestamp,
+      );
     const supportingBullets = Array.isArray(currentRead.supporting_bullets)
       ? currentRead.supporting_bullets.filter(
           (item): item is string => typeof item === 'string',
@@ -976,11 +1042,12 @@ export function createDreamingProposalStore(
         return { status: 'not_pending', proposalId: input.proposalId };
       const { proposal, run } = decision;
       const timestamp = now();
+      const expectedRevision = run.decision_revision ?? run.source_revision;
       if (
         input.getCurrentSourceRevision(
           proposal.entityId,
           proposal.entityType,
-        ) !== run.source_revision
+        ) !== expectedRevision
       ) {
         return markProposalStale(proposal.id, timestamp);
       }
@@ -1021,6 +1088,16 @@ export function createDreamingProposalStore(
         .prepare(`UPDATE entity_dreaming_proposals SET status = 'accepted',
         decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
         .run(timestamp, timestamp, proposal.id);
+      const nextRevision = input.getCurrentSourceRevision(
+        proposal.entityId,
+        proposal.entityType,
+      );
+      if (!nextRevision) throw new Error('dreaming_revision_unavailable');
+      sql
+        .prepare(
+          'UPDATE entity_dreaming_runs SET decision_revision = ?, updated_at = ? WHERE id = ?',
+        )
+        .run(nextRevision, timestamp, run.id);
       return { status: 'accepted', proposalId: proposal.id };
     })();
 
@@ -1033,11 +1110,12 @@ export function createDreamingProposalStore(
         return { status: 'not_pending', proposalId: input.proposalId };
       const { proposal, run } = decision;
       const timestamp = now();
+      const expectedRevision = run.decision_revision ?? run.source_revision;
       if (
         input.getCurrentSourceRevision(
           proposal.entityId,
           proposal.entityType,
-        ) !== run.source_revision
+        ) !== expectedRevision
       ) {
         return markProposalStale(proposal.id, timestamp);
       }
@@ -1056,6 +1134,16 @@ export function createDreamingProposalStore(
         .prepare(`UPDATE entity_dreaming_proposals SET status = 'rejected',
         decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
         .run(timestamp, timestamp, proposal.id);
+      const nextRevision = input.getCurrentSourceRevision(
+        proposal.entityId,
+        proposal.entityType,
+      );
+      if (!nextRevision) throw new Error('dreaming_revision_unavailable');
+      sql
+        .prepare(
+          'UPDATE entity_dreaming_runs SET decision_revision = ?, updated_at = ? WHERE id = ?',
+        )
+        .run(nextRevision, timestamp, run.id);
       return { status: 'rejected', proposalId: proposal.id };
     })();
 
@@ -1097,8 +1185,8 @@ export function createDreamingProposalStore(
         .get(alias.entity_type, alias.normalized_name, alias.entity_id);
       const aliasCollision = sql
         .prepare(`SELECT 1 FROM entity_dreaming_aliases WHERE entity_type = ?
-          AND normalized_name = ? AND entity_id <> ? AND active = 1 LIMIT 1`)
-        .get(alias.entity_type, alias.normalized_name, alias.entity_id);
+          AND normalized_name = ? AND proposal_id <> ? AND active = 1 LIMIT 1`)
+        .get(alias.entity_type, alias.normalized_name, input.proposalId);
       const userAliasCollision =
         alias.entity_type === 'person' &&
         (
