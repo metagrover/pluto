@@ -11,6 +11,7 @@ import {
   type NotesRequest,
 } from '../../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
+import { normalizeCapturedNotesDraft } from '../../scripts/lib/meeting_notes_recovery_replay';
 import {
   makeDirectNotesFixture,
   makeNotesContext,
@@ -936,6 +937,58 @@ it('rejects a malformed writer response after one bounded repair', async () => {
   expect(repair.prompt).toContain('Repair the prior response');
   expect(repair.prompt).not.toContain('BEGIN AUDIT CORRECTION GUIDANCE');
   expect(repair.responseContract).toBe('draft');
+});
+
+it('lets a benchmark recover a mechanical writer contract failure before model repair', async () => {
+  const fixture = makeDirectNotesFixture();
+  const malformed = JSON.parse(
+    JSON.stringify(fixture.draft, (key, value) =>
+      key === 'id' ? undefined : value,
+    ),
+  ) as {
+    sections: Array<{
+      items: Array<{
+        text: string | { text: string; sources: unknown[] };
+        sources?: unknown[];
+      }>;
+    }>;
+  };
+  const item = malformed.sections[0]!.items[0]!;
+  item.text = { text: item.text as string, sources: item.sources! };
+  item.sources = undefined;
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') return JSON.stringify(malformed);
+    return JSON.stringify({
+      ...auditDraft(request.prompt),
+      dispositions: [],
+      terminology: [],
+    });
+  });
+  const onRepair = vi.fn();
+  const onDeterministicWriterRecovery = vi.fn();
+
+  await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16384,
+    onRepair,
+    onDeterministicWriterRecovery,
+    recoverWriterDraft: (raw) => {
+      const recovery = normalizeCapturedNotesDraft(raw);
+      return recovery.status === 'normalized' ? recovery.normalizedJson : null;
+    },
+  });
+
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
+  expect(onDeterministicWriterRecovery).toHaveBeenCalledTimes(1);
+  expect(onRepair).not.toHaveBeenCalled();
 });
 
 it('propagates a direct writer transport failure without a repair request', async () => {

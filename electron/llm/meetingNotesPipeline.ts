@@ -234,6 +234,18 @@ const withOneRepair = async <T>(
   try {
     return parse(raw, false);
   } catch (error) {
+    if (task === 'notesWriter' && input.recoverWriterDraft) {
+      try {
+        const recovered = input.recoverWriterDraft(raw);
+        if (recovered !== null) {
+          const parsed = parse(recovered, false);
+          input.onDeterministicWriterRecovery?.();
+          return parsed;
+        }
+      } catch {
+        // A benchmark recovery candidate must pass the unchanged strict parser.
+      }
+    }
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',

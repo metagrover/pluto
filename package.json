@@ -49,6 +49,7 @@
     "benchmark:meeting-summaries": "tsx scripts/benchmark_meeting_summaries.ts",
     "benchmark:meeting-notes-latency": "tsx scripts/run_meeting_notes_latency_benchmark.ts",
     "report:meeting-notes-latency": "tsx scripts/report_meeting_notes_latency.ts",
+    "report:meeting-notes-trust-cost": "tsx scripts/report_meeting_notes_trust_cost.ts",
     "benchmark:ask-pluto": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/run_ask_pluto_benchmark.ts",
     "benchmark:meeting-notes-quality:score-fixtures": "node scripts/evaluate_meeting_notes_quality.js",
     "changelog:check": "node scripts/changelog.mjs check",

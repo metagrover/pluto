@@ -113,6 +113,9 @@ export type GenerateMeetingNotesInput = {
   contextTokens: number;
   signal?: AbortSignal;
   onRepair?: (task: NotesTask) => void;
+  /** Benchmark-only experiment. Product callers must retain the default. */
+  recoverWriterDraft?: (raw: string) => string | null;
+  onDeterministicWriterRecovery?: () => void;
   onStage?: (task: NotesTask) => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;

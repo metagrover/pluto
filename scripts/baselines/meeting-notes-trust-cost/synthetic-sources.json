@@ -1,0 +1,64 @@
+{
+  "conditional-promise-and-willingness": [
+    {
+      "speaker": "Ava",
+      "text": "If finance approves, I will send the revised budget to Nora by Thursday."
+    },
+    {
+      "speaker": "Ben",
+      "text": "I can draft the launch announcement if that would help."
+    },
+    {
+      "speaker": "Nora",
+      "text": "Thanks, Ben, but let us leave the announcement unassigned for now."
+    },
+    {
+      "speaker": "Ava",
+      "text": "My budget promise still depends on finance approval; it is not an unconditional send."
+    }
+  ],
+  "accepted-request-owner": [
+    {
+      "speaker": "Priya",
+      "text": "Mateo, could you send the accessibility report to Jules by Tuesday?"
+    },
+    {
+      "speaker": "Jules",
+      "text": "Tuesday works for receiving it. I am the recipient, not the person preparing or sending it."
+    },
+    {
+      "speaker": "Mateo",
+      "text": "Yes, I will take that on and send it by Tuesday."
+    },
+    {
+      "speaker": "Priya",
+      "text": "Thanks, Mateo. That is the only follow-up from this discussion."
+    }
+  ],
+  "withdrawal-and-qualified-promise": [
+    {
+      "speaker": "Ava",
+      "text": "I will send the integration checklist to Ben by Friday."
+    },
+    {
+      "speaker": "Ben",
+      "text": "If legal approves, I can draft the announcement."
+    },
+    {
+      "speaker": "Casey",
+      "text": "Next quarter the team may explore a migration, but that is not a current commitment."
+    },
+    {
+      "speaker": "Dana",
+      "text": "The research discussion has no assignments or decisions today."
+    },
+    {
+      "speaker": "Ava",
+      "text": "I take back my earlier checklist commitment. The source data is incomplete, so no one should send it Friday."
+    },
+    {
+      "speaker": "Dana",
+      "text": "After the final audit, I will publish the reviewed FAQ to Elena by Wednesday."
+    }
+  ]
+}
