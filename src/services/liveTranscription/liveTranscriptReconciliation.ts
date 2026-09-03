@@ -40,26 +40,39 @@ const activityCoverage = (
   }, 0);
 };
 
-// Every non-filler mic word must survive, in order, in the system version.
-// Unlike token-set similarity, this preserves reordered or unmatched local
-// words. Extra remote words are bounded and checked for numeric/polarity changes.
-const orderedEcho = (mic: string[], system: string[]): boolean => {
+// High-coverage words must survive in order across both sources. Unlike token-set
+// similarity, this rejects reordered speech and substantial unmatched local text.
+// Numeric, symbolic, and polarity-bearing tokens must still match exactly.
+const orderedEchoConfidence = (
+  mic: string[],
+  system: string[],
+): number | null => {
   if (
     !mic.length ||
-    system.length > MAX_ALIGNMENT_TOKENS ||
-    mic.length / system.length < 0.8
+    mic.length > MAX_ALIGNMENT_TOKENS ||
+    system.length > MAX_ALIGNMENT_TOKENS
   )
-    return false;
+    return null;
   if (
     mic.filter((word) => CONTRADICTION_TOKEN.test(word)).join(' ') !==
     system.filter((word) => CONTRADICTION_TOKEN.test(word)).join(' ')
   )
-    return false;
-  let matched = 0;
-  for (const word of system) {
-    if (word === mic[matched]) matched += 1;
+    return null;
+
+  let previous = new Uint16Array(system.length + 1);
+  for (const micWord of mic) {
+    const next = new Uint16Array(system.length + 1);
+    for (let index = 1; index <= system.length; index += 1) {
+      next[index] =
+        micWord === system[index - 1]
+          ? previous[index - 1] + 1
+          : Math.max(previous[index], next[index - 1]);
+    }
+    previous = next;
   }
-  return matched === mic.length;
+  const confidence =
+    previous[system.length] / Math.max(mic.length, system.length);
+  return confidence >= 0.9 ? confidence : null;
 };
 
 const alignedBoundaries = (
@@ -143,16 +156,16 @@ export const reconcileLiveTranscriptSegments = (input: {
           endMs(last) > endMs(segment) + MAX_BOUNDARY_SKEW_MS
         )
           break;
-        if (
-          alignedBoundaries(segment, first, last) &&
-          orderedEcho(tokens, combined)
-        ) {
+        const confidence = alignedBoundaries(segment, first, last)
+          ? orderedEchoConfidence(tokens, combined)
+          : null;
+        if (confidence !== null) {
           return {
             ...segment,
             presentation: {
               visibility: 'suppressed_echo' as const,
               matchedSegmentId: first.id,
-              confidence: Number((tokens.length / combined.length).toFixed(3)),
+              confidence: Number(confidence.toFixed(3)),
               reason: 'cross_channel_echo' as const,
             },
           };

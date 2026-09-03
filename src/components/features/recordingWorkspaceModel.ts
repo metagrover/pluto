@@ -76,10 +76,8 @@ export const buildRecordingWorkspaceModel = (
   const systemAudioWarning = input.systemAudio !== 'healthy';
   const durabilityWarning = input.captureDurability !== 'healthy';
   const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
-  const visibleTranscript = input.segments.filter(
-    (segment) =>
-      segment.text.trim() &&
-      segment.presentation?.visibility !== 'suppressed_echo',
+  const nonEmptyTranscript = input.segments.filter((segment) =>
+    segment.text.trim(),
   );
   return {
     status: input.isStarting
@@ -111,7 +109,7 @@ export const buildRecordingWorkspaceModel = (
               : input.isProcessing
                 ? 'Finalizing notes. Keep Pluto open.'
                 : 'Capture is healthy',
-    transcript: visibleTranscript,
+    transcript: nonEmptyTranscript,
     interimText: input.interimText.trim(),
   };
 };

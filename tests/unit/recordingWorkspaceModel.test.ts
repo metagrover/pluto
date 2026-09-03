@@ -53,7 +53,7 @@ describe('buildRecordingWorkspaceModel', () => {
     expect(model.transcript).toHaveLength(1);
   });
 
-  it('keeps raw echo candidates in input while hiding suppressed presentation rows', () => {
+  it('leaves echo visibility to the transcript presentation boundary', () => {
     const suppressed = {
       id: 'mic-echo',
       speaker: 'Speaker' as const,
@@ -89,7 +89,10 @@ describe('buildRecordingWorkspaceModel', () => {
       interimText: '',
     });
 
-    expect(model.transcript.map((segment) => segment.id)).toEqual(['system-1']);
+    expect(model.transcript.map((segment) => segment.id)).toEqual([
+      'mic-echo',
+      'system-1',
+    ]);
     expect(suppressed.presentation.visibility).toBe('suppressed_echo');
   });
 

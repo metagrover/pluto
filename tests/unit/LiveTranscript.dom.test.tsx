@@ -83,6 +83,50 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('shows one call row when reconciliation identifies a microphone echo', () => {
+    const root = createRoot(container);
+    const mic = {
+      ...liveSegment,
+      id: 'mic-near-echo',
+      text: 'The team reviewed the long release checklist and tried adding the deployment script before connecting to the database for the final validation run',
+      rawText:
+        'the team reviewed the long release checklist and tried adding the deployment script before connecting to the database for the final validation run',
+      timestampMs: 1_100,
+      endTimestampMs: 8_100,
+    };
+    const system = {
+      ...otherSpeakerSegment,
+      id: 'system-near-echo',
+      text: 'The team reviewed the long release checklist and tried running the deployment script before connecting to the database for the final validation run',
+      rawText:
+        'the team reviewed the long release checklist and tried running the deployment script before connecting to the database for the final validation run',
+      timestampMs: 1_000,
+      endTimestampMs: 8_000,
+    };
+    const distinctLocal = {
+      ...liveSegment,
+      id: 'distinct-local',
+      text: 'I will check that separately.',
+      timestampMs: 9_000,
+      endTimestampMs: 10_000,
+    };
+    const reconciled = reconcileLiveTranscriptSegments({
+      segments: [mic, system, distinctLocal],
+      activityWindows: [{ startTime: 1, endTime: 8.2, speaker: 'Them' }],
+    });
+
+    act(() =>
+      root.render(<LiveTranscript segments={reconciled} interimText="" />),
+    );
+
+    expect(container.textContent).not.toContain('tried adding');
+    expect(container.textContent).toContain('tried running');
+    expect(container.textContent).toContain('I will check that separately.');
+    expect(container.querySelectorAll('.transcript-turn')).toHaveLength(2);
+
+    act(() => root.unmount());
+  });
+
   it('keeps both sources visible through delayed provisional updates and commitment', () => {
     const root = createRoot(container);
     const projection = createEouTranscriptProjection();

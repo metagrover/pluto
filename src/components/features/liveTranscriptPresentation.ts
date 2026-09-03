@@ -83,6 +83,7 @@ export const buildLiveTranscriptTurns = (
   const turns: LiveTranscriptTurn[] = [];
 
   for (const segment of segments) {
+    if (segment.presentation?.visibility === 'suppressed_echo') continue;
     const current = turns.at(-1);
     const canContinueTurn =
       current?.speaker === segment.speaker &&

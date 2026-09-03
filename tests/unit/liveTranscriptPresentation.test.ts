@@ -16,6 +16,27 @@ const segment = (
 });
 
 describe('live transcript presentation', () => {
+  it('omits a reconciled echo without mutating its evidence', () => {
+    const echo = {
+      ...segment('mic-echo', 'Me', 'The duplicated microphone row.', 1_000),
+      source: 'mic' as const,
+      presentation: {
+        visibility: 'suppressed_echo' as const,
+        matchedSegmentId: 'system-1',
+        confidence: 0.95,
+        reason: 'cross_channel_echo' as const,
+      },
+    };
+    const call = {
+      ...segment('system-1', 'Them', 'The remote row remains.', 1_050),
+      source: 'system' as const,
+    };
+
+    expect(buildLiveTranscriptTurns([echo, call])).toHaveLength(1);
+    expect(buildLiveTranscriptTurns([echo, call])[0].segments).toEqual([call]);
+    expect(echo.presentation.visibility).toBe('suppressed_echo');
+  });
+
   it('groups consecutive same-speaker segments without changing their evidence', () => {
     const first = segment('one', 'Me', 'This sentence', 1_000);
     const second = segment('two', 'Me', 'continues here.', 2_000);
