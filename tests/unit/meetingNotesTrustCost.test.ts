@@ -104,6 +104,9 @@ describe('meeting notes trust-cost evaluator', () => {
       },
     });
     expect(JSON.stringify(report)).not.toContain('digest-a');
+    expect(report.cases[0]?.attempts[0]).not.toHaveProperty(
+      'blocksPublication',
+    );
   });
 
   it('classifies unique audit value only when reviewed quality improves', () => {
@@ -204,5 +207,21 @@ describe('meeting notes trust-cost evaluator', () => {
         ['PRIVATE_SENTINEL'],
       ),
     ).toThrow('unsafe_meeting_notes_latency_report');
+  });
+
+  it('rejects path-like identifiers and malformed timing input consistently', () => {
+    expect(() =>
+      buildMeetingNotesTrustCostReport([
+        { ...writerFailure(), fixtureId: 'private/path' },
+      ]),
+    ).toThrow('invalid_meeting_notes_trust_cost_case');
+    expect(() =>
+      buildMeetingNotesTrustCostReport([
+        {
+          ...writerFailure(),
+          timingEvidence: undefined,
+        } as unknown as MeetingNotesTrustCostCase,
+      ]),
+    ).toThrow('invalid_meeting_notes_trust_cost_case');
   });
 });

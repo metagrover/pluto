@@ -123,7 +123,10 @@ const isNullableCount = (value: unknown): value is number | null =>
   value === null || isCount(value);
 
 const isSafeIdentifier = (value: unknown): value is string =>
-  typeof value === 'string' && /^[a-z0-9][a-z0-9._:@/-]{0,127}$/i.test(value);
+  typeof value === 'string' && /^[a-z0-9][a-z0-9._:@-]{0,127}$/i.test(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const assertCheckpoint = (value: TrustCostCheckpoint | null): void => {
   if (value === null) return;
@@ -187,6 +190,8 @@ const assertCase = (value: MeetingNotesTrustCostCase): void => {
     !terminalStatuses.has(value.terminalStatus) ||
     (value.errorCode !== null && !isSafeIdentifier(value.errorCode)) ||
     typeof value.publicationBlocked !== 'boolean' ||
+    !isRecord(value.checkpoints) ||
+    !isRecord(value.timingEvidence) ||
     !Array.isArray(value.attempts) ||
     value.attempts.length === 0 ||
     value.attempts.length > 256
@@ -328,7 +333,6 @@ export const buildMeetingNotesTrustCostReport = (
         outputTokens: attempt.outputTokens,
         repeatsSource: attempt.repeatsSource,
         duplicateRecovery,
-        blocksPublication: input.publicationBlocked,
       };
     });
     return {
