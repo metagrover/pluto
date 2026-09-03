@@ -56,4 +56,18 @@ describe('idle dreaming production wiring', () => {
     expect(handler).toContain("typeof options.entityId !== 'string'");
     expect(handler).not.toContain('force');
   });
+
+  it('does not treat another serialized model request as a dreaming pause lock', () => {
+    const coordinator = mainSource.indexOf('createIdleDreamingCoordinator({');
+    const policy = mainSource.slice(coordinator, coordinator + 900);
+    expect(policy).toContain("reason !== 'llm_active'");
+    expect(policy).toContain('Number(count) > 0');
+
+    const pauseListener = mainSource.indexOf(
+      'configureKnowledgeSynthesisPause((paused) =>',
+    );
+    const listener = mainSource.slice(pauseListener, pauseListener + 500);
+    expect(listener).toContain("reason !== 'llm_active'");
+    expect(listener).toContain('notifyForegroundActivity()');
+  });
 });

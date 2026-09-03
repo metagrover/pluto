@@ -840,6 +840,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       responseSchema?: Record<string, unknown>;
       model?: string;
       promptVersion?: string;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
     } = {},
   ): Promise<string> {
     if (options.purpose === 'dreaming' && this.providerType !== 'ollama') {
@@ -866,6 +867,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       modelOverride:
         options.purpose === 'dreaming' ? options.model?.trim() : undefined,
       signal: options.signal,
+      workClass: options.workClass,
     });
   }
 

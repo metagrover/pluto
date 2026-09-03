@@ -122,6 +122,7 @@ describe('IdleDreamingCoordinator', () => {
       expect.any(AbortSignal),
       request.model,
       request.promptVersion,
+      'background',
     );
     expect(proposalStore.startRun).toHaveBeenCalledWith({
       entityId: 'proj-1',
@@ -309,7 +310,14 @@ describe('IdleDreamingCoordinator', () => {
     });
     expect(result.status).toBe('no_change');
     expect(result.entityId).toBe('proj-1');
-    expect(generateMock).toHaveBeenCalledOnce();
+    expect(generateMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      expect.any(AbortSignal),
+      expect.any(String),
+      expect.any(String),
+      'manual_notes',
+    );
   });
 
   it('does not let a manual request bypass a foreground pause lock', async () => {

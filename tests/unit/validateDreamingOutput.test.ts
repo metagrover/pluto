@@ -204,6 +204,78 @@ describe('validateDreamingOutput', () => {
     });
   });
 
+  it('rejects tentative ideas presented as project commitments', () => {
+    const tentativePackage: DreamingInputPackage = {
+      ...projectPackage,
+      recentMeetingNotes: [
+        {
+          meetingId: 'meeting-1',
+          title: 'Strategy review',
+          startedAt: '2026-08-01T10:00:00.000Z',
+          notesContent:
+            'A dossier approach to capture client interest signals was proposed as an alternative method of engagement, with the aim of converting potential leads into actual sales.',
+        },
+      ],
+    };
+    expectInvalid(
+      {
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_commitment',
+            payload: {
+              task: 'Develop a dossier approach to capture client interest signals.',
+            },
+            evidence: [
+              {
+                meetingId: 'meeting-1',
+                excerpt:
+                  'A dossier approach to capture client interest signals was proposed as an alternative method of engagement, with the aim of converting potential leads into actual sales.',
+              },
+            ],
+          },
+        ],
+      },
+      tentativePackage,
+    );
+  });
+
+  it('accepts a project commitment with explicit commitment language', () => {
+    const committedPackage: DreamingInputPackage = {
+      ...projectPackage,
+      recentMeetingNotes: [
+        {
+          meetingId: 'meeting-1',
+          title: 'Delivery review',
+          startedAt: '2026-08-01T10:00:00.000Z',
+          notesContent:
+            'The team agreed to deliver the billing migration checklist on Friday.',
+        },
+      ],
+    };
+    expect(
+      validate(
+        {
+          status: 'proposed',
+          proposals: [
+            {
+              kind: 'project_commitment',
+              payload: { task: 'Deliver the billing migration checklist.' },
+              evidence: [
+                {
+                  meetingId: 'meeting-1',
+                  excerpt:
+                    'The team agreed to deliver the billing migration checklist on Friday.',
+                },
+              ],
+            },
+          ],
+        },
+        committedPackage,
+      ),
+    ).toMatchObject({ valid: true, status: 'proposed' });
+  });
+
   it('rejects current and legacy correction collisions after normalization', () => {
     const proposal = milestoneProposal();
     const fingerprint = generateProposalFingerprint(proposal, projectPackage);

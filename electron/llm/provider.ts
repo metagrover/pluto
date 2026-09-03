@@ -202,6 +202,7 @@ export interface LLMProvider {
       responseSchema?: Record<string, unknown>;
       model?: string;
       promptVersion?: string;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
     },
   ): Promise<string>;
   answerAskPluto(

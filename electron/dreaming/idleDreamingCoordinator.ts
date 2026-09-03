@@ -1,4 +1,5 @@
 import { classifyAskPlutoFailure } from '../intelligence/askPlutoFailures';
+import type { LLMWorkClass } from '../llm/llmWorkClass';
 import { buildDreamingGenerationRequest } from './prompt';
 import type {
   DreamingLeasedRunRecord,
@@ -61,6 +62,7 @@ export interface IdleDreamingCoordinatorDeps {
     signal: AbortSignal,
     model: string,
     promptVersion: string,
+    workClass: LLMWorkClass,
   ) => Promise<string>;
   proposalStore: {
     startRun(input: DreamingStartInput): DreamingStartResult;
@@ -101,6 +103,7 @@ export interface DreamingGenerationProvider {
       signal: AbortSignal;
       model: string;
       promptVersion: string;
+      workClass: LLMWorkClass;
     },
   ): Promise<string>;
 }
@@ -112,6 +115,7 @@ export const generateDreamingWithProvider = (
   signal: AbortSignal,
   model: string,
   promptVersion: string,
+  workClass: LLMWorkClass,
 ): Promise<string> =>
   provider.synthesizeKnowledgeDocument(prompt, {
     purpose: 'dreaming',
@@ -119,6 +123,7 @@ export const generateDreamingWithProvider = (
     signal,
     model,
     promptVersion,
+    workClass,
   });
 
 export const createIdleDreamingCoordinator = (
@@ -194,6 +199,7 @@ export const createIdleDreamingCoordinator = (
   const generateWithDeadline = (
     request: ReturnType<typeof buildDreamingGenerationRequest>,
     signal: AbortSignal,
+    mode: 'automatic' | 'manual',
   ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       let settled = false;
@@ -228,6 +234,7 @@ export const createIdleDreamingCoordinator = (
           signal,
           request.model,
           request.promptVersion,
+          mode === 'manual' ? 'manual_notes' : 'background',
         )
         .then(
           (value) => finish(() => resolve(value)),
@@ -286,7 +293,7 @@ export const createIdleDreamingCoordinator = (
         lease = start.run;
       }
 
-      const raw = await generateWithDeadline(request, signal);
+      const raw = await generateWithDeadline(request, signal, mode);
       if (signal.aborted) {
         if (lease) {
           deps.proposalStore.cancelRun({

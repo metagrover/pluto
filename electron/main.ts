@@ -680,7 +680,7 @@ configureKnowledgeSynthesisPause((paused) => {
   setKnowledgeDocSynthesisPaused(paused);
   const hasForegroundPause = Object.entries(
     knowledgeSynthesisPause.snapshot(),
-  ).some(([, count]) => Number(count) > 0);
+  ).some(([reason, count]) => reason !== 'llm_active' && Number(count) > 0);
   if (hasForegroundPause) {
     notifyForegroundActivity();
   }
@@ -876,7 +876,7 @@ app.whenReady().then(async () => {
       rendererQuiet:
         Date.now() - lastRendererActivityAt >= DREAMING_ENTITY_DEADLINE_MS,
       paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
-        ([, count]) => Number(count) > 0,
+        ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
       ),
     }),
     getNextDirtyEntityId: () => dreamingEntityQueue?.getNextCandidate(),
@@ -889,7 +889,14 @@ app.whenReady().then(async () => {
       scheduleDreamingRun?.(delayMs);
     },
     hasPendingWork: () => dreamingEntityQueue?.hasPendingWork() === true,
-    generate: async (prompt, responseSchema, signal, model, promptVersion) => {
+    generate: async (
+      prompt,
+      responseSchema,
+      signal,
+      model,
+      promptVersion,
+      workClass,
+    ) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
         await getAllSettings(db),
@@ -902,6 +909,7 @@ app.whenReady().then(async () => {
         signal,
         model,
         promptVersion,
+        workClass,
       );
     },
     unloadModel: async (signal) => {

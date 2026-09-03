@@ -43,6 +43,22 @@ const normalizeEvidenceText = (text: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const EXPLICIT_COMMITMENT_CUE =
+  /\b(?:agreed to|committed to|promised to|will|must|needs? to|assigned to|action item(?: is|:)?|owns? the task of)\b/;
+const TENTATIVE_COMMITMENT_CUE =
+  /\b(?:propos(?:e|ed|al)|suggest(?:ed|ion)?|consider(?:ed|ing)?|might|may|could|option|alternative|aim(?:ed)? to|aspiration)\b/;
+
+const hasExplicitCommitmentEvidence = (
+  proposal: RawDreamingProposal,
+): boolean =>
+  proposal.evidence.some((reference) => {
+    const excerpt = normalizeEvidenceText(reference.excerpt);
+    return (
+      EXPLICIT_COMMITMENT_CUE.test(excerpt) &&
+      !TENTATIVE_COMMITMENT_CUE.test(excerpt)
+    );
+  });
+
 const canonicalPayload = (proposal: RawDreamingProposal): unknown => {
   switch (proposal.kind) {
     case 'project_summary':
@@ -168,6 +184,12 @@ export const validateDreamingOutput = (
     }
     if (proposal.kind === 'project_summary' && distinctMeetingIds.size < 2) {
       return invalid('insufficient_summary_evidence');
+    }
+    if (
+      proposal.kind === 'project_commitment' &&
+      !hasExplicitCommitmentEvidence(proposal)
+    ) {
+      return invalid('unsupported_project_commitment');
     }
 
     const fingerprint = generateProposalFingerprint(proposal, pkg);
