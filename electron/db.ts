@@ -103,6 +103,8 @@ import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
 import {
+  type DreamingDecisionInput,
+  type DreamingDecisionResult,
   createDreamingProposalStore,
   ensureDreamingProposalSchema,
 } from './dreaming/proposalStore';
@@ -1569,6 +1571,14 @@ export const dreamingProposalStore = createDreamingProposalStore(db, {
       ? resolvePersonIdentityId(entityId)
       : resolveProjectIdentityId(entityId),
 });
+export const acceptDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.acceptDreamingProposal(input);
+export const rejectDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.rejectDreamingProposal(input);
 // Cheap invalidation lets the background scheduler avoid repeatedly reading
 // complete source text when nothing relevant has changed.
 db.exec(`CREATE TABLE IF NOT EXISTS identity_input_revision (singleton INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
@@ -6911,6 +6921,21 @@ export const upsertEntity = (entity: {
   ) {
     existing = db
       .prepare(
+        `SELECT project.* FROM project_name_aliases name_alias
+         JOIN entities project ON project.id = name_alias.project_id
+         WHERE name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'project' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
         `SELECT canonical.* FROM project_aliases pa
          JOIN entities alias ON alias.id = pa.project_id
          JOIN entities canonical ON canonical.id = pa.canonical_id
@@ -7987,6 +8012,15 @@ export const findEntity = (
     return getEntity(resolvePersonIdentityId(direct.id));
   }
   if (direct) return direct;
+  if (type === 'project') {
+    const matches = db
+      .prepare(
+        `SELECT DISTINCT project_id FROM project_name_aliases
+         WHERE normalized_name = ?`,
+      )
+      .all(normalizedName) as Array<{ project_id: string }>;
+    return matches.length === 1 ? getEntity(matches[0].project_id) : undefined;
+  }
   if (type !== 'person') return undefined;
   const matches = db
     .prepare(
@@ -8572,7 +8606,7 @@ export const getDreamingEntityBaseline = (
     canonical.type === 'person' ? 'person_aliases' : 'project_aliases';
   const aliasIdColumn =
     canonical.type === 'person' ? 'person_id' : 'project_id';
-  const aliases = db
+  const identityAliases = db
     .prepare(`
       SELECT alias.id, alias.name
       FROM ${aliasTable} identity
@@ -8582,6 +8616,20 @@ export const getDreamingEntityBaseline = (
       LIMIT 24
     `)
     .all(canonicalId) as Array<{ id: string; name: string }>;
+  const nameAliasTable =
+    canonical.type === 'person'
+      ? 'person_name_aliases'
+      : 'project_name_aliases';
+  const nameAliasIdColumn =
+    canonical.type === 'person' ? 'person_id' : 'project_id';
+  const nameAliases = db
+    .prepare(
+      `SELECT normalized_name AS id, display_name AS name
+       FROM ${nameAliasTable} WHERE ${nameAliasIdColumn} = ?
+       ORDER BY normalized_name LIMIT 24`,
+    )
+    .all(canonicalId) as Array<{ id: string; name: string }>;
+  const aliases = [...identityAliases, ...nameAliases].slice(0, 24);
   const commitments =
     canonical.type === 'project'
       ? (db
@@ -8626,17 +8674,47 @@ export const getDreamingEntityBaseline = (
         }>);
   const scopeType = canonical.type === 'person' ? 'person_context' : 'project';
   const snapshot = getWorkingMemorySnapshot(scopeType, canonicalId);
+  let acceptedPersonCurrentRead: {
+    headline: string;
+    supportingBullets: string[];
+  } | null = null;
+  if (canonical.type === 'person') {
+    const personDoc = getKnowledgeDocByScope('person_context', canonicalId);
+    try {
+      const structured = JSON.parse(personDoc?.structured_json || '{}') as {
+        current_read?: {
+          headline?: unknown;
+          supporting_bullets?: unknown;
+        };
+      };
+      if (
+        typeof structured.current_read?.headline === 'string' &&
+        Array.isArray(structured.current_read.supporting_bullets)
+      ) {
+        acceptedPersonCurrentRead = {
+          headline: structured.current_read.headline,
+          supportingBullets: structured.current_read.supporting_bullets.filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        };
+      }
+    } catch {
+      acceptedPersonCurrentRead = null;
+    }
+  }
 
   const common = {
     status: canonical.status,
     aliases,
     commitments,
-    currentRead: snapshot
-      ? {
-          headline: snapshot.payload.current_read.headline,
-          supportingBullets: snapshot.payload.current_read.supporting_bullets,
-        }
-      : null,
+    currentRead:
+      acceptedPersonCurrentRead ??
+      (snapshot
+        ? {
+            headline: snapshot.payload.current_read.headline,
+            supportingBullets: snapshot.payload.current_read.supporting_bullets,
+          }
+        : null),
   };
   if (canonical.type === 'person') {
     return {
@@ -9384,6 +9462,11 @@ export const resetKnowledge = () => {
     'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
+    'entity_dreaming_proposals',
+    'entity_dreaming_runs',
+    'entity_alias_suggestions',
+    'entity_corrections',
+    'project_name_aliases',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',

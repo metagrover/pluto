@@ -96,4 +96,30 @@ describe('Entity Corrections Persistence', () => {
       db.isItemDismissed(entityId, itemType, 'stripe-elements-pending'),
     ).toBe(false);
   });
+
+  it('includes accepted person current-read fields in the dreaming baseline', () => {
+    const person = db.upsertEntity({
+      type: 'person',
+      name: 'Dreaming Baseline Person',
+    });
+    db.upsertKnowledgeDoc({
+      scope_type: 'person_context',
+      scope_key: person.id,
+      title: person.name,
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        current_read: {
+          headline: 'Evidence-backed headline',
+          supporting_bullets: ['Current focus'],
+        },
+      }),
+    });
+
+    expect(db.getDreamingEntityBaseline(person.id)).toMatchObject({
+      currentRead: {
+        headline: 'Evidence-backed headline',
+        supportingBullets: ['Current focus'],
+      },
+    });
+  });
 });

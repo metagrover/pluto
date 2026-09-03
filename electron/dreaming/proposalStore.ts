@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { withSavedDreamingProjectMilestone } from '../../src/utils/projectMilestones';
 import { parseDreamingProposal } from './proposalParser';
 import type {
   DreamingEntityType,
@@ -129,6 +130,18 @@ export interface DreamingProposalStoreDependencies {
   ) => string;
 }
 
+export type DreamingDecisionResult =
+  | { status: 'accepted' | 'rejected' | 'stale'; proposalId: string }
+  | { status: 'review_required' | 'not_pending'; proposalId: string };
+
+export interface DreamingDecisionInput {
+  proposalId: string;
+  getCurrentSourceRevision: (
+    entityId: string,
+    entityType: DreamingEntityType,
+  ) => string | null;
+}
+
 export function ensureDreamingProposalSchema(sql: Database.Database): void {
   // V0 is append-only: the store exposes no run deletion or proposal cleanup.
   // The FK is defense in depth when the connection enables foreign keys; no
@@ -198,6 +211,17 @@ export function ensureDreamingProposalSchema(sql: Database.Database): void {
       ON entity_dreaming_proposals(entity_id, status, created_at);
     CREATE INDEX IF NOT EXISTS idx_entity_dreaming_proposals_run
       ON entity_dreaming_proposals(run_id);
+
+    CREATE TABLE IF NOT EXISTS project_name_aliases (
+      project_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      normalized_name TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('user', 'dreaming')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(project_id, normalized_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_name_aliases_name
+      ON project_name_aliases(normalized_name);
   `);
 }
 
@@ -558,6 +582,398 @@ export function createDreamingProposalStore(
       .map((row) => ({ ...toProposalRecord(row), entityId: canonicalId }));
   };
 
+  const markProposalStale = (
+    proposalId: string,
+    timestamp: string,
+  ): DreamingDecisionResult => {
+    sql
+      .prepare(`UPDATE entity_dreaming_proposals SET status = 'stale',
+        decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
+      .run(timestamp, timestamp, proposalId);
+    return { status: 'stale', proposalId };
+  };
+
+  const readDecisionProposal = (
+    proposalId: string,
+  ): { proposal: DreamingProposalRecord; run: DreamingRunRow } | null => {
+    const row = sql
+      .prepare('SELECT * FROM entity_dreaming_proposals WHERE id = ?')
+      .get(proposalId) as DreamingProposalRow | undefined;
+    if (!row || row.status !== 'pending') return null;
+    const run = sql
+      .prepare('SELECT * FROM entity_dreaming_runs WHERE id = ?')
+      .get(row.run_id) as DreamingRunRow | undefined;
+    if (
+      !run ||
+      run.entity_id !== row.entity_id ||
+      run.entity_type !== row.entity_type
+    ) {
+      throw new Error('dreaming_proposal_run_mismatch');
+    }
+    return { proposal: toProposalRecord(row), run };
+  };
+
+  const normalizeName = (value: string): string =>
+    value.toLocaleLowerCase().trim().replace(/\s+/g, ' ');
+
+  const parseObject = (value: string | null): Record<string, unknown> => {
+    if (!value) return {};
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return isRecord(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const applyProjectSummary = (
+    proposal: Extract<DreamingProposalRecord, { kind: 'project_summary' }>,
+    timestamp: string,
+  ) => {
+    const entity = sql
+      .prepare('SELECT type, metadata FROM entities WHERE id = ?')
+      .get(proposal.entityId) as
+      | { type: string; metadata: string | null }
+      | undefined;
+    if (!entity || entity.type !== 'project')
+      throw new Error('dreaming_entity_invalid');
+    const metadata = parseObject(entity.metadata);
+    const existing = isRecord(metadata.projectThemeSynthesis)
+      ? metadata.projectThemeSynthesis
+      : {};
+    const sourceMeetingIds = [
+      ...new Set([
+        ...(Array.isArray(existing.sourceMeetingIds)
+          ? existing.sourceMeetingIds.filter(
+              (id): id is string => typeof id === 'string',
+            )
+          : []),
+        ...proposal.evidence.map((item) => item.meetingId),
+      ]),
+    ];
+    const sourceContexts = {
+      ...(isRecord(existing.sourceContexts) ? existing.sourceContexts : {}),
+      ...Object.fromEntries(
+        proposal.evidence.map((item) => [item.meetingId, item.excerpt]),
+      ),
+    };
+    const nextTheme = {
+      ...existing,
+      version: 1,
+      sourceMeetingIds,
+      candidateProjectIds: Array.isArray(existing.candidateProjectIds)
+        ? existing.candidateProjectIds
+        : [proposal.entityId],
+      outcome:
+        typeof existing.outcome === 'string'
+          ? existing.outcome
+          : proposal.payload.summary,
+      currentFocus: proposal.payload.summary,
+      recentChanges: Array.isArray(existing.recentChanges)
+        ? existing.recentChanges
+        : [],
+      openThreads: Array.isArray(existing.openThreads)
+        ? existing.openThreads
+        : [],
+      synthesizedAt: timestamp,
+      sourceContexts,
+    };
+    sql
+      .prepare('UPDATE entities SET metadata = ?, updated_at = ? WHERE id = ?')
+      .run(
+        JSON.stringify({ ...metadata, projectThemeSynthesis: nextTheme }),
+        timestamp,
+        proposal.entityId,
+      );
+  };
+
+  const applyProjectMilestone = (
+    proposal: Extract<DreamingProposalRecord, { kind: 'project_milestone' }>,
+    timestamp: string,
+  ) => {
+    const entity = sql
+      .prepare('SELECT type, metadata FROM entities WHERE id = ?')
+      .get(proposal.entityId) as
+      | { type: string; metadata: string | null }
+      | undefined;
+    if (!entity || entity.type !== 'project')
+      throw new Error('dreaming_entity_invalid');
+    const saved = withSavedDreamingProjectMilestone(
+      entity.metadata,
+      { title: proposal.payload.name, status: proposal.payload.status },
+      {
+        id: `dream_ms_${proposal.id}`,
+        now: timestamp,
+        proposalId: proposal.id,
+        runId: proposal.runId,
+        evidence: proposal.evidence,
+      },
+    );
+    sql
+      .prepare('UPDATE entities SET metadata = ?, updated_at = ? WHERE id = ?')
+      .run(saved.metadata, timestamp, proposal.entityId);
+  };
+
+  const deterministicId = (prefix: string, value: string): string =>
+    `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 20)}`;
+
+  const applyProjectCommitment = (
+    proposal: Extract<DreamingProposalRecord, { kind: 'project_commitment' }>,
+    timestamp: string,
+  ) => {
+    const project = sql
+      .prepare('SELECT type FROM entities WHERE id = ?')
+      .get(proposal.entityId) as { type: string } | undefined;
+    if (!project || project.type !== 'project')
+      throw new Error('dreaming_entity_invalid');
+    const actionId = deterministicId(
+      'dream_action',
+      `${proposal.entityId}:${proposal.fingerprint}`,
+    );
+    const metadata = JSON.stringify({
+      source: 'dreaming',
+      dreaming_proposal_id: proposal.id,
+      dreaming_run_id: proposal.runId,
+      dreaming_fingerprint: proposal.fingerprint,
+      source_meeting_id: proposal.evidence[0].meetingId,
+      source_meeting_ids: proposal.evidence.map((item) => item.meetingId),
+      source_excerpts: proposal.evidence.map((item) => item.excerpt),
+      ownership_confirmed: false,
+    });
+    sql
+      .prepare(`INSERT OR IGNORE INTO entities(
+      id, type, name, normalized_name, status, assigned_to, metadata, updated_at
+    ) VALUES (?, 'action_item', ?, ?, 'active', NULL, ?, ?)`)
+      .run(
+        actionId,
+        proposal.payload.task,
+        normalizeName(proposal.payload.task),
+        metadata,
+        timestamp,
+      );
+    const action = sql
+      .prepare('SELECT type, assigned_to FROM entities WHERE id = ?')
+      .get(actionId) as
+      | { type: string; assigned_to: string | null }
+      | undefined;
+    if (
+      !action ||
+      action.type !== 'action_item' ||
+      action.assigned_to !== null
+    ) {
+      throw new Error('dreaming_commitment_conflict');
+    }
+    sql
+      .prepare(`INSERT OR IGNORE INTO entity_links(
+      id, source_entity_id, target_entity_id, relationship, meeting_id,
+      state, evidence_meeting_id, evidence_quote, source, confidence,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, 'belongs_to', ?, 'confirmed', ?, ?, 'synthesis', 1, ?, ?)`)
+      .run(
+        deterministicId('dream_link', `${actionId}:${proposal.entityId}`),
+        actionId,
+        proposal.entityId,
+        proposal.evidence[0].meetingId,
+        proposal.evidence[0].meetingId,
+        proposal.evidence[0].excerpt,
+        timestamp,
+        timestamp,
+      );
+  };
+
+  const applyPersonContext = (
+    proposal: Extract<
+      DreamingProposalRecord,
+      { kind: 'person_headline' | 'person_focus' | 'person_collaborator' }
+    >,
+    timestamp: string,
+  ) => {
+    const person = sql
+      .prepare('SELECT type FROM entities WHERE id = ?')
+      .get(proposal.entityId) as { type: string } | undefined;
+    if (!person || person.type !== 'person')
+      throw new Error('dreaming_entity_invalid');
+    const doc = sql
+      .prepare(`SELECT id, structured_json FROM knowledge_docs
+      WHERE scope_type = 'person_context' AND scope_key = ?`)
+      .get(proposal.entityId) as
+      | { id: string; structured_json: string | null }
+      | undefined;
+    if (!doc) throw new Error('dreaming_person_context_missing');
+    const structured = parseObject(doc.structured_json);
+    const currentRead = isRecord(structured.current_read)
+      ? structured.current_read
+      : {};
+    const value =
+      proposal.kind === 'person_headline'
+        ? proposal.payload.headline
+        : proposal.kind === 'person_focus'
+          ? proposal.payload.focus
+          : proposal.payload.name;
+    const supportingBullets = Array.isArray(currentRead.supporting_bullets)
+      ? currentRead.supporting_bullets.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [];
+    if (
+      proposal.kind !== 'person_headline' &&
+      !supportingBullets.includes(value)
+    ) {
+      supportingBullets.push(value);
+    }
+    const dreamingEvidence = Array.isArray(currentRead.dreamingEvidence)
+      ? currentRead.dreamingEvidence
+      : [];
+    dreamingEvidence.push({
+      proposalId: proposal.id,
+      runId: proposal.runId,
+      kind: proposal.kind,
+      sourceMeetingIds: proposal.evidence.map((item) => item.meetingId),
+      excerpts: proposal.evidence.map((item) => item.excerpt),
+    });
+    const nextCurrentRead = {
+      ...currentRead,
+      ...(proposal.kind === 'person_headline' ? { headline: value } : {}),
+      supporting_bullets: supportingBullets,
+      dreamingEvidence,
+    };
+    sql
+      .prepare(
+        'UPDATE knowledge_docs SET structured_json = ?, updated_at = ? WHERE id = ?',
+      )
+      .run(
+        JSON.stringify({ ...structured, current_read: nextCurrentRead }),
+        timestamp,
+        doc.id,
+      );
+  };
+
+  const applyAlias = (
+    proposal: Extract<
+      DreamingProposalRecord,
+      { kind: 'project_alias' | 'person_alias' }
+    >,
+  ): 'applied' | 'review_required' => {
+    const expectedType =
+      proposal.kind === 'project_alias' ? 'project' : 'person';
+    const alias = proposal.payload.alias.trim().replace(/\s+/g, ' ');
+    const normalized = normalizeName(alias);
+    const entity = sql
+      .prepare('SELECT id, type, normalized_name FROM entities WHERE id = ?')
+      .get(proposal.entityId) as
+      | { id: string; type: string; normalized_name: string }
+      | undefined;
+    if (!entity || entity.type !== expectedType)
+      throw new Error('dreaming_entity_invalid');
+    if (normalized === entity.normalized_name) return 'applied';
+    const collision = sql
+      .prepare(
+        'SELECT id FROM entities WHERE type = ? AND normalized_name = ? AND id <> ?',
+      )
+      .get(expectedType, normalized, entity.id) as { id: string } | undefined;
+    if (collision) return 'review_required';
+    const table =
+      expectedType === 'project'
+        ? 'project_name_aliases'
+        : 'person_name_aliases';
+    const idColumn = expectedType === 'project' ? 'project_id' : 'person_id';
+    const aliasCollision = sql
+      .prepare(
+        `SELECT ${idColumn} AS id FROM ${table} WHERE normalized_name = ? AND ${idColumn} <> ?`,
+      )
+      .get(normalized, entity.id) as { id: string } | undefined;
+    if (aliasCollision) return 'review_required';
+    const source = expectedType === 'project' ? 'dreaming' : 'user';
+    sql
+      .prepare(`INSERT INTO ${table}(${idColumn}, normalized_name, display_name, source)
+      VALUES (?, ?, ?, ?) ON CONFLICT(${idColumn}, normalized_name) DO UPDATE SET display_name=excluded.display_name`)
+      .run(entity.id, normalized, alias, source);
+    return 'applied';
+  };
+
+  const acceptDreamingProposal = (
+    input: DreamingDecisionInput,
+  ): DreamingDecisionResult =>
+    sql.transaction((): DreamingDecisionResult => {
+      const decision = readDecisionProposal(input.proposalId);
+      if (!decision)
+        return { status: 'not_pending', proposalId: input.proposalId };
+      const { proposal, run } = decision;
+      const timestamp = now();
+      if (
+        input.getCurrentSourceRevision(
+          proposal.entityId,
+          proposal.entityType,
+        ) !== run.source_revision
+      ) {
+        return markProposalStale(proposal.id, timestamp);
+      }
+      let application: 'applied' | 'review_required' = 'applied';
+      if (proposal.kind === 'project_summary')
+        applyProjectSummary(proposal, timestamp);
+      else if (proposal.kind === 'project_milestone')
+        applyProjectMilestone(proposal, timestamp);
+      else if (proposal.kind === 'project_commitment')
+        applyProjectCommitment(proposal, timestamp);
+      else if (
+        proposal.kind === 'person_headline' ||
+        proposal.kind === 'person_focus' ||
+        proposal.kind === 'person_collaborator'
+      )
+        applyPersonContext(proposal, timestamp);
+      else if (
+        proposal.kind === 'project_alias' ||
+        proposal.kind === 'person_alias'
+      ) {
+        application = applyAlias(proposal);
+      } else {
+        throw new Error('dreaming_application_unsupported');
+      }
+      if (application === 'review_required') {
+        return { status: 'review_required', proposalId: proposal.id };
+      }
+      sql
+        .prepare(`UPDATE entity_dreaming_proposals SET status = 'accepted',
+        decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
+        .run(timestamp, timestamp, proposal.id);
+      return { status: 'accepted', proposalId: proposal.id };
+    })();
+
+  const rejectDreamingProposal = (
+    input: DreamingDecisionInput,
+  ): DreamingDecisionResult =>
+    sql.transaction((): DreamingDecisionResult => {
+      const decision = readDecisionProposal(input.proposalId);
+      if (!decision)
+        return { status: 'not_pending', proposalId: input.proposalId };
+      const { proposal, run } = decision;
+      const timestamp = now();
+      if (
+        input.getCurrentSourceRevision(
+          proposal.entityId,
+          proposal.entityType,
+        ) !== run.source_revision
+      ) {
+        return markProposalStale(proposal.id, timestamp);
+      }
+      const correctionId = `corr_${randomUUID()}`;
+      sql
+        .prepare(`INSERT INTO entity_corrections(id, entity_id, item_type, fingerprint, reason)
+        VALUES (?, ?, ?, ?, 'dreaming_proposal_rejected')
+        ON CONFLICT(entity_id, item_type, fingerprint) DO UPDATE SET reason=excluded.reason`)
+        .run(
+          correctionId,
+          proposal.entityId,
+          `dreaming:${proposal.kind}`,
+          proposal.fingerprint,
+        );
+      sql
+        .prepare(`UPDATE entity_dreaming_proposals SET status = 'rejected',
+        decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
+        .run(timestamp, timestamp, proposal.id);
+      return { status: 'rejected', proposalId: proposal.id };
+    })();
+
   const recoverStaleRuns = (input: { staleBefore: string }): number => {
     const timestamp = now();
     return sql
@@ -576,6 +992,8 @@ export function createDreamingProposalStore(
     getRun: readRun,
     listRuns,
     listPendingProposals,
+    acceptDreamingProposal,
+    rejectDreamingProposal,
     recoverStaleRuns,
   };
 }

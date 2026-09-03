@@ -27,6 +27,44 @@ function fixture(options?: {
 }) {
   const sql = new Database(':memory:');
   connections.push(sql);
+  sql.exec(`
+    CREATE TABLE entities (
+      id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL, status TEXT, due_date TEXT,
+      assigned_to TEXT, metadata TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE entity_links (
+      id TEXT PRIMARY KEY, source_entity_id TEXT NOT NULL,
+      target_entity_id TEXT NOT NULL, relationship TEXT NOT NULL,
+      meeting_id TEXT, state TEXT NOT NULL, evidence_meeting_id TEXT,
+      evidence_quote TEXT, source TEXT NOT NULL, confidence REAL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE entity_corrections (
+      id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, item_type TEXT NOT NULL,
+      fingerprint TEXT NOT NULL, reason TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(entity_id, item_type, fingerprint)
+    );
+    CREATE TABLE person_name_aliases (
+      person_id TEXT NOT NULL, normalized_name TEXT NOT NULL,
+      display_name TEXT NOT NULL, source TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(person_id, normalized_name)
+    );
+    CREATE TABLE project_name_aliases (
+      project_id TEXT NOT NULL, normalized_name TEXT NOT NULL,
+      display_name TEXT NOT NULL, source TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(project_id, normalized_name)
+    );
+    CREATE TABLE knowledge_docs (
+      id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, scope_key TEXT NOT NULL,
+      title TEXT NOT NULL, structured_json TEXT, status TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(scope_type, scope_key)
+    );
+  `);
   ensureDreamingProposalSchema(sql);
   let currentTime = options?.now ?? '2026-08-10T10:00:00.000Z';
   const store = createDreamingProposalStore(sql, {
@@ -484,5 +522,459 @@ describe('dreaming proposal persistence', () => {
     expect(duplicate.status).toBe('existing');
     expect('leaseToken' in duplicate.run).toBe(false);
     expect(secondStore.listRuns('project-1', 'project')).toHaveLength(1);
+  });
+
+  it('rejects a pending proposal and records its fingerprint atomically', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.rejectDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toEqual({ status: 'rejected', proposalId: proposal.id });
+    expect(
+      sql
+        .prepare('SELECT status FROM entity_dreaming_proposals WHERE id=?')
+        .get(proposal.id),
+    ).toEqual({ status: 'rejected' });
+    expect(
+      sql
+        .prepare(
+          'SELECT entity_id,item_type,fingerprint FROM entity_corrections',
+        )
+        .get(),
+    ).toEqual({
+      entity_id: 'project-1',
+      item_type: 'dreaming:project_summary',
+      fingerprint: 'project-summary-one',
+    });
+    expect(
+      createDreamingProposalStore(sql).listPendingProposals(
+        'project-1',
+        'project',
+      ),
+    ).toEqual([]);
+  });
+
+  it('keeps a proposal pending when its rejection correction cannot be stored', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+    sql.exec(`CREATE TRIGGER fail_correction BEFORE INSERT ON entity_corrections
+      BEGIN SELECT RAISE(ABORT, 'injected_correction_failure'); END;`);
+
+    expect(() =>
+      store.rejectDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toThrow('injected_correction_failure');
+    expect(store.listPendingProposals('project-1', 'project')).toHaveLength(1);
+  });
+
+  it('marks a proposal stale without canonical or correction writes when the revision changed', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-2',
+      }),
+    ).toEqual({
+      status: 'stale',
+      proposalId: proposal.id,
+    });
+    expect(
+      sql.prepare(`SELECT metadata FROM entities WHERE id='project-1'`).get(),
+    ).toEqual({ metadata: '{}' });
+    expect(
+      sql.prepare('SELECT COUNT(*) count FROM entity_corrections').get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it('accepts a project summary into the existing theme without changing a confirmed title', () => {
+    const { sql, store } = fixture();
+    const metadata = JSON.stringify({
+      projectDisplayTitle: 'User title',
+      projectDisplayTitleSource: 'user',
+      projectThemeSynthesis: {
+        version: 1,
+        sourceMeetingIds: ['old'],
+        candidateProjectIds: ['project-1'],
+        outcome: 'Existing outcome',
+        currentFocus: 'Old focus',
+        recentChanges: [],
+        openThreads: [],
+        synthesizedAt: 'old',
+      },
+    });
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha',?)`)
+      .run(metadata);
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toEqual({ status: 'accepted', proposalId: proposal.id });
+    const saved = JSON.parse(
+      (
+        sql
+          .prepare(`SELECT metadata FROM entities WHERE id='project-1'`)
+          .get() as { metadata: string }
+      ).metadata,
+    );
+    expect(saved.projectDisplayTitle).toBe('User title');
+    expect(saved.projectThemeSynthesis).toMatchObject({
+      outcome: 'Existing outcome',
+      currentFocus: 'A grounded summary',
+      sourceMeetingIds: ['old', 'meeting-1'],
+      sourceContexts: { 'meeting-1': 'Supporting evidence' },
+    });
+  });
+
+  it('returns review_required rather than merging an alias that names another entity', () => {
+    const { sql, store } = fixture();
+    sql.exec(`INSERT INTO entities(id,type,name,normalized_name,metadata) VALUES
+      ('project-1','project','Alpha','alpha','{}'),
+      ('project-2','project','Beta','beta','{}')`);
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'project_alias',
+          payload: { alias: 'Beta' },
+          evidence: [{ meetingId: 'meeting-1', excerpt: 'Beta' }],
+          fingerprint: 'beta',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toEqual({ status: 'review_required', proposalId: proposal.id });
+    expect(
+      sql.prepare('SELECT COUNT(*) count FROM project_name_aliases').get(),
+    ).toEqual({ count: 0 });
+    expect(store.listPendingProposals('project-1', 'project')).toHaveLength(1);
+  });
+
+  it('accepts a non-colliding project alias without creating or merging an entity', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'project_alias',
+          payload: { alias: 'Alpha launch' },
+          evidence: [{ meetingId: 'meeting-1', excerpt: 'Alpha launch' }],
+          fingerprint: 'alpha-launch',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toEqual({ status: 'accepted', proposalId: proposal.id });
+    expect(sql.prepare('SELECT COUNT(*) count FROM entities').get()).toEqual({
+      count: 1,
+    });
+    expect(
+      sql.prepare('SELECT * FROM project_name_aliases').get(),
+    ).toMatchObject({
+      project_id: 'project-1',
+      normalized_name: 'alpha launch',
+      display_name: 'Alpha launch',
+      source: 'dreaming',
+    });
+  });
+
+  it('accepts an evidence-backed generated milestone without disturbing user milestones', () => {
+    const { sql, store } = fixture();
+    const metadata = JSON.stringify({
+      projectMilestonesVersion: 1,
+      projectMilestones: [
+        {
+          id: 'user-1',
+          title: 'User milestone',
+          status: 'planned',
+          targetDate: null,
+          note: null,
+          createdAt: 'old',
+          updatedAt: 'old',
+        },
+      ],
+    });
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha',?)`)
+      .run(metadata);
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'project_milestone',
+          payload: { name: 'Generated milestone', status: 'in_progress' },
+          evidence: [{ meetingId: 'meeting-1', excerpt: 'Work is underway' }],
+          fingerprint: 'generated-milestone',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }).status,
+    ).toBe('accepted');
+    const saved = JSON.parse(
+      (
+        sql
+          .prepare(`SELECT metadata FROM entities WHERE id='project-1'`)
+          .get() as { metadata: string }
+      ).metadata,
+    );
+    expect(saved.projectMilestones).toEqual([
+      expect.objectContaining({ id: 'user-1', title: 'User milestone' }),
+      expect.objectContaining({
+        title: 'Generated milestone',
+        source: 'dreaming',
+        dreamingProposalId: proposal.id,
+        dreamingRunId: started.run.id,
+        sourceMeetingIds: ['meeting-1'],
+        sourceExcerpts: ['Work is underway'],
+      }),
+    ]);
+  });
+
+  it('accepts a commitment as one unowned canonical action with a confirmed project link', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'project_commitment',
+          payload: { task: 'Ship the preview' },
+          evidence: [
+            { meetingId: 'meeting-1', excerpt: 'We will ship the preview' },
+          ],
+          fingerprint: 'ship-preview',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }).status,
+    ).toBe('accepted');
+    expect(
+      sql
+        .prepare(
+          `SELECT type,name,assigned_to FROM entities WHERE type='action_item'`,
+        )
+        .all(),
+    ).toEqual([
+      { type: 'action_item', name: 'Ship the preview', assigned_to: null },
+    ]);
+    expect(
+      sql
+        .prepare(
+          'SELECT relationship,state,evidence_meeting_id,evidence_quote FROM entity_links',
+        )
+        .get(),
+    ).toEqual({
+      relationship: 'belongs_to',
+      state: 'confirmed',
+      evidence_meeting_id: 'meeting-1',
+      evidence_quote: 'We will ship the preview',
+    });
+  });
+
+  it('updates person current_read claims while preserving unrelated knowledge fields and evidence', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('person-1','person','Avery','avery','{}')`)
+      .run();
+    sql
+      .prepare(`INSERT INTO knowledge_docs(id,scope_type,scope_key,title,structured_json,status)
+      VALUES ('doc-1','person_context','person-1','Avery',?,'up_to_date')`)
+      .run(
+        JSON.stringify({
+          schema_version: 2,
+          current_read: {
+            headline: 'Old headline',
+            supporting_bullets: ['Keep me'],
+          },
+          active_streams: [{ id: 'keep' }],
+        }),
+      );
+    const started = store.startRun({
+      entityId: 'person-1',
+      entityType: 'person',
+      sourceRevision: 'person-rev',
+      model: 'gemma4:12b',
+      promptVersion: 'dreaming-v1',
+    });
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'person_focus',
+          payload: { focus: 'Launch readiness' },
+          evidence: [
+            { meetingId: 'meeting-1', excerpt: 'Focused on launch readiness' },
+          ],
+          fingerprint: 'launch-readiness',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('person-1', 'person')[0];
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'person-rev',
+      }).status,
+    ).toBe('accepted');
+    const saved = JSON.parse(
+      (
+        sql
+          .prepare(
+            `SELECT structured_json FROM knowledge_docs WHERE id='doc-1'`,
+          )
+          .get() as { structured_json: string }
+      ).structured_json,
+    );
+    expect(saved.active_streams).toEqual([{ id: 'keep' }]);
+    expect(saved.current_read).toMatchObject({
+      headline: 'Old headline',
+      supporting_bullets: ['Keep me', 'Launch readiness'],
+      dreamingEvidence: expect.arrayContaining([
+        expect.objectContaining({
+          proposalId: proposal.id,
+          kind: 'person_focus',
+          sourceMeetingIds: ['meeting-1'],
+        }),
+      ]),
+    });
+  });
+
+  it('rolls back canonical application when accepting status cannot be persisted', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+    sql.exec(`CREATE TRIGGER fail_accept BEFORE UPDATE OF status ON entity_dreaming_proposals
+      WHEN NEW.status='accepted' BEGIN SELECT RAISE(ABORT, 'injected_accept_failure'); END;`);
+
+    expect(() =>
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toThrow('injected_accept_failure');
+    expect(
+      sql.prepare(`SELECT metadata FROM entities WHERE id='project-1'`).get(),
+    ).toEqual({ metadata: '{}' });
+    expect(store.listPendingProposals('project-1', 'project')).toHaveLength(1);
   });
 });

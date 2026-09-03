@@ -812,6 +812,7 @@ app.whenReady().then(async () => {
     getNextDirtyEntityId: () => dreamingEntityQueue.getNextCandidate(),
     getEntity: (id: string) => db.getEntity(id),
     packageNotes: (entityId: string) => packageEntityNotes(entityId),
+    proposalStore: db.dreamingProposalStore,
     generate: async (prompt, responseSchema, signal, model, promptVersion) => {
       const provider = new UnifiedLLMProvider(
         'ollama',

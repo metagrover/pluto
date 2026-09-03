@@ -1,8 +1,14 @@
 import { buildDreamingGenerationRequest } from './prompt';
 import type {
+  DreamingLeasedRunRecord,
+  DreamingStartInput,
+  DreamingStartResult,
+} from './proposalStore';
+import type {
   DreamingEntityType,
   DreamingInputPackage,
   DreamingRunResult,
+  ValidatedDreamingProposal,
 } from './types';
 import { validateDreamingOutput } from './validateDreamingOutput';
 
@@ -23,7 +29,13 @@ type EntityDreamingRunResult = DreamingRunResult & { entityId: string };
 export type IdleDreamingResult =
   | EntityDreamingRunResult
   | {
-      status: 'ineligible' | 'no_work';
+      status:
+        | 'ineligible'
+        | 'no_work'
+        | 'existing'
+        | 'busy'
+        | 'backoff'
+        | 'exhausted';
       entityId?: string;
     };
 
@@ -44,6 +56,23 @@ export interface IdleDreamingCoordinatorDeps {
     model: string,
     promptVersion: string,
   ) => Promise<string>;
+  proposalStore: {
+    startRun(input: DreamingStartInput): DreamingStartResult;
+    completeRun(input: {
+      runId: string;
+      leaseToken: string;
+      status: 'no_change' | 'proposed';
+      proposals:
+        | []
+        | [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]];
+    }): unknown;
+    failRun(input: {
+      runId: string;
+      leaseToken: string;
+      errorCode: string;
+    }): unknown;
+    cancelRun(input: { runId: string; leaseToken: string }): unknown;
+  };
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
@@ -110,7 +139,9 @@ export const createIdleDreamingCoordinator = (
   const executeEntityRun = async (
     candidate: DirtyEntityCandidate,
     signal: AbortSignal,
+    mode: 'automatic' | 'manual',
   ): Promise<IdleDreamingResult> => {
+    let lease: DreamingLeasedRunRecord | null = null;
     try {
       const pkg = deps.packageNotes(candidate.entityId);
       if (!pkg || pkg.recentMeetingNotes.length === 0) {
@@ -132,6 +163,20 @@ export const createIdleDreamingCoordinator = (
       }
 
       const request = buildDreamingGenerationRequest(pkg);
+      if (deps.proposalStore) {
+        const start = deps.proposalStore.startRun({
+          entityId: pkg.entityId,
+          entityType: pkg.entityType,
+          sourceRevision: pkg.sourceRevision,
+          model: request.model,
+          promptVersion: request.promptVersion,
+          mode,
+        });
+        if (start.status !== 'started') {
+          return { status: start.status, entityId: candidate.entityId };
+        }
+        lease = start.run;
+      }
 
       const raw = await deps.generate(
         request.prompt,
@@ -141,23 +186,99 @@ export const createIdleDreamingCoordinator = (
         request.promptVersion,
       );
       if (signal.aborted) {
+        if (lease) {
+          deps.proposalStore.cancelRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+          });
+        }
         return { status: 'cancelled', entityId: candidate.entityId };
       }
 
       const validated = validateDreamingOutput(raw, pkg);
       if (!validated.valid) {
+        if (lease) {
+          deps.proposalStore.failRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+            errorCode: 'validation_failed',
+          });
+        }
         return {
           status: 'failed',
           entityId: candidate.entityId,
           errorCode: validated.error,
         };
       }
+      if (lease && mode === 'automatic' && !isEligible()) {
+        deps.proposalStore.cancelRun({
+          runId: lease.id,
+          leaseToken: lease.leaseToken,
+        });
+        return { status: 'cancelled', entityId: candidate.entityId };
+      }
       if (validated.status === 'no_change') {
+        if (lease) {
+          try {
+            const completed = deps.proposalStore.completeRun({
+              runId: lease.id,
+              leaseToken: lease.leaseToken,
+              status: 'no_change',
+              proposals: [],
+            });
+            if (!completed) {
+              return {
+                status: 'failed',
+                entityId: candidate.entityId,
+                errorCode: 'lease_expired',
+              };
+            }
+          } catch {
+            deps.proposalStore.failRun({
+              runId: lease.id,
+              leaseToken: lease.leaseToken,
+              errorCode: 'persistence_failed',
+            });
+            return {
+              status: 'failed',
+              entityId: candidate.entityId,
+              errorCode: 'persistence_failed',
+            };
+          }
+        }
         return {
           status: 'no_change',
           entityId: candidate.entityId,
           proposals: [],
         };
+      }
+      if (lease) {
+        try {
+          const completed = deps.proposalStore.completeRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+            status: 'proposed',
+            proposals: validated.proposals,
+          });
+          if (!completed) {
+            return {
+              status: 'failed',
+              entityId: candidate.entityId,
+              errorCode: 'lease_expired',
+            };
+          }
+        } catch {
+          deps.proposalStore.failRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+            errorCode: 'persistence_failed',
+          });
+          return {
+            status: 'failed',
+            entityId: candidate.entityId,
+            errorCode: 'persistence_failed',
+          };
+        }
       }
       return {
         status: 'proposed',
@@ -169,7 +290,20 @@ export const createIdleDreamingCoordinator = (
         signal.aborted ||
         (err instanceof Error && err.name === 'AbortError')
       ) {
+        if (lease) {
+          deps.proposalStore.cancelRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+          });
+        }
         return { status: 'cancelled', entityId: candidate.entityId };
+      }
+      if (lease) {
+        deps.proposalStore.failRun({
+          runId: lease.id,
+          leaseToken: lease.leaseToken,
+          errorCode: 'generation_failed',
+        });
       }
       return {
         status: 'failed',
@@ -217,7 +351,11 @@ export const createIdleDreamingCoordinator = (
     const controller = new AbortController();
     activeController = controller;
 
-    activeRun = executeEntityRun(candidate, controller.signal).finally(() => {
+    activeRun = executeEntityRun(
+      candidate,
+      controller.signal,
+      options?.force ? 'manual' : 'automatic',
+    ).finally(() => {
       activeController = null;
       activeRun = null;
     });
