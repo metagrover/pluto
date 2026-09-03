@@ -246,6 +246,45 @@ describe('UnifiedLLMProvider', () => {
     expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
   });
 
+  it('honors the fixed local dreaming model over saved model settings', async () => {
+    let body: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      body = parseRequestBody(init);
+      return jsonResponse({
+        response: '{"status":"no_change","proposals":[]}',
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'legacy-saved-model',
+      ollama_fast_model: 'quick-saved-model',
+    });
+
+    await provider.synthesizeKnowledgeDocument('dream', {
+      purpose: 'dreaming',
+      model: 'gemma4:12b',
+      promptVersion: 'dreaming-proposals-v1',
+      responseSchema: { type: 'object' },
+    });
+
+    expect(body).toMatchObject({
+      model: 'gemma4:12b',
+      format: { type: 'object' },
+    });
+  });
+
+  it('refuses to route dreaming through a hosted provider', async () => {
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+    });
+    await expect(
+      provider.synthesizeKnowledgeDocument('dream', {
+        purpose: 'dreaming',
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-proposals-v1',
+      }),
+    ).rejects.toThrow('dreaming_local_provider_required');
+  });
+
   it('uses bounded non-thinking JSON for project scope without changing knowledge synthesis', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {

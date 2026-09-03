@@ -89,7 +89,7 @@ export const ProjectDossier = ({
     EntityAliasSuggestion[]
   >([]);
   const [dreamingState, setDreamingState] = useState<
-    'idle' | 'running' | 'done' | 'error'
+    'idle' | 'running' | 'proposed' | 'no_change' | 'cancelled' | 'error'
   >('idle');
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,11 +129,22 @@ export const ProjectDossier = ({
   const handleDreamNow = async () => {
     setDreamingState('running');
     try {
-      await triggerDreamingNow({ entityId: projectId, force: true });
-      setRequest((r) => r + 1);
-      const updatedAliases = await getEntityAliasSuggestions(projectId);
-      setAliasSuggestions(updatedAliases);
-      setDreamingState('done');
+      const result = await triggerDreamingNow({
+        entityId: projectId,
+        force: true,
+      });
+      if (result.status === 'proposed') {
+        setRequest((r) => r + 1);
+        const updatedAliases = await getEntityAliasSuggestions(projectId);
+        setAliasSuggestions(updatedAliases);
+        setDreamingState('proposed');
+      } else if (result.status === 'no_change') {
+        setDreamingState('no_change');
+      } else if (result.status === 'cancelled') {
+        setDreamingState('cancelled');
+      } else {
+        setDreamingState('error');
+      }
     } catch {
       setDreamingState('error');
     }
@@ -354,7 +365,15 @@ export const ProjectDossier = ({
             >
               {dreamingState === 'running'
                 ? 'Dreaming in progress…'
-                : 'Dream Now'}
+                : dreamingState === 'proposed'
+                  ? 'Updates prepared'
+                  : dreamingState === 'no_change'
+                    ? 'No new updates'
+                    : dreamingState === 'cancelled'
+                      ? 'Preparation cancelled'
+                      : dreamingState === 'error'
+                        ? 'Preparation failed'
+                        : 'Dream Now'}
             </button>
           </div>
         </details>

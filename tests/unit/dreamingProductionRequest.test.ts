@@ -8,6 +8,10 @@ const fixture = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 
 import * as db from '../../electron/db';
+import {
+  createIdleDreamingCoordinator,
+  generateDreamingWithProvider,
+} from '../../electron/dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from '../../electron/dreaming/packageEntityNotes';
 import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
 import { validateDreamingOutput } from '../../electron/dreaming/validateDreamingOutput';
@@ -82,5 +86,50 @@ describe('Dreaming production request integration', () => {
     });
     expect(JSON.parse(db.getEntity(project.id)?.metadata || '{}')).toEqual({});
     expect(db.getEntityAliasSuggestions(project.id)).toEqual([]);
+  });
+
+  it('carries the production model and prompt version from coordinator to provider', async () => {
+    const synthesizeKnowledgeDocument = vi
+      .fn()
+      .mockResolvedValue('{"status":"no_change","proposals":[]}');
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => ({
+        systemIdleSeconds: 600,
+        onBattery: false,
+        thermalState: 'nominal',
+        paused: false,
+      }),
+      getNextDirtyEntityId: () => ({ entityId: 'project-1', type: 'project' }),
+      packageNotes: () => ({
+        entityId: 'project-1',
+        entityType: 'project',
+        entityName: 'Project',
+        sourceRevision: 'revision-1',
+        recentMeetingNotes: [
+          {
+            meetingId: 'meeting-1',
+            title: 'Review',
+            startedAt: null,
+            notesContent: 'Grounded notes',
+          },
+        ],
+        correctionFingerprints: [],
+        negativeConstraints: [],
+      }),
+      generate: (...args) =>
+        generateDreamingWithProvider({ synthesizeKnowledgeDocument }, ...args),
+    });
+
+    expect(await coordinator.attemptIdleRun()).toMatchObject({
+      status: 'no_change',
+    });
+    expect(synthesizeKnowledgeDocument).toHaveBeenCalledWith(
+      expect.stringContaining('Prompt version: dreaming-proposals-v1'),
+      expect.objectContaining({
+        purpose: 'dreaming',
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-proposals-v1',
+      }),
+    );
   });
 });

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   getPeopleBriefingSummaries: vi.fn(),
   getPersonBriefing: vi.fn(),
+  getEntityAliasSuggestions: vi.fn(),
 }));
 
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -40,6 +41,8 @@ describe('PeopleTab loading', () => {
   beforeEach(() => {
     api.getPeopleBriefingSummaries.mockReset();
     api.getPersonBriefing.mockReset();
+    api.getEntityAliasSuggestions.mockReset();
+    api.getEntityAliasSuggestions.mockResolvedValue([]);
     api.getPeopleBriefingSummaries.mockResolvedValue([summary]);
     container = document.createElement('div');
     document.body.append(container);

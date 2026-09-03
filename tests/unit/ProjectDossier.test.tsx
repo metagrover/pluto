@@ -23,7 +23,11 @@ const api = vi.hoisted(() => ({
   updateEntityAliasSuggestionStatus: vi
     .fn()
     .mockResolvedValue({ success: true }),
-  triggerDreamingNow: vi.fn().mockResolvedValue({ status: 'completed' }),
+  triggerDreamingNow: vi.fn().mockResolvedValue({
+    status: 'no_change',
+    entityId: 'p1',
+    proposals: [],
+  }),
   recordEntityCorrection: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -166,6 +170,11 @@ beforeEach(() => {
   api.setProjectPortfolioDisposition.mockResolvedValue({});
   api.getEntitiesByType.mockResolvedValue([]);
   api.getEntityLinks.mockResolvedValue([]);
+  api.triggerDreamingNow.mockResolvedValue({
+    status: 'no_change',
+    entityId: 'p1',
+    proposals: [],
+  });
 });
 
 afterEach(async () => {
@@ -542,6 +551,18 @@ it('triggers manual dreaming run when Dream Now is clicked', async () => {
     entityId: 'p1',
     force: true,
   });
+  expect(host.textContent).toContain('No new updates');
+});
+
+it('shows a failed dreaming run as a failure', async () => {
+  api.triggerDreamingNow.mockResolvedValue({
+    status: 'failed',
+    entityId: 'p1',
+    errorCode: 'generation_failed',
+  });
+  await render();
+  await click('Dream Now');
+  expect(host.textContent).toContain('Preparation failed');
 });
 
 it('merges an alias suggestion and registers the alias', async () => {

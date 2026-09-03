@@ -6,6 +6,7 @@
  */
 
 import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
+import type { IdleDreamingResult } from '../../electron/dreaming/idleDreamingCoordinator';
 import type { PersonBriefingSummary } from '../utils/personBriefing';
 import type { ProjectPortfolioDisposition } from '../utils/projectQualification';
 
@@ -647,7 +648,7 @@ export const updateEntityAliasSuggestionStatus = async (
 export const triggerDreamingNow = async (options?: {
   entityId?: string;
   force?: boolean;
-}): Promise<{ status: string; entityId?: string; error?: string }> => {
+}): Promise<IdleDreamingResult> => {
   return invoke('TRIGGER_DREAMING_NOW', options);
 };
 

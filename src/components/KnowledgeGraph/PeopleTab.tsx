@@ -515,7 +515,7 @@ export const PersonDossier = ({
     EntityAliasSuggestion[]
   >([]);
   const [dreamingState, setDreamingState] = useState<
-    'idle' | 'running' | 'done' | 'error'
+    'idle' | 'running' | 'proposed' | 'no_change' | 'cancelled' | 'error'
   >('idle');
   const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -680,16 +680,24 @@ export const PersonDossier = ({
   const handleDreamNow = async () => {
     setDreamingState('running');
     try {
-      await triggerDreamingNow({
+      const result = await triggerDreamingNow({
         entityId: currentDetail.person.id,
         force: true,
       });
-      await onIdentityChanged();
-      const updatedAliases = await getEntityAliasSuggestions(
-        currentDetail.person.id,
-      );
-      setAliasSuggestions(updatedAliases);
-      setDreamingState('done');
+      if (result.status === 'proposed') {
+        await onIdentityChanged();
+        const updatedAliases = await getEntityAliasSuggestions(
+          currentDetail.person.id,
+        );
+        setAliasSuggestions(updatedAliases);
+        setDreamingState('proposed');
+      } else if (result.status === 'no_change') {
+        setDreamingState('no_change');
+      } else if (result.status === 'cancelled') {
+        setDreamingState('cancelled');
+      } else {
+        setDreamingState('error');
+      }
     } catch {
       setDreamingState('error');
     }
@@ -783,7 +791,15 @@ export const PersonDossier = ({
             >
               {dreamingState === 'running'
                 ? 'Dreaming in progress…'
-                : 'Dream Now'}
+                : dreamingState === 'proposed'
+                  ? 'Updates prepared'
+                  : dreamingState === 'no_change'
+                    ? 'No new updates'
+                    : dreamingState === 'cancelled'
+                      ? 'Preparation cancelled'
+                      : dreamingState === 'error'
+                        ? 'Preparation failed'
+                        : 'Dream Now'}
             </button>
           </div>
         </details>

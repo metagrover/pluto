@@ -436,6 +436,7 @@ interface TextGenerationOptions {
   task: LLMTask;
   jsonMode?: boolean;
   responseSchema?: Record<string, unknown>;
+  modelOverride?: string;
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
@@ -834,10 +835,21 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt: string,
     options: {
       signal?: AbortSignal;
-      purpose?: 'projectScope' | 'commitmentReconciliation';
+      purpose?: 'projectScope' | 'commitmentReconciliation' | 'dreaming';
       responseSchema?: Record<string, unknown>;
+      model?: string;
+      promptVersion?: string;
     } = {},
   ): Promise<string> {
+    if (options.purpose === 'dreaming' && this.providerType !== 'ollama') {
+      throw new Error('dreaming_local_provider_required');
+    }
+    if (
+      options.purpose === 'dreaming' &&
+      (!options.model?.trim() || !options.promptVersion?.trim())
+    ) {
+      throw new Error('dreaming_request_metadata_required');
+    }
     return this.generateText({
       prompt,
       task:
@@ -848,6 +860,8 @@ export class UnifiedLLMProvider implements LLMProvider {
             : 'knowledgeDoc',
       jsonMode: true,
       responseSchema: options.responseSchema,
+      modelOverride:
+        options.purpose === 'dreaming' ? options.model?.trim() : undefined,
       signal: options.signal,
     });
   }
@@ -1274,10 +1288,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesBudget,
     notesResponseSchema,
     notesModel,
+    modelOverride,
     onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
-    const model =
-      notesBudget && notesModel
+    const model = modelOverride
+      ? modelOverride
+      : notesBudget && notesModel
         ? notesModel
         : await this.resolveOllamaModel(task);
     const activeModel = process.versions.electron

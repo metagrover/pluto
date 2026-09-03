@@ -60,6 +60,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
         paused: false,
       }),
       getNextDirtyEntityId: () => ({ entityId: project.id, type: 'project' }),
+      getEntity: (entityId) => db.getEntity(entityId),
       packageNotes: (entityId) => packageEntityNotes(entityId),
       generate: async (_prompt, _schema, signal) => {
         signal.throwIfAborted();
@@ -91,7 +92,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
     // 8. The same corrected proposal fails the whole validation boundary.
     expect(
       await coordinator.triggerNow({ entityId: project.id, force: true }),
-    ).toMatchObject({ status: 'failed', error: 'proposal_corrected' });
+    ).toMatchObject({ status: 'failed', errorCode: 'proposal_corrected' });
 
     // 9. Instant Preemption test: when user becomes active, running dream must abort immediately
     let abortedImmediately = false;
@@ -103,6 +104,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
         paused: false,
       }),
       getNextDirtyEntityId: () => ({ entityId: project.id, type: 'project' }),
+      getEntity: (entityId) => db.getEntity(entityId),
       packageNotes: (entityId) => packageEntityNotes(entityId),
       generate: async (_prompt, _schema, signal) => {
         return new Promise((resolve, reject) => {
@@ -124,7 +126,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
     hangingCoordinator.notifyForegroundActivity();
 
     const pendingResult = await pendingPromise;
-    expect(pendingResult.status).toBe('aborted');
+    expect(pendingResult.status).toBe('cancelled');
     expect(abortedImmediately).toBe(true);
   });
 });

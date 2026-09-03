@@ -47,6 +47,7 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
+      getEntity: () => ({ type: 'project' }),
     });
 
     const result = await coordinator.attemptIdleRun();
@@ -85,6 +86,8 @@ describe('IdleDreamingCoordinator', () => {
       request.prompt,
       request.schema,
       expect.any(AbortSignal),
+      request.model,
+      request.promptVersion,
     );
   });
 
@@ -135,7 +138,7 @@ describe('IdleDreamingCoordinator', () => {
     expect(await coordinator.attemptIdleRun()).toEqual({
       status: 'failed',
       entityId: 'proj-1',
-      error: 'invalid_proposed_output',
+      errorCode: 'invalid_proposed_output',
     });
   });
 
@@ -148,6 +151,7 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
+      getEntity: () => ({ type: 'project' }),
     });
 
     const result = await coordinator.triggerNow({
@@ -157,6 +161,59 @@ describe('IdleDreamingCoordinator', () => {
     expect(result.status).toBe('no_change');
     expect(result.entityId).toBe('proj-1');
     expect(generateMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not guess a project type for a missing forced entity', async () => {
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      getEntity: () => null,
+    });
+
+    expect(
+      await coordinator.triggerNow({ entityId: 'missing', force: true }),
+    ).toEqual({ status: 'no_work', entityId: 'missing' });
+    expect(packageNotesMock).not.toHaveBeenCalled();
+  });
+
+  it('fails a forced entity with an unsupported runtime type', async () => {
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      getEntity: () => ({ type: 'topic' }),
+    });
+
+    expect(
+      await coordinator.triggerNow({ entityId: 'topic-1', force: true }),
+    ).toEqual({
+      status: 'failed',
+      entityId: 'topic-1',
+      errorCode: 'invalid_entity_type',
+    });
+    expect(packageNotesMock).not.toHaveBeenCalled();
+  });
+
+  it('fails when a forced entity package has the wrong supported type', async () => {
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      getEntity: () => ({ type: 'person' }),
+    });
+
+    expect(
+      await coordinator.triggerNow({ entityId: 'proj-1', force: true }),
+    ).toEqual({
+      status: 'failed',
+      entityId: 'proj-1',
+      errorCode: 'entity_type_mismatch',
+    });
+    expect(generateMock).not.toHaveBeenCalled();
   });
 
   it('preempts immediately when notifyForegroundActivity is called', async () => {
@@ -192,7 +249,7 @@ describe('IdleDreamingCoordinator', () => {
     coordinator.notifyForegroundActivity();
 
     const result = await runPromise;
-    expect(result.status).toBe('aborted');
+    expect(result.status).toBe('cancelled');
     expect(capturedSignal?.aborted).toBe(true);
   });
 });

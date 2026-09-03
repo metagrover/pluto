@@ -346,8 +346,10 @@ import {
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
 import {
+  type IdleDreamingResult,
   createIdleDreamingCoordinator,
   createRoundRobinEntityQueue,
+  generateDreamingWithProvider,
 } from './dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from './dreaming/packageEntityNotes';
 import {
@@ -444,6 +446,7 @@ import type {
   AnalysisDocument,
   InternalSignalDocument,
 } from './llm/provider';
+import { UnifiedLLMProvider } from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
@@ -809,13 +812,20 @@ app.whenReady().then(async () => {
     getNextDirtyEntityId: () => dreamingEntityQueue.getNextCandidate(),
     getEntity: (id: string) => db.getEntity(id),
     packageNotes: (entityId: string) => packageEntityNotes(entityId),
-    generate: async (prompt, responseSchema, signal) => {
-      const provider = await getProvider(await getAllSettings(db));
+    generate: async (prompt, responseSchema, signal, model, promptVersion) => {
+      const provider = new UnifiedLLMProvider(
+        'ollama',
+        await getAllSettings(db),
+      );
       signal?.throwIfAborted();
-      return provider.synthesizeKnowledgeDocument(prompt, {
+      return generateDreamingWithProvider(
+        provider,
+        prompt,
         responseSchema,
         signal,
-      });
+        model,
+        promptVersion,
+      );
     },
   });
 
@@ -3045,7 +3055,10 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'TRIGGER_DREAMING_NOW',
-    async (_event, options?: { entityId?: string; force?: boolean }) => {
+    async (
+      _event,
+      options?: { entityId?: string; force?: boolean },
+    ): Promise<IdleDreamingResult> => {
       return (
         (await idleDreamingCoordinator?.triggerNow(options)) ?? {
           status: 'no_work',

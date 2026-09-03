@@ -2,7 +2,7 @@ import { buildDreamingGenerationRequest } from './prompt';
 import type {
   DreamingEntityType,
   DreamingInputPackage,
-  ValidatedDreamingProposal,
+  DreamingRunResult,
 } from './types';
 import { validateDreamingOutput } from './validateDreamingOutput';
 
@@ -18,17 +18,13 @@ export interface DirtyEntityCandidate {
   type: DreamingEntityType;
 }
 
+type EntityDreamingRunResult = DreamingRunResult & { entityId: string };
+
 export type IdleDreamingResult =
-  | { status: 'no_change'; entityId: string; proposals: [] }
+  | EntityDreamingRunResult
   | {
-      status: 'proposed';
-      entityId: string;
-      proposals: [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]];
-    }
-  | {
-      status: 'ineligible' | 'no_work' | 'aborted' | 'failed';
+      status: 'ineligible' | 'no_work';
       entityId?: string;
-      error?: string;
     };
 
 export {
@@ -45,11 +41,42 @@ export interface IdleDreamingCoordinatorDeps {
     prompt: string,
     responseSchema: Record<string, unknown>,
     signal: AbortSignal,
+    model: string,
+    promptVersion: string,
   ) => Promise<string>;
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
 }
+
+export interface DreamingGenerationProvider {
+  synthesizeKnowledgeDocument(
+    prompt: string,
+    options: {
+      purpose: 'dreaming';
+      responseSchema: Record<string, unknown>;
+      signal: AbortSignal;
+      model: string;
+      promptVersion: string;
+    },
+  ): Promise<string>;
+}
+
+export const generateDreamingWithProvider = (
+  provider: DreamingGenerationProvider,
+  prompt: string,
+  responseSchema: Record<string, unknown>,
+  signal: AbortSignal,
+  model: string,
+  promptVersion: string,
+): Promise<string> =>
+  provider.synthesizeKnowledgeDocument(prompt, {
+    purpose: 'dreaming',
+    responseSchema,
+    signal,
+    model,
+    promptVersion,
+  });
 
 export const createIdleDreamingCoordinator = (
   deps: IdleDreamingCoordinatorDeps,
@@ -57,6 +84,8 @@ export const createIdleDreamingCoordinator = (
   const idleThreshold = deps.idleThresholdSeconds ?? 300;
   let activeController: AbortController | null = null;
   let activeRun: Promise<IdleDreamingResult> | null = null;
+  const isEntityType = (value: string): value is DreamingEntityType =>
+    value === 'project' || value === 'person';
 
   const isEligible = () => {
     const policy = deps.getPolicy();
@@ -87,12 +116,32 @@ export const createIdleDreamingCoordinator = (
       if (!pkg || pkg.recentMeetingNotes.length === 0) {
         return { status: 'no_work', entityId: candidate.entityId };
       }
+      if (pkg.entityId !== candidate.entityId) {
+        return {
+          status: 'failed',
+          entityId: candidate.entityId,
+          errorCode: 'entity_id_mismatch',
+        };
+      }
+      if (pkg.entityType !== candidate.type) {
+        return {
+          status: 'failed',
+          entityId: candidate.entityId,
+          errorCode: 'entity_type_mismatch',
+        };
+      }
 
       const request = buildDreamingGenerationRequest(pkg);
 
-      const raw = await deps.generate(request.prompt, request.schema, signal);
+      const raw = await deps.generate(
+        request.prompt,
+        request.schema,
+        signal,
+        request.model,
+        request.promptVersion,
+      );
       if (signal.aborted) {
-        return { status: 'aborted', entityId: candidate.entityId };
+        return { status: 'cancelled', entityId: candidate.entityId };
       }
 
       const validated = validateDreamingOutput(raw, pkg);
@@ -100,7 +149,7 @@ export const createIdleDreamingCoordinator = (
         return {
           status: 'failed',
           entityId: candidate.entityId,
-          error: validated.error,
+          errorCode: validated.error,
         };
       }
       if (validated.status === 'no_change') {
@@ -120,12 +169,12 @@ export const createIdleDreamingCoordinator = (
         signal.aborted ||
         (err instanceof Error && err.name === 'AbortError')
       ) {
-        return { status: 'aborted', entityId: candidate.entityId };
+        return { status: 'cancelled', entityId: candidate.entityId };
       }
       return {
         status: 'failed',
         entityId: candidate.entityId,
-        error: err instanceof Error ? err.message : String(err),
+        errorCode: 'generation_failed',
       };
     }
   };
@@ -140,14 +189,28 @@ export const createIdleDreamingCoordinator = (
       return { status: 'ineligible' };
     }
 
-    const candidate = options?.entityId
-      ? {
+    let candidate: DirtyEntityCandidate | null | undefined;
+    if (options?.entityId) {
+      const entity = deps.getEntity?.(options.entityId);
+      if (!entity) return { status: 'no_work', entityId: options.entityId };
+      if (!isEntityType(entity.type)) {
+        return {
+          status: 'failed',
           entityId: options.entityId,
-          type:
-            (deps.getEntity?.(options.entityId)?.type as DreamingEntityType) ??
-            'project',
-        }
-      : deps.getNextDirtyEntityId();
+          errorCode: 'invalid_entity_type',
+        };
+      }
+      candidate = { entityId: options.entityId, type: entity.type };
+    } else {
+      candidate = deps.getNextDirtyEntityId();
+      if (candidate && !isEntityType(candidate.type)) {
+        return {
+          status: 'failed',
+          entityId: candidate.entityId,
+          errorCode: 'invalid_entity_type',
+        };
+      }
+    }
 
     if (!candidate) return { status: 'no_work' };
 
