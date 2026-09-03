@@ -16,7 +16,7 @@
 - Create: `scripts/lib/meeting_notes_recovery_replay.ts`
 - Create: `tests/unit/meetingNotesRecoveryReplay.test.ts`
 
-- [ ] Write failing tests proving exact nested-text flattening, `discussion` to `point` mapping, field/order preservation, and refusal for competing sources, extra nested fields, non-null discussion metadata, audit payloads, and invalid JSON.
+- [x] Write failing tests proving exact nested-text flattening, `discussion` to `point` mapping, field/order preservation, and refusal for competing sources, extra nested fields, non-null discussion metadata, audit payloads, and invalid JSON.
 
 ```ts
 expect(normalizeCapturedNotesDraft(nestedWriter)).toMatchObject({
@@ -29,8 +29,8 @@ expect(normalizeCapturedNotesDraft(competingSources)).toEqual({
 });
 ```
 
-- [ ] Run `pnpm vitest run tests/unit/meetingNotesRecoveryReplay.test.ts` and verify the missing-module failure.
-- [ ] Implement the minimal pure normalizer with exact-key and invariant checks. Return transformation counts and normalized JSON only to the replay caller.
+- [x] Run `pnpm vitest run tests/unit/meetingNotesRecoveryReplay.test.ts` and verify the missing-module failure.
+- [x] Implement the minimal pure normalizer with exact-key and invariant checks. Return transformation counts and normalized JSON only to the replay caller.
 
 ```ts
 export type NotesRecoveryNormalization =
@@ -49,8 +49,8 @@ export type NotesRecoveryNormalization =
     };
 ```
 
-- [ ] Run the focused test and verify it passes.
-- [ ] Commit as `test: define deterministic notes recovery`.
+- [x] Run the focused test and verify it passes.
+- [x] Commit as `test: define deterministic notes recovery`.
 
 ### Task 2: Captured replay integration
 
@@ -58,7 +58,7 @@ export type NotesRecoveryNormalization =
 - Modify: `scripts/report_meeting_notes_trust_cost.ts`
 - Modify: `tests/unit/meetingNotesTrustCostReport.test.ts`
 
-- [ ] Add failing expectations for five duplicate repairs: four writer candidates evaluated, one audit repair refused, strict parse results, guardrail results, and captured avoidable model milliseconds.
+- [x] Add failing expectations for five duplicate repairs: four writer candidates evaluated, one audit repair refused, strict parse results, guardrail results, and captured avoidable model milliseconds.
 
 ```ts
 expect(report.deterministic_recovery_replay).toMatchObject({
@@ -69,10 +69,10 @@ expect(report.deterministic_recovery_replay).toMatchObject({
 });
 ```
 
-- [ ] Run the report test and verify it fails.
-- [ ] Join case IDs to committed synthetic segments, decode source labels with `createNotesWireRequest`, normalize only initial writer responses, parse with `parseNotesDraft`, and evaluate with `findNotesGuardrailIssues`. Add a privacy-safe `deterministic_recovery_replay` section to the report.
-- [ ] Run focused tests and byte-compare two report executions.
-- [ ] Commit as `feat: replay deterministic notes recovery`.
+- [x] Run the report test and verify it fails.
+- [x] Join case IDs to committed synthetic segments, decode source labels with `createNotesWireRequest`, normalize only initial writer responses, parse with `parseNotesDraft`, and evaluate with `findNotesGuardrailIssues`. Add a privacy-safe `deterministic_recovery_replay` section to the report.
+- [x] Run focused tests and byte-compare two report executions.
+- [x] Commit as `feat: replay deterministic notes recovery`.
 
 ### Task 3: Documentation and full verification
 
@@ -80,11 +80,11 @@ expect(report.deterministic_recovery_replay).toMatchObject({
 - Modify: `docs/changelog/entries/2026-09-03-739-meeting-trust-cost-ledger.md`
 - Modify: `docs/superpowers/plans/2026-09-03-deterministic-notes-recovery-replay.md`
 
-- [ ] Record measured replay findings without claiming production safety or semantic correctness.
+- [x] Record measured replay findings without claiming production safety or semantic correctness.
 
 ```markdown
 - **Notes:** Deterministic replay is benchmark-only. Structural recovery and guardrail passage do not establish semantic correctness or authorize production parser changes.
 ```
-- [ ] Run focused tests, full tests, TypeScript, Biome, changelog validation, deterministic report comparison, and the privacy assertion.
-- [ ] Mark every plan step complete and commit.
+- [x] Run focused tests, full tests, TypeScript, Biome, changelog validation, deterministic report comparison, and the privacy assertion.
+- [x] Mark every plan step complete and commit.
 - [ ] Push PR #740 and add the content-free replay result to issue #739.
