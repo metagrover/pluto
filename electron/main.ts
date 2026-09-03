@@ -288,6 +288,8 @@ function createWindow() {
   win.webContents.on('will-prevent-unload', () => {
     console.warn('[CaptureLease] navigation prevented: capture_active');
   });
+  win.webContents.on('before-input-event', notifyRendererActivity);
+  win.on('focus', notifyForegroundActivity);
   win.webContents.on('will-navigate', (event, url) => {
     if (url === win?.webContents.getURL()) return;
     event.preventDefault();
@@ -345,6 +347,28 @@ import {
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
+import {
+  type DirtyEntityQueue,
+  invalidateDreamingWork,
+} from './dreaming/entityQueue';
+import {
+  DREAMING_ENTITY_DEADLINE_MS,
+  type IdleDreamingResult,
+  createDirtyEntityQueue,
+  createIdleDreamingCoordinator,
+  generateDreamingWithProvider,
+} from './dreaming/idleDreamingCoordinator';
+import { packageEntityNotes } from './dreaming/packageEntityNotes';
+import { DREAMING_MODEL } from './dreaming/prompt';
+import {
+  assertScopedPendingProposal,
+  parseDreamingProposalScope,
+} from './dreaming/proposalIpc';
+import type {
+  DreamingDecisionResult,
+  DreamingProposalRecord,
+} from './dreaming/proposalStore';
+import type { DreamingEntityType } from './dreaming/types';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
@@ -439,6 +463,7 @@ import type {
   AnalysisDocument,
   InternalSignalDocument,
 } from './llm/provider';
+import { UnifiedLLMProvider } from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
@@ -456,12 +481,35 @@ import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 
 let backgroundKnowledgeRefresh: BackgroundKnowledgeRefreshCoordinator | null =
   null;
+let idleDreamingCoordinator: ReturnType<
+  typeof createIdleDreamingCoordinator
+> | null = null;
+let dreamingEntityQueue: DirtyEntityQueue | null = null;
+let lastRendererActivityAt = Date.now();
+let scheduleDreamingRun: ((delayMs?: number) => void) | null = null;
+
+const notifyForegroundActivity = () => {
+  lastRendererActivityAt = Date.now();
+  backgroundKnowledgeRefresh?.notifyForegroundActivity();
+  idleDreamingCoordinator?.notifyForegroundActivity();
+};
+
+const notifyRendererActivity = () => {
+  if (Date.now() - lastRendererActivityAt < 1_000) return;
+  notifyForegroundActivity();
+};
+
+const invalidateDreamingCatalog = () => {
+  if (!dreamingEntityQueue) return;
+  invalidateDreamingWork(dreamingEntityQueue, () => scheduleDreamingRun?.());
+};
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
   getSettings: () => getAllSettings(db),
   getProvider,
   onUpdated: (meetingId) => {
+    invalidateDreamingCatalog();
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
@@ -634,7 +682,7 @@ configureKnowledgeSynthesisPause((paused) => {
     knowledgeSynthesisPause.snapshot(),
   ).some(([reason, count]) => reason !== 'llm_active' && Number(count) > 0);
   if (hasForegroundPause) {
-    backgroundKnowledgeRefresh?.notifyForegroundActivity();
+    notifyForegroundActivity();
   }
 });
 
@@ -724,26 +772,47 @@ function abortMeetingTasks(meetingId: string) {
 }
 
 let stopIdentityReconciliation: (() => void) | undefined;
+let shutdownStarted = false;
+let shutdownComplete = false;
 // Cleanup on quit
-app.on('before-quit', async () => {
-  backgroundKnowledgeRefresh?.close();
-  backgroundKnowledgeRefresh = null;
-  stopIdentityReconciliation?.();
-  calendarService.stop();
-  console.log('[Pluto] Shutting down...');
-  // Abort all active tasks
-  for (const controller of activeMeetingTasks.values()) {
-    controller.abort();
-  }
-  activeMeetingTasks.clear();
-  parakeetFinalClient?.close();
-  parakeetFinalClient = null;
-  await parakeetEouCoordinator?.fail('parakeet_app_quit');
-  parakeetEouCoordinator = null;
-  parakeetEouOwner = null;
-  parakeetEouGeneration = null;
-  parakeetRuntimeHost?.shutdown();
-  parakeetRuntimeHost = null;
+app.on('before-quit', (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  void (async () => {
+    for (const controller of activeMeetingTasks.values()) controller.abort();
+    activeMeetingTasks.clear();
+    for (const task of activeAnalysisGenerations.values())
+      task.controller.abort();
+    for (const task of activeAskPlutoQueries.values()) task.controller.abort();
+    for (const task of activeMeetingAskPlutoQueries.values())
+      task.controller.abort();
+    backgroundKnowledgeRefresh?.close();
+    backgroundKnowledgeRefresh = null;
+    await idleDreamingCoordinator?.close();
+    idleDreamingCoordinator = null;
+    scheduleDreamingRun = null;
+    dreamingEntityQueue = null;
+    stopIdentityReconciliation?.();
+    calendarService.stop();
+    console.log('[Pluto] Shutting down...');
+    parakeetFinalClient?.close();
+    parakeetFinalClient = null;
+    await parakeetEouCoordinator?.fail('parakeet_app_quit');
+    parakeetEouCoordinator = null;
+    parakeetEouOwner = null;
+    parakeetEouGeneration = null;
+    parakeetRuntimeHost?.shutdown();
+    parakeetRuntimeHost = null;
+  })()
+    .catch((error) => {
+      console.error('[Pluto] Shutdown cleanup failed:', error);
+    })
+    .finally(() => {
+      shutdownComplete = true;
+      app.quit();
+    });
 });
 
 app.whenReady().then(async () => {
@@ -766,6 +835,7 @@ app.whenReady().then(async () => {
         if (!refreshed || refreshed.status !== 'up_to_date') {
           throw new Error('knowledge_document_refresh_incomplete');
         }
+        invalidateDreamingCatalog();
         return;
       }
       await refreshKnowledgeDocsForMeetingNow(
@@ -774,6 +844,7 @@ app.whenReady().then(async () => {
           : workId,
         { signal },
       );
+      invalidateDreamingCatalog();
     },
     onError: (error, workId) => {
       console.warn(
@@ -782,17 +853,126 @@ app.whenReady().then(async () => {
       );
     },
   });
-  powerMonitor.on('user-did-become-active', () => {
-    backgroundKnowledgeRefresh?.notifyForegroundActivity();
+  dreamingEntityQueue = createDirtyEntityQueue({
+    getProjects: () => db.getEntitiesByType('project'),
+    getPeople: () => db.getEntitiesByType('person'),
+    resolveProjectId: db.resolveProjectIdentityId,
+    resolvePersonId: db.resolvePersonIdentityId,
   });
+
+  // A run may outlive a crash, but never the per-entity deadline. Recover stale
+  // leases before the first scheduling attempt so their revisions can retry.
+  db.dreamingProposalStore.recoverStaleRuns({
+    staleBefore: new Date(
+      Date.now() - DREAMING_ENTITY_DEADLINE_MS,
+    ).toISOString(),
+  });
+
+  idleDreamingCoordinator = createIdleDreamingCoordinator({
+    getPolicy: () => ({
+      systemIdleSeconds: powerMonitor.getSystemIdleTime(),
+      onBattery: powerMonitor.isOnBatteryPower(),
+      thermalState: powerMonitor.getCurrentThermalState(),
+      rendererQuiet:
+        Date.now() - lastRendererActivityAt >= DREAMING_ENTITY_DEADLINE_MS,
+      paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
+        ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
+      ),
+    }),
+    getNextDirtyEntityId: () => dreamingEntityQueue?.getNextCandidate(),
+    getEntity: (id: string) => db.getEntity(id),
+    packageNotes: (entityId: string) => packageEntityNotes(entityId),
+    proposalStore: db.dreamingProposalStore,
+    recoverStaleRuns: db.dreamingProposalStore.recoverStaleRuns,
+    onRetryable: (candidate, delayMs) => {
+      dreamingEntityQueue?.invalidate(candidate);
+      scheduleDreamingRun?.(delayMs);
+    },
+    hasPendingWork: () => dreamingEntityQueue?.hasPendingWork() === true,
+    generate: async (
+      prompt,
+      responseSchema,
+      signal,
+      model,
+      promptVersion,
+      workClass,
+      onStart,
+    ) => {
+      const provider = new UnifiedLLMProvider(
+        'ollama',
+        await getAllSettings(db),
+      );
+      signal?.throwIfAborted();
+      return generateDreamingWithProvider(
+        provider,
+        prompt,
+        responseSchema,
+        signal,
+        model,
+        promptVersion,
+        workClass,
+        onStart,
+      );
+    },
+    unloadModel: async (signal) => {
+      const provider = new UnifiedLLMProvider(
+        'ollama',
+        await getAllSettings(db),
+      );
+      await provider.unloadModel(DREAMING_MODEL, signal);
+    },
+  });
+
+  powerMonitor.on('user-did-become-active', notifyForegroundActivity);
+  powerMonitor.on('on-battery', notifyForegroundActivity);
+  powerMonitor.on('on-ac', notifyForegroundActivity);
+  powerMonitor.on('thermal-state-change', notifyForegroundActivity);
+
+  let dreamingTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleDreaming = (delayMs = 60_000) => {
+    if (dreamingTimer || !dreamingEntityQueue?.hasPendingWork()) return;
+    dreamingTimer = setTimeout(async () => {
+      dreamingTimer = null;
+      const result = await idleDreamingCoordinator?.attemptIdleRun();
+      if (
+        result?.entityId &&
+        (result.status === 'cancelled' ||
+          result.status === 'failed' ||
+          result.status === 'backoff' ||
+          result.status === 'busy')
+      ) {
+        const entity = db.getEntity(result.entityId);
+        if (entity?.type === 'project' || entity?.type === 'person') {
+          dreamingEntityQueue?.invalidate({
+            entityId: result.entityId,
+            type: entity.type,
+          });
+        }
+      }
+      scheduleDreaming();
+    }, delayMs);
+    if (typeof dreamingTimer === 'object' && 'unref' in dreamingTimer) {
+      dreamingTimer.unref();
+    }
+  };
+  scheduleDreamingRun = scheduleDreaming;
+  scheduleDreaming(0);
   for (const channel of IDENTITY_CHANNELS) {
-    ipcMain.handle(channel, (_event, payload) =>
-      handleIdentityRequest(channel, payload),
-    );
+    ipcMain.handle(channel, (_event, payload) => {
+      const result = handleIdentityRequest(channel, payload);
+      if (
+        channel !== 'GET_IDENTITY_STATE' &&
+        channel !== 'GET_MEETING_IDENTITY'
+      ) {
+        invalidateDreamingCatalog();
+      }
+      return result;
+    });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
     pauseReasons: () => knowledgeSynthesisPause.snapshot(),
     onChange: () => {
+      invalidateDreamingCatalog();
       if (win && !win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED');
     },
@@ -2353,6 +2533,7 @@ app.whenReady().then(async () => {
           );
         }
       }
+      if (result !== false) invalidateDreamingCatalog();
       return result;
     } catch (e) {
       console.error(
@@ -2378,9 +2559,11 @@ app.whenReady().then(async () => {
     }
     return claimed;
   });
-  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
-    db.updateMeetingTitleIfCurrent(input),
-  );
+  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) => {
+    const result = db.updateMeetingTitleIfCurrent(input);
+    if (result) invalidateDreamingCatalog();
+    return result;
+  });
   ipcMain.handle(
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
     (_event, meetingId, lease) =>
@@ -2479,6 +2662,7 @@ app.whenReady().then(async () => {
           ...meeting,
           user_edits_json: JSON.stringify(editsMap),
         });
+        invalidateDreamingCatalog();
         return { success: true };
       } catch (e) {
         console.error('[Pluto] SAVE_USER_EDIT failed:', e);
@@ -2508,6 +2692,7 @@ app.whenReady().then(async () => {
         ...meeting,
         user_edits_json: JSON.stringify(editsMap),
       });
+      invalidateDreamingCatalog();
       return { success: true };
     } catch (e) {
       console.error('[Pluto] REVERT_USER_EDIT failed:', e);
@@ -2562,6 +2747,7 @@ app.whenReady().then(async () => {
     if (!db.restoreMeetingNotesSnapshot(input.meetingId)) {
       throw new Error('meeting_notes_restore_unavailable');
     }
+    invalidateDreamingCatalog();
     return { meetingId: String(input.meetingId), status: 'restored' };
   });
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
@@ -2605,6 +2791,7 @@ app.whenReady().then(async () => {
       }
 
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return result;
     } catch (e) {
       console.error('[Pluto] DELETE_MEETING failed:', e);
@@ -2629,6 +2816,7 @@ app.whenReady().then(async () => {
           : result;
       });
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return saved;
     } catch (e) {
       console.error('[Pluto] UPSERT_ENTITY failed:', e);
@@ -2646,53 +2834,85 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'UPDATE_PROJECT_DISPLAY_TITLE',
-    (_event, { projectId, title }) =>
-      db.updateProjectDisplayTitle(projectId, title),
+    (_event, { projectId, title }) => {
+      const result = db.updateProjectDisplayTitle(projectId, title);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
   ipcMain.handle(
     'SET_PROJECT_PORTFOLIO_DISPOSITION',
-    (_event, { projectId, disposition }) =>
-      db.setProjectPortfolioDisposition(projectId, disposition),
+    (_event, { projectId, disposition }) => {
+      const result = db.setProjectPortfolioDisposition(projectId, disposition);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
-  ipcMain.handle('SAVE_PROJECT_MILESTONE', (_event, { projectId, milestone }) =>
-    db.saveProjectMilestone(projectId, milestone),
+  ipcMain.handle(
+    'SAVE_PROJECT_MILESTONE',
+    (_event, { projectId, milestone }) => {
+      const result = db.saveProjectMilestone(projectId, milestone);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
   ipcMain.handle(
     'DELETE_PROJECT_MILESTONE',
-    (_event, { projectId, milestoneId }) =>
-      db.deleteProjectMilestone(projectId, milestoneId),
+    (_event, { projectId, milestoneId }) => {
+      const result = db.deleteProjectMilestone(projectId, milestoneId);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
   ipcMain.handle(
     'RESTORE_PROJECT_MILESTONE',
-    (_event, { projectId, milestone }) =>
-      db.restoreProjectMilestone(projectId, milestone),
+    (_event, { projectId, milestone }) => {
+      const result = db.restoreProjectMilestone(projectId, milestone);
+      invalidateDreamingCatalog();
+      return result;
+    },
   );
   ipcMain.handle(
     'MERGE_PROJECT',
     (_event, { projectId, destinationProjectId }) => {
       db.mergeProject(projectId, destinationProjectId);
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
     },
   );
+  ipcMain.handle('ADD_PROJECT_ALIAS', (_event, { projectId, aliasName }) => {
+    db.addProjectAlias(String(projectId), String(aliasName));
+    queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
+  });
   ipcMain.handle('RESTORE_PROJECT_MERGE', (_event, projectId) => {
     db.restoreProjectMerge(projectId);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
   });
   ipcMain.handle('UPDATE_PERSON_NAME', (_event, { personId, name }) => {
     const person = db.updatePersonName(String(personId), String(name));
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
     return person;
+  });
+  ipcMain.handle('ADD_PERSON_NAME_ALIAS', (_event, { personId, aliasName }) => {
+    db.addPersonNameAlias(String(personId), String(aliasName));
+    queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
   });
   ipcMain.handle(
     'MERGE_PERSON',
     (_event, { personId, destinationPersonId }) => {
       db.mergePerson(String(personId), String(destinationPersonId));
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
     },
   );
   ipcMain.handle('RESTORE_PERSON_MERGE', (_event, personId) => {
     db.restorePersonMerge(String(personId));
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
   });
   const projectThemeSynthesisStateKey = 'project_theme_synthesis_state_v2';
   const readProjectThemeSynthesisState =
@@ -2880,18 +3100,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('FIND_ENTITY', (_event, { type, name }) =>
     db.findEntity(type, name),
   );
-  ipcMain.handle('UPDATE_ENTITY_STATUS', (_event, { id, status }) =>
-    db.updateEntityStatus(id, status),
-  );
+  ipcMain.handle('UPDATE_ENTITY_STATUS', (_event, { id, status }) => {
+    const result = db.updateEntityStatus(id, status);
+    invalidateDreamingCatalog();
+    return result;
+  });
   ipcMain.handle('UPDATE_ACTION_COMMITMENT_STATE', (_event, payload) =>
     handleActionCommitmentReview(payload, {
       updateActionCommitmentState: db.updateActionCommitmentState,
-      queueKnowledgeRefresh: queueAllKnowledgeDocsRefresh,
+      queueKnowledgeRefresh: () => {
+        queueAllKnowledgeDocsRefresh();
+        invalidateDreamingCatalog();
+      },
     }),
   );
   ipcMain.handle('DELETE_ENTITY', (_event, id) => {
     db.deleteEntity(id);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
   });
 
   // Entity relationship operations
@@ -2903,6 +3129,7 @@ app.whenReady().then(async () => {
         state: link?.state || 'confirmed',
       });
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return saved;
     } catch (e) {
       console.error('[Pluto] LINK_ENTITIES failed:', e);
@@ -2930,7 +3157,9 @@ app.whenReady().then(async () => {
   // Meeting-entity associations
   ipcMain.handle('ADD_MEETING_ENTITY', (_event, meetingEntity) => {
     try {
-      return db.addMeetingEntity(meetingEntity);
+      const saved = db.addMeetingEntity(meetingEntity);
+      invalidateDreamingCatalog();
+      return saved;
     } catch (e) {
       console.error('[Pluto] ADD_MEETING_ENTITY failed:', e);
       throw e;
@@ -2957,7 +3186,109 @@ app.whenReady().then(async () => {
         personId === null ? null : String(personId),
       );
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return action;
+    },
+  );
+  ipcMain.handle(
+    'RECORD_ENTITY_CORRECTION',
+    (
+      _event,
+      input: {
+        entityId: string;
+        itemType: string;
+        fingerprint: string;
+        reason?: string;
+      },
+    ) => {
+      const correction = db.recordEntityCorrection(input);
+      invalidateDreamingCatalog();
+      return correction;
+    },
+  );
+  ipcMain.handle('GET_ENTITY_CORRECTIONS', (_event, entityId: string) => {
+    return db.getEntityCorrections(String(entityId));
+  });
+  ipcMain.handle('GET_ENTITY_ALIAS_SUGGESTIONS', (_event, entityId: string) => {
+    return db.getEntityAliasSuggestions(String(entityId));
+  });
+  ipcMain.handle(
+    'UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS',
+    (
+      _event,
+      {
+        id,
+        status,
+      }: { id: string; status: 'pending' | 'merged' | 'dismissed' },
+    ) => {
+      db.updateEntityAliasSuggestionStatus(id, status);
+      return { success: true };
+    },
+  );
+  ipcMain.handle(
+    'TRIGGER_DREAMING_NOW',
+    async (
+      _event,
+      options: { entityId: string },
+    ): Promise<IdleDreamingResult> => {
+      if (
+        !options ||
+        typeof options.entityId !== 'string' ||
+        !options.entityId.trim()
+      ) {
+        return { status: 'invalid_request', errorCode: 'entity_id_required' };
+      }
+      return (
+        (await idleDreamingCoordinator?.triggerNow(options)) ?? {
+          status: 'no_work',
+        }
+      );
+    },
+  );
+  const getCurrentDreamingSourceRevision = (
+    entityId: string,
+    entityType: DreamingEntityType,
+  ): string | null => {
+    const packaged = packageEntityNotes(entityId);
+    return packaged?.entityType === entityType ? packaged.sourceRevision : null;
+  };
+
+  ipcMain.handle(
+    'GET_PENDING_DREAMING_PROPOSALS',
+    (_event, input: unknown): DreamingProposalRecord[] => {
+      const scope = parseDreamingProposalScope(input, db.getEntity);
+      return db.dreamingProposalStore.listPendingProposals(
+        scope.entityId,
+        scope.entityType,
+      );
+    },
+  );
+  ipcMain.handle(
+    'ACCEPT_DREAMING_PROPOSAL',
+    (_event, input: unknown): DreamingDecisionResult => {
+      const decision = assertScopedPendingProposal(
+        input,
+        db.getEntity,
+        db.dreamingProposalStore.listPendingProposals,
+      );
+      return db.dreamingProposalStore.acceptDreamingProposal({
+        proposalId: decision.proposalId,
+        getCurrentSourceRevision: getCurrentDreamingSourceRevision,
+      });
+    },
+  );
+  ipcMain.handle(
+    'REJECT_DREAMING_PROPOSAL',
+    (_event, input: unknown): DreamingDecisionResult => {
+      const decision = assertScopedPendingProposal(
+        input,
+        db.getEntity,
+        db.dreamingProposalStore.listPendingProposals,
+      );
+      return db.dreamingProposalStore.rejectDreamingProposal({
+        proposalId: decision.proposalId,
+        getCurrentSourceRevision: getCurrentDreamingSourceRevision,
+      });
     },
   );
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>
@@ -3046,11 +3377,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('SET_ENTITY_LINK_STATE', (_event, { id, state }) => {
     const updated = db.setEntityLinkState(id, state);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
     return updated;
   });
   ipcMain.handle('RESOLVE_CONFLICT', (_event, { winnerId, loserId }) => {
     const result = db.resolveConflictLinks(winnerId, loserId);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
     return result;
   });
 
@@ -4793,7 +5126,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('APP_RELAUNCH', () => {
     app.relaunch();
-    app.exit(0);
+    app.quit();
     return true;
   });
 

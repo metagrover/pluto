@@ -93,7 +93,7 @@ export function ProjectsOverview({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [attempt, activeId]);
+  }, [activeId, attempt]);
 
   const portfolio = useMemo(
     () => buildProjectPortfolio(entries, search),
@@ -222,19 +222,21 @@ export function ProjectsOverview({
             Established across conversations, with suggestions kept separate.
           </p>
         </div>
-        <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
-          <Search
-            aria-hidden="true"
-            className="h-3.5 w-3.5 text-pro-text-muted"
-          />
-          <input
-            aria-label="Search projects and discussed work"
-            placeholder="Search projects"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex w-full items-center gap-2 rounded-lg border border-pro-border/50 px-3 py-2 sm:w-60 focus-within:border-pro-accent/50">
+            <Search
+              aria-hidden="true"
+              className="h-3.5 w-3.5 text-pro-text-muted"
+            />
+            <input
+              aria-label="Search projects and discussed work"
+              placeholder="Search projects"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="min-w-0 w-full bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted"
+            />
+          </label>
+        </div>
       </div>
 
       {loadError && (

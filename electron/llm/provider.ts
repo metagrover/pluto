@@ -198,8 +198,12 @@ export interface LLMProvider {
     prompt: string,
     options?: {
       signal?: AbortSignal;
-      purpose?: 'projectScope' | 'commitmentReconciliation';
+      purpose?: 'projectScope' | 'commitmentReconciliation' | 'dreaming';
       responseSchema?: Record<string, unknown>;
+      model?: string;
+      promptVersion?: string;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+      onStart?: () => void;
     },
   ): Promise<string>;
   answerAskPluto(

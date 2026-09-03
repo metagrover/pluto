@@ -1,6 +1,6 @@
 import {
   type UserProjectMilestoneStatus,
-  readUserProjectMilestones,
+  readProjectMilestones,
 } from './projectMilestones';
 
 export interface ProjectBriefingParticipant {
@@ -93,10 +93,12 @@ export interface ProjectMilestone {
   status: 'complete' | 'overdue' | 'upcoming' | 'in_progress' | 'planned';
   timing: string | null;
   evidenceQuote: string | null;
-  source: 'user' | 'commitment';
+  source: 'user' | 'dreaming' | 'commitment';
   userStatus?: UserProjectMilestoneStatus;
   targetDate: string | null;
   note: string | null;
+  sourceMeetingIds?: string[];
+  sourceExcerpts?: string[];
 }
 
 export interface ProjectThemeSynthesisRead {
@@ -472,7 +474,7 @@ export const buildUserProjectMilestones = (
   metadata: string | null,
   now = Date.now(),
 ): ProjectMilestone[] =>
-  readUserProjectMilestones(metadata).map((milestone) => {
+  readProjectMilestones(metadata).map((milestone) => {
     const dueAt = milestone.targetDate
       ? dateValue(`${milestone.targetDate}T23:59:59.999Z`)
       : null;
@@ -489,11 +491,16 @@ export const buildUserProjectMilestones = (
       title: milestone.title,
       status,
       timing: formatTiming(milestone.targetDate),
-      evidenceQuote: null,
-      source: 'user',
+      evidenceQuote:
+        milestone.source === 'dreaming'
+          ? (milestone.sourceExcerpts?.[0] ?? null)
+          : null,
+      source: milestone.source === 'dreaming' ? 'dreaming' : 'user',
       userStatus: milestone.status,
       targetDate: milestone.targetDate,
       note: milestone.note,
+      sourceMeetingIds: milestone.sourceMeetingIds,
+      sourceExcerpts: milestone.sourceExcerpts,
     };
   });
 

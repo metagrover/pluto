@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  readProjectMilestones,
   readUserProjectMilestones,
   restoreUserProjectMilestone,
+  withSavedDreamingProjectMilestone,
   withSavedUserProjectMilestone,
   withoutUserProjectMilestone,
 } from '../../src/utils/projectMilestones';
@@ -146,6 +148,39 @@ describe('project milestone metadata', () => {
       title: 'Launch',
       createdAt: now,
       updatedAt: '2026-08-30T09:00:00.000Z',
+    });
+  });
+
+  it('stores generated milestones with immutable evidence provenance without exposing them as user milestones', () => {
+    const user = withSavedUserProjectMilestone(
+      null,
+      { title: 'User launch', status: 'planned' },
+      { id: 'user-1', now },
+    );
+    const generated = withSavedDreamingProjectMilestone(
+      user.metadata,
+      { title: 'Evidence launch', status: 'in_progress' },
+      {
+        id: 'generated-1',
+        now,
+        proposalId: 'proposal-1',
+        runId: 'run-1',
+        evidence: [
+          { meetingId: 'meeting-1', excerpt: 'Launch work is underway' },
+        ],
+      },
+    );
+
+    expect(readUserProjectMilestones(generated.metadata)).toEqual([
+      user.milestone,
+    ]);
+    expect(readProjectMilestones(generated.metadata)[1]).toMatchObject({
+      id: 'generated-1',
+      source: 'dreaming',
+      dreamingProposalId: 'proposal-1',
+      dreamingRunId: 'run-1',
+      sourceMeetingIds: ['meeting-1'],
+      sourceExcerpts: ['Launch work is underway'],
     });
   });
 });
