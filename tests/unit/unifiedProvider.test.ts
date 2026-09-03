@@ -592,6 +592,41 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('preempts active dreaming for foreground meeting analysis', async () => {
+    let generationCalls = 0;
+    const fetchMock = installFetchMock((_url, init) => {
+      generationCalls += 1;
+      if (generationCalls > 1) {
+        return jsonResponse({ response: validAnalysisMarkdown });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(init.signal?.reason),
+          { once: true },
+        );
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+
+    const dreaming = provider.synthesizeKnowledgeDocument('dream', {
+      purpose: 'dreaming',
+      model: 'gemma4:12b',
+      promptVersion: 'dreaming-proposals-v1',
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const foreground = provider.generateUserAnalysisMarkdown('analysis');
+
+    await expect(dreaming).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'foreground_preempted',
+    });
+    await expect(foreground).resolves.toBe(validAnalysisMarkdown);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('preempts background title generation for Ask Pluto', async () => {
     let generationCalls = 0;
     const fetchMock = installFetchMock((_url, init) => {

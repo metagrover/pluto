@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type IdleDreamingPolicy,
   createIdleDreamingCoordinator,
-  createRoundRobinEntityQueue,
 } from '../../electron/dreaming/idleDreamingCoordinator';
 import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
 
@@ -84,6 +83,22 @@ describe('IdleDreamingCoordinator', () => {
     const result = await coordinator.attemptIdleRun();
     expect(result.status).toBe('ineligible');
     expect(generateMock).not.toHaveBeenCalled();
+  });
+
+  it('requires renderer quiet for an automatic run', async () => {
+    policy.rendererQuiet = false;
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+    });
+
+    await expect(coordinator.attemptIdleRun()).resolves.toEqual({
+      status: 'ineligible',
+    });
+    expect(packageNotesMock).not.toHaveBeenCalled();
   });
 
   it('returns no_change and sends the exact production request when eligible', async () => {
@@ -290,11 +305,27 @@ describe('IdleDreamingCoordinator', () => {
 
     const result = await coordinator.triggerNow({
       entityId: 'proj-1',
-      force: true,
     });
     expect(result.status).toBe('no_change');
     expect(result.entityId).toBe('proj-1');
     expect(generateMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a manual request bypass a foreground pause lock', async () => {
+    policy.paused = true;
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    await expect(
+      coordinator.triggerNow({ entityId: 'proj-1' }),
+    ).resolves.toEqual({ status: 'ineligible' });
+    expect(packageNotesMock).not.toHaveBeenCalled();
   });
 
   it('does not guess a project type for a missing forced entity', async () => {
@@ -307,9 +338,10 @@ describe('IdleDreamingCoordinator', () => {
       getEntity: () => null,
     });
 
-    expect(
-      await coordinator.triggerNow({ entityId: 'missing', force: true }),
-    ).toEqual({ status: 'no_work', entityId: 'missing' });
+    expect(await coordinator.triggerNow({ entityId: 'missing' })).toEqual({
+      status: 'no_work',
+      entityId: 'missing',
+    });
     expect(packageNotesMock).not.toHaveBeenCalled();
   });
 
@@ -323,9 +355,7 @@ describe('IdleDreamingCoordinator', () => {
       getEntity: () => ({ type: 'topic' }),
     });
 
-    expect(
-      await coordinator.triggerNow({ entityId: 'topic-1', force: true }),
-    ).toEqual({
+    expect(await coordinator.triggerNow({ entityId: 'topic-1' })).toEqual({
       status: 'failed',
       entityId: 'topic-1',
       errorCode: 'invalid_entity_type',
@@ -343,9 +373,7 @@ describe('IdleDreamingCoordinator', () => {
       getEntity: () => ({ type: 'person' }),
     });
 
-    expect(
-      await coordinator.triggerNow({ entityId: 'proj-1', force: true }),
-    ).toEqual({
+    expect(await coordinator.triggerNow({ entityId: 'proj-1' })).toEqual({
       status: 'failed',
       entityId: 'proj-1',
       errorCode: 'entity_type_mismatch',
@@ -377,9 +405,10 @@ describe('IdleDreamingCoordinator', () => {
       packageNotes: packageNotesMock,
       generate: generateMock,
       proposalStore,
+      getEntity: () => ({ type: 'project' }),
     });
 
-    const runPromise = coordinator.triggerNow({ force: true });
+    const runPromise = coordinator.triggerNow({ entityId: 'proj-1' });
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal?.aborted).toBe(false);
 
@@ -393,6 +422,27 @@ describe('IdleDreamingCoordinator', () => {
       runId: 'run-1',
       leaseToken: 'lease-1',
     });
+    expect(proposalStore.completeRun).not.toHaveBeenCalled();
+  });
+
+  it('settles cancellation even when the provider ignores AbortSignal', async () => {
+    generateMock.mockReturnValue(new Promise(() => {}));
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+    });
+
+    const run = coordinator.attemptIdleRun();
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+    coordinator.notifyForegroundActivity();
+    await expect(run).resolves.toEqual({
+      status: 'cancelled',
+      entityId: 'proj-1',
+    });
+    expect(proposalStore.cancelRun).toHaveBeenCalledOnce();
     expect(proposalStore.completeRun).not.toHaveBeenCalled();
   });
 
@@ -419,113 +469,87 @@ describe('IdleDreamingCoordinator', () => {
       expect(generateMock).not.toHaveBeenCalled();
     },
   );
-});
 
-describe('createRoundRobinEntityQueue', () => {
-  it('fairly rotates through all projects and people before repeating', () => {
-    const projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
-    const people = [{ id: 'person-1' }, { id: 'person-2' }];
-
-    const queue = createRoundRobinEntityQueue({
-      getProjects: () => projects,
-      getPeople: () => people,
+  it('requires a concrete entity for a manual run', async () => {
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
     });
 
-    // Round 1: Interleaves projects and people fairly
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-1',
-      type: 'project',
+    await expect(coordinator.triggerNow()).resolves.toEqual({
+      status: 'invalid_request',
+      errorCode: 'entity_id_required',
     });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-1',
-      type: 'person',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-2',
-      type: 'project',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-2',
-      type: 'person',
-    });
-
-    // All entities visited; round 2 starts from beginning
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-1',
-      type: 'project',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-1',
-      type: 'person',
-    });
+    expect(packageNotesMock).not.toHaveBeenCalled();
   });
 
-  it('handles asymmetric numbers of projects and people', () => {
-    const projects = [{ id: 'proj-1' }];
-    const people = [{ id: 'person-1' }, { id: 'person-2' }, { id: 'person-3' }];
-
-    const queue = createRoundRobinEntityQueue({
-      getProjects: () => projects,
-      getPeople: () => people,
+  it('does not coalesce a different manual entity with the active run', async () => {
+    let release!: () => void;
+    generateMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          release = () =>
+            resolve(JSON.stringify({ status: 'no_change', proposals: [] }));
+        }),
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: (id) => ({ ...packageNotesMock(), entityId: id }),
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
     });
 
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-1',
-      type: 'project',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-1',
-      type: 'person',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-2',
-      type: 'person',
-    });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-3',
-      type: 'person',
-    });
-
-    // Cycles back
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-1',
-      type: 'project',
-    });
+    const first = coordinator.triggerNow({ entityId: 'proj-1' });
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+    await expect(
+      coordinator.triggerNow({ entityId: 'proj-2' }),
+    ).resolves.toEqual({ status: 'busy', entityId: 'proj-2' });
+    release();
+    await first;
+    expect(generateMock).toHaveBeenCalledOnce();
   });
 
-  it('prunes deleted entities and handles new additions dynamically', () => {
-    let projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
-    const people = [{ id: 'person-1' }];
-
-    const queue = createRoundRobinEntityQueue({
-      getProjects: () => projects,
-      getPeople: () => people,
+  it('settles a provider that ignores abort at the entity deadline', async () => {
+    vi.useFakeTimers();
+    let resolveLate!: (value: string) => void;
+    generateMock.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveLate = resolve;
+      }),
+    );
+    const unloadModel = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      deadlineMs: 100,
+      unloadModel,
     });
 
-    expect(queue.getNextCandidate()).toEqual({
+    const run = coordinator.attemptIdleRun();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(run).resolves.toEqual({
+      status: 'failed',
       entityId: 'proj-1',
-      type: 'project',
+      errorCode: 'timeout',
     });
-
-    // Delete proj-2 and add proj-3
-    projects = [{ id: 'proj-1' }, { id: 'proj-3' }];
-
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'person-1',
-      type: 'person',
+    expect(proposalStore.failRun).toHaveBeenCalledWith({
+      runId: 'run-1',
+      leaseToken: 'lease-1',
+      errorCode: 'generation_failed',
     });
-    expect(queue.getNextCandidate()).toEqual({
-      entityId: 'proj-3',
-      type: 'project',
-    });
-  });
-
-  it('returns null when no entities exist', () => {
-    const queue = createRoundRobinEntityQueue({
-      getProjects: () => [],
-      getPeople: () => [],
-    });
-
-    expect(queue.getNextCandidate()).toBeNull();
+    expect(proposalStore.completeRun).not.toHaveBeenCalled();
+    expect(unloadModel).toHaveBeenCalledOnce();
+    resolveLate(JSON.stringify({ status: 'no_change', proposals: [] }));
+    await Promise.resolve();
+    expect(proposalStore.completeRun).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

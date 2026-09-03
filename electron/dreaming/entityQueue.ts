@@ -1,72 +1,92 @@
 import type { DirtyEntityCandidate } from './idleDreamingCoordinator';
 
-export interface RoundRobinEntityQueueDeps {
-  getProjects: () => Array<{ id: string }>;
-  getPeople: () => Array<{ id: string }>;
+type EntityRef = { id: string };
+
+export interface DirtyEntityQueueDeps {
+  getProjects: () => EntityRef[];
+  getPeople: () => EntityRef[];
+  resolveProjectId?: (id: string) => string;
+  resolvePersonId?: (id: string) => string;
 }
 
-export interface RoundRobinEntityQueue {
+export interface DirtyEntityQueue {
   getNextCandidate: () => DirtyEntityCandidate | null;
-  reset: () => void;
-  getVisitedCount: () => number;
+  invalidate: (candidate?: DirtyEntityCandidate) => void;
+  hasPendingWork: () => boolean;
+  getPendingCount: () => number;
 }
 
-export const createRoundRobinEntityQueue = (
-  deps: RoundRobinEntityQueueDeps,
-): RoundRobinEntityQueue => {
-  const visitedIds = new Set<string>();
+const candidateKey = ({ entityId, type }: DirtyEntityCandidate) =>
+  `${type}:${entityId}`;
 
-  const getNextCandidate = (): DirtyEntityCandidate | null => {
+/** Each canonical entity is yielded once until content invalidates the queue. */
+export const createDirtyEntityQueue = (
+  deps: DirtyEntityQueueDeps,
+): DirtyEntityQueue => {
+  let initialized = false;
+  let pending: DirtyEntityCandidate[] = [];
+  const pendingKeys = new Set<string>();
+
+  const append = (candidate: DirtyEntityCandidate) => {
+    const key = candidateKey(candidate);
+    if (pendingKeys.has(key)) return;
+    pendingKeys.add(key);
+    pending.push(candidate);
+  };
+
+  const isCanonical = (id: string, resolve?: (id: string) => string) => {
+    try {
+      return (resolve?.(id) ?? id) === id;
+    } catch {
+      return false;
+    }
+  };
+
+  const scanCatalog = () => {
+    pending = [];
+    pendingKeys.clear();
     const projects = deps.getProjects();
     const people = deps.getPeople();
-
-    const maxLen = Math.max(projects.length, people.length);
-    const candidates: DirtyEntityCandidate[] = [];
-
-    for (let i = 0; i < maxLen; i++) {
-      if (i < projects.length) {
-        candidates.push({ entityId: projects[i].id, type: 'project' });
+    const maxLength = Math.max(projects.length, people.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      const project = projects[index];
+      if (project && isCanonical(project.id, deps.resolveProjectId)) {
+        append({ entityId: project.id, type: 'project' });
       }
-      if (i < people.length) {
-        candidates.push({ entityId: people[i].id, type: 'person' });
-      }
-    }
-
-    if (candidates.length === 0) {
-      visitedIds.clear();
-      return null;
-    }
-
-    // Prune visitedIds that no longer exist in either list
-    const currentIdSet = new Set(candidates.map((c) => c.entityId));
-    for (const id of visitedIds) {
-      if (!currentIdSet.has(id)) {
-        visitedIds.delete(id);
+      const person = people[index];
+      if (person && isCanonical(person.id, deps.resolvePersonId)) {
+        append({ entityId: person.id, type: 'person' });
       }
     }
-
-    // Find first unvisited candidate in fair round-robin order
-    let next = candidates.find((c) => !visitedIds.has(c.entityId));
-
-    // If all current candidates have been visited, reset cycle and pick the first
-    if (!next) {
-      visitedIds.clear();
-      next = candidates[0];
-    }
-
-    visitedIds.add(next.entityId);
-    return next;
+    initialized = true;
   };
 
-  const reset = () => {
-    visitedIds.clear();
+  const ensureInitialized = () => {
+    if (!initialized) scanCatalog();
   };
-
-  const getVisitedCount = () => visitedIds.size;
 
   return {
-    getNextCandidate,
-    reset,
-    getVisitedCount,
+    getNextCandidate() {
+      ensureInitialized();
+      const next = pending.shift() ?? null;
+      if (next) pendingKeys.delete(candidateKey(next));
+      return next;
+    },
+    invalidate(candidate) {
+      if (!candidate) {
+        scanCatalog();
+        return;
+      }
+      ensureInitialized();
+      append(candidate);
+    },
+    hasPendingWork() {
+      ensureInitialized();
+      return pending.length > 0;
+    },
+    getPendingCount() {
+      ensureInitialized();
+      return pending.length;
+    },
   };
 };

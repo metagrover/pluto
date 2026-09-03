@@ -857,13 +857,20 @@ export class UnifiedLLMProvider implements LLMProvider {
           ? 'commitmentReconciliation'
           : options.purpose === 'projectScope'
             ? 'projectScopeReview'
-            : 'knowledgeDoc',
+            : options.purpose === 'dreaming'
+              ? 'dreaming'
+              : 'knowledgeDoc',
       jsonMode: true,
       responseSchema: options.responseSchema,
       modelOverride:
         options.purpose === 'dreaming' ? options.model?.trim() : undefined,
       signal: options.signal,
     });
+  }
+
+  async unloadModel(model: string): Promise<void> {
+    if (this.providerType !== 'ollama' || !model.trim()) return;
+    await this.unloadOllamaModel(model.trim());
   }
 
   async answerAskPluto(
@@ -1005,7 +1012,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         ...options.notesBudget,
       });
     }
-    const isBackground = options.task === 'knowledgeDoc';
+    const isBackground =
+      options.task === 'knowledgeDoc' || options.task === 'dreaming';
     if (!isBackground) {
       knowledgeSynthesisPause.acquire('llm_active');
     }

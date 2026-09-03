@@ -18,6 +18,7 @@ export interface IdleDreamingPolicy {
   onBattery: boolean;
   thermalState: string;
   paused: boolean;
+  rendererQuiet?: boolean;
 }
 
 export interface DirtyEntityCandidate {
@@ -32,19 +33,23 @@ export type IdleDreamingResult =
   | {
       status:
         | 'ineligible'
+        | 'invalid_request'
         | 'no_work'
         | 'existing'
         | 'busy'
         | 'backoff'
         | 'exhausted';
       entityId?: string;
+      errorCode?: string;
     };
 
 export {
-  createRoundRobinEntityQueue,
-  type RoundRobinEntityQueue,
-  type RoundRobinEntityQueueDeps,
+  createDirtyEntityQueue,
+  type DirtyEntityQueue,
+  type DirtyEntityQueueDeps,
 } from './entityQueue';
+
+export const DREAMING_ENTITY_DEADLINE_MS = 3 * 60_000;
 
 export interface IdleDreamingCoordinatorDeps {
   getPolicy: () => IdleDreamingPolicy;
@@ -76,6 +81,9 @@ export interface IdleDreamingCoordinatorDeps {
   };
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
+  deadlineMs?: number;
+  setTimeout?: typeof setTimeout;
+  clearTimeout?: typeof clearTimeout;
   unloadModel?: () => Promise<void> | void;
 }
 
@@ -112,8 +120,12 @@ export const createIdleDreamingCoordinator = (
   deps: IdleDreamingCoordinatorDeps,
 ) => {
   const idleThreshold = deps.idleThresholdSeconds ?? 300;
+  const deadlineMs = deps.deadlineMs ?? DREAMING_ENTITY_DEADLINE_MS;
+  const scheduleTimeout = deps.setTimeout ?? setTimeout;
+  const cancelTimeout = deps.clearTimeout ?? clearTimeout;
   let activeController: AbortController | null = null;
   let activeRun: Promise<IdleDreamingResult> | null = null;
+  let activeCandidate: DirtyEntityCandidate | null = null;
   const isEntityType = (value: string): value is DreamingEntityType =>
     value === 'project' || value === 'person';
 
@@ -123,8 +135,17 @@ export const createIdleDreamingCoordinator = (
       policy.systemIdleSeconds >= idleThreshold &&
       !policy.onBattery &&
       (policy.thermalState === 'nominal' || policy.thermalState === 'fair') &&
-      !policy.paused
+      !policy.paused &&
+      policy.rendererQuiet !== false
     );
+  };
+
+  const unloadModel = () => {
+    try {
+      void Promise.resolve(deps.unloadModel?.()).catch(() => undefined);
+    } catch {
+      // Unloading is best-effort and cannot hold the coordinator lifecycle.
+    }
   };
 
   const notifyForegroundActivity = () => {
@@ -132,10 +153,52 @@ export const createIdleDreamingCoordinator = (
       activeController.abort(
         new DOMException('Foreground activity resumed', 'AbortError'),
       );
-      activeController = null;
-      deps.unloadModel?.();
     }
   };
+
+  const generateWithDeadline = (
+    request: ReturnType<typeof buildDreamingGenerationRequest>,
+    signal: AbortSignal,
+  ): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cancelTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        callback();
+      };
+      const onAbort = () =>
+        finish(() =>
+          reject(
+            signal.reason ??
+              new DOMException('Dreaming cancelled', 'AbortError'),
+          ),
+        );
+      const timer = scheduleTimeout(
+        () =>
+          finish(() => {
+            const error = new Error('dreaming_timeout');
+            activeController?.abort(error);
+            reject(error);
+          }),
+        deadlineMs,
+      );
+      signal.addEventListener('abort', onAbort, { once: true });
+      void deps
+        .generate(
+          request.prompt,
+          request.schema,
+          signal,
+          request.model,
+          request.promptVersion,
+        )
+        .then(
+          (value) => finish(() => resolve(value)),
+          (error) => finish(() => reject(error)),
+        );
+    });
 
   const executeEntityRun = async (
     candidate: DirtyEntityCandidate,
@@ -179,13 +242,7 @@ export const createIdleDreamingCoordinator = (
         lease = start.run;
       }
 
-      const raw = await deps.generate(
-        request.prompt,
-        request.schema,
-        signal,
-        request.model,
-        request.promptVersion,
-      );
+      const raw = await generateWithDeadline(request, signal);
       if (signal.aborted) {
         if (lease) {
           deps.proposalStore.cancelRun({
@@ -287,6 +344,20 @@ export const createIdleDreamingCoordinator = (
         proposals: validated.proposals,
       };
     } catch (err) {
+      if (err instanceof Error && err.message === 'dreaming_timeout') {
+        if (lease) {
+          deps.proposalStore.failRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+            errorCode: 'generation_failed',
+          });
+        }
+        return {
+          status: 'failed',
+          entityId: candidate.entityId,
+          errorCode: 'timeout',
+        };
+      }
       if (
         signal.aborted ||
         (err instanceof Error && err.name === 'AbortError')
@@ -320,56 +391,79 @@ export const createIdleDreamingCoordinator = (
 
   const triggerNow = async (options?: {
     entityId?: string;
-    force?: boolean;
   }): Promise<IdleDreamingResult> => {
-    if (activeRun) return activeRun;
-
-    if (!options?.force && !isEligible()) {
+    if (!options?.entityId) {
+      return {
+        status: 'invalid_request',
+        errorCode: 'entity_id_required',
+      };
+    }
+    if (activeRun) {
+      return activeCandidate?.entityId === options.entityId
+        ? activeRun
+        : { status: 'busy', entityId: options.entityId };
+    }
+    // Manual requests bypass idle, power, thermal, and renderer-quiet checks,
+    // but never foreground/capture/transcription/downstream pause locks.
+    if (deps.getPolicy().paused) {
       return { status: 'ineligible' };
     }
-
-    let candidate: DirtyEntityCandidate | null | undefined;
-    if (options?.entityId) {
-      const entity = deps.getEntity?.(options.entityId);
-      if (!entity) return { status: 'no_work', entityId: options.entityId };
-      if (!isEntityType(entity.type)) {
-        return {
-          status: 'failed',
-          entityId: options.entityId,
-          errorCode: 'invalid_entity_type',
-        };
-      }
-      candidate = { entityId: options.entityId, type: entity.type };
-    } else {
-      candidate = deps.getNextDirtyEntityId();
-      if (candidate && !isEntityType(candidate.type)) {
-        return {
-          status: 'failed',
-          entityId: candidate.entityId,
-          errorCode: 'invalid_entity_type',
-        };
-      }
+    const entity = deps.getEntity?.(options.entityId);
+    if (!entity) return { status: 'no_work', entityId: options.entityId };
+    if (!isEntityType(entity.type)) {
+      return {
+        status: 'failed',
+        entityId: options.entityId,
+        errorCode: 'invalid_entity_type',
+      };
     }
-
-    if (!candidate) return { status: 'no_work' };
+    const candidate = { entityId: options.entityId, type: entity.type };
 
     const controller = new AbortController();
     activeController = controller;
+    activeCandidate = candidate;
 
     activeRun = executeEntityRun(
       candidate,
       controller.signal,
-      options?.force ? 'manual' : 'automatic',
+      'manual',
     ).finally(() => {
       activeController = null;
+      activeCandidate = null;
       activeRun = null;
+      unloadModel();
     });
 
     return activeRun;
   };
 
   const attemptIdleRun = async (): Promise<IdleDreamingResult> => {
-    return triggerNow({ force: false });
+    if (activeRun)
+      return { status: 'busy', entityId: activeCandidate?.entityId };
+    if (!isEligible()) return { status: 'ineligible' };
+    const candidate = deps.getNextDirtyEntityId();
+    if (!candidate) return { status: 'no_work' };
+    if (!isEntityType(candidate.type)) {
+      return {
+        status: 'failed',
+        entityId: candidate.entityId,
+        errorCode: 'invalid_entity_type',
+      };
+    }
+    const controller = new AbortController();
+    activeController = controller;
+    activeCandidate = candidate;
+    activeRun = executeEntityRun(
+      candidate,
+      controller.signal,
+      'automatic',
+    ).finally(() => {
+      activeController = null;
+      activeCandidate = null;
+      activeRun = null;
+      unloadModel();
+    });
+    return activeRun;
   };
 
   return {
@@ -377,5 +471,6 @@ export const createIdleDreamingCoordinator = (
     attemptIdleRun,
     triggerNow,
     notifyForegroundActivity,
+    close: notifyForegroundActivity,
   };
 };
