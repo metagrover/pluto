@@ -39,6 +39,7 @@ interface SettingsTabProps {
   setTheme: (val: 'light' | 'dark' | 'system') => void;
   calendarSnapshot?: CalendarIntegrationSnapshot | null;
   onCalendarSnapshotChange?: (snapshot: CalendarIntegrationSnapshot) => void;
+  initialTab?: SettingsTabId;
 }
 
 const providerOptions = [
@@ -61,7 +62,7 @@ const settingsTabs = [
   { id: 'advanced', label: 'Advanced' },
 ] as const;
 
-type SettingsTabId = (typeof settingsTabs)[number]['id'];
+export type SettingsTabId = (typeof settingsTabs)[number]['id'];
 
 const Section = ({
   title,
@@ -160,9 +161,17 @@ export const SettingsTab = ({
   setTheme,
   calendarSnapshot = null,
   onCalendarSnapshotChange = () => {},
+  initialTab,
 }: SettingsTabProps) => {
-  const [activeSettingsTab, setActiveSettingsTab] =
-    useState<SettingsTabId>('personal');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
+    initialTab ?? 'personal',
+  );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveSettingsTab(initialTab);
+    }
+  }, [initialTab]);
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'

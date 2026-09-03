@@ -10,6 +10,7 @@ import { CalendarSettings } from '../../src/components/features/CalendarSettings
 const api = vi.hoisted(() => ({
   connectCalendar: vi.fn(),
   selectCalendar: vi.fn(),
+  selectCalendars: vi.fn(),
   refreshCalendar: vi.fn(),
   disconnectCalendar: vi.fn(),
   openCalendarSystemSettings: vi.fn(),
@@ -25,21 +26,38 @@ const workCalendar = {
   colorHex: '#7367D9',
 };
 
+const personalCalendar = {
+  identifier: 'calendar-b',
+  title: 'Personal',
+  sourceTitle: 'Google',
+  sourceType: 'caldav',
+  colorHex: '#34A853',
+};
+
 const snapshot = (
   overrides: Partial<CalendarIntegrationSnapshot> = {},
-): CalendarIntegrationSnapshot => ({
-  state: 'not_determined',
-  authorization: 'not_determined',
-  enabled: false,
-  selectedCalendar: null,
-  calendars: [],
-  lastAttemptAt: null,
-  lastReadAt: null,
-  cacheStart: null,
-  cacheEnd: null,
-  stale: false,
-  ...overrides,
-});
+): CalendarIntegrationSnapshot => {
+  const selectedCalendar =
+    'selectedCalendar' in overrides
+      ? (overrides.selectedCalendar ?? null)
+      : null;
+  const selectedCalendars =
+    overrides.selectedCalendars ?? (selectedCalendar ? [selectedCalendar] : []);
+  return {
+    state: 'not_determined',
+    authorization: 'not_determined',
+    enabled: false,
+    selectedCalendar,
+    selectedCalendars,
+    calendars: [],
+    lastAttemptAt: null,
+    lastReadAt: null,
+    cacheStart: null,
+    cacheEnd: null,
+    stale: false,
+    ...overrides,
+  };
+};
 
 const render = (value: CalendarIntegrationSnapshot) => {
   const container = document.createElement('div');
@@ -71,31 +89,97 @@ describe('CalendarSettings', () => {
     act(() => root.unmount());
   });
 
-  it('lets the user choose exactly one calendar', async () => {
+  it('provides grouped multi-selection with staged changes and Save changes', async () => {
     const selected = snapshot({
       state: 'ready',
       authorization: 'full_access',
       enabled: true,
       selectedCalendar: workCalendar,
-      calendars: [workCalendar],
+      selectedCalendars: [workCalendar, personalCalendar],
+      calendars: [workCalendar, personalCalendar],
     });
-    api.selectCalendar.mockResolvedValue(selected);
+    api.selectCalendars.mockResolvedValue(selected);
+
     const { container, root, onSnapshotChange } = render(
       snapshot({
         state: 'needs_selection',
         authorization: 'full_access',
-        calendars: [workCalendar],
+        calendars: [workCalendar, personalCalendar],
       }),
     );
-    await act(async () =>
-      container
-        .querySelector<HTMLButtonElement>(
-          'button[aria-label="Use Work calendar from iCloud"]',
-        )
-        ?.click(),
+
+    // Grouping by sourceTitle
+    expect(container.textContent).toContain('iCloud');
+    expect(container.textContent).toContain('Google');
+
+    const saveButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Save changes"]',
     );
-    expect(api.selectCalendar).toHaveBeenCalledWith(workCalendar);
+    // Disabled when no calendars are selected
+    expect(saveButton?.disabled).toBe(true);
+
+    const checkboxes = Array.from(
+      container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    );
+    expect(checkboxes).toHaveLength(2);
+
+    // Check both
+    await act(async () => checkboxes[0].click());
+    expect(saveButton?.disabled).toBe(false);
+
+    await act(async () => checkboxes[1].click());
+    await act(async () => saveButton?.click());
+
+    expect(api.selectCalendars).toHaveBeenCalledWith([
+      workCalendar,
+      personalCalendar,
+    ]);
     expect(onSnapshotChange).toHaveBeenCalledWith(selected);
+    act(() => root.unmount());
+  });
+
+  it('shows missing selected calendar requiring explicit user resolution', async () => {
+    const resolved = snapshot({
+      state: 'ready',
+      authorization: 'full_access',
+      enabled: true,
+      selectedCalendar: workCalendar,
+      selectedCalendars: [workCalendar],
+      calendars: [workCalendar],
+    });
+    api.selectCalendars.mockResolvedValue(resolved);
+
+    const { container, root, onSnapshotChange } = render(
+      snapshot({
+        state: 'selected_calendar_missing',
+        authorization: 'full_access',
+        enabled: true,
+        selectedCalendar: workCalendar,
+        selectedCalendars: [workCalendar, personalCalendar],
+        calendars: [workCalendar], // personalCalendar is missing from available
+      }),
+    );
+
+    expect(container.textContent).toContain('Personal');
+    expect(container.textContent).toContain('Missing');
+
+    // Staged save button is disabled until user changes selection
+    const saveButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Save changes"]',
+    );
+    expect(saveButton?.disabled).toBe(true);
+
+    // Uncheck the missing calendar
+    const missingCheckbox = container.querySelector<HTMLInputElement>(
+      'input[aria-label*="Personal"]',
+    );
+    await act(async () => missingCheckbox?.click());
+
+    expect(saveButton?.disabled).toBe(false);
+    await act(async () => saveButton?.click());
+
+    expect(api.selectCalendars).toHaveBeenCalledWith([workCalendar]);
+    expect(onSnapshotChange).toHaveBeenCalledWith(resolved);
     act(() => root.unmount());
   });
 

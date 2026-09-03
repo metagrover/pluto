@@ -30,6 +30,29 @@ const event: CalendarEvent = {
   lastModified: null,
 };
 
+const calendarB: CalendarDescriptor = {
+  identifier: 'calendar-b',
+  title: 'Personal',
+  sourceTitle: 'Google',
+  sourceType: 'caldav',
+  colorHex: '#34A853',
+};
+
+const eventB: CalendarEvent = {
+  occurrenceKey: 'event-b',
+  eventIdentifier: 'event-b',
+  calendarIdentifier: 'calendar-b',
+  title: 'Family dinner',
+  start: '2026-08-30T19:00:00.000Z',
+  end: '2026-08-30T20:00:00.000Z',
+  isAllDay: false,
+  isCancelled: false,
+  availability: 'busy',
+  organizer: null,
+  attendees: [],
+  lastModified: null,
+};
+
 const createFixture = (
   options: {
     platform?: NodeJS.Platform;
@@ -43,6 +66,7 @@ const createFixture = (
   let state = {
     enabled: false,
     selectedCalendar: null as CalendarDescriptor | null,
+    selectedCalendars: [] as CalendarDescriptor[],
     cacheRevision: 0,
     lastAttemptAt: null as string | null,
     lastReadAt: null as string | null,
@@ -53,24 +77,49 @@ const createFixture = (
   const store = {
     getState: vi.fn(() => state),
     selectCalendar: vi.fn((selected: CalendarDescriptor) => {
-      state = { ...state, enabled: true, selectedCalendar: selected };
-      return state;
-    }),
-    replaceEvents: vi.fn((input: { revision: number; readAt: string }) => {
       state = {
         ...state,
-        cacheRevision: input.revision,
-        lastAttemptAt: input.readAt,
-        lastReadAt: input.readAt,
+        enabled: true,
+        selectedCalendar: selected,
+        selectedCalendars: [selected],
       };
-      return true;
+      return state;
     }),
+    selectCalendars: vi.fn((selected: CalendarDescriptor[]) => {
+      state = {
+        ...state,
+        enabled: selected.length > 0,
+        selectedCalendar: selected[0] ?? null,
+        selectedCalendars: selected,
+      };
+      return state;
+    }),
+    replaceEvents: vi.fn(
+      (input: {
+        revision: number;
+        readAt: string;
+        events: CalendarEvent[];
+      }) => {
+        state = {
+          ...state,
+          cacheRevision: input.revision,
+          lastAttemptAt: input.readAt,
+          lastReadAt: input.readAt,
+        };
+        return true;
+      },
+    ),
     listEvents: vi.fn(() => options.events ?? [event]),
     recordFailure: vi.fn((errorCode: 'read_failed', readAt: string) => {
       state = { ...state, errorCode, lastAttemptAt: readAt };
     }),
     disconnect: vi.fn(() => {
-      state = { ...state, enabled: false, selectedCalendar: null };
+      state = {
+        ...state,
+        enabled: false,
+        selectedCalendar: null,
+        selectedCalendars: [],
+      };
     }),
   };
   const client = {
@@ -80,7 +129,10 @@ const createFixture = (
       return authorization;
     }),
     listCalendars: vi.fn(async () => options.calendars ?? [calendar]),
-    listEvents: vi.fn(async () => options.events ?? [event]),
+    listEvents: vi.fn(async (calId: string) => {
+      if (calId === 'calendar-b') return [eventB];
+      return options.events ?? [event];
+    }),
     onChange: vi.fn(() => () => {}),
     close: vi.fn(),
   };
@@ -193,5 +245,69 @@ describe('calendar service', () => {
     await fixture.service.connect();
 
     expect(fixture.client.onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('selects multiple calendars and refreshes events across all selected calendars', async () => {
+    const fixture = createFixture({
+      authorization: 'full_access',
+      calendars: [calendar, calendarB],
+    });
+
+    const snapshot = await fixture.service.selectCalendars([
+      calendar,
+      calendarB,
+    ]);
+    expect(snapshot.state).toBe('ready');
+    expect(snapshot.selectedCalendars).toEqual([calendar, calendarB]);
+    expect(snapshot.selectedCalendar).toEqual(calendar);
+
+    expect(fixture.client.listEvents).toHaveBeenCalledWith(
+      'calendar-a',
+      '2026-08-16T16:00:00.000Z',
+      '2026-09-29T16:00:00.000Z',
+    );
+    expect(fixture.client.listEvents).toHaveBeenCalledWith(
+      'calendar-b',
+      '2026-08-16T16:00:00.000Z',
+      '2026-09-29T16:00:00.000Z',
+    );
+    expect(fixture.store.replaceEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revision: 1,
+        events: [event, eventB],
+      }),
+    );
+  });
+
+  it('preserves the prior combined cache when one of multiple calendar reads fails', async () => {
+    const fixture = createFixture({
+      authorization: 'full_access',
+      calendars: [calendar, calendarB],
+    });
+    fixture.store.selectCalendars([calendar, calendarB]);
+    fixture.client.listEvents.mockImplementation(async (calId: string) => {
+      if (calId === 'calendar-b') throw new Error('CalDAV timeout');
+      return [event];
+    });
+
+    await expect(fixture.service.refresh()).rejects.toThrow('CalDAV timeout');
+    expect(fixture.store.replaceEvents).not.toHaveBeenCalled();
+    expect(fixture.store.recordFailure).toHaveBeenCalledWith(
+      'read_failed',
+      '2026-08-30T16:00:00.000Z',
+    );
+  });
+
+  it('reports selected_calendar_missing when any selected calendar disappears', async () => {
+    const fixture = createFixture({
+      authorization: 'full_access',
+      calendars: [calendar], // calendarB is missing!
+    });
+    fixture.store.selectCalendars([calendar, calendarB]);
+
+    const snapshot = await fixture.service.getSnapshot();
+    expect(snapshot.state).toBe('selected_calendar_missing');
+    // Selections must not be silently modified
+    expect(snapshot.selectedCalendars).toEqual([calendar, calendarB]);
   });
 });

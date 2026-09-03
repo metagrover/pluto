@@ -17,7 +17,7 @@ import {
   disconnectCalendar,
   openCalendarSystemSettings,
   refreshCalendar,
-  selectCalendar,
+  selectCalendars,
 } from '../../api/calendar';
 
 interface CalendarSettingsProps {
@@ -55,11 +55,30 @@ export const CalendarSettings = ({
   const [choosing, setChoosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedList =
+    snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
+      ? snapshot.selectedCalendars
+      : snapshot?.selectedCalendar
+        ? [snapshot.selectedCalendar]
+        : [];
+
+  const [stagedIds, setStagedIds] = useState<Set<string>>(
+    () => new Set(selectedList.map((c) => c.identifier)),
+  );
+
+  const [lastSnapshot, setLastSnapshot] = useState(snapshot);
+  if (snapshot !== lastSnapshot) {
+    setLastSnapshot(snapshot);
+    setStagedIds(new Set(selectedList.map((c) => c.identifier)));
+  }
+
   const run = async (action: () => Promise<CalendarIntegrationSnapshot>) => {
     setBusy(true);
     setError(null);
     try {
-      onSnapshotChange(await action());
+      const next = await action();
+      onSnapshotChange(next);
+      setChoosing(false);
     } catch {
       setError('Calendar couldn’t be updated. Try again.');
     } finally {
@@ -67,15 +86,66 @@ export const CalendarSettings = ({
     }
   };
 
-  const choose = (calendar: CalendarDescriptor) =>
-    run(async () => {
-      const next = await selectCalendar(calendar);
-      setChoosing(false);
+  const availableCalendars = snapshot?.calendars ?? [];
+  const availableMap = new Map(
+    availableCalendars.map((c) => [c.identifier, c]),
+  );
+  const missingSelected = selectedList.filter(
+    (c) => !availableMap.has(c.identifier),
+  );
+
+  const allCandidates: {
+    descriptor: CalendarDescriptor;
+    isMissing: boolean;
+  }[] = [
+    ...availableCalendars.map((descriptor) => ({
+      descriptor,
+      isMissing: false,
+    })),
+    ...missingSelected.map((descriptor) => ({
+      descriptor,
+      isMissing: true,
+    })),
+  ];
+
+  const groupedBySource = new Map<string, typeof allCandidates>();
+  for (const candidate of allCandidates) {
+    const source = candidate.descriptor.sourceTitle || 'Other';
+    const list = groupedBySource.get(source) ?? [];
+    list.push(candidate);
+    groupedBySource.set(source, list);
+  }
+
+  const toggleStaged = (id: string) => {
+    setStagedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+  };
 
-  const calendars = snapshot?.calendars ?? [];
-  const needsChoice = snapshot?.state === 'needs_selection' || choosing;
+  const currentSelectedIds = new Set(selectedList.map((c) => c.identifier));
+  const isUnchanged =
+    stagedIds.size === currentSelectedIds.size &&
+    Array.from(stagedIds).every((id) => currentSelectedIds.has(id));
+
+  const saveDisabled = busy || stagedIds.size === 0 || isUnchanged;
+
+  const handleSave = () => {
+    const chosenMap = new Map(
+      allCandidates.map((c) => [c.descriptor.identifier, c.descriptor]),
+    );
+    const chosen = Array.from(stagedIds)
+      .map((id) => chosenMap.get(id))
+      .filter((c): c is CalendarDescriptor => Boolean(c));
+    return run(() => selectCalendars(chosen));
+  };
+
+  const needsChoice =
+    snapshot?.state === 'needs_selection' ||
+    snapshot?.state === 'selected_calendar_missing' ||
+    choosing;
 
   return (
     <section className="mb-10" aria-labelledby="calendar-context-title">
@@ -154,42 +224,93 @@ export const CalendarSettings = ({
         {needsChoice ? (
           <div className="border-t border-pro-border/40 px-5 py-4">
             <p className="text-[12px] font-semibold text-pro-text-main">
-              Choose one calendar
+              {snapshot?.state === 'selected_calendar_missing'
+                ? 'Resolve missing calendar'
+                : 'Choose calendars'}
             </p>
-            <div className="mt-3 divide-y divide-pro-border/50 rounded-lg border border-pro-border/60 bg-pro-bg">
-              {calendars.map((calendar) => (
-                <button
-                  key={calendar.identifier}
-                  type="button"
-                  aria-label={`Use ${calendar.title} calendar from ${calendar.sourceTitle}`}
-                  disabled={busy}
-                  onClick={() => void choose(calendar)}
-                  className="flex min-h-12 w-full items-center gap-3 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full bg-pro-accent"
-                    style={
-                      calendar.colorHex
-                        ? { backgroundColor: calendar.colorHex }
-                        : undefined
-                    }
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-pro-text-main">
-                      {calendar.title}
-                    </span>
-                    <span className="block truncate text-[10px] font-medium text-pro-text-muted">
-                      {calendar.sourceTitle}
-                    </span>
-                  </span>
-                </button>
+            <p className="mt-0.5 text-[11px] text-pro-text-muted">
+              Pluto will read events from every selected calendar.
+            </p>
+            <div className="mt-3 space-y-4">
+              {Array.from(groupedBySource.entries()).map(([source, items]) => (
+                <div key={source}>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-pro-text-muted/70">
+                    {source}
+                  </p>
+                  <div className="divide-y divide-pro-border/50 rounded-lg border border-pro-border/60 bg-pro-bg">
+                    {items.map(({ descriptor: calendar, isMissing }) => {
+                      const isChecked = stagedIds.has(calendar.identifier);
+                      return (
+                        <label
+                          key={calendar.identifier}
+                          className="flex min-h-12 w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleStaged(calendar.identifier)}
+                            className="h-3.5 w-3.5 rounded border-pro-border/70 text-pro-accent focus:ring-pro-accent"
+                            aria-label={`${calendar.title} from ${calendar.sourceTitle}${isMissing ? ' (Missing)' : ''}`}
+                          />
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full bg-pro-accent"
+                            style={
+                              calendar.colorHex
+                                ? { backgroundColor: calendar.colorHex }
+                                : undefined
+                            }
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="block truncate text-[13px] font-medium text-pro-text-main">
+                                {calendar.title}
+                              </span>
+                              {isMissing ? (
+                                <span className="rounded bg-pro-urgent/15 px-1.5 py-0.5 text-[9px] font-semibold text-pro-urgent">
+                                  Missing
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="block truncate text-[10px] font-medium text-pro-text-muted">
+                              {calendar.sourceTitle}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Save changes"
+                disabled={saveDisabled}
+                onClick={() => void handleSave()}
+                className="inline-flex min-h-9 items-center justify-center rounded-lg bg-pro-accent px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? 'Saving…' : 'Save changes'}
+              </button>
+              {choosing && snapshot?.enabled && snapshot.state === 'ready' ? (
+                <SecondaryButton
+                  onClick={() => {
+                    setChoosing(false);
+                    setStagedIds(
+                      new Set(selectedList.map((c) => c.identifier)),
+                    );
+                  }}
+                >
+                  Cancel
+                </SecondaryButton>
+              ) : null}
             </div>
           </div>
         ) : null}
 
-        {snapshot?.enabled && snapshot.selectedCalendar && !needsChoice ? (
+        {snapshot?.enabled && selectedList.length > 0 && !needsChoice ? (
           <div className="border-t border-pro-border/40 px-5 py-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -199,10 +320,14 @@ export const CalendarSettings = ({
                     aria-hidden="true"
                   />
                   <span className="truncate">
-                    {snapshot.selectedCalendar.title}
+                    {selectedList.length > 1
+                      ? `${selectedList.length} calendars`
+                      : selectedList[0].title}
                   </span>
                   <span className="font-normal text-pro-text-muted">
-                    · {snapshot.selectedCalendar.sourceTitle}
+                    {selectedList.length > 1
+                      ? `· ${selectedList.map((c) => c.title).join(', ')}`
+                      : `· ${selectedList[0].sourceTitle}`}
                   </span>
                 </p>
                 <p className="mt-1 text-[10px] font-medium text-pro-text-muted">

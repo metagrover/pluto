@@ -12,7 +12,8 @@ interface UpcomingMeetingsProps {
   events: CalendarEvent[];
   loading: boolean;
   onConnect: () => Promise<void>;
-  onSelectCalendar: (calendar: CalendarDescriptor) => Promise<void>;
+  onSelectCalendar?: (calendar: CalendarDescriptor) => Promise<void>;
+  onSelectCalendars?: (calendars: CalendarDescriptor[]) => Promise<void>;
   onRefreshCalendar: () => Promise<void>;
   onOpenSettings: () => void;
 }
@@ -71,31 +72,62 @@ export const UpcomingMeetings = ({
   loading,
   onConnect,
   onSelectCalendar,
+  onSelectCalendars,
   onRefreshCalendar,
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
-  const [selectingCalendarId, setSelectingCalendarId] = useState<string | null>(
-    null,
-  );
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    if (snapshot?.selectedCalendars?.length) {
+      for (const cal of snapshot.selectedCalendars) {
+        initial.add(cal.identifier);
+      }
+    } else if (snapshot?.selectedCalendar) {
+      initial.add(snapshot.selectedCalendar.identifier);
+    }
+    return initial;
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const visibleEvents = expanded ? events : events.slice(0, 2);
   const hiddenCount = Math.max(0, events.length - 2);
-  const calendarSource =
-    snapshot?.selectedCalendar &&
-    (snapshot.state === 'ready' || events.length > 0)
-      ? snapshot.selectedCalendar
-      : null;
+  const selectedList =
+    snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
+      ? snapshot.selectedCalendars
+      : snapshot?.selectedCalendar
+        ? [snapshot.selectedCalendar]
+        : [];
+  const hasConnectedCalendar =
+    selectedList.length > 0 &&
+    (snapshot?.state === 'ready' || events.length > 0);
 
-  const chooseCalendar = async (calendar: CalendarDescriptor) => {
-    setSelectingCalendarId(calendar.identifier);
+  const toggleCalendar = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleCommitSelection = async () => {
+    if (checkedIds.size === 0) return;
+    setIsSubmitting(true);
     setSelectionError(null);
     try {
-      await onSelectCalendar(calendar);
+      const chosen = (snapshot?.calendars ?? []).filter((cal) =>
+        checkedIds.has(cal.identifier),
+      );
+      if (onSelectCalendars) {
+        await onSelectCalendars(chosen);
+      } else if (onSelectCalendar && chosen.length > 0) {
+        await onSelectCalendar(chosen[0]);
+      }
     } catch {
       setSelectionError('Calendar couldn’t be selected. Try again.');
     } finally {
-      setSelectingCalendarId(null);
+      setIsSubmitting(false);
     }
   };
 
@@ -153,46 +185,56 @@ export const UpcomingMeetings = ({
             <p className="text-[13px] font-medium leading-5 text-pro-text-main">
               {snapshot.state === 'selected_calendar_missing'
                 ? 'Choose another calendar'
-                : 'Choose one calendar'}
+                : 'Choose calendars'}
             </p>
             <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-              Pluto will read meetings from this calendar only.
+              Pluto will read meetings from selected calendars.
             </p>
             <div className="mt-3 max-h-48 divide-y divide-pro-border/50 overflow-y-auto rounded-lg border border-pro-border/60 bg-pro-surface/55">
-              {snapshot.calendars.map((calendar) => (
-                <button
-                  key={calendar.identifier}
-                  type="button"
-                  aria-label={`Use ${calendar.title} calendar from ${calendar.sourceTitle}`}
-                  disabled={selectingCalendarId !== null}
-                  onClick={() => void chooseCalendar(calendar)}
-                  className="flex min-h-11 w-full items-center gap-2.5 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-55"
-                >
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
-                    style={
-                      calendar.colorHex
-                        ? { backgroundColor: calendar.colorHex }
-                        : undefined
-                    }
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-medium text-pro-text-main">
-                      {calendar.title}
+              {snapshot.calendars.map((calendar) => {
+                const isChecked = checkedIds.has(calendar.identifier);
+                return (
+                  <label
+                    key={calendar.identifier}
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleCalendar(calendar.identifier)}
+                      className="h-3.5 w-3.5 rounded border-pro-border/70 text-pro-accent focus:ring-pro-accent"
+                      aria-label={`${calendar.title} from ${calendar.sourceTitle}`}
+                    />
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
+                      style={
+                        calendar.colorHex
+                          ? { backgroundColor: calendar.colorHex }
+                          : undefined
+                      }
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-medium text-pro-text-main">
+                        {calendar.title}
+                      </span>
+                      <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
+                        {calendar.sourceTitle}
+                      </span>
                     </span>
-                    <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
-                      {calendar.sourceTitle}
-                    </span>
-                  </span>
-                  {selectingCalendarId === calendar.identifier ? (
-                    <span className="text-[9px] font-semibold text-pro-text-muted">
-                      Selecting…
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+                  </label>
+                );
+              })}
             </div>
+            <button
+              type="button"
+              aria-label="Use selected calendars"
+              disabled={checkedIds.size === 0 || isSubmitting}
+              onClick={() => void handleCommitSelection()}
+              className="mt-3 inline-flex min-h-8 items-center justify-center rounded-md bg-pro-accent px-3 text-[11px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? 'Saving…' : 'Use selected calendars'}
+            </button>
             {selectionError ? (
               <p
                 role="alert"
@@ -282,7 +324,7 @@ export const UpcomingMeetings = ({
           </>
         ) : snapshot.state === 'read_failed' ? (
           <RecoveryAction
-            title={`Couldn’t refresh ${snapshot.selectedCalendar?.title ?? 'calendar'}`}
+            title={`Couldn’t refresh ${selectedList.length === 1 ? selectedList[0].title : 'calendars'}`}
             detail="The calendar is still selected. Pluto can try the local read again."
             action={() => void onRefreshCalendar()}
             actionLabel="Try again"
@@ -293,16 +335,24 @@ export const UpcomingMeetings = ({
           </p>
         )}
       </div>
-      {calendarSource ? (
+      {hasConnectedCalendar ? (
         <div
           data-testid="upcoming-meetings-source"
           className="mt-4 flex min-w-0 items-center gap-2 text-[9px] font-medium text-pro-text-muted/60"
         >
           <span
-            title={`${calendarSource.title} · ${calendarSource.sourceTitle}`}
+            title={
+              selectedList.length > 1
+                ? selectedList
+                    .map((c) => `${c.title} (${c.sourceTitle})`)
+                    .join(', ')
+                : `${selectedList[0].title} · ${selectedList[0].sourceTitle}`
+            }
             className="min-w-0 flex-1 truncate"
           >
-            {calendarSource.title} · {calendarSource.sourceTitle}
+            {selectedList.length > 1
+              ? `${selectedList.length} calendars`
+              : `${selectedList[0].title} · ${selectedList[0].sourceTitle}`}
           </span>
           <button
             type="button"

@@ -70,6 +70,9 @@ interface DashboardProps {
   calendarLoading?: boolean;
   onCalendarConnect?: () => Promise<void>;
   onCalendarSelect?: (calendar: CalendarDescriptor) => Promise<void>;
+  onCalendarSelectCalendars?: (
+    calendars: CalendarDescriptor[],
+  ) => Promise<void>;
   onCalendarRefresh?: () => Promise<void>;
   onCalendarOpenSettings?: () => void;
 }
@@ -415,6 +418,7 @@ export const Dashboard = ({
   calendarLoading = false,
   onCalendarConnect = async () => {},
   onCalendarSelect = async () => {},
+  onCalendarSelectCalendars = async () => {},
   onCalendarRefresh = async () => {},
   onCalendarOpenSettings = () => {},
 }: DashboardProps) => {
@@ -1127,6 +1131,7 @@ export const Dashboard = ({
             loading={calendarLoading}
             onConnect={onCalendarConnect}
             onSelectCalendar={onCalendarSelect}
+            onSelectCalendars={onCalendarSelectCalendars}
             onRefreshCalendar={onCalendarRefresh}
             onOpenSettings={onCalendarOpenSettings}
           />

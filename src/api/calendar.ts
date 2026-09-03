@@ -14,6 +14,9 @@ export const getCalendarState = () =>
 export const connectCalendar = () =>
   invoke<CalendarIntegrationSnapshot>('CALENDAR_CONNECT');
 
+export const selectCalendars = (calendars: CalendarDescriptor[]) =>
+  invoke<CalendarIntegrationSnapshot>('CALENDAR_SELECT', calendars);
+
 export const selectCalendar = (calendar: CalendarDescriptor) =>
   invoke<CalendarIntegrationSnapshot>('CALENDAR_SELECT', calendar);
 

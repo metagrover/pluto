@@ -6,6 +6,7 @@ import {
   getCalendarState,
   listCalendarDay,
   selectCalendar,
+  selectCalendars,
 } from '../../src/api/calendar';
 
 describe('calendar renderer API', () => {
@@ -49,5 +50,17 @@ describe('calendar renderer API', () => {
       ],
       ['CALENDAR_DISCONNECT'],
     ]);
+  });
+
+  it('selectCalendars sends array to CALENDAR_SELECT', async () => {
+    const calendar = {
+      identifier: 'calendar-a',
+      title: 'Work',
+      sourceTitle: 'iCloud',
+      sourceType: 'icloud',
+      colorHex: null,
+    };
+    await selectCalendars([calendar]);
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_SELECT', [calendar]);
   });
 });

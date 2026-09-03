@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-03 - Support multiple local macOS calendars without remote OAuth
+
+- **Status:** Accepted
+- **Source:** [Issue #617](https://github.com/metagrover/pluto/issues/617), approved design comment on 2026-09-03
+- **Decision:** Pluto reads event context from an explicit set of multiple local macOS calendars selected by the user, calls `EKEventStore.refreshSourcesIfNecessary()` before inventory enumeration, combines events from all selected calendars into an atomic cache revision, preserves prior caches upon partial read failures, and updates Dashboard → Change to navigate directly to Settings → Meetings. Database migration adds `selected_calendars_json` while mirroring the first descriptor into `selected_calendar_json` for rollback compatibility.
+- **Rationale:** Users commonly maintain multiple work and personal calendars configured via Apple Calendar accounts (such as iCloud, Google CalDAV, Exchange). Sticking to local read-only EventKit preserves Pluto's zero-cloud-service, private, free distribution model while supporting multiple accounts and dynamic inventory discovery without app restarts.
+- **Consequences:** The integration remains strictly local and read-only; no Google OAuth or hosted service is added; selected calendars that disappear from macOS are flagged as `selected_calendar_missing` and require explicit user resolution; cross-calendar event ties remain ambiguous in meeting matching; disconnect atomically purges selections, cached events, and associations.
+
 ## 2026-09-01 - Make meeting finalization converge before downstream work
 
 - **Status:** Accepted

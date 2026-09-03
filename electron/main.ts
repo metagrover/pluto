@@ -993,8 +993,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('CALENDAR_GET_STATE', () => calendarService.getSnapshot());
   ipcMain.handle('CALENDAR_CONNECT', () => calendarService.connect());
-  ipcMain.handle('CALENDAR_SELECT', (_event, calendar) =>
-    calendarService.selectCalendar(calendar),
+  ipcMain.handle('CALENDAR_SELECT', (_event, calendarOrCalendars) =>
+    Array.isArray(calendarOrCalendars)
+      ? calendarService.selectCalendars(calendarOrCalendars)
+      : calendarService.selectCalendar(calendarOrCalendars),
   );
   ipcMain.handle('CALENDAR_REFRESH', async () => {
     await calendarService.refresh();

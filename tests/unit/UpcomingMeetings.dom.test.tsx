@@ -18,21 +18,38 @@ const workCalendar = {
   colorHex: '#7367D9',
 };
 
+const personalCalendar = {
+  identifier: 'calendar-b',
+  title: 'Personal',
+  sourceTitle: 'Google',
+  sourceType: 'caldav',
+  colorHex: '#34A853',
+};
+
 const snapshot = (
   overrides: Partial<CalendarIntegrationSnapshot> = {},
-): CalendarIntegrationSnapshot => ({
-  state: 'ready',
-  authorization: 'full_access',
-  enabled: true,
-  selectedCalendar: workCalendar,
-  calendars: [],
-  lastAttemptAt: '2026-08-30T16:00:00.000Z',
-  lastReadAt: '2026-08-30T16:00:00.000Z',
-  cacheStart: '2026-08-16T16:00:00.000Z',
-  cacheEnd: '2026-09-29T16:00:00.000Z',
-  stale: false,
-  ...overrides,
-});
+): CalendarIntegrationSnapshot => {
+  const selectedCalendar =
+    'selectedCalendar' in overrides
+      ? (overrides.selectedCalendar ?? null)
+      : workCalendar;
+  const selectedCalendars =
+    overrides.selectedCalendars ?? (selectedCalendar ? [selectedCalendar] : []);
+  return {
+    state: 'ready',
+    authorization: 'full_access',
+    enabled: true,
+    selectedCalendar,
+    selectedCalendars,
+    calendars: [],
+    lastAttemptAt: '2026-08-30T16:00:00.000Z',
+    lastReadAt: '2026-08-30T16:00:00.000Z',
+    cacheStart: '2026-08-16T16:00:00.000Z',
+    cacheEnd: '2026-09-29T16:00:00.000Z',
+    stale: false,
+    ...overrides,
+  };
+};
 
 const meeting = (index: number): CalendarEvent => ({
   occurrenceKey: `event-${index}`,
@@ -180,29 +197,75 @@ describe('UpcomingMeetings', () => {
     act(() => denied.root.unmount());
   });
 
-  it('lets the dashboard choose a calendar in place', async () => {
-    const onSelectCalendar = vi.fn(async () => {});
+  it('supports selecting several calendars with compact checkbox rows and one action', async () => {
+    const onSelectCalendars = vi.fn(async () => {});
     const picker = render({
       snapshot: snapshot({
         state: 'needs_selection',
         enabled: false,
         selectedCalendar: null,
-        calendars: [workCalendar],
+        selectedCalendars: [],
+        calendars: [workCalendar, personalCalendar],
       }),
       events: [],
-      onSelectCalendar,
+      onSelectCalendars,
     });
 
-    expect(picker.container.textContent).toContain('Choose one calendar');
-    await act(async () =>
-      picker.container
-        .querySelector<HTMLButtonElement>(
-          'button[aria-label="Use Work calendar from iCloud"]',
-        )
-        ?.click(),
+    expect(picker.container.textContent).toContain('Choose calendars');
+    const commitButton = picker.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Use selected calendars"]',
     );
-    expect(onSelectCalendar).toHaveBeenCalledWith(workCalendar);
+    // Disabled until at least one calendar is checked
+    expect(commitButton?.disabled).toBe(true);
+
+    const checkboxes = Array.from(
+      picker.container.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"]',
+      ),
+    );
+    expect(checkboxes).toHaveLength(2);
+
+    // Check both calendars
+    await act(async () => checkboxes[0].click());
+    expect(commitButton?.disabled).toBe(false);
+
+    await act(async () => checkboxes[1].click());
+    await act(async () => commitButton?.click());
+
+    expect(onSelectCalendars).toHaveBeenCalledWith([
+      workCalendar,
+      personalCalendar,
+    ]);
     act(() => picker.root.unmount());
+  });
+
+  it('summarizes multiple connected calendars quietly in the footer', () => {
+    const onOpenSettings = vi.fn();
+    const agenda = render({
+      snapshot: snapshot({
+        selectedCalendar: workCalendar,
+        selectedCalendars: [workCalendar, personalCalendar],
+      }),
+      onOpenSettings,
+    });
+
+    const source = agenda.container.querySelector(
+      '[data-testid="upcoming-meetings-source"]',
+    );
+    expect(source?.textContent).toContain('2 calendars');
+    expect(source?.textContent).not.toContain('Work · iCloud');
+    expect(source?.querySelector('[title]')?.getAttribute('title')).toContain(
+      'Work',
+    );
+    expect(source?.querySelector('[title]')?.getAttribute('title')).toContain(
+      'Personal',
+    );
+
+    source
+      ?.querySelector<HTMLButtonElement>('button[aria-label="Change calendar"]')
+      ?.click();
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    act(() => agenda.root.unmount());
   });
 
   it('handles clear-day, loading, and stale-cache states truthfully', () => {

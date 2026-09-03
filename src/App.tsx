@@ -26,6 +26,7 @@ import {
   openCalendarSystemSettings,
   refreshCalendar,
   selectCalendar,
+  selectCalendars,
 } from './api/calendar';
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
@@ -94,7 +95,10 @@ import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 import { AllMeetingsTab } from './components/features/AllMeetingsTab';
 
-import { SettingsTab } from './components/features/SettingsTab';
+import {
+  SettingsTab,
+  type SettingsTabId,
+} from './components/features/SettingsTab';
 // Overlays
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
@@ -232,6 +236,8 @@ function App() {
   const [meetingCalendarContext, setMeetingCalendarContext] =
     useState<MeetingCalendarContext | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [settingsInitialTab, setSettingsInitialTab] =
+    useState<SettingsTabId>('personal');
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
@@ -314,6 +320,17 @@ function App() {
     }
   };
 
+  const handleCalendarSelectCalendars = async (
+    calendars: CalendarDescriptor[],
+  ) => {
+    setCalendarLoading(true);
+    try {
+      await loadCalendarAgenda(await selectCalendars(calendars));
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
   const handleCalendarRefresh = async () => {
     setCalendarLoading(true);
     try {
@@ -338,6 +355,17 @@ function App() {
       void openCalendarSystemSettings('accounts');
       return;
     }
+    // Refresh inventory so newly added accounts/calendars in Apple Calendar appear without restarting Pluto
+    void refreshCalendar()
+      .then((snapshot) => {
+        setCalendarSnapshot(snapshot);
+      })
+      .catch(() => {
+        void getCalendarState().then((snapshot) =>
+          setCalendarSnapshot(snapshot),
+        );
+      });
+    setSettingsInitialTab('meetings');
     setActiveTab('settings');
     setSelectedMeetingId(null);
   };
@@ -1419,6 +1447,7 @@ function App() {
                   calendarLoading={calendarLoading}
                   onCalendarConnect={handleCalendarConnect}
                   onCalendarSelect={handleCalendarSelect}
+                  onCalendarSelectCalendars={handleCalendarSelectCalendars}
                   onCalendarRefresh={handleCalendarRefresh}
                   onCalendarOpenSettings={handleCalendarOpenSettings}
                 />
@@ -1483,6 +1512,7 @@ function App() {
                 fetchMeetings={fetchMeetings}
                 setSelectedMeetingId={setSelectedMeetingId}
                 theme={theme}
+                initialTab={settingsInitialTab}
                 calendarSnapshot={calendarSnapshot}
                 onCalendarSnapshotChange={(snapshot) => {
                   void loadCalendarAgenda(snapshot);
