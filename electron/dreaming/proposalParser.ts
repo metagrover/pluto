@@ -2,6 +2,7 @@ import type {
   DreamingEntityType,
   DreamingProposalKind,
   DreamingProposalPayloadByKind,
+  RawDreamingProposal,
   ValidatedDreamingProposal,
 } from './types';
 
@@ -105,6 +106,27 @@ const parsePayload = (
 
 const normalizedFingerprint = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+export const parseRawDreamingProposal = (
+  value: unknown,
+  entityType: DreamingEntityType,
+): RawDreamingProposal | null => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['kind', 'payload', 'evidence']) ||
+    typeof value.kind !== 'string' ||
+    !proposalKindsByEntityType[entityType].includes(
+      value.kind as DreamingProposalKind,
+    )
+  ) {
+    return null;
+  }
+  const kind = value.kind as DreamingProposalKind;
+  const payload = parsePayload(kind, value.payload);
+  const evidence = parseEvidence(value.evidence);
+  if (!payload || !evidence) return null;
+  return { kind, payload, evidence } as RawDreamingProposal;
+};
+
 export const parseDreamingProposal = (
   value: unknown,
   entityType: DreamingEntityType,
@@ -121,14 +143,13 @@ export const parseDreamingProposal = (
   ) {
     return null;
   }
-  const kind = value.kind as DreamingProposalKind;
-  const payload = parsePayload(kind, value.payload);
-  const evidence = parseEvidence(value.evidence);
-  if (!payload || !evidence) return null;
+  const raw = parseRawDreamingProposal(
+    { kind: value.kind, payload: value.payload, evidence: value.evidence },
+    entityType,
+  );
+  if (!raw) return null;
   return {
-    kind,
-    payload,
-    evidence,
+    ...raw,
     fingerprint: value.fingerprint,
   } as ValidatedDreamingProposal;
 };

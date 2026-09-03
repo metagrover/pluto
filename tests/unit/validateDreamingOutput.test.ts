@@ -1,126 +1,298 @@
 import { describe, expect, it } from 'vitest';
-import type { DreamingInputPackage } from '../../electron/dreaming/types';
+import type {
+  DreamingInputPackage,
+  RawDreamingProposal,
+} from '../../electron/dreaming/types';
 import {
   generateItemFingerprint,
-  validatePersonDreamingOutput,
-  validateProjectDreamingOutput,
+  generateProposalFingerprint,
+  validateDreamingOutput,
 } from '../../electron/dreaming/validateDreamingOutput';
 
-describe('validateDreamingOutput', () => {
-  const sampleProjectPackage: DreamingInputPackage = {
-    entityId: 'proj-1',
-    entityType: 'project',
-    entityName: 'Billing V2',
-    recentMeetingNotes: [
-      {
-        meetingId: 'm-101',
-        title: 'Sprint 1',
-        startedAt: '2026-08-01',
-        notesContent: 'Discussed Stripe integration',
-      },
-    ],
-    negativeConstraints: ['dismissed-old-milestone'],
-  };
-
-  it('validates and accepts valid project output with markdown fences', () => {
-    const raw = `\`\`\`json
+const projectPackage: DreamingInputPackage = {
+  entityId: 'project-1',
+  entityType: 'project',
+  entityName: 'Billing V2',
+  sourceRevision: 'revision-1',
+  recentMeetingNotes: [
     {
-      "status": "updated",
-      "dossier_summary": "Migration to Stripe is underway.",
-      "milestones": [
-        {
-          "name": "Stripe Elements connected",
-          "status": "in_progress",
-          "source_meeting_id": "m-101",
-          "evidence_snippet": "Discussed Stripe integration"
-        }
-      ],
-      "associated_commitments": [
-        {
-          "task": "Test webhooks",
-          "owner_name": "Bob",
-          "source_meeting_id": "m-101"
-        }
-      ],
-      "suggested_aliases": ["Billing Redesign"]
-    }
-    \`\`\``;
+      meetingId: 'meeting-1',
+      title: 'Architecture review',
+      startedAt: '2026-08-01T10:00:00.000Z',
+      notesContent:
+        'The team agreed that Stripe Elements is in progress. Launch is planned for October.',
+    },
+    {
+      meetingId: 'meeting-2',
+      title: 'Trust review',
+      startedAt: '2026-08-02T10:00:00.000Z',
+      notesContent: 'Billing V2’s migration remains the team’s primary focus.',
+    },
+  ],
+  correctionFingerprints: [],
+  negativeConstraints: [],
+};
 
-    const result = validateProjectDreamingOutput(raw, sampleProjectPackage);
-    expect(result).not.toBeNull();
-    expect(result?.status).toBe('updated');
-    expect(result?.dossier_summary).toBe('Migration to Stripe is underway.');
-    expect(result?.milestones).toHaveLength(1);
-    expect(result?.milestones?.[0].name).toBe('Stripe Elements connected');
-    expect(result?.associated_commitments).toHaveLength(1);
-    expect(result?.suggested_aliases).toEqual(['Billing Redesign']);
+const personPackage: DreamingInputPackage = {
+  ...projectPackage,
+  entityId: 'person-1',
+  entityType: 'person',
+  entityName: 'Alice',
+  recentMeetingNotes: [
+    {
+      meetingId: 'meeting-person',
+      title: 'Weekly sync',
+      startedAt: '2026-08-03T10:00:00.000Z',
+      notesContent: 'Alice is focused on the proposal review experience.',
+    },
+  ],
+};
+
+const milestoneProposal = (): RawDreamingProposal => ({
+  kind: 'project_milestone',
+  payload: { name: 'Stripe Elements connected', status: 'in_progress' },
+  evidence: [
+    {
+      meetingId: 'meeting-1',
+      excerpt: 'Stripe Elements is in progress.',
+    },
+  ],
+});
+
+const validate = (value: unknown, pkg: DreamingInputPackage = projectPackage) =>
+  validateDreamingOutput(JSON.stringify(value), pkg);
+
+const expectInvalid = (
+  value: unknown,
+  pkg: DreamingInputPackage = projectPackage,
+) => expect(validate(value, pkg)).toMatchObject({ valid: false });
+
+describe('validateDreamingOutput', () => {
+  it('rejects invalid JSON and markdown fences', () => {
+    expect(validateDreamingOutput('{', projectPackage)).toMatchObject({
+      valid: false,
+    });
+    expect(
+      validateDreamingOutput(
+        '```json\n{"status":"no_change","proposals":[]}\n```',
+        projectPackage,
+      ),
+    ).toMatchObject({ valid: false });
   });
 
-  it('rejects milestones citing non-existent meeting IDs', () => {
-    const raw = JSON.stringify({
-      status: 'updated',
-      milestones: [
+  it.each([
+    { proposals: [] },
+    { status: 'updated', proposals: [] },
+    { status: null, proposals: [] },
+  ])('rejects an unknown or missing status: %j', (output) => {
+    expectInvalid(output);
+  });
+
+  it('requires no_change to contain exactly an empty proposals array', () => {
+    expectInvalid({ status: 'no_change', proposals: [milestoneProposal()] });
+    expectInvalid({ status: 'no_change' });
+    expectInvalid({
+      status: 'no_change',
+      proposals: [],
+      reason: 'nothing new',
+    });
+  });
+
+  it('requires proposed to contain at least one proposal', () => {
+    expectInvalid({ status: 'proposed', proposals: [] });
+  });
+
+  it.each([
+    {
+      name: 'root',
+      mutate: (proposal: RawDreamingProposal) => ({
+        status: 'proposed',
+        proposals: [proposal],
+        extra: true,
+      }),
+    },
+    {
+      name: 'proposal',
+      mutate: (proposal: RawDreamingProposal) => ({
+        status: 'proposed',
+        proposals: [{ ...proposal, extra: true }],
+      }),
+    },
+    {
+      name: 'payload',
+      mutate: (proposal: RawDreamingProposal) => ({
+        status: 'proposed',
+        proposals: [
+          { ...proposal, payload: { ...proposal.payload, extra: true } },
+        ],
+      }),
+    },
+    {
+      name: 'evidence',
+      mutate: (proposal: RawDreamingProposal) => ({
+        status: 'proposed',
+        proposals: [
+          {
+            ...proposal,
+            evidence: [{ ...proposal.evidence[0], extra: true }],
+          },
+        ],
+      }),
+    },
+  ])('rejects unknown $name fields', ({ mutate }) => {
+    expectInvalid(mutate(milestoneProposal()));
+  });
+
+  it('rejects unknown kinds and kinds for the wrong entity type', () => {
+    expectInvalid({
+      status: 'proposed',
+      proposals: [{ ...milestoneProposal(), kind: 'project_risk' }],
+    });
+    expectInvalid(
+      { status: 'proposed', proposals: [milestoneProposal()] },
+      personPackage,
+    );
+  });
+
+  it('rejects unknown meeting IDs', () => {
+    const proposal = milestoneProposal();
+    proposal.evidence[0].meetingId = 'meeting-unknown';
+    expectInvalid({ status: 'proposed', proposals: [proposal] });
+  });
+
+  it('rejects empty and unmatched excerpts', () => {
+    const empty = milestoneProposal();
+    empty.evidence[0].excerpt = '   ';
+    expectInvalid({ status: 'proposed', proposals: [empty] });
+
+    const unmatched = milestoneProposal();
+    unmatched.evidence[0].excerpt = 'Stripe Elements has already shipped.';
+    expectInvalid({ status: 'proposed', proposals: [unmatched] });
+  });
+
+  it('requires project summaries to cite two distinct meetings', () => {
+    expectInvalid({
+      status: 'proposed',
+      proposals: [
         {
-          name: 'Fake milestone',
-          status: 'completed',
-          source_meeting_id: 'fake-meeting-999',
-          evidence_snippet: 'hallucinated quote',
+          kind: 'project_summary',
+          payload: { summary: 'The billing migration is underway.' },
+          evidence: [
+            {
+              meetingId: 'meeting-1',
+              excerpt: 'Stripe Elements is in progress.',
+            },
+            {
+              meetingId: 'meeting-1',
+              excerpt: 'Launch is planned for October.',
+            },
+          ],
         },
       ],
     });
-
-    const result = validateProjectDreamingOutput(raw, sampleProjectPackage);
-    expect(result?.milestones).toHaveLength(0);
   });
 
-  it('prunes milestones matching negative constraints', () => {
-    const raw = JSON.stringify({
-      status: 'updated',
-      milestones: [
-        {
-          name: 'Dismissed Old Milestone',
-          status: 'completed',
-          source_meeting_id: 'm-101',
-          evidence_snippet: 'Discussed Stripe integration',
-        },
-      ],
-    });
-
-    const result = validateProjectDreamingOutput(raw, sampleProjectPackage);
-    expect(result?.milestones).toHaveLength(0);
+  it('rejects current and legacy correction collisions after normalization', () => {
+    const proposal = milestoneProposal();
+    const fingerprint = generateProposalFingerprint(proposal, projectPackage);
+    expectInvalid(
+      { status: 'proposed', proposals: [proposal] },
+      {
+        ...projectPackage,
+        correctionFingerprints: [`  ${fingerprint.toUpperCase()}  `],
+      },
+    );
+    expectInvalid(
+      { status: 'proposed', proposals: [proposal] },
+      {
+        ...projectPackage,
+        correctionFingerprints: [],
+        negativeConstraints: [' Stripe Elements connected! '],
+      },
+    );
   });
 
-  it('validates person output properly', () => {
-    const samplePersonPackage: DreamingInputPackage = {
-      entityId: 'person-1',
-      entityType: 'person',
-      entityName: 'Alice',
-      recentMeetingNotes: [
+  it('rejects duplicate normalized proposal fingerprints', () => {
+    const first = milestoneProposal();
+    const duplicate: RawDreamingProposal = {
+      kind: 'project_milestone',
+      payload: { name: '  stripe elements CONNECTED ', status: 'in_progress' },
+      evidence: [
         {
-          meetingId: 'm-101',
-          title: 'Sprint 1',
-          startedAt: '2026-08-01',
-          notesContent: 'Alice leads backend',
+          meetingId: 'meeting-1',
+          excerpt: '  STRIPE ELEMENTS is in progress. ',
         },
       ],
-      negativeConstraints: [],
     };
-
-    const raw = JSON.stringify({
-      status: 'updated',
-      headline: 'Backend Lead for Billing',
-      current_focus: 'Working on Stripe API integration',
-      recent_collaborators: ['Bob', 'Charlie'],
-      suggested_aliases: ['Alice Smith'],
-    });
-
-    const result = validatePersonDreamingOutput(raw, samplePersonPackage);
-    expect(result).not.toBeNull();
-    expect(result?.headline).toBe('Backend Lead for Billing');
-    expect(result?.recent_collaborators).toEqual(['Bob', 'Charlie']);
+    expectInvalid({ status: 'proposed', proposals: [first, duplicate] });
   });
 
-  it('generates consistent normalized fingerprints', () => {
+  it('accepts a fully valid project output and deterministically fingerprints it', () => {
+    const summary: RawDreamingProposal = {
+      kind: 'project_summary',
+      payload: { summary: 'The billing migration is underway.' },
+      evidence: [
+        {
+          meetingId: 'meeting-1',
+          excerpt: '  stripe elements is in progress.  ',
+        },
+        {
+          meetingId: 'meeting-2',
+          excerpt: "Billing V2's migration remains the team's primary focus.",
+        },
+      ],
+    };
+    const result = validate({ status: 'proposed', proposals: [summary] });
+
+    expect(result).toEqual({
+      valid: true,
+      status: 'proposed',
+      proposals: [
+        {
+          ...summary,
+          fingerprint: generateProposalFingerprint(summary, projectPackage),
+        },
+      ],
+    });
+  });
+
+  it('accepts a fully valid person output', () => {
+    const proposal: RawDreamingProposal = {
+      kind: 'person_focus',
+      payload: { focus: 'Proposal review experience' },
+      evidence: [
+        {
+          meetingId: 'meeting-person',
+          excerpt: 'Alice is focused on the proposal review experience.',
+        },
+      ],
+    };
+    const result = validate(
+      { status: 'proposed', proposals: [proposal] },
+      personPackage,
+    );
+
+    expect(result).toEqual({
+      valid: true,
+      status: 'proposed',
+      proposals: [
+        {
+          ...proposal,
+          fingerprint: generateProposalFingerprint(proposal, personPackage),
+        },
+      ],
+    });
+  });
+
+  it('accepts exact no_change output', () => {
+    expect(validate({ status: 'no_change', proposals: [] })).toEqual({
+      valid: true,
+      status: 'no_change',
+      proposals: [],
+    });
+  });
+
+  it('preserves legacy item fingerprint normalization for entity corrections', () => {
     expect(generateItemFingerprint('Stripe Elements connected')).toBe(
       'stripe-elements-connected',
     );
