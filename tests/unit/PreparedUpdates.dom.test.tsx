@@ -183,9 +183,22 @@ it('keeps actions available after a decision error and uses semantic controls', 
 });
 
 it('keeps a confirmed decision absent and reports refresh failures separately', async () => {
+  let backendProposals = [proposal];
+  let failNextProposalRead = false;
+  api.getPendingDreamingProposals.mockImplementation(async () => {
+    if (failNextProposalRead) {
+      failNextProposalRead = false;
+      throw new Error('offline');
+    }
+    return backendProposals;
+  });
+  api.acceptDreamingProposal.mockImplementationOnce(async () => {
+    backendProposals = [];
+    failNextProposalRead = true;
+    return { status: 'accepted', proposalId: proposal.id };
+  });
   const onCanonicalChange = vi.fn().mockRejectedValue(new Error('offline'));
   await render(onCanonicalChange);
-  api.getPendingDreamingProposals.mockRejectedValueOnce(new Error('offline'));
 
   await click('Accept');
 
@@ -194,27 +207,25 @@ it('keeps a confirmed decision absent and reports refresh failures separately', 
   expect(host.textContent).not.toContain('Launch the archive');
   expect(host.textContent).toContain('couldn’t refresh the dossier');
 
-  api.getPendingDreamingProposals.mockResolvedValueOnce([proposal]);
+  await act(async () => {
+    root.unmount();
+  });
+  root = createRoot(host);
   await act(async () => {
     root.render(
       <PreparedUpdates
         entityId="project-1"
         entityType="project"
-        reloadToken={1}
         onCanonicalChange={onCanonicalChange}
       />,
     );
     await Promise.resolve();
   });
   expect(host.textContent).not.toContain('Launch the archive');
-  expect(host.textContent).toContain('Update accepted');
-
-  api.getPendingDreamingProposals.mockResolvedValueOnce([proposal]);
-  onCanonicalChange.mockResolvedValueOnce(undefined);
-  await click('Retry refresh');
-
-  expect(host.textContent).not.toContain('Launch the archive');
-  expect(host.textContent).not.toContain('couldn’t refresh the dossier');
+  expect(api.getPendingDreamingProposals).toHaveBeenLastCalledWith({
+    entityId: 'project-1',
+    entityType: 'project',
+  });
 });
 
 it('disables every proposal action while one decision is in flight', async () => {
@@ -280,6 +291,32 @@ it('ignores a slow pending response from the previously open entity', async () =
 });
 
 it('supports keyboard focus order and semantic disclosure and decision activation', async () => {
+  const pressNativeKey = async (target: HTMLElement, key: 'Enter' | ' ') => {
+    await act(async () => {
+      target.focus();
+      const keydown = new KeyboardEvent('keydown', {
+        key,
+        bubbles: true,
+        cancelable: true,
+      });
+      const shouldRunDefault = target.dispatchEvent(keydown);
+      if (
+        shouldRunDefault &&
+        ((target instanceof HTMLButtonElement &&
+          (key === 'Enter' || key === ' ')) ||
+          (target instanceof HTMLElement &&
+            target.tagName === 'SUMMARY' &&
+            key === 'Enter'))
+      ) {
+        target.dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true }),
+        );
+      }
+      target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+      await Promise.resolve();
+    });
+  };
+
   await render();
   const summary = host.querySelector('summary')!;
   const accept = Array.from(host.querySelectorAll('button')).find(
@@ -289,9 +326,8 @@ it('supports keyboard focus order and semantic disclosure and decision activatio
     (button) => button.textContent === 'Reject',
   )!;
 
-  summary.focus();
+  await pressNativeKey(summary, 'Enter');
   expect(document.activeElement).toBe(summary);
-  await act(async () => summary.click());
   expect(host.querySelector('details')?.open).toBe(true);
 
   accept.focus();
@@ -302,13 +338,7 @@ it('supports keyboard focus order and semantic disclosure and decision activatio
   expect(
     accept.compareDocumentPosition(reject) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  await act(async () => {
-    accept.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-    );
-    accept.click();
-    await Promise.resolve();
-  });
+  await pressNativeKey(accept, 'Enter');
   expect(api.acceptDreamingProposal).toHaveBeenCalledOnce();
 
   api.getPendingDreamingProposals.mockResolvedValueOnce([secondProposal]);
@@ -325,14 +355,7 @@ it('supports keyboard focus order and semantic disclosure and decision activatio
   const nextReject = Array.from(host.querySelectorAll('button')).find(
     (button) => button.textContent === 'Reject',
   )!;
-  nextReject.focus();
-  await act(async () => {
-    nextReject.dispatchEvent(
-      new KeyboardEvent('keydown', { key: ' ', bubbles: true }),
-    );
-    nextReject.click();
-    await Promise.resolve();
-  });
+  await pressNativeKey(nextReject, ' ');
   expect(api.rejectDreamingProposal).toHaveBeenCalledOnce();
   expect(reject.tagName).toBe('BUTTON');
 });

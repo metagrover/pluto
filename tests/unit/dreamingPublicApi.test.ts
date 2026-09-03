@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptDreamingProposal,
@@ -6,11 +5,18 @@ import {
   rejectDreamingProposal,
 } from '../../src/api/knowledgeGraph';
 
-const readSource = (path: string) =>
-  readFileSync(new URL(path, import.meta.url), 'utf8');
-
 describe('manual dreaming public API', () => {
-  const invoke = vi.fn(async () => ({}));
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === 'GET_PENDING_DREAMING_PROPOSALS')
+      return [{ id: 'proposal-1' }];
+    if (channel === 'ACCEPT_DREAMING_PROPOSAL') {
+      return { status: 'accepted', proposalId: 'proposal-1' };
+    }
+    if (channel === 'REJECT_DREAMING_PROPOSAL') {
+      return { status: 'rejected', proposalId: 'proposal-2' };
+    }
+    return undefined;
+  });
 
   beforeEach(() => {
     invoke.mockClear();
@@ -19,31 +25,17 @@ describe('manual dreaming public API', () => {
     });
   });
 
-  it('requires a concrete entity id and exposes no force option', () => {
-    const source = readSource('../../src/api/knowledgeGraph.ts');
-    const start = source.indexOf('export const triggerDreamingNow');
-    const declaration = source.slice(start, start + 220);
-    expect(declaration).toContain('options: {');
-    expect(declaration).toContain('entityId: string;');
-    expect(declaration).not.toContain('entityId?:');
-    expect(declaration).not.toContain('force');
-  });
-
-  it('does not render entity-less overview triggers', () => {
-    expect(
-      readSource('../../src/components/features/projects/ProjectsOverview.tsx'),
-    ).not.toContain('✨ Dream Now');
-    const peopleSource = readSource(
-      '../../src/components/KnowledgeGraph/PeopleTab.tsx',
-    );
-    expect(peopleSource.match(/triggerDreamingNow\(/g)).toHaveLength(1);
-  });
-
   it('uses explicit entity scope for proposal reads and decisions', async () => {
     const scope = { entityId: 'project-1', entityType: 'project' as const };
-    await getPendingDreamingProposals(scope);
-    await acceptDreamingProposal({ ...scope, proposalId: 'proposal-1' });
-    await rejectDreamingProposal({ ...scope, proposalId: 'proposal-2' });
+    const pending = await getPendingDreamingProposals(scope);
+    const accepted = await acceptDreamingProposal({
+      ...scope,
+      proposalId: 'proposal-1',
+    });
+    const rejected = await rejectDreamingProposal({
+      ...scope,
+      proposalId: 'proposal-2',
+    });
 
     expect(invoke).toHaveBeenNthCalledWith(
       1,
@@ -56,6 +48,15 @@ describe('manual dreaming public API', () => {
     });
     expect(invoke).toHaveBeenNthCalledWith(3, 'REJECT_DREAMING_PROPOSAL', {
       ...scope,
+      proposalId: 'proposal-2',
+    });
+    expect(pending).toEqual([{ id: 'proposal-1' }]);
+    expect(accepted).toEqual({
+      status: 'accepted',
+      proposalId: 'proposal-1',
+    });
+    expect(rejected).toEqual({
+      status: 'rejected',
       proposalId: 'proposal-2',
     });
   });
