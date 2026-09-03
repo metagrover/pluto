@@ -9,6 +9,7 @@ import type {
   DreamingRunStatus,
   ValidatedDreamingProposal,
 } from './types';
+import { MAX_DREAMING_PROPOSALS } from './types';
 
 export { parseDreamingProposal } from './proposalParser';
 
@@ -529,6 +530,9 @@ export function createDreamingProposalStore(
       }
       if (input.status === 'proposed' && input.proposals.length === 0) {
         throw new Error('dreaming_proposals_required');
+      }
+      if (input.proposals.length > MAX_DREAMING_PROPOSALS) {
+        throw new Error('dreaming_proposals_limit_exceeded');
       }
 
       const timestamp = now();

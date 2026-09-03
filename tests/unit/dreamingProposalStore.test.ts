@@ -7,7 +7,10 @@ import {
   createDreamingProposalStore,
   ensureDreamingProposalSchema,
 } from '../../electron/dreaming/proposalStore';
-import type { ValidatedDreamingProposal } from '../../electron/dreaming/types';
+import {
+  MAX_DREAMING_PROPOSALS,
+  type ValidatedDreamingProposal,
+} from '../../electron/dreaming/types';
 
 const connections: Database.Database[] = [];
 const temporaryDirectories: string[] = [];
@@ -97,6 +100,24 @@ const startProject = (
   });
 
 describe('dreaming proposal persistence', () => {
+  it('rejects proposal batches above the review limit before persistence', () => {
+    const { store } = fixture();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    expect(() =>
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken!,
+        status: 'proposed',
+        proposals: Array.from(
+          { length: MAX_DREAMING_PROPOSALS + 1 },
+          (_, index) => projectSummary(`summary-${index}`),
+        ) as [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]],
+      }),
+    ).toThrow('dreaming_proposals_limit_exceeded');
+    expect(store.listPendingProposals('project-1', 'project')).toEqual([]);
+  });
+
   it('keeps one logical run for an entity and source revision', () => {
     const { store } = fixture();
 

@@ -592,6 +592,42 @@ it('shows a failed dreaming run as a failure', async () => {
   expect(host.textContent).toContain('Preparation failed');
 });
 
+it('ignores a late preparation result after the open project changes', async () => {
+  let resolvePreparation!: (value: {
+    status: 'proposed';
+    entityId: string;
+    proposals: [];
+  }) => void;
+  api.triggerDreamingNow.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolvePreparation = resolve;
+    }),
+  );
+  await render();
+  await act(async () => {
+    Array.from(host.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('Prepare updates'))
+      ?.click();
+    await Promise.resolve();
+  });
+  api.getProjectBrief.mockResolvedValueOnce(
+    brief({
+      project: { ...brief().project, id: 'p2', displayTitle: 'Second project' },
+    }),
+  );
+  await act(async () => {
+    root.render(<ProjectDossier projectId="p2" onBack={() => {}} />);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    resolvePreparation({ status: 'proposed', entityId: 'p1', proposals: [] });
+    await Promise.resolve();
+  });
+
+  expect(host.textContent).toContain('Second project');
+  expect(host.textContent).not.toContain('Updates are ready');
+});
+
 it('shows generated milestone provenance and keeps its durable remove action', async () => {
   api.getProjectBrief.mockResolvedValue(
     brief({

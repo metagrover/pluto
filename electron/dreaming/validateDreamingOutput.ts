@@ -6,6 +6,7 @@ import type {
   RawDreamingProposal,
   ValidatedDreamingProposal,
 } from './types';
+import { MAX_DREAMING_PROPOSALS } from './types';
 
 export const generateItemFingerprint = (text: string): string => {
   return text
@@ -132,7 +133,8 @@ export const validateDreamingOutput = (
   if (
     parsed.status !== 'proposed' ||
     !Array.isArray(parsed.proposals) ||
-    parsed.proposals.length === 0
+    parsed.proposals.length === 0 ||
+    parsed.proposals.length > MAX_DREAMING_PROPOSALS
   ) {
     return invalid('invalid_proposed_output');
   }

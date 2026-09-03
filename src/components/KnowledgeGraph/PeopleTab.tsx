@@ -496,6 +496,7 @@ export const PersonDossier = ({
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
+  const prepareGeneration = useRef(0);
   const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -503,6 +504,18 @@ export const PersonDossier = ({
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
   }, [detail]);
+
+  useEffect(() => {
+    prepareGeneration.current += 1;
+    setDreamingState('idle');
+  }, [detail.person.id]);
+
+  useEffect(
+    () => () => {
+      prepareGeneration.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.focus();
@@ -645,13 +658,25 @@ export const PersonDossier = ({
   };
 
   const handleDreamNow = async () => {
+    const generation = ++prepareGeneration.current;
+    const preparedPersonId = currentDetail.person.id;
     setDreamingState('running');
     try {
       const result = await triggerDreamingNow({
-        entityId: currentDetail.person.id,
+        entityId: preparedPersonId,
       });
+      if (
+        generation !== prepareGeneration.current ||
+        preparedPersonId !== currentDetail.person.id
+      )
+        return;
       if (result.status === 'proposed') {
         await onIdentityChanged();
+        if (
+          generation !== prepareGeneration.current ||
+          preparedPersonId !== currentDetail.person.id
+        )
+          return;
         setPreparedUpdatesReload((value) => value + 1);
         setDreamingState('proposed');
       } else {
@@ -661,7 +686,11 @@ export const PersonDossier = ({
         setDreamingState(result.status);
       }
     } catch {
-      setDreamingState('error');
+      if (
+        generation === prepareGeneration.current &&
+        preparedPersonId === currentDetail.person.id
+      )
+        setDreamingState('error');
     }
   };
 
@@ -726,6 +755,31 @@ export const PersonDossier = ({
             </button>
           </div>
         </details>
+      </div>
+      <div
+        className="person-dossier__prepare-status flex min-h-6 items-center gap-3 text-sm text-pro-text-muted"
+        aria-live="polite"
+      >
+        {dreamingState !== 'idle' ? (
+          <>
+            <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
+            {dreamingState === 'proposed' ? (
+              <button
+                type="button"
+                className="rounded font-medium text-pro-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                onClick={() => {
+                  const heading = document.getElementById(
+                    `prepared-updates-person-${currentDetail.person.id}`,
+                  );
+                  heading?.focus();
+                  heading?.scrollIntoView?.({ block: 'start' });
+                }}
+              >
+                Review prepared updates
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </div>
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
@@ -1020,6 +1074,7 @@ export const PersonDossier = ({
       </section>
 
       <PreparedUpdates
+        key={currentDetail.person.id}
         entityId={currentDetail.person.id}
         entityType="person"
         reloadToken={preparedUpdatesReload}
@@ -1029,6 +1084,11 @@ export const PersonDossier = ({
           date: meeting.started_at || meeting.created_at,
         }))}
         onCanonicalChange={onIdentityChanged}
+        onOpenMeeting={onOpenMeeting}
+        onReviewIdentity={() => {
+          setMergeOpen(true);
+          setMergeState('idle');
+        }}
       />
 
       <section className="person-dossier__open-loops">

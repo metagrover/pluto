@@ -87,11 +87,24 @@ export const ProjectDossier = ({
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
+  const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editingTitle) titleInputRef.current?.focus();
   }, [editingTitle]);
+
+  useEffect(() => {
+    prepareGeneration.current += 1;
+    setDreamingState('idle');
+  }, [projectId]);
+
+  useEffect(
+    () => () => {
+      prepareGeneration.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -117,11 +130,18 @@ export const ProjectDossier = ({
   }, [projectId, projectName, request]);
 
   const handleDreamNow = async () => {
+    const generation = ++prepareGeneration.current;
+    const preparedProjectId = projectId;
     setDreamingState('running');
     try {
       const result = await triggerDreamingNow({
-        entityId: projectId,
+        entityId: preparedProjectId,
       });
+      if (
+        generation !== prepareGeneration.current ||
+        preparedProjectId !== projectId
+      )
+        return;
       if (result.status === 'proposed') {
         setRequest((r) => r + 1);
         setPreparedUpdatesReload((value) => value + 1);
@@ -133,7 +153,11 @@ export const ProjectDossier = ({
         setDreamingState(result.status);
       }
     } catch {
-      setDreamingState('error');
+      if (
+        generation === prepareGeneration.current &&
+        preparedProjectId === projectId
+      )
+        setDreamingState('error');
     }
   };
 
@@ -519,6 +543,7 @@ export const ProjectDossier = ({
             </section>
 
             <PreparedUpdates
+              key={current.project.id}
               entityId={current.project.id}
               entityType="project"
               reloadToken={preparedUpdatesReload}
@@ -530,6 +555,11 @@ export const ProjectDossier = ({
               onCanonicalChange={async () => {
                 setRequest((value) => value + 1);
                 await onPortfolioChanged?.();
+              }}
+              onOpenMeeting={onOpenMeeting}
+              onReviewIdentity={() => {
+                setMergeOpen(true);
+                setMergeState('idle');
               }}
             />
 

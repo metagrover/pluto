@@ -240,4 +240,19 @@ describe('People identity controls', () => {
     await click('Prepare updates');
     expect(host.textContent).toContain('Preparation cancelled');
   });
+
+  it('announces prepared updates outside the closed menu with a review action', async () => {
+    api.triggerDreamingNow.mockResolvedValueOnce({
+      status: 'proposed',
+      entityId: 'person-1',
+      proposals: [],
+    });
+    await render();
+    await click('More actions');
+    await click('Prepare updates');
+
+    const status = host.querySelector('[aria-live="polite"]');
+    expect(status?.textContent).toContain('Updates are ready');
+    expect(host.textContent).toContain('Review prepared updates');
+  });
 });

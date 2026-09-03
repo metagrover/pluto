@@ -3,6 +3,7 @@ import type {
   DreamingInputPackage,
   RawDreamingProposal,
 } from '../../electron/dreaming/types';
+import { MAX_DREAMING_PROPOSALS } from '../../electron/dreaming/types';
 import {
   generateItemFingerprint,
   generateProposalFingerprint,
@@ -101,6 +102,16 @@ describe('validateDreamingOutput', () => {
 
   it('requires proposed to contain at least one proposal', () => {
     expectInvalid({ status: 'proposed', proposals: [] });
+  });
+
+  it('rejects proposal batches above the durable review limit', () => {
+    expectInvalid({
+      status: 'proposed',
+      proposals: Array.from(
+        { length: MAX_DREAMING_PROPOSALS + 1 },
+        milestoneProposal,
+      ),
+    });
   });
 
   it.each([

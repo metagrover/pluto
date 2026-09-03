@@ -1,5 +1,7 @@
 export type DreamingEntityType = 'project' | 'person';
 
+export const MAX_DREAMING_PROPOSALS = 20;
+
 export type DreamingProposalKind =
   | 'project_summary'
   | 'project_milestone'

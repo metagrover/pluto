@@ -124,6 +124,18 @@ it('loads an entity-scoped proposal and keeps exact evidence collapsed', async (
   expect(host.textContent).toContain('We launch the archive next week.');
 });
 
+it('bounds the number of proposal rows rendered at once', async () => {
+  api.getPendingDreamingProposals.mockResolvedValue(
+    Array.from({ length: 24 }, (_, index) => ({
+      ...proposal,
+      id: `proposal-${index}`,
+      fingerprint: `fingerprint-${index}`,
+    })),
+  );
+  await render();
+  expect(host.querySelectorAll('ol > li')).toHaveLength(20);
+});
+
 it('accepts one row, refreshes canonical data, and announces the result politely', async () => {
   const onCanonicalChange = await render();
   await click('Accept');
@@ -165,6 +177,71 @@ it.each([
   await render();
   await click('Accept');
   expect(host.textContent).toContain(message);
+});
+
+it('keeps Reject and identity review available when an alias needs review', async () => {
+  const aliasProposal = {
+    ...proposal,
+    kind: 'person_alias' as const,
+    entityId: 'person-1',
+    entityType: 'person' as const,
+    payload: { alias: 'A. Chen' },
+  };
+  const onReviewIdentity = vi.fn();
+  api.getPendingDreamingProposals.mockResolvedValue([aliasProposal]);
+  api.acceptDreamingProposal.mockResolvedValueOnce({
+    status: 'review_required',
+    proposalId: aliasProposal.id,
+  });
+  await act(async () => {
+    root.render(
+      <PreparedUpdates
+        entityId="person-1"
+        entityType="person"
+        onReviewIdentity={onReviewIdentity}
+      />,
+    );
+    await Promise.resolve();
+  });
+
+  expect(host.textContent).toContain('Alternate person name');
+  expect(host.textContent).toContain('displayed name stays unchanged');
+  await click('Accept');
+  const accept = Array.from(host.querySelectorAll('button')).find(
+    (button) => button.textContent === 'Accept',
+  )!;
+  const reject = Array.from(host.querySelectorAll('button')).find(
+    (button) => button.textContent === 'Reject',
+  )!;
+  expect(accept.disabled).toBe(true);
+  expect(reject.disabled).toBe(false);
+
+  await click('Review identity');
+  expect(onReviewIdentity).toHaveBeenCalledOnce();
+  await click('Reject');
+  expect(api.rejectDreamingProposal).toHaveBeenCalledWith({
+    entityId: 'person-1',
+    entityType: 'person',
+    proposalId: aliasProposal.id,
+  });
+});
+
+it('opens source meetings through the dossier callback', async () => {
+  const onOpenMeeting = vi.fn();
+  await act(async () => {
+    root.render(
+      <PreparedUpdates
+        entityId="project-1"
+        entityType="project"
+        evidenceMeetings={[{ id: 'meeting-1', title: 'Archive weekly' }]}
+        onOpenMeeting={onOpenMeeting}
+      />,
+    );
+    await Promise.resolve();
+  });
+  await click('Show source');
+  await click('Archive weekly');
+  expect(onOpenMeeting).toHaveBeenCalledWith('meeting-1');
 });
 
 it('keeps actions available after a decision error and uses semantic controls', async () => {
@@ -263,6 +340,7 @@ it('disables every proposal action while one decision is in flight', async () =>
       (button) => button.textContent === 'Reject' && !button.disabled,
     ),
   ).toBe(true);
+  expect(document.activeElement?.textContent).toBe('Accept');
 });
 
 it('ignores a slow pending response from the previously open entity', async () => {
