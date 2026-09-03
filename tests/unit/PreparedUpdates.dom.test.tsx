@@ -33,6 +33,24 @@ const proposal = {
   updatedAt: '2026-09-01T12:00:00Z',
 };
 
+const secondProposal = {
+  ...proposal,
+  id: 'proposal-2',
+  kind: 'project_summary' as const,
+  payload: { summary: 'Complete access review' },
+  fingerprint: 'fingerprint-2',
+};
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
 let host: HTMLDivElement;
 let root: Root;
 
@@ -162,4 +180,159 @@ it('keeps actions available after a decision error and uses semantic controls', 
     ),
   ).toBe(true);
   expect(host.querySelector('button')?.className).toContain('focus-visible');
+});
+
+it('keeps a confirmed decision absent and reports refresh failures separately', async () => {
+  const onCanonicalChange = vi.fn().mockRejectedValue(new Error('offline'));
+  await render(onCanonicalChange);
+  api.getPendingDreamingProposals.mockRejectedValueOnce(new Error('offline'));
+
+  await click('Accept');
+
+  expect(host.textContent).toContain('Update accepted');
+  expect(host.textContent).not.toContain('couldn’t save this choice');
+  expect(host.textContent).not.toContain('Launch the archive');
+  expect(host.textContent).toContain('couldn’t refresh the dossier');
+
+  api.getPendingDreamingProposals.mockResolvedValueOnce([proposal]);
+  await act(async () => {
+    root.render(
+      <PreparedUpdates
+        entityId="project-1"
+        entityType="project"
+        reloadToken={1}
+        onCanonicalChange={onCanonicalChange}
+      />,
+    );
+    await Promise.resolve();
+  });
+  expect(host.textContent).not.toContain('Launch the archive');
+  expect(host.textContent).toContain('Update accepted');
+
+  api.getPendingDreamingProposals.mockResolvedValueOnce([proposal]);
+  onCanonicalChange.mockResolvedValueOnce(undefined);
+  await click('Retry refresh');
+
+  expect(host.textContent).not.toContain('Launch the archive');
+  expect(host.textContent).not.toContain('couldn’t refresh the dossier');
+});
+
+it('disables every proposal action while one decision is in flight', async () => {
+  const pendingDecision = deferred<{
+    status: 'accepted';
+    proposalId: string;
+  }>();
+  api.getPendingDreamingProposals.mockResolvedValue([proposal, secondProposal]);
+  api.acceptDreamingProposal.mockReturnValueOnce(pendingDecision.promise);
+  await render();
+
+  await act(async () => {
+    Array.from(host.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('Accept'))
+      ?.click();
+    await Promise.resolve();
+  });
+
+  const proposalActions = Array.from(host.querySelectorAll('button')).filter(
+    (button) =>
+      button.textContent === 'Accept' || button.textContent === 'Reject',
+  );
+  expect(proposalActions).toHaveLength(3);
+  expect(proposalActions.every((button) => button.disabled)).toBe(true);
+  expect(api.rejectDreamingProposal).not.toHaveBeenCalled();
+
+  await act(async () => {
+    pendingDecision.resolve({ status: 'accepted', proposalId: proposal.id });
+    await pendingDecision.promise;
+    await Promise.resolve();
+  });
+
+  expect(
+    Array.from(host.querySelectorAll('button')).some(
+      (button) => button.textContent === 'Reject' && !button.disabled,
+    ),
+  ).toBe(true);
+});
+
+it('ignores a slow pending response from the previously open entity', async () => {
+  const oldEntity = deferred<(typeof proposal)[]>();
+  api.getPendingDreamingProposals.mockReturnValueOnce(oldEntity.promise);
+  await act(async () => {
+    root.render(<PreparedUpdates entityId="project-1" entityType="project" />);
+    await Promise.resolve();
+  });
+
+  api.getPendingDreamingProposals.mockResolvedValueOnce([
+    { ...secondProposal, entityId: 'project-2' },
+  ]);
+  await act(async () => {
+    root.render(<PreparedUpdates entityId="project-2" entityType="project" />);
+    await Promise.resolve();
+  });
+  expect(host.textContent).toContain('Complete access review');
+
+  await act(async () => {
+    oldEntity.resolve([proposal]);
+    await oldEntity.promise;
+  });
+  expect(host.textContent).toContain('Complete access review');
+  expect(host.textContent).not.toContain('Launch the archive');
+});
+
+it('supports keyboard focus order and semantic disclosure and decision activation', async () => {
+  await render();
+  const summary = host.querySelector('summary')!;
+  const accept = Array.from(host.querySelectorAll('button')).find(
+    (button) => button.textContent === 'Accept',
+  )!;
+  const reject = Array.from(host.querySelectorAll('button')).find(
+    (button) => button.textContent === 'Reject',
+  )!;
+
+  summary.focus();
+  expect(document.activeElement).toBe(summary);
+  await act(async () => summary.click());
+  expect(host.querySelector('details')?.open).toBe(true);
+
+  accept.focus();
+  expect(document.activeElement).toBe(accept);
+  expect(
+    summary.compareDocumentPosition(accept) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    accept.compareDocumentPosition(reject) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  await act(async () => {
+    accept.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    accept.click();
+    await Promise.resolve();
+  });
+  expect(api.acceptDreamingProposal).toHaveBeenCalledOnce();
+
+  api.getPendingDreamingProposals.mockResolvedValueOnce([secondProposal]);
+  await act(async () => {
+    root.render(
+      <PreparedUpdates
+        entityId="project-1"
+        entityType="project"
+        reloadToken={1}
+      />,
+    );
+    await Promise.resolve();
+  });
+  const nextReject = Array.from(host.querySelectorAll('button')).find(
+    (button) => button.textContent === 'Reject',
+  )!;
+  nextReject.focus();
+  await act(async () => {
+    nextReject.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', bubbles: true }),
+    );
+    nextReject.click();
+    await Promise.resolve();
+  });
+  expect(api.rejectDreamingProposal).toHaveBeenCalledOnce();
+  expect(reject.tagName).toBe('BUTTON');
 });

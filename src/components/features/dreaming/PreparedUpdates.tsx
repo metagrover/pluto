@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DreamingEntityType } from '../../../../electron/dreaming/types';
 import {
   type DreamingDecisionResult,
@@ -96,8 +96,24 @@ export function PreparedUpdates({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, string>>({});
   const [announcement, setAnnouncement] = useState('');
+  const [decisionNotice, setDecisionNotice] = useState('');
+  const [refreshWarning, setRefreshWarning] = useState(false);
+  const requestGeneration = useRef(0);
+  const scopeKey = `${entityType}:${entityId}`;
+  const activeScopeKey = useRef(scopeKey);
+  const decidedProposalIds = useRef(new Set<string>());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
+    const generation = ++requestGeneration.current;
+    if (activeScopeKey.current !== scopeKey) {
+      activeScopeKey.current = scopeKey;
+      decidedProposalIds.current = new Set();
+      setProposals([]);
+      setResults({});
+      setDecisionNotice('');
+      setRefreshWarning(false);
+      setSavingId(null);
+    }
     setLoading(true);
     setLoadError(false);
     try {
@@ -105,60 +121,111 @@ export function PreparedUpdates({
         entityId,
         entityType,
       });
-      setProposals(pending);
-      setResults({});
+      if (generation !== requestGeneration.current) return false;
+      setProposals(
+        pending.filter((item) => !decidedProposalIds.current.has(item.id)),
+      );
+      return true;
     } catch {
-      setLoadError(true);
+      if (generation === requestGeneration.current) setLoadError(true);
+      return false;
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
-  }, [entityId, entityType]);
+  }, [entityId, entityType, scopeKey]);
 
   useEffect(() => {
     void load();
+    return () => {
+      requestGeneration.current += 1;
+    };
   }, [load, reloadToken]);
+
+  const refreshAfterDecision = useCallback(async () => {
+    const refreshScopeKey = scopeKey;
+    const generation = ++requestGeneration.current;
+    setRefreshWarning(false);
+    const refreshes = await Promise.allSettled([
+      Promise.resolve().then(() => onCanonicalChange?.()),
+      getPendingDreamingProposals({ entityId, entityType }).then((pending) => {
+        if (
+          activeScopeKey.current !== refreshScopeKey ||
+          generation !== requestGeneration.current
+        )
+          return;
+        setProposals(
+          pending.filter((item) => !decidedProposalIds.current.has(item.id)),
+        );
+      }),
+    ]);
+    if (
+      activeScopeKey.current !== refreshScopeKey ||
+      generation !== requestGeneration.current
+    )
+      return;
+    if (refreshes.some((result) => result.status === 'rejected')) {
+      setRefreshWarning(true);
+      return;
+    }
+    setLoadError(false);
+  }, [entityId, entityType, onCanonicalChange, scopeKey]);
 
   const decide = async (
     proposal: DreamingProposalRecord,
     action: 'accept' | 'reject',
   ) => {
+    const decisionScopeKey = scopeKey;
     setSavingId(proposal.id);
     setAnnouncement('');
+    let result: DreamingDecisionResult;
     try {
-      const result = await (action === 'accept'
+      result = await (action === 'accept'
         ? acceptDreamingProposal
         : rejectDreamingProposal)({
         entityId,
         entityType,
         proposalId: proposal.id,
       });
-      const message = decisionMessage(result);
-      setResults((current) => ({ ...current, [proposal.id]: message }));
-      setAnnouncement(message);
-      if (result.status === 'accepted' || result.status === 'rejected') {
-        await onCanonicalChange?.();
-      }
-      const pending = await getPendingDreamingProposals({
-        entityId,
-        entityType,
-      });
-      setProposals((current) => {
-        const decided = current.filter((item) => item.id === proposal.id);
-        return [
-          ...decided,
-          ...pending.filter((item) => item.id !== proposal.id),
-        ];
-      });
     } catch {
+      if (activeScopeKey.current !== decisionScopeKey) return;
       const message = 'Pluto couldn’t save this choice. Try again.';
       setResults((current) => ({ ...current, [proposal.id]: message }));
       setAnnouncement(message);
-    } finally {
       setSavingId(null);
+      return;
+    }
+
+    if (activeScopeKey.current !== decisionScopeKey) return;
+
+    const message = decisionMessage(result);
+    setAnnouncement(message);
+    setSavingId(null);
+    if (result.status === 'accepted' || result.status === 'rejected') {
+      decidedProposalIds.current.add(proposal.id);
+      setProposals((current) =>
+        current.filter((item) => item.id !== proposal.id),
+      );
+      setDecisionNotice(message);
+      await refreshAfterDecision();
+    } else if (result.status === 'stale' || result.status === 'not_pending') {
+      decidedProposalIds.current.add(proposal.id);
+      setProposals((current) =>
+        current.filter((item) => item.id !== proposal.id),
+      );
+      setDecisionNotice(message);
+    } else {
+      setResults((current) => ({ ...current, [proposal.id]: message }));
     }
   };
 
-  if (!loading && !loadError && proposals.length === 0) return null;
+  if (
+    !loading &&
+    !loadError &&
+    proposals.length === 0 &&
+    !decisionNotice &&
+    !refreshWarning
+  )
+    return null;
 
   return (
     <section
@@ -192,11 +259,11 @@ export function PreparedUpdates({
           </button>
         </div>
       ) : (
-        <ol className="mt-4 divide-y divide-pro-border/40 border-y border-pro-border/45">
+        <ol className="mt-4 divide-y divide-pro-border/40 border-y border-pro-border/45 empty:hidden">
           {proposals.map((proposal) => {
             const result = results[proposal.id];
             const disabled =
-              savingId === proposal.id ||
+              savingId !== null ||
               Boolean(result && !result.includes('couldn’t'));
             return (
               <li key={proposal.id} className="py-4">
@@ -258,6 +325,24 @@ export function PreparedUpdates({
           })}
         </ol>
       )}
+      {decisionNotice ? (
+        <p className="mt-3 text-sm text-pro-text-muted">{decisionNotice}</p>
+      ) : null}
+      {refreshWarning ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-pro-text-muted">
+          <p>
+            The choice was saved, but Pluto couldn’t refresh the dossier. The
+            saved decision is unchanged.
+          </p>
+          <button
+            type="button"
+            onClick={() => void refreshAfterDecision()}
+            className={actionClass}
+          >
+            Retry refresh
+          </button>
+        </div>
+      ) : null}
       <p aria-live="polite" aria-atomic="true" className="sr-only">
         {announcement}
       </p>
