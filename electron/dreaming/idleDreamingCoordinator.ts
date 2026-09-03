@@ -63,6 +63,7 @@ export interface IdleDreamingCoordinatorDeps {
     model: string,
     promptVersion: string,
     workClass: LLMWorkClass,
+    onStart: () => void,
   ) => Promise<string>;
   proposalStore: {
     startRun(input: DreamingStartInput): DreamingStartResult;
@@ -104,6 +105,7 @@ export interface DreamingGenerationProvider {
       model: string;
       promptVersion: string;
       workClass: LLMWorkClass;
+      onStart: () => void;
     },
   ): Promise<string>;
 }
@@ -116,6 +118,7 @@ export const generateDreamingWithProvider = (
   model: string,
   promptVersion: string,
   workClass: LLMWorkClass,
+  onStart: () => void,
 ): Promise<string> =>
   provider.synthesizeKnowledgeDocument(prompt, {
     purpose: 'dreaming',
@@ -124,6 +127,7 @@ export const generateDreamingWithProvider = (
     model,
     promptVersion,
     workClass,
+    onStart,
   });
 
 export const createIdleDreamingCoordinator = (
@@ -138,6 +142,7 @@ export const createIdleDreamingCoordinator = (
   let activeController: AbortController | null = null;
   let activeRun: Promise<IdleDreamingResult> | null = null;
   let activeCandidate: DirtyEntityCandidate | null = null;
+  let activeMode: 'automatic' | 'manual' | null = null;
   let unloadPromise: Promise<void> | null = null;
   let closed = false;
   const isEntityType = (value: string): value is DreamingEntityType =>
@@ -189,7 +194,10 @@ export const createIdleDreamingCoordinator = (
     });
 
   const notifyForegroundActivity = () => {
-    if (activeController) {
+    if (
+      activeController &&
+      (activeMode === 'automatic' || deps.getPolicy().paused)
+    ) {
       activeController.abort(
         new DOMException('Foreground activity resumed', 'AbortError'),
       );
@@ -203,10 +211,11 @@ export const createIdleDreamingCoordinator = (
   ): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
-        cancelTimeout(timer);
+        if (timer) cancelTimeout(timer);
         signal.removeEventListener('abort', onAbort);
         callback();
       };
@@ -217,15 +226,18 @@ export const createIdleDreamingCoordinator = (
               new DOMException('Dreaming cancelled', 'AbortError'),
           ),
         );
-      const timer = scheduleTimeout(
-        () =>
-          finish(() => {
-            const error = new Error('dreaming_timeout');
-            activeController?.abort(error);
-            reject(error);
-          }),
-        deadlineMs,
-      );
+      const onStart = () => {
+        if (settled || timer) return;
+        timer = scheduleTimeout(
+          () =>
+            finish(() => {
+              const error = new Error('dreaming_timeout');
+              activeController?.abort(error);
+              reject(error);
+            }),
+          deadlineMs,
+        );
+      };
       signal.addEventListener('abort', onAbort, { once: true });
       void deps
         .generate(
@@ -235,6 +247,7 @@ export const createIdleDreamingCoordinator = (
           request.model,
           request.promptVersion,
           mode === 'manual' ? 'manual_notes' : 'background',
+          onStart,
         )
         .then(
           (value) => finish(() => resolve(value)),
@@ -497,6 +510,7 @@ export const createIdleDreamingCoordinator = (
     const controller = new AbortController();
     activeController = controller;
     activeCandidate = candidate;
+    activeMode = 'manual';
 
     activeRun = executeEntityRun(candidate, controller.signal, 'manual')
       .then(async (result) => {
@@ -506,6 +520,7 @@ export const createIdleDreamingCoordinator = (
       .finally(() => {
         activeController = null;
         activeCandidate = null;
+        activeMode = null;
         activeRun = null;
       });
 
@@ -530,6 +545,7 @@ export const createIdleDreamingCoordinator = (
     const controller = new AbortController();
     activeController = controller;
     activeCandidate = candidate;
+    activeMode = 'automatic';
     activeRun = executeEntityRun(candidate, controller.signal, 'automatic')
       .then(async (result) => {
         if (result.status === 'cancelled' || !deps.hasPendingWork?.()) {
@@ -540,6 +556,7 @@ export const createIdleDreamingCoordinator = (
       .finally(() => {
         activeController = null;
         activeCandidate = null;
+        activeMode = null;
         activeRun = null;
       });
     return activeRun;
@@ -557,7 +574,9 @@ export const createIdleDreamingCoordinator = (
       }
       closed = true;
       const run = activeRun;
-      notifyForegroundActivity();
+      activeController?.abort(
+        new DOMException('Dreaming coordinator closed', 'AbortError'),
+      );
       if (run) {
         await run;
         await unloadPromise;

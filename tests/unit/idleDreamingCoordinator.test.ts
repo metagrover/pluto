@@ -123,6 +123,7 @@ describe('IdleDreamingCoordinator', () => {
       request.model,
       request.promptVersion,
       'background',
+      expect.any(Function),
     );
     expect(proposalStore.startRun).toHaveBeenCalledWith({
       entityId: 'proj-1',
@@ -317,6 +318,7 @@ describe('IdleDreamingCoordinator', () => {
       expect.any(String),
       expect.any(String),
       'manual_notes',
+      expect.any(Function),
     );
   });
 
@@ -417,7 +419,7 @@ describe('IdleDreamingCoordinator', () => {
       getEntity: () => ({ type: 'project' }),
     });
 
-    const runPromise = coordinator.triggerNow({ entityId: 'proj-1' });
+    const runPromise = coordinator.attemptIdleRun();
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal?.aborted).toBe(false);
 
@@ -432,6 +434,53 @@ describe('IdleDreamingCoordinator', () => {
       leaseToken: 'lease-1',
     });
     expect(proposalStore.completeRun).not.toHaveBeenCalled();
+  });
+
+  it('keeps an explicit manual run alive through ordinary foreground activity', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let release!: () => void;
+    generateMock.mockImplementation(
+      async (_prompt: string, _schema: unknown, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise<string>((resolve) => {
+          release = () =>
+            resolve(JSON.stringify({ status: 'no_change', proposals: [] }));
+        });
+      },
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    const run = coordinator.triggerNow({ entityId: 'proj-1' });
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+    coordinator.notifyForegroundActivity();
+    expect(capturedSignal?.aborted).toBe(false);
+    release();
+    await expect(run).resolves.toMatchObject({ status: 'no_change' });
+  });
+
+  it('still cancels a manual run when a safety pause lock becomes active', async () => {
+    generateMock.mockReturnValue(new Promise(() => {}));
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    const run = coordinator.triggerNow({ entityId: 'proj-1' });
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+    policy.paused = true;
+    coordinator.notifyForegroundActivity();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
   });
 
   it('settles cancellation even when the provider ignores AbortSignal', async () => {
@@ -649,10 +698,22 @@ describe('IdleDreamingCoordinator', () => {
   it('settles a provider that ignores abort at the entity deadline', async () => {
     vi.useFakeTimers();
     let resolveLate!: (value: string) => void;
-    generateMock.mockReturnValue(
-      new Promise<string>((resolve) => {
-        resolveLate = resolve;
-      }),
+    let admit!: () => void;
+    generateMock.mockImplementation(
+      (
+        _prompt: string,
+        _schema: unknown,
+        _signal: AbortSignal,
+        _model: string,
+        _promptVersion: string,
+        _workClass: string,
+        onStart: () => void,
+      ) => {
+        admit = onStart;
+        return new Promise<string>((resolve) => {
+          resolveLate = resolve;
+        });
+      },
     );
     const unloadModel = vi.fn();
     const coordinator = createIdleDreamingCoordinator({
@@ -666,6 +727,9 @@ describe('IdleDreamingCoordinator', () => {
     });
 
     const run = coordinator.attemptIdleRun();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(proposalStore.failRun).not.toHaveBeenCalled();
+    admit();
     await vi.advanceTimersByTimeAsync(100);
     await expect(run).resolves.toEqual({
       status: 'failed',

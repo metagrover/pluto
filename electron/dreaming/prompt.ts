@@ -138,7 +138,7 @@ export const buildDreamingGenerationRequest = (
       : '';
   const commitmentEvidenceRule =
     input.entityType === 'project'
-      ? ' A project_commitment requires an excerpt with explicit agreed, assigned, promised, or required action language; an idea, option, aim, or proposed approach is not a commitment.'
+      ? ' A project_commitment requires an excerpt with explicit agreed, assigned, promised, or required action language; tentative, negated, or conditional language is not a commitment, and an excerpt mixing those qualifiers with explicit language must not be used.'
       : '';
 
   return {

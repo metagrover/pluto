@@ -896,6 +896,7 @@ app.whenReady().then(async () => {
       model,
       promptVersion,
       workClass,
+      onStart,
     ) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
@@ -910,6 +911,7 @@ app.whenReady().then(async () => {
         model,
         promptVersion,
         workClass,
+        onStart,
       );
     },
     unloadModel: async (signal) => {

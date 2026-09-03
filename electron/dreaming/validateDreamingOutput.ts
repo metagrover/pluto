@@ -44,9 +44,13 @@ const normalizeEvidenceText = (text: string): string =>
     .trim();
 
 const EXPLICIT_COMMITMENT_CUE =
-  /\b(?:agreed to|committed to|promised to|will|must|needs? to|assigned to|action item(?: is|:)?|owns? the task of)\b/;
+  /\b(?:agreed to|committed to|promised to|must|needs? to|assigned to|action item(?: is|:)?|owns? the task of)\b/;
 const TENTATIVE_COMMITMENT_CUE =
-  /\b(?:propos(?:e|ed|al)|suggest(?:ed|ion)?|consider(?:ed|ing)?|might|may|could|option|alternative|aim(?:ed)? to|aspiration)\b/;
+  /\b(?:propos(?:e|es|ed|ing|als?)|suggest(?:s|ed|ing|ions?)?|consider(?:s|ed|ing|ation)?|might|may|could|options?|alternatives?|aim(?:s|ed|ing)? to|aspirations?)\b/;
+const NEGATED_COMMITMENT_CUE =
+  /\b(?:not|never|no longer|(?:is|was|are|were|has|have|had|does|do|did|will|would|should|could|can)n't|cannot|declined to|refused to|withdrawn?|cancel(?:led|ed)|no action item)\b/;
+const CONDITIONAL_COMMITMENT_CUE =
+  /\b(?:if|unless|once|when|until|upon approval|after approval|subject to|pending|provided that|assuming|depending on|contingent (?:on|upon))\b/;
 
 const hasExplicitCommitmentEvidence = (
   proposal: RawDreamingProposal,
@@ -55,7 +59,9 @@ const hasExplicitCommitmentEvidence = (
     const excerpt = normalizeEvidenceText(reference.excerpt);
     return (
       EXPLICIT_COMMITMENT_CUE.test(excerpt) &&
-      !TENTATIVE_COMMITMENT_CUE.test(excerpt)
+      !TENTATIVE_COMMITMENT_CUE.test(excerpt) &&
+      !NEGATED_COMMITMENT_CUE.test(excerpt) &&
+      !CONDITIONAL_COMMITMENT_CUE.test(excerpt)
     );
   });
 

@@ -203,6 +203,7 @@ export interface LLMProvider {
       model?: string;
       promptVersion?: string;
       workClass?: import('./llmWorkClass').LLMWorkClass;
+      onStart?: () => void;
     },
   ): Promise<string>;
   answerAskPluto(

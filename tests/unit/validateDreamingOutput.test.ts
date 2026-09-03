@@ -240,6 +240,54 @@ describe('validateDreamingOutput', () => {
     );
   });
 
+  it.each([
+    'The team had not agreed to deliver the billing migration checklist.',
+    'The team will not deliver the billing migration checklist.',
+    'If procurement approves, the team will deliver the billing migration checklist.',
+    'Delivery is subject to approval, and the team will provide the billing migration checklist.',
+    'The team proposed a Friday handoff but agreed to revisit the delivery date.',
+    'The team is not committed to delivering the billing migration checklist.',
+    'The team never agreed to deliver the billing migration checklist.',
+    'The team is not assigned to deliver the billing migration checklist.',
+    'The team suggests Alice will deliver the billing migration checklist.',
+    'The team proposes Alice will deliver the billing migration checklist.',
+    "The team isn't committed to delivering the billing migration checklist.",
+    "The team wasn't assigned to deliver the billing migration checklist.",
+    'The team cannot deliver the billing migration checklist.',
+    'Once procurement approves, the team will deliver the billing migration checklist.',
+    'When procurement approves, the team will deliver the billing migration checklist.',
+    'Upon approval, the team will deliver the billing migration checklist.',
+    'The team will likely deliver the billing migration checklist.',
+    'The team probably will deliver the billing migration checklist.',
+    'The team will possibly deliver the billing migration checklist.',
+    'The team will deliver the billing migration checklist as long as procurement approves.',
+  ])('rejects negated or conditional commitment evidence: %s', (excerpt) => {
+    const qualifiedPackage: DreamingInputPackage = {
+      ...projectPackage,
+      recentMeetingNotes: [
+        {
+          meetingId: 'meeting-1',
+          title: 'Delivery review',
+          startedAt: '2026-08-01T10:00:00.000Z',
+          notesContent: excerpt,
+        },
+      ],
+    };
+    expectInvalid(
+      {
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_commitment',
+            payload: { task: 'Deliver the billing migration checklist.' },
+            evidence: [{ meetingId: 'meeting-1', excerpt }],
+          },
+        ],
+      },
+      qualifiedPackage,
+    );
+  });
+
   it('accepts a project commitment with explicit commitment language', () => {
     const committedPackage: DreamingInputPackage = {
       ...projectPackage,

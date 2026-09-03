@@ -93,7 +93,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
       await coordinator.triggerNow({ entityId: project.id }),
     ).toMatchObject({ status: 'failed', errorCode: 'proposal_corrected' });
 
-    // 9. Instant Preemption test: when user becomes active, running dream must abort immediately
+    // 9. Automatic work still preempts instantly when foreground activity resumes.
     let abortedImmediately = false;
     const hangingCoordinator = createIdleDreamingCoordinator({
       getPolicy: () => ({
@@ -117,9 +117,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
       },
     });
 
-    const pendingPromise = hangingCoordinator.triggerNow({
-      entityId: project.id,
-    });
+    const pendingPromise = hangingCoordinator.attemptIdleRun();
     // User moves mouse / foreground activity happens
     hangingCoordinator.notifyForegroundActivity();
 

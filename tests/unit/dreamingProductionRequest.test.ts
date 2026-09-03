@@ -124,11 +124,11 @@ describe('Dreaming production request integration', () => {
       status: 'no_change',
     });
     expect(synthesizeKnowledgeDocument).toHaveBeenCalledWith(
-      expect.stringContaining('Prompt version: dreaming-proposals-v1'),
+      expect.stringContaining('Prompt version: dreaming-proposals-v2'),
       expect.objectContaining({
         purpose: 'dreaming',
         model: 'gemma4:12b',
-        promptVersion: 'dreaming-proposals-v1',
+        promptVersion: 'dreaming-proposals-v2',
       }),
     );
   });
