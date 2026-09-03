@@ -1,15 +1,21 @@
 import type Database from 'better-sqlite3';
 import { recoverInterruptedIdentityJobs } from '../identityStore';
+import {
+  repairMeetingFtsIndex,
+  repairMeetingNotesFtsIndex,
+} from './meetingSearchMaintenance';
 
 export interface StartupRecoveryResult {
   identityJobsRecovered: number;
   orphanContextRowsRemoved: number;
+  meetingFtsRebuilt: boolean;
+  meetingNotesFtsRebuilt: boolean;
 }
 
 export const runDatabaseStartupRecovery = (
   sqlite: Database.Database,
-): StartupRecoveryResult =>
-  sqlite.transaction(() => {
+): StartupRecoveryResult => {
+  const relational = sqlite.transaction(() => {
     const events = sqlite
       .prepare(
         `DELETE FROM meeting_context_events
@@ -33,3 +39,11 @@ export const runDatabaseStartupRecovery = (
       orphanContextRowsRemoved: events + snapshots,
     };
   })();
+  const meetingFts = repairMeetingFtsIndex(sqlite);
+  const meetingNotesFts = repairMeetingNotesFtsIndex(sqlite);
+  return {
+    ...relational,
+    meetingFtsRebuilt: meetingFts.rebuilt,
+    meetingNotesFtsRebuilt: meetingNotesFts.rebuilt,
+  };
+};

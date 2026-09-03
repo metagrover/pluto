@@ -30,8 +30,13 @@ export const createApplicationDatabase = (
   const initialize = () => {
     const connection = runtime.initialize();
     if (!recovered) {
-      runDatabaseStartupRecovery(connection);
-      recovered = true;
+      try {
+        runDatabaseStartupRecovery(connection);
+        recovered = true;
+      } catch (error) {
+        runtime.close();
+        throw error;
+      }
     }
     return connection;
   };

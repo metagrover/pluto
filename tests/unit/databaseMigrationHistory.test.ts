@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
@@ -66,6 +68,17 @@ describe('database migration history', () => {
     expect(history[0]?.hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('classifies unreadable packaged migration metadata', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pluto-migrations-'));
+    try {
+      expect(() => readPackagedMigrationHistory(root)).toThrowError(
+        expect.objectContaining({ code: 'database_migration_failed' }),
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('reads no applied history until Drizzle has migrated the database', () => {
     const sqlite = new Database(':memory:');
     expect(readAppliedMigrationHistory(sqlite)).toEqual([]);
@@ -81,6 +94,15 @@ describe('database migration history', () => {
       { createdAt: 100, hash: 'hash-0' },
       { createdAt: 200, hash: 'hash-1' },
     ]);
+    sqlite.close();
+  });
+
+  it('classifies malformed applied migration metadata', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE __drizzle_migrations (unexpected TEXT)');
+    expect(() => readAppliedMigrationHistory(sqlite)).toThrowError(
+      expect.objectContaining({ code: 'database_version_unsupported' }),
+    );
     sqlite.close();
   });
 

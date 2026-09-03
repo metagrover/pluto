@@ -57,6 +57,7 @@ import {
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { closeApplicationDatabase } from './database/applicationDatabase';
+import { createBeforeQuitHandler } from './database/shutdown';
 import {
   type IncrementalMeetingNotesOffer,
   createIncrementalMeetingNotesCoordinator,
@@ -724,8 +725,7 @@ function abortMeetingTasks(meetingId: string) {
 }
 
 let stopIdentityReconciliation: (() => void) | undefined;
-// Cleanup on quit
-app.on('before-quit', async () => {
+const shutdownMainProcessConsumers = async () => {
   backgroundKnowledgeRefresh?.close();
   backgroundKnowledgeRefresh = null;
   stopIdentityReconciliation?.();
@@ -744,8 +744,17 @@ app.on('before-quit', async () => {
   parakeetEouGeneration = null;
   parakeetRuntimeHost?.shutdown();
   parakeetRuntimeHost = null;
-  closeApplicationDatabase();
-});
+};
+
+app.on(
+  'before-quit',
+  createBeforeQuitHandler({
+    shutdownConsumers: shutdownMainProcessConsumers,
+    closeDatabase: closeApplicationDatabase,
+    quit: () => app.quit(),
+    onError: (error) => console.error('[Pluto] Shutdown failed', error),
+  }),
+);
 
 app.whenReady().then(async () => {
   db.recoverInterruptedMeetingAnalysisRuns();

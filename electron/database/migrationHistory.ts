@@ -19,53 +19,79 @@ interface DrizzleJournal {
   entries: Array<{ idx: number; tag: string; when: number }>;
 }
 
+const sqliteCode = (error: unknown): string | undefined => {
+  if (!error || typeof error !== 'object' || !('code' in error)) return;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+};
+
 export const readPackagedMigrationHistory = (
   migrationsFolder: string,
 ): PackagedMigration[] => {
-  const journal = JSON.parse(
-    fs.readFileSync(
-      path.join(migrationsFolder, 'meta', '_journal.json'),
-      'utf8',
-    ),
-  ) as DrizzleJournal;
-  const migrationFiles = readMigrationFiles({ migrationsFolder });
+  try {
+    const journal = JSON.parse(
+      fs.readFileSync(
+        path.join(migrationsFolder, 'meta', '_journal.json'),
+        'utf8',
+      ),
+    ) as DrizzleJournal;
+    const migrationFiles = readMigrationFiles({ migrationsFolder });
 
-  if (journal.entries.length !== migrationFiles.length) {
+    if (journal.entries.length !== migrationFiles.length) {
+      throw new DatabaseLifecycleError(
+        'database_version_unsupported',
+        'Packaged migration metadata is inconsistent.',
+      );
+    }
+
+    return journal.entries.map((entry, index) => ({
+      tag: entry.tag,
+      when: entry.when,
+      hash: migrationFiles[index]?.hash ?? '',
+    }));
+  } catch (error) {
+    if (error instanceof DatabaseLifecycleError) throw error;
     throw new DatabaseLifecycleError(
-      'database_version_unsupported',
-      'Packaged migration metadata is inconsistent.',
+      'database_migration_failed',
+      'Packaged migration history could not be read.',
+      { sqliteCode: sqliteCode(error) },
+      { cause: error },
     );
   }
-
-  return journal.entries.map((entry, index) => ({
-    tag: entry.tag,
-    when: entry.when,
-    hash: migrationFiles[index]?.hash ?? '',
-  }));
 };
 
 export const readAppliedMigrationHistory = (
   sqlite: Database.Database,
 ): AppliedMigration[] => {
-  const exists = sqlite
-    .prepare(
-      `SELECT 1 FROM sqlite_schema
-       WHERE type = 'table' AND name = '__drizzle_migrations'`,
-    )
-    .get();
-  if (!exists) return [];
+  try {
+    const exists = sqlite
+      .prepare(
+        `SELECT 1 FROM sqlite_schema
+         WHERE type = 'table' AND name = '__drizzle_migrations'`,
+      )
+      .get();
+    if (!exists) return [];
 
-  const rows = sqlite
-    .prepare(
-      `SELECT hash, created_at AS createdAt
-       FROM __drizzle_migrations
-       ORDER BY created_at, id`,
-    )
-    .all() as Array<{ hash: string; createdAt: number | string }>;
-  return rows.map((row) => ({
-    createdAt: Number(row.createdAt),
-    hash: row.hash,
-  }));
+    const rows = sqlite
+      .prepare(
+        `SELECT hash, created_at AS createdAt
+         FROM __drizzle_migrations
+         ORDER BY created_at, id`,
+      )
+      .all() as Array<{ hash: string; createdAt: number | string }>;
+    return rows.map((row) => ({
+      createdAt: Number(row.createdAt),
+      hash: row.hash,
+    }));
+  } catch (error) {
+    if (error instanceof DatabaseLifecycleError) throw error;
+    throw new DatabaseLifecycleError(
+      'database_version_unsupported',
+      'Applied migration history could not be read.',
+      { sqliteCode: sqliteCode(error) },
+      { cause: error },
+    );
+  }
 };
 
 export const assertSupportedMigrationHistory = (

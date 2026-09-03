@@ -28,6 +28,7 @@ export interface DatabaseRuntimeOptions {
   migrationsFolder: string;
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   cleanupStaged?: (staged: StagedDatabase) => void;
+  openConnection?: (databasePath: string) => Database.Database;
 }
 
 type DatabaseKind = 'blank' | 'legacy' | 'managed';
@@ -66,9 +67,12 @@ const prepareDirectory = (databasePath: string) => {
   }
 };
 
-const openDatabase = (databasePath: string) => {
+const openDatabase = (
+  databasePath: string,
+  opener: (databasePath: string) => Database.Database,
+) => {
   try {
-    return new Database(databasePath);
+    return opener(databasePath);
   } catch (error) {
     throw new DatabaseLifecycleError(
       'database_open_failed',
@@ -123,16 +127,25 @@ const verifyHealth = (sqlite: Database.Database) => {
 };
 
 const classifyDatabase = (sqlite: Database.Database): DatabaseKind => {
-  const tableNames = (
-    sqlite
-      .prepare(
-        `SELECT name FROM sqlite_schema
-         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
-      )
-      .all() as Array<{ name: string }>
-  ).map(({ name }) => name);
-  if (tableNames.includes('__drizzle_migrations')) return 'managed';
-  return tableNames.length === 0 ? 'blank' : 'legacy';
+  try {
+    const tableNames = (
+      sqlite
+        .prepare(
+          `SELECT name FROM sqlite_schema
+           WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+        )
+        .all() as Array<{ name: string }>
+    ).map(({ name }) => name);
+    if (tableNames.includes('__drizzle_migrations')) return 'managed';
+    return tableNames.length === 0 ? 'blank' : 'legacy';
+  } catch (error) {
+    throw new DatabaseLifecycleError(
+      'database_integrity_failed',
+      'SQLite schema inspection failed.',
+      { sqliteCode: sqliteCode(error) },
+      { cause: error },
+    );
+  }
 };
 
 export const createDatabaseRuntime = (
@@ -142,6 +155,8 @@ export const createDatabaseRuntime = (
   let connection: Database.Database | null = null;
   const inMemory = options.databasePath === ':memory:';
   const cleanup = options.cleanupStaged ?? cleanupStagedDatabase;
+  const opener =
+    options.openConnection ?? ((databasePath) => new Database(databasePath));
   const packaged = () => readPackagedMigrationHistory(options.migrationsFolder);
 
   const closeConnection = () => {
@@ -156,23 +171,34 @@ export const createDatabaseRuntime = (
     const pendingMigrationId = getPendingMigrationId(applied, packagedHistory);
     if (!pendingMigrationId) return;
 
+    let migrationFailure: DatabaseLifecycleError | undefined;
     try {
       sqlite.pragma('foreign_keys = OFF');
       migrate(drizzle(sqlite), { migrationsFolder: options.migrationsFolder });
     } catch (error) {
-      throw new DatabaseLifecycleError(
+      migrationFailure = new DatabaseLifecycleError(
         'database_migration_failed',
         'A packaged database migration failed.',
         { migrationId: pendingMigrationId, sqliteCode: sqliteCode(error) },
         { cause: error },
       );
-    } finally {
-      try {
-        sqlite.pragma('foreign_keys = ON');
-      } catch {
-        // The original migration/configuration error remains the useful failure.
-      }
     }
+    let restorationFailure: DatabaseLifecycleError | undefined;
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      if (sqlite.pragma('foreign_keys', { simple: true }) !== 1) {
+        throw new Error('SQLite did not restore foreign-key enforcement.');
+      }
+    } catch (error) {
+      restorationFailure = new DatabaseLifecycleError(
+        'database_configuration_failed',
+        'SQLite foreign-key enforcement could not be restored.',
+        { sqliteCode: sqliteCode(error) },
+        { cause: error },
+      );
+    }
+    if (migrationFailure) throw migrationFailure;
+    if (restorationFailure) throw restorationFailure;
     assertSupportedMigrationHistory(
       readAppliedMigrationHistory(sqlite),
       packagedHistory,
@@ -180,7 +206,7 @@ export const createDatabaseRuntime = (
   };
 
   const initializeFresh = () => {
-    connection = openDatabase(options.databasePath);
+    connection = openDatabase(options.databasePath, opener);
     configureConnection(connection, inMemory);
     applyPendingMigrations(connection);
     verifyHealth(connection);
@@ -226,9 +252,8 @@ export const createDatabaseRuntime = (
 
       prepareDirectory(options.databasePath);
       try {
-        connection = openDatabase(options.databasePath);
+        connection = openDatabase(options.databasePath, opener);
         try {
-          configureConnection(connection, inMemory);
           verifyHealth(connection);
         } catch (error) {
           if (
@@ -255,6 +280,13 @@ export const createDatabaseRuntime = (
         if (kind === 'legacy') {
           connection = replaceExisting('legacy');
         } else {
+          if (kind === 'managed') {
+            assertSupportedMigrationHistory(
+              readAppliedMigrationHistory(connection),
+              packaged(),
+            );
+          }
+          configureConnection(connection, inMemory);
           applyPendingMigrations(connection);
           verifyHealth(connection);
         }

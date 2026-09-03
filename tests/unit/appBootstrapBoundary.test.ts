@@ -37,14 +37,8 @@ describe('Electron bootstrap boundary', () => {
 
   it('closes the database after main-process consumers stop', () => {
     const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
-    const beforeQuit = source.indexOf("app.on('before-quit'");
-    const stopCalendar = source.indexOf('calendarService.stop()', beforeQuit);
-    const closeDatabase = source.indexOf(
-      'closeApplicationDatabase()',
-      beforeQuit,
-    );
-    expect(beforeQuit).toBeGreaterThan(-1);
-    expect(stopCalendar).toBeGreaterThan(beforeQuit);
-    expect(closeDatabase).toBeGreaterThan(stopCalendar);
+    expect(source).toContain('createBeforeQuitHandler({');
+    expect(source).toContain('shutdownConsumers: shutdownMainProcessConsumers');
+    expect(source).toContain('closeDatabase: closeApplicationDatabase');
   });
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createApplicationDatabase,
   resolveApplicationDatabasePath,
@@ -72,5 +72,65 @@ describe('application database ownership', () => {
     expect(() => owner.getConnection()).toThrowError(
       expect.objectContaining({ code: 'database_closed' }),
     );
+  });
+
+  it('repairs missing derived search rows when reopening a managed database', () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-application-db-'),
+    );
+    roots.push(root);
+    const options = {
+      databasePath: path.join(root, 'pluto.db'),
+      migrationsFolder: path.join(process.cwd(), 'drizzle'),
+    };
+    const first = createApplicationDatabase(options);
+    first
+      .initialize()
+      .prepare(
+        "INSERT INTO meetings (id, title) VALUES ('missing-fts', 'Search me')",
+      )
+      .run();
+    first.close();
+
+    const reopened = createApplicationDatabase(options);
+    const sqlite = reopened.initialize();
+    expect(
+      sqlite
+        .prepare(
+          "SELECT meeting_id FROM meetings_fts WHERE meeting_id = 'missing-fts'",
+        )
+        .all(),
+    ).toHaveLength(1);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT meeting_id FROM meeting_notes_fts WHERE meeting_id = 'missing-fts'",
+        )
+        .all(),
+    ).toHaveLength(1);
+    reopened.close();
+  });
+
+  it('closes the runtime when first-run operational recovery fails', () => {
+    const close = vi.fn();
+    const owner = createApplicationDatabase({
+      databasePath: ':memory:',
+      migrationsFolder: '/unused',
+      createRuntime: () => ({
+        state: 'open',
+        initialize: () =>
+          ({
+            transaction: () => () => {
+              throw new Error('recovery failed');
+            },
+          }) as never,
+        getConnection: () => {
+          throw new Error('unused');
+        },
+        close,
+      }),
+    });
+    expect(() => owner.initialize()).toThrow('recovery failed');
+    expect(close).toHaveBeenCalledOnce();
   });
 });

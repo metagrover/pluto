@@ -249,4 +249,85 @@ describe('database runtime', () => {
     ).toBeUndefined();
     inspection.close();
   });
+
+  it('rejects unsupported history without changing persistent journal mode', () => {
+    const root = makeRoot();
+    const migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE expected (id INTEGER);',
+      },
+    ]);
+    const databasePath = path.join(root, 'pluto.db');
+    const sqlite = new Database(databasePath);
+    sqlite.exec(
+      `CREATE TABLE __drizzle_migrations (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         hash text NOT NULL,
+         created_at numeric
+       );
+       INSERT INTO __drizzle_migrations (hash, created_at)
+       VALUES ('future-hash', 999);`,
+    );
+    expect(sqlite.pragma('journal_mode', { simple: true })).toBe('delete');
+    sqlite.close();
+
+    const runtime = createDatabaseRuntime({ databasePath, migrationsFolder });
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_version_unsupported' }),
+    );
+    const inspection = new Database(databasePath);
+    expect(inspection.pragma('journal_mode', { simple: true })).toBe('delete');
+    inspection.close();
+  });
+
+  it('fails initialization if foreign-key enforcement cannot be restored', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const migrationsFolder = writeMigrations(root, [
+      { tag: '0000_first', when: 100, sql: 'CREATE TABLE ready (id INTEGER);' },
+    ]);
+    const runtime = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      openConnection: (filename) => {
+        const sqlite = new Database(filename);
+        const pragma = sqlite.pragma.bind(sqlite);
+        let foreignKeysDisabled = false;
+        sqlite.pragma = ((source: string, options?: { simple?: boolean }) => {
+          if (source === 'foreign_keys = OFF') foreignKeysDisabled = true;
+          if (source === 'foreign_keys = ON' && foreignKeysDisabled) return [];
+          if (source === 'foreign_keys' && foreignKeysDisabled) return 0;
+          return pragma(source, options);
+        }) as typeof sqlite.pragma;
+        return sqlite;
+      },
+    });
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_configuration_failed' }),
+    );
+  });
+
+  it('classifies schema inspection failures as lifecycle errors', () => {
+    const root = makeRoot();
+    const runtime = createDatabaseRuntime({
+      databasePath: path.join(root, 'pluto.db'),
+      migrationsFolder: writeMigrations(root, []),
+      openConnection: (filename) => {
+        const sqlite = new Database(filename);
+        const prepare = sqlite.prepare.bind(sqlite);
+        sqlite.prepare = ((source: string) => {
+          if (source.includes("name NOT LIKE 'sqlite_%'")) {
+            throw new Error('schema inspection failed');
+          }
+          return prepare(source);
+        }) as typeof sqlite.prepare;
+        return sqlite;
+      },
+    });
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_integrity_failed' }),
+    );
+  });
 });
