@@ -50,7 +50,7 @@ const packageDeps = (
     note('meeting-new', '2026-09-02T10:00:00.000Z', 'Newest note'),
   ]),
   getDreamingEntityBaseline: vi.fn(() => ({ summary: 'Accepted summary' })),
-  getEntityCorrections: vi.fn(() => []),
+  getDreamingEntityCorrections: vi.fn(() => []),
   ...overrides,
 });
 
@@ -164,6 +164,49 @@ describe('packageEntityNotes', () => {
     expect(pkg?.recentMeetingNotes[1].notesContent).not.toContain('b600');
   });
 
+  it('bounds oversized note text before scanning for words', () => {
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({
+        getDreamingEntityNotes: vi.fn(() => [
+          note(
+            'oversized-note',
+            '2026-09-02T10:00:00.000Z',
+            `first ${'x'.repeat(2_000_000)} tail`,
+          ),
+        ]),
+      }),
+    );
+
+    expect(pkg?.recentMeetingNotes[0].notesContent.length).toBeLessThanOrEqual(
+      65_536,
+    );
+    expect(pkg?.recentMeetingNotes[0].notesContent).not.toContain('tail');
+  });
+
+  it('caps adversarial long tokens across the complete notes package', () => {
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({
+        getDreamingEntityNotes: vi.fn(() =>
+          Array.from({ length: 8 }, (_, index) =>
+            note(
+              `long-token-${index}`,
+              `2026-09-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+              `${index}-${'x'.repeat(20_000)}`,
+            ),
+          ),
+        ),
+      }),
+    );
+
+    const totalCharacters = pkg?.recentMeetingNotes.reduce(
+      (total, meeting) => total + meeting.notesContent.length,
+      0,
+    );
+    expect(totalCharacters).toBeLessThanOrEqual(65_536);
+  });
+
   it('returns only structured-note projection fields and excludes transcript and audio data', () => {
     const project = db.upsertEntity({
       type: 'project',
@@ -210,7 +253,7 @@ describe('packageEntityNotes', () => {
       'project-586',
       packageDeps({
         getDreamingEntityBaseline: vi.fn(() => currentBaseline),
-        getEntityCorrections: vi.fn(() => [
+        getDreamingEntityCorrections: vi.fn(() => [
           { fingerprint: ' Zeta ' },
           { fingerprint: 'alpha' },
         ]),
@@ -222,12 +265,98 @@ describe('packageEntityNotes', () => {
     expect(pkg?.negativeConstraints).toEqual(['alpha', 'zeta']);
   });
 
+  it('bounds oversized prompt-visible baseline collections, text, and corrections', () => {
+    const oversized = Array.from(
+      { length: 100 },
+      (_, index) => `value-${index}-${'x'.repeat(2_000)}`,
+    );
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({
+        getDreamingEntityBaseline: vi.fn(() => ({
+          summary: 's'.repeat(20_000),
+          aliases: oversized,
+          commitments: oversized,
+          nested: { bullets: oversized },
+        })),
+        getDreamingEntityCorrections: vi.fn(() => [
+          ...oversized.map((fingerprint) => ({ fingerprint })),
+          { fingerprint: oversized[0] },
+        ]),
+      }),
+    );
+
+    expect(JSON.stringify(pkg?.currentBaseline).length).toBeLessThan(16_000);
+    expect(pkg?.correctionFingerprints.length).toBeLessThanOrEqual(64);
+    expect(
+      pkg?.correctionFingerprints.every(
+        (fingerprint) => fingerprint.length <= 128,
+      ),
+    ).toBe(true);
+  });
+
+  it('deduplicates corrections and sorts them by deterministic code-unit order', () => {
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({
+        getDreamingEntityCorrections: vi.fn(() => [
+          { fingerprint: 'z' },
+          { fingerprint: 'ä' },
+          { fingerprint: 'a' },
+          { fingerprint: 'z' },
+        ]),
+      }),
+    );
+
+    expect(pkg?.correctionFingerprints).toEqual(['a', 'z', 'ä']);
+  });
+
+  it.each(['project', 'person'] as const)(
+    'keeps %s corrections recorded before an identity merge',
+    (entityType) => {
+      const canonical = db.upsertEntity({
+        type: entityType,
+        name: `Canonical ${entityType} correction`,
+      });
+      const alias = db.upsertEntity({
+        type: entityType,
+        name: `Alias ${entityType} correction`,
+      });
+      db.recordEntityCorrection({
+        entityId: alias.id,
+        itemType: 'summary',
+        fingerprint: `${entityType}-before-merge`,
+      });
+      if (entityType === 'project') db.mergeProject(alias.id, canonical.id);
+      else db.mergePerson(alias.id, canonical.id);
+
+      const pkg = packageEntityNotes(canonical.id);
+
+      expect(pkg?.correctionFingerprints).toContain(
+        `${entityType}-before-merge`,
+      );
+    },
+  );
+
+  it('uses the entity-first meeting index for the bounded family query', () => {
+    const project = db.upsertEntity({
+      type: 'project',
+      name: 'Indexed Dreaming Project',
+    });
+
+    expect(db.getDreamingEntityNotesQueryPlan(project.id)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('idx_meeting_entities_entity_meeting'),
+      ]),
+    );
+  });
+
   it('computes a stable SHA-256 revision for equivalent package inputs', () => {
     const first = packageEntityNotes(
       'project-586',
       packageDeps({
         getDreamingEntityBaseline: vi.fn(() => ({ z: 1, a: { y: 2, x: 3 } })),
-        getEntityCorrections: vi.fn(() => [
+        getDreamingEntityCorrections: vi.fn(() => [
           { fingerprint: 'zeta' },
           { fingerprint: 'alpha' },
         ]),
@@ -237,7 +366,7 @@ describe('packageEntityNotes', () => {
       'project-586',
       packageDeps({
         getDreamingEntityBaseline: vi.fn(() => ({ a: { x: 3, y: 2 }, z: 1 })),
-        getEntityCorrections: vi.fn(() => [
+        getDreamingEntityCorrections: vi.fn(() => [
           { fingerprint: 'alpha' },
           { fingerprint: 'zeta' },
         ]),
@@ -267,21 +396,34 @@ describe('packageEntityNotes', () => {
     ],
     ['baseline', { baseline: { summary: 'Changed accepted summary' } }],
     ['correction', { corrections: [{ fingerprint: 'new-correction' }] }],
+    ['entity name', { entityName: 'Changed entity name' }],
+    ['meeting title', { title: 'Changed meeting title' }],
+    ['meeting date', { startedAt: '2026-09-03T10:00:00.000Z' }],
   ])('changes the revision when the included %s changes', (_label, change) => {
     const original = packageEntityNotes('project-586', packageDeps());
     const changed = packageEntityNotes(
       'project-586',
       packageDeps({
+        getEntity: vi.fn(() =>
+          entity({ name: change.entityName ?? 'Memory Dreaming' }),
+        ),
         getDreamingEntityNotes: vi.fn(
           () =>
             change.notes ?? [
-              note('meeting-new', '2026-09-02T10:00:00.000Z', 'Newest note'),
+              {
+                ...note(
+                  'meeting-new',
+                  change.startedAt ?? '2026-09-02T10:00:00.000Z',
+                  'Newest note',
+                ),
+                title: change.title ?? 'Meeting meeting-new',
+              },
             ],
         ),
         getDreamingEntityBaseline: vi.fn(
           () => change.baseline ?? { summary: 'Accepted summary' },
         ),
-        getEntityCorrections: vi.fn(() => change.corrections ?? []),
+        getDreamingEntityCorrections: vi.fn(() => change.corrections ?? []),
       }),
     );
     expect(changed?.sourceRevision).not.toBe(original?.sourceRevision);

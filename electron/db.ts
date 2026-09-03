@@ -652,6 +652,8 @@ const initDb = () => {
         FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
         FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
       );
+      CREATE INDEX IF NOT EXISTS idx_meeting_entities_entity_meeting
+        ON meeting_entities(entity_id, meeting_id);
 
       -- =============================================
       -- KNOWLEDGE LIVE DOC TABLES
@@ -8456,6 +8458,51 @@ export interface DreamingEntityNoteSource {
   enhanced_notes: string | null;
 }
 
+const dreamingEntityNotesQuery = (
+  aliasTable: 'person_aliases' | 'project_aliases',
+  aliasIdColumn: 'person_id' | 'project_id',
+): string => `
+  WITH family(id) AS (
+    SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
+    WHERE a.canonical_id = ? AND a.active = 1
+  )
+  SELECT
+    m.id,
+    m.title,
+    m.started_at,
+    m.created_at,
+    m.user_notes,
+    m.enhanced_notes
+  FROM meeting_entities me INDEXED BY idx_meeting_entities_entity_meeting
+  JOIN meetings m ON m.id = me.meeting_id
+  WHERE me.entity_id IN (SELECT id FROM family)
+    AND (
+      TRIM(COALESCE(m.user_notes, '')) != ''
+      OR TRIM(COALESCE(m.enhanced_notes, '')) != ''
+    )
+  GROUP BY m.id
+  ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC
+  LIMIT ?
+`;
+
+const getDreamingEntityQueryContext = (entityId: string) => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return null;
+  }
+  return entity.type === 'person'
+    ? {
+        canonicalId: resolvePersonIdentityId(entity.id),
+        aliasTable: 'person_aliases' as const,
+        aliasIdColumn: 'person_id' as const,
+      }
+    : {
+        canonicalId: resolveProjectIdentityId(entity.id),
+        aliasTable: 'project_aliases' as const,
+        aliasIdColumn: 'project_id' as const,
+      };
+};
+
 /**
  * Return the bounded, notes-only meeting projection used by idle dreaming.
  * Keep this projection explicit: transcripts, audio paths, and analysis payloads
@@ -8465,53 +8512,35 @@ export const getDreamingEntityNotes = (
   entityId: string,
   limit = 8,
 ): DreamingEntityNoteSource[] => {
-  const entity = getEntity(entityId);
-  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
-    return [];
-  }
-  const canonicalId =
-    entity.type === 'person'
-      ? resolvePersonIdentityId(entity.id)
-      : resolveProjectIdentityId(entity.id);
-  const aliasTable =
-    entity.type === 'person' ? 'person_aliases' : 'project_aliases';
-  const aliasIdColumn = entity.type === 'person' ? 'person_id' : 'project_id';
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
   const boundedLimit = Math.max(1, Math.min(8, Math.trunc(limit)));
 
   return db
-    .prepare(`
-      WITH family(id) AS (
-        SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
-        WHERE a.canonical_id = ? AND a.active = 1
-      )
-      SELECT
-        m.id,
-        m.title,
-        m.started_at,
-        m.created_at,
-        m.user_notes,
-        m.enhanced_notes
-      FROM meetings m
-      JOIN meeting_entities me ON me.meeting_id = m.id
-      WHERE me.entity_id IN (SELECT id FROM family)
-        AND (
-          TRIM(COALESCE(m.user_notes, '')) != ''
-          OR TRIM(COALESCE(m.enhanced_notes, '')) != ''
-        )
-      GROUP BY m.id
-      ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC
-      LIMIT ?
-    `)
-    .all(canonicalId, canonicalId, boundedLimit) as DreamingEntityNoteSource[];
+    .prepare(
+      dreamingEntityNotesQuery(context.aliasTable, context.aliasIdColumn),
+    )
+    .all(
+      context.canonicalId,
+      context.canonicalId,
+      boundedLimit,
+    ) as DreamingEntityNoteSource[];
 };
 
-const parseDreamingBaselineJson = (value: string | null): unknown => {
-  if (!value) return null;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
-  }
+export const getDreamingEntityNotesQueryPlan = (entityId: string): string[] => {
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
+  const rows = db
+    .prepare(
+      `EXPLAIN QUERY PLAN ${dreamingEntityNotesQuery(
+        context.aliasTable,
+        context.aliasIdColumn,
+      )}`,
+    )
+    .all(context.canonicalId, context.canonicalId, 8) as Array<{
+    detail: string;
+  }>;
+  return rows.map((row) => row.detail);
 };
 
 /** Compact accepted state supplied to dreaming so proposals do not repeat it. */
@@ -8539,6 +8568,7 @@ export const getDreamingEntityBaseline = (
       JOIN entities alias ON alias.id = identity.${aliasIdColumn}
       WHERE identity.canonical_id = ? AND identity.active = 1
       ORDER BY alias.id
+      LIMIT 24
     `)
     .all(canonicalId) as Array<{ id: string; name: string }>;
   const commitments =
@@ -8557,6 +8587,7 @@ export const getDreamingEntityBaseline = (
               AND link.state = 'confirmed'
               AND link.target_entity_id IN (SELECT id FROM family)
             ORDER BY action.id
+            LIMIT 24
           `)
           .all(canonicalId, canonicalId) as Array<{
           id: string;
@@ -8574,6 +8605,7 @@ export const getDreamingEntityBaseline = (
             FROM entities
             WHERE type = 'action_item' AND assigned_to IN (SELECT id FROM family)
             ORDER BY id
+            LIMIT 24
           `)
           .all(canonicalId, canonicalId) as Array<{
           id: string;
@@ -8582,17 +8614,40 @@ export const getDreamingEntityBaseline = (
           due_date: string | null;
         }>);
   const scopeType = canonical.type === 'person' ? 'person_context' : 'project';
-  const knowledgeDoc = getKnowledgeDocByScope(scopeType, canonicalId);
   const snapshot = getWorkingMemorySnapshot(scopeType, canonicalId);
 
-  return {
-    name: canonical.name,
+  const common = {
     status: canonical.status,
-    metadata: parseDreamingBaselineJson(canonical.metadata),
     aliases,
     commitments,
-    knowledge: parseDreamingBaselineJson(knowledgeDoc?.structured_json ?? null),
-    currentRead: snapshot?.payload.current_read ?? null,
+    currentRead: snapshot
+      ? {
+          headline: snapshot.payload.current_read.headline,
+          supportingBullets: snapshot.payload.current_read.supporting_bullets,
+        }
+      : null,
+  };
+  if (canonical.type === 'person') {
+    return {
+      ...common,
+      role: parsePersonRole(canonical.metadata),
+    };
+  }
+  const theme = readProjectThemeSynthesis(canonical.metadata);
+  return {
+    ...common,
+    displayTitle: readProjectDisplayTitle(canonical.metadata, canonical.name),
+    theme: theme
+      ? { outcome: theme.outcome, currentFocus: theme.currentFocus }
+      : null,
+    milestones: buildUserProjectMilestones(canonical.metadata)
+      .slice(0, 24)
+      .map(({ title, status, targetDate, note }) => ({
+        title,
+        status,
+        targetDate,
+        note,
+      })),
   };
 };
 
@@ -9609,6 +9664,36 @@ export const getEntityCorrections = (
       'SELECT * FROM entity_corrections WHERE entity_id = ? ORDER BY datetime(created_at) DESC',
     )
     .all(String(entityId)) as EntityCorrectionRecord[];
+};
+
+/** Include corrections recorded on the canonical entity or any active alias. */
+export const getDreamingEntityCorrections = (
+  entityId: string,
+): Array<{ fingerprint: string }> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return [];
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const aliasTable =
+    entity.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn = entity.type === 'person' ? 'person_id' : 'project_id';
+  return db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+        WHERE canonical_id = ? AND active = 1
+      )
+      SELECT DISTINCT correction.fingerprint
+      FROM entity_corrections correction
+      WHERE correction.entity_id IN (SELECT id FROM family)
+      ORDER BY correction.fingerprint COLLATE BINARY
+      LIMIT 64
+    `)
+    .all(canonicalId, canonicalId) as Array<{ fingerprint: string }>;
 };
 
 export const isItemDismissed = (

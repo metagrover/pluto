@@ -121,11 +121,14 @@ export const buildDreamingGenerationRequest = (
   input: DreamingInputPackage,
 ): DreamingGenerationRequest => {
   const correctionFingerprints = [
-    ...(input.correctionFingerprints ?? []),
-    ...input.negativeConstraints,
-  ];
+    ...new Set([
+      ...(input.correctionFingerprints ?? []),
+      ...input.negativeConstraints,
+    ]),
+  ].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  const { negativeConstraints: _legacyCorrections, ...currentInput } = input;
   const promptInput = {
-    ...input,
+    ...currentInput,
     correctionFingerprints,
   };
   const supportedKinds = kindsByEntity[input.entityType].join(', ');
