@@ -1,7 +1,7 @@
 ### Expose duplicate model work in trusted meeting notes
 
 - **Issue:** [#739](https://github.com/metagrover/pluto/issues/739)
-- **PR:** Pending.
+- **PR:** [#740](https://github.com/metagrover/pluto/pull/740)
 - **Changed:** A deterministic repository report now separates capture sealing, canonical transcript finalization, trusted-note generation, and post-publication enrichment while accounting for note-stage model calls, tokens, repeated source consumption, repairs, and identical recovery outputs.
 - **Why:** A single stop-to-notes total can misattribute capture or transcription delay to notes generation, while aggregate retry counts hide expensive repairs that reproduce the rejected response unchanged.
 - **Replaced:** Ad hoc inspection of captured note attempts without an explicit privacy-safe timing and recovery ledger.
