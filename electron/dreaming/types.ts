@@ -42,7 +42,10 @@ export type RawDreamingProposal = {
 
 export type RawDreamingOutput =
   | { status: 'no_change'; proposals: [] }
-  | { status: 'proposed'; proposals: RawDreamingProposal[] };
+  | {
+      status: 'proposed';
+      proposals: [RawDreamingProposal, ...RawDreamingProposal[]];
+    };
 
 export type ValidatedDreamingProposal = RawDreamingProposal & {
   fingerprint: string;
@@ -60,13 +63,16 @@ export type DreamingValidationResult =
   | {
       valid: true;
       status: 'proposed';
-      proposals: ValidatedDreamingProposal[];
+      proposals: [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]];
     }
   | { valid: false; error: string };
 
 export type DreamingRunResult =
   | { status: 'no_change'; proposals: [] }
-  | { status: 'proposed'; proposals: ValidatedDreamingProposal[] }
+  | {
+      status: 'proposed';
+      proposals: [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]];
+    }
   | { status: 'failed'; errorCode: string }
   | { status: 'cancelled' };
 
