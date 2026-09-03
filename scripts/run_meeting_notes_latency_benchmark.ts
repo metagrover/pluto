@@ -23,6 +23,7 @@ import {
   parsePrivateMeetingNotesLatencyManifest,
   summarizeMeetingNotesLatencyStages,
 } from './lib/meeting_notes_latency_benchmark.ts';
+import { normalizeCapturedNotesDraft } from './lib/meeting_notes_recovery_replay.ts';
 import { writeOwnerOnlyPrivateFile } from './lib/privateEvaluationFile.ts';
 
 type BenchmarkMode = 'isolated' | 'repeat-30' | 'burst';
@@ -48,6 +49,9 @@ const hierarchyAuditStrategy = option(
 if (!['every_node', 'final_only'].includes(hierarchyAuditStrategy)) {
   throw new Error('invalid_meeting_notes_hierarchy_audit_strategy');
 }
+const deterministicWriterRecovery = process.argv.includes(
+  '--deterministic-writer-recovery',
+);
 const manifest = parsePrivateMeetingNotesLatencyManifest(
   JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown,
 );
@@ -116,6 +120,7 @@ const runCase = async (
     generatedNodeCount: number;
     stageCounts: ReturnType<typeof summarizeMeetingNotesLatencyStages>;
     repairCount: number;
+    deterministicWriterRecoveryCount: number;
     repartitionCount: number;
   }
 > => {
@@ -148,6 +153,7 @@ const runCase = async (
   let errorCode: string | undefined;
   let runMetric: MeetingNotesRunMetric;
   let generatedNodeCount = 0;
+  let deterministicWriterRecoveryCount = 0;
   try {
     const analysis = await provider.generateStructuredAnalysis('', '', 'auto', {
       source,
@@ -157,6 +163,19 @@ const runCase = async (
       onPlan: ({ plannedLeafCount }) =>
         metrics.setPlannedLeafCount(plannedLeafCount),
       onRepair: () => metrics.recordRepair(),
+      ...(deterministicWriterRecovery
+        ? {
+            recoverWriterDraft: (raw: string) => {
+              const recovery = normalizeCapturedNotesDraft(raw);
+              return recovery.status === 'normalized'
+                ? recovery.normalizedJson
+                : null;
+            },
+            onDeterministicWriterRecovery: () => {
+              deterministicWriterRecoveryCount += 1;
+            },
+          }
+        : {}),
       onRepartition: () => metrics.recordRepartition(),
     });
     generatedNodeCount = analysis.generation_metadata?.hierarchy?.nodes ?? 1;
@@ -185,6 +204,7 @@ const runCase = async (
     generatedNodeCount,
     stageCounts: summarizeMeetingNotesLatencyStages(runMetric.stages),
     repairCount: runMetric.repairCount,
+    deterministicWriterRecoveryCount,
     repartitionCount: runMetric.repartitionCount,
     ...(errorCode ? { errorCode } : {}),
   };
@@ -219,6 +239,7 @@ const main = async () => {
       seed,
       structuredThinking: false,
       hierarchyAuditStrategy,
+      deterministicWriterRecovery,
       fixtureOrderSha256: createHash('sha256')
         .update(cases.map(({ definition }) => definition.caseKey).join('\n'))
         .digest('hex'),

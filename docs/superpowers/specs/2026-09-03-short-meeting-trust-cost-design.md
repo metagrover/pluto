@@ -155,3 +155,9 @@ The normalizer may perform only these lossless schema adaptations:
 It must preserve text, source references, owner, due date, section order, item order, and every other field byte-for-value after JSON parsing. Unknown fields, competing source arrays, non-null ownership/deadline on a discussion item, invalid JSON, audit responses, or any other shape are not normalizable.
 
 Decode captured request-local source labels through the existing notes wire adapter, parse the candidate through the existing strict draft parser, and run existing source guardrails against the original synthetic source. Report parse recovery, guardrail issue counts/codes, transformation counts, and the captured model time that the replay could have avoided. Do not project or publish the candidate, call a model, change the production parser, or claim semantic correctness from structural recovery.
+
+## Recent-meeting probe
+
+The private latency runner may explicitly supply the deterministic writer recovery function to the otherwise unchanged meeting-notes pipeline. Normal product callers cannot activate it accidentally. A recovery counts only when the normalized response passes the existing strict parser and allowed-source checks; refusal or parse failure falls through to the existing single model repair.
+
+Run only against validated, finalized meetings with the production database opened read-only. Persist content-free counts and timings, never generated notes or raw responses. The first completed recent-meeting run recorded no repair opportunity and failed during hierarchical merge. A second historically repair-prone case expanded beyond 30 merge calls and was stopped rather than spending toward the 128-node bound. These probes did not justify production promotion: writer normalization remains a bounded candidate, while truncation and merge/repartition convergence are the stronger next targets.

@@ -513,6 +513,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      /** Explicit benchmark experiment; product callers retain model repair. */
+      recoverWriterDraft?: (raw: string) => string | null;
+      onDeterministicWriterRecovery?: () => void;
       onStageEvent?: NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
       onRepartition?: () => void;
@@ -537,6 +540,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       hierarchyAuditStrategy: options.hierarchyAuditStrategy,
       onStage: options.onStage,
       onRepair: options.onRepair,
+      recoverWriterDraft: options.recoverWriterDraft,
+      onDeterministicWriterRecovery: options.onDeterministicWriterRecovery,
       onPlan: options.onPlan,
       onRepartition: options.onRepartition,
       generate: async (request) => {

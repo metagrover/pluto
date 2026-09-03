@@ -88,3 +88,18 @@ expect(report.deterministic_recovery_replay).toMatchObject({
 - [x] Run focused tests, full tests, TypeScript, Biome, changelog validation, deterministic report comparison, and the privacy assertion.
 - [x] Mark every plan step complete and commit.
 - [x] Push PR #740 and add the content-free replay result to issue #739.
+
+### Task 4: Read-only recent-meeting probe
+
+**Files:**
+- Modify: `electron/llm/meetingNotesTypes.ts`
+- Modify: `electron/llm/meetingNotesPipeline.ts`
+- Modify: `electron/llm/unifiedProvider.ts`
+- Modify: `scripts/run_meeting_notes_latency_benchmark.ts`
+- Modify: `tests/unit/meetingNotesPipeline.test.ts`
+
+- [x] Add a failing pipeline test proving an explicitly supplied benchmark recovery can pass the unchanged parser and avoid model repair.
+- [x] Add the minimal opt-in hook and a distinct successful-recovery counter; retain the default product path.
+- [x] Run a validated recent meeting read-only and record the content-free result.
+- [x] Stop the repair-prone probe after recursive merge work exceeded 30 calls rather than spending toward the hard node bound.
+- [ ] Run full verification, update issue #739, and push PR #740.
