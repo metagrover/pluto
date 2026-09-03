@@ -1,5 +1,8 @@
 import type { Meeting } from '../types.ts';
-import { hasVerifiedSpeakerAttribution } from '../utils/speakerAttributionTrust.ts';
+import {
+  hasVerifiedSpeakerAttribution,
+  readStoredSpeakerAttribution,
+} from '../utils/speakerAttributionTrust.ts';
 import { readDownstreamProcessingLease } from './downstreamProcessingLease.ts';
 import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValidation.ts';
 
@@ -85,10 +88,14 @@ export function canImproveHistoricalSpeakerLabels(
     completedParakeetFinal = false;
   }
   if (!completedParakeetFinal) return false;
-  if (meeting.speaker_attribution_verified === true) return false;
-  return meeting.transcript_json
-    ? !hasVerifiedSpeakerAttribution(meeting.transcript_json)
-    : meeting.speaker_attribution_verified === false;
+  if (meeting.transcript_json) {
+    const attribution = readStoredSpeakerAttribution(meeting.transcript_json);
+    return (
+      attribution?.source === 'recovered_channel_acoustic_v1' ||
+      !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+    );
+  }
+  return meeting.speaker_attribution_verified === false;
 }
 
 export const isParakeetValidatedMeeting = (

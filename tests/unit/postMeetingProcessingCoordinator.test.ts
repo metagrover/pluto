@@ -145,6 +145,72 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForFinalTranscription([meeting])).toBeNull();
   });
 
+  it('offers a manual v2 upgrade for a completed v1 attribution', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v1',
+          confidence: 1,
+          mappingApplied: true,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(true);
+  });
+
+  it('does not offer another upgrade for a completed v2 attribution', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v2',
+          confidence: 0.95,
+          mappingApplied: true,
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(false);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(true);
+  });
+
   it('does not classify a fresh attribution rejection as historical repair', () => {
     expect(
       canImproveHistoricalSpeakerLabels({
