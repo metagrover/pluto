@@ -8651,11 +8651,21 @@ export const getDreamingEntityBaseline = (
     .all(canonicalId) as Array<{ id: string; name: string }>;
   const dreamingAliases = db
     .prepare(
-      `SELECT normalized_name AS id, display_name AS name
-       FROM entity_dreaming_aliases WHERE entity_id = ? AND active = 1
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+         WHERE canonical_id = ? AND active = 1
+       )
+       SELECT normalized_name AS id, MIN(display_name) AS name
+       FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND entity_id IN (SELECT id FROM family)
+         AND active = 1
+       GROUP BY normalized_name
        ORDER BY normalized_name LIMIT 24`,
     )
-    .all(canonicalId) as Array<{ id: string; name: string }>;
+    .all(canonicalId, canonicalId, canonical.type) as Array<{
+    id: string;
+    name: string;
+  }>;
   const userNameAliases =
     canonical.type === 'person'
       ? (db

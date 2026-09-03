@@ -759,6 +759,109 @@ describe('dreaming proposal persistence', () => {
     ).toEqual({ count: 0 });
   });
 
+  it.each([
+    ['project', 'project_alias'],
+    ['person', 'person_alias'],
+  ] as const)(
+    'does not accept a %s alias identical to the canonical name',
+    (entityType, kind) => {
+      const { sql, store } = fixture();
+      const entityId = `${entityType}-same-name`;
+      sql
+        .prepare(
+          'INSERT INTO entities(id,type,name,normalized_name,metadata) VALUES (?,?,?,?,?)',
+        )
+        .run(entityId, entityType, 'Canonical Name', 'canonical name', '{}');
+      const started = store.startRun({
+        entityId,
+        entityType,
+        sourceRevision: 'same-name-rev',
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-v1',
+      });
+      expect(started.status).toBe('started');
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind,
+            payload: { alias: ' Canonical   Name ' },
+            evidence: [{ meetingId: 'meeting-1', excerpt: 'Canonical Name' }],
+            fingerprint: `${entityType}-same-name`,
+          },
+        ],
+      });
+      const proposal = store.listPendingProposals(entityId, entityType)[0];
+
+      expect(
+        store.acceptDreamingProposal({
+          proposalId: proposal.id,
+          getCurrentSourceRevision: () => 'same-name-rev',
+        }),
+      ).toEqual({
+        status: 'review_required',
+        proposalId: proposal.id,
+      });
+      expect(store.listPendingProposals(entityId, entityType)).toHaveLength(1);
+      expect(
+        store.rejectDreamingProposal({
+          proposalId: proposal.id,
+          getCurrentSourceRevision: () => 'same-name-rev',
+        }).status,
+      ).toBe('rejected');
+      expect(
+        sql.prepare('SELECT COUNT(*) count FROM entity_dreaming_aliases').get(),
+      ).toEqual({ count: 0 });
+    },
+  );
+
+  it('returns review_required instead of violating uniqueness for a repeated active family alias', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const acceptAlias = (revision: string) => {
+      const started = startProject(store, revision);
+      expect(started.status).toBe('started');
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_alias',
+            payload: { alias: 'Shared Alias' },
+            evidence: [{ meetingId: 'meeting-1', excerpt: 'Shared Alias' }],
+            fingerprint: `shared-alias-${revision}`,
+          },
+        ],
+      });
+      const proposal = store
+        .listPendingProposals('project-1', 'project')
+        .at(-1)!;
+      return {
+        proposal,
+        result: store.acceptDreamingProposal({
+          proposalId: proposal.id,
+          getCurrentSourceRevision: () => revision,
+        }),
+      };
+    };
+
+    expect(acceptAlias('rev-one').result.status).toBe('accepted');
+    const repeated = acceptAlias('rev-two');
+    expect(repeated.result).toEqual({
+      status: 'review_required',
+      proposalId: repeated.proposal.id,
+    });
+    expect(
+      sql.prepare('SELECT COUNT(*) count FROM entity_dreaming_aliases').get(),
+    ).toEqual({ count: 1 });
+  });
+
   it('accepts a non-colliding project alias without creating or merging an entity', () => {
     const { sql, store } = fixture();
     sql

@@ -911,7 +911,12 @@ export function createDreamingProposalStore(
       | undefined;
     if (!entity || entity.type !== expectedType)
       throw new Error('dreaming_entity_invalid');
-    if (normalized === entity.normalized_name) return 'applied';
+    const canonicalId = resolveCanonicalEntityId(entity.id, expectedType);
+    const canonical = sql
+      .prepare('SELECT normalized_name FROM entities WHERE id = ?')
+      .get(canonicalId) as { normalized_name: string } | undefined;
+    if (!canonical) throw new Error('dreaming_entity_invalid');
+    if (normalized === canonical.normalized_name) return 'review_required';
     const collision = sql
       .prepare(
         'SELECT id FROM entities WHERE type = ? AND normalized_name = ? AND id <> ?',
@@ -926,7 +931,7 @@ export function createDreamingProposalStore(
       if (
         userAliasOwners.some(
           (owner) =>
-            resolveCanonicalEntityId(owner.person_id, 'person') !== entity.id,
+            resolveCanonicalEntityId(owner.person_id, 'person') !== canonicalId,
         )
       ) {
         return 'review_required';
@@ -934,11 +939,12 @@ export function createDreamingProposalStore(
     }
     const aliasCollision = sql
       .prepare(
-        `SELECT entity_id AS id FROM entity_dreaming_aliases
-         WHERE entity_type = ? AND normalized_name = ? AND active = 1
-           AND entity_id <> ?`,
+        `SELECT entity_id AS id, proposal_id FROM entity_dreaming_aliases
+         WHERE entity_type = ? AND normalized_name = ? AND active = 1`,
       )
-      .get(expectedType, normalized, entity.id) as { id: string } | undefined;
+      .get(expectedType, normalized) as
+      | { id: string; proposal_id: string }
+      | undefined;
     if (aliasCollision) return 'review_required';
     sql
       .prepare(`INSERT INTO entity_dreaming_aliases(

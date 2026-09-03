@@ -180,53 +180,111 @@ describe('Entity Corrections Persistence', () => {
     },
   );
 
-  it('keeps a dreaming person alias reversible after its person is canonically merged', () => {
-    const source = db.upsertEntity({
-      type: 'person',
-      name: `Merge Source ${process.pid}`,
-    });
-    const destination = db.upsertEntity({
-      type: 'person',
-      name: `Merge Destination ${process.pid}`,
-    });
-    const revision = 'person-merge-alias-revision';
-    const started = db.dreamingProposalStore.startRun({
-      entityId: source.id,
-      entityType: 'person',
-      sourceRevision: revision,
-      model: 'gemma4:12b',
-      promptVersion: 'dreaming-v1',
-    });
-    expect(started.status).toBe('started');
-    db.dreamingProposalStore.completeRun({
-      runId: started.run.id,
-      leaseToken: started.run.leaseToken,
-      status: 'proposed',
-      proposals: [
-        {
-          kind: 'person_alias',
-          payload: { alias: 'Merged Dream Alias' },
-          evidence: [
-            { meetingId: 'meeting-merge', excerpt: 'Merged Dream Alias cited' },
-          ],
-          fingerprint: 'merged-dream-alias',
-        },
-      ],
-    });
-    const proposal = db.dreamingProposalStore.listPendingProposals(
-      source.id,
-      'person',
-    )[0];
-    db.acceptDreamingProposal({
-      proposalId: proposal.id,
-      getCurrentSourceRevision: () => revision,
-    });
-    db.mergePerson(source.id, destination.id);
+  it.each([
+    ['person', 'person_alias'],
+    ['project', 'project_alias'],
+  ] as const)(
+    'keeps a dreaming %s alias resolvable, packaged, and reversible after a canonical merge',
+    (entityType, kind) => {
+      const source = db.upsertEntity({
+        type: entityType,
+        name: `${entityType} Merge Source ${process.pid}`,
+      });
+      const destination = db.upsertEntity({
+        type: entityType,
+        name: `${entityType} Merge Destination ${process.pid}`,
+      });
+      const alias = `${entityType} Merged Dream Alias`;
+      const revision = `${entityType}-merge-alias-revision`;
+      const started = db.dreamingProposalStore.startRun({
+        entityId: source.id,
+        entityType,
+        sourceRevision: revision,
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-v1',
+      });
+      expect(started.status).toBe('started');
+      db.dreamingProposalStore.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind,
+            payload: { alias },
+            evidence: [
+              { meetingId: 'meeting-merge', excerpt: `${alias} cited` },
+            ],
+            fingerprint: `${entityType}-merged-dream-alias`,
+          },
+        ],
+      });
+      const proposal = db.dreamingProposalStore.listPendingProposals(
+        source.id,
+        entityType,
+      )[0];
+      db.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => revision,
+      });
+      if (entityType === 'person') db.mergePerson(source.id, destination.id);
+      else db.mergeProject(source.id, destination.id);
 
-    expect(db.findEntity('person', 'Merged Dream Alias')?.id).toBe(
-      destination.id,
-    );
-    db.removeDreamingAlias({ proposalId: proposal.id });
-    expect(db.resolvePersonIdentityId(source.id)).toBe(destination.id);
-  });
+      expect(db.findEntity(entityType, alias)?.id).toBe(destination.id);
+      expect(db.getDreamingEntityBaseline(destination.id).aliases).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: alias })]),
+      );
+      const repeatedRevision = `${revision}-repeated`;
+      const repeatedRun = db.dreamingProposalStore.startRun({
+        entityId: destination.id,
+        entityType,
+        sourceRevision: repeatedRevision,
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-v1',
+      });
+      expect(repeatedRun.status).toBe('started');
+      db.dreamingProposalStore.completeRun({
+        runId: repeatedRun.run.id,
+        leaseToken: repeatedRun.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind,
+            payload: { alias },
+            evidence: [
+              { meetingId: 'meeting-repeat', excerpt: `${alias} repeated` },
+            ],
+            fingerprint: `${entityType}-merged-dream-alias-repeated`,
+          },
+        ],
+      });
+      const repeatedProposal = db.dreamingProposalStore.listPendingProposals(
+        destination.id,
+        entityType,
+      )[0];
+      expect(
+        db.acceptDreamingProposal({
+          proposalId: repeatedProposal.id,
+          getCurrentSourceRevision: () => repeatedRevision,
+        }).status,
+      ).toBe('review_required');
+      db.removeDreamingAlias({ proposalId: proposal.id });
+      expect(db.findEntity(entityType, alias)).toBeUndefined();
+      expect(db.getDreamingEntityBaseline(destination.id).aliases).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: alias })]),
+      );
+      expect(db.restoreDreamingAlias({ proposalId: proposal.id }).status).toBe(
+        'restored',
+      );
+      expect(db.findEntity(entityType, alias)?.id).toBe(destination.id);
+      expect(db.getDreamingEntityBaseline(destination.id).aliases).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: alias })]),
+      );
+      expect(
+        entityType === 'person'
+          ? db.resolvePersonIdentityId(source.id)
+          : db.resolveProjectIdentityId(source.id),
+      ).toBe(destination.id);
+    },
+  );
 });
