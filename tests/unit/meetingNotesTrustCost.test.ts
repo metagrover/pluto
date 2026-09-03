@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type MeetingNotesTrustCostCase,
   assertMeetingNotesTrustCostReportSafe,
   buildMeetingNotesTrustCostReport,
-  type MeetingNotesTrustCostCase,
 } from '../../scripts/lib/meeting_notes_trust_cost';
 
 const checkpoint = (
@@ -35,6 +35,11 @@ const writerFailure = (): MeetingNotesTrustCostCase => ({
   terminalStatus: 'failed',
   errorCode: 'notes_writer_invalid',
   publicationBlocked: true,
+  timingEvidence: {
+    stopToSealedCapture: null,
+    sealedToCanonicalTranscript: null,
+    postPublicationCompute: null,
+  },
   checkpoints: {
     writer: null,
     deterministicBoundary: null,
@@ -76,12 +81,17 @@ describe('meeting notes trust-cost evaluator', () => {
         deterministicBoundary: null,
         audited: null,
       },
-      stopToTrustedNotes: {
-        modelCallCount: 2,
-        modelMs: 70,
-        inputTokens: 220,
-        outputTokens: 40,
-        repeatedSourceModelCallCount: 1,
+      timing_boundaries: {
+        stop_to_sealed_capture: null,
+        sealed_to_canonical_transcript: null,
+        canonical_to_trusted_notes: {
+          modelCallCount: 2,
+          modelMs: 70,
+          inputTokens: 220,
+          outputTokens: 40,
+          repeatedSourceModelCallCount: 1,
+        },
+        post_publication_compute: null,
       },
       recovery: {
         malformedContractRepairCount: 1,
@@ -146,9 +156,40 @@ describe('meeting notes trust-cost evaluator', () => {
       },
     ]);
 
-    expect(report.cases[0]?.conclusion).toBe(
-      'insufficient_fixture_evidence',
-    );
+    expect(report.cases[0]?.conclusion).toBe('insufficient_fixture_evidence');
+  });
+
+  it('keeps canonical finalization stages separate with queue and resume state', () => {
+    const input = writerFailure();
+    input.timingEvidence.sealedToCanonicalTranscript = {
+      totalMs: 35,
+      queueMs: 5,
+      activeMs: 30,
+      attemptCount: 2,
+      resumeState: 'resumed',
+      stages: [
+        {
+          stage: 'materialize_mic',
+          queueMs: 5,
+          activeMs: 30,
+          attempt: 2,
+          resumeState: 'resumed',
+        },
+      ],
+    };
+
+    const report = buildMeetingNotesTrustCostReport([input]);
+
+    expect(
+      report.cases[0]?.timing_boundaries.sealed_to_canonical_transcript,
+    ).toEqual(input.timingEvidence.sealedToCanonicalTranscript);
+    expect(report.totals.sealed_to_canonical_transcript).toMatchObject({
+      observedCaseCount: 1,
+      totalMs: 35,
+      queueMs: 5,
+      activeMs: 30,
+      attemptCount: 2,
+    });
   });
 
   it('rejects text-bearing fields and private sentinel values recursively', () => {

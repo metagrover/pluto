@@ -35,6 +35,35 @@ export type MeetingNotesTrustCostAttempt = {
   repeatsSource: boolean;
 };
 
+export type MeetingPipelineTiming = {
+  totalMs: number;
+  queueMs: number;
+  activeMs: number;
+  attemptCount: number;
+  resumeState: 'fresh' | 'resumed' | 'mixed';
+};
+
+export type CanonicalTranscriptStage =
+  | 'materialize_mic'
+  | 'materialize_system'
+  | 'build_mix'
+  | 'transcribe_mic'
+  | 'transcribe_system'
+  | 'reconcile_channels'
+  | 'attribute_speakers'
+  | 'validate_transcript'
+  | 'commit_canonical';
+
+export type CanonicalTranscriptTiming = MeetingPipelineTiming & {
+  stages: Array<{
+    stage: CanonicalTranscriptStage;
+    queueMs: number;
+    activeMs: number;
+    attempt: number;
+    resumeState: 'fresh' | 'resumed';
+  }>;
+};
+
 export type MeetingNotesTrustCostCase = {
   fixtureId: string;
   caseId: string;
@@ -43,6 +72,11 @@ export type MeetingNotesTrustCostCase = {
   terminalStatus: 'published' | 'failed' | 'cancelled';
   errorCode: string | null;
   publicationBlocked: boolean;
+  timingEvidence: {
+    stopToSealedCapture: MeetingPipelineTiming | null;
+    sealedToCanonicalTranscript: CanonicalTranscriptTiming | null;
+    postPublicationCompute: MeetingPipelineTiming | null;
+  };
   checkpoints: {
     writer: TrustCostCheckpoint | null;
     deterministicBoundary: TrustCostCheckpoint | null;
@@ -68,6 +102,19 @@ const outcomes = new Set([
   'cancelled',
 ]);
 const terminalStatuses = new Set(['published', 'failed', 'cancelled']);
+const canonicalStages = new Set<CanonicalTranscriptStage>([
+  'materialize_mic',
+  'materialize_system',
+  'build_mix',
+  'transcribe_mic',
+  'transcribe_system',
+  'reconcile_channels',
+  'attribute_speakers',
+  'validate_transcript',
+  'commit_canonical',
+]);
+const aggregateResumeStates = new Set(['fresh', 'resumed', 'mixed']);
+const stageResumeStates = new Set(['fresh', 'resumed']);
 
 const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -76,8 +123,7 @@ const isNullableCount = (value: unknown): value is number | null =>
   value === null || isCount(value);
 
 const isSafeIdentifier = (value: unknown): value is string =>
-  typeof value === 'string' &&
-  /^[a-z0-9][a-z0-9._:@/-]{0,127}$/i.test(value);
+  typeof value === 'string' && /^[a-z0-9][a-z0-9._:@/-]{0,127}$/i.test(value);
 
 const assertCheckpoint = (value: TrustCostCheckpoint | null): void => {
   if (value === null) return;
@@ -92,6 +138,43 @@ const assertCheckpoint = (value: TrustCostCheckpoint | null): void => {
     !isCount(value.actionCount)
   ) {
     throw new Error('invalid_meeting_notes_trust_cost_case');
+  }
+};
+
+const assertTiming = (value: MeetingPipelineTiming | null): void => {
+  if (value === null) return;
+  if (
+    !isCount(value.totalMs) ||
+    !isCount(value.queueMs) ||
+    !isCount(value.activeMs) ||
+    value.queueMs + value.activeMs > value.totalMs ||
+    !isCount(value.attemptCount) ||
+    value.attemptCount === 0 ||
+    !aggregateResumeStates.has(value.resumeState)
+  ) {
+    throw new Error('invalid_meeting_notes_trust_cost_case');
+  }
+};
+
+const assertCanonicalTiming = (
+  value: CanonicalTranscriptTiming | null,
+): void => {
+  assertTiming(value);
+  if (value === null) return;
+  if (!Array.isArray(value.stages) || value.stages.length > 256) {
+    throw new Error('invalid_meeting_notes_trust_cost_case');
+  }
+  for (const stage of value.stages) {
+    if (
+      !canonicalStages.has(stage.stage) ||
+      !isCount(stage.queueMs) ||
+      !isCount(stage.activeMs) ||
+      !isCount(stage.attempt) ||
+      stage.attempt === 0 ||
+      !stageResumeStates.has(stage.resumeState)
+    ) {
+      throw new Error('invalid_meeting_notes_trust_cost_case');
+    }
   }
 };
 
@@ -113,6 +196,9 @@ const assertCase = (value: MeetingNotesTrustCostCase): void => {
   assertCheckpoint(value.checkpoints.writer);
   assertCheckpoint(value.checkpoints.deterministicBoundary);
   assertCheckpoint(value.checkpoints.audited);
+  assertTiming(value.timingEvidence.stopToSealedCapture);
+  assertCanonicalTiming(value.timingEvidence.sealedToCanonicalTranscript);
+  assertTiming(value.timingEvidence.postPublicationCompute);
   for (const attempt of value.attempts) {
     if (
       !tasks.has(attempt.task) ||
@@ -176,9 +262,7 @@ const classifyConclusion = (
     : 'insufficient_fixture_evidence';
 };
 
-const sumNullable = (
-  values: Array<number | null>,
-): number | null =>
+const sumNullable = (values: Array<number | null>): number | null =>
   values.every((value) => value === null)
     ? null
     : values.reduce<number>((total, value) => total + (value ?? 0), 0);
@@ -187,6 +271,23 @@ const recoveryCount = (
   attempts: MeetingNotesTrustCostAttempt[],
   recovery: TrustCostRecovery,
 ) => attempts.filter((attempt) => attempt.recovery === recovery).length;
+
+const aggregateTimings = <T extends MeetingPipelineTiming>(
+  values: Array<T | null>,
+) => {
+  const observed = values.filter((value): value is T => value !== null);
+  if (observed.length === 0) return null;
+  return {
+    observedCaseCount: observed.length,
+    totalMs: observed.reduce((total, value) => total + value.totalMs, 0),
+    queueMs: observed.reduce((total, value) => total + value.queueMs, 0),
+    activeMs: observed.reduce((total, value) => total + value.activeMs, 0),
+    attemptCount: observed.reduce(
+      (total, value) => total + value.attemptCount,
+      0,
+    ),
+  };
+};
 
 export const assertMeetingNotesTrustCostReportSafe = (
   value: unknown,
@@ -240,16 +341,21 @@ export const buildMeetingNotesTrustCostReport = (
       publicationBlocked: input.publicationBlocked,
       conclusion: classifyConclusion(input),
       checkpoints: input.checkpoints,
-      stopToTrustedNotes: {
-        modelCallCount: attempts.length,
-        modelMs: attempts.reduce((total, item) => total + item.modelMs, 0),
-        inputTokens: sumNullable(attempts.map((item) => item.inputTokens)),
-        outputTokens: sumNullable(attempts.map((item) => item.outputTokens)),
-        repeatedSourceModelCallCount: attempts.filter(
-          (item) => item.repeatsSource,
-        ).length,
+      timing_boundaries: {
+        stop_to_sealed_capture: input.timingEvidence.stopToSealedCapture,
+        sealed_to_canonical_transcript:
+          input.timingEvidence.sealedToCanonicalTranscript,
+        canonical_to_trusted_notes: {
+          modelCallCount: attempts.length,
+          modelMs: attempts.reduce((total, item) => total + item.modelMs, 0),
+          inputTokens: sumNullable(attempts.map((item) => item.inputTokens)),
+          outputTokens: sumNullable(attempts.map((item) => item.outputTokens)),
+          repeatedSourceModelCallCount: attempts.filter(
+            (item) => item.repeatsSource,
+          ).length,
+        },
+        post_publication_compute: input.timingEvidence.postPublicationCompute,
       },
-      postPublicationCompute: null,
       recovery: {
         malformedContractRepairCount: recoveryCount(
           input.attempts,
@@ -285,24 +391,41 @@ export const buildMeetingNotesTrustCostReport = (
       insufficientFixtureEvidenceCount: cases.filter(
         (item) => item.conclusion === 'insufficient_fixture_evidence',
       ).length,
-      stopToTrustedNotes: {
+      stop_to_sealed_capture: aggregateTimings(
+        inputs.map((input) => input.timingEvidence.stopToSealedCapture),
+      ),
+      sealed_to_canonical_transcript: aggregateTimings(
+        inputs.map((input) => input.timingEvidence.sealedToCanonicalTranscript),
+      ),
+      canonical_to_trusted_notes: {
         modelCallCount: cases.reduce(
-          (total, item) => total + item.stopToTrustedNotes.modelCallCount,
+          (total, item) =>
+            total +
+            item.timing_boundaries.canonical_to_trusted_notes.modelCallCount,
           0,
         ),
         modelMs: cases.reduce(
-          (total, item) => total + item.stopToTrustedNotes.modelMs,
+          (total, item) =>
+            total + item.timing_boundaries.canonical_to_trusted_notes.modelMs,
           0,
         ),
         inputTokens: sumNullable(
-          cases.map((item) => item.stopToTrustedNotes.inputTokens),
+          cases.map(
+            (item) =>
+              item.timing_boundaries.canonical_to_trusted_notes.inputTokens,
+          ),
         ),
         outputTokens: sumNullable(
-          cases.map((item) => item.stopToTrustedNotes.outputTokens),
+          cases.map(
+            (item) =>
+              item.timing_boundaries.canonical_to_trusted_notes.outputTokens,
+          ),
         ),
         repeatedSourceModelCallCount: cases.reduce(
           (total, item) =>
-            total + item.stopToTrustedNotes.repeatedSourceModelCallCount,
+            total +
+            item.timing_boundaries.canonical_to_trusted_notes
+              .repeatedSourceModelCallCount,
           0,
         ),
         duplicateRecoveryModelMs: cases.reduce(
@@ -310,7 +433,9 @@ export const buildMeetingNotesTrustCostReport = (
           0,
         ),
       },
-      postPublicationCompute: null,
+      post_publication_compute: aggregateTimings(
+        inputs.map((input) => input.timingEvidence.postPublicationCompute),
+      ),
     },
   };
   assertMeetingNotesTrustCostReportSafe(report);
