@@ -2704,6 +2704,7 @@ export const failMeetingFinalTranscription = (
         .prepare(
           `UPDATE meetings
            SET transcript_status = 'needs_attention',
+               finalization_status = 'needs_attention',
                transcript_json = ?,
                transcript_integrity_json = ?
            WHERE id = ? AND transcript_integrity_json IS ?`,
@@ -2756,6 +2757,7 @@ export const expireInterruptedFinalTranscription = (): number =>
         .prepare(
           `UPDATE meetings
            SET transcript_status = 'needs_attention',
+               finalization_status = 'needs_attention',
                transcript_json = ?,
                transcript_integrity_json = ?
            WHERE id = ? AND transcript_integrity_json IS ?`,

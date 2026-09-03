@@ -105,6 +105,12 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(materializeIndex).toBeGreaterThan(releaseIndex);
   });
 
+  it('keeps the sealed provisional handoff in a processing state', () => {
+    expect(source).toMatch(
+      /transcript_status: 'provisional',[\s\S]{0,700}finalization_status: 'processing'/u,
+    );
+  });
+
   it('keeps the active EOU session across ordinary AudioManager rerenders', () => {
     const listenerEffectStart = source.indexOf(
       '// Set up event listeners for external control',

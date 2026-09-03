@@ -52,6 +52,7 @@ it('claims and commits final transcription only for the exact capture generation
     }),
     transcript_integrity_json: '{}',
     capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
     analysis_json: JSON.stringify({ stale: true }),
   });
   const lease = buildFinalTranscriptionLease({
@@ -250,6 +251,7 @@ it('expires interrupted final transcription without replacing provisional text',
     transcript_json: provisional,
     transcript_integrity_json: '{}',
     capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
   });
   const lease = buildFinalTranscriptionLease({
     runId: 'interrupted-run',
@@ -262,6 +264,7 @@ it('expires interrupted final transcription without replacing provisional text',
   expect(expireInterruptedFinalTranscription()).toBeGreaterThanOrEqual(1);
   expect(getMeeting(id)).toMatchObject({
     transcript_status: 'needs_attention',
+    finalization_status: 'needs_attention',
   });
   expect(JSON.parse(String(getMeeting(id)?.transcript_json)).segments).toEqual([
     { speaker: 'Me', text: 'provisional' },

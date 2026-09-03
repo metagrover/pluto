@@ -515,6 +515,7 @@ describe('MeetingView transcript integrity', () => {
 
   it('does not offer deletion for a recovery-required meeting', () => {
     expect(canDeleteMeeting('recovery_required')).toBe(false);
+    expect(canDeleteMeeting('processing')).toBe(false);
     expect(canDeleteMeeting('finalized')).toBe(true);
 
     const markup = renderToStaticMarkup(

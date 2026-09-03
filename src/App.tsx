@@ -72,6 +72,7 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
+  shouldRunMeetingFinalTranscription,
 } from './services/postMeetingProcessingCoordinator';
 import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
 import { shouldAutoProcessMeetingAnalysis } from './services/retryMeetingTranscriptValidation';
@@ -923,7 +924,7 @@ function App() {
       'GET_MEETING',
       meeting.id,
     )) as Meeting | null;
-    if (!detail) return;
+    if (!detail || !shouldRunMeetingFinalTranscription(detail)) return;
     const controller = new AbortController();
     finalTranscriptionAbortRef.current = controller;
     setFinalTranscriptionMeetingId(meeting.id);

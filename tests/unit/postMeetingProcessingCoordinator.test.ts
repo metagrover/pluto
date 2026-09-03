@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   canImproveHistoricalSpeakerLabels,
@@ -9,6 +10,7 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
+  shouldRunMeetingFinalTranscription,
 } from '../../src/services/postMeetingProcessingCoordinator';
 
 const incomplete = (id: string) => ({
@@ -33,13 +35,38 @@ describe('post-meeting processing coordinator', () => {
         {
           id: 'meeting-1',
           transcript_status: 'provisional',
-          finalization_status: 'finalized',
+          finalization_status: 'processing',
           capture_journal_generation: 'generation-1',
           transcript_json: '{"segments":[]}',
           audio_path: '/approved/mic.wav',
+          system_audio_path: '/approved/system.wav',
+          mixed_audio_path: '/approved/mixed.wav',
         },
       ])?.id,
     ).toBe('meeting-1');
+  });
+
+  it('waits for all recovered audio artifacts before final transcription', () => {
+    expect(
+      shouldRunMeetingFinalTranscription({
+        id: 'meeting-1',
+        transcript_status: 'provisional',
+        finalization_status: 'processing',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{"segments":[]}',
+        has_audio: true,
+        audio_path: '/approved/mic.wav',
+        system_audio_path: '/approved/system.wav',
+        mixed_audio_path: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('rechecks full meeting detail before starting final transcription', () => {
+    const appSource = readFileSync('src/App.tsx', 'utf8');
+    expect(appSource).toContain(
+      'if (!detail || !shouldRunMeetingFinalTranscription(detail)) return;',
+    );
   });
 
   it('does not finalize an unsealed or recovery-required recording', () => {

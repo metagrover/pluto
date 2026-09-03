@@ -30,7 +30,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
     );
   });
 
-  it('retains confident channel attribution and assigns overlapping mic rows to Them', () => {
+  it('retains source labels and neutralizes unverified overlapping mic rows', () => {
     const transcriptJson = JSON.stringify({
       speakerAttribution: {
         source: 'channel_fallback',
@@ -81,9 +81,9 @@ describe('buildAnalysisTranscriptFromJson', () => {
       parseTranscriptSegmentsForPresentation(transcriptJson).map(
         (segment) => segment.speaker,
       ),
-    ).toEqual(['Them', 'Them', 'Me', 'Them', 'Speaker', 'Speaker']);
+    ).toEqual(['Them', 'Speaker', 'Me', 'Speaker', 'Speaker', 'Speaker']);
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Them: A longer remote sentence from system audio.\nThem: Short echo.\nMe: Do these match the original format?\nThem: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
+      'Them: A longer remote sentence from system audio.\nSpeaker: Short echo.\nMe: Do these match the original format?\nSpeaker: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
     );
   });
 
@@ -105,7 +105,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
 
     expect(
       parseTranscriptSegmentsForPresentation(transcriptJson).at(-1)?.speaker,
-    ).toBe('Them');
+    ).toBe('Speaker');
   });
 
   it('uses legacy start and end timing as attribution evidence', () => {

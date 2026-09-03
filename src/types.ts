@@ -182,7 +182,11 @@ export interface UserEditsMap {
   [path: string]: UserEdit;
 }
 
-export type MeetingFinalizationStatus = 'finalized' | 'recovery_required';
+export type MeetingFinalizationStatus =
+  | 'processing'
+  | 'finalized'
+  | 'needs_attention'
+  | 'recovery_required';
 
 export interface Meeting {
   id: string | number;
