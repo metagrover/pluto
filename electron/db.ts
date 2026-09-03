@@ -92,7 +92,10 @@ import {
   withProjectPortfolioDisposition,
 } from '../src/utils/projectQualification';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
-import { hasVerifiedSpeakerAttribution } from '../src/utils/speakerAttributionTrust';
+import {
+  hasVerifiedSpeakerAttribution,
+  readStoredSpeakerAttribution,
+} from '../src/utils/speakerAttributionTrust';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import {
@@ -2513,7 +2516,9 @@ export const claimMeetingFinalTranscription = (
       ) &&
         !(
           current.transcript_status === 'validated' &&
-          !hasVerifiedSpeakerAttribution(current.transcript_json)
+          (readStoredSpeakerAttribution(current.transcript_json)?.source ===
+            'recovered_channel_acoustic_v1' ||
+            !hasVerifiedSpeakerAttribution(current.transcript_json))
         ))
     ) {
       return false;

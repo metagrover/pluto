@@ -182,14 +182,27 @@ describe('runPersistedMeetingFinalTranscription', () => {
       return { status: 'validated' };
     });
 
-    const onTranscriptCommitted = vi.fn(async () => undefined);
-    const outcome = await runPersistedMeetingFinalTranscription(
-      meeting,
-      invoke,
-      { runId: 'run-1', onTranscriptCommitted },
+    let releaseDownstream: (() => void) | undefined;
+    mocks.processDownstream.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseDownstream = () => resolve({ status: 'published' });
+      }),
     );
+    const onTranscriptCommitted = vi.fn(async () => undefined);
+    const attempt = runPersistedMeetingFinalTranscription(meeting, invoke, {
+      runId: 'run-1',
+      onTranscriptCommitted,
+    });
+    const outcome = await Promise.race([
+      attempt,
+      new Promise<'downstream-still-running'>((resolve) =>
+        setTimeout(() => resolve('downstream-still-running'), 25),
+      ),
+    ]);
+    releaseDownstream?.();
 
     expect(outcome).toEqual({ status: 'validated' });
+    await attempt;
     expect(onTranscriptCommitted).toHaveBeenCalledOnce();
     expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
       preserveProvisionalText: false,

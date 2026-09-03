@@ -111,6 +111,7 @@ export type TranscriptTrustEnvelopeV2 = {
       collapsedSequenceCount: number;
       droppedExactDuplicateSegmentCount?: number;
       droppedEmbeddedMicFragmentCount?: number;
+      droppedSystemExplainedMicSegmentCount?: number;
     };
   };
   recovery?: {
@@ -399,7 +400,13 @@ const validFinalTranscriptionResult = (
       'droppedExactDuplicateSegmentCount',
       'droppedEmbeddedMicFragmentCount',
     ];
-    const hasCurrentCounts = exactKeys(value, currentKeys);
+    const systemExplainedKeys = [
+      ...currentKeys,
+      'droppedSystemExplainedMicSegmentCount',
+    ];
+    const hasSystemExplainedCount = exactKeys(value, systemExplainedKeys);
+    const hasCurrentCounts =
+      exactKeys(value, currentKeys) || hasSystemExplainedCount;
     return (
       (exactKeys(value, legacyKeys) || hasCurrentCounts) &&
       value.policyVersion === 'cross_channel_skew_v1' &&
@@ -426,7 +433,11 @@ const validFinalTranscriptionResult = (
           value.droppedExactDuplicateSegmentCount >= 0 &&
           typeof value.droppedEmbeddedMicFragmentCount === 'number' &&
           Number.isInteger(value.droppedEmbeddedMicFragmentCount) &&
-          value.droppedEmbeddedMicFragmentCount >= 0))
+          value.droppedEmbeddedMicFragmentCount >= 0 &&
+          (!hasSystemExplainedCount ||
+            (typeof value.droppedSystemExplainedMicSegmentCount === 'number' &&
+              Number.isInteger(value.droppedSystemExplainedMicSegmentCount) &&
+              value.droppedSystemExplainedMicSegmentCount >= 0))))
     );
   };
   return (

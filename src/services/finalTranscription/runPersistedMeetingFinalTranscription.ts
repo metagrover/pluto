@@ -270,7 +270,14 @@ export const runPersistedMeetingFinalTranscription = async (
         }
       },
       startAnalysis: async () => {
-        await processValidatedMeetingDownstream(meetingId, invoke);
+        void processValidatedMeetingDownstream(meetingId, invoke).catch(
+          (error) => {
+            console.error(
+              '[Pluto] Post-transcription notes processing failed',
+              error,
+            );
+          },
+        );
         return committedSegments.length;
       },
     },

@@ -980,7 +980,23 @@ function App() {
     autoAnalysisAttemptsRef.current.add(
       meetingProcessingFingerprint(candidate),
     );
-    void handleRetryTranscriptValidation(candidate.id, 'analysis');
+    void processValidatedMeetingDownstream(
+      candidate.id,
+      (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      { reason: 'automatic' },
+    )
+      .then(async () => {
+        const refreshedMeetings = await fetchMeetings();
+        rememberMeetingProcessingOutcome(
+          autoAnalysisAttemptsRef.current,
+          refreshedMeetings.find(
+            (meeting) => String(meeting.id) === String(candidate.id),
+          ),
+        );
+      })
+      .catch((error) => {
+        console.error('[Pluto] Automatic meeting processing failed', error);
+      });
   }, [safeMeetings, transcriptValidationRetryOperation]);
 
   useEffect(() => {

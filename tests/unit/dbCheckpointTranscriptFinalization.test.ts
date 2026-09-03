@@ -152,6 +152,51 @@ it('claims an explicit validated attribution repair and fences transcript or sou
   ]);
 });
 
+it('claims a verified v1 attribution upgrade but rejects a completed v2 result', () => {
+  const saveAttributedMeeting = (
+    id: string,
+    source: 'recovered_channel_acoustic_v1' | 'recovered_channel_acoustic_v2',
+  ) =>
+    saveMeeting({
+      id,
+      title: 'Meeting',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        speakerAttribution: {
+          source,
+          confidence: 0.95,
+          diarizationAttempted: true,
+          mappingApplied: true,
+        },
+        segments: [{ speaker: 'Me', text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: '{}',
+      capture_journal_generation: journalGeneration,
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+    });
+  saveAttributedMeeting('parakeet-v1-upgrade', 'recovered_channel_acoustic_v1');
+  saveAttributedMeeting(
+    'parakeet-v2-complete',
+    'recovered_channel_acoustic_v2',
+  );
+  const lease = buildFinalTranscriptionLease({
+    runId: 'source-aware-upgrade-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: Date.parse('2026-08-15T00:00:00.000Z'),
+  });
+
+  expect(claimMeetingFinalTranscription('parakeet-v1-upgrade', lease)).toBe(
+    true,
+  );
+  expect(claimMeetingFinalTranscription('parakeet-v2-complete', lease)).toBe(
+    false,
+  );
+});
+
 it('rejects an invalid v2 final commit without publishing the transcript', () => {
   const id = 'parakeet-final-invalid-trust';
   saveMeeting({
