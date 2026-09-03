@@ -1,6 +1,6 @@
 # Measure trust cost across the meeting-intelligence pipeline
 
-**Status:** First diagnostic iteration implemented in [PR #740](https://github.com/metagrover/pluto/pull/740)
+**Status:** First diagnostic iteration implemented in [PR #740](https://github.com/metagrover/pluto/pull/740); deterministic recovery replay approved
 
 **Issue:** [#739 — Make short-meeting trusted notes meaningfully faster](https://github.com/metagrover/pluto/issues/739)
 
@@ -142,3 +142,16 @@ Each later experiment requires its own reviewed design adjustment and failing te
 No production change follows automatically. If the audit adds unique value, retain one final semantic audit and optimize elsewhere. If deterministic checks are sufficient across the reviewed short-meeting fixtures, design a separate benchmark-only audit-ablation experiment. Intermediate hierarchy audits remain out of scope for this iteration.
 
 Secondary intelligence is also out of scope for production changes in this iteration. The ledger may identify it as expensive, but a notes-first replacement must preserve entity/action recall, false-positive limits, exact-evidence rules, and reversible persistence before it can ship.
+
+## Deterministic recovery replay
+
+The first report found five model repairs that returned the same rejected response digest, consuming 209,622 ms across six committed synthetic cases. Before changing production parsing, replay the initial rejected writer responses through a benchmark-only mechanical normalizer.
+
+The normalizer may perform only these lossless schema adaptations:
+
+- flatten an item whose `text` field contains exactly the original string and source array when the outer item has no competing source array;
+- map the unsupported presentation label `discussion` to the existing narrative kind `point` only when owner and due fields are absent or null.
+
+It must preserve text, source references, owner, due date, section order, item order, and every other field byte-for-value after JSON parsing. Unknown fields, competing source arrays, non-null ownership/deadline on a discussion item, invalid JSON, audit responses, or any other shape are not normalizable.
+
+Decode captured request-local source labels through the existing notes wire adapter, parse the candidate through the existing strict draft parser, and run existing source guardrails against the original synthetic source. Report parse recovery, guardrail issue counts/codes, transformation counts, and the captured model time that the replay could have avoided. Do not project or publish the candidate, call a model, change the production parser, or claim semantic correctness from structural recovery.
