@@ -1579,6 +1579,12 @@ export const rejectDreamingProposal = (
   input: DreamingDecisionInput,
 ): DreamingDecisionResult =>
   dreamingProposalStore.rejectDreamingProposal(input);
+export const removeDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.removeDreamingAlias(input);
+export const restoreDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.restoreDreamingAlias(input);
 // Cheap invalidation lets the background scheduler avoid repeatedly reading
 // complete source text when nothing relevant has changed.
 db.exec(`CREATE TABLE IF NOT EXISTS identity_input_revision (singleton INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
@@ -6921,11 +6927,13 @@ export const upsertEntity = (entity: {
   ) {
     existing = db
       .prepare(
-        `SELECT project.* FROM project_name_aliases name_alias
-         JOIN entities project ON project.id = name_alias.project_id
-         WHERE name_alias.normalized_name = ?`,
+        `SELECT project.* FROM entity_dreaming_aliases name_alias
+         JOIN entities project ON project.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'project'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
       )
       .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolveProjectIdentityId(existing.id));
     matchedProjectAlias = Boolean(existing);
   }
 
@@ -6943,6 +6951,23 @@ export const upsertEntity = (entity: {
       )
       .get(normalizedName) as Entity | undefined;
     matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'person' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
+        `SELECT person.* FROM entity_dreaming_aliases name_alias
+         JOIN entities person ON person.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'person'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolvePersonIdentityId(existing.id));
+    matchedPersonAlias = Boolean(existing);
   }
 
   if (
@@ -8012,15 +8037,23 @@ export const findEntity = (
     return getEntity(resolvePersonIdentityId(direct.id));
   }
   if (direct) return direct;
-  if (type === 'project') {
-    const matches = db
-      .prepare(
-        `SELECT DISTINCT project_id FROM project_name_aliases
-         WHERE normalized_name = ?`,
-      )
-      .all(normalizedName) as Array<{ project_id: string }>;
-    return matches.length === 1 ? getEntity(matches[0].project_id) : undefined;
+  const dreamingAliasMatches = db
+    .prepare(
+      `SELECT DISTINCT entity_id FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND active = 1 AND normalized_name = ?`,
+    )
+    .all(type, normalizedName) as Array<{ entity_id: string }>;
+  if (dreamingAliasMatches.length === 1) {
+    const aliasEntityId = dreamingAliasMatches[0].entity_id;
+    return getEntity(
+      type === 'person'
+        ? resolvePersonIdentityId(aliasEntityId)
+        : type === 'project'
+          ? resolveProjectIdentityId(aliasEntityId)
+          : aliasEntityId,
+    );
   }
+  if (dreamingAliasMatches.length > 1 || type === 'project') return undefined;
   if (type !== 'person') return undefined;
   const matches = db
     .prepare(
@@ -8616,20 +8649,26 @@ export const getDreamingEntityBaseline = (
       LIMIT 24
     `)
     .all(canonicalId) as Array<{ id: string; name: string }>;
-  const nameAliasTable =
-    canonical.type === 'person'
-      ? 'person_name_aliases'
-      : 'project_name_aliases';
-  const nameAliasIdColumn =
-    canonical.type === 'person' ? 'person_id' : 'project_id';
-  const nameAliases = db
+  const dreamingAliases = db
     .prepare(
       `SELECT normalized_name AS id, display_name AS name
-       FROM ${nameAliasTable} WHERE ${nameAliasIdColumn} = ?
+       FROM entity_dreaming_aliases WHERE entity_id = ? AND active = 1
        ORDER BY normalized_name LIMIT 24`,
     )
     .all(canonicalId) as Array<{ id: string; name: string }>;
-  const aliases = [...identityAliases, ...nameAliases].slice(0, 24);
+  const userNameAliases =
+    canonical.type === 'person'
+      ? (db
+          .prepare(`SELECT normalized_name AS id, display_name AS name
+            FROM person_name_aliases WHERE person_id = ?
+            ORDER BY normalized_name LIMIT 24`)
+          .all(canonicalId) as Array<{ id: string; name: string }>)
+      : [];
+  const aliases = [
+    ...identityAliases,
+    ...userNameAliases,
+    ...dreamingAliases,
+  ].slice(0, 24);
   const commitments =
     canonical.type === 'project'
       ? (db
@@ -9466,7 +9505,7 @@ export const resetKnowledge = () => {
     'entity_dreaming_runs',
     'entity_alias_suggestions',
     'entity_corrections',
-    'project_name_aliases',
+    'entity_dreaming_aliases',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',

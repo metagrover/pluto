@@ -363,9 +363,7 @@ export function ProjectMilestones({
                   <p className="mt-1.5 text-xs text-pro-text-muted">
                     {milestone.source === 'user'
                       ? 'User-created'
-                      : milestone.source === 'dreaming'
-                        ? 'Generated · evidence-backed'
-                        : 'From meeting evidence'}
+                      : 'From meeting evidence'}
                   </p>
                 </div>
                 <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1 sm:mt-0 sm:justify-end">
@@ -408,7 +406,7 @@ export function ProjectMilestones({
                       </button>
                     </>
                   )}
-                  {milestone.source === 'commitment' && (
+                  {milestone.source !== 'user' && (
                     <button
                       type="button"
                       disabled={busy}

@@ -52,12 +52,6 @@ function fixture(options?: {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(person_id, normalized_name)
     );
-    CREATE TABLE project_name_aliases (
-      project_id TEXT NOT NULL, normalized_name TEXT NOT NULL,
-      display_name TEXT NOT NULL, source TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(project_id, normalized_name)
-    );
     CREATE TABLE knowledge_docs (
       id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, scope_key TEXT NOT NULL,
       title TEXT NOT NULL, structured_json TEXT, status TEXT,
@@ -711,9 +705,58 @@ describe('dreaming proposal persistence', () => {
       }),
     ).toEqual({ status: 'review_required', proposalId: proposal.id });
     expect(
-      sql.prepare('SELECT COUNT(*) count FROM project_name_aliases').get(),
+      sql.prepare('SELECT COUNT(*) count FROM entity_dreaming_aliases').get(),
     ).toEqual({ count: 0 });
     expect(store.listPendingProposals('project-1', 'project')).toHaveLength(1);
+  });
+
+  it('returns review_required when a person alias belongs to another active person', () => {
+    const { sql, store } = fixture();
+    sql.exec(`INSERT INTO entities(id,type,name,normalized_name,metadata) VALUES
+      ('person-1','person','Alpha','alpha','{}'),
+      ('person-2','person','Beta','beta','{}');
+      INSERT INTO person_name_aliases(person_id,normalized_name,display_name,source)
+      VALUES ('person-2','shared name','Shared Name','user')`);
+    const started = store.startRun({
+      entityId: 'person-1',
+      entityType: 'person',
+      sourceRevision: 'person-alias-rev',
+      model: 'gemma4:12b',
+      promptVersion: 'dreaming-v1',
+    });
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [
+        {
+          kind: 'person_alias',
+          payload: { alias: 'Shared Name' },
+          evidence: [{ meetingId: 'meeting-1', excerpt: 'Shared Name' }],
+          fingerprint: 'shared-name',
+        },
+      ],
+    });
+    const proposal = store.listPendingProposals('person-1', 'person')[0];
+    expect(
+      sql
+        .prepare('SELECT person_id,normalized_name FROM person_name_aliases')
+        .all(),
+    ).toEqual([{ person_id: 'person-2', normalized_name: 'shared name' }]);
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'person-alias-rev',
+      }),
+    ).toEqual({
+      status: 'review_required',
+      proposalId: proposal.id,
+    });
+    expect(
+      sql.prepare('SELECT COUNT(*) count FROM entity_dreaming_aliases').get(),
+    ).toEqual({ count: 0 });
   });
 
   it('accepts a non-colliding project alias without creating or merging an entity', () => {
@@ -749,13 +792,170 @@ describe('dreaming proposal persistence', () => {
       count: 1,
     });
     expect(
-      sql.prepare('SELECT * FROM project_name_aliases').get(),
+      sql.prepare('SELECT * FROM entity_dreaming_aliases').get(),
     ).toMatchObject({
-      project_id: 'project-1',
+      proposal_id: proposal.id,
+      entity_id: 'project-1',
+      entity_type: 'project',
       normalized_name: 'alpha launch',
       display_name: 'Alpha launch',
       source: 'dreaming',
+      active: 1,
     });
+  });
+
+  it.each([
+    ['project', 'project_alias', 'Project alternate'],
+    ['person', 'person_alias', 'Person alternate'],
+  ] as const)(
+    'removes and restores a %s dreaming alias without deleting proposal evidence',
+    (entityType, kind, alias) => {
+      const { sql, store } = fixture();
+      const entityId = `${entityType}-1`;
+      sql
+        .prepare(
+          'INSERT INTO entities(id,type,name,normalized_name,metadata) VALUES (?,?,?,?,?)',
+        )
+        .run(entityId, entityType, 'Canonical', 'canonical', '{}');
+      if (entityType === 'person') {
+        sql
+          .prepare(`INSERT INTO person_name_aliases(person_id,normalized_name,display_name,source)
+          VALUES (?, 'kept-user-alias', 'Kept User Alias', 'user')`)
+          .run(entityId);
+      }
+      const started = store.startRun({
+        entityId,
+        entityType,
+        sourceRevision: 'alias-rev',
+        model: 'gemma4:12b',
+        promptVersion: 'dreaming-v1',
+      });
+      expect(started.status).toBe('started');
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind,
+            payload: { alias },
+            evidence: [
+              { meetingId: 'meeting-1', excerpt: `${alias} was used` },
+            ],
+            fingerprint: `${entityType}-alternate`,
+          },
+        ],
+      });
+      const proposal = store.listPendingProposals(entityId, entityType)[0];
+      expect(
+        store.acceptDreamingProposal({
+          proposalId: proposal.id,
+          getCurrentSourceRevision: () => 'alias-rev',
+        }).status,
+      ).toBe('accepted');
+
+      expect(store.removeDreamingAlias({ proposalId: proposal.id })).toEqual({
+        status: 'removed',
+        proposalId: proposal.id,
+      });
+      expect(
+        sql
+          .prepare(
+            'SELECT active,evidence_json FROM entity_dreaming_aliases WHERE proposal_id=?',
+          )
+          .get(proposal.id),
+      ).toEqual({
+        active: 0,
+        evidence_json: JSON.stringify([
+          { meetingId: 'meeting-1', excerpt: `${alias} was used` },
+        ]),
+      });
+      expect(store.restoreDreamingAlias({ proposalId: proposal.id })).toEqual({
+        status: 'restored',
+        proposalId: proposal.id,
+      });
+      expect(
+        sql
+          .prepare(
+            'SELECT active FROM entity_dreaming_aliases WHERE proposal_id=?',
+          )
+          .get(proposal.id),
+      ).toEqual({ active: 1 });
+      if (entityType === 'person') {
+        expect(
+          sql.prepare('SELECT display_name FROM person_name_aliases').all(),
+        ).toEqual([{ display_name: 'Kept User Alias' }]);
+      }
+    },
+  );
+
+  it('blocks a proposal corrected before completion even when the correction is older than the prompt limit', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const insert =
+      sql.prepare(`INSERT INTO entity_corrections(id,entity_id,item_type,fingerprint)
+      VALUES (?,?,?,?)`);
+    insert.run(
+      'oldest',
+      'project-1',
+      'dreaming:project_summary',
+      'project-summary-one',
+    );
+    for (let index = 0; index < 64; index += 1) {
+      insert.run(`new-${index}`, 'project-1', 'other', `newer-${index}`);
+    }
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+
+    expect(() =>
+      store.completeRun({
+        runId: started.run.id,
+        leaseToken: started.run.leaseToken,
+        status: 'proposed',
+        proposals: [projectSummary()],
+      }),
+    ).toThrow('dreaming_proposal_corrected');
+    expect(
+      sql.prepare('SELECT COUNT(*) count FROM entity_dreaming_proposals').get(),
+    ).toEqual({ count: 0 });
+    expect(store.getRun(started.run.id)?.status).toBe('running');
+  });
+
+  it('marks a pending proposal stale when it was corrected after generation', () => {
+    const { sql, store } = fixture();
+    sql
+      .prepare(`INSERT INTO entities(id,type,name,normalized_name,metadata)
+      VALUES ('project-1','project','Alpha','alpha','{}')`)
+      .run();
+    const started = startProject(store);
+    expect(started.status).toBe('started');
+    store.completeRun({
+      runId: started.run.id,
+      leaseToken: started.run.leaseToken,
+      status: 'proposed',
+      proposals: [projectSummary()],
+    });
+    const proposal = store.listPendingProposals('project-1', 'project')[0];
+    sql
+      .prepare(`INSERT INTO entity_corrections(id,entity_id,item_type,fingerprint)
+      VALUES ('late','project-1','dreaming:project_summary','project-summary-one')`)
+      .run();
+
+    expect(
+      store.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: () => 'revision-1',
+      }),
+    ).toEqual({
+      status: 'stale',
+      proposalId: proposal.id,
+    });
+    expect(
+      sql.prepare(`SELECT metadata FROM entities WHERE id='project-1'`).get(),
+    ).toEqual({ metadata: '{}' });
   });
 
   it('accepts an evidence-backed generated milestone without disturbing user milestones', () => {

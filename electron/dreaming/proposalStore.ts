@@ -128,10 +128,18 @@ export interface DreamingProposalStoreDependencies {
     entityId: string,
     entityType: DreamingEntityType,
   ) => string;
+  isCorrectionPresent?: (
+    entityId: string,
+    entityType: DreamingEntityType,
+    fingerprint: string,
+  ) => boolean;
 }
 
 export type DreamingDecisionResult =
-  | { status: 'accepted' | 'rejected' | 'stale'; proposalId: string }
+  | {
+      status: 'accepted' | 'rejected' | 'stale' | 'removed' | 'restored';
+      proposalId: string;
+    }
   | { status: 'review_required' | 'not_pending'; proposalId: string };
 
 export interface DreamingDecisionInput {
@@ -212,16 +220,25 @@ export function ensureDreamingProposalSchema(sql: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_entity_dreaming_proposals_run
       ON entity_dreaming_proposals(run_id);
 
-    CREATE TABLE IF NOT EXISTS project_name_aliases (
-      project_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    CREATE TABLE IF NOT EXISTS entity_dreaming_aliases (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE REFERENCES entity_dreaming_proposals(id),
+      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('project', 'person')),
       normalized_name TEXT NOT NULL,
       display_name TEXT NOT NULL,
-      source TEXT NOT NULL CHECK(source IN ('user', 'dreaming')),
+      source TEXT NOT NULL CHECK(source = 'dreaming'),
+      evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
+      active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(project_id, normalized_name)
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      removed_at TEXT,
+      CHECK((active = 1 AND removed_at IS NULL) OR (active = 0 AND removed_at IS NOT NULL))
     );
-    CREATE INDEX IF NOT EXISTS idx_project_name_aliases_name
-      ON project_name_aliases(normalized_name);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_dreaming_aliases_active_name
+      ON entity_dreaming_aliases(entity_type, normalized_name) WHERE active = 1;
+    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_aliases_entity
+      ON entity_dreaming_aliases(entity_id, entity_type, active);
   `);
 }
 
@@ -316,6 +333,26 @@ export function createDreamingProposalStore(
   const now = dependencies.now ?? (() => new Date().toISOString());
   const resolveCanonicalEntityId =
     dependencies.resolveCanonicalEntityId ?? ((entityId: string) => entityId);
+  const isCorrectionPresent =
+    dependencies.isCorrectionPresent ??
+    ((
+      entityId: string,
+      entityType: DreamingEntityType,
+      fingerprint: string,
+    ) => {
+      const rows = sql
+        .prepare(`SELECT correction.entity_id
+          FROM entity_corrections correction
+          LEFT JOIN entities entity ON entity.id = correction.entity_id
+          WHERE correction.fingerprint = ?
+            AND (entity.type = ? OR correction.entity_id = ?)`)
+        .all(fingerprint, entityType, entityId) as Array<{ entity_id: string }>;
+      return rows.some(
+        (row) =>
+          row.entity_id === entityId ||
+          resolveCanonicalEntityId(row.entity_id, entityType) === entityId,
+      );
+    });
   const readRun = (id: string): DreamingRunRecord | null => {
     const row = sql
       .prepare('SELECT * FROM entity_dreaming_runs WHERE id = ?')
@@ -467,6 +504,15 @@ export function createDreamingProposalStore(
         for (const proposal of input.proposals) {
           const parsed = parseDreamingProposal(proposal, row.entity_type);
           if (!parsed) throw new Error('dreaming_proposal_invalid');
+          if (
+            isCorrectionPresent(
+              row.entity_id,
+              row.entity_type,
+              parsed.fingerprint,
+            )
+          ) {
+            throw new Error('dreaming_proposal_corrected');
+          }
           insert.run(
             `dream_prop_${randomUUID()}`,
             row.id,
@@ -872,22 +918,46 @@ export function createDreamingProposalStore(
       )
       .get(expectedType, normalized, entity.id) as { id: string } | undefined;
     if (collision) return 'review_required';
-    const table =
-      expectedType === 'project'
-        ? 'project_name_aliases'
-        : 'person_name_aliases';
-    const idColumn = expectedType === 'project' ? 'project_id' : 'person_id';
+    if (expectedType === 'person') {
+      const userAliasOwners = sql
+        .prepare(`SELECT person_id FROM person_name_aliases
+          WHERE normalized_name = ?`)
+        .all(normalized) as Array<{ person_id: string }>;
+      if (
+        userAliasOwners.some(
+          (owner) =>
+            resolveCanonicalEntityId(owner.person_id, 'person') !== entity.id,
+        )
+      ) {
+        return 'review_required';
+      }
+    }
     const aliasCollision = sql
       .prepare(
-        `SELECT ${idColumn} AS id FROM ${table} WHERE normalized_name = ? AND ${idColumn} <> ?`,
+        `SELECT entity_id AS id FROM entity_dreaming_aliases
+         WHERE entity_type = ? AND normalized_name = ? AND active = 1
+           AND entity_id <> ?`,
       )
-      .get(normalized, entity.id) as { id: string } | undefined;
+      .get(expectedType, normalized, entity.id) as { id: string } | undefined;
     if (aliasCollision) return 'review_required';
-    const source = expectedType === 'project' ? 'dreaming' : 'user';
     sql
-      .prepare(`INSERT INTO ${table}(${idColumn}, normalized_name, display_name, source)
-      VALUES (?, ?, ?, ?) ON CONFLICT(${idColumn}, normalized_name) DO UPDATE SET display_name=excluded.display_name`)
-      .run(entity.id, normalized, alias, source);
+      .prepare(`INSERT INTO entity_dreaming_aliases(
+        id, proposal_id, entity_id, entity_type, normalized_name,
+        display_name, source, evidence_json, active, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'dreaming', ?, 1, ?)
+      ON CONFLICT(proposal_id) DO UPDATE SET
+        display_name=excluded.display_name, evidence_json=excluded.evidence_json,
+        active=1, removed_at=NULL, updated_at=excluded.updated_at`)
+      .run(
+        deterministicId('dream_alias', proposal.id),
+        proposal.id,
+        entity.id,
+        expectedType,
+        normalized,
+        alias,
+        JSON.stringify(proposal.evidence),
+        now(),
+      );
     return 'applied';
   };
 
@@ -905,6 +975,15 @@ export function createDreamingProposalStore(
           proposal.entityId,
           proposal.entityType,
         ) !== run.source_revision
+      ) {
+        return markProposalStale(proposal.id, timestamp);
+      }
+      if (
+        isCorrectionPresent(
+          proposal.entityId,
+          proposal.entityType,
+          proposal.fingerprint,
+        )
       ) {
         return markProposalStale(proposal.id, timestamp);
       }
@@ -974,6 +1053,69 @@ export function createDreamingProposalStore(
       return { status: 'rejected', proposalId: proposal.id };
     })();
 
+  const removeDreamingAlias = (input: {
+    proposalId: string;
+  }): DreamingDecisionResult =>
+    sql.transaction((): DreamingDecisionResult => {
+      const timestamp = now();
+      const result = sql
+        .prepare(`UPDATE entity_dreaming_aliases SET active = 0,
+          removed_at = ?, updated_at = ?
+          WHERE proposal_id = ? AND active = 1`)
+        .run(timestamp, timestamp, input.proposalId);
+      return {
+        status: result.changes === 1 ? 'removed' : 'not_pending',
+        proposalId: input.proposalId,
+      };
+    })();
+
+  const restoreDreamingAlias = (input: {
+    proposalId: string;
+  }): DreamingDecisionResult =>
+    sql.transaction((): DreamingDecisionResult => {
+      const alias = sql
+        .prepare(`SELECT * FROM entity_dreaming_aliases
+          WHERE proposal_id = ? AND active = 0`)
+        .get(input.proposalId) as
+        | {
+            entity_id: string;
+            entity_type: DreamingEntityType;
+            normalized_name: string;
+          }
+        | undefined;
+      if (!alias)
+        return { status: 'not_pending', proposalId: input.proposalId };
+      const entityCollision = sql
+        .prepare(`SELECT 1 FROM entities WHERE type = ? AND normalized_name = ?
+          AND id <> ? LIMIT 1`)
+        .get(alias.entity_type, alias.normalized_name, alias.entity_id);
+      const aliasCollision = sql
+        .prepare(`SELECT 1 FROM entity_dreaming_aliases WHERE entity_type = ?
+          AND normalized_name = ? AND entity_id <> ? AND active = 1 LIMIT 1`)
+        .get(alias.entity_type, alias.normalized_name, alias.entity_id);
+      const userAliasCollision =
+        alias.entity_type === 'person' &&
+        (
+          sql
+            .prepare(`SELECT person_id FROM person_name_aliases
+              WHERE normalized_name = ?`)
+            .all(alias.normalized_name) as Array<{ person_id: string }>
+        ).some(
+          (owner) =>
+            resolveCanonicalEntityId(owner.person_id, 'person') !==
+            resolveCanonicalEntityId(alias.entity_id, 'person'),
+        );
+      if (entityCollision || aliasCollision || userAliasCollision) {
+        return { status: 'review_required', proposalId: input.proposalId };
+      }
+      const timestamp = now();
+      sql
+        .prepare(`UPDATE entity_dreaming_aliases SET active = 1,
+        removed_at = NULL, updated_at = ? WHERE proposal_id = ?`)
+        .run(timestamp, input.proposalId);
+      return { status: 'restored', proposalId: input.proposalId };
+    })();
+
   const recoverStaleRuns = (input: { staleBefore: string }): number => {
     const timestamp = now();
     return sql
@@ -994,6 +1136,8 @@ export function createDreamingProposalStore(
     listPendingProposals,
     acceptDreamingProposal,
     rejectDreamingProposal,
+    removeDreamingAlias,
+    restoreDreamingAlias,
     recoverStaleRuns,
   };
 }
