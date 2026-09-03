@@ -102,4 +102,4 @@ expect(report.deterministic_recovery_replay).toMatchObject({
 - [x] Add the minimal opt-in hook and a distinct successful-recovery counter; retain the default product path.
 - [x] Run a validated recent meeting read-only and record the content-free result.
 - [x] Stop the repair-prone probe after recursive merge work exceeded 30 calls rather than spending toward the hard node bound.
-- [ ] Run full verification, update issue #739, and push PR #740.
+- [x] Run full verification, update issue #739, and push PR #740.
