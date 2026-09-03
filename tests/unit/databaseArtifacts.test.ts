@@ -86,4 +86,18 @@ describe('database artifact staging', () => {
       expect.objectContaining({ code: 'database_cleanup_failed' }),
     );
   });
+
+  it('binds an issued cleanup record to its original directory', () => {
+    const root = makeRoot();
+    const unrelated = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    fs.writeFileSync(databasePath, 'database');
+    const staged = stageDatabaseArtifacts(databasePath, 'legacy');
+
+    expect(() => {
+      (staged as { directory: string }).directory = unrelated;
+    }).toThrow();
+    cleanupStagedDatabase(staged);
+    expect(fs.existsSync(unrelated)).toBe(true);
+  });
 });

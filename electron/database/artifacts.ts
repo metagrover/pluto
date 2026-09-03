@@ -5,9 +5,9 @@ import { DatabaseLifecycleError } from './errors';
 export type ReplacementReason = 'legacy' | 'integrity-failed';
 
 export interface StagedDatabase {
-  directory: string;
-  databasePath: string;
-  moved: string[];
+  readonly directory: string;
+  readonly databasePath: string;
+  readonly moved: readonly string[];
 }
 
 interface StagingOptions {
@@ -84,11 +84,11 @@ export const stageDatabaseArtifacts = (
     );
   }
 
-  const staged: StagedDatabase = {
+  const staged: StagedDatabase = Object.freeze({
     directory,
     databasePath,
-    moved: movedPairs.map(({ destination }) => destination),
-  };
+    moved: Object.freeze(movedPairs.map(({ destination }) => destination)),
+  });
   issuedStagingRecords.add(staged);
   return staged;
 };
