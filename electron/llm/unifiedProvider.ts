@@ -372,6 +372,7 @@ export const collapseOversizedTopics = (
 
 let nextNotesStageSequence = 0;
 let electronActiveOllamaModel: string | null = null;
+let ollamaActivityEpoch = 0;
 
 type LLMTask = LocalInferenceTask;
 
@@ -436,6 +437,7 @@ interface TextGenerationOptions {
   task: LLMTask;
   jsonMode?: boolean;
   responseSchema?: Record<string, unknown>;
+  modelOverride?: string;
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
@@ -834,10 +836,23 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt: string,
     options: {
       signal?: AbortSignal;
-      purpose?: 'projectScope' | 'commitmentReconciliation';
+      purpose?: 'projectScope' | 'commitmentReconciliation' | 'dreaming';
       responseSchema?: Record<string, unknown>;
+      model?: string;
+      promptVersion?: string;
+      workClass?: import('./llmWorkClass').LLMWorkClass;
+      onStart?: () => void;
     } = {},
   ): Promise<string> {
+    if (options.purpose === 'dreaming' && this.providerType !== 'ollama') {
+      throw new Error('dreaming_local_provider_required');
+    }
+    if (
+      options.purpose === 'dreaming' &&
+      (!options.model?.trim() || !options.promptVersion?.trim())
+    ) {
+      throw new Error('dreaming_request_metadata_required');
+    }
     return this.generateText({
       prompt,
       task:
@@ -845,10 +860,31 @@ export class UnifiedLLMProvider implements LLMProvider {
           ? 'commitmentReconciliation'
           : options.purpose === 'projectScope'
             ? 'projectScopeReview'
-            : 'knowledgeDoc',
+            : options.purpose === 'dreaming'
+              ? 'dreaming'
+              : 'knowledgeDoc',
       jsonMode: true,
       responseSchema: options.responseSchema,
+      modelOverride:
+        options.purpose === 'dreaming' ? options.model?.trim() : undefined,
       signal: options.signal,
+      workClass: options.workClass,
+      onStart: options.onStart,
+    });
+  }
+
+  async unloadModel(model: string, signal?: AbortSignal): Promise<void> {
+    if (this.providerType !== 'ollama' || !model.trim()) return;
+    const epoch = ollamaActivityEpoch;
+    await runWithLocalInferenceCoordinator({
+      key: Symbol('dreamingCleanup'),
+      task: 'dreamingCleanup',
+      workClass: 'background',
+      signal,
+      run: async (gateSignal) => {
+        if (epoch !== ollamaActivityEpoch) return;
+        await this.unloadOllamaModel(model.trim(), gateSignal);
+      },
     });
   }
 
@@ -991,7 +1027,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         ...options.notesBudget,
       });
     }
-    const isBackground = options.task === 'knowledgeDoc';
+    const isBackground =
+      options.task === 'knowledgeDoc' || options.task === 'dreaming';
     if (!isBackground) {
       knowledgeSynthesisPause.acquire('llm_active');
     }
@@ -1274,10 +1311,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesBudget,
     notesResponseSchema,
     notesModel,
+    modelOverride,
     onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
-    const model =
-      notesBudget && notesModel
+    ollamaActivityEpoch += 1;
+    const model = modelOverride
+      ? modelOverride
+      : notesBudget && notesModel
         ? notesModel
         : await this.resolveOllamaModel(task);
     const activeModel = process.versions.electron
@@ -1514,7 +1554,10 @@ export class UnifiedLLMProvider implements LLMProvider {
     return data.response ?? '';
   }
 
-  private async unloadOllamaModel(model: string): Promise<void> {
+  private async unloadOllamaModel(
+    model: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
       await this.ollamaFetch(
         '/api/generate',
@@ -1528,6 +1571,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           }),
         },
         30_000,
+        signal,
       );
       if (this.activeOllamaModel === model) {
         this.activeOllamaModel = null;

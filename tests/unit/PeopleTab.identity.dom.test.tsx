@@ -11,6 +11,11 @@ const api = vi.hoisted(() => ({
   mergePerson: vi.fn(),
   restorePersonMerge: vi.fn(),
   resolvePersonCommitmentOwner: vi.fn(),
+  getEntityAliasSuggestions: vi.fn(),
+  triggerDreamingNow: vi.fn(),
+  getPendingDreamingProposals: vi.fn(),
+  acceptDreamingProposal: vi.fn(),
+  rejectDreamingProposal: vi.fn(),
 }));
 
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -86,6 +91,12 @@ describe('People identity controls', () => {
     api.mergePerson.mockResolvedValue(undefined);
     api.restorePersonMerge.mockResolvedValue(undefined);
     api.resolvePersonCommitmentOwner.mockResolvedValue({});
+    api.getEntityAliasSuggestions.mockResolvedValue([]);
+    api.triggerDreamingNow.mockResolvedValue({
+      status: 'cancelled',
+      entityId: 'person-1',
+    });
+    api.getPendingDreamingProposals.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -221,5 +232,27 @@ describe('People identity controls', () => {
       'action-1',
       'person-1',
     );
+  });
+
+  it('shows cancelled preparation without claiming success', async () => {
+    await render();
+    await click('More actions');
+    await click('Prepare updates');
+    expect(host.textContent).toContain('Preparation cancelled');
+  });
+
+  it('announces prepared updates outside the closed menu with a review action', async () => {
+    api.triggerDreamingNow.mockResolvedValueOnce({
+      status: 'proposed',
+      entityId: 'person-1',
+      proposals: [],
+    });
+    await render();
+    await click('More actions');
+    await click('Prepare updates');
+
+    const status = host.querySelector('[aria-live="polite"]');
+    expect(status?.textContent).toContain('Updates are ready');
+    expect(host.textContent).toContain('Review prepared updates');
   });
 });

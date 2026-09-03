@@ -83,7 +83,7 @@ import {
   type UserProjectMilestoneInput,
   restoreUserProjectMilestone,
   withSavedUserProjectMilestone,
-  withoutUserProjectMilestone,
+  withoutProjectMilestone,
 } from '../src/utils/projectMilestones';
 import type { ProjectPortfolioEntry } from '../src/utils/projectPortfolio';
 import {
@@ -102,6 +102,13 @@ import {
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
+import {
+  type DreamingDecisionInput,
+  type DreamingDecisionResult,
+  createDreamingProposalStore,
+  ensureDreamingProposalSchema,
+} from './dreaming/proposalStore';
+import { generateItemFingerprint } from './dreaming/validateDreamingOutput';
 import { createIdentityStore } from './identityStore';
 import type {
   AttentionEvidenceReference,
@@ -651,6 +658,8 @@ const initDb = () => {
         FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
         FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
       );
+      CREATE INDEX IF NOT EXISTS idx_meeting_entities_entity_meeting
+        ON meeting_entities(entity_id, meeting_id);
 
       -- =============================================
       -- KNOWLEDGE LIVE DOC TABLES
@@ -728,6 +737,30 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
+
+      CREATE TABLE IF NOT EXISTS entity_corrections (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_corrections_unique ON entity_corrections(entity_id, item_type, fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_entity_corrections_lookup ON entity_corrections(entity_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS entity_alias_suggestions (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT NOT NULL,
+        suggested_name TEXT NOT NULL,
+        source_meeting_ids_json TEXT NOT NULL DEFAULT '[]',
+        evidence_snippet TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'merged', 'dismissed')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_alias_suggestions_unique ON entity_alias_suggestions(entity_id, suggested_name);
+      CREATE INDEX IF NOT EXISTS idx_entity_alias_suggestions_lookup ON entity_alias_suggestions(entity_id, status);
 
       CREATE TABLE IF NOT EXISTS knowledge_backlinks (
         id TEXT PRIMARY KEY,
@@ -1529,8 +1562,31 @@ export function repairExtractionAuthoredPersonRoles(): number {
 
 initDb();
 ensureCalendarSchema(db);
+ensureDreamingProposalSchema(db);
 export const calendarStore = createCalendarStore(db);
 export const identityStore = createIdentityStore(db);
+export const dreamingProposalStore = createDreamingProposalStore(db, {
+  resolveCanonicalEntityId: (entityId, entityType) =>
+    entityType === 'person'
+      ? resolvePersonIdentityId(entityId)
+      : resolveProjectIdentityId(entityId),
+  upsertProjectCommitment: (input) =>
+    upsertCanonicalDreamingProjectCommitment(input),
+});
+export const acceptDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.acceptDreamingProposal(input);
+export const rejectDreamingProposal = (
+  input: DreamingDecisionInput,
+): DreamingDecisionResult =>
+  dreamingProposalStore.rejectDreamingProposal(input);
+export const removeDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.removeDreamingAlias(input);
+export const restoreDreamingAlias = (input: {
+  proposalId: string;
+}): DreamingDecisionResult => dreamingProposalStore.restoreDreamingAlias(input);
 // Cheap invalidation lets the background scheduler avoid repeatedly reading
 // complete source text when nothing relevant has changed.
 db.exec(`CREATE TABLE IF NOT EXISTS identity_input_revision (singleton INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
@@ -6873,6 +6929,23 @@ export const upsertEntity = (entity: {
   ) {
     existing = db
       .prepare(
+        `SELECT project.* FROM entity_dreaming_aliases name_alias
+         JOIN entities project ON project.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'project'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolveProjectIdentityId(existing.id));
+    matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'project' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
         `SELECT canonical.* FROM project_aliases pa
          JOIN entities alias ON alias.id = pa.project_id
          JOIN entities canonical ON canonical.id = pa.canonical_id
@@ -6880,6 +6953,23 @@ export const upsertEntity = (entity: {
       )
       .get(normalizedName) as Entity | undefined;
     matchedProjectAlias = Boolean(existing);
+  }
+
+  if (
+    !existing &&
+    entity.type === 'person' &&
+    entity.dedupe_by_name !== false
+  ) {
+    existing = db
+      .prepare(
+        `SELECT person.* FROM entity_dreaming_aliases name_alias
+         JOIN entities person ON person.id = name_alias.entity_id
+         WHERE name_alias.entity_type = 'person'
+           AND name_alias.active = 1 AND name_alias.normalized_name = ?`,
+      )
+      .get(normalizedName) as Entity | undefined;
+    if (existing) existing = getEntity(resolvePersonIdentityId(existing.id));
+    matchedPersonAlias = Boolean(existing);
   }
 
   if (
@@ -7052,6 +7142,29 @@ export const updatePersonName = (personId: string, name: string): Entity =>
     }
     return getEntity(person.id)!;
   })();
+
+export const addPersonNameAlias = (
+  personId: string,
+  aliasName: string,
+): void => {
+  const canonicalId = resolvePersonIdentityId(personId);
+  const person = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!person || person.type !== 'person' || !trimmed) {
+    throw new Error('person_name_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === person.normalized_name) {
+    return;
+  }
+  db.prepare(
+    `INSERT INTO person_name_aliases(
+       person_id, normalized_name, display_name, source
+     ) VALUES (?, ?, ?, 'alias_suggestion')
+     ON CONFLICT(person_id, normalized_name) DO UPDATE SET
+       display_name = excluded.display_name`,
+  ).run(person.id, normalizedName, trimmed);
+};
 
 export const mergePerson = (
   personId: string,
@@ -7466,7 +7579,7 @@ export const restoreCommitmentAlias = (extractionId: string): void => {
 /**
  * Get all entities of a specific type
  */
-const resolveProjectIdentityId = (projectId: string): string => {
+export const resolveProjectIdentityId = (projectId: string): string => {
   let current = projectId;
   const seen = new Set<string>();
   while (!seen.has(current)) {
@@ -7542,11 +7655,30 @@ export const deleteProjectMilestone = (
     const project = getEntity(canonicalId);
     if (!project || project.type !== 'project')
       throw new Error('project_milestone_project_invalid');
-    const deleted = withoutUserProjectMilestone(project.metadata, milestoneId);
+    const deleted = withoutProjectMilestone(project.metadata, milestoneId);
     if (!deleted.removed) throw new Error('project_milestone_not_found');
     db.prepare(
       'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     ).run(deleted.metadata, canonicalId);
+    if (
+      deleted.removed.source === 'dreaming' &&
+      deleted.removed.dreamingProposalId
+    ) {
+      const proposal = db
+        .prepare(
+          'SELECT fingerprint FROM entity_dreaming_proposals WHERE id = ?',
+        )
+        .get(deleted.removed.dreamingProposalId) as
+        | { fingerprint: string }
+        | undefined;
+      if (!proposal) throw new Error('dreaming_milestone_proposal_missing');
+      recordEntityCorrection({
+        entityId: canonicalId,
+        itemType: 'dreaming:project_milestone',
+        fingerprint: proposal.fingerprint,
+        reason: 'removed_by_user',
+      });
+    }
     return deleted.removed;
   })();
 
@@ -7604,6 +7736,43 @@ export const mergeProject = (
     db.prepare(
       'UPDATE project_aliases SET canonical_id = ? WHERE canonical_id = ? AND active = 1',
     ).run(destinationId, source.id);
+  })();
+};
+
+export const addProjectAlias = (projectId: string, aliasName: string): void => {
+  const canonicalId = resolveProjectIdentityId(projectId);
+  const project = getEntity(canonicalId);
+  const trimmed = aliasName.trim().replace(/\s+/g, ' ');
+  if (!project || project.type !== 'project' || !trimmed) {
+    throw new Error('project_alias_invalid');
+  }
+  const normalizedName = normalizeEntityName(trimmed);
+  if (normalizedName === project.normalized_name) {
+    return;
+  }
+  db.transaction(() => {
+    let aliasEntity = db
+      .prepare('SELECT * FROM entities WHERE type = ? AND normalized_name = ?')
+      .get('project', normalizedName) as Entity | undefined;
+    if (!aliasEntity) {
+      const aliasId = `proj_${createHash('sha256')
+        .update(`alias:${canonicalId}:${normalizedName}`)
+        .digest('hex')
+        .slice(0, 12)}`;
+      aliasEntity = upsertEntity({
+        id: aliasId,
+        type: 'project',
+        name: trimmed,
+        status: 'active',
+        dedupe_by_name: false,
+      });
+    }
+    if (
+      aliasEntity.id !== canonicalId &&
+      resolveProjectIdentityId(aliasEntity.id) !== canonicalId
+    ) {
+      mergeProject(aliasEntity.id, canonicalId);
+    }
   })();
 };
 
@@ -7889,6 +8058,23 @@ export const findEntity = (
     return getEntity(resolvePersonIdentityId(direct.id));
   }
   if (direct) return direct;
+  const dreamingAliasMatches = db
+    .prepare(
+      `SELECT DISTINCT entity_id FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND active = 1 AND normalized_name = ?`,
+    )
+    .all(type, normalizedName) as Array<{ entity_id: string }>;
+  if (dreamingAliasMatches.length === 1) {
+    const aliasEntityId = dreamingAliasMatches[0].entity_id;
+    return getEntity(
+      type === 'person'
+        ? resolvePersonIdentityId(aliasEntityId)
+        : type === 'project'
+          ? resolveProjectIdentityId(aliasEntityId)
+          : aliasEntityId,
+    );
+  }
+  if (dreamingAliasMatches.length > 1 || type === 'project') return undefined;
   if (type !== 'person') return undefined;
   const matches = db
     .prepare(
@@ -8069,6 +8255,96 @@ export const linkEntities = (link: {
     .prepare('SELECT * FROM entity_links WHERE id = ?')
     .get(id) as EntityLink;
 };
+
+function upsertCanonicalDreamingProjectCommitment(input: {
+  projectId: string;
+  task: string;
+  proposalId: string;
+  runId: string;
+  fingerprint: string;
+  evidence: Array<{ meetingId: string; excerpt: string }>;
+  timestamp: string;
+}): void {
+  const normalizedTask = normalizeEntityName(input.task);
+  const matchingRows = db
+    .prepare(
+      `SELECT id FROM entities
+       WHERE type = 'action_item' AND normalized_name = ? ORDER BY id`,
+    )
+    .all(normalizedTask) as Array<{ id: string }>;
+  const canonicalMatches = new Map<string, Entity>();
+  for (const row of matchingRows) {
+    const resolved = resolveCommitmentIdentity(row.id);
+    if (resolved?.type === 'action_item')
+      canonicalMatches.set(resolved.id, resolved);
+  }
+  if (canonicalMatches.size > 1)
+    throw new Error('dreaming_commitment_conflict');
+  const action =
+    canonicalMatches.values().next().value ??
+    upsertEntity({
+      type: 'action_item',
+      name: input.task.trim().replace(/\s+/g, ' '),
+      status: 'active',
+      assigned_to: null,
+      dedupe_by_name: true,
+    });
+  if (action.type !== 'action_item' || action.assigned_to !== null) {
+    throw new Error('dreaming_commitment_conflict');
+  }
+  let metadata: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(action.metadata || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      metadata = parsed as Record<string, unknown>;
+    }
+  } catch {
+    metadata = {};
+  }
+  const existingSources = Array.isArray(metadata.dreamingSources)
+    ? metadata.dreamingSources.filter(
+        (source): source is Record<string, unknown> =>
+          Boolean(source) &&
+          typeof source === 'object' &&
+          !Array.isArray(source),
+      )
+    : [];
+  const dreamingSources = existingSources.some(
+    (source) => source.proposalId === input.proposalId,
+  )
+    ? existingSources
+    : [
+        ...existingSources,
+        {
+          proposalId: input.proposalId,
+          runId: input.runId,
+          fingerprint: input.fingerprint,
+          meetingIds: input.evidence.map((item) => item.meetingId),
+          excerpts: input.evidence.map((item) => item.excerpt),
+        },
+      ];
+  db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = ? WHERE id = ?',
+  ).run(
+    JSON.stringify({ ...metadata, dreamingSources }),
+    input.timestamp,
+    action.id,
+  );
+  const primaryEvidence = input.evidence[0];
+  const link = linkEntities({
+    source_entity_id: action.id,
+    target_entity_id: resolveProjectIdentityId(input.projectId),
+    relationship: 'belongs_to',
+    meeting_id: primaryEvidence.meetingId,
+    state: 'confirmed',
+    evidence_meeting_id: primaryEvidence.meetingId,
+    evidence_quote: primaryEvidence.excerpt,
+    source: 'synthesis',
+    confidence: 1,
+  });
+  if (link.state !== 'confirmed')
+    throw new Error('dreaming_commitment_conflict');
+}
 
 /**
  * Get all links for an entity (both directions)
@@ -8360,6 +8636,491 @@ export const getEntityMeetings = (
     mention_count: number;
     context: string | null;
   })[];
+};
+
+export interface DreamingEntityNoteSource {
+  id: string;
+  title: string;
+  started_at: string | null;
+  created_at: string | null;
+  user_notes: string | null;
+  enhanced_notes: string | null;
+}
+
+const dreamingEntityNotesQuery = (
+  aliasTable: 'person_aliases' | 'project_aliases',
+  aliasIdColumn: 'person_id' | 'project_id',
+): string => `
+  WITH family(id) AS (
+    SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
+    WHERE a.canonical_id = ? AND a.active = 1
+  )
+  SELECT
+    m.id,
+    m.title,
+    m.started_at,
+    m.created_at,
+    m.user_notes,
+    m.enhanced_notes
+  FROM meeting_entities me INDEXED BY idx_meeting_entities_entity_meeting
+  JOIN meetings m ON m.id = me.meeting_id
+  WHERE me.entity_id IN (SELECT id FROM family)
+    AND (
+      TRIM(COALESCE(m.user_notes, '')) != ''
+      OR TRIM(COALESCE(m.enhanced_notes, '')) != ''
+    )
+  GROUP BY m.id
+  ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC
+  LIMIT ?
+`;
+
+const getDreamingEntityQueryContext = (entityId: string) => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return null;
+  }
+  return entity.type === 'person'
+    ? {
+        canonicalId: resolvePersonIdentityId(entity.id),
+        aliasTable: 'person_aliases' as const,
+        aliasIdColumn: 'person_id' as const,
+      }
+    : {
+        canonicalId: resolveProjectIdentityId(entity.id),
+        aliasTable: 'project_aliases' as const,
+        aliasIdColumn: 'project_id' as const,
+      };
+};
+
+/**
+ * Return the bounded, notes-only meeting projection used by idle dreaming.
+ * Keep this projection explicit: transcripts, audio paths, and analysis payloads
+ * are intentionally unavailable to the packager.
+ */
+export const getDreamingEntityNotes = (
+  entityId: string,
+  limit = 8,
+): DreamingEntityNoteSource[] => {
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
+  const boundedLimit = Math.max(1, Math.min(8, Math.trunc(limit)));
+
+  return db
+    .prepare(
+      dreamingEntityNotesQuery(context.aliasTable, context.aliasIdColumn),
+    )
+    .all(
+      context.canonicalId,
+      context.canonicalId,
+      boundedLimit,
+    ) as DreamingEntityNoteSource[];
+};
+
+export const getDreamingEntityNotesQueryPlan = (entityId: string): string[] => {
+  const context = getDreamingEntityQueryContext(entityId);
+  if (!context) return [];
+  const rows = db
+    .prepare(
+      `EXPLAIN QUERY PLAN ${dreamingEntityNotesQuery(
+        context.aliasTable,
+        context.aliasIdColumn,
+      )}`,
+    )
+    .all(context.canonicalId, context.canonicalId, 8) as Array<{
+    detail: string;
+  }>;
+  return rows.map((row) => row.detail);
+};
+
+interface AcceptedDreamingPersonClaim {
+  proposalId: string;
+  runId: string;
+  kind: 'person_headline' | 'person_focus' | 'person_collaborator';
+  value: string;
+  sourceMeetingIds: string[];
+  excerpts: string[];
+  createdAt: string;
+}
+
+const getAcceptedDreamingPersonClaims = (
+  canonicalId: string,
+): AcceptedDreamingPersonClaim[] => {
+  const rows = db
+    .prepare(`WITH family(id) AS (
+      SELECT ? UNION SELECT person_id FROM person_aliases
+      WHERE canonical_id = ? AND active = 1
+    )
+    SELECT claim.proposal_id, proposal.run_id, claim.kind, claim.value,
+      claim.evidence_json, claim.created_at
+    FROM entity_dreaming_person_claims claim
+    JOIN entity_dreaming_proposals proposal ON proposal.id = claim.proposal_id
+    WHERE claim.entity_id IN (SELECT id FROM family)
+    ORDER BY claim.created_at, claim.proposal_id`)
+    .all(canonicalId, canonicalId) as Array<{
+    proposal_id: string;
+    run_id: string;
+    kind: AcceptedDreamingPersonClaim['kind'];
+    value: string;
+    evidence_json: string;
+    created_at: string;
+  }>;
+  return rows.map((row) => {
+    let evidence: Array<{ meetingId: string; excerpt: string }> = [];
+    try {
+      const parsed = JSON.parse(row.evidence_json) as unknown;
+      if (Array.isArray(parsed)) {
+        evidence = parsed.filter(
+          (item): item is { meetingId: string; excerpt: string } =>
+            Boolean(item) &&
+            typeof item === 'object' &&
+            typeof (item as { meetingId?: unknown }).meetingId === 'string' &&
+            typeof (item as { excerpt?: unknown }).excerpt === 'string',
+        );
+      }
+    } catch {
+      evidence = [];
+    }
+    return {
+      proposalId: row.proposal_id,
+      runId: row.run_id,
+      kind: row.kind,
+      value: row.value,
+      sourceMeetingIds: evidence.map((item) => item.meetingId),
+      excerpts: evidence.map((item) => item.excerpt),
+      createdAt: row.created_at,
+    };
+  });
+};
+
+const acceptedPersonRead = (
+  claims: AcceptedDreamingPersonClaim[],
+  fallbackHeadline: string,
+  fallbackBullets: string[],
+) => {
+  const acceptedHeadline = claims
+    .filter((claim) => claim.kind === 'person_headline')
+    .at(-1)?.value;
+  const acceptedBullets = claims
+    .filter((claim) => claim.kind !== 'person_headline')
+    .map((claim) => claim.value);
+  return {
+    headline: acceptedHeadline ?? fallbackHeadline,
+    supportingBullets: [...new Set([...fallbackBullets, ...acceptedBullets])],
+  };
+};
+
+const overlayAcceptedClaimsOnKnowledgeDoc = (
+  doc: KnowledgeDoc | null,
+  claims: AcceptedDreamingPersonClaim[],
+): KnowledgeDoc | null => {
+  if (!doc || claims.length === 0) return doc;
+  let structured: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(doc.structured_json || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      structured = parsed as Record<string, unknown>;
+    }
+  } catch {
+    structured = {};
+  }
+  const current =
+    structured.current_read &&
+    typeof structured.current_read === 'object' &&
+    !Array.isArray(structured.current_read)
+      ? (structured.current_read as Record<string, unknown>)
+      : {};
+  const read = acceptedPersonRead(
+    claims,
+    typeof current.headline === 'string' ? current.headline : '',
+    Array.isArray(current.supporting_bullets)
+      ? current.supporting_bullets.filter(
+          (item): item is string => typeof item === 'string',
+        )
+      : [],
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct',
+      confidence: 1,
+    })),
+  );
+  const existingEvidence = Array.isArray(structured.evidence_index)
+    ? structured.evidence_index
+    : [];
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...doc,
+    structured_json: JSON.stringify({
+      ...structured,
+      current_read: {
+        ...current,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          typeof current.source_count === 'number' ? current.source_count : 0,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          typeof current.cited_item_count === 'number'
+            ? current.cited_item_count
+            : 0,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          typeof current.cited_meeting_count === 'number'
+            ? current.cited_meeting_count
+            : 0,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...existingEvidence, ...acceptedEvidence],
+    }),
+  };
+};
+
+const overlayAcceptedClaimsOnSnapshot = (
+  snapshot: WorkingMemorySnapshot | null,
+  claims: AcceptedDreamingPersonClaim[],
+): WorkingMemorySnapshot | null => {
+  if (!snapshot || claims.length === 0) return snapshot;
+  const read = acceptedPersonRead(
+    claims,
+    snapshot.payload.current_read.headline,
+    snapshot.payload.current_read.supporting_bullets,
+  );
+  const acceptedEvidence = claims.flatMap((claim) =>
+    claim.sourceMeetingIds.map((meetingId, index) => ({
+      id: `dreaming-${claim.proposalId}-${index}`,
+      meeting_id: meetingId,
+      meeting_title: '',
+      captured_at: claim.createdAt,
+      quote: claim.excerpts[index] ?? '',
+      stream_ids: [],
+      item_ids: [claim.proposalId],
+      mode: 'direct' as const,
+      confidence: 1,
+    })),
+  );
+  const meetingCount = new Set(
+    acceptedEvidence.map((entry) => entry.meeting_id).filter(Boolean),
+  ).size;
+  return {
+    ...snapshot,
+    payload: {
+      ...snapshot.payload,
+      current_read: {
+        ...snapshot.payload.current_read,
+        headline: read.headline,
+        supporting_bullets: read.supportingBullets,
+        source_count: Math.max(
+          snapshot.payload.current_read.source_count,
+          meetingCount,
+        ),
+        cited_item_count: Math.max(
+          snapshot.payload.current_read.cited_item_count,
+          claims.length,
+        ),
+        cited_meeting_count: Math.max(
+          snapshot.payload.current_read.cited_meeting_count,
+          meetingCount,
+        ),
+      },
+      evidence_index: [...snapshot.payload.evidence_index, ...acceptedEvidence],
+    },
+  };
+};
+
+/** Compact accepted state supplied to dreaming so proposals do not repeat it. */
+export const getDreamingEntityBaseline = (
+  entityId: string,
+): Record<string, unknown> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return {};
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const canonical = getEntity(canonicalId);
+  if (!canonical) return {};
+  const aliasTable =
+    canonical.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn =
+    canonical.type === 'person' ? 'person_id' : 'project_id';
+  const identityAliases = db
+    .prepare(`
+      SELECT alias.id, alias.name
+      FROM ${aliasTable} identity
+      JOIN entities alias ON alias.id = identity.${aliasIdColumn}
+      WHERE identity.canonical_id = ? AND identity.active = 1
+      ORDER BY alias.id
+      LIMIT 24
+    `)
+    .all(canonicalId) as Array<{ id: string; name: string }>;
+  const dreamingAliases = db
+    .prepare(
+      `WITH family(id) AS (
+         SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+         WHERE canonical_id = ? AND active = 1
+       )
+       SELECT normalized_name AS id, MIN(display_name) AS name
+       FROM entity_dreaming_aliases
+       WHERE entity_type = ? AND entity_id IN (SELECT id FROM family)
+         AND active = 1
+       GROUP BY normalized_name
+       ORDER BY normalized_name LIMIT 24`,
+    )
+    .all(canonicalId, canonicalId, canonical.type) as Array<{
+    id: string;
+    name: string;
+  }>;
+  const userNameAliases =
+    canonical.type === 'person'
+      ? (db
+          .prepare(`SELECT normalized_name AS id, display_name AS name
+            FROM person_name_aliases WHERE person_id = ?
+            ORDER BY normalized_name LIMIT 24`)
+          .all(canonicalId) as Array<{ id: string; name: string }>)
+      : [];
+  const aliases = [
+    ...identityAliases,
+    ...userNameAliases,
+    ...dreamingAliases,
+  ].slice(0, 24);
+  const commitments =
+    canonical.type === 'project'
+      ? (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT project_id FROM project_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT DISTINCT action.id, action.name, action.status, action.due_date
+            FROM entities action
+            JOIN entity_links link ON link.source_entity_id = action.id
+            WHERE action.type = 'action_item'
+              AND link.relationship = 'belongs_to'
+              AND link.state = 'confirmed'
+              AND link.target_entity_id IN (SELECT id FROM family)
+            ORDER BY action.id
+            LIMIT 24
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>)
+      : (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT person_id FROM person_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT id, name, status, due_date
+            FROM entities
+            WHERE type = 'action_item' AND assigned_to IN (SELECT id FROM family)
+            ORDER BY id
+            LIMIT 24
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>);
+  const scopeType = canonical.type === 'person' ? 'person_context' : 'project';
+  const snapshot = getWorkingMemorySnapshot(scopeType, canonicalId);
+  let acceptedPersonCurrentRead: {
+    headline: string;
+    supportingBullets: string[];
+  } | null = null;
+  const acceptedPersonClaims =
+    canonical.type === 'person'
+      ? getAcceptedDreamingPersonClaims(canonicalId)
+      : [];
+  if (canonical.type === 'person') {
+    const personDoc = getKnowledgeDocByScope('person_context', canonicalId);
+    try {
+      const structured = JSON.parse(personDoc?.structured_json || '{}') as {
+        current_read?: {
+          headline?: unknown;
+          supporting_bullets?: unknown;
+        };
+      };
+      if (
+        typeof structured.current_read?.headline === 'string' &&
+        Array.isArray(structured.current_read.supporting_bullets)
+      ) {
+        acceptedPersonCurrentRead = {
+          headline: structured.current_read.headline,
+          supportingBullets: structured.current_read.supporting_bullets.filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        };
+      }
+    } catch {
+      acceptedPersonCurrentRead = null;
+    }
+    if (acceptedPersonClaims.length > 0) {
+      acceptedPersonCurrentRead = acceptedPersonRead(
+        acceptedPersonClaims,
+        acceptedPersonCurrentRead?.headline ??
+          snapshot?.payload.current_read.headline ??
+          '',
+        acceptedPersonCurrentRead?.supportingBullets ??
+          snapshot?.payload.current_read.supporting_bullets ??
+          [],
+      );
+    }
+  }
+
+  const common = {
+    status: canonical.status,
+    aliases,
+    commitments,
+    ...(canonical.type === 'person' ? { acceptedPersonClaims } : {}),
+    currentRead:
+      acceptedPersonCurrentRead ??
+      (snapshot
+        ? {
+            headline: snapshot.payload.current_read.headline,
+            supportingBullets: snapshot.payload.current_read.supporting_bullets,
+          }
+        : null),
+  };
+  if (canonical.type === 'person') {
+    return {
+      ...common,
+      role: parsePersonRole(canonical.metadata),
+    };
+  }
+  const theme = readProjectThemeSynthesis(canonical.metadata);
+  return {
+    ...common,
+    displayTitle: readProjectDisplayTitle(canonical.metadata, canonical.name),
+    theme: theme
+      ? { outcome: theme.outcome, currentFocus: theme.currentFocus }
+      : null,
+    milestones: buildUserProjectMilestones(canonical.metadata)
+      .slice(0, 24)
+      .map(({ title, status, targetDate, note }) => ({
+        title,
+        status,
+        targetDate,
+        note,
+      })),
+  };
 };
 
 type PeopleBriefingSummaryRow = {
@@ -8792,6 +9553,15 @@ export const getPersonBriefing = (
     mergedAt: string;
   }>;
   const selfPersonId = identityStore.getSelfPersonId();
+  const acceptedClaims = getAcceptedDreamingPersonClaims(canonicalId);
+  const knowledgeDoc = overlayAcceptedClaimsOnKnowledgeDoc(
+    getKnowledgeDocByScope('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
+  const workingMemorySnapshot = overlayAcceptedClaimsOnSnapshot(
+    getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    acceptedClaims,
+  );
 
   return {
     person,
@@ -8813,9 +9583,8 @@ export const getPersonBriefing = (
     isSelf:
       selfPersonId !== null &&
       resolvePersonIdentityId(selfPersonId) === canonicalId,
-    knowledgeDoc: getKnowledgeDocByScope('person_context', canonicalId) ?? null,
-    workingMemorySnapshot:
-      getWorkingMemorySnapshot('person_context', canonicalId) ?? null,
+    knowledgeDoc,
+    workingMemorySnapshot,
     mergedPeople,
   };
 };
@@ -9084,6 +9853,12 @@ export const resetKnowledge = () => {
     'meeting_context_snapshots',
     'meeting_entities',
     'entity_links',
+    'entity_dreaming_person_claims',
+    'entity_dreaming_aliases',
+    'entity_dreaming_proposals',
+    'entity_dreaming_runs',
+    'entity_alias_suggestions',
+    'entity_corrections',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',
@@ -9321,4 +10096,175 @@ export const getMeetingsForEntity = (entityId: string) => {
     mention_count: number;
     context: string | null;
   }>;
+};
+
+export interface EntityCorrectionRecord {
+  id: string;
+  entity_id: string;
+  item_type: string;
+  fingerprint: string;
+  reason?: string | null;
+  created_at: string;
+}
+
+export const recordEntityCorrection = (input: {
+  entityId: string;
+  itemType: string;
+  fingerprint: string;
+  reason?: string;
+}): EntityCorrectionRecord => {
+  const normalizedId = String(input.entityId).trim();
+  const normalizedType = String(input.itemType).trim();
+  const normalizedFingerprint = generateItemFingerprint(
+    String(input.fingerprint),
+  );
+  const id = `corr_${createHash('sha256')
+    .update(`${normalizedId}:${normalizedType}:${normalizedFingerprint}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  db.prepare(`
+    INSERT INTO entity_corrections (id, entity_id, item_type, fingerprint, reason)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(entity_id, item_type, fingerprint) DO UPDATE SET
+      reason = excluded.reason,
+      created_at = CURRENT_TIMESTAMP
+  `).run(
+    id,
+    normalizedId,
+    normalizedType,
+    normalizedFingerprint,
+    input.reason ?? null,
+  );
+
+  return db
+    .prepare('SELECT * FROM entity_corrections WHERE id = ?')
+    .get(id) as EntityCorrectionRecord;
+};
+
+export const getEntityCorrections = (
+  entityId: string,
+): EntityCorrectionRecord[] => {
+  return db
+    .prepare(
+      'SELECT * FROM entity_corrections WHERE entity_id = ? ORDER BY datetime(created_at) DESC',
+    )
+    .all(String(entityId)) as EntityCorrectionRecord[];
+};
+
+/** Include corrections recorded on the canonical entity or any active alias. */
+export const getDreamingEntityCorrections = (
+  entityId: string,
+): Array<{ fingerprint: string }> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return [];
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const aliasTable =
+    entity.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn = entity.type === 'person' ? 'person_id' : 'project_id';
+  return db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT ${aliasIdColumn} FROM ${aliasTable}
+        WHERE canonical_id = ? AND active = 1
+      )
+      SELECT DISTINCT correction.fingerprint
+      FROM entity_corrections correction
+      WHERE correction.entity_id IN (SELECT id FROM family)
+      ORDER BY correction.fingerprint COLLATE BINARY
+      LIMIT 64
+    `)
+    .all(canonicalId, canonicalId) as Array<{ fingerprint: string }>;
+};
+
+export const isItemDismissed = (
+  entityId: string,
+  itemType: string,
+  fingerprint: string,
+): boolean => {
+  const row = db
+    .prepare(`
+      SELECT 1 FROM entity_corrections
+      WHERE entity_id = ? AND item_type = ? AND fingerprint = ?
+      LIMIT 1
+    `)
+    .get(
+      String(entityId),
+      String(itemType),
+      generateItemFingerprint(String(fingerprint)),
+    );
+  return Boolean(row);
+};
+
+export { generateItemFingerprint };
+
+export interface EntityAliasSuggestion {
+  id: string;
+  entity_id: string;
+  suggested_name: string;
+  source_meeting_ids_json: string;
+  evidence_snippet?: string | null;
+  status: 'pending' | 'merged' | 'dismissed';
+  created_at: string;
+  updated_at: string;
+}
+
+export const saveEntityAliasSuggestion = (input: {
+  entityId: string;
+  suggestedName: string;
+  sourceMeetingIds?: string[];
+  evidenceSnippet?: string;
+}): void => {
+  const entityId = String(input.entityId).trim();
+  const suggestedName = String(input.suggestedName).trim();
+  if (!entityId || !suggestedName) return;
+
+  const id = `alias_sug_${createHash('sha256')
+    .update(`${entityId}:${suggestedName.toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
+  const sourceMeetingIdsJson = JSON.stringify(input.sourceMeetingIds ?? []);
+
+  db.prepare(`
+    INSERT INTO entity_alias_suggestions (id, entity_id, suggested_name, source_meeting_ids_json, evidence_snippet, status, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+    ON CONFLICT(entity_id, suggested_name) DO UPDATE SET
+      source_meeting_ids_json = excluded.source_meeting_ids_json,
+      evidence_snippet = COALESCE(excluded.evidence_snippet, entity_alias_suggestions.evidence_snippet),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE status != 'dismissed'
+  `).run(
+    id,
+    entityId,
+    suggestedName,
+    sourceMeetingIdsJson,
+    input.evidenceSnippet ?? null,
+  );
+};
+
+export const getEntityAliasSuggestions = (
+  entityId: string,
+): EntityAliasSuggestion[] => {
+  return db
+    .prepare(
+      "SELECT * FROM entity_alias_suggestions WHERE entity_id = ? AND status = 'pending' ORDER BY datetime(created_at) DESC",
+    )
+    .all(String(entityId)) as EntityAliasSuggestion[];
+};
+
+export const updateEntityAliasSuggestionStatus = (
+  id: string,
+  status: 'pending' | 'merged' | 'dismissed',
+): void => {
+  db.prepare(`
+    UPDATE entity_alias_suggestions
+    SET status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(status, id);
 };

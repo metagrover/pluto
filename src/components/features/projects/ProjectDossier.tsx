@@ -5,11 +5,17 @@ import {
   mergeProject,
   restoreProjectMerge,
   setProjectPortfolioDisposition,
+  triggerDreamingNow,
   updateProjectDisplayTitle,
 } from '../../../api/knowledgeGraph';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../../utils/dreamingStatus';
 import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
+import { PreparedUpdates } from '../dreaming/PreparedUpdates';
 import { ProjectCommitments } from './ProjectCommitments';
 import { ProjectMilestones } from './ProjectMilestones';
 
@@ -79,11 +85,26 @@ export const ProjectDossier = ({
     id: string;
     name: string;
   } | null>(null);
+  const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
+  const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editingTitle) titleInputRef.current?.focus();
   }, [editingTitle]);
+
+  useEffect(() => {
+    prepareGeneration.current += 1;
+    setDreamingState('idle');
+  }, [projectId]);
+
+  useEffect(
+    () => () => {
+      prepareGeneration.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -102,10 +123,43 @@ export const ProjectDossier = ({
       .finally(() => {
         if (active) setLoading(false);
       });
+
     return () => {
       active = false;
     };
   }, [projectId, projectName, request]);
+
+  const handleDreamNow = async () => {
+    const generation = ++prepareGeneration.current;
+    const preparedProjectId = projectId;
+    setDreamingState('running');
+    try {
+      const result = await triggerDreamingNow({
+        entityId: preparedProjectId,
+      });
+      if (
+        generation !== prepareGeneration.current ||
+        preparedProjectId !== projectId
+      )
+        return;
+      if (result.status === 'proposed') {
+        setRequest((r) => r + 1);
+        setPreparedUpdatesReload((value) => value + 1);
+        setDreamingState('proposed');
+      } else {
+        if (result.status === 'existing') {
+          setPreparedUpdatesReload((value) => value + 1);
+        }
+        setDreamingState(result.status);
+      }
+    } catch {
+      if (
+        generation === prepareGeneration.current &&
+        preparedProjectId === projectId
+      )
+        setDreamingState('error');
+    }
+  };
 
   const current = loadedProjectId === projectId ? brief : null;
   const qualification = readProjectQualification(current?.project.metadata);
@@ -286,6 +340,14 @@ export const ProjectDossier = ({
               className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
             >
               Merge another project
+            </button>
+            <button
+              type="button"
+              disabled={dreamingState === 'running'}
+              onClick={() => void handleDreamNow()}
+              className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+            >
+              {DREAMING_STATUS_LABEL[dreamingState]}
             </button>
           </div>
         </details>
@@ -480,6 +542,27 @@ export const ProjectDossier = ({
               </h2>
             </section>
 
+            <PreparedUpdates
+              key={current.project.id}
+              entityId={current.project.id}
+              entityType="project"
+              reloadToken={preparedUpdatesReload}
+              evidenceMeetings={current.meetings.map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                date: meeting.started_at || meeting.created_at,
+              }))}
+              onCanonicalChange={async () => {
+                setRequest((value) => value + 1);
+                await onPortfolioChanged?.();
+              }}
+              onOpenMeeting={onOpenMeeting}
+              onReviewIdentity={() => {
+                setMergeOpen(true);
+                setMergeState('idle');
+              }}
+            />
+
             {current.theme?.recentChanges.length ? (
               <section aria-labelledby="project-recent-changes">
                 <h2
@@ -605,6 +688,12 @@ export const ProjectDossier = ({
             <ProjectMilestones
               projectId={current.project.id}
               milestones={current.milestones}
+              evidenceMeetings={current.meetings.map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                date: meeting.started_at || meeting.created_at,
+              }))}
+              onOpenMeeting={onOpenMeeting}
               onChange={(milestones) =>
                 setBrief((value) => (value ? { ...value, milestones } : value))
               }

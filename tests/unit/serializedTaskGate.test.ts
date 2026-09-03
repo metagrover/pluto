@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { getLocalInferenceAdmission } from '../../electron/llm/inferenceCoordinator';
 import { LLM_WORK_CLASS_PRIORITY } from '../../electron/llm/llmWorkClass';
 import { createSerializedTaskGate } from '../../electron/serializedTaskGate';
 
@@ -11,6 +12,16 @@ describe('createSerializedTaskGate', () => {
       project_review: 15,
       meeting_secondary: 5,
       background: 0,
+    });
+  });
+  it('admits dreaming as preemptible lowest-priority inference', () => {
+    expect(getLocalInferenceAdmission('dreaming')).toEqual({
+      priority: LLM_WORK_CLASS_PRIORITY.background,
+      preemptible: true,
+    });
+    expect(getLocalInferenceAdmission('dreamingCleanup')).toEqual({
+      priority: LLM_WORK_CLASS_PRIORITY.background,
+      preemptible: true,
     });
   });
   it('cancels queued work before the active task finishes and permits retry', async () => {

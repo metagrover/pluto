@@ -24,10 +24,16 @@ import {
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
+  recordEntityCorrection,
   resolvePersonCommitmentOwner,
   restorePersonMerge,
+  triggerDreamingNow,
   updatePersonName,
 } from '../../api/knowledgeGraph';
+import {
+  DREAMING_STATUS_LABEL,
+  type DreamingUiStatus,
+} from '../../utils/dreamingStatus';
 import type {
   PersonBriefingCommitment,
   PersonBriefingCommitmentCandidate,
@@ -36,6 +42,7 @@ import type {
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
+import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
@@ -215,17 +222,19 @@ export const PeopleBriefing = ({
   return (
     <section aria-label="People" className="people-briefing">
       <PageHeader title="People">
-        {rows.length > 0 && (
-          <label className="people-search">
-            <Search aria-hidden="true" size={13} />
-            <span className="sr-only">Search people</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search people"
-            />
-          </label>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {rows.length > 0 && (
+            <label className="people-search">
+              <Search aria-hidden="true" size={13} />
+              <span className="sr-only">Search people</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search people"
+              />
+            </label>
+          )}
+        </div>
       </PageHeader>
 
       {rows.length === 0 ? (
@@ -485,12 +494,28 @@ export const PersonDossier = ({
     id: string;
     name: string;
   } | null>(null);
+  const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
+  const prepareGeneration = useRef(0);
+  const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
   }, [detail]);
+
+  useEffect(() => {
+    prepareGeneration.current += 1;
+    setDreamingState('idle');
+  }, [detail.person.id]);
+
+  useEffect(
+    () => () => {
+      prepareGeneration.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.focus();
@@ -632,6 +657,57 @@ export const PersonDossier = ({
     }
   };
 
+  const handleDreamNow = async () => {
+    const generation = ++prepareGeneration.current;
+    const preparedPersonId = currentDetail.person.id;
+    setDreamingState('running');
+    try {
+      const result = await triggerDreamingNow({
+        entityId: preparedPersonId,
+      });
+      if (
+        generation !== prepareGeneration.current ||
+        preparedPersonId !== currentDetail.person.id
+      )
+        return;
+      if (result.status === 'proposed') {
+        await onIdentityChanged();
+        if (
+          generation !== prepareGeneration.current ||
+          preparedPersonId !== currentDetail.person.id
+        )
+          return;
+        setPreparedUpdatesReload((value) => value + 1);
+        setDreamingState('proposed');
+      } else {
+        if (result.status === 'existing') {
+          setPreparedUpdatesReload((value) => value + 1);
+        }
+        setDreamingState(result.status);
+      }
+    } catch {
+      if (
+        generation === prepareGeneration.current &&
+        preparedPersonId === currentDetail.person.id
+      )
+        setDreamingState('error');
+    }
+  };
+
+  const handleDismissInsight = async (observation: string) => {
+    try {
+      await recordEntityCorrection({
+        entityId: currentDetail.person.id,
+        itemType: 'insight',
+        fingerprint: observation,
+        reason: 'reported_inaccurate',
+      });
+      setDismissedInsights((prev) => [...prev, observation]);
+    } catch {
+      // keep on error
+    }
+  };
+
   return (
     <article className="person-dossier">
       <div className="person-dossier__topline">
@@ -667,8 +743,43 @@ export const PersonDossier = ({
             >
               Merge another person
             </button>
+            <button
+              type="button"
+              disabled={dreamingState === 'running'}
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
+                void handleDreamNow();
+              }}
+            >
+              {DREAMING_STATUS_LABEL[dreamingState]}
+            </button>
           </div>
         </details>
+      </div>
+      <div
+        className="person-dossier__prepare-status flex min-h-6 items-center gap-3 text-sm text-pro-text-muted"
+        aria-live="polite"
+      >
+        {dreamingState !== 'idle' ? (
+          <>
+            <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
+            {dreamingState === 'proposed' ? (
+              <button
+                type="button"
+                className="rounded font-medium text-pro-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                onClick={() => {
+                  const heading = document.getElementById(
+                    `prepared-updates-person-${currentDetail.person.id}`,
+                  );
+                  heading?.focus();
+                  heading?.scrollIntoView?.({ block: 'start' });
+                }}
+              >
+                Review prepared updates
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </div>
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
@@ -922,31 +1033,63 @@ export const PersonDossier = ({
           <div className="person-dossier__patterns">
             <h3>Recent patterns</h3>
             <ul className="person-dossier__insights">
-              {insights.map((insight) => {
-                const citation = insight.citations[0];
-                const source = brief.evidenceIndex.find(
-                  (entry) => entry.meeting_id === citation?.meeting_id,
-                );
-                return (
-                  <li key={insight.id}>
-                    <strong>{insight.title}</strong>
-                    <p>{insight.summary}</p>
-                    {citation ? <q>{citation.quote}</q> : null}
-                    {citation ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenMeeting(citation.meeting_id)}
-                      >
-                        Source: {source?.meeting_title ?? 'Meeting'}
-                      </button>
-                    ) : null}
-                  </li>
-                );
-              })}
+              {insights
+                .filter((insight) => !dismissedInsights.includes(insight.title))
+                .map((insight) => {
+                  const citation = insight.citations[0];
+                  const source = brief.evidenceIndex.find(
+                    (entry) => entry.meeting_id === citation?.meeting_id,
+                  );
+                  return (
+                    <li key={insight.id}>
+                      <div className="flex items-start justify-between gap-2">
+                        <strong>{insight.title}</strong>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDismissInsight(insight.title)
+                          }
+                          title="Report inaccurate"
+                          className="text-xs text-pro-text-muted hover:text-pro-urgent"
+                        >
+                          Report inaccurate
+                        </button>
+                      </div>
+                      <p>{insight.summary}</p>
+                      {citation ? <q>{citation.quote}</q> : null}
+                      {citation ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenMeeting(citation.meeting_id)}
+                        >
+                          Source: {source?.meeting_title ?? 'Meeting'}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
             </ul>
           </div>
         ) : null}
       </section>
+
+      <PreparedUpdates
+        key={currentDetail.person.id}
+        entityId={currentDetail.person.id}
+        entityType="person"
+        reloadToken={preparedUpdatesReload}
+        evidenceMeetings={currentDetail.meetings.map((meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          date: meeting.started_at || meeting.created_at,
+        }))}
+        onCanonicalChange={onIdentityChanged}
+        onOpenMeeting={onOpenMeeting}
+        onReviewIdentity={() => {
+          setMergeOpen(true);
+          setMergeState('idle');
+        }}
+      />
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">
