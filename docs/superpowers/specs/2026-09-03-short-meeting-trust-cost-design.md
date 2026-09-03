@@ -16,17 +16,24 @@ The working hypothesis is that Pluto's inexpensive trust boundary remains valuab
 
 ## Pipeline boundaries
 
-Classify existing work into four zones:
+Classify existing work into five zones:
 
-1. **Canonical source:** transcript finalization, trust admission, and revision identity.
-2. **Primary notes:** writer, hierarchy, semantic audits, repairs, merges, and guarded publication.
-3. **Publication trust kernel:** schema, allowed-source, commitment-conservation, revision, and transactional checks that do not call a model.
-4. **Secondary intelligence:** value signals, entities, commitment reconciliation, MID generation, and later knowledge refresh.
+1. **Capture seal:** accepted stop through durable capture-journal seal.
+2. **Canonical source:** audio materialization, final ASR, channel reconciliation, speaker attribution, transcript validation, canonical commit, trust admission, and revision identity.
+3. **Primary notes:** writer, hierarchy, semantic audits, repairs, merges, and guarded publication.
+4. **Publication trust kernel:** schema, allowed-source, commitment-conservation, revision, and transactional checks that do not call a model.
+5. **Secondary intelligence:** value signals, entities, commitment reconciliation, MID generation, and later knowledge refresh.
 
-Report two totals rather than one:
+Report four top-level timing boundaries rather than one aggregate:
 
-- **stop-to-trusted-notes:** work required before notes are safely published;
-- **post-publication compute:** work that enriches People, Projects, commitments, search, or knowledge after notes are available.
+- **stop_to_sealed_capture:** accepted stop through durable capture-journal seal;
+- **sealed_to_canonical_transcript:** media materialization through validated canonical commit;
+- **canonical_to_trusted_notes:** notes generation, review, deterministic checks, and guarded publication;
+- **post_publication_compute:** work that enriches People, Projects, commitments, search, or knowledge after notes are available.
+
+Within `sealed_to_canonical_transcript`, retain content-free stage measurements when the input artifact records them: `materialize_mic`, `materialize_system`, `build_mix`, `transcribe_mic`, `transcribe_system`, `reconcile_channels`, `attribute_speakers`, `validate_transcript`, and `commit_canonical`. Keep queue time separate from active time and retain attempt/resume state when recorded. Missing boundaries or stages are `null`; never infer them or fold them into another boundary.
+
+Finalization recovery remains owned by #718/#446. This issue measures that boundary without changing or bypassing the canonical transcript gate.
 
 ## Inputs
 
@@ -105,7 +112,7 @@ The report may include only committed synthetic fixture identifiers and content-
 - Keep the evaluator independent from the production generation and publication path.
 - Make no provider calls and add no feature flag.
 - Do not alter historical fixture contents.
-- Do not combine primary-note latency with secondary-processing duration.
+- Do not combine capture, canonical-finalization, primary-note, or secondary-processing duration.
 - Do not treat asynchronous publication as evidence that total compute decreased.
 
 ## Verification
@@ -115,7 +122,7 @@ The iteration is complete when:
 - focused tests fail before implementation and pass afterward;
 - the script produces the same report on repeated runs, with no wall-clock timestamp because the report is a comparison artifact;
 - an automated privacy test rejects forbidden text-bearing fields;
-- the report distinguishes stop-to-trusted-notes from post-publication compute;
+- the report distinguishes all four timing boundaries and marks unavailable capture/canonical/secondary evidence as `null`;
 - repeated model consumption of the same source is visible as counts, without exposing that source;
 - TypeScript and Biome pass for touched files;
 - the result is summarized on #739 before deciding whether any production audit can be removed.

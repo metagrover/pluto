@@ -4,7 +4,7 @@
 
 **Goal:** Add a deterministic, privacy-safe report that exposes meeting-note model cost, duplicate recovery work, and the limits of current checkpoint evidence without changing production behavior.
 
-**Architecture:** A pure TypeScript library validates normalized captured attempts and builds content-free per-case and aggregate reports. A thin CLI adapter reads two committed synthetic editor fixtures, strips raw text before evaluation, and prints stable JSON. Existing quality and privacy taxonomies remain authoritative; unsupported semantic comparisons return `insufficient_fixture_evidence` rather than inferred scores.
+**Architecture:** A pure TypeScript library validates normalized captured attempts and builds content-free per-case and aggregate reports across four non-overlapping timing boundaries. A thin CLI adapter reads two committed synthetic editor fixtures, strips raw text before evaluation, records their evidence only under `canonical_to_trusted_notes`, and prints stable JSON with unavailable capture/canonical/secondary measurements as `null`. Existing quality and privacy taxonomies remain authoritative; unsupported semantic comparisons return `insufficient_fixture_evidence` rather than inferred scores.
 
 **Tech Stack:** TypeScript, Node.js, Vitest, existing captured synthetic JSON fixtures, existing meeting-notes latency privacy guard.
 
@@ -39,7 +39,7 @@ Expected: FAIL because `meeting_notes_trust_cost.ts` does not exist.
 
 - [ ] **Step 3: Implement strict normalized inputs and deterministic reporting**
 
-Implement `buildMeetingNotesTrustCostReport(cases)` with exact output types. Include only fixture/case identifiers, model/prompt identifiers, stage/task, recovery kind, outcome, counts, durations, token counts, duplicate digest equality, blocking status, and nullable quality checkpoints. Do not include raw response, transcript, prompt, evidence, names, paths, timestamps, or free-form review text.
+Implement `buildMeetingNotesTrustCostReport(cases)` with exact output types. Include only fixture/case identifiers, model/prompt identifiers, stage/task, recovery kind, outcome, counts, durations, token counts, duplicate digest equality, blocking status, and nullable quality checkpoints. Every case and aggregate must expose `stop_to_sealed_capture`, `sealed_to_canonical_transcript`, `canonical_to_trusted_notes`, and `post_publication_compute` separately. The canonical boundary may contain only the approved content-free stage names, with queue/active time and attempt/resume state distinct; absent evidence is `null`. Do not include raw response, transcript, prompt, evidence, names, paths, timestamps, or free-form review text.
 
 ```ts
 export type TrustCostConclusion =
@@ -72,12 +72,12 @@ git commit -m "test: measure meeting notes recovery cost"
 
 - [ ] **Step 1: Write a failing adapter/CLI test**
 
-Load `meetingNotesCompactEditorBaseline.json` and `meetingNotesCompactEditorCandidate.json` through an exported adapter. Assert six cases, deterministic repeated serialization, no raw/text-bearing fields, separated `stopToTrustedNotes` and nullable `postPublicationCompute`, and the known duplicate repairs from captured response digests.
+Load `meetingNotesCompactEditorBaseline.json` and `meetingNotesCompactEditorCandidate.json` through an exported adapter. Assert six cases, deterministic repeated serialization, no raw/text-bearing fields, measured `canonical_to_trusted_notes`, nullable `stop_to_sealed_capture`, nullable `sealed_to_canonical_transcript`, nullable `post_publication_compute`, and the known duplicate repairs from captured response digests.
 
 ```ts
 expect(report.totals).toMatchObject({
   caseCount: 6,
-  postPublicationCompute: null,
+  post_publication_compute: null,
 });
 expect(JSON.stringify(report)).not.toContain('review');
 ```
