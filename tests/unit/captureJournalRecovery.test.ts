@@ -1545,6 +1545,156 @@ describe('capture journal recovery', () => {
     });
   });
 
+  it('resumes a sealed provisional meeting whose materialized audio was never saved', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-resume';
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+      expectedSources: ['mic', 'system'],
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+    });
+    for (const source of ['mic', 'system'] as const) {
+      manifest = await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        format: 'wav',
+        data: Buffer.from(`${source}-raw`),
+      });
+      const raw = manifest.intervals[0].sources[source];
+      if (raw.disposition !== 'raw_durable') {
+        throw new Error(`expected raw durable ${source} tuple`);
+      }
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        rawChecksumSha256: raw.rawChecksumSha256,
+        repairData: Buffer.from(`${source}-repair`),
+      });
+      manifest = completed.manifest;
+    }
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+    const stopping = await stopCaptureJournal(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision + 1,
+    });
+    const sealed = await sealCaptureJournal(root, {
+      meetingId,
+      endedAtMs: 3_000,
+    });
+    expect(stopping.generation).toBe(sealed.generation);
+
+    const provisionalTranscript = JSON.stringify({
+      schemaVersion: 2,
+      lifecycleStatus: 'provisional',
+      segments: [{ speaker: 'Me', startTime: 0, endTime: 1, text: 'draft' }],
+    });
+    const existing = {
+      id: meetingId,
+      title: 'Keep title',
+      user_notes: 'Keep notes',
+      transcript_status: 'provisional',
+      transcript_json: provisionalTranscript,
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'provisional',
+      }),
+      capture_journal_generation: sealed.generation,
+      audio_path: null,
+      system_audio_path: null,
+      mixed_audio_path: null,
+      finalization_status: 'processing',
+    } as PersistedMeeting;
+    let persisted = existing;
+    const saveMeeting = vi.fn((meeting: PersistedMeeting) => {
+      persisted = meeting;
+    });
+    let failSystemOnce = true;
+    const stitchWavSegments = vi.fn(async (_segments, outputTag: string) => {
+      if (outputTag.includes('system') && failSystemOnce) {
+        failSystemOnce = false;
+        throw new Error('synthetic_system_interruption');
+      }
+      return join(root, `${outputTag}.wav`);
+    });
+    const mixWavSources = vi.fn(
+      async (_inputPaths: string[], outputTag: string) =>
+        join(root, `${outputTag}.wav`),
+    );
+
+    const interrupted = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => persisted,
+      saveMeeting,
+      stitchWavSegments,
+      mixWavSources,
+      nowMs: 4_000,
+    });
+
+    expect(interrupted).toMatchObject({
+      recoveredCount: 0,
+      failedRecoveryCount: 1,
+    });
+    expect(persisted).toMatchObject({
+      audio_path: join(root, `${meetingId}-mic-recovered.wav`),
+      system_audio_path: null,
+      mixed_audio_path: null,
+    });
+
+    const resumed = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => persisted,
+      saveMeeting,
+      stitchWavSegments,
+      mixWavSources,
+      nowMs: 5_000,
+    });
+
+    expect(resumed).toMatchObject({
+      recoveredCount: 1,
+      skippedExistingCount: 0,
+      skippedSealedCount: 0,
+    });
+    expect(
+      stitchWavSegments.mock.calls.filter(([, tag]) => tag.includes('mic')),
+    ).toHaveLength(1);
+    expect(mixWavSources).toHaveBeenCalledWith(
+      [
+        join(root, `${meetingId}-mic-recovered.wav`),
+        join(root, `${meetingId}-system-recovered.wav`),
+      ],
+      `${meetingId}-mix-recovered`,
+    );
+    expect(persisted).toMatchObject({
+      id: meetingId,
+      title: 'Keep title',
+      user_notes: 'Keep notes',
+      transcript_status: 'provisional',
+      transcript_json: provisionalTranscript,
+      finalization_status: 'processing',
+      audio_path: join(root, `${meetingId}-mic-recovered.wav`),
+      system_audio_path: join(root, `${meetingId}-system-recovered.wav`),
+      mixed_audio_path: join(root, `${meetingId}-mix-recovered.wav`),
+    });
+  });
+
   it.each([
     {
       name: 'legacy v1',

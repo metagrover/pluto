@@ -84,6 +84,7 @@ import {
   buildSaveMeetingFailureDiagnostic,
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
+import { planTimedWavStitch } from './timedWavStitchPlan';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
@@ -2129,57 +2130,66 @@ app.whenReady().then(async () => {
     },
   );
 
+  const mixWavSources = async ({
+    inputPaths,
+    outputTag,
+  }: {
+    inputPaths?: unknown[];
+    outputTag?: string;
+  }) => {
+    if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
+    const validPaths = inputPaths.filter(
+      (value): value is string =>
+        typeof value === 'string' && value.length > 0 && fs.existsSync(value),
+    );
+    if (validPaths.length < 2) return null;
+
+    const tag =
+      (typeof outputTag === 'string' ? outputTag : 'mix')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '')
+        .slice(0, 24) || 'mix';
+    const outputDir = path.join(app.getPath('userData'), 'meetings');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    const outputPath = path.join(
+      outputDir,
+      `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
+    );
+
+    return await new Promise<string | null>((resolve) => {
+      const command = ffmpeg();
+      for (const inputPath of validPaths) {
+        command.input(inputPath);
+      }
+      command
+        .complexFilter(
+          `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
+        )
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .toFormat('wav')
+        .on('end', () => {
+          console.log(`[Pluto] Mixed audio created: ${outputPath}`);
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          console.warn(
+            '[Pluto] Mixed audio failed:',
+            err instanceof Error ? err.message : err,
+          );
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          resolve(null);
+        })
+        .save(outputPath);
+    });
+  };
+
   ipcMain.handle(
     'AUDIO_MIX_WAV',
-    async (_event, { inputPaths, outputTag } = {}) => {
-      if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
-      const validPaths = inputPaths.filter(
-        (value): value is string =>
-          typeof value === 'string' && value.length > 0 && fs.existsSync(value),
-      );
-      if (validPaths.length < 2) return null;
-
-      const tag =
-        (typeof outputTag === 'string' ? outputTag : 'mix')
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]/g, '')
-          .slice(0, 24) || 'mix';
-      const outputDir = path.join(app.getPath('userData'), 'meetings');
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-      const outputPath = path.join(
-        outputDir,
-        `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
-      );
-
-      return await new Promise<string | null>((resolve) => {
-        const command = ffmpeg();
-        for (const inputPath of validPaths) {
-          command.input(inputPath);
-        }
-        command
-          .complexFilter(
-            `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
-          )
-          .audioChannels(1)
-          .audioFrequency(16000)
-          .toFormat('wav')
-          .on('end', () => {
-            console.log(`[Pluto] Mixed audio created: ${outputPath}`);
-            resolve(outputPath);
-          })
-          .on('error', (err) => {
-            console.warn(
-              '[Pluto] Mixed audio failed:',
-              err instanceof Error ? err.message : err,
-            );
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-            resolve(null);
-          })
-          .save(outputPath);
-      });
-    },
+    async (_event, { inputPaths, outputTag } = {}) =>
+      await mixWavSources({ inputPaths, outputTag }),
   );
 
   const stitchWavSegments = async ({
@@ -2235,6 +2245,63 @@ app.whenReady().then(async () => {
       outputDir,
       `${tag}_${Date.now()}_${randomUUID()}.wav`,
     );
+
+    const firstAudioDuration = await probeAudioDuration(validSegments[0].path);
+    const plan = planTimedWavStitch(validSegments, firstAudioDuration ?? 0);
+    if (plan.mode === 'sequential') {
+      const concatPath = path.join(
+        app.getPath('temp'),
+        `pluto-audio-concat-${randomUUID()}.ffconcat`,
+      );
+      const escapeConcatPath = (value: string) =>
+        value.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
+      fs.writeFileSync(
+        concatPath,
+        [
+          'ffconcat version 1.0',
+          ...validSegments.map(
+            (segment) => `file '${escapeConcatPath(segment.path)}'`,
+          ),
+          '',
+        ].join('\n'),
+      );
+      return await new Promise<string | null>((resolve) => {
+        const cleanupConcat = () => {
+          if (fs.existsSync(concatPath)) fs.unlinkSync(concatPath);
+        };
+        const filters = [
+          ...(plan.initialDelayMs > 0
+            ? [`adelay=${plan.initialDelayMs}:all=1`]
+            : []),
+          'apad',
+          `atrim=0:${plan.targetDurationSeconds}`,
+        ];
+        ffmpeg()
+          .input(concatPath)
+          .inputOptions(['-f concat', '-safe 0'])
+          .audioFilters(filters)
+          .audioChannels(1)
+          .audioFrequency(16000)
+          .toFormat('wav')
+          .on('end', () => {
+            cleanupConcat();
+            console.log(
+              `[Pluto] Sequentially reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
+            );
+            resolve(outputPath);
+          })
+          .on('error', (err) => {
+            cleanupConcat();
+            console.warn(
+              '[Pluto] Sequential WAV reconstruction failed:',
+              err instanceof Error ? err.message : err,
+            );
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            resolve(null);
+          })
+          .save(outputPath);
+      });
+    }
 
     return await new Promise<string | null>((resolve) => {
       const command = ffmpeg();
@@ -5180,9 +5247,17 @@ app.whenReady().then(async () => {
       {
         getMeeting: (meetingId) =>
           (db.getMeeting(meetingId) as db.PersistedMeeting | null) ?? null,
-        saveMeeting: (meeting) => db.saveMeeting(meeting),
+        saveMeeting: (meeting) => {
+          const saved = db.saveMeeting(meeting);
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('MEETING_NOTES_UPDATED', meeting.id);
+          }
+          return saved;
+        },
         stitchWavSegments: async (segments, outputTag) =>
           await stitchWavSegments({ segments, outputTag }),
+        mixWavSources: async (inputPaths, outputTag) =>
+          await mixWavSources({ inputPaths, outputTag }),
         repairRawChunk: async (inputPath) => {
           const outputPath = path.join(
             app.getPath('temp'),

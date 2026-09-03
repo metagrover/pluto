@@ -11,15 +11,29 @@ const PROCESSING_POLL_INTERVAL_MS = 2_000;
 
 export const shouldRunMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
-): boolean =>
-  Boolean(
+): boolean => {
+  const hasDetailedAudioFields = Boolean(
+    meeting &&
+      ('audio_path' in meeting ||
+        'system_audio_path' in meeting ||
+        'mixed_audio_path' in meeting),
+  );
+  const hasRequiredAudio = hasDetailedAudioFields
+    ? Boolean(
+        meeting?.audio_path &&
+          meeting.system_audio_path &&
+          meeting.mixed_audio_path,
+      )
+    : Boolean(meeting?.has_audio);
+  return Boolean(
     meeting &&
       meeting.finalization_status !== 'recovery_required' &&
       meeting.transcript_status === 'provisional' &&
       meeting.capture_journal_generation &&
       (meeting.transcript_json || meeting.has_transcript) &&
-      (meeting.audio_path || meeting.system_audio_path || meeting.has_audio),
+      hasRequiredAudio,
   );
+};
 
 export const canRetryMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,

@@ -156,7 +156,12 @@ export type TranscriptTrustMeetingFields = {
   transcript_integrity_json?: string | null;
   transcript_validated_at?: string | null;
   transcript_json?: string | null;
-  finalization_status?: 'finalized' | 'recovery_required' | null;
+  finalization_status?:
+    | 'processing'
+    | 'finalized'
+    | 'needs_attention'
+    | 'recovery_required'
+    | null;
 };
 
 export type TranscriptTrustCapabilityInput = {

@@ -1775,7 +1775,7 @@ export const AudioManager = ({
         folder_id: null,
         is_favorite: false,
         end_reason: endReason || 'manual',
-        finalization_status: 'finalized',
+        finalization_status: 'processing',
         finalization_error_category: null,
       };
       const provisionalIntegrity = {

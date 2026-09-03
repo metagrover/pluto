@@ -136,7 +136,7 @@ export const applyTranscriptSpeakerPresentation = <
         }
         const remoteOverlap = coveredOverlapRatio(segment, remoteIntervals);
         if (remoteOverlap >= MINIMUM_REMOTE_DOMINANT_OVERLAP) {
-          return { ...segment, speaker: 'Them' } as T;
+          return { ...segment, speaker: 'Speaker' } as T;
         }
         if (
           wordCount(segment.text) >= MINIMUM_CONFIDENT_MIC_WORDS &&
