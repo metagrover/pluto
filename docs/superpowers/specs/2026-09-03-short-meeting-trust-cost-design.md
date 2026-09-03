@@ -1,6 +1,6 @@
 # Measure trust cost across the meeting-intelligence pipeline
 
-**Status:** Approved direction, awaiting written-spec review
+**Status:** First diagnostic iteration implemented in [PR #740](https://github.com/metagrover/pluto/pull/740)
 
 **Issue:** [#739 — Make short-meeting trusted notes meaningfully faster](https://github.com/metagrover/pluto/issues/739)
 
