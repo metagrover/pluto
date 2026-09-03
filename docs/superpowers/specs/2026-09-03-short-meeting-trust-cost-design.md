@@ -55,6 +55,16 @@ For every observable pipeline stage, report:
 
 Never infer timing, token counts, or quality effects for missing evidence. Mark them unavailable.
 
+Classify recovery work separately so cascades remain visible:
+
+- malformed-contract repair;
+- transient leaf retry;
+- compact retry after truncated output;
+- source or draft repartition;
+- context-overflow replanning.
+
+Report the number of attempts, model time spent before the final successful attempt, and terminal outcome. Existing hierarchy limits are safety ceilings, not evidence that a recovery sequence is efficient.
+
 ## Audit comparison
 
 Add a small pure evaluator that reports three checkpoints per case:
@@ -115,9 +125,10 @@ The iteration is complete when:
 Each later experiment requires its own reviewed design adjustment and failing tests before implementation:
 
 1. **Intermediate-audit ablation:** compare the current hierarchy with deterministic intermediate checks plus one final semantic audit.
-2. **Notes-first secondary extraction:** compare entities, actions, and value signals extracted from grounded structured notes against the current transcript-first path, using the transcript only for exact-evidence verification.
-3. **Short-meeting model readiness:** measure warm versus cold model startup independently from notes quality; do not precompute or persist provisional analysis in this experiment.
-4. **Production change:** select only the smallest candidate that demonstrates a meaningful efficiency gain while meeting the existing reviewed accuracy bar.
+2. **Bounded recovery policy:** compare the current repair/repartition cascade with deterministic preflight partitioning and a measured per-meeting model-call budget. Preserve at most one contract repair where it demonstrably recovers a valid result; prevent repair, compact retry, overflow replanning, and repartition from cascading without a shared budget. Exhaustion must fail closed and retain resumable diagnostics rather than publish degraded notes.
+3. **Notes-first secondary extraction:** compare entities, actions, and value signals extracted from grounded structured notes against the current transcript-first path, using the transcript only for exact-evidence verification.
+4. **Short-meeting model readiness:** measure warm versus cold model startup independently from notes quality; do not precompute or persist provisional analysis in this experiment.
+5. **Production change:** select only the smallest candidate that demonstrates a meaningful efficiency gain while meeting the existing reviewed accuracy bar.
 
 ## Decision after the first measurement
 
