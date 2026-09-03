@@ -7514,7 +7514,7 @@ export const restoreCommitmentAlias = (extractionId: string): void => {
 /**
  * Get all entities of a specific type
  */
-const resolveProjectIdentityId = (projectId: string): string => {
+export const resolveProjectIdentityId = (projectId: string): string => {
   let current = projectId;
   const seen = new Set<string>();
   while (!seen.has(current)) {
@@ -8445,6 +8445,155 @@ export const getEntityMeetings = (
     mention_count: number;
     context: string | null;
   })[];
+};
+
+export interface DreamingEntityNoteSource {
+  id: string;
+  title: string;
+  started_at: string | null;
+  created_at: string | null;
+  user_notes: string | null;
+  enhanced_notes: string | null;
+}
+
+/**
+ * Return the bounded, notes-only meeting projection used by idle dreaming.
+ * Keep this projection explicit: transcripts, audio paths, and analysis payloads
+ * are intentionally unavailable to the packager.
+ */
+export const getDreamingEntityNotes = (
+  entityId: string,
+  limit = 8,
+): DreamingEntityNoteSource[] => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return [];
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const aliasTable =
+    entity.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn = entity.type === 'person' ? 'person_id' : 'project_id';
+  const boundedLimit = Math.max(1, Math.min(8, Math.trunc(limit)));
+
+  return db
+    .prepare(`
+      WITH family(id) AS (
+        SELECT ? UNION SELECT a.${aliasIdColumn} FROM ${aliasTable} a
+        WHERE a.canonical_id = ? AND a.active = 1
+      )
+      SELECT
+        m.id,
+        m.title,
+        m.started_at,
+        m.created_at,
+        m.user_notes,
+        m.enhanced_notes
+      FROM meetings m
+      JOIN meeting_entities me ON me.meeting_id = m.id
+      WHERE me.entity_id IN (SELECT id FROM family)
+        AND (
+          TRIM(COALESCE(m.user_notes, '')) != ''
+          OR TRIM(COALESCE(m.enhanced_notes, '')) != ''
+        )
+      GROUP BY m.id
+      ORDER BY datetime(COALESCE(m.started_at, m.created_at)) DESC, m.id DESC
+      LIMIT ?
+    `)
+    .all(canonicalId, canonicalId, boundedLimit) as DreamingEntityNoteSource[];
+};
+
+const parseDreamingBaselineJson = (value: string | null): unknown => {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+};
+
+/** Compact accepted state supplied to dreaming so proposals do not repeat it. */
+export const getDreamingEntityBaseline = (
+  entityId: string,
+): Record<string, unknown> => {
+  const entity = getEntity(entityId);
+  if (!entity || (entity.type !== 'person' && entity.type !== 'project')) {
+    return {};
+  }
+  const canonicalId =
+    entity.type === 'person'
+      ? resolvePersonIdentityId(entity.id)
+      : resolveProjectIdentityId(entity.id);
+  const canonical = getEntity(canonicalId);
+  if (!canonical) return {};
+  const aliasTable =
+    canonical.type === 'person' ? 'person_aliases' : 'project_aliases';
+  const aliasIdColumn =
+    canonical.type === 'person' ? 'person_id' : 'project_id';
+  const aliases = db
+    .prepare(`
+      SELECT alias.id, alias.name
+      FROM ${aliasTable} identity
+      JOIN entities alias ON alias.id = identity.${aliasIdColumn}
+      WHERE identity.canonical_id = ? AND identity.active = 1
+      ORDER BY alias.id
+    `)
+    .all(canonicalId) as Array<{ id: string; name: string }>;
+  const commitments =
+    canonical.type === 'project'
+      ? (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT project_id FROM project_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT DISTINCT action.id, action.name, action.status, action.due_date
+            FROM entities action
+            JOIN entity_links link ON link.source_entity_id = action.id
+            WHERE action.type = 'action_item'
+              AND link.relationship = 'belongs_to'
+              AND link.state = 'confirmed'
+              AND link.target_entity_id IN (SELECT id FROM family)
+            ORDER BY action.id
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>)
+      : (db
+          .prepare(`
+            WITH family(id) AS (
+              SELECT ? UNION SELECT person_id FROM person_aliases
+              WHERE canonical_id = ? AND active = 1
+            )
+            SELECT id, name, status, due_date
+            FROM entities
+            WHERE type = 'action_item' AND assigned_to IN (SELECT id FROM family)
+            ORDER BY id
+          `)
+          .all(canonicalId, canonicalId) as Array<{
+          id: string;
+          name: string;
+          status: EntityStatus;
+          due_date: string | null;
+        }>);
+  const scopeType = canonical.type === 'person' ? 'person_context' : 'project';
+  const knowledgeDoc = getKnowledgeDocByScope(scopeType, canonicalId);
+  const snapshot = getWorkingMemorySnapshot(scopeType, canonicalId);
+
+  return {
+    name: canonical.name,
+    status: canonical.status,
+    metadata: parseDreamingBaselineJson(canonical.metadata),
+    aliases,
+    commitments,
+    knowledge: parseDreamingBaselineJson(knowledgeDoc?.structured_json ?? null),
+    currentRead: snapshot?.payload.current_read ?? null,
+  };
 };
 
 type PeopleBriefingSummaryRow = {

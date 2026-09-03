@@ -126,6 +126,7 @@ export interface DreamingInputPackage {
   entityId: string;
   entityType: DreamingEntityType;
   entityName: string;
+  sourceRevision: string;
   currentBaseline?: Record<string, unknown>;
   currentSummary?: string | null;
   currentMilestones?: string[];
