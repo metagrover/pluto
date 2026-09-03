@@ -22,6 +22,19 @@ describe('committed meeting notes trust-cost report', () => {
       post_publication_compute: null,
     });
     expect(report.cases).toHaveLength(6);
+    expect(report.deterministic_recovery_replay).toMatchObject({
+      duplicateRepairCount: 5,
+      writerCandidateCount: 4,
+      auditRepairRefusalCount: 1,
+      strictParseRecoveredCount: 4,
+      guardrailPassedCount: 4,
+      capturedAvoidableModelMs: 177_875,
+      unsupportedDuplicateRepairMs: 31_747,
+      transformations: {
+        flattenedTextFields: 9,
+        discussionKindsMapped: 8,
+      },
+    });
     expect(
       report.cases.reduce(
         (total, item) => total + item.recovery.duplicateRecoveryCount,
