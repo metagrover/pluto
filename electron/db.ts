@@ -102,6 +102,10 @@ import {
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore, ensureCalendarSchema } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
+import {
+  createDreamingProposalStore,
+  ensureDreamingProposalSchema,
+} from './dreaming/proposalStore';
 import { generateItemFingerprint } from './dreaming/validateDreamingOutput';
 import { createIdentityStore } from './identityStore';
 import type {
@@ -1556,8 +1560,15 @@ export function repairExtractionAuthoredPersonRoles(): number {
 
 initDb();
 ensureCalendarSchema(db);
+ensureDreamingProposalSchema(db);
 export const calendarStore = createCalendarStore(db);
 export const identityStore = createIdentityStore(db);
+export const dreamingProposalStore = createDreamingProposalStore(db, {
+  resolveCanonicalEntityId: (entityId, entityType) =>
+    entityType === 'person'
+      ? resolvePersonIdentityId(entityId)
+      : resolveProjectIdentityId(entityId),
+});
 // Cheap invalidation lets the background scheduler avoid repeatedly reading
 // complete source text when nothing relevant has changed.
 db.exec(`CREATE TABLE IF NOT EXISTS identity_input_revision (singleton INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
