@@ -8,10 +8,6 @@ const fixture = vi.hoisted(() => ({
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 import * as db from '../../electron/db';
 import { reconcileDreamingOutput } from '../../electron/dreaming/reconcileDreamingOutput';
-import type {
-  PersonDreamingOutput,
-  ProjectDreamingOutput,
-} from '../../electron/dreaming/types';
 
 afterAll(() => fs.rmSync(fixture.directory, { recursive: true, force: true }));
 
@@ -22,14 +18,14 @@ describe('reconcileDreamingOutput', () => {
       name: 'Checkout Revamp',
     });
 
-    const projectOutput: ProjectDreamingOutput = {
-      status: 'updated',
+    const projectOutput = {
+      status: 'updated' as const,
       dossier_summary:
         'Migrating to Stripe Elements for lower latency checkout.',
       milestones: [
         {
           name: 'PCI Compliance Verified',
-          status: 'completed',
+          status: 'completed' as const,
           source_meeting_id: 'm-1',
           evidence_snippet: 'Security team signed off.',
         },
@@ -66,8 +62,8 @@ describe('reconcileDreamingOutput', () => {
       name: 'Bob',
     });
 
-    const personOutput: PersonDreamingOutput = {
-      status: 'updated',
+    const personOutput = {
+      status: 'updated' as const,
       headline: 'Tech Lead, Payments',
       current_focus: 'Webhook reliability',
       suggested_aliases: ['Robert'],

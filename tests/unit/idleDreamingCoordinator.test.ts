@@ -4,11 +4,11 @@ import {
   createIdleDreamingCoordinator,
   createRoundRobinEntityQueue,
 } from '../../electron/dreaming/idleDreamingCoordinator';
+import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
 
 describe('IdleDreamingCoordinator', () => {
   let policy: IdleDreamingPolicy;
   let generateMock: ReturnType<typeof vi.fn>;
-  let reconcileMock: ReturnType<typeof vi.fn>;
   let packageNotesMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -20,12 +20,14 @@ describe('IdleDreamingCoordinator', () => {
     };
     generateMock = vi
       .fn()
-      .mockResolvedValue(JSON.stringify({ status: 'no_change' }));
-    reconcileMock = vi.fn().mockResolvedValue(undefined);
+      .mockResolvedValue(
+        JSON.stringify({ status: 'no_change', proposals: [] }),
+      );
     packageNotesMock = vi.fn().mockReturnValue({
       entityId: 'proj-1',
       entityType: 'project',
       entityName: 'Test Project',
+      sourceRevision: 'revision-1',
       recentMeetingNotes: [
         {
           meetingId: 'm-1',
@@ -45,7 +47,6 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
-      reconcile: reconcileMock,
     });
 
     const result = await coordinator.attemptIdleRun();
@@ -60,7 +61,6 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
-      reconcile: reconcileMock,
     });
 
     const result = await coordinator.attemptIdleRun();
@@ -68,20 +68,75 @@ describe('IdleDreamingCoordinator', () => {
     expect(generateMock).not.toHaveBeenCalled();
   });
 
-  it('runs successfully when eligible during idle', async () => {
+  it('returns no_change and sends the exact production request when eligible', async () => {
     const coordinator = createIdleDreamingCoordinator({
       getPolicy: () => policy,
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
-      reconcile: reconcileMock,
     });
 
     const result = await coordinator.attemptIdleRun();
-    expect(result.status).toBe('completed');
+    expect(result.status).toBe('no_change');
     expect(result.entityId).toBe('proj-1');
     expect(generateMock).toHaveBeenCalledOnce();
-    expect(reconcileMock).toHaveBeenCalledOnce();
+    const request = buildDreamingGenerationRequest(packageNotesMock());
+    expect(generateMock).toHaveBeenCalledWith(
+      request.prompt,
+      request.schema,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('returns validated proposals without mutating canonical data', async () => {
+    generateMock.mockResolvedValue(
+      JSON.stringify({
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_milestone',
+            payload: { name: 'Grounded work', status: 'in_progress' },
+            evidence: [{ meetingId: 'm-1', excerpt: 'Notes' }],
+          },
+        ],
+      }),
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+    });
+
+    const result = await coordinator.attemptIdleRun();
+    expect(result).toMatchObject({
+      status: 'proposed',
+      entityId: 'proj-1',
+      proposals: [
+        {
+          kind: 'project_milestone',
+          payload: { name: 'Grounded work', status: 'in_progress' },
+        },
+      ],
+    });
+  });
+
+  it('returns a stable failure for invalid model output', async () => {
+    generateMock.mockResolvedValue(
+      JSON.stringify({ status: 'updated', proposals: [] }),
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+    });
+
+    expect(await coordinator.attemptIdleRun()).toEqual({
+      status: 'failed',
+      entityId: 'proj-1',
+      error: 'invalid_proposed_output',
+    });
   });
 
   it('triggerNow bypasses idle and battery checks for manual testing', async () => {
@@ -93,14 +148,13 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
-      reconcile: reconcileMock,
     });
 
     const result = await coordinator.triggerNow({
       entityId: 'proj-1',
       force: true,
     });
-    expect(result.status).toBe('completed');
+    expect(result.status).toBe('no_change');
     expect(result.entityId).toBe('proj-1');
     expect(generateMock).toHaveBeenCalledOnce();
   });
@@ -128,7 +182,6 @@ describe('IdleDreamingCoordinator', () => {
       getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
       packageNotes: packageNotesMock,
       generate: generateMock,
-      reconcile: reconcileMock,
     });
 
     const runPromise = coordinator.triggerNow({ force: true });
@@ -141,7 +194,6 @@ describe('IdleDreamingCoordinator', () => {
     const result = await runPromise;
     expect(result.status).toBe('aborted');
     expect(capturedSignal?.aborted).toBe(true);
-    expect(reconcileMock).not.toHaveBeenCalled();
   });
 });
 

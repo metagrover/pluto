@@ -350,7 +350,6 @@ import {
   createRoundRobinEntityQueue,
 } from './dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from './dreaming/packageEntityNotes';
-import { reconcileDreamingOutput } from './dreaming/reconcileDreamingOutput';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
@@ -817,17 +816,6 @@ app.whenReady().then(async () => {
         responseSchema,
         signal,
       });
-    },
-    reconcile: async (entityId, type, output) => {
-      await reconcileDreamingOutput(entityId, type, output, {
-        getEntity: db.getEntity,
-        upsertEntity: db.upsertEntity,
-        saveAliasSuggestion: db.saveEntityAliasSuggestion,
-        isItemDismissed: db.isItemDismissed,
-      });
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('MEETING_NOTES_UPDATED');
-      }
     },
   });
 

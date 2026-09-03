@@ -4,11 +4,32 @@ import {
 } from '../../src/utils/projectMilestones';
 import * as db from '../db';
 import type { Entity } from '../db';
-import type {
-  DreamingEntityType,
-  PersonDreamingOutput,
-  ProjectDreamingOutput,
-} from './types';
+import type { DreamingEntityType } from './types';
+
+interface LegacyProjectDreamingOutput {
+  status: 'updated' | 'no_change';
+  dossier_summary?: string;
+  milestones?: Array<{
+    name: string;
+    status: 'planned' | 'in_progress' | 'completed';
+    source_meeting_id: string;
+    evidence_snippet: string;
+  }>;
+  associated_commitments?: Array<{
+    task: string;
+    owner_name: string;
+    source_meeting_id: string;
+  }>;
+  suggested_aliases?: string[];
+}
+
+interface LegacyPersonDreamingOutput {
+  status: 'updated' | 'no_change';
+  headline?: string;
+  current_focus?: string;
+  recent_collaborators?: string[];
+  suggested_aliases?: string[];
+}
 
 export interface ReconcileDreamingOutputDeps {
   getEntity(id: string): Entity | null | undefined;
@@ -30,7 +51,7 @@ export interface ReconcileDreamingOutputDeps {
 export const reconcileDreamingOutput = async (
   entityId: string,
   type: DreamingEntityType,
-  output: ProjectDreamingOutput | PersonDreamingOutput,
+  output: LegacyProjectDreamingOutput | LegacyPersonDreamingOutput,
   deps?: Partial<ReconcileDreamingOutputDeps>,
 ): Promise<void> => {
   const getEntity = deps?.getEntity ?? db.getEntity;
@@ -51,7 +72,7 @@ export const reconcileDreamingOutput = async (
   }
 
   if (type === 'project') {
-    const projectOutput = output as ProjectDreamingOutput;
+    const projectOutput = output as LegacyProjectDreamingOutput;
 
     if (projectOutput.dossier_summary) {
       metadata.dossierSummary = projectOutput.dossier_summary;
@@ -105,7 +126,7 @@ export const reconcileDreamingOutput = async (
       metadata: finalMetadata,
     });
   } else if (type === 'person') {
-    const personOutput = output as PersonDreamingOutput;
+    const personOutput = output as LegacyPersonDreamingOutput;
 
     if (personOutput.headline) {
       metadata.headline = personOutput.headline;

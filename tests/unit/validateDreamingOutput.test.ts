@@ -26,7 +26,8 @@ const projectPackage: DreamingInputPackage = {
       meetingId: 'meeting-2',
       title: 'Trust review',
       startedAt: '2026-08-02T10:00:00.000Z',
-      notesContent: 'Billing V2’s migration remains the team’s primary focus.',
+      notesContent:
+        'Billing V2’s migration remains the team’s primary focus. Stripe Elements is in progress.',
     },
   ],
   correctionFingerprints: [],
@@ -212,14 +213,44 @@ describe('validateDreamingOutput', () => {
     );
   });
 
-  it('rejects duplicate normalized proposal fingerprints', () => {
+  it('keeps corrections effective when the same claim cites different evidence', () => {
+    const rejected = milestoneProposal();
+    const alternateEvidence: RawDreamingProposal = {
+      ...milestoneProposal(),
+      evidence: [
+        {
+          meetingId: 'meeting-2',
+          excerpt: 'Stripe Elements is in progress.',
+        },
+      ],
+    };
+    expectInvalid(
+      { status: 'proposed', proposals: [alternateEvidence] },
+      {
+        ...projectPackage,
+        correctionFingerprints: [
+          generateProposalFingerprint(rejected, projectPackage),
+        ],
+      },
+    );
+  });
+
+  it('does not treat milestone status as a legacy claim correction', () => {
+    const result = validate(
+      { status: 'proposed', proposals: [milestoneProposal()] },
+      { ...projectPackage, negativeConstraints: ['in-progress'] },
+    );
+    expect(result).toMatchObject({ valid: true, status: 'proposed' });
+  });
+
+  it('rejects the same normalized claim with different valid evidence', () => {
     const first = milestoneProposal();
     const duplicate: RawDreamingProposal = {
       kind: 'project_milestone',
       payload: { name: '  stripe elements CONNECTED ', status: 'in_progress' },
       evidence: [
         {
-          meetingId: 'meeting-1',
+          meetingId: 'meeting-2',
           excerpt: '  STRIPE ELEMENTS is in progress. ',
         },
       ],

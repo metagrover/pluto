@@ -76,42 +76,6 @@ export type DreamingRunResult =
   | { status: 'failed'; errorCode: string }
   | { status: 'cancelled' };
 
-interface LegacyDreamingMilestoneProposal {
-  name: string;
-  status: 'planned' | 'in_progress' | 'completed';
-  source_meeting_id: string;
-  evidence_snippet: string;
-}
-
-interface LegacyDreamingCommitmentProposal {
-  task: string;
-  owner_name: string;
-  source_meeting_id: string;
-}
-
-interface LegacyProjectDreamingOutput {
-  status: 'updated' | 'no_change';
-  dossier_summary?: string;
-  milestones?: LegacyDreamingMilestoneProposal[];
-  associated_commitments?: LegacyDreamingCommitmentProposal[];
-  suggested_aliases?: string[];
-}
-
-interface LegacyPersonDreamingOutput {
-  status: 'updated' | 'no_change';
-  headline?: string;
-  current_focus?: string;
-  recent_collaborators?: string[];
-  suggested_aliases?: string[];
-}
-
-// TODO(#586): Remove these temporary aliases when the validator and coordinator
-// persist ValidatedDreamingProposal records instead of dossier mutations.
-export type DreamingMilestoneProposal = LegacyDreamingMilestoneProposal;
-export type DreamingCommitmentProposal = LegacyDreamingCommitmentProposal;
-export type ProjectDreamingOutput = LegacyProjectDreamingOutput;
-export type PersonDreamingOutput = LegacyPersonDreamingOutput;
-
 export interface EntityMeetingNoteSummary {
   meetingId: string;
   title: string;

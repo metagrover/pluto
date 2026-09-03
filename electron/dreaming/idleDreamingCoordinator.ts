@@ -1,13 +1,10 @@
+import { buildDreamingGenerationRequest } from './prompt';
 import type {
   DreamingEntityType,
   DreamingInputPackage,
-  PersonDreamingOutput,
-  ProjectDreamingOutput,
+  ValidatedDreamingProposal,
 } from './types';
-import {
-  validatePersonDreamingOutput,
-  validateProjectDreamingOutput,
-} from './validateDreamingOutput';
+import { validateDreamingOutput } from './validateDreamingOutput';
 
 export interface IdleDreamingPolicy {
   systemIdleSeconds: number;
@@ -21,11 +18,18 @@ export interface DirtyEntityCandidate {
   type: DreamingEntityType;
 }
 
-export interface IdleDreamingResult {
-  status: 'completed' | 'ineligible' | 'no_work' | 'aborted' | 'failed';
-  entityId?: string;
-  error?: string;
-}
+export type IdleDreamingResult =
+  | { status: 'no_change'; entityId: string; proposals: [] }
+  | {
+      status: 'proposed';
+      entityId: string;
+      proposals: [ValidatedDreamingProposal, ...ValidatedDreamingProposal[]];
+    }
+  | {
+      status: 'ineligible' | 'no_work' | 'aborted' | 'failed';
+      entityId?: string;
+      error?: string;
+    };
 
 export {
   createRoundRobinEntityQueue,
@@ -42,11 +46,6 @@ export interface IdleDreamingCoordinatorDeps {
     responseSchema: Record<string, unknown>,
     signal: AbortSignal,
   ) => Promise<string>;
-  reconcile: (
-    entityId: string,
-    type: DreamingEntityType,
-    output: ProjectDreamingOutput | PersonDreamingOutput,
-  ) => Promise<void>;
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   unloadModel?: () => Promise<void> | void;
@@ -89,24 +88,33 @@ export const createIdleDreamingCoordinator = (
         return { status: 'no_work', entityId: candidate.entityId };
       }
 
-      const prompt = `Synthesize cross-meeting consolidation for ${candidate.type}: ${pkg.entityName}`;
-      const schema = { type: 'object' };
+      const request = buildDreamingGenerationRequest(pkg);
 
-      const raw = await deps.generate(prompt, schema, signal);
+      const raw = await deps.generate(request.prompt, request.schema, signal);
       if (signal.aborted) {
         return { status: 'aborted', entityId: candidate.entityId };
       }
 
-      const validated =
-        candidate.type === 'project'
-          ? validateProjectDreamingOutput(raw, pkg)
-          : validatePersonDreamingOutput(raw, pkg);
-
-      if (validated) {
-        await deps.reconcile(candidate.entityId, candidate.type, validated);
+      const validated = validateDreamingOutput(raw, pkg);
+      if (!validated.valid) {
+        return {
+          status: 'failed',
+          entityId: candidate.entityId,
+          error: validated.error,
+        };
       }
-
-      return { status: 'completed', entityId: candidate.entityId };
+      if (validated.status === 'no_change') {
+        return {
+          status: 'no_change',
+          entityId: candidate.entityId,
+          proposals: [],
+        };
+      }
+      return {
+        status: 'proposed',
+        entityId: candidate.entityId,
+        proposals: validated.proposals,
+      };
     } catch (err) {
       if (
         signal.aborted ||
