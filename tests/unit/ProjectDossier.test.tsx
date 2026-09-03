@@ -29,6 +29,9 @@ const api = vi.hoisted(() => ({
     proposals: [],
   }),
   recordEntityCorrection: vi.fn().mockResolvedValue({}),
+  getPendingDreamingProposals: vi.fn().mockResolvedValue([]),
+  acceptDreamingProposal: vi.fn(),
+  rejectDreamingProposal: vi.fn(),
 }));
 vi.mock('../../src/api/knowledgeGraph', () => api);
 import { ProjectDossier } from '../../src/components/features/projects/ProjectDossier';
@@ -549,7 +552,7 @@ it('dismisses a one-conversation suggestion and returns to the portfolio', async
   expect(back).toHaveBeenCalledOnce();
 });
 
-it('renders alias suggestions and allows user to dismiss them', async () => {
+it('does not render the legacy alias suggestion banner', async () => {
   api.getProjectBrief.mockResolvedValue(brief());
   api.getEntityAliasSuggestions.mockResolvedValue([
     {
@@ -564,31 +567,18 @@ it('renders alias suggestions and allows user to dismiss them', async () => {
   ]);
 
   await render();
-  expect(host.textContent).toContain('Archive Modernization V2');
-  expect(host.textContent).toContain('Suggested Alias');
-
-  await click('Keep Separate');
-  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith(
-    'sug-1',
-    'dismissed',
-  );
-  expect(api.recordEntityCorrection).toHaveBeenCalledWith(
-    expect.objectContaining({
-      entityId: 'p1',
-      itemType: 'alias',
-      fingerprint: 'Archive Modernization V2',
-    }),
-  );
+  expect(host.textContent).not.toContain('Archive Modernization V2');
+  expect(host.textContent).not.toContain('Suggested Alias');
 });
 
-it('triggers manual dreaming run when Dream Now is clicked', async () => {
+it('prepares updates for the open project and reports no change accurately', async () => {
   api.getProjectBrief.mockResolvedValue(brief());
   await render();
-  await click('Dream Now');
+  await click('Prepare updates');
   expect(api.triggerDreamingNow).toHaveBeenCalledWith({
     entityId: 'p1',
   });
-  expect(host.textContent).toContain('No new updates');
+  expect(host.textContent).toContain('Current — no updates needed');
 });
 
 it('shows a failed dreaming run as a failure', async () => {
@@ -598,41 +588,48 @@ it('shows a failed dreaming run as a failure', async () => {
     errorCode: 'generation_failed',
   });
   await render();
-  await click('Dream Now');
+  await click('Prepare updates');
   expect(host.textContent).toContain('Preparation failed');
 });
 
-it('merges an alias suggestion and registers the alias', async () => {
-  api.getProjectBrief.mockResolvedValue(brief());
-  api.getEntityAliasSuggestions.mockResolvedValue([
-    {
-      id: 'sug-2',
-      entity_id: 'p1',
-      suggested_name: 'Historical Archive Modernization',
-      source_meeting_ids_json: '["m1"]',
-      status: 'pending',
-      created_at: '2026-08-28T12:00:00Z',
-      updated_at: '2026-08-28T12:00:00Z',
-    },
-  ]);
-
+it('shows generated milestone provenance and keeps its durable remove action', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      milestones: [
+        {
+          id: 'dream-milestone-1',
+          title: 'Launch the archive',
+          status: 'planned',
+          timing: null,
+          evidenceQuote: 'We launch the archive next week.',
+          source: 'dreaming',
+          targetDate: null,
+          note: null,
+          sourceMeetingIds: ['m1'],
+          sourceExcerpts: ['We launch the archive next week.'],
+        },
+      ],
+    }),
+  );
   await render();
-  expect(host.textContent).toContain('Historical Archive Modernization');
 
-  const alert = host.querySelector('[role="alert"]');
-  const mergeButton = Array.from(alert?.querySelectorAll('button') ?? []).find(
-    (btn) => btn.textContent?.trim() === 'Merge',
+  expect(host.textContent).toContain('Pluto-prepared');
+  const source = Array.from(host.querySelectorAll('summary')).find((item) =>
+    item.textContent?.includes('Show source'),
   );
+  await act(async () => source?.click());
+  expect(host.textContent).toContain('Archive weekly review');
+  expect(host.textContent).toContain('We launch the archive next week.');
+
   await act(async () => {
-    mergeButton?.click();
+    host
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Remove Launch the archive"]',
+      )
+      ?.click();
   });
-
-  expect(api.addProjectAlias).toHaveBeenCalledWith(
+  expect(api.deleteProjectMilestone).toHaveBeenCalledWith(
     'p1',
-    'Historical Archive Modernization',
-  );
-  expect(api.updateEntityAliasSuggestionStatus).toHaveBeenCalledWith(
-    'sug-2',
-    'merged',
+    'dream-milestone-1',
   );
 });

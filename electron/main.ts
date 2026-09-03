@@ -360,6 +360,11 @@ import {
 } from './dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from './dreaming/packageEntityNotes';
 import { DREAMING_MODEL } from './dreaming/prompt';
+import type {
+  DreamingDecisionResult,
+  DreamingProposalRecord,
+} from './dreaming/proposalStore';
+import type { DreamingEntityType } from './dreaming/types';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
@@ -3224,6 +3229,81 @@ app.whenReady().then(async () => {
           status: 'no_work',
         }
       );
+    },
+  );
+  const parseDreamingProposalScope = (input: unknown) => {
+    if (!input || typeof input !== 'object') {
+      throw new Error('dreaming_scope_invalid');
+    }
+    const { entityId, entityType } = input as Record<string, unknown>;
+    if (
+      typeof entityId !== 'string' ||
+      !entityId.trim() ||
+      (entityType !== 'project' && entityType !== 'person')
+    ) {
+      throw new Error('dreaming_scope_invalid');
+    }
+    const entity = db.getEntity(entityId.trim());
+    if (!entity || entity.type !== entityType) {
+      throw new Error('dreaming_scope_invalid');
+    }
+    return {
+      entityId: entityId.trim(),
+      entityType: entityType as DreamingEntityType,
+    };
+  };
+  const parseDreamingProposalDecision = (input: unknown) => {
+    const scope = parseDreamingProposalScope(input);
+    const proposalId = (input as Record<string, unknown>).proposalId;
+    if (typeof proposalId !== 'string' || !proposalId.trim()) {
+      throw new Error('dreaming_proposal_id_required');
+    }
+    return { ...scope, proposalId: proposalId.trim() };
+  };
+  const assertScopedPendingProposal = (input: unknown) => {
+    const decision = parseDreamingProposalDecision(input);
+    const proposal = db.dreamingProposalStore
+      .listPendingProposals(decision.entityId, decision.entityType)
+      .find((item) => item.id === decision.proposalId);
+    if (!proposal) throw new Error('dreaming_proposal_not_in_scope');
+    return decision;
+  };
+  const getCurrentDreamingSourceRevision = (
+    entityId: string,
+    entityType: DreamingEntityType,
+  ): string | null => {
+    const packaged = packageEntityNotes(entityId);
+    return packaged?.entityType === entityType ? packaged.sourceRevision : null;
+  };
+
+  ipcMain.handle(
+    'GET_PENDING_DREAMING_PROPOSALS',
+    (_event, input: unknown): DreamingProposalRecord[] => {
+      const scope = parseDreamingProposalScope(input);
+      return db.dreamingProposalStore.listPendingProposals(
+        scope.entityId,
+        scope.entityType,
+      );
+    },
+  );
+  ipcMain.handle(
+    'ACCEPT_DREAMING_PROPOSAL',
+    (_event, input: unknown): DreamingDecisionResult => {
+      const decision = assertScopedPendingProposal(input);
+      return db.dreamingProposalStore.acceptDreamingProposal({
+        proposalId: decision.proposalId,
+        getCurrentSourceRevision: getCurrentDreamingSourceRevision,
+      });
+    },
+  );
+  ipcMain.handle(
+    'REJECT_DREAMING_PROPOSAL',
+    (_event, input: unknown): DreamingDecisionResult => {
+      const decision = assertScopedPendingProposal(input);
+      return db.dreamingProposalStore.rejectDreamingProposal({
+        proposalId: decision.proposalId,
+        getCurrentSourceRevision: getCurrentDreamingSourceRevision,
+      });
     },
   );
   ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>

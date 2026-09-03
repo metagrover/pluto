@@ -63,6 +63,17 @@ const timing = (targetDate: string | null): string | null => {
       });
 };
 
+const sourceDate = (value: string): string | null => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+};
+
 const toProjectMilestone = (
   milestone: UserProjectMilestone,
 ): ProjectMilestone => ({
@@ -92,10 +103,16 @@ const emptyDraft = (): UserProjectMilestoneInput => ({
 export function ProjectMilestones({
   projectId,
   milestones,
+  evidenceMeetings = [],
   onChange,
 }: {
   projectId: string;
   milestones: ProjectMilestone[];
+  evidenceMeetings?: Array<{
+    id: string;
+    title?: string | null;
+    date?: string | null;
+  }>;
   onChange: (milestones: ProjectMilestone[]) => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
@@ -356,16 +373,48 @@ export function ProjectMilestones({
               <div className="min-w-0 border-b border-pro-border/35 pb-3 last:border-0 sm:flex sm:items-start sm:justify-between sm:gap-5">
                 <div className="min-w-0">
                   <p className="font-medium leading-6">{milestone.title}</p>
-                  {(milestone.note || milestone.evidenceQuote) && (
+                  {milestone.note && (
                     <p className="mt-1 max-w-[56ch] text-sm leading-5 text-pro-text-muted">
-                      {milestone.note || milestone.evidenceQuote}
+                      {milestone.note}
                     </p>
                   )}
                   <p className="mt-1.5 text-xs text-pro-text-muted">
                     {milestone.source === 'user'
                       ? 'User-created'
-                      : 'From meeting evidence'}
+                      : milestone.source === 'dreaming'
+                        ? 'Pluto-prepared'
+                        : 'From meeting evidence'}
                   </p>
+                  {milestone.source === 'dreaming' &&
+                  milestone.sourceExcerpts?.length ? (
+                    <details className="mt-1.5 text-sm">
+                      <summary className="min-h-11 cursor-pointer rounded py-2 text-pro-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent sm:min-h-10">
+                        Show source
+                      </summary>
+                      <ul className="space-y-2 border-l border-pro-border/60 pl-3">
+                        {milestone.sourceExcerpts.map((excerpt, index) => {
+                          const meeting = evidenceMeetings.find(
+                            (item) =>
+                              item.id === milestone.sourceMeetingIds?.[index],
+                          );
+                          const meetingDate = meeting?.date
+                            ? sourceDate(meeting.date)
+                            : null;
+                          return (
+                            <li key={`${milestone.id}-source-${index}`}>
+                              <p className="text-xs text-pro-text-muted">
+                                {meeting?.title || 'Linked meeting'}
+                                {meetingDate ? ` · ${meetingDate}` : ''}
+                              </p>
+                              <q className="mt-1 block max-w-[56ch] leading-5 text-pro-text-main">
+                                {excerpt}
+                              </q>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </details>
+                  ) : null}
                 </div>
                 <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1 sm:mt-0 sm:justify-end">
                   <span

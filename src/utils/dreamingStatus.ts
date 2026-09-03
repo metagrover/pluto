@@ -8,10 +8,10 @@ export type DreamingUiStatus =
   | 'error';
 
 export const DREAMING_STATUS_LABEL = {
-  idle: 'Dream Now',
-  running: 'Dreaming in progress…',
-  proposed: 'Updates prepared',
-  no_change: 'No new updates',
+  idle: 'Prepare updates',
+  running: 'Preparing updates…',
+  proposed: 'Updates are ready',
+  no_change: 'Current — no updates needed',
   cancelled: 'Preparation cancelled',
   existing: 'Already prepared',
   busy: 'Another preparation is running',

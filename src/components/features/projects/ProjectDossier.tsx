@@ -1,16 +1,11 @@
 import { Check, MoreHorizontal, Pencil } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  type EntityAliasSuggestion,
-  addProjectAlias,
-  getEntityAliasSuggestions,
   getProjectBrief,
   mergeProject,
-  recordEntityCorrection,
   restoreProjectMerge,
   setProjectPortfolioDisposition,
   triggerDreamingNow,
-  updateEntityAliasSuggestionStatus,
   updateProjectDisplayTitle,
 } from '../../../api/knowledgeGraph';
 import {
@@ -20,6 +15,7 @@ import {
 import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
+import { PreparedUpdates } from '../dreaming/PreparedUpdates';
 import { ProjectCommitments } from './ProjectCommitments';
 import { ProjectMilestones } from './ProjectMilestones';
 
@@ -89,10 +85,8 @@ export const ProjectDossier = ({
     id: string;
     name: string;
   } | null>(null);
-  const [aliasSuggestions, setAliasSuggestions] = useState<
-    EntityAliasSuggestion[]
-  >([]);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -117,12 +111,6 @@ export const ProjectDossier = ({
         if (active) setLoading(false);
       });
 
-    getEntityAliasSuggestions(projectId)
-      .then((suggestions) => {
-        if (active) setAliasSuggestions(suggestions);
-      })
-      .catch(() => undefined);
-
     return () => {
       active = false;
     };
@@ -136,41 +124,16 @@ export const ProjectDossier = ({
       });
       if (result.status === 'proposed') {
         setRequest((r) => r + 1);
-        const updatedAliases = await getEntityAliasSuggestions(projectId);
-        setAliasSuggestions(updatedAliases);
+        setPreparedUpdatesReload((value) => value + 1);
         setDreamingState('proposed');
       } else {
+        if (result.status === 'existing') {
+          setPreparedUpdatesReload((value) => value + 1);
+        }
         setDreamingState(result.status);
       }
     } catch {
       setDreamingState('error');
-    }
-  };
-
-  const handleMergeAlias = async (suggestion: EntityAliasSuggestion) => {
-    try {
-      await addProjectAlias(projectId, suggestion.suggested_name);
-      await updateEntityAliasSuggestionStatus(suggestion.id, 'merged');
-      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
-      await onPortfolioChanged?.();
-      setRequest((r) => r + 1);
-    } catch {
-      // keep suggestion on error
-    }
-  };
-
-  const handleDismissAlias = async (suggestion: EntityAliasSuggestion) => {
-    try {
-      await updateEntityAliasSuggestionStatus(suggestion.id, 'dismissed');
-      await recordEntityCorrection({
-        entityId: projectId,
-        itemType: 'alias',
-        fingerprint: suggestion.suggested_name,
-        reason: 'dismissed_by_user',
-      });
-      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
-    } catch {
-      // keep suggestion on error
     }
   };
 
@@ -406,39 +369,6 @@ export const ProjectDossier = ({
 
       {current && (
         <>
-          {aliasSuggestions.map((suggestion) => (
-            <div
-              key={suggestion.id}
-              role="alert"
-              className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-pro-accent/30 bg-pro-accent/[0.04] p-3.5 text-sm"
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-pro-accent">
-                  💡 Suggested Alias:
-                </span>
-                <span>
-                  Recent meetings refer to this project as{' '}
-                  <strong>"{suggestion.suggested_name}"</strong>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleMergeAlias(suggestion)}
-                  className="rounded bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90"
-                >
-                  Merge
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDismissAlias(suggestion)}
-                  className="rounded border border-pro-border px-3 py-1 text-xs text-pro-text-muted hover:text-pro-text-main"
-                >
-                  Keep Separate
-                </button>
-              </div>
-            </div>
-          ))}
           <header className="mb-9">
             {editingTitle ? (
               <form
@@ -588,6 +518,21 @@ export const ProjectDossier = ({
               </h2>
             </section>
 
+            <PreparedUpdates
+              entityId={current.project.id}
+              entityType="project"
+              reloadToken={preparedUpdatesReload}
+              evidenceMeetings={current.meetings.map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                date: meeting.started_at || meeting.created_at,
+              }))}
+              onCanonicalChange={async () => {
+                setRequest((value) => value + 1);
+                await onPortfolioChanged?.();
+              }}
+            />
+
             {current.theme?.recentChanges.length ? (
               <section aria-labelledby="project-recent-changes">
                 <h2
@@ -713,6 +658,11 @@ export const ProjectDossier = ({
             <ProjectMilestones
               projectId={current.project.id}
               milestones={current.milestones}
+              evidenceMeetings={current.meetings.map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                date: meeting.started_at || meeting.created_at,
+              }))}
               onChange={(milestones) =>
                 setBrief((value) => (value ? { ...value, milestones } : value))
               }

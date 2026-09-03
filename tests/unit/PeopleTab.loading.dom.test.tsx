@@ -8,6 +8,9 @@ const api = vi.hoisted(() => ({
   getPeopleBriefingSummaries: vi.fn(),
   getPersonBriefing: vi.fn(),
   getEntityAliasSuggestions: vi.fn(),
+  getPendingDreamingProposals: vi.fn(),
+  acceptDreamingProposal: vi.fn(),
+  rejectDreamingProposal: vi.fn(),
 }));
 
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -43,6 +46,7 @@ describe('PeopleTab loading', () => {
     api.getPersonBriefing.mockReset();
     api.getEntityAliasSuggestions.mockReset();
     api.getEntityAliasSuggestions.mockResolvedValue([]);
+    api.getPendingDreamingProposals.mockResolvedValue([]);
     api.getPeopleBriefingSummaries.mockResolvedValue([summary]);
     container = document.createElement('div');
     document.body.append(container);

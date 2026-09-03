@@ -7,6 +7,11 @@
 
 import type { PersonBriefingDetail as ElectronPersonBriefingDetail } from '../../electron/db';
 import type { IdleDreamingResult } from '../../electron/dreaming/idleDreamingCoordinator';
+import type {
+  DreamingDecisionResult,
+  DreamingProposalRecord,
+} from '../../electron/dreaming/proposalStore';
+import type { DreamingEntityType } from '../../electron/dreaming/types';
 import type { PersonBriefingSummary } from '../utils/personBriefing';
 import type { ProjectPortfolioDisposition } from '../utils/projectQualification';
 
@@ -650,6 +655,32 @@ export const triggerDreamingNow = async (options: {
 }): Promise<IdleDreamingResult> => {
   return invoke('TRIGGER_DREAMING_NOW', options);
 };
+
+export interface DreamingProposalScope {
+  entityId: string;
+  entityType: DreamingEntityType;
+}
+
+export interface DreamingProposalDecision extends DreamingProposalScope {
+  proposalId: string;
+}
+
+export type { DreamingDecisionResult, DreamingProposalRecord };
+
+export const getPendingDreamingProposals = async (
+  scope: DreamingProposalScope,
+): Promise<DreamingProposalRecord[]> =>
+  invoke('GET_PENDING_DREAMING_PROPOSALS', scope);
+
+export const acceptDreamingProposal = async (
+  decision: DreamingProposalDecision,
+): Promise<DreamingDecisionResult> =>
+  invoke('ACCEPT_DREAMING_PROPOSAL', decision);
+
+export const rejectDreamingProposal = async (
+  decision: DreamingProposalDecision,
+): Promise<DreamingDecisionResult> =>
+  invoke('REJECT_DREAMING_PROPOSAL', decision);
 
 /**
  * Parse entity metadata JSON

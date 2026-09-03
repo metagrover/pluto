@@ -19,11 +19,8 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   type Entity,
-  type EntityAliasSuggestion,
   type EntityMeeting,
   type PersonBriefingDetail,
-  addPersonNameAlias,
-  getEntityAliasSuggestions,
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
@@ -31,7 +28,6 @@ import {
   resolvePersonCommitmentOwner,
   restorePersonMerge,
   triggerDreamingNow,
-  updateEntityAliasSuggestionStatus,
   updatePersonName,
 } from '../../api/knowledgeGraph';
 import {
@@ -46,6 +42,7 @@ import type {
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
+import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
@@ -497,10 +494,8 @@ export const PersonDossier = ({
     id: string;
     name: string;
   } | null>(null);
-  const [aliasSuggestions, setAliasSuggestions] = useState<
-    EntityAliasSuggestion[]
-  >([]);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
   const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -508,18 +503,6 @@ export const PersonDossier = ({
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
   }, [detail]);
-
-  useEffect(() => {
-    let active = true;
-    getEntityAliasSuggestions(detail.person.id)
-      .then((suggestions) => {
-        if (active) setAliasSuggestions(suggestions);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [detail.person.id]);
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.focus();
@@ -669,45 +652,16 @@ export const PersonDossier = ({
       });
       if (result.status === 'proposed') {
         await onIdentityChanged();
-        const updatedAliases = await getEntityAliasSuggestions(
-          currentDetail.person.id,
-        );
-        setAliasSuggestions(updatedAliases);
+        setPreparedUpdatesReload((value) => value + 1);
         setDreamingState('proposed');
       } else {
+        if (result.status === 'existing') {
+          setPreparedUpdatesReload((value) => value + 1);
+        }
         setDreamingState(result.status);
       }
     } catch {
       setDreamingState('error');
-    }
-  };
-
-  const handleMergeAlias = async (suggestion: EntityAliasSuggestion) => {
-    try {
-      await addPersonNameAlias(
-        currentDetail.person.id,
-        suggestion.suggested_name,
-      );
-      await updateEntityAliasSuggestionStatus(suggestion.id, 'merged');
-      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
-      await onIdentityChanged();
-    } catch {
-      // keep on error
-    }
-  };
-
-  const handleDismissAlias = async (suggestion: EntityAliasSuggestion) => {
-    try {
-      await updateEntityAliasSuggestionStatus(suggestion.id, 'dismissed');
-      await recordEntityCorrection({
-        entityId: currentDetail.person.id,
-        itemType: 'alias',
-        fingerprint: suggestion.suggested_name,
-        reason: 'dismissed_by_user',
-      });
-      setAliasSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
-    } catch {
-      // keep on error
     }
   };
 
@@ -773,39 +727,6 @@ export const PersonDossier = ({
           </div>
         </details>
       </div>
-      {aliasSuggestions.map((suggestion) => (
-        <div
-          key={suggestion.id}
-          role="alert"
-          className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-pro-accent/30 bg-pro-accent/[0.04] p-3.5 text-sm"
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-pro-accent">
-              💡 Suggested Alias:
-            </span>
-            <span>
-              Recent meetings refer to this person as{' '}
-              <strong>"{suggestion.suggested_name}"</strong>
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleMergeAlias(suggestion)}
-              className="rounded bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90"
-            >
-              Merge
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleDismissAlias(suggestion)}
-              className="rounded border border-pro-border px-3 py-1 text-xs text-pro-text-muted hover:text-pro-text-main"
-            >
-              Keep Separate
-            </button>
-          </div>
-        </div>
-      ))}
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
           {currentDetail.person.name.slice(0, 1).toUpperCase()}
@@ -1097,6 +1018,18 @@ export const PersonDossier = ({
           </div>
         ) : null}
       </section>
+
+      <PreparedUpdates
+        entityId={currentDetail.person.id}
+        entityType="person"
+        reloadToken={preparedUpdatesReload}
+        evidenceMeetings={currentDetail.meetings.map((meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          date: meeting.started_at || meeting.created_at,
+        }))}
+        onCanonicalChange={onIdentityChanged}
+      />
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">

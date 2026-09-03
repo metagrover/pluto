@@ -13,6 +13,9 @@ const api = vi.hoisted(() => ({
   resolvePersonCommitmentOwner: vi.fn(),
   getEntityAliasSuggestions: vi.fn(),
   triggerDreamingNow: vi.fn(),
+  getPendingDreamingProposals: vi.fn(),
+  acceptDreamingProposal: vi.fn(),
+  rejectDreamingProposal: vi.fn(),
 }));
 
 vi.mock('../../src/api/knowledgeGraph', () => api);
@@ -93,6 +96,7 @@ describe('People identity controls', () => {
       status: 'cancelled',
       entityId: 'person-1',
     });
+    api.getPendingDreamingProposals.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -233,7 +237,7 @@ describe('People identity controls', () => {
   it('shows cancelled preparation without claiming success', async () => {
     await render();
     await click('More actions');
-    await click('Dream Now');
+    await click('Prepare updates');
     expect(host.textContent).toContain('Preparation cancelled');
   });
 });

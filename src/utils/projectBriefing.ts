@@ -97,6 +97,8 @@ export interface ProjectMilestone {
   userStatus?: UserProjectMilestoneStatus;
   targetDate: string | null;
   note: string | null;
+  sourceMeetingIds?: string[];
+  sourceExcerpts?: string[];
 }
 
 export interface ProjectThemeSynthesisRead {
@@ -497,6 +499,8 @@ export const buildUserProjectMilestones = (
       userStatus: milestone.status,
       targetDate: milestone.targetDate,
       note: milestone.note,
+      sourceMeetingIds: milestone.sourceMeetingIds,
+      sourceExcerpts: milestone.sourceExcerpts,
     };
   });
 
