@@ -87,4 +87,4 @@ expect(report.deterministic_recovery_replay).toMatchObject({
 ```
 - [x] Run focused tests, full tests, TypeScript, Biome, changelog validation, deterministic report comparison, and the privacy assertion.
 - [x] Mark every plan step complete and commit.
-- [ ] Push PR #740 and add the content-free replay result to issue #739.
+- [x] Push PR #740 and add the content-free replay result to issue #739.
