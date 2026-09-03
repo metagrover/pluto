@@ -587,7 +587,6 @@ it('triggers manual dreaming run when Dream Now is clicked', async () => {
   await click('Dream Now');
   expect(api.triggerDreamingNow).toHaveBeenCalledWith({
     entityId: 'p1',
-    force: true,
   });
   expect(host.textContent).toContain('No new updates');
 });

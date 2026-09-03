@@ -98,15 +98,6 @@ export const PeopleBriefing = ({
   onSelectPerson: (personId: string) => void;
 }) => {
   const [query, setQuery] = useState('');
-  const [dreaming, setDreaming] = useState(false);
-  const handleDreamNow = async () => {
-    setDreaming(true);
-    try {
-      await triggerDreamingNow({ force: true });
-    } finally {
-      setDreaming(false);
-    }
-  };
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized
@@ -231,15 +222,6 @@ export const PeopleBriefing = ({
     <section aria-label="People" className="people-briefing">
       <PageHeader title="People">
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={dreaming}
-            onClick={() => void handleDreamNow()}
-            className="flex items-center gap-1.5 rounded-lg border border-pro-border/50 px-3 py-1.5 text-[13px] text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
-            title="Consolidate cross-meeting knowledge and discover updates"
-          >
-            {dreaming ? 'Consolidating…' : '✨ Dream Now'}
-          </button>
           {rows.length > 0 && (
             <label className="people-search">
               <Search aria-hidden="true" size={13} />
@@ -682,7 +664,6 @@ export const PersonDossier = ({
     try {
       const result = await triggerDreamingNow({
         entityId: currentDetail.person.id,
-        force: true,
       });
       if (result.status === 'proposed') {
         await onIdentityChanged();

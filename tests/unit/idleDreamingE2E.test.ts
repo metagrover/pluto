@@ -71,7 +71,6 @@ describe('Idle Dreaming End-to-End Engine', () => {
     // 4. Run dreaming via manual trigger
     const runResult = await coordinator.triggerNow({
       entityId: project.id,
-      force: true,
     });
     expect(runResult.status).toBe('proposed');
 
@@ -91,7 +90,7 @@ describe('Idle Dreaming End-to-End Engine', () => {
 
     // 8. The same corrected proposal fails the whole validation boundary.
     expect(
-      await coordinator.triggerNow({ entityId: project.id, force: true }),
+      await coordinator.triggerNow({ entityId: project.id }),
     ).toMatchObject({ status: 'failed', errorCode: 'proposal_corrected' });
 
     // 9. Instant Preemption test: when user becomes active, running dream must abort immediately
@@ -120,7 +119,6 @@ describe('Idle Dreaming End-to-End Engine', () => {
 
     const pendingPromise = hangingCoordinator.triggerNow({
       entityId: project.id,
-      force: true,
     });
     // User moves mouse / foreground activity happens
     hangingCoordinator.notifyForegroundActivity();

@@ -645,9 +645,8 @@ export const updateEntityAliasSuggestionStatus = async (
   return invoke('UPDATE_ENTITY_ALIAS_SUGGESTION_STATUS', { id, status });
 };
 
-export const triggerDreamingNow = async (options?: {
-  entityId?: string;
-  force?: boolean;
+export const triggerDreamingNow = async (options: {
+  entityId: string;
 }): Promise<IdleDreamingResult> => {
   return invoke('TRIGGER_DREAMING_NOW', options);
 };

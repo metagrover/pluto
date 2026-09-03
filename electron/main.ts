@@ -760,28 +760,45 @@ function abortMeetingTasks(meetingId: string) {
 }
 
 let stopIdentityReconciliation: (() => void) | undefined;
+let shutdownStarted = false;
+let shutdownComplete = false;
 // Cleanup on quit
-app.on('before-quit', async () => {
-  backgroundKnowledgeRefresh?.close();
-  backgroundKnowledgeRefresh = null;
-  idleDreamingCoordinator?.close();
-  idleDreamingCoordinator = null;
-  stopIdentityReconciliation?.();
-  calendarService.stop();
-  console.log('[Pluto] Shutting down...');
-  // Abort all active tasks
-  for (const controller of activeMeetingTasks.values()) {
-    controller.abort();
-  }
-  activeMeetingTasks.clear();
-  parakeetFinalClient?.close();
-  parakeetFinalClient = null;
-  await parakeetEouCoordinator?.fail('parakeet_app_quit');
-  parakeetEouCoordinator = null;
-  parakeetEouOwner = null;
-  parakeetEouGeneration = null;
-  parakeetRuntimeHost?.shutdown();
-  parakeetRuntimeHost = null;
+app.on('before-quit', (event) => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  void (async () => {
+    backgroundKnowledgeRefresh?.close();
+    backgroundKnowledgeRefresh = null;
+    await idleDreamingCoordinator?.close();
+    idleDreamingCoordinator = null;
+    scheduleDreamingRun = null;
+    dreamingEntityQueue = null;
+    stopIdentityReconciliation?.();
+    calendarService.stop();
+    console.log('[Pluto] Shutting down...');
+    // Abort all active tasks
+    for (const controller of activeMeetingTasks.values()) {
+      controller.abort();
+    }
+    activeMeetingTasks.clear();
+    parakeetFinalClient?.close();
+    parakeetFinalClient = null;
+    await parakeetEouCoordinator?.fail('parakeet_app_quit');
+    parakeetEouCoordinator = null;
+    parakeetEouOwner = null;
+    parakeetEouGeneration = null;
+    parakeetRuntimeHost?.shutdown();
+    parakeetRuntimeHost = null;
+  })()
+    .catch((error) => {
+      console.error('[Pluto] Shutdown cleanup failed:', error);
+    })
+    .finally(() => {
+      shutdownComplete = true;
+      app.quit();
+    });
 });
 
 app.whenReady().then(async () => {
@@ -850,6 +867,11 @@ app.whenReady().then(async () => {
     getEntity: (id: string) => db.getEntity(id),
     packageNotes: (entityId: string) => packageEntityNotes(entityId),
     proposalStore: db.dreamingProposalStore,
+    recoverStaleRuns: db.dreamingProposalStore.recoverStaleRuns,
+    onRetryable: (candidate, delayMs) => {
+      dreamingEntityQueue?.invalidate(candidate);
+      scheduleDreamingRun?.(delayMs);
+    },
     generate: async (prompt, responseSchema, signal, model, promptVersion) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
@@ -3046,7 +3068,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('UPDATE_ACTION_COMMITMENT_STATE', (_event, payload) =>
     handleActionCommitmentReview(payload, {
       updateActionCommitmentState: db.updateActionCommitmentState,
-      queueKnowledgeRefresh: queueAllKnowledgeDocsRefresh,
+      queueKnowledgeRefresh: () => {
+        queueAllKnowledgeDocsRefresh();
+        invalidateDreamingCatalog();
+      },
     }),
   );
   ipcMain.handle('DELETE_ENTITY', (_event, id) => {
@@ -3064,6 +3089,7 @@ app.whenReady().then(async () => {
         state: link?.state || 'confirmed',
       });
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return saved;
     } catch (e) {
       console.error('[Pluto] LINK_ENTITIES failed:', e);
@@ -3091,7 +3117,9 @@ app.whenReady().then(async () => {
   // Meeting-entity associations
   ipcMain.handle('ADD_MEETING_ENTITY', (_event, meetingEntity) => {
     try {
-      return db.addMeetingEntity(meetingEntity);
+      const saved = db.addMeetingEntity(meetingEntity);
+      invalidateDreamingCatalog();
+      return saved;
     } catch (e) {
       console.error('[Pluto] ADD_MEETING_ENTITY failed:', e);
       throw e;
@@ -3118,6 +3146,7 @@ app.whenReady().then(async () => {
         personId === null ? null : String(personId),
       );
       queueAllKnowledgeDocsRefresh();
+      invalidateDreamingCatalog();
       return action;
     },
   );
@@ -3132,7 +3161,9 @@ app.whenReady().then(async () => {
         reason?: string;
       },
     ) => {
-      return db.recordEntityCorrection(input);
+      const correction = db.recordEntityCorrection(input);
+      invalidateDreamingCatalog();
+      return correction;
     },
   );
   ipcMain.handle('GET_ENTITY_CORRECTIONS', (_event, entityId: string) => {
@@ -3158,8 +3189,15 @@ app.whenReady().then(async () => {
     'TRIGGER_DREAMING_NOW',
     async (
       _event,
-      options?: { entityId?: string; force?: boolean },
+      options: { entityId: string },
     ): Promise<IdleDreamingResult> => {
+      if (
+        !options ||
+        typeof options.entityId !== 'string' ||
+        !options.entityId.trim()
+      ) {
+        return { status: 'invalid_request', errorCode: 'entity_id_required' };
+      }
       return (
         (await idleDreamingCoordinator?.triggerNow(options)) ?? {
           status: 'no_work',
@@ -3253,11 +3291,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('SET_ENTITY_LINK_STATE', (_event, { id, state }) => {
     const updated = db.setEntityLinkState(id, state);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
     return updated;
   });
   ipcMain.handle('RESOLVE_CONFLICT', (_event, { winnerId, loserId }) => {
     const result = db.resolveConflictLinks(winnerId, loserId);
     queueAllKnowledgeDocsRefresh();
+    invalidateDreamingCatalog();
     return result;
   });
 
@@ -5000,7 +5040,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('APP_RELAUNCH', () => {
     app.relaunch();
-    app.exit(0);
+    app.quit();
     return true;
   });
 

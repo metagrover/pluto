@@ -28,4 +28,32 @@ describe('idle dreaming production wiring', () => {
     );
     expect(mainSource).toContain('invalidateDreamingCatalog()');
   });
+
+  it.each([
+    'LINK_ENTITIES',
+    'ADD_MEETING_ENTITY',
+    'RECORD_ENTITY_CORRECTION',
+    'SET_ENTITY_LINK_STATE',
+    'RESOLVE_CONFLICT',
+    'RESOLVE_PERSON_COMMITMENT_OWNER',
+  ])('invalidates dreaming inputs after %s', (channel) => {
+    const start = mainSource.indexOf(`'${channel}'`);
+    expect(start).toBeGreaterThan(0);
+    expect(mainSource.slice(start, start + 700)).toContain(
+      'invalidateDreamingCatalog()',
+    );
+  });
+
+  it('awaits coordinator close during guarded application shutdown', () => {
+    expect(mainSource).toContain('event.preventDefault()');
+    expect(mainSource).toContain('await idleDreamingCoordinator?.close()');
+  });
+
+  it('validates a required entity id at the manual IPC boundary', () => {
+    const start = mainSource.indexOf("'TRIGGER_DREAMING_NOW'");
+    const handler = mainSource.slice(start, start + 650);
+    expect(handler).toContain('options: { entityId: string }');
+    expect(handler).toContain("typeof options.entityId !== 'string'");
+    expect(handler).not.toContain('force');
+  });
 });

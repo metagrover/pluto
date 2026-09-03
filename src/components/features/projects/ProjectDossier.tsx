@@ -131,7 +131,6 @@ export const ProjectDossier = ({
     try {
       const result = await triggerDreamingNow({
         entityId: projectId,
-        force: true,
       });
       if (result.status === 'proposed') {
         setRequest((r) => r + 1);

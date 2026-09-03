@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type IdleDreamingPolicy,
+  type IdleDreamingResult,
   createIdleDreamingCoordinator,
 } from '../../electron/dreaming/idleDreamingCoordinator';
 import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
@@ -470,6 +471,96 @@ describe('IdleDreamingCoordinator', () => {
     },
   );
 
+  it('retains a young orphan until stale recovery makes it retryable', async () => {
+    let nowMs = Date.parse('2026-09-02T10:02:00.000Z');
+    let recovered = false;
+    let queued = true;
+    let retryDelay: number | undefined;
+    proposalStore.startRun.mockImplementation(() =>
+      recovered
+        ? {
+            status: 'started',
+            run: { id: 'run-1', leaseToken: 'lease-new' },
+          }
+        : {
+            status: 'existing',
+            run: {
+              id: 'run-1',
+              status: 'running',
+              updatedAt: '2026-09-02T10:00:00.000Z',
+            },
+          },
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => {
+        if (!queued) return null;
+        queued = false;
+        return { entityId: 'proj-1', type: 'project' };
+      },
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      now: () => nowMs,
+      recoverStaleRuns: ({ staleBefore }) => {
+        recovered =
+          Date.parse(staleBefore) >= Date.parse('2026-09-02T10:00:00.000Z');
+        return recovered ? 1 : 0;
+      },
+      onRetryable: (_candidate, delayMs) => {
+        queued = true;
+        retryDelay = delayMs;
+      },
+    });
+
+    await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
+      status: 'existing',
+    });
+    expect(retryDelay).toBe(60_000);
+    expect(generateMock).not.toHaveBeenCalled();
+
+    nowMs += retryDelay!;
+    await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
+      status: 'no_change',
+    });
+    expect(generateMock).toHaveBeenCalledOnce();
+  });
+
+  it('cancels and requeues when authoritative source changes during generation', async () => {
+    packageNotesMock
+      .mockReturnValueOnce({
+        ...packageNotesMock(),
+        sourceRevision: 'revision-before',
+      })
+      .mockReturnValueOnce({
+        ...packageNotesMock(),
+        sourceRevision: 'revision-after',
+      });
+    const onRetryable = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      onRetryable,
+    });
+
+    await expect(coordinator.attemptIdleRun()).resolves.toEqual({
+      status: 'cancelled',
+      entityId: 'proj-1',
+    });
+    expect(proposalStore.cancelRun).toHaveBeenCalledWith({
+      runId: 'run-1',
+      leaseToken: 'lease-1',
+    });
+    expect(proposalStore.completeRun).not.toHaveBeenCalled();
+    expect(onRetryable).toHaveBeenCalledWith(
+      { entityId: 'proj-1', type: 'project' },
+      0,
+    );
+  });
+
   it('requires a concrete entity for a manual run', async () => {
     const coordinator = createIdleDreamingCoordinator({
       getPolicy: () => policy,
@@ -479,7 +570,10 @@ describe('IdleDreamingCoordinator', () => {
       proposalStore,
     });
 
-    await expect(coordinator.triggerNow()).resolves.toEqual({
+    const unsafeTrigger = coordinator.triggerNow as (options?: {
+      entityId: string;
+    }) => Promise<IdleDreamingResult>;
+    await expect(unsafeTrigger()).resolves.toEqual({
       status: 'invalid_request',
       errorCode: 'entity_id_required',
     });
@@ -551,5 +645,52 @@ describe('IdleDreamingCoordinator', () => {
     await Promise.resolve();
     expect(proposalStore.completeRun).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it('awaits model unload when closed while idle', async () => {
+    let finishUnload!: () => void;
+    const unloadModel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishUnload = resolve;
+        }),
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      unloadModel,
+    });
+
+    let closed = false;
+    const closing = coordinator.close().then(() => {
+      closed = true;
+    });
+    await vi.waitFor(() => expect(unloadModel).toHaveBeenCalledOnce());
+    expect(closed).toBe(false);
+    finishUnload();
+    await closing;
+    expect(closed).toBe(true);
+  });
+
+  it('cancels an active run and awaits its unload when closed', async () => {
+    generateMock.mockReturnValue(new Promise(() => {}));
+    const unloadModel = vi.fn().mockResolvedValue(undefined);
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      unloadModel,
+    });
+
+    const run = coordinator.attemptIdleRun();
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+    await coordinator.close();
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' });
+    expect(unloadModel).toHaveBeenCalledOnce();
   });
 });

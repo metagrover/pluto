@@ -82,8 +82,11 @@ export interface IdleDreamingCoordinatorDeps {
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
   deadlineMs?: number;
+  now?: () => number;
   setTimeout?: typeof setTimeout;
   clearTimeout?: typeof clearTimeout;
+  recoverStaleRuns?: (input: { staleBefore: string }) => number;
+  onRetryable?: (candidate: DirtyEntityCandidate, delayMs: number) => void;
   unloadModel?: () => Promise<void> | void;
 }
 
@@ -123,9 +126,12 @@ export const createIdleDreamingCoordinator = (
   const deadlineMs = deps.deadlineMs ?? DREAMING_ENTITY_DEADLINE_MS;
   const scheduleTimeout = deps.setTimeout ?? setTimeout;
   const cancelTimeout = deps.clearTimeout ?? clearTimeout;
+  const now = deps.now ?? Date.now;
   let activeController: AbortController | null = null;
   let activeRun: Promise<IdleDreamingResult> | null = null;
   let activeCandidate: DirtyEntityCandidate | null = null;
+  let unloadPromise: Promise<void> | null = null;
+  let closed = false;
   const isEntityType = (value: string): value is DreamingEntityType =>
     value === 'project' || value === 'person';
 
@@ -140,13 +146,30 @@ export const createIdleDreamingCoordinator = (
     );
   };
 
-  const unloadModel = () => {
+  const unloadModel = (): Promise<void> => {
     try {
-      void Promise.resolve(deps.unloadModel?.()).catch(() => undefined);
+      unloadPromise = Promise.resolve(deps.unloadModel?.()).catch(
+        () => undefined,
+      );
     } catch {
       // Unloading is best-effort and cannot hold the coordinator lifecycle.
+      unloadPromise = Promise.resolve();
+    }
+    return unloadPromise;
+  };
+
+  const requeue = (candidate: DirtyEntityCandidate, delayMs = 0) => {
+    try {
+      deps.onRetryable?.(candidate, delayMs);
+    } catch {
+      // Scheduling is advisory; the persisted run remains authoritative.
     }
   };
+
+  const recoverStaleRuns = () =>
+    deps.recoverStaleRuns?.({
+      staleBefore: new Date(now() - deadlineMs).toISOString(),
+    });
 
   const notifyForegroundActivity = () => {
     if (activeController) {
@@ -237,6 +260,15 @@ export const createIdleDreamingCoordinator = (
           mode,
         });
         if (start.status !== 'started') {
+          if (start.status === 'existing' && start.run.status === 'running') {
+            const staleAt = Date.parse(start.run.updatedAt) + deadlineMs;
+            requeue(
+              candidate,
+              Number.isFinite(staleAt)
+                ? Math.max(1_000, staleAt - now())
+                : deadlineMs,
+            );
+          }
           return { status: start.status, entityId: candidate.entityId };
         }
         lease = start.run;
@@ -273,7 +305,29 @@ export const createIdleDreamingCoordinator = (
           runId: lease.id,
           leaseToken: lease.leaseToken,
         });
+        requeue(candidate);
         return { status: 'cancelled', entityId: candidate.entityId };
+      }
+      const currentPackage = deps.packageNotes(candidate.entityId);
+      if (
+        !currentPackage ||
+        currentPackage.entityId !== pkg.entityId ||
+        currentPackage.entityType !== pkg.entityType ||
+        currentPackage.sourceRevision !== pkg.sourceRevision ||
+        (lease?.sourceRevision !== undefined &&
+          currentPackage.sourceRevision !== lease.sourceRevision)
+      ) {
+        if (lease) {
+          deps.proposalStore.cancelRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+          });
+        }
+        requeue(candidate);
+        return {
+          status: 'cancelled',
+          entityId: candidate.entityId,
+        };
       }
       if (validated.status === 'no_change') {
         if (lease) {
@@ -368,6 +422,7 @@ export const createIdleDreamingCoordinator = (
             leaseToken: lease.leaseToken,
           });
         }
+        requeue(candidate);
         return { status: 'cancelled', entityId: candidate.entityId };
       }
       const errorCode =
@@ -389,9 +444,10 @@ export const createIdleDreamingCoordinator = (
     }
   };
 
-  const triggerNow = async (options?: {
-    entityId?: string;
+  const triggerNow = async (options: {
+    entityId: string;
   }): Promise<IdleDreamingResult> => {
+    if (closed) return { status: 'ineligible' };
     if (!options?.entityId) {
       return {
         status: 'invalid_request',
@@ -431,13 +487,15 @@ export const createIdleDreamingCoordinator = (
       activeController = null;
       activeCandidate = null;
       activeRun = null;
-      unloadModel();
+      void unloadModel();
     });
 
     return activeRun;
   };
 
   const attemptIdleRun = async (): Promise<IdleDreamingResult> => {
+    if (closed) return { status: 'ineligible' };
+    recoverStaleRuns();
     if (activeRun)
       return { status: 'busy', entityId: activeCandidate?.entityId };
     if (!isEligible()) return { status: 'ineligible' };
@@ -461,7 +519,7 @@ export const createIdleDreamingCoordinator = (
       activeController = null;
       activeCandidate = null;
       activeRun = null;
-      unloadModel();
+      void unloadModel();
     });
     return activeRun;
   };
@@ -471,6 +529,20 @@ export const createIdleDreamingCoordinator = (
     attemptIdleRun,
     triggerNow,
     notifyForegroundActivity,
-    close: notifyForegroundActivity,
+    async close() {
+      if (closed) {
+        await unloadPromise;
+        return;
+      }
+      closed = true;
+      const run = activeRun;
+      notifyForegroundActivity();
+      if (run) {
+        await run;
+        await unloadPromise;
+      } else {
+        await unloadModel();
+      }
+    },
   };
 };
