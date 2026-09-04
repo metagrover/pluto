@@ -27,4 +27,23 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
       /kAudioHardwareBadObjectError|560947818|badObjectRetry/u,
     );
   });
+
+  it('suppresses device change triggers during self-initiated aggregate rebuilds to prevent loops', () => {
+    expect(mainSource).toMatch(
+      /isSelfModifyingDevices|isRebuildingTap|suppressDeviceChange/u,
+    );
+  });
+
+  it('tracks frames per tap generation so post-switch silent taps trigger watchdog recovery', () => {
+    expect(mainSource).toMatch(
+      /tapFramesReceived|tapGeneration|currentTapFrames/u,
+    );
+  });
+
+  it('normalizes native tap output to fixed 48kHz Float32 PCM', () => {
+    expect(mainSource).toContain('48000');
+    expect(mainSource).toMatch(
+      /normalizeTo48k|resampleTo48k|outputSampleRate\s*=\s*48000|AudioStreamer|targetSampleRate\s*=\s*48000/u,
+    );
+  });
 });

@@ -69,109 +69,63 @@ export function createAudioResampler(
     }
     combined.set(input, carryover.length);
 
-    // Estimate output sample count
     const outSamples: number[] = [];
     const maxInputIndex = combined.length - 1;
 
-    // For downsampling, average/interpolate samples within the fractional window
-    // to achieve clean anti-aliasing without phase distortion or pitch shift
-    const windowRadius = Math.max(1, Math.round(ratio));
+    // Normalized cutoff frequency relative to input sample rate.
+    // For downsampling, cutoff is slightly below output Nyquist (0.45 / ratio)
+    // to provide a transition band that eliminates all aliasing into the speech band.
+    const cutoff = ratio > 1.0 ? 0.45 / ratio : 0.45;
+    const filterRadius = Math.max(8, Math.round(12 * Math.max(1, ratio)));
 
-    while (phase <= maxInputIndex) {
-      const center = phase;
-      const startIdx = Math.max(0, Math.floor(center - windowRadius * 0.5));
+    const sinc = (x: number): number => {
+      if (Math.abs(x) < 1e-7) return 1.0;
+      const piX = Math.PI * x;
+      return Math.sin(piX) / piX;
+    };
+
+    const computeSample = (center: number, source: Float32Array): number => {
+      const startIdx = Math.max(0, Math.floor(center - filterRadius));
       const endIdx = Math.min(
-        maxInputIndex,
-        Math.ceil(center + windowRadius * 0.5),
+        source.length - 1,
+        Math.ceil(center + filterRadius),
       );
+      let sum = 0;
+      let totalWeight = 0;
 
-      if (ratio > 1.0) {
-        // Downsampling: integrate / average over the input window covered by this output sample
-        let sum = 0;
-        let weightSum = 0;
-        for (let i = startIdx; i <= endIdx; i++) {
-          const dist = Math.abs(i - center);
-          // Triangle window weight
-          const weight = Math.max(0, 1 - dist / (windowRadius * 0.5 + 0.5));
-          if (weight > 0) {
-            sum += combined[i] * weight;
-            weightSum += weight;
-          }
-        }
-        outSamples.push(
-          weightSum > 0 ? sum / weightSum : combined[Math.round(center)],
-        );
-      } else {
-        // Upsampling or exact interpolation: linear interpolation between surrounding samples
-        const i0 = Math.floor(center);
-        const i1 = Math.min(maxInputIndex, i0 + 1);
-        const frac = center - i0;
-        const s0 = combined[i0];
-        const s1 = combined[i1];
-        outSamples.push(s0 + frac * (s1 - s0));
+      for (let i = startIdx; i <= endIdx; i++) {
+        const tau = i - center;
+        // Blackman window
+        const w =
+          0.42 +
+          0.5 * Math.cos((Math.PI * tau) / filterRadius) +
+          0.08 * Math.cos((2 * Math.PI * tau) / filterRadius);
+        const h = 2 * cutoff * sinc(2 * cutoff * tau);
+        const weight = h * w;
+        sum += source[i] * weight;
+        totalWeight += weight;
       }
 
+      return totalWeight > 0 ? sum / totalWeight : source[Math.round(center)];
+    };
+
+    while (phase <= maxInputIndex) {
+      outSamples.push(computeSample(phase, combined));
       phase += ratio;
     }
 
-    // Retain remaining samples after the last processed point as carryover for the next chunk
-    const consumedInputIndex = Math.floor(phase);
-    if (consumedInputIndex < combined.length) {
-      carryover = combined.slice(consumedInputIndex);
-      phase -= consumedInputIndex;
-    } else {
-      phase -= combined.length;
-      carryover = new Float32Array(0);
-    }
+    // Retain filterRadius samples from the end of combined for the next chunk's history
+    const historyCount = Math.min(combined.length, filterRadius);
+    carryover = combined.slice(combined.length - historyCount);
+    // Adjust phase to be relative to the new carryover buffer in the next chunk
+    phase = phase - combined.length + historyCount;
 
     return new Float32Array(outSamples);
   };
 
   const flush = (): Float32Array => {
-    if (carryover.length === 0) {
-      reset();
-      return new Float32Array(0);
-    }
-    const remaining = carryover;
-    carryover = new Float32Array(0);
-    const outSamples: number[] = [];
-    const maxInputIndex = remaining.length - 1;
-    const windowRadius = Math.max(1, Math.round(ratio));
-
-    while (phase <= maxInputIndex) {
-      const center = phase;
-      const startIdx = Math.max(0, Math.floor(center - windowRadius * 0.5));
-      const endIdx = Math.min(
-        maxInputIndex,
-        Math.ceil(center + windowRadius * 0.5),
-      );
-
-      if (ratio > 1.0) {
-        let sum = 0;
-        let weightSum = 0;
-        for (let i = startIdx; i <= endIdx; i++) {
-          const dist = Math.abs(i - center);
-          const weight = Math.max(0, 1 - dist / (windowRadius * 0.5 + 0.5));
-          if (weight > 0) {
-            sum += remaining[i] * weight;
-            weightSum += weight;
-          }
-        }
-        outSamples.push(
-          weightSum > 0 ? sum / weightSum : remaining[Math.round(center)],
-        );
-      } else {
-        const i0 = Math.floor(center);
-        const i1 = Math.min(maxInputIndex, i0 + 1);
-        const frac = center - i0;
-        const s0 = remaining[i0];
-        const s1 = remaining[i1];
-        outSamples.push(s0 + frac * (s1 - s0));
-      }
-      phase += ratio;
-    }
     reset();
-    return new Float32Array(outSamples);
+    return new Float32Array(0);
   };
 
   return {

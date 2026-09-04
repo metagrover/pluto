@@ -268,6 +268,10 @@ export const AudioManager = ({
   const reconfigureDeviceTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const activeDeviceChangeListenerRef = useRef<(() => void) | null>(null);
+  const startMicMediaRecorderRef = useRef<
+    ((stream: MediaStream) => void) | null
+  >(null);
   const deviceChangeDebounceMs = 200;
   const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
   const systemAudioChunkSeenRef = useRef(false);
@@ -1078,8 +1082,19 @@ export const AudioManager = ({
       disableMicChunkTranscriptionRef.current = false;
       micWebmInitSegmentRef.current = null;
 
-      if (micStream) {
-        const micRecorder = new MediaRecorder(micStream, getRecorderOptions());
+      const startMicMediaRecorder = (stream: MediaStream) => {
+        if (
+          micRecorderRef.current &&
+          micRecorderRef.current.state !== 'inactive'
+        ) {
+          try {
+            micRecorderRef.current.ondataavailable = null;
+            micRecorderRef.current.stop();
+          } catch {
+            // ignore
+          }
+        }
+        const micRecorder = new MediaRecorder(stream, getRecorderOptions());
         micRecorderRef.current = micRecorder;
         micMimeTypeRef.current = micRecorder.mimeType || null;
         console.log(
@@ -1230,13 +1245,18 @@ export const AudioManager = ({
           }
         };
 
+        micRecorder.start(CHUNK_SECONDS * 1000);
+        console.log('[Pluto] Microphone recording started.');
+      };
+      startMicMediaRecorderRef.current = startMicMediaRecorder;
+
+      if (micStream) {
         // AudioCap starts before MediaRecorder so the native tap can become
         // healthy. Discard that setup pre-roll at the synchronization point;
         // otherwise system timestamps can extend beyond the journal interval.
         systemPcmChunksRef.current = [];
         systemPcmCarryoverBytesRef.current = new Uint8Array(0);
-        micRecorder.start(CHUNK_SECONDS * 1000);
-        console.log('[Pluto] Microphone recording started.');
+        startMicMediaRecorder(micStream);
       }
 
       // Only expose the recording state once live PCM and durable microphone
@@ -1250,9 +1270,18 @@ export const AudioManager = ({
         typeof navigator !== 'undefined' &&
         navigator.mediaDevices?.addEventListener
       ) {
+        if (activeDeviceChangeListenerRef.current) {
+          navigator.mediaDevices.removeEventListener(
+            'devicechange',
+            activeDeviceChangeListenerRef.current,
+          );
+          activeDeviceChangeListenerRef.current = null;
+        }
+        const listener = () => handleDeviceChangeDebounced();
+        activeDeviceChangeListenerRef.current = listener;
         navigator.mediaDevices.addEventListener(
           'devicechange',
-          handleDeviceChangeDebounced,
+          listener,
         );
       }
       return { admitted: true, meetingId };
@@ -1384,10 +1413,11 @@ export const AudioManager = ({
       pendingReconfigureRef.current = true;
       return;
     }
-    if (!isRecordingRef.current) {
+    if (!isRecordingRef.current || stopInFlightRef.current) {
       return;
     }
 
+    const reconfigureSessionId = currentMeetingIdRef.current;
     isReconfiguringRef.current = true;
     publishCaptureHealth({
       microphone: 'reconfiguring',
@@ -1430,6 +1460,21 @@ export const AudioManager = ({
         },
         video: false,
       });
+
+      if (
+        !isRecordingRef.current ||
+        stopInFlightRef.current ||
+        currentMeetingIdRef.current !== reconfigureSessionId
+      ) {
+        console.log(
+          '[Pluto] Capture stopped while awaiting getUserMedia; stopping returned tracks',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        return;
+      }
+
       micStreamRef.current = newMicStream;
 
       let audioContext = audioContextRef.current;
@@ -1484,6 +1529,11 @@ export const AudioManager = ({
 
       startSpeakingMonitor(audioContext, newMicStream);
 
+      // Recreate MediaRecorder with the new stream to preserve the 5-second journal cadence
+      if (startMicMediaRecorderRef.current) {
+        startMicMediaRecorderRef.current(newMicStream);
+      }
+
       publishCaptureHealth({
         microphone: 'healthy',
         systemAudio: systemAudioHealthRef.current,
@@ -1525,12 +1575,14 @@ export const AudioManager = ({
   const stopAllTracks = () => {
     if (
       typeof navigator !== 'undefined' &&
-      navigator.mediaDevices?.removeEventListener
+      navigator.mediaDevices?.removeEventListener &&
+      activeDeviceChangeListenerRef.current
     ) {
       navigator.mediaDevices.removeEventListener(
         'devicechange',
-        handleDeviceChangeDebounced,
+        activeDeviceChangeListenerRef.current,
       );
+      activeDeviceChangeListenerRef.current = null;
     }
     if (reconfigureDeviceTimeoutRef.current) {
       clearTimeout(reconfigureDeviceTimeoutRef.current);
@@ -2261,12 +2313,14 @@ export const AudioManager = ({
     return () => {
       if (
         typeof navigator !== 'undefined' &&
-        navigator.mediaDevices?.removeEventListener
+        navigator.mediaDevices?.removeEventListener &&
+        activeDeviceChangeListenerRef.current
       ) {
         navigator.mediaDevices.removeEventListener(
           'devicechange',
-          handleDeviceChangeDebounced,
+          activeDeviceChangeListenerRef.current,
         );
+        activeDeviceChangeListenerRef.current = null;
       }
       if (reconfigureDeviceTimeoutRef.current) {
         clearTimeout(reconfigureDeviceTimeoutRef.current);

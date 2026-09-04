@@ -153,4 +153,44 @@ describe('audioResampler', () => {
     // After flush, another flush should return empty
     expect(resampler.flush().length).toBe(0);
   });
+
+  it('rejects out-of-band frequencies (anti-aliasing) when downsampling 48kHz to 16kHz', () => {
+    const resampler = createAudioResampler({
+      inputSampleRate: 48000,
+      outputSampleRate: 16000,
+    });
+    // Generate a 10kHz sine wave at 48kHz (amplitude 1.0, input RMS ~0.707)
+    // At 16kHz, Nyquist is 8kHz, so 10kHz is above Nyquist and must be strongly attenuated
+    const numSamples = 4800; // 100ms
+    const input10k = new Float32Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      input10k[i] = Math.sin((2 * Math.PI * 10000 * i) / 48000);
+    }
+    const output = resampler.process(input10k);
+    let sumSq = 0;
+    for (let i = 0; i < output.length; i++) {
+      sumSq += output[i] * output[i];
+    }
+    const rms = Math.sqrt(sumSq / output.length);
+    // Stopband rejection: must attenuate 10kHz tone heavily (RMS < 0.05, >23dB rejection)
+    expect(rms).toBeLessThan(0.05);
+
+    // Meanwhile, a 1kHz tone within the passband (speech band) must be preserved
+    const resamplerPass = createAudioResampler({
+      inputSampleRate: 48000,
+      outputSampleRate: 16000,
+    });
+    const input1k = new Float32Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      input1k[i] = Math.sin((2 * Math.PI * 1000 * i) / 48000);
+    }
+    const outputPass = resamplerPass.process(input1k);
+    let sumSqPass = 0;
+    for (let i = 0; i < outputPass.length; i++) {
+      sumSqPass += outputPass[i] * outputPass[i];
+    }
+    const rmsPass = Math.sqrt(sumSqPass / outputPass.length);
+    // 1kHz tone (input RMS ~0.707) should retain nearly full power (RMS > 0.65)
+    expect(rmsPass).toBeGreaterThan(0.65);
+  });
 });

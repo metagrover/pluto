@@ -34,4 +34,23 @@ describe('AudioManager dynamic audio device reconnect wiring', () => {
     expect(source).toContain('createAudioResampler');
     expect(source).toContain('micResamplerRef');
   });
+
+  it('recreates MediaRecorder upon dynamic reconnect to preserve journal cadence', () => {
+    expect(source).toMatch(
+      /startMicMediaRecorder|new MediaRecorder\(newMicStream/u,
+    );
+    expect(source).toContain('micRecorderRef.current = micRecorder');
+  });
+
+  it('guards against late getUserMedia resolution when recording was stopped', () => {
+    expect(source).toMatch(
+      /!isRecordingRef\.current[\s\S]*?track\.stop\(\)/u,
+    );
+  });
+
+  it('retains a stable devicechange listener ref for accurate removal', () => {
+    expect(source).toMatch(
+      /activeDeviceChangeListenerRef|deviceChangeListenerRef/u,
+    );
+  });
 });
