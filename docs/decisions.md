@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop
+
+- **Status:** Accepted
+- **Source:** [Issue #747](https://github.com/metagrover/pluto/issues/747), owner direction on 2026-09-04
+- **Decision:** Pluto automatically detects active or scheduled calendar events during recording startup (±15 minute window) to immediately set meeting title and attendees without waiting for post-meeting finalization. When an upcoming or starting conference meeting (Zoom, Google Meet, Microsoft Teams, Webex, Slack) is detected while idle, Pluto surfaces a non-intrusive floating pill banner with 1-click start. Pluto monitors active audio capture via a silence watchdog, automatically stopping recording with an explicit `end_reason` (`auto:calendar_silence_timeout` or `auto:silence_timeout`) and pushing a desktop notification when meeting notes are ready if silence persists past the scheduled event end time or conference audio drops to zero. Users can configure these behaviors in Settings → Meetings (Auto-name toggle, Prompt toggle, Silence timeout selector: 3m, 5m [default], 10m, Disabled).
+- **Rationale:** Users previously had to manually type meeting titles and attendee lists or wait until finalization completed to see calendar context attached, frequently forgot to stop recording when meetings concluded (bloating transcripts with silence), and had to remember to start recordings manually even when on scheduled calls.
+- **Consequences:** Calendar integration remains strictly read-only and local (macOS EventKit); recording never auto-starts without explicit user action; silence auto-stop enforces a dual boundary check (continuous silence + calendar end time passed or conference audio dropped) to prevent premature cutoffs during natural meeting pauses.
+
 ## 2026-09-04 - Dynamic audio device reconnection with continuous 16kHz resampling
 
 - **Status:** Accepted

@@ -27,12 +27,7 @@ for (const relativePath of requiredExecutables) {
 }
 
 const calendarInfo = readFileSync(
-  path.join(
-    resourcesPath,
-    'PlutoCalendarHelper.app',
-    'Contents',
-    'Info.plist',
-  ),
+  path.join(resourcesPath, 'PlutoCalendarHelper.app', 'Contents', 'Info.plist'),
   'utf8',
 );
 if (!calendarInfo.includes('NSCalendarsFullAccessUsageDescription')) {

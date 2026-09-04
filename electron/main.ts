@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   type WebContents,
   app,
@@ -515,6 +516,18 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
       if (!win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
     }
+    try {
+      if (Notification.isSupported()) {
+        const meeting = db.getMeeting(meetingId) as { title?: string } | null;
+        const title = meeting?.title || 'Meeting';
+        new Notification({
+          title: 'Meeting notes ready',
+          body: `Notes for "${title}" are ready.`,
+        }).show();
+      }
+    } catch {
+      // Non-fatal notification error
+    }
   },
   runSecondary: async (input) => {
     if (
@@ -1011,6 +1024,19 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('CALENDAR_GET_MEETING_CONTEXT', (_event, meetingId) =>
     db.calendarStore.getMeetingContext(String(meetingId)),
+  );
+  ipcMain.handle(
+    'CALENDAR_MATCH_ACTIVE',
+    (_event, payload?: { atTime?: string }) =>
+      calendarService.matchActiveEvent(payload?.atTime),
+  );
+  ipcMain.handle(
+    'CALENDAR_ASSOCIATE_START',
+    (_event, payload: { meetingId: string; atTime?: string }) =>
+      calendarService.associateMeetingAtStart(
+        String(payload.meetingId),
+        payload?.atTime,
+      ),
   );
   ipcMain.handle('OPEN_CALENDAR_SYSTEM_SETTINGS', async (_event, target) => {
     if (process.platform !== 'darwin') return false;

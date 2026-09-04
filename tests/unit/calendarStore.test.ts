@@ -269,4 +269,40 @@ describe('calendar store', () => {
     // Should persist calendarB's title ("Personal"), NOT calendarA's title ("Work")!
     expect(matched?.calendarTitle).toBe('Personal');
   });
+
+  it('matches active calendar event at start time and associates context immediately', () => {
+    const store = createCalendarStore(sql);
+    store.selectCalendars([calendar, calendarB]);
+    store.replaceEvents({
+      revision: 1,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T16:00:00.000Z',
+      events: [calendarEvent, calendarEventB],
+    });
+
+    // Recording begins at 17:31 during calendarEvent (17:30 - 18:30)
+    const activeResult = store.matchActiveEvent('2026-08-30T17:31:00.000Z');
+    expect(activeResult.match.kind).toBe('matched');
+    expect(activeResult.event?.title).toBe('Product review');
+    expect(activeResult.event?.attendees).toHaveLength(1);
+
+    sql
+      .prepare('INSERT INTO meetings (id) VALUES (?)')
+      .run('meeting-proactive-1');
+    const association = store.associateMeetingAtStart(
+      'meeting-proactive-1',
+      '2026-08-30T17:31:00.000Z',
+    );
+    expect(association.context).not.toBeNull();
+    expect(association.context?.occurrenceKey).toBe(
+      calendarEvent.occurrenceKey,
+    );
+    expect(association.context?.matchOrigin).toBe('automatic');
+    expect(association.event?.title).toBe('Product review');
+
+    // Context should already be queryable via getMeetingContext
+    const retrieved = store.getMeetingContext('meeting-proactive-1');
+    expect(retrieved?.occurrenceKey).toBe(calendarEvent.occurrenceKey);
+  });
 });
