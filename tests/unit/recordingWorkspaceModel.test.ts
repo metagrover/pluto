@@ -189,6 +189,44 @@ describe('buildRecordingWorkspaceModel', () => {
       'Audio may still be recording, but crash recovery is no longer guaranteed',
     );
   });
+
+  it('reports a calm status during device reconfiguration without triggering error alerts', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 10_000,
+      isStarting: false,
+      isProcessing: false,
+      microphone: 'reconfiguring',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [],
+      interimText: '',
+    });
+
+    expect(model.needsAttention).toBe(false);
+    expect(model.statusMessage).toBe('Reconfiguring audio devices...');
+    expect(model.microphone).toBe('reconfiguring');
+  });
+
+  it('reports reconfiguring status when system audio is reconfiguring', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 10_000,
+      isStarting: false,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'reconfiguring',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [],
+      interimText: '',
+    });
+
+    expect(model.needsAttention).toBe(false);
+    expect(model.statusMessage).toBe('Reconfiguring audio devices...');
+    expect(model.systemAudio).toBe('reconfiguring');
+  });
 });
 
 describe('withCaptureDurabilityWarning', () => {

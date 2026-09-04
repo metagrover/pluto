@@ -1,4 +1,8 @@
-export type CaptureHealth = 'healthy' | 'warning' | 'unavailable';
+export type CaptureHealth =
+  | 'healthy'
+  | 'warning'
+  | 'unavailable'
+  | 'reconfiguring';
 export type LiveTranscriptIntegrity = 'healthy' | 'lagging';
 export type CaptureHealthState = {
   microphone: CaptureHealth;
@@ -72,8 +76,13 @@ const formatElapsed = (milliseconds: number) => {
 export const buildRecordingWorkspaceModel = (
   input: RecordingWorkspaceInput,
 ) => {
-  const microphoneWarning = input.microphone !== 'healthy';
-  const systemAudioWarning = input.systemAudio !== 'healthy';
+  const isReconfiguring =
+    input.microphone === 'reconfiguring' ||
+    input.systemAudio === 'reconfiguring';
+  const microphoneWarning =
+    input.microphone !== 'healthy' && input.microphone !== 'reconfiguring';
+  const systemAudioWarning =
+    input.systemAudio !== 'healthy' && input.systemAudio !== 'reconfiguring';
   const durabilityWarning = input.captureDurability !== 'healthy';
   const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
   const nonEmptyTranscript = input.segments.filter((segment) =>
@@ -96,19 +105,21 @@ export const buildRecordingWorkspaceModel = (
       systemAudioWarning ||
       durabilityWarning ||
       transcriptWarning,
-    statusMessage: microphoneWarning
-      ? 'Microphone needs attention'
-      : systemAudioWarning
-        ? 'System audio needs attention'
-        : durabilityWarning
-          ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
-          : transcriptWarning
-            ? 'Your audio is recording, but live transcription is falling behind'
-            : input.isStarting
-              ? 'Preparing capture'
-              : input.isProcessing
-                ? 'Finalizing notes. Keep Pluto open.'
-                : 'Capture is healthy',
+    statusMessage: isReconfiguring
+      ? 'Reconfiguring audio devices...'
+      : microphoneWarning
+        ? 'Microphone needs attention'
+        : systemAudioWarning
+          ? 'System audio needs attention'
+          : durabilityWarning
+            ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
+            : transcriptWarning
+              ? 'Your audio is recording, but live transcription is falling behind'
+              : input.isStarting
+                ? 'Preparing capture'
+                : input.isProcessing
+                  ? 'Finalizing notes. Keep Pluto open.'
+                  : 'Capture is healthy',
     transcript: nonEmptyTranscript,
     interimText: input.interimText.trim(),
   };
