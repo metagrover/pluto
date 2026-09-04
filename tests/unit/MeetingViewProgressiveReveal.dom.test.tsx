@@ -1040,7 +1040,7 @@ describe('MeetingView progressive reveal', () => {
     });
     expect(template?.value).toBe('project_kickoff');
     expect(container.textContent).toContain('Notes template');
-    expect(container.textContent).toContain('Export as Markdown');
+    expect(container.textContent).toContain('Export meeting notes');
     expect(container.textContent).toContain('Delete meeting');
     expect(
       Array.from(template?.options || []).map((option) => option.text),

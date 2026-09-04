@@ -1132,7 +1132,7 @@ export const MeetingView = ({
                         }
                       }}
                       className="meeting-toolbar-button"
-                      aria-label="Export as Markdown"
+                      aria-label="Export meeting notes"
                     >
                       <svg
                         aria-hidden="true"
@@ -1148,7 +1148,7 @@ export const MeetingView = ({
                           d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                         />
                       </svg>
-                      <span>Export as Markdown</span>
+                      <span>Export meeting notes</span>
                     </button>
                   </div>
                   {selectedMeeting.finalization_status !==

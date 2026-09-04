@@ -91,7 +91,7 @@ describe('MeetingView export action', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes "Export as Markdown" and downloads a sanitized .md file without raw transcript', async () => {
+  it('exposes "Export meeting notes" and downloads a sanitized .md file without raw transcript', async () => {
     await act(async () => {
       root.render(
         <MeetingView
@@ -112,11 +112,11 @@ describe('MeetingView export action', () => {
     });
 
     const exportButton = container.querySelector(
-      'button[aria-label="Export as Markdown"]',
+      'button[aria-label="Export meeting notes"]',
     ) as HTMLButtonElement | null;
 
     expect(exportButton).not.toBeNull();
-    expect(exportButton?.textContent).toContain('Export as Markdown');
+    expect(exportButton?.textContent).toContain('Export meeting notes');
 
     // Intercept URL creation and anchor click
     let capturedBlob: Blob | null = null;
