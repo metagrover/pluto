@@ -49,19 +49,23 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
         systemURL: URL
     ) async throws -> SpeakerEvidenceOutput {
         let totalStart = ContinuousClock.now
-        let diarizationStart = ContinuousClock.now
-        // Remote participants are mixed together on the system channel. The
-        // microphone is user speech plus possible system echo, so it must not
-        // be diarized as a source of local identity.
-        let turns = try await diarizer.diarize(audioURL: systemURL)
-        let diarizationMs = elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
-
         let energyStart = ContinuousClock.now
         let windows = try await energyAnalyzer.analyze(micURL: micURL, systemURL: systemURL)
         let energyMs = elapsedMilliseconds(since: energyStart)
         try Task.checkCancellation()
         guard !windows.isEmpty else { throw RuntimeFailure.audioAnalysisFailed }
+
+        let diarizationStart = ContinuousClock.now
+        // Remote participants are mixed together on the system channel. The
+        // microphone is user speech plus possible system echo, so it must not
+        // be diarized as a source of local identity.
+        // Only exact digital silence skips inference; even very quiet audio
+        // still receives the normal model pass.
+        let systemIsSilent = windows.allSatisfy { $0.systemRms == 0 }
+        let turns = systemIsSilent ? [] : try await diarizer.diarize(audioURL: systemURL)
+        let diarizationMs = systemIsSilent ? 0 : elapsedMilliseconds(since: diarizationStart)
+        try Task.checkCancellation()
 
         return SpeakerEvidenceOutput(
             turns: turns,
