@@ -13,6 +13,7 @@ import type {
   TranscriptionResult,
 } from '../transcription/contracts.ts';
 import { applyRecoveredChannelEvidence } from './applyRecoveredChannelEvidence.ts';
+import { applyRemoteSpeakerClusters } from './applyRemoteSpeakerClusters.ts';
 import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
 import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
 import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
@@ -344,12 +345,21 @@ export const runFinalTranscription = async <TTranscript>(
       return { status: 'needs_attention', reasons: attribution.reasons };
     }
 
+    const remoteSpeakers = applyRemoteSpeakerClusters({
+      segments: attribution.segments,
+      turns: speakerEvidence.turns,
+    });
+    metadata.speakerAttribution = {
+      ...attribution.attribution,
+      remoteDiarization: remoteSpeakers.metadata,
+    };
+
     lease = advanceFinalTranscriptionLease(lease, 'saving');
     await dependencies.updateLease?.(lease);
     const commit = await dependencies.commitCanonical({
       meetingId: input.meetingId,
       expectedCaptureGeneration: input.captureEvidence.generation,
-      segments: attribution.segments,
+      segments: remoteSpeakers.segments,
       integrity: validation.evidence,
       metadata,
     });

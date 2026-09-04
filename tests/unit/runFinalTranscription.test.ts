@@ -184,6 +184,59 @@ describe('runFinalTranscription', () => {
     );
   });
 
+  it('persists stable anonymous labels for multiple supported system speakers', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) => {
+      if (request.source === 'mic') return result('mic');
+      return {
+        ...result('system'),
+        segments: [
+          {
+            start: 5,
+            end: 9,
+            text: 'first remote second remote',
+            words: [
+              { word: 'first', start: 5, end: 5.8 },
+              { word: 'remote', start: 5.8, end: 7 },
+              { word: 'second', start: 7, end: 7.8 },
+              { word: 'remote', start: 7.8, end: 9 },
+            ],
+          },
+        ],
+      };
+    });
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+      turns: [
+        { startTime: 5, endTime: 7, cluster: 'speaker-b' },
+        { startTime: 7, endTime: 9, cluster: 'speaker-a' },
+      ],
+    });
+    deps.speakerEvidence.mockClear();
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    const commit = deps.commitCanonical.mock.calls[0][0];
+    expect(commit.segments.map((segment) => segment.speaker)).toEqual([
+      'Me',
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+    expect(commit.metadata.speakerAttribution).toMatchObject({
+      source: 'recovered_channel_acoustic_v2',
+      mappingApplied: true,
+      remoteDiarization: {
+        attempted: true,
+        input: 'system_audio',
+        applied: true,
+        confidence: 1,
+        clusterCount: 2,
+        labeledSegmentCount: 2,
+      },
+    });
+  });
+
   it('pauses before inference when system resources are unsafe', async () => {
     const deps = dependencies();
     const outcome = await runFinalTranscription(baseInput, {
@@ -277,6 +330,15 @@ describe('runFinalTranscription', () => {
       expect.objectContaining({ speaker: 'Me' }),
       expect.objectContaining({ speaker: 'Them' }),
     ]);
+    expect(
+      deps.commitCanonical.mock.calls[0][0].metadata.speakerAttribution,
+    ).toMatchObject({
+      remoteDiarization: {
+        attempted: true,
+        applied: false,
+        fallbackReason: 'not_enough_speakers',
+      },
+    });
     expect(deps.startAnalysis).toHaveBeenCalledOnce();
   });
 

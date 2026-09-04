@@ -21,6 +21,7 @@ const SpeakerCorrection = ({
   busy,
   onSave,
   onClear,
+  attendeeNames,
 }: {
   speaker: string;
   binding?: IdentityBinding;
@@ -28,6 +29,7 @@ const SpeakerCorrection = ({
   busy: boolean;
   onSave: (selection: IdentitySelection) => void;
   onClear: () => void;
+  attendeeNames: string[];
 }) => {
   const id = useId();
   const [choice, setChoice] = useState(binding?.personId ?? '');
@@ -35,6 +37,43 @@ const SpeakerCorrection = ({
   const [individual, setIndividual] = useState(
     binding?.source === 'user' && binding.individual === true,
   );
+  const normalizedPeople = people.reduce<Map<string, IdentityPerson[]>>(
+    (index, person) => {
+      const key = person.name.trim().toLocaleLowerCase();
+      index.set(key, [...(index.get(key) ?? []), person]);
+      return index;
+    },
+    new Map(),
+  );
+  const attendeeChoices: Array<{
+    name: string;
+    selection: IdentitySelection;
+  }> = [];
+  if (/^Remote Speaker \d+$/u.test(speaker)) {
+    const attendeesByName = attendeeNames.reduce<
+      Map<string, { name: string; count: number }>
+    >((index, value) => {
+      const name = value.trim();
+      if (!name) return index;
+      const key = name.toLocaleLowerCase();
+      const current = index.get(key);
+      index.set(key, {
+        name: current?.name ?? name,
+        count: (current?.count ?? 0) + 1,
+      });
+      return index;
+    }, new Map());
+    for (const [key, attendee] of attendeesByName) {
+      const matches = normalizedPeople.get(key) ?? [];
+      if (attendee.count > 1 || matches.length > 1) continue;
+      attendeeChoices.push({
+        name: attendee.name,
+        selection: matches[0]
+          ? { personId: matches[0].id }
+          : { newName: attendee.name },
+      });
+    }
+  }
   return (
     <form
       className="space-y-3 py-4 border-t border-pro-border/40"
@@ -64,6 +103,24 @@ const SpeakerCorrection = ({
               : 'Individual speaker confirmed, name unknown.'
             : 'No individual identity confirmed.'}
       </p>
+      {attendeeChoices.length > 0 && !binding ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-pro-text-muted">
+            From calendar
+          </span>
+          {attendeeChoices.map((choice) => (
+            <button
+              key={choice.name}
+              type="button"
+              className={identityButtonClass}
+              disabled={busy}
+              onClick={() => onSave(choice.selection)}
+            >
+              {choice.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <select
         id={id}
         aria-label={`Person for ${speaker}`}
@@ -135,7 +192,15 @@ const SpeakerCorrection = ({
   );
 };
 
-const MeetingIdentityPanel = ({ meetingId }: { meetingId: string }) => {
+const MeetingIdentityPanel = ({
+  meetingId,
+  attendeeNames,
+  onDisplayNamesChange,
+}: {
+  meetingId: string;
+  attendeeNames: string[];
+  onDisplayNamesChange?: (displayNames: Record<string, string>) => void;
+}) => {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<MeetingIdentityState | null>(null);
@@ -169,8 +234,25 @@ const MeetingIdentityPanel = ({ meetingId }: { meetingId: string }) => {
   );
 
   useEffect(() => {
-    if (open) void load();
-  }, [open, load]);
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!state) return;
+    const peopleById = new Map(
+      state.people.map((person) => [person.id, person.name]),
+    );
+    onDisplayNamesChange?.(
+      Object.fromEntries(
+        state.bindings.flatMap((binding) => {
+          const name = binding.personId
+            ? peopleById.get(binding.personId)?.trim()
+            : '';
+          return name ? [[binding.speaker, name]] : [];
+        }),
+      ),
+    );
+  }, [state, onDisplayNamesChange]);
 
   useEffect(
     () => () => {
@@ -313,6 +395,7 @@ const MeetingIdentityPanel = ({ meetingId }: { meetingId: string }) => {
                 binding={binding}
                 people={state.people}
                 busy={busy || loading}
+                attendeeNames={attendeeNames}
                 onSave={(selection) =>
                   void mutate(() =>
                     setMeetingIdentityBinding(
@@ -343,6 +426,17 @@ const MeetingIdentityPanel = ({ meetingId }: { meetingId: string }) => {
 
 export const MeetingIdentityControls = ({
   meetingId,
-}: { meetingId: string }) => (
-  <MeetingIdentityPanel key={meetingId} meetingId={meetingId} />
+  attendeeNames = [],
+  onDisplayNamesChange,
+}: {
+  meetingId: string;
+  attendeeNames?: string[];
+  onDisplayNamesChange?: (displayNames: Record<string, string>) => void;
+}) => (
+  <MeetingIdentityPanel
+    key={meetingId}
+    meetingId={meetingId}
+    attendeeNames={attendeeNames}
+    onDisplayNamesChange={onDisplayNamesChange}
+  />
 );
