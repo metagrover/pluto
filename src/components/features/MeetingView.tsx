@@ -24,6 +24,10 @@ import {
 } from '../../utils/analysisDocument';
 import { buildMeetingNotesDocument } from '../../utils/meetingNotesDocument';
 import {
+  buildMeetingExportFilename,
+  formatMeetingNotesAsMarkdown,
+} from '../../utils/meetingNotesExport';
+import {
   ANALYSIS_SNAPSHOT_PATH,
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
@@ -1105,20 +1109,30 @@ export const MeetingView = ({
                       type="button"
                       onClick={() => {
                         if (selectedMeeting) {
-                          const summaryText = canonicalAnalysisMarkdown;
-                          const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
-                          const blob = new Blob([content], {
-                            type: 'text/plain',
+                          const markdown = formatMeetingNotesAsMarkdown({
+                            meeting: selectedMeeting,
+                            documentModel: notesDocument,
+                            calendarContext,
+                            transcriptSegments,
+                          });
+                          const filename = buildMeetingExportFilename(
+                            selectedMeeting.title || 'Untitled Session',
+                            selectedMeeting.created_at || Date.now(),
+                            selectedMeeting.id,
+                          );
+                          const blob = new Blob([markdown], {
+                            type: 'text/markdown;charset=utf-8',
                           });
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = url;
-                          a.download = `pluto-session-${selectedMeeting.id}.txt`;
+                          a.download = filename;
                           a.click();
+                          URL.revokeObjectURL(url);
                         }
                       }}
                       className="meeting-toolbar-button"
-                      aria-label="Export meeting"
+                      aria-label="Export as Markdown"
                     >
                       <svg
                         aria-hidden="true"
@@ -1134,7 +1148,7 @@ export const MeetingView = ({
                           d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                         />
                       </svg>
-                      <span>Export meeting</span>
+                      <span>Export as Markdown</span>
                     </button>
                   </div>
                   {selectedMeeting.finalization_status !==
