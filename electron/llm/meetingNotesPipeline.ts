@@ -935,7 +935,8 @@ const runHierarchy = async (
     } catch (error) {
       if (
         !(error instanceof MeetingNotesError) ||
-        error.code !== 'notes_output_truncated'
+        (error.code !== 'notes_output_truncated' &&
+          error.code !== 'notes_context_exhausted')
       )
         throw error;
       assertNotCancelled(input);

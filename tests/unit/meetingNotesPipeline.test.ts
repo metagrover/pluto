@@ -1063,6 +1063,65 @@ it('repartitions original source after reported input overflow instead of repair
   expect(generate.mock.calls[1]![0].contextTokens).toBe(16384);
 });
 
+it('repartitions only the failed leaf when its audit repair cannot fit', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.source;
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const context = {
+    userNotes: '',
+    template: undefined,
+    trustedUserTerms: [],
+    entityHints: [],
+  };
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
+    {
+      primarySpans: spans,
+      overlapSpans: [],
+      primaryText: source.segments.map(({ text }) => text).join('\n'),
+      sourceText: source.segments.map(({ text }) => text).join('\n'),
+      sourceRevision: source.revision,
+    },
+  ]);
+  const generate = vi
+    .fn<(request: NotesRequest) => Promise<string>>()
+    .mockRejectedValueOnce(new MeetingNotesError('notes_input_overflow'))
+    .mockResolvedValueOnce(JSON.stringify(fixture.draft))
+    .mockResolvedValueOnce(JSON.stringify({ invalid: 'x'.repeat(4_000) }))
+    .mockRejectedValueOnce(new Error('stop-after-repartition'));
+  const onRepartition = vi.fn();
+
+  try {
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        source,
+        context,
+        generate,
+        provider: 'ollama',
+        model: 'test',
+        contextTokens: 6_000,
+        onRepartition,
+      }),
+    ).rejects.toThrow('stop-after-repartition');
+    expect(onRepartition).toHaveBeenCalledOnce();
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesWriter',
+      'notesAudit',
+      'notesWriter',
+    ]);
+    expect(sourceDescriptors(generate.mock.calls[3]![0].prompt)).toHaveLength(
+      1,
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
 it('repairs an incomplete edited document once with the rejected payload and missing-source block diagnosis', async () => {
   const fixture = makeDirectNotesFixture();
   const incomplete = structuredClone(fixture.draft);
