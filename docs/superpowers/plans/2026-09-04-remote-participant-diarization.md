@@ -71,4 +71,4 @@
 - [x] Add a changelog fragment linking #749 and describing system-only clustering, safe fallback, reversible identity projection, and local-only privacy.
 - [x] Run `pnpm run changelog:check`, focused Vitest suites, full `pnpm test -- --run`, `pnpm exec tsc --noEmit`, `pnpm run check`, `swift test --package-path native/parakeet-runtime`, relevant builds, and `git diff --check`.
 - [x] Review the complete diff against every acceptance criterion and correct Critical or Important findings.
-- [ ] Commit focused changes, refresh `origin/master`, rebase if needed, rerun affected verification, push `codex/749-remote-diarization`, and create a PR that links and closes #749.
+- [x] Commit focused changes, refresh `origin/master`, rebase if needed, rerun affected verification, push `codex/749-remote-diarization`, and create a PR that links and closes #749.
