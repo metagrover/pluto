@@ -214,9 +214,15 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
   const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
     Object.keys(value).length === keys.length &&
     Object.keys(value).every((key) => keys.includes(key));
+  const compactKeys =
+    isRecord(parsed) &&
+    Object.keys(parsed).every((key) =>
+      ['meetingType', 'sections'].includes(key),
+    );
   if (
     !isRecord(parsed) ||
-    !exactKeys(parsed, ['meetingType', 'sections']) ||
+    !compactKeys ||
+    !Object.hasOwn(parsed, 'sections') ||
     !Array.isArray(parsed.sections) ||
     parsed.sections.length > 64
   ) {
@@ -237,13 +243,15 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
     const items = section.items.map((item) => {
       if (
         !isRecord(item) ||
-        !exactKeys(item, ['kind', 'text', 'sources']) ||
+        !exactKeys(item, ['kind', 'text', 'owner', 'due', 'sources']) ||
         !['point', 'action', 'decision', 'question'].includes(
           String(item.kind),
         ) ||
         typeof item.text !== 'string' ||
         !item.text.trim() ||
         item.text.length > 12_000 ||
+        (item.owner !== null && typeof item.owner !== 'string') ||
+        (item.due !== null && typeof item.due !== 'string') ||
         !Array.isArray(item.sources) ||
         item.sources.length === 0 ||
         item.sources.length > 3 ||
@@ -255,8 +263,8 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
         kind: item.kind,
         text: item.text,
         sources: item.sources,
-        owner: null,
-        due: null,
+        owner: item.owner,
+        due: item.due,
       };
     });
     const titleSources = [
@@ -273,7 +281,7 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
   });
   return parseNotesDraft(
     JSON.stringify({
-      meetingType: parsed.meetingType,
+      meetingType: 'general',
       overview: null,
       sections,
     }),
@@ -984,18 +992,41 @@ export const applyNotesAudit = ({
 /** Complete-document source review uses the same provenance and projection boundary,
  * without pretending the editor returned per-block audit verdicts. Invalid settled
  * claims fail the review; they must not silently erase otherwise useful discussion. */
+const explicitDecisionOwner = (
+  source: NotesSource,
+  item: NotesItem,
+): string | null => {
+  const speakers = new Set(
+    item.sources.flatMap((span) => {
+      const segment = source.segments.find(
+        (candidate) => candidate.index === span.segment,
+      );
+      if (!segment?.speaker) return [];
+      const text = resolveSourceSpan(source, span);
+      return /\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+        text,
+      )
+        ? [segment.speaker]
+        : [];
+    }),
+  );
+  return speakers.size === 1 ? [...speakers][0]! : null;
+};
+
 export const acceptEditedNotes = ({
   source,
   draft,
   terminology,
   proposals = [],
   acceptancePolicy = 'strict',
+  compactNormalization = false,
 }: {
   source: NotesSource;
   draft: NotesDraft;
   terminology?: AuditTerminologyContext;
   proposals?: NotesAudit['terminology'];
   acceptancePolicy?: 'strict' | 'conservative';
+  compactNormalization?: boolean;
 }): AuditedNotes => {
   const next = structuredClone(draft);
   const issues: string[] = [];
@@ -1014,6 +1045,13 @@ export const acceptEditedNotes = ({
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
+      const declaredDecisionOwner =
+        compactNormalization && item.kind === 'decision'
+          ? explicitDecisionOwner(source, item)
+          : null;
+      const reviewedItem = declaredDecisionOwner
+        ? { ...item, owner: item.owner ?? declaredDecisionOwner }
+        : item;
       if (
         item.kind === 'action' &&
         isUnacceptedConditionalWillingness(evidence)
@@ -1029,7 +1067,7 @@ export const acceptEditedNotes = ({
         return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
       });
       const checked = groundSourceReviewedItem(
-        { ...item, kind: item.kind },
+        { ...reviewedItem, kind: item.kind },
         {
           evidence,
           quotedEvidence: evidence,
@@ -1039,6 +1077,21 @@ export const acceptEditedNotes = ({
         },
       );
       if (!checked) {
+        const statusExplanation =
+          /\b(?:withdraw|retract|cancel|replac|supersed)\w*\b/i;
+        if (
+          item.kind === 'decision' &&
+          compactNormalization &&
+          !declaredDecisionOwner &&
+          statusExplanation.test(item.text) &&
+          statusExplanation.test(evidence)
+        ) {
+          issues.push(`deterministic_reclassified_decision:${item.id}`);
+          return [{ ...item, kind: 'point' as const, owner: null, due: null }];
+        }
+        if (item.kind === 'decision' && declaredDecisionOwner) {
+          return [{ ...item, owner: declaredDecisionOwner, due: null }];
+        }
         if (acceptancePolicy === 'conservative') {
           issues.push(`deterministic_unsupported_commitment:${item.id}`);
           return [];

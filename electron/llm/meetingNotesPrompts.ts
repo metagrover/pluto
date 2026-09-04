@@ -62,10 +62,10 @@ export const notesDraftSchema = [
 
 const compactNotesDraftSchema = [
   'Field definitions (not output content):',
-  'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, sources: 1 to at most 3 copied source descriptors}.',
+  'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
   'Use kind: "point" for discussion.',
   'Section = {title: nonempty string, items: nonempty Item[]}.',
-  'Document = {meetingType: one_on_one | team_sync | brainstorm | presentation | general, sections: Section[]}.',
+  'Document = {sections: Section[]}. The final editor classifies the meeting.',
 ].join('\n');
 
 export const notesDispositionSchema =
@@ -138,8 +138,10 @@ export const buildCompactNotesWriterPrompt = ({
   [
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
-    'Return only useful note items. Code derives overview, heading evidence, owner and deadline. Do not emit those fields.',
-    'Write action text without an owner name or speaker attribution; describe only the task, recipient, condition and deadline. Code attaches a supported owner separately.',
+    'Return only useful note items. Code derives the overview and heading evidence.',
+    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments; compact repetition, not facts.',
+    'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Keep the task, recipient, condition and deadline clear in the text itself.',
+    'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, use its speaker as owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
     'For each item, cite only the 1 to 3 source labels needed to support its exact claim.',
     notesSourceGuidance,
     '',

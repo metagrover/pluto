@@ -168,6 +168,78 @@ it('preserves the speaker of an explicit declarative decision', () => {
   ).toBe('Nadia');
 });
 
+it('derives the speaker for an explicit decision and preserves its rejected alternative', () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Nadia',
+      text: 'The decision is a staged rollout. We are rejecting the big-bang launch because stages limit the impact of failures.',
+    },
+  ]);
+  const { draft } = makeDirectNotesFixture();
+  const sources = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'decision',
+      text: 'A staged rollout is chosen; a big-bang launch is rejected because stages limit the impact of failures.',
+      sources,
+      owner: null,
+      due: null,
+    },
+  ];
+  expect(
+    projectAuditedNotes(
+      parseEditedNotes({
+        raw: JSON.stringify(draft),
+        source,
+        compactDraft: true,
+      }).audited,
+    ).all_decisions[0]?.decided_by,
+  ).toBe('Nadia');
+});
+
+it('keeps a withdrawal replacement explanation as discussion, not a decision', () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Owen',
+      text: 'I withdraw the Friday commitment. Instead I will send a corrected forecast on Monday.',
+    },
+    {
+      speaker: 'Lila',
+      text: 'The corrected Monday version replaces the old draft, not an additional delivery.',
+    },
+  ]);
+  const { draft } = makeDirectNotesFixture();
+  const sources = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'decision',
+      text: 'The corrected forecast on Monday replaces the old draft, not an additional delivery.',
+      sources,
+      owner: null,
+      due: null,
+    },
+  ];
+  const result = projectAuditedNotes(
+    parseEditedNotes({
+      raw: JSON.stringify(draft),
+      source,
+      compactDraft: true,
+    }).audited,
+  );
+  expect(result.all_decisions).toEqual([]);
+  expect(result.topics[0]?.summary).toMatch(/replaces.*old draft/i);
+});
+
 it('rejects source labels leaking into visible prose but permits labels spoken in the source', () => {
   const { source, draft } = makeDirectNotesFixture();
   draft.sections[0]!.items[0]!.text = 'Send the outline (R0).';

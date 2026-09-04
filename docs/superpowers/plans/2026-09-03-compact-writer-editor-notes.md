@@ -16,7 +16,7 @@
 - Modify: `tests/unit/meetingNotesPipeline.test.ts`
 - Modify: `tests/unit/meetingNotesEditor.test.ts`
 
-- [ ] **Step 1: Write the failing direct-path test**
+- [x] **Step 1: Write the failing direct-path test**
 
 Add a test that invokes `generateMeetingNotes` with
 `reviewProtocol: 'editor'` and `compactWriterContract: true`. Return a compact
@@ -35,7 +35,7 @@ expect(generate.mock.calls.map(([request]) => request.responseContract)).toEqual
 expect(onRepair).not.toHaveBeenCalled();
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -45,14 +45,14 @@ pnpm exec vitest run tests/unit/meetingNotesPipeline.test.ts
 
 Expected: failure with `notes_compact_writer_requires_deterministic_only`.
 
-- [ ] **Step 3: Permit the compact writer/editor pair**
+- [x] **Step 3: Permit the compact writer/editor pair**
 
 In `electron/llm/meetingNotesPipeline.ts`, treat
 `compactWriterContract && reviewProtocol === 'editor'` as a supported direct
 pair. Use `COMPACT_WRITER_OUTPUT_TOKENS` in capacity planning and feed the
 expanded compact draft to the existing `auditDraft` editor route.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -68,7 +68,7 @@ Expected: both files pass.
 - Modify: `tests/unit/meetingNotesPipeline.test.ts`
 - Modify: `electron/llm/meetingNotesPipeline.ts`
 
-- [ ] **Step 1: Write failing malformed-response tests**
+- [x] **Step 1: Write failing malformed-response tests**
 
 Add separate tests for malformed compact writer output and malformed editor
 output. Each generator throws or returns invalid JSON on the relevant call.
@@ -82,7 +82,7 @@ expect(generate).toHaveBeenCalledTimes(expectedCalls);
 Use `expectedCalls = 1` for writer failure and `expectedCalls = 2` for editor
 failure.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -92,7 +92,7 @@ pnpm exec vitest run tests/unit/meetingNotesPipeline.test.ts
 
 Expected: the current repair helper makes an additional model call.
 
-- [ ] **Step 3: Add a one-attempt parse path**
+- [x] **Step 3: Add a one-attempt parse path**
 
 Extend `withOneRepair` with an `allowModelRepair` parameter that defaults to
 `true`. After the first parser failure, use:
@@ -104,7 +104,7 @@ if (!allowModelRepair) throw new MeetingNotesError(failureCode);
 Pass `false` from compact writer/editor direct stages. Preserve existing
 hierarchy and benchmark behavior.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run:
 
@@ -120,7 +120,7 @@ Expected: direct no-repair tests and legacy recovery tests pass.
 - Modify: `tests/unit/meetingNotesPipeline.test.ts`
 - Modify: `electron/llm/meetingNotesPipeline.ts`
 
-- [ ] **Step 1: Write the failing oversized-input test**
+- [x] **Step 1: Write the failing oversized-input test**
 
 Force capacity planning to choose hierarchy while passing the compact
 writer/editor pair. Assert the first hierarchy writer request uses:
@@ -131,7 +131,7 @@ expect(request.responseContract).toBe('draft');
 
 and that the existing hierarchy audit protocol remains unchanged.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -141,13 +141,13 @@ pnpm exec vitest run tests/unit/meetingNotesPipeline.test.ts
 
 Expected: hierarchy incorrectly inherits the compact direct contract.
 
-- [ ] **Step 3: Strip direct-only options before hierarchy**
+- [x] **Step 3: Strip direct-only options before hierarchy**
 
 When the compact pair does not fit, call `runHierarchy` with a copied input
 whose `compactWriterContract` and `reviewProtocol` are unset. Do not change
 hierarchy prompts, retries, merges, or validation.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -165,7 +165,7 @@ Expected: direct and hierarchy routing tests pass.
 - Modify: `electron/llm/provider.ts`
 - Modify: `electron/llm/meetingNotesTypes.ts`
 
-- [ ] **Step 1: Write the failing provider-routing test**
+- [x] **Step 1: Write the failing provider-routing test**
 
 Call `generateStructuredAnalysis` without experimental options and assert the
 generated direct requests use:
@@ -177,7 +177,7 @@ expect(contracts).toEqual(['compact_draft', 'editor']);
 Also retain a test that explicit deterministic-only benchmark routing makes one
 writer call.
 
-- [ ] **Step 2: Run the provider test and verify RED**
+- [x] **Step 2: Run the provider test and verify RED**
 
 Run:
 
@@ -187,14 +187,14 @@ pnpm exec vitest run tests/unit/meetingNotesProviderRouting.test.ts
 
 Expected: the default contracts are `draft` and `audit`.
 
-- [ ] **Step 3: Set product defaults**
+- [x] **Step 3: Set product defaults**
 
 In `UnifiedLLMProvider.generateStructuredAnalysis`, pass
 `reviewProtocol: 'editor'` and `compactWriterContract: true` when no explicit
 benchmark strategy overrides the route. Update comments that still describe the
 contracts as benchmark-only.
 
-- [ ] **Step 4: Run routing and semantic tests**
+- [x] **Step 4: Run routing and semantic tests**
 
 Run:
 
@@ -210,19 +210,19 @@ Expected: all files pass.
 - Modify: `docs/decisions.md`
 - Create: `docs/changelog/entries/2026-09-03-739-compact-writer-editor.md`
 
-- [ ] **Step 1: Add the durable decision**
+- [x] **Step 1: Add the durable decision**
 
 Record that direct notes use a compact writer plus complete-document editor,
 both on the configured model; code remains mechanical; direct model repair and
 merge loops are removed; oversized meetings retain the existing hierarchy for
 this iteration.
 
-- [ ] **Step 2: Add the changelog fragment**
+- [x] **Step 2: Add the changelog fragment**
 
 Describe the user-visible outcome: bounded direct note generation with retained
 source and publication safeguards.
 
-- [ ] **Step 3: Run complete verification**
+- [x] **Step 3: Run complete verification**
 
 Run:
 
@@ -236,7 +236,7 @@ pnpm run audit:high
 
 Expected: all commands exit zero.
 
-- [ ] **Step 4: Review the final diff**
+- [x] **Step 4: Review the final diff**
 
 Run:
 

@@ -52,9 +52,10 @@ revision-checked transactional publication
 
 ### Compact writer
 
-The writer returns section titles and useful items. Each item contains only its
-kind, concise text, and one to three request-local source labels. Code derives
-IDs, title evidence, overview, owner, and deadline where the evidence permits.
+The writer returns section titles and useful items. Each item contains its kind,
+concise text, nullable owner and deadline, and one to three request-local source
+labels. Code derives IDs, title evidence, and the overview; the editor verifies
+and completes supported ownership and timing.
 
 The writer gets one attempt. Malformed or truncated output fails the direct run;
 there is no model repair call.

@@ -216,7 +216,6 @@ it('routes the compact product writer through the complete-document editor', asy
     .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce(
       JSON.stringify({
-        meetingType: 'general',
         sections: [
           {
             title: 'Outline',
@@ -224,6 +223,8 @@ it('routes the compact product writer through the complete-document editor', asy
               {
                 kind: 'action',
                 text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
                 sources: [source],
               },
             ],

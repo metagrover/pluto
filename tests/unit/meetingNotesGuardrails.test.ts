@@ -136,6 +136,29 @@ describe('source-grounded notes guardrails', () => {
     },
   );
 
+  it('accepts narrated withdrawal context when its exact evidence is carried by the replacement action', () => {
+    const f = fixture(
+      'I will send the draft forecast on Friday.',
+      'The inputs are wrong. Please do not circulate it.',
+      'I withdraw the Friday commitment. Instead I will send a corrected forecast on Monday.',
+    );
+    expect(
+      findNotesGuardrailIssues(
+        f.source,
+        f.draft(
+          f.item(
+            'The Friday commitment was withdrawn because the inputs were wrong.',
+            'point',
+            [f.spans[0]!, f.spans[1]!],
+          ),
+          f.item('Send a corrected forecast on Monday.', 'action', [
+            f.spans[2]!,
+          ]),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   it('does not borrow a repeated promise citation across a cancellation and renewal', () => {
     const f = fixture(
       'I will send the outline.',
@@ -426,6 +449,11 @@ describe('source-grounded notes guardrails', () => {
       "I'll replace the screenshots.",
       'I’m withdrawing my screenshot replacement promise; the images are still accurate.',
       'Replace the screenshots.',
+    ],
+    [
+      'I will send the draft forecast on Friday.',
+      'I withdraw the Friday commitment. Instead I will send a corrected forecast on Monday.',
+      'Send the draft forecast on Friday.',
     ],
   ])(
     'links a same-speaker explicit withdrawal to its task: %s',

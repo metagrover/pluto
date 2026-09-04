@@ -28,18 +28,36 @@ const stagePrompts = () => [
   buildSourceReconciliationPrompt(''),
 ];
 
-it('asks the compact benchmark writer only for item content and bounded evidence', () => {
+it('asks the compact writer for complete items and bounded evidence', () => {
   const prompt = buildCompactNotesWriterPrompt(input);
 
   expect(prompt).toContain('title: nonempty string');
   expect(prompt).toContain('at most 3 copied source descriptors');
+  expect(prompt).toContain('owner: string | null');
+  expect(prompt).toContain('due: string | null');
+  expect(prompt).toContain('account for every source turn');
+  expect(prompt).toContain('names, numbers, definitions, reasons');
+  expect(prompt).toContain('Stay close to source wording');
   expect(prompt).toContain(
-    'Write action text without an owner name or speaker attribution',
+    'withdrawal or replacement explanation is discussion',
   );
-  expect(prompt).not.toContain('owner: string');
-  expect(prompt).not.toContain('due: string');
   expect(prompt).not.toContain('overview:');
   expect(prompt).not.toContain('recentWin:');
+  expect(prompt).not.toContain('meetingType:');
+});
+
+it('requires the compact final editor to retain source rules and structured ownership', () => {
+  const prompt = buildNotesEditorPrompt({ ...input, compactDraft: true });
+
+  expect(prompt).toContain('account for every source turn');
+  expect(prompt).toContain('names, numbers, definitions, reasons');
+  expect(prompt).toContain('every action or decision');
+  expect(prompt).toContain('owner into owner');
+  expect(prompt).toContain('Stay close to source wording');
+  expect(prompt).toContain(
+    'withdrawal or replacement explanation is discussion',
+  );
+  expect(prompt).toContain('speaker who states the settled choice');
 });
 
 it('spells out flat item and reconciliation fields without Text inheritance notation', () => {

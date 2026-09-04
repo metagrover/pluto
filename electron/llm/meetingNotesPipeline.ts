@@ -58,7 +58,10 @@ const reviewPrompt = (
   options: Parameters<typeof buildNotesAuditPrompt>[0],
 ) =>
   input.reviewProtocol === 'editor'
-    ? buildNotesEditorPrompt(options)
+    ? buildNotesEditorPrompt({
+        ...options,
+        compactDraft: input.compactWriterContract === true,
+      })
     : buildNotesAuditPrompt(options);
 const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
   input.reviewProtocol === 'editor'
@@ -632,6 +635,7 @@ const auditDraft = async (
             provider: input.provider,
             model: input.model,
           },
+          compactDraft: input.compactWriterContract === true,
         });
         assertAllowedSources(result.draft, evidenceSpans);
         assertAuditSourcesAllowed(result.audit, evidenceSpans);

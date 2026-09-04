@@ -50,7 +50,6 @@ const validate = (
 describe('local notes wire schemas', () => {
   it('expands a compact writer draft with derived title evidence and empty metadata', () => {
     const value = {
-      meetingType: 'general',
       sections: [
         {
           title: 'Outline',
@@ -59,6 +58,8 @@ describe('local notes wire schemas', () => {
               kind: 'action',
               text: 'Send the outline',
               sources: ['R0'],
+              owner: 'Ava',
+              due: null,
             },
           ],
         },
@@ -67,15 +68,38 @@ describe('local notes wire schemas', () => {
 
     expect(validate('compact_draft', value)).toBe(true);
     const expected = structuredClone(fixture.draft);
-    expected.sections[0]!.items[0]!.owner = null;
+    expected.sections[0]!.items[0]!.owner = 'Ava';
     expect(parseCompactNotesDraft(wire.decode(JSON.stringify(value)))).toEqual(
       expected,
     );
   });
 
+  it('ignores a leaked compact meeting type because the editor owns final classification', () => {
+    const value = {
+      meetingType: 'interview',
+      sections: [
+        {
+          title: 'Past experience',
+          items: [
+            {
+              kind: 'point',
+              text: 'Inez described completed onboarding work.',
+              sources: ['R0'],
+              owner: null,
+              due: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(parseCompactNotesDraft(wire.decode(JSON.stringify(value)))).toEqual(
+      expect.objectContaining({ meetingType: 'general' }),
+    );
+  });
+
   it('rejects compact writer items with more than three sources', () => {
     const value = {
-      meetingType: 'general',
       sections: [
         {
           title: 'Outline',
@@ -84,6 +108,8 @@ describe('local notes wire schemas', () => {
               kind: 'action',
               text: 'Send the outline',
               sources: ['R0', 'R0', 'R0', 'R0'],
+              owner: 'Ava',
+              due: null,
             },
           ],
         },

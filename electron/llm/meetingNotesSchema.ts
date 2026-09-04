@@ -40,25 +40,20 @@ export const buildNotesResponseSchema = (
   };
   if (contract === 'compact_draft') {
     const compactSources = { ...sources, maxItems: 3 };
-    const compactItem = object({
-      kind: {
-        type: 'string',
-        enum: ['point', 'action', 'decision', 'question'],
+    const compactItem = object(
+      {
+        kind: {
+          type: 'string',
+          enum: ['point', 'action', 'decision', 'question'],
+        },
+        text: { type: 'string', minLength: 1, maxLength: 12_000 },
+        owner: nullableString,
+        due: nullableString,
+        sources: compactSources,
       },
-      text: { type: 'string', minLength: 1, maxLength: 12_000 },
-      sources: compactSources,
-    });
+      ['kind', 'text', 'owner', 'due', 'sources'],
+    );
     return object({
-      meetingType: {
-        type: 'string',
-        enum: [
-          'one_on_one',
-          'team_sync',
-          'brainstorm',
-          'presentation',
-          'general',
-        ],
-      },
       sections: {
         ...array(
           object({

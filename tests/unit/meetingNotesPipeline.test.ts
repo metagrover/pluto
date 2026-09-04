@@ -128,7 +128,6 @@ it('uses a compact writer and complete-document editor in exactly two calls with
   const generate = vi.fn(async (request: NotesRequest) => {
     if (request.task === 'notesWriter') {
       return JSON.stringify({
-        meetingType: 'general',
         sections: [
           {
             title: 'Outline',
@@ -136,6 +135,8 @@ it('uses a compact writer and complete-document editor in exactly two calls with
               {
                 kind: 'action',
                 text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
                 sources: [source],
               },
             ],
@@ -202,7 +203,6 @@ it('fails a malformed compact editor without a model repair call', async () => {
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
-        meetingType: 'general',
         sections: [
           {
             title: 'Outline',
@@ -210,6 +210,8 @@ it('fails a malformed compact editor without a model repair call', async () => {
               {
                 kind: 'action',
                 text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
                 sources: [source],
               },
             ],
@@ -305,7 +307,6 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
   const span = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi.fn().mockResolvedValue(
     JSON.stringify({
-      meetingType: 'general',
       sections: [
         {
           title: 'Outline',
@@ -313,6 +314,8 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
             {
               kind: 'action',
               text: 'Send the outline',
+              owner: 'Milo',
+              due: null,
               sources: [span],
             },
           ],
@@ -339,7 +342,7 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
     responseContract: 'compact_draft',
     outputTokens: 1024,
   });
-  expect(generate.mock.calls[0]![0].prompt).not.toContain('owner: string');
+  expect(generate.mock.calls[0]![0].prompt).toContain('owner: string | null');
   expect(result.all_action_items).toEqual([
     expect.objectContaining(fixture.expectedAction),
   ]);
