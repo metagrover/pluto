@@ -70,6 +70,14 @@ export const canRetryMeetingFinalTranscription = (
   }
 };
 
+export const shouldStartMeetingFinalTranscription = (
+  meeting: Partial<Meeting> | null | undefined,
+  reason: 'automatic' | 'manual',
+): boolean =>
+  reason === 'manual'
+    ? canRetryMeetingFinalTranscription(meeting)
+    : shouldRunMeetingFinalTranscription(meeting);
+
 export function canImproveHistoricalSpeakerLabels(
   meeting: Partial<Meeting> | null | undefined,
 ): boolean {

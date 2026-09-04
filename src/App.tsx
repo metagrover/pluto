@@ -73,7 +73,7 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
-  shouldRunMeetingFinalTranscription,
+  shouldStartMeetingFinalTranscription,
 } from './services/postMeetingProcessingCoordinator';
 import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
 import { shouldAutoProcessMeetingAnalysis } from './services/retryMeetingTranscriptValidation';
@@ -847,7 +847,7 @@ function App() {
             )) as Meeting | null);
       const route = resolveMeetingRetryRoute(kind, meeting);
       if (route === 'final_transcription' && meeting) {
-        await runMeetingFinalTranscription(meeting);
+        await runMeetingFinalTranscription(meeting, 'manual');
         return;
       }
       if (route === 'analysis' && meeting) {
@@ -952,13 +952,17 @@ function App() {
     setSidebarVisible(true);
   };
 
-  const runMeetingFinalTranscription = async (meeting: Pick<Meeting, 'id'>) => {
+  const runMeetingFinalTranscription = async (
+    meeting: Pick<Meeting, 'id'>,
+    reason: 'automatic' | 'manual' = 'automatic',
+  ) => {
     if (finalTranscriptionAbortRef.current) return;
     const detail = (await window.ipcRenderer.invoke(
       'GET_MEETING',
       meeting.id,
     )) as Meeting | null;
-    if (!detail || !shouldRunMeetingFinalTranscription(detail)) return;
+    if (!detail || !shouldStartMeetingFinalTranscription(detail, reason))
+      return;
     const controller = new AbortController();
     finalTranscriptionAbortRef.current = controller;
     setFinalTranscriptionMeetingId(meeting.id);

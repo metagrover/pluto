@@ -11,6 +11,7 @@ import {
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
   shouldRunMeetingFinalTranscription,
+  shouldStartMeetingFinalTranscription,
 } from '../../src/services/postMeetingProcessingCoordinator';
 
 const incomplete = (id: string) => ({
@@ -62,10 +63,13 @@ describe('post-meeting processing coordinator', () => {
     ).toBe(false);
   });
 
-  it('rechecks full meeting detail before starting final transcription', () => {
+  it('rechecks full meeting detail using the initiating retry reason', () => {
     const appSource = readFileSync('src/App.tsx', 'utf8');
     expect(appSource).toContain(
-      'if (!detail || !shouldRunMeetingFinalTranscription(detail)) return;',
+      'shouldStartMeetingFinalTranscription(detail, reason)',
+    );
+    expect(appSource).toContain(
+      "runMeetingFinalTranscription(meeting, 'manual')",
     );
   });
 
@@ -108,6 +112,10 @@ describe('post-meeting processing coordinator', () => {
       }),
     };
     expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(shouldStartMeetingFinalTranscription(meeting, 'manual')).toBe(true);
+    expect(shouldStartMeetingFinalTranscription(meeting, 'automatic')).toBe(
+      false,
+    );
     expect(selectNextMeetingForProcessing([meeting], new Set())).toBeNull();
   });
 
