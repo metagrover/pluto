@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import {
+  buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
   buildNotesMergePrompt,
   buildNotesWriterPrompt,
@@ -26,6 +27,20 @@ const stagePrompts = () => [
   buildNotesMergePrompt(input),
   buildSourceReconciliationPrompt(''),
 ];
+
+it('asks the compact benchmark writer only for item content and bounded evidence', () => {
+  const prompt = buildCompactNotesWriterPrompt(input);
+
+  expect(prompt).toContain('title: nonempty string');
+  expect(prompt).toContain('at most 3 copied source descriptors');
+  expect(prompt).toContain(
+    'Write action text without an owner name or speaker attribution',
+  );
+  expect(prompt).not.toContain('owner: string');
+  expect(prompt).not.toContain('due: string');
+  expect(prompt).not.toContain('overview:');
+  expect(prompt).not.toContain('recentWin:');
+});
 
 it('spells out flat item and reconciliation fields without Text inheritance notation', () => {
   for (const prompt of stagePrompts().slice(0, 4)) {

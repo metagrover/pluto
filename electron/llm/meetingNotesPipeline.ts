@@ -6,6 +6,7 @@ import {
   type AuditedNotes,
   acceptEditedNotes,
   applyNotesAudit,
+  parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
   projectAuditedNotes,
@@ -30,6 +31,7 @@ import {
 } from './meetingNotesHierarchy';
 import {
   type NotesKnownTerm,
+  buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
   buildNotesMergePrompt,
   buildNotesWriterPrompt,
@@ -49,6 +51,7 @@ import {
 } from './meetingNotesTypes';
 
 const WRITER_OUTPUT_TOKENS = 2048;
+const COMPACT_WRITER_OUTPUT_TOKENS = 1024;
 const AUDIT_OUTPUT_TOKENS = 1536;
 const reviewPrompt = (
   input: GenerateMeetingNotesInput,
@@ -130,7 +133,9 @@ const makeRequest = (
       ? input.reviewProtocol === 'editor'
         ? 'editor'
         : 'audit'
-      : 'draft',
+      : task === 'notesWriter' && input.compactWriterContract
+        ? 'compact_draft'
+        : 'draft',
   prompt,
   outputTokens,
   contextTokens: input.contextTokens,
@@ -345,6 +350,10 @@ const writeDraft = async (
   prompt: string,
   allowedSpans: SourceSpan[],
 ) => {
+  const outputTokens =
+    task === 'notesWriter' && input.compactWriterContract
+      ? COMPACT_WRITER_OUTPUT_TOKENS
+      : WRITER_OUTPUT_TOKENS;
   const evidenceRevision = createHash('sha256')
     .update(
       JSON.stringify(
@@ -385,9 +394,12 @@ const writeDraft = async (
     input,
     task,
     prompt,
-    WRITER_OUTPUT_TOKENS,
+    outputTokens,
     (raw) => {
-      const parsed = parseNotesDraft(raw);
+      const parsed =
+        task === 'notesWriter' && input.compactWriterContract
+          ? parseCompactNotesDraft(raw)
+          : parseNotesDraft(raw);
       assertAllowedSources(parsed, allowedSpans);
       return parsed;
     },
@@ -1245,7 +1257,18 @@ const runMeetingNotes = async (
   assertNotCancelled(input);
   const sourceText = serializeSource(input);
   const knownTerms = knownTermsFor(input);
-  const writerPrompt = buildNotesWriterPrompt({
+  if (
+    input.compactWriterContract &&
+    input.hierarchyAuditStrategy !== 'deterministic_only'
+  ) {
+    throw new MeetingNotesError(
+      'notes_compact_writer_requires_deterministic_only',
+    );
+  }
+  const writerPromptBuilder = input.compactWriterContract
+    ? buildCompactNotesWriterPrompt
+    : buildNotesWriterPrompt;
+  const writerPrompt = writerPromptBuilder({
     sourceText,
     userNotes: input.context.userNotes,
     knownTerms,
@@ -1259,7 +1282,13 @@ const runMeetingNotes = async (
       end: segment.text.length,
     }));
   if (input.hierarchyAuditStrategy === 'deterministic_only') {
-    if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
+    const writerOutputTokens = input.compactWriterContract
+      ? COMPACT_WRITER_OUTPUT_TOKENS
+      : WRITER_OUTPUT_TOKENS;
+    if (!fits(input, writerPrompt, writerOutputTokens)) {
+      if (input.compactWriterContract) {
+        throw new MeetingNotesError('notes_context_exhausted');
+      }
       return runHierarchy(input, knownTerms);
     }
     const draft = await writeDraft(

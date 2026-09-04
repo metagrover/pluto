@@ -47,6 +47,14 @@ pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json
 
 This is also benchmark-only. It retains the strict output parser, allowed-source checks, commitment guardrails, and deterministic action/decision owner and deadline grounding. It does not claim semantic equivalence to the audited product path.
 
+To measure the smaller direct-writer response contract, add
+`--compact-writer-contract` to that deterministic-only command. The compact
+contract limits each item to its kind, text, and at most three source labels;
+code derives title evidence, overview, owner, and deadline. It deliberately
+fails instead of entering the hierarchy when the direct request does not fit.
+Do not combine it with another audit strategy or treat a schema-valid result as
+semantic acceptance.
+
 
 Reports contain opaque case keys, source counts, planned leaf and generated-node counts, writer/audit/merge and terminal-outcome counts, aggregate stage timings, repair/repartition counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, raw provider responses, and individual stage payloads.
 

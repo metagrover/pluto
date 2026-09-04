@@ -79,7 +79,11 @@ export type NotesAudit = {
 };
 
 export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
-export type NotesResponseContract = 'draft' | 'audit' | 'editor';
+export type NotesResponseContract =
+  | 'draft'
+  | 'compact_draft'
+  | 'audit'
+  | 'editor';
 
 export type NotesRequest = {
   task: NotesTask;
@@ -105,6 +109,8 @@ export type GenerateMeetingNotesInput = {
   reviewProtocol?: 'editor';
   /** Benchmark-only experiment. Product callers must retain the default. */
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
+  /** Benchmark-only experiment for the direct deterministic-only route. */
+  compactWriterContract?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;

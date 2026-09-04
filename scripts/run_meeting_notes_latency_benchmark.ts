@@ -59,6 +59,9 @@ if (
 const deterministicWriterRecovery = process.argv.includes(
   '--deterministic-writer-recovery',
 );
+const compactWriterContract = process.argv.includes(
+  '--compact-writer-contract',
+);
 const manifest = parsePrivateMeetingNotesLatencyManifest(
   JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown,
 );
@@ -166,6 +169,7 @@ const runCase = async (
       source,
       contextTokens,
       hierarchyAuditStrategy,
+      compactWriterContract,
       onStageEvent: metrics.observe,
       onPlan: ({ plannedLeafCount }) =>
         metrics.setPlannedLeafCount(plannedLeafCount),
@@ -246,6 +250,7 @@ const main = async () => {
       seed,
       structuredThinking: false,
       hierarchyAuditStrategy,
+      compactWriterContract,
       deterministicWriterRecovery,
       fixtureOrderSha256: createHash('sha256')
         .update(cases.map(({ definition }) => definition.caseKey).join('\n'))

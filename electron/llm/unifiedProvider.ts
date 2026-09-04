@@ -512,6 +512,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         | 'every_node'
         | 'final_only'
         | 'deterministic_only';
+      /** Explicit benchmark experiment; requires deterministic-only review. */
+      compactWriterContract?: boolean;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
@@ -541,6 +543,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
       hierarchyAuditStrategy: options.hierarchyAuditStrategy,
+      compactWriterContract: options.compactWriterContract,
       onStage: options.onStage,
       onRepair: options.onRepair,
       recoverWriterDraft: options.recoverWriterDraft,

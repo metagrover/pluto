@@ -141,6 +141,8 @@ export interface LLMProvider {
         | 'every_node'
         | 'final_only'
         | 'deterministic_only';
+      /** Explicit benchmark experiment; requires deterministic-only review. */
+      compactWriterContract?: boolean;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;

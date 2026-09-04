@@ -60,6 +60,14 @@ export const notesDraftSchema = [
   'Use null for absent overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
 ].join('\n');
 
+const compactNotesDraftSchema = [
+  'Field definitions (not output content):',
+  'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, sources: 1 to at most 3 copied source descriptors}.',
+  'Use kind: "point" for discussion.',
+  'Section = {title: nonempty string, items: nonempty Item[]}.',
+  'Document = {meetingType: one_on_one | team_sync | brainstorm | presentation | general, sections: Section[]}.',
+].join('\n');
+
 export const notesDispositionSchema =
   'Disposition = {target: string, kind: deduplicated | cancelled | superseded, replacementId: string | null, sources: copied source descriptor[]}.';
 
@@ -119,6 +127,31 @@ export const buildNotesWriterPrompt = ({
     '',
     'Return compact JSON only using these fields:',
     notesDraftSchema,
+  ].join('\n');
+
+export const buildCompactNotesWriterPrompt = ({
+  sourceText,
+  userNotes,
+  knownTerms,
+  template,
+}: WriterPromptInput): string =>
+  [
+    'You produce compact, source-grounded Pluto meeting-note drafts.',
+    notesContentGuidance,
+    'Return only useful note items. Code derives overview, heading evidence, owner and deadline. Do not emit those fields.',
+    'Write action text without an owner name or speaker attribution; describe only the task, recipient, condition and deadline. Code attaches a supported owner separately.',
+    'For each item, cite only the 1 to 3 source labels needed to support its exact claim.',
+    notesSourceGuidance,
+    '',
+    `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
+    `Template: ${template}`,
+    'User-note emphasis:',
+    userNotes,
+    '',
+    sourcePacket(sourceText),
+    '',
+    'Return compact JSON only using these fields:',
+    compactNotesDraftSchema,
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

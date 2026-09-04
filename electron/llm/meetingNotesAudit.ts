@@ -204,6 +204,82 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
   };
 };
 
+export const parseCompactNotesDraft = (raw: string): NotesDraft => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
+  const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
+  if (
+    !isRecord(parsed) ||
+    !exactKeys(parsed, ['meetingType', 'sections']) ||
+    !Array.isArray(parsed.sections) ||
+    parsed.sections.length > 64
+  ) {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
+  const sections = parsed.sections.map((section) => {
+    if (
+      !isRecord(section) ||
+      !exactKeys(section, ['title', 'items']) ||
+      typeof section.title !== 'string' ||
+      !section.title.trim() ||
+      section.title.length > 12_000 ||
+      !Array.isArray(section.items) ||
+      section.items.length === 0
+    ) {
+      throw new MeetingNotesError('notes_writer_invalid');
+    }
+    const items = section.items.map((item) => {
+      if (
+        !isRecord(item) ||
+        !exactKeys(item, ['kind', 'text', 'sources']) ||
+        !['point', 'action', 'decision', 'question'].includes(
+          String(item.kind),
+        ) ||
+        typeof item.text !== 'string' ||
+        !item.text.trim() ||
+        item.text.length > 12_000 ||
+        !Array.isArray(item.sources) ||
+        item.sources.length === 0 ||
+        item.sources.length > 3 ||
+        item.sources.some((source) => parseSpan(source) === null)
+      ) {
+        throw new MeetingNotesError('notes_writer_invalid');
+      }
+      return {
+        kind: item.kind,
+        text: item.text,
+        sources: item.sources,
+        owner: null,
+        due: null,
+      };
+    });
+    const titleSources = [
+      ...new Map(
+        items
+          .flatMap((item) => item.sources as SourceSpan[])
+          .map((span) => [`${span.segment}:${span.start}:${span.end}`, span]),
+      ).values(),
+    ];
+    return {
+      title: { text: section.title.trim(), sources: titleSources },
+      items,
+    };
+  });
+  return parseNotesDraft(
+    JSON.stringify({
+      meetingType: parsed.meetingType,
+      overview: null,
+      sections,
+    }),
+  );
+};
+
 export const parseNotesAudit = (raw: string): NotesAudit => {
   let parsed: unknown;
   try {

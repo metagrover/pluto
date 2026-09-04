@@ -146,6 +146,51 @@ it('can benchmark a direct draft with deterministic checks and no model audit', 
   expect(result.generation_metadata.mode).toBe('direct');
 });
 
+it('can benchmark the compact writer contract in one bounded call', async () => {
+  const fixture = makeDirectNotesFixture();
+  const span = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({
+      meetingType: 'general',
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: 'action',
+              text: 'Send the outline',
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'deterministic_only',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+  });
+
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate.mock.calls[0]![0]).toMatchObject({
+    task: 'notesWriter',
+    responseContract: 'compact_draft',
+    outputTokens: 1024,
+  });
+  expect(generate.mock.calls[0]![0].prompt).not.toContain('owner: string');
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining(fixture.expectedAction),
+  ]);
+});
+
 it('strips unsupported owner and due fields in the deterministic-only benchmark', async () => {
   const fixture = makeDirectNotesFixture();
   const draft = structuredClone(fixture.draft);
