@@ -124,6 +124,7 @@ interface MeetingViewProps {
   onRetryTranscriptValidation?: (kind: MeetingRetryKind) => void;
   transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
+  exportIncludeTranscript?: boolean;
 }
 
 type MeetingNotesTemplate =
@@ -637,6 +638,7 @@ export const MeetingView = ({
   onRetryTranscriptValidation,
   transcriptValidationRetryOperation = null,
   calendarContext = null,
+  exportIncludeTranscript = false,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
@@ -1114,6 +1116,7 @@ export const MeetingView = ({
                             documentModel: notesDocument,
                             calendarContext,
                             transcriptSegments,
+                            includeTranscript: exportIncludeTranscript,
                           });
                           const filename = buildMeetingExportFilename(
                             selectedMeeting.title || 'Untitled Session',

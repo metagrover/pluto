@@ -230,6 +230,7 @@ function App() {
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
+  const [exportIncludeTranscript, setExportIncludeTranscript] = useState(false);
   const [calendarSnapshot, setCalendarSnapshot] =
     useState<CalendarIntegrationSnapshot | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
@@ -680,6 +681,11 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'auto_end_enabled').then((val) => {
       if (val !== null) setAutoEndEnabled(val !== 'false');
     });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'export_include_transcript')
+      .then((val) => {
+        if (val !== null) setExportIncludeTranscript(val === 'true');
+      });
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
@@ -1418,6 +1424,7 @@ function App() {
                   transcriptValidationRetryOperation
                 }
                 calendarContext={meetingCalendarContext}
+                exportIncludeTranscript={exportIncludeTranscript}
               />
             ) : activeTab === 'hub' ? (
               <>
@@ -1524,6 +1531,8 @@ function App() {
                     value: newTheme,
                   });
                 }}
+                exportIncludeTranscript={exportIncludeTranscript}
+                setExportIncludeTranscript={setExportIncludeTranscript}
               />
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">

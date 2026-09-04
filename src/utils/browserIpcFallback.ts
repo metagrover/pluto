@@ -664,6 +664,8 @@ const getSetting = (key: unknown) => {
       return 'system';
     case 'auto_end_enabled':
       return 'true';
+    case 'export_include_transcript':
+      return 'false';
     case 'transcription_language':
       return '';
     default:

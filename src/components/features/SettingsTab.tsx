@@ -40,6 +40,8 @@ interface SettingsTabProps {
   calendarSnapshot?: CalendarIntegrationSnapshot | null;
   onCalendarSnapshotChange?: (snapshot: CalendarIntegrationSnapshot) => void;
   initialTab?: SettingsTabId;
+  exportIncludeTranscript?: boolean;
+  setExportIncludeTranscript?: (val: boolean) => void;
 }
 
 const providerOptions = [
@@ -162,6 +164,8 @@ export const SettingsTab = ({
   calendarSnapshot = null,
   onCalendarSnapshotChange = () => {},
   initialTab,
+  exportIncludeTranscript = false,
+  setExportIncludeTranscript,
 }: SettingsTabProps) => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
     initialTab ?? 'personal',
@@ -398,6 +402,26 @@ export const SettingsTab = ({
                   const next = !autoEndEnabled;
                   setAutoEndEnabled(next);
                   persistSetting('auto_end_enabled', next ? 'true' : 'false');
+                }}
+              />
+            </SettingsRow>
+          </Section>
+
+          <Section title="Export">
+            <SettingsRow
+              label="Include transcript in exports"
+              helper="Append the speaker-attributed transcript to exported Markdown notes."
+              actionControl
+            >
+              <Toggle
+                checked={Boolean(exportIncludeTranscript)}
+                onChange={() => {
+                  const next = !exportIncludeTranscript;
+                  setExportIncludeTranscript?.(next);
+                  persistSetting(
+                    'export_include_transcript',
+                    next ? 'true' : 'false',
+                  );
                 }}
               />
             </SettingsRow>

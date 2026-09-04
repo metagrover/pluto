@@ -160,4 +160,49 @@ describe('MeetingView export action', () => {
     expect(textContent).not.toContain('"transcript_json"');
     expect(textContent).not.toContain('lifecycleStatus');
   });
+
+  it('appends ## Transcript when exportIncludeTranscript is true', async () => {
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={mockMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue="Export Feature Sync"
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+          exportIncludeTranscript={true}
+        />,
+      );
+    });
+
+    const exportButton = container.querySelector(
+      'button[aria-label="Export meeting notes"]',
+    ) as HTMLButtonElement | null;
+
+    let capturedBlob: Blob | null = null;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(
+      (blob: Blob | MediaSource) => {
+        capturedBlob = blob as Blob;
+        return 'blob:mock-url';
+      },
+    );
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    await act(async () => {
+      exportButton?.click();
+    });
+
+    const textContent = await capturedBlob?.text();
+    expect(textContent).toContain('## Transcript');
+    expect(textContent).toContain('**Sarah** (0:00)');
+    expect(textContent).toContain('Let us export meeting notes cleanly.');
+  });
 });
