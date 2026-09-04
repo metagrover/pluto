@@ -113,7 +113,7 @@ class AudioCapCLI {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isRunning, !self.isSelfModifyingDevices else { return }
             fputs("[AudioCap] CoreAudio device change detected, reconfiguring tap...\n", stderr)
-            self.restartTap()
+            self.restartTap(isExternalRouteChange: true)
         }
         reconnectWorkItem = workItem
         controlQueue.asyncAfter(deadline: .now() + 0.2, execute: workItem)
@@ -126,15 +126,21 @@ class AudioCapCLI {
             guard let self = self, self.isRunning else { return }
             let now = Date()
             let elapsedSinceTapStart = now.timeIntervalSince(self.tapStartTime)
-            if self.tapFramesReceived == 0 && elapsedSinceTapStart >= 3.0 {
+            let elapsedSinceLastFrame = now.timeIntervalSince(self.lastFrameTime)
+            
+            let isInitialSilence = (self.tapFramesReceived == 0 && elapsedSinceTapStart >= 3.0)
+            let isStalled = (self.tapFramesReceived > 0 && elapsedSinceLastFrame >= 3.0)
+            
+            if isInitialSilence || isStalled {
                 if self.watchdogRetries < self.maxWatchdogRetries {
                     self.watchdogRetries += 1
-                    fputs("[AudioCap] Watchdog: 0 frames received in 3.0s for tap generation \(self.tapGeneration) (retry \(self.watchdogRetries)/\(self.maxWatchdogRetries)), restarting tap...\n", stderr)
-                    self.restartTap()
+                    let reason = isInitialSilence ? "0 frames received in 3.0s" : "audio stream stalled for 3.0s"
+                    fputs("[AudioCap] Watchdog: \(reason) for tap generation \(self.tapGeneration) (retry \(self.watchdogRetries)/\(self.maxWatchdogRetries)), restarting tap...\n", stderr)
+                    self.restartTap(isExternalRouteChange: false)
                 } else {
-                    fputs("[AudioCap] Watchdog: 0 frames received after \(self.maxWatchdogRetries) retries for tap generation \(self.tapGeneration).\n", stderr)
+                    fputs("[AudioCap] Watchdog: exceeded \(self.maxWatchdogRetries) retries for tap generation \(self.tapGeneration).\n", stderr)
                 }
-            } else if self.tapFramesReceived > 0 {
+            } else if self.tapFramesReceived > 0 && elapsedSinceLastFrame < 1.0 {
                 self.watchdogRetries = 0
             }
         }
@@ -142,14 +148,16 @@ class AudioCapCLI {
         self.watchdogTimer = timer
     }
 
-    private func restartTap() {
+    private func restartTap(isExternalRouteChange: Bool = false) {
         isSelfModifyingDevices = true
         reconnectWorkItem?.cancel()
         tapGeneration += 1
         tapFramesReceived = 0
         tapStartTime = Date()
         lastFrameTime = Date()
-        watchdogRetries = 0
+        if isExternalRouteChange {
+            watchdogRetries = 0
+        }
         tap?.stop()
         tap = nil
         var attempts = 0
@@ -196,6 +204,7 @@ class AudioCapCLI {
             throw ProcessTapError.unsupportedTapFormat
         }
 
+        let currentGeneration = self.tapGeneration
         self.audioStreamer = AudioStreamer(inputSampleRate: desc.mSampleRate)
         let stdout = FileHandle.standardOutput
         let streamChannels = max(1, Int(desc.mChannelsPerFrame))
@@ -247,13 +256,15 @@ class AudioCapCLI {
                 mono = mixed
             }
             let normalized = self?.normalizeTo48k(mono) ?? mono
-            if let self = self {
-                self.framesReceived += UInt64(normalized.count)
-                self.tapFramesReceived += UInt64(normalized.count)
-                self.lastFrameTime = Date()
-            }
+            let frameCount = UInt64(normalized.count)
             normalized.withUnsafeBytes { bytes in
                 try? stdout.write(contentsOf: Data(bytes))
+            }
+            self?.controlQueue.async { [weak self] in
+                guard let self = self, self.tapGeneration == currentGeneration else { return }
+                self.framesReceived += frameCount
+                self.tapFramesReceived += frameCount
+                self.lastFrameTime = Date()
             }
         }
     }
@@ -453,7 +464,40 @@ let includeSelf = CommandLine.arguments.contains("--probe-include-self")
 let probeSilent = CommandLine.arguments.contains("--probe-silent")
 let targetPids = parseTargetPids(arguments: CommandLine.arguments)
 let cli = AudioCapCLI(includeSelf: includeSelf, targetPids: targetPids.isEmpty ? nil : targetPids)
-if CommandLine.arguments.contains("--probe") {
+
+if CommandLine.arguments.contains("--test-stopband") {
+    let streamer = AudioStreamer(inputSampleRate: 96000.0)
+    let sampleCount = 9600 // 100ms at 96kHz
+    
+    // 1. Generate 43kHz tone (stopband, amplitude 1.0, expected RMS ~0.707 at input)
+    var stopbandSignal = [Float](repeating: 0, count: sampleCount)
+    for i in 0..<sampleCount {
+        stopbandSignal[i] = Float(sin(2.0 * Double.pi * 43000.0 * Double(i) / 96000.0))
+    }
+    let stopbandResampled = streamer.resampleTo48k(stopbandSignal)
+    var stopbandSumSq: Double = 0.0
+    for s in stopbandResampled {
+        stopbandSumSq += Double(s * s)
+    }
+    let stopbandRms = stopbandResampled.isEmpty ? 0.0 : sqrt(stopbandSumSq / Double(stopbandResampled.count))
+    
+    // 2. Generate 5kHz tone (passband, amplitude 1.0, speech band)
+    streamer.reset()
+    var passbandSignal = [Float](repeating: 0, count: sampleCount)
+    for i in 0..<sampleCount {
+        passbandSignal[i] = Float(sin(2.0 * Double.pi * 5000.0 * Double(i) / 96000.0))
+    }
+    let passbandResampled = streamer.resampleTo48k(passbandSignal)
+    var passbandSumSq: Double = 0.0
+    for s in passbandResampled {
+        passbandSumSq += Double(s * s)
+    }
+    let passbandRms = passbandResampled.isEmpty ? 0.0 : sqrt(passbandSumSq / Double(passbandResampled.count))
+    
+    let passed = (stopbandRms < 0.05) && (passbandRms > 0.65)
+    print("{\"status\":\"\(passed ? "ok" : "fail")\",\"stopbandRms\":\(stopbandRms),\"passbandRms\":\(passbandRms)}")
+    exit(passed ? 0 : 1)
+} else if CommandLine.arguments.contains("--probe") {
     var durationMs = 1500
     if let idx = CommandLine.arguments.firstIndex(of: "--probe-ms"), idx + 1 < CommandLine.arguments.count {
         if let parsed = Int(CommandLine.arguments[idx + 1]) {

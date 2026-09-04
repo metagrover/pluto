@@ -19,7 +19,6 @@ import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
-  resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
 import {
@@ -270,7 +269,7 @@ export const AudioManager = ({
   > | null>(null);
   const activeDeviceChangeListenerRef = useRef<(() => void) | null>(null);
   const startMicMediaRecorderRef = useRef<
-    ((stream: MediaStream) => void) | null
+    ((stream: MediaStream) => Promise<void>) | null
   >(null);
   const deviceChangeDebounceMs = 200;
   const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -1082,17 +1081,33 @@ export const AudioManager = ({
       disableMicChunkTranscriptionRef.current = false;
       micWebmInitSegmentRef.current = null;
 
-      const startMicMediaRecorder = (stream: MediaStream) => {
-        if (
-          micRecorderRef.current &&
-          micRecorderRef.current.state !== 'inactive'
-        ) {
+      const startMicMediaRecorder = async (stream: MediaStream) => {
+        const oldRecorder = micRecorderRef.current;
+        if (oldRecorder && oldRecorder.state !== 'inactive') {
           try {
-            micRecorderRef.current.ondataavailable = null;
-            micRecorderRef.current.stop();
+            await new Promise<void>((resolve) => {
+              let finished = false;
+              const done = () => {
+                if (!finished) {
+                  finished = true;
+                  resolve();
+                }
+              };
+              oldRecorder.addEventListener('stop', done, { once: true });
+              try {
+                oldRecorder.stop();
+              } catch {
+                done();
+              }
+              setTimeout(done, 500);
+            });
+            await captureActivitySessionRef.current?.drain();
           } catch {
             // ignore
           }
+        }
+        if (!isRecordingRef.current || stopInFlightRef.current) {
+          return;
         }
         const micRecorder = new MediaRecorder(stream, getRecorderOptions());
         micRecorderRef.current = micRecorder;
@@ -1186,33 +1201,15 @@ export const AudioManager = ({
                 0.2,
                 chunkEndSec - chunkStartSec,
               );
-              const rawSampleRateEstimate = totalLen / chunkDurationSec;
-              if (
-                rawSampleRateEstimate >= 8000 &&
-                rawSampleRateEstimate <= 768000
-              ) {
-                systemPcmSampleRateRef.current = resolvePcmTimelineSampleRate(
-                  totalLen,
-                  chunkDurationSec,
-                  systemPcmSampleRateRef.current,
-                );
-              }
-              if (index < 3) {
-                console.log(
-                  `[Pluto] System chunk #${index} sampleRate estimate: raw=${rawSampleRateEstimate.toFixed(0)}Hz, ` +
-                    `using=${systemPcmSampleRateRef.current}Hz, samples=${totalLen}, duration=${chunkDurationSec.toFixed(2)}s`,
-                );
-              }
+              // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
+              // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
+              systemPcmSampleRateRef.current = 48000;
               const intervalPcm = trimPcmLeadingOverflow(
                 merged,
-                systemPcmSampleRateRef.current,
+                48000,
                 chunkDurationSec,
               );
-              systemBlob = createWavBlob(
-                intervalPcm,
-                systemPcmSampleRateRef.current,
-                1,
-              );
+              systemBlob = createWavBlob(intervalPcm, 48000, 1);
               // Clear for next chunk
               systemPcmChunksRef.current = [];
             }
@@ -1279,10 +1276,7 @@ export const AudioManager = ({
         }
         const listener = () => handleDeviceChangeDebounced();
         activeDeviceChangeListenerRef.current = listener;
-        navigator.mediaDevices.addEventListener(
-          'devicechange',
-          listener,
-        );
+        navigator.mediaDevices.addEventListener('devicechange', listener);
       }
       return { admitted: true, meetingId };
     } catch (e) {
@@ -1461,11 +1455,12 @@ export const AudioManager = ({
         video: false,
       });
 
-      if (
+      const isSessionAborted = () =>
         !isRecordingRef.current ||
         stopInFlightRef.current ||
-        currentMeetingIdRef.current !== reconfigureSessionId
-      ) {
+        currentMeetingIdRef.current !== reconfigureSessionId;
+
+      if (isSessionAborted()) {
         console.log(
           '[Pluto] Capture stopped while awaiting getUserMedia; stopping returned tracks',
         );
@@ -1488,6 +1483,16 @@ export const AudioManager = ({
       }
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
+      }
+
+      if (isSessionAborted()) {
+        console.log(
+          '[Pluto] Capture stopped while resuming audioContext; stopping returned tracks',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        return;
       }
 
       micResamplerRef.current = createAudioResampler({
@@ -1531,7 +1536,21 @@ export const AudioManager = ({
 
       // Recreate MediaRecorder with the new stream to preserve the 5-second journal cadence
       if (startMicMediaRecorderRef.current) {
-        startMicMediaRecorderRef.current(newMicStream);
+        await startMicMediaRecorderRef.current(newMicStream);
+      }
+
+      if (isSessionAborted()) {
+        console.log(
+          '[Pluto] Capture stopped while starting replacement recorder; stopping tracks and cleaning nodes',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        processor.onaudioprocess = null;
+        processor.disconnect();
+        micSource.disconnect();
+        sink.disconnect();
+        return;
       }
 
       publishCaptureHealth({

@@ -43,14 +43,35 @@ describe('AudioManager dynamic audio device reconnect wiring', () => {
   });
 
   it('guards against late getUserMedia resolution when recording was stopped', () => {
-    expect(source).toMatch(
-      /!isRecordingRef\.current[\s\S]*?track\.stop\(\)/u,
-    );
+    expect(source).toMatch(/!isRecordingRef\.current[\s\S]*?track\.stop\(\)/u);
   });
 
   it('retains a stable devicechange listener ref for accurate removal', () => {
     expect(source).toMatch(
       /activeDeviceChangeListenerRef|deviceChangeListenerRef/u,
     );
+  });
+
+  it('keeps system audio sample rate fixed at 48000 Hz and does not re-infer from wall time', () => {
+    expect(source).toContain('systemPcmSampleRateRef.current = 48000');
+    expect(source).toContain('createWavBlob(intervalPcm, 48000, 1)');
+    expect(source).not.toContain('resolvePcmTimelineSampleRate');
+  });
+
+  it('awaits old recorder stop and journal drain before starting replacement recorder', () => {
+    expect(source).toMatch(
+      /addEventListener\(['"]stop['"][\s\S]*?oldRecorder\.stop\(\)[\s\S]*?drain\(\)/u,
+    );
+  });
+
+  it('checks session cancellation after every await during dynamic reconfiguration', () => {
+    const fnStart = source.indexOf('handleDeviceChangeReconfigure = async');
+    const fnEnd = source.indexOf('catch (reconnectErr)', fnStart);
+    const fnBody = source.slice(fnStart, fnEnd);
+
+    // Verify isSessionAborted is invoked multiple times (after getUserMedia, resume, startMicMediaRecorder)
+    const matches = fnBody.match(/if\s*\(\s*isSessionAborted\(\)\s*\)/g);
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(3);
   });
 });
