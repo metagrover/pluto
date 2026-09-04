@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-03 - User setting to optionally include transcript in meeting notes export
+
+- **Status:** Accepted
+- **Source:** [Issue #745](https://github.com/metagrover/pluto/issues/745), owner direction on 2026-09-03
+- **Decision:** Pluto provides a user setting under Settings → Meetings ("Include transcript in exports", stored in SQLite as `export_include_transcript`, defaulting to false). When enabled, meeting notes exports append a clean `## Transcript` section with speaker-attributed turns and timestamps (`m:ss`).
+- **Rationale:** Users who want transcript records for reference or external ingestion can enable it once globally without re-prompting on every export, while preserving the clean, noise-free notes-first default.
+- **Consequences:** The setting is toggleable anytime in Settings → Meetings and persists across sessions; transcript content is formatted into clean conversational turns rather than raw JSON.
+
 ## 2026-09-03 - Export meeting notes as clean Markdown rather than raw dumps or heavy PDFs
 
 - **Status:** Accepted

@@ -16,28 +16,28 @@
 - Modify: `src/utils/meetingNotesExport.ts`
 - Test: `tests/unit/meetingNotesExport.test.ts`
 
-- [ ] **Step 1: Write failing unit tests for includeTranscript option**
+- [x] **Step 1: Write failing unit tests for includeTranscript option**
 
 Add tests to `tests/unit/meetingNotesExport.test.ts` asserting:
 - When `includeTranscript: true`, appends `## Transcript` with clean speaker turns (`**Speaker** (0:00)\nText`).
 - When `includeTranscript: false` or omitted, does not append transcript.
 - When `includeTranscript: true` but transcript is empty or missing, does not append empty transcript section.
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run: `pnpm vitest run tests/unit/meetingNotesExport.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: Implement includeTranscript formatting in `src/utils/meetingNotesExport.ts`**
+- [x] **Step 3: Implement includeTranscript formatting in `src/utils/meetingNotesExport.ts`**
 
 Update `MeetingNotesExportOptions` to accept `includeTranscript?: boolean`. If true, format transcript segments into clean speaker turns with timestamps using `buildTranscriptSegmentsForPresentation`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pnpm vitest run tests/unit/meetingNotesExport.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/meetingNotesExport.ts tests/unit/meetingNotesExport.test.ts
@@ -55,17 +55,17 @@ git commit -m "feat: support including formatted transcript in meeting notes exp
 - Modify: `src/App.tsx`
 - Modify: `tests/unit/MeetingViewExport.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `tests/unit/SettingsTabExport.test.tsx` asserting the toggle renders in Settings → Meetings and triggers `SET_SETTING` with `'export_include_transcript'`.
 Update `tests/unit/MeetingViewExport.test.tsx` to assert that `exportIncludeTranscript={true}` produces an export containing `## Transcript`.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pnpm vitest run tests/unit/SettingsTabExport.test.tsx tests/unit/MeetingViewExport.test.tsx`
 Expected: FAIL
 
-- [ ] **Step 3: Implement UI and wiring**
+- [x] **Step 3: Implement UI and wiring**
 
 1. In `src/components/features/SettingsTab.tsx`:
    - Accept `exportIncludeTranscript: boolean` and `setExportIncludeTranscript: (val: boolean) => void`.
@@ -77,12 +77,12 @@ Expected: FAIL
    - Accept `exportIncludeTranscript?: boolean`.
    - Pass `includeTranscript: exportIncludeTranscript` into `formatMeetingNotesAsMarkdown`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm vitest run tests/unit/SettingsTabExport.test.tsx tests/unit/MeetingViewExport.test.tsx`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/features/SettingsTab.tsx src/components/features/MeetingView.tsx src/App.tsx tests/unit/SettingsTabExport.test.tsx tests/unit/MeetingViewExport.test.tsx
@@ -97,22 +97,22 @@ git commit -m "feat: add include transcript export setting and wire through meet
 - Create: `docs/changelog/entries/2026-09-03-745-export-include-transcript-setting.md`
 - Modify: `docs/decisions.md`
 
-- [ ] **Step 1: Run full test suite and lint**
+- [x] **Step 1: Run full test suite and lint**
 
 Run: `pnpm vitest run tests/unit/meetingNotesExport.test.ts tests/unit/MeetingViewExport.test.tsx tests/unit/SettingsTabExport.test.tsx`
 Run: `pnpm run lint`
 
-- [ ] **Step 2: Add changelog fragment and record decision**
+- [x] **Step 2: Add changelog fragment and record decision**
 
 Create `docs/changelog/entries/2026-09-03-745-export-include-transcript-setting.md` and update `docs/decisions.md`. Validate with `pnpm run changelog:check`.
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
 ```bash
 git add docs/changelog/entries/2026-09-03-745-export-include-transcript-setting.md docs/decisions.md docs/superpowers/plans/2026-09-03-export-include-transcript-setting.md
 git commit -m "docs: add decision and changelog for export transcript setting (#745)" --no-verify
 ```
 
-- [ ] **Step 4: Merge to master**
+- [x] **Step 4: Merge to master**
 
 Checkout `master`, merge `codex/745-export-include-transcript-setting`, and verify clean status.
