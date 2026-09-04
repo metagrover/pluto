@@ -1,7 +1,7 @@
 ### Align recording navigation with macOS window controls
 
 - **Issue:** [#743](https://github.com/metagrover/pluto/issues/743)
-- **PR:** Pending.
+- **PR:** Direct `master` delivery requested by the owner.
 - **Changed:** The recording workspace Back control is now a compact accessible arrow aligned with the macOS traffic-light row.
 - **Why:** The prior text pill cleared the native controls horizontally but sat below their vertical center, weakening the titlebar/navigation relationship.
 - **Replaced:** The full-width Back home pill inside the recording-status flow.
