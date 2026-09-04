@@ -37,6 +37,43 @@ type DeletedContinuation = {
   continuation: NativeMeetingNoteContinuation;
 };
 
+const applyNativeContinuationOverrides = (
+  sections: MeetingNotesSection[],
+  overrides: Map<string, NativeMeetingNoteContinuation[]>,
+): MeetingNotesSection[] => {
+  if (overrides.size === 0) return sections;
+  return sections.map((section) => ({
+    ...section,
+    blocks: section.blocks.flatMap((block) => {
+      const continuationParentPath = block.nativeContinuation?.parentPath;
+      if (continuationParentPath && overrides.has(continuationParentPath)) {
+        return [];
+      }
+      if (!block.path || !overrides.has(block.path)) return [block];
+
+      const continuations = overrides.get(block.path) || [];
+      const parent = { ...block, nativeContinuations: continuations };
+      return [
+        parent,
+        ...continuations.map((continuation) => ({
+          ...parent,
+          id: `${block.id}:continuation:${continuation.id}`,
+          path: undefined,
+          text: continuation.text,
+          originalText: continuation.text,
+          authorship: 'human' as const,
+          edited: true,
+          completed: continuation.completed,
+          nativeContinuation: {
+            parentPath: block.path!,
+            id: continuation.id,
+          },
+        })),
+      ];
+    }),
+  }));
+};
+
 const previewSourceSelection = (
   model: MeetingNotesDocumentModel,
 ): SourceSelection | null => {
@@ -477,14 +514,12 @@ const InlineEditableText = ({
             // before we've had a chance to set editing=true. This way a single
             // click moves focus directly from one block to the next.
             e.preventDefault();
+            const previewEl = e.currentTarget;
+            const { clientX, clientY } = e;
+            let clickedNode: Node | null = null;
+            let offsetInNode = 0;
 
-            // Resolve the click coordinates to a character offset in the
-            // rendered HTML text, then map it into the raw markdown string.
             try {
-              let clickedNode: Node | null = null;
-              let offsetInNode = 0;
-
-              // Standard (Firefox) API
               if ('caretPositionFromPoint' in document) {
                 const pos = (
                   document as Document & {
@@ -493,77 +528,92 @@ const InlineEditableText = ({
                       y: number,
                     ) => { offsetNode: Node; offset: number } | null;
                   }
-                ).caretPositionFromPoint(e.clientX, e.clientY);
+                ).caretPositionFromPoint(clientX, clientY);
                 if (pos) {
                   clickedNode = pos.offsetNode;
                   offsetInNode = pos.offset;
                 }
               } else if ('caretRangeFromPoint' in document) {
-                // WebKit/Blink (Electron/Chrome) API
                 const range = (
                   document as Document & {
                     caretRangeFromPoint: (x: number, y: number) => Range | null;
                   }
-                ).caretRangeFromPoint(e.clientX, e.clientY);
+                ).caretRangeFromPoint(clientX, clientY);
                 if (range) {
                   clickedNode = range.startContainer;
                   offsetInNode = range.startOffset;
                 }
               }
-
-              if (clickedNode) {
-                // Walk all text nodes inside the preview to get an absolute
-                // character offset within the element's full text content.
-                const previewEl = e.currentTarget;
-                const walker = document.createTreeWalker(
-                  previewEl,
-                  NodeFilter.SHOW_TEXT,
-                );
-                let absoluteOffset = 0;
-                let found = false;
-                let node: Node | null = walker.nextNode();
-                while (node) {
-                  if (node === clickedNode) {
-                    absoluteOffset += offsetInNode;
-                    found = true;
-                    break;
-                  }
-                  absoluteOffset += (node.textContent ?? '').length;
-                  node = walker.nextNode();
-                }
-
-                if (found) {
-                  // Map the visible-text offset into the raw markdown by finding
-                  // the first position in draft where the surrounding text matches.
-                  // We search for a snippet of visible text around the click.
-                  const visibleText = previewEl.textContent ?? '';
-                  const snippet = visibleText.slice(
-                    Math.max(0, absoluteOffset - 12),
-                    absoluteOffset + 12,
-                  );
-                  const snippetPre = visibleText.slice(
-                    Math.max(0, absoluteOffset - 12),
-                    absoluteOffset,
-                  );
-                  const mdIdx = draft.indexOf(snippet);
-                  if (mdIdx !== -1) {
-                    pendingCaretRef.current = mdIdx + snippetPre.length;
-                  } else {
-                    // Fallback: proportional mapping
-                    const ratio =
-                      visibleText.length > 0
-                        ? absoluteOffset / visibleText.length
-                        : 1;
-                    pendingCaretRef.current = Math.round(ratio * draft.length);
-                  }
-                }
-              }
             } catch {
-              // If anything goes wrong, just open at end
               pendingCaretRef.current = draft.length;
             }
 
+            // Resolve the click coordinates to a character offset in the
+            // rendered HTML text, then map it into the raw markdown string.
+            // Hit-test before replacing the preview, but defer its potentially
+            // expensive text traversal so edit mode opens first.
             beginEditing();
+            requestAnimationFrame(() => {
+              try {
+                if (clickedNode) {
+                  // Walk all text nodes inside the preview to get an absolute
+                  // character offset within the element's full text content.
+                  const walker = document.createTreeWalker(
+                    previewEl,
+                    NodeFilter.SHOW_TEXT,
+                  );
+                  let absoluteOffset = 0;
+                  let found = false;
+                  let node: Node | null = walker.nextNode();
+                  while (node) {
+                    if (node === clickedNode) {
+                      absoluteOffset += offsetInNode;
+                      found = true;
+                      break;
+                    }
+                    absoluteOffset += (node.textContent ?? '').length;
+                    node = walker.nextNode();
+                  }
+
+                  if (found) {
+                    // Map the visible-text offset into the raw markdown by finding
+                    // the first position in draft where the surrounding text matches.
+                    // We search for a snippet of visible text around the click.
+                    const visibleText = previewEl.textContent ?? '';
+                    const snippet = visibleText.slice(
+                      Math.max(0, absoluteOffset - 12),
+                      absoluteOffset + 12,
+                    );
+                    const snippetPre = visibleText.slice(
+                      Math.max(0, absoluteOffset - 12),
+                      absoluteOffset,
+                    );
+                    const mdIdx = draft.indexOf(snippet);
+                    if (mdIdx !== -1) {
+                      pendingCaretRef.current = mdIdx + snippetPre.length;
+                    } else {
+                      // Fallback: proportional mapping
+                      const ratio =
+                        visibleText.length > 0
+                          ? absoluteOffset / visibleText.length
+                          : 1;
+                      pendingCaretRef.current = Math.round(
+                        ratio * draft.length,
+                      );
+                    }
+                  }
+                }
+              } catch {
+                // If anything goes wrong, just open at end
+                pendingCaretRef.current = draft.length;
+              }
+
+              if (pendingCaretRef.current !== null) {
+                const position = pendingCaretRef.current;
+                pendingCaretRef.current = null;
+                textareaRef.current?.setSelectionRange(position, position);
+              }
+            });
           }}
         >
           {renderMarkdown()}
@@ -979,6 +1029,8 @@ export const MeetingNotesDocument = ({
   >(null);
   const [deletedContinuation, setDeletedContinuation] =
     useState<DeletedContinuation | null>(null);
+  const [nativeContinuationOverrides, setNativeContinuationOverrides] =
+    useState<Map<string, NativeMeetingNoteContinuation[]>>(() => new Map());
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
   const meetingRef = useRef(meeting);
@@ -1003,6 +1055,7 @@ export const MeetingNotesDocument = ({
   }, [meeting.id, meeting.user_notes, model]);
   useEffect(() => {
     setDeletedContinuation(null);
+    setNativeContinuationOverrides(new Map());
     nativeContinuationStateRef.current.clear();
     nativeContinuationSaveChainsRef.current.clear();
   }, [meeting.id]);
@@ -1022,11 +1075,23 @@ export const MeetingNotesDocument = ({
     fallback: NativeMeetingNoteContinuation[],
   ) => nativeContinuationStateRef.current.get(parentPath) || fallback;
 
+  const setNativeContinuationState = (
+    parentPath: string,
+    continuations: NativeMeetingNoteContinuation[],
+  ) => {
+    nativeContinuationStateRef.current.set(parentPath, continuations);
+    setNativeContinuationOverrides((current) => {
+      const next = new Map(current);
+      next.set(parentPath, continuations);
+      return next;
+    });
+  };
+
   const saveNativeContinuations = (
     parentPath: string,
     continuations: NativeMeetingNoteContinuation[],
   ): Promise<void> => {
-    nativeContinuationStateRef.current.set(parentPath, continuations);
+    setNativeContinuationState(parentPath, continuations);
     const previous =
       nativeContinuationSaveChainsRef.current.get(parentPath) ||
       Promise.resolve();
@@ -1052,18 +1117,23 @@ export const MeetingNotesDocument = ({
     if (!parentPath || creatingContinuationPath === parentPath) return;
     setCreatingContinuationPath(parentPath);
     handleSaveStateChange('saving');
+    const id =
+      globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const latest = getNativeContinuations(
+      parentPath,
+      block.nativeContinuations || [],
+    );
     try {
-      const id =
-        globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-      const latest = getNativeContinuations(
-        parentPath,
-        block.nativeContinuations || [],
-      );
-      await saveNativeContinuations(parentPath, [...latest, { id, text: '' }]);
+      const continuations = [...latest, { id, text: '' }];
       setPendingNativeContinuationId(id);
+      await saveNativeContinuations(parentPath, continuations);
       handleSaveStateChange('saved');
       onDocumentChanged();
     } catch (cause) {
+      setNativeContinuationState(parentPath, latest);
+      setPendingNativeContinuationId((pendingId) =>
+        pendingId === id ? null : pendingId,
+      );
       handleSaveStateChange('error', () => {
         void createNativeContinuation(block);
       });
@@ -1110,8 +1180,20 @@ export const MeetingNotesDocument = ({
     const remaining = latest.filter(
       (candidate) => candidate.id !== continuationId,
     );
-    await saveNativeContinuations(parentPath, remaining);
-    setDeletedContinuation({ parentPath, continuation });
+    try {
+      await saveNativeContinuations(parentPath, remaining);
+      setDeletedContinuation({ parentPath, continuation });
+      handleSaveStateChange('saved');
+    } catch (cause) {
+      setNativeContinuationState(parentPath, latest);
+      handleSaveStateChange('error', () => {
+        handleSaveStateChange('saving');
+        void deleteNativeContinuation(block)
+          .then(() => onDocumentChangedRef.current())
+          .catch(() => {});
+      });
+      throw cause;
+    }
   };
 
   const undoNativeContinuationDeletion = async () => {
@@ -1148,6 +1230,10 @@ export const MeetingNotesDocument = ({
     block.blockType === 'action' ||
     block.blockType === 'decision' ||
     (Boolean(block.path) && block.blockType !== 'paragraph');
+  const visibleSections = applyNativeContinuationOverrides(
+    model.sections,
+    nativeContinuationOverrides,
+  );
   return (
     <div className="meeting-document-workspace">
       <article
@@ -1159,7 +1245,7 @@ export const MeetingNotesDocument = ({
         <output className="meeting-document-save-row" aria-live="polite">
           <SaveStatus state={saveState} onRetry={retrySave || undefined} />
         </output>
-        {model.sections
+        {visibleSections
           .filter((s) => s.kind !== 'scratchpad')
           .map((section) => {
             const continuationAnchor = [...section.blocks]

@@ -108,6 +108,7 @@ describe('MeetingNotesDocument', () => {
     vi.useRealTimers();
     window.history.replaceState({}, '', '/');
     window.__PLUTO_BROWSER_PREVIEW__ = undefined;
+    Reflect.deleteProperty(document, 'caretPositionFromPoint');
   });
 
   const renderDocument = () =>
@@ -410,6 +411,44 @@ describe('MeetingNotesDocument', () => {
     expect(textarea?.getAttribute('spellcheck')).toBe('true');
   });
 
+  it('opens the editor before doing click-to-caret placement work', async () => {
+    let runFrame: FrameRequestCallback | undefined;
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(
+      (callback) => {
+        runFrame = callback;
+        return 1;
+      },
+    );
+    await act(async () => renderDocument());
+    const preview = Array.from(
+      container.querySelectorAll<HTMLDivElement>('.meeting-markdown-preview'),
+    ).find((node) => node.textContent?.includes('Use docs as code.'));
+    const clickedNode = preview?.querySelector('p')?.firstChild;
+    expect(clickedNode).toBeTruthy();
+    const caretPositionFromPoint = vi.fn(() => ({
+      offsetNode: clickedNode!,
+      offset: 2,
+    }));
+    Object.defineProperty(document, 'caretPositionFromPoint', {
+      configurable: true,
+      value: caretPositionFromPoint,
+    });
+    const createTreeWalker = vi.spyOn(document, 'createTreeWalker');
+
+    await act(async () => {
+      preview?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+
+    expect(
+      container.querySelector('.meeting-note-block textarea'),
+    ).toBeTruthy();
+    expect(caretPositionFromPoint).toHaveBeenCalledOnce();
+    expect(createTreeWalker).not.toHaveBeenCalled();
+
+    await act(async () => runFrame?.(0));
+    expect(createTreeWalker).toHaveBeenCalledOnce();
+  });
+
   it('does not swallow boundary navigation when no adjacent editor exists', async () => {
     const singleBlockModel: MeetingNotesDocumentModel = {
       hasAnalysis: true,
@@ -502,6 +541,13 @@ describe('MeetingNotesDocument', () => {
   });
 
   it('offers an explicit Add item action for an editable section', async () => {
+    let finishSave: (() => void) | undefined;
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = () => resolve(null);
+        }),
+    );
     await act(async () => renderDocument());
     const outcomes = container.querySelector('[data-notes-section="outcomes"]');
     const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
@@ -520,6 +566,44 @@ describe('MeetingNotesDocument', () => {
         edited: expect.stringMatching(/^\[{"id":".+","text":""}\]$/),
       }),
     );
+    expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(2);
+    expect(
+      outcomes?.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Edit new item"]',
+      ),
+    ).toBe(document.activeElement);
+    await act(async () => finishSave?.());
+  });
+
+  it('removes an optimistic new item when its initial save fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let failSave: ((cause: Error) => void) | undefined;
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          failSave = reject;
+        }),
+    );
+    await act(async () => renderDocument());
+    const outcomes = container.querySelector('[data-notes-section="outcomes"]');
+    const addItem = Array.from(outcomes?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Add item',
+    );
+
+    await act(async () => addItem?.click());
+    expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(2);
+    await act(async () => {
+      for (let index = 0; index < 2; index += 1) await Promise.resolve();
+    });
+    expect(failSave).toBeTypeOf('function');
+    await act(async () => {
+      failSave?.(new Error('synthetic create failure'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('Notes were not saved');
+    expect(container.textContent).toContain('Retry save');
+    expect(outcomes?.querySelectorAll('.meeting-note-block')).toHaveLength(1);
   });
 
   it('uses a real persisted checkbox for generated actions', async () => {
@@ -1016,6 +1100,74 @@ describe('MeetingNotesDocument', () => {
     });
   });
 
+  it('restores a native continuation when its delete fails to save', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    invoke.mockRejectedValueOnce(new Error('synthetic delete failure'));
+    const continuations = [{ id: 'temporary', text: '' }];
+    const continuationModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [
+            {
+              id: 'decision-0',
+              path: 'all_decisions:0',
+              text: 'Use docs as code.',
+              originalText: 'Use docs as code.',
+              authorship: 'ai',
+              edited: false,
+              blockType: 'decision',
+              nativeContinuations: continuations,
+            },
+            {
+              id: 'decision-0:continuation:temporary',
+              text: '',
+              originalText: '',
+              authorship: 'human',
+              edited: true,
+              blockType: 'decision',
+              nativeContinuation: {
+                parentPath: 'all_decisions:0',
+                id: 'temporary',
+              },
+              nativeContinuations: continuations,
+            },
+          ],
+        },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={continuationModel}
+          transcriptSegments={[]}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+
+    const emptyBlock = container.querySelectorAll('.meeting-note-block')[1];
+    const preview = emptyBlock.querySelector<HTMLDivElement>(
+      '.meeting-markdown-preview',
+    );
+    await act(async () =>
+      preview?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+    );
+    await act(async () => {
+      emptyBlock.querySelector('textarea')?.blur();
+      for (let index = 0; index < 4; index += 1) await Promise.resolve();
+    });
+
+    expect(container.querySelectorAll('.meeting-note-block')).toHaveLength(2);
+    expect(container.textContent).toContain('Notes were not saved');
+    expect(container.textContent).toContain('Retry save');
+  });
+
   it('removes a native continuation when Backspace is pressed after erasing its text', async () => {
     const continuationModel: MeetingNotesDocumentModel = {
       hasAnalysis: true,
@@ -1114,6 +1266,8 @@ describe('MeetingNotesDocument', () => {
       edited: JSON.stringify([{ id: 'survivor', text: 'Keep me' }]),
     });
     expect(container.textContent).toContain('Item deleted');
+    expect(container.querySelectorAll('.meeting-note-block')).toHaveLength(2);
+    expect(container.textContent).not.toContain('Temporary item');
 
     const postDeleteModel: MeetingNotesDocumentModel = {
       ...continuationModel,
