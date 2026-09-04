@@ -16,8 +16,6 @@ import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../.
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
-  analysisDocumentToMarkdown,
-  analysisDocumentV3ToMarkdown,
   parseAnalysisEditConflictsJson,
   parseUserEditsJson,
   resolveMeetingAnalysis,
@@ -790,12 +788,6 @@ export const MeetingView = ({
   const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
   const canImproveHistoricalSpeakerLabelsForMeeting =
     canImproveHistoricalSpeakerLabels(selectedMeeting);
-
-  const canonicalAnalysisMarkdown = v3
-    ? analysisDocumentV3ToMarkdown(v3)
-    : v2
-      ? analysisDocumentToMarkdown(v2)
-      : selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '';
 
   const notesDocument = buildMeetingNotesDocument({
     v2,
