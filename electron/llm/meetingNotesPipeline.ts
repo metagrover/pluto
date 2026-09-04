@@ -4,7 +4,9 @@ import type {
 } from './analysisTypes';
 import {
   type AuditedNotes,
+  acceptEditedNotes,
   applyNotesAudit,
+  parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
   projectAuditedNotes,
@@ -29,6 +31,7 @@ import {
 } from './meetingNotesHierarchy';
 import {
   type NotesKnownTerm,
+  buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
   buildNotesMergePrompt,
   buildNotesWriterPrompt,
@@ -48,13 +51,17 @@ import {
 } from './meetingNotesTypes';
 
 const WRITER_OUTPUT_TOKENS = 2048;
+const COMPACT_WRITER_OUTPUT_TOKENS = 1024;
 const AUDIT_OUTPUT_TOKENS = 1536;
 const reviewPrompt = (
   input: GenerateMeetingNotesInput,
   options: Parameters<typeof buildNotesAuditPrompt>[0],
 ) =>
   input.reviewProtocol === 'editor'
-    ? buildNotesEditorPrompt(options)
+    ? buildNotesEditorPrompt({
+        ...options,
+        compactDraft: input.compactWriterContract === true,
+      })
     : buildNotesAuditPrompt(options);
 const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
   input.reviewProtocol === 'editor'
@@ -129,7 +136,9 @@ const makeRequest = (
       ? input.reviewProtocol === 'editor'
         ? 'editor'
         : 'audit'
-      : 'draft',
+      : task === 'notesWriter' && input.compactWriterContract
+        ? 'compact_draft'
+        : 'draft',
   prompt,
   outputTokens,
   contextTokens: input.contextTokens,
@@ -209,6 +218,7 @@ const withOneRepair = async <T>(
   outputTokens: number,
   parse: (raw: string, repaired: boolean) => T,
   allowedSpans?: SourceSpan[],
+  allowModelRepair = true,
 ): Promise<T> => {
   const failureCode =
     task === 'notesAudit' ? 'notes_audit_invalid' : 'notes_writer_invalid';
@@ -234,6 +244,19 @@ const withOneRepair = async <T>(
   try {
     return parse(raw, false);
   } catch (error) {
+    if (task === 'notesWriter' && input.recoverWriterDraft) {
+      try {
+        const recovered = input.recoverWriterDraft(raw);
+        if (recovered !== null) {
+          const parsed = parse(recovered, false);
+          input.onDeterministicWriterRecovery?.();
+          return parsed;
+        }
+      } catch {
+        // A benchmark recovery candidate must pass the unchanged strict parser.
+      }
+    }
+    if (!allowModelRepair) throw new MeetingNotesError(failureCode);
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
@@ -332,6 +355,10 @@ const writeDraft = async (
   prompt: string,
   allowedSpans: SourceSpan[],
 ) => {
+  const outputTokens =
+    task === 'notesWriter' && input.compactWriterContract
+      ? COMPACT_WRITER_OUTPUT_TOKENS
+      : WRITER_OUTPUT_TOKENS;
   const evidenceRevision = createHash('sha256')
     .update(
       JSON.stringify(
@@ -372,13 +399,17 @@ const writeDraft = async (
     input,
     task,
     prompt,
-    WRITER_OUTPUT_TOKENS,
+    outputTokens,
     (raw) => {
-      const parsed = parseNotesDraft(raw);
+      const parsed =
+        task === 'notesWriter' && input.compactWriterContract
+          ? parseCompactNotesDraft(raw)
+          : parseNotesDraft(raw);
       assertAllowedSources(parsed, allowedSpans);
       return parsed;
     },
     allowedSpans,
+    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   input.stageCache?.set(key, draft);
   return draft;
@@ -477,6 +508,26 @@ const deterministicallyCheckedDraft = (
       issues: [],
     },
   };
+};
+
+const deterministicallyAcceptedDraft = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  inherited: NotesItem[] = [],
+): Awaited<ReturnType<typeof auditDraft>> => {
+  const checked = deterministicallyCheckedDraft(
+    input,
+    draft,
+    evidenceSpans,
+    inherited,
+  );
+  const audited = acceptEditedNotes({
+    source: input.source,
+    draft: checked.draft,
+    acceptancePolicy: 'conservative',
+  });
+  return { ...checked, draft: audited.draft, audited };
 };
 
 const auditDraft = async (
@@ -584,6 +635,7 @@ const auditDraft = async (
             provider: input.provider,
             model: input.model,
           },
+          compactDraft: input.compactWriterContract === true,
         });
         assertAllowedSources(result.draft, evidenceSpans);
         assertAuditSourcesAllowed(result.audit, evidenceSpans);
@@ -627,6 +679,7 @@ const auditDraft = async (
       };
     },
     evidenceSpans,
+    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   assertNotCancelled(input);
   return result;
@@ -757,6 +810,9 @@ const runHierarchy = async (
 ): Promise<AnalysisDocumentV3> => {
   const capacityInput = { ...input, contextTokens: planningTokens };
   const finalAuditOnly = input.hierarchyAuditStrategy === 'final_only';
+  const deterministicOnly =
+    input.hierarchyAuditStrategy === 'deterministic_only';
+  const skipsIntermediateAudits = finalAuditOnly || deterministicOnly;
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
     const sourceText = serializeSource(input, spans);
     const writerPrompt = buildNotesWriterPrompt({
@@ -774,7 +830,7 @@ const runHierarchy = async (
     ) {
       return false;
     }
-    if (finalAuditOnly) return true;
+    if (skipsIntermediateAudits) return true;
     const auditPrompt = reviewPrompt(input, {
       sourceText,
       draft: {},
@@ -835,8 +891,11 @@ const runHierarchy = async (
       ),
       idPrefix,
     );
-    const audited =
-      !finalAuditOnly || leaves.length === 1
+    const audited = deterministicOnly
+      ? leaves.length === 1
+        ? deterministicallyAcceptedDraft(input, draft, evidenceSpans)
+        : deterministicallyCheckedDraft(input, draft, evidenceSpans)
+      : !finalAuditOnly || leaves.length === 1
         ? await withTruncationRetry(input, (retryInstruction) =>
             auditDraft(
               input,
@@ -942,7 +1001,7 @@ const runHierarchy = async (
         ) {
           continue;
         }
-        if (finalAuditOnly && level.length > 2) {
+        if (deterministicOnly || (finalAuditOnly && level.length > 2)) {
           pair = [left, right];
           continue;
         }
@@ -1072,8 +1131,21 @@ const runHierarchy = async (
         ),
         inherited,
       );
-      audited =
-        !finalAuditOnly || level.length === 2
+      audited = deterministicOnly
+        ? level.length === 2
+          ? deterministicallyAcceptedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            )
+          : deterministicallyCheckedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            )
+        : !finalAuditOnly || level.length === 2
           ? await withTruncationRetry(input, (retryInstruction) =>
               auditDraft(
                 input,
@@ -1193,39 +1265,89 @@ const runMeetingNotes = async (
   assertNotCancelled(input);
   const sourceText = serializeSource(input);
   const knownTerms = knownTermsFor(input);
-  const writerPrompt = buildNotesWriterPrompt({
+  const compactEditor =
+    input.compactWriterContract && input.reviewProtocol === 'editor';
+  if (
+    input.compactWriterContract &&
+    input.hierarchyAuditStrategy !== 'deterministic_only' &&
+    !compactEditor
+  ) {
+    throw new MeetingNotesError(
+      'notes_compact_writer_requires_deterministic_only',
+    );
+  }
+  const writerPromptBuilder = input.compactWriterContract
+    ? buildCompactNotesWriterPrompt
+    : buildNotesWriterPrompt;
+  const writerPrompt = writerPromptBuilder({
     sourceText,
     userNotes: input.context.userNotes,
     knownTerms,
     template: input.context.template,
   });
+  const evidenceSpans = input.source.segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+  if (input.hierarchyAuditStrategy === 'deterministic_only') {
+    const writerOutputTokens = input.compactWriterContract
+      ? COMPACT_WRITER_OUTPUT_TOKENS
+      : WRITER_OUTPUT_TOKENS;
+    if (!fits(input, writerPrompt, writerOutputTokens)) {
+      if (input.compactWriterContract) {
+        throw new MeetingNotesError('notes_context_exhausted');
+      }
+      return runHierarchy(input, knownTerms);
+    }
+    const draft = await writeDraft(
+      input,
+      'notesWriter',
+      writerPrompt,
+      evidenceSpans,
+    );
+    const checked = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
+    return metadataFor(
+      input,
+      projectAuditedNotes(checked.audited),
+      'direct',
+      0,
+    );
+  }
   const preliminaryAuditPrompt = reviewPrompt(input, {
     sourceText,
     draft: {},
     userNotes: input.context.userNotes,
     knownTerms,
   });
+  const writerOutputTokens = input.compactWriterContract
+    ? COMPACT_WRITER_OUTPUT_TOKENS
+    : WRITER_OUTPUT_TOKENS;
   const capacity = planNotesCapacity({
     contextTokens: input.contextTokens,
     writerInputTokens: estimateNotesTokens(writerPrompt),
     auditBaseInputTokens: estimateNotesTokens(preliminaryAuditPrompt),
-    writerOutputTokens: WRITER_OUTPUT_TOKENS,
+    writerOutputTokens,
     auditOutputTokens: reviewOutputTokens(input),
     safetyTokens: SAFETY_TOKENS,
   });
-  if (capacity.mode !== 'direct') return runHierarchy(input, knownTerms);
+  if (capacity.mode !== 'direct') {
+    if (!compactEditor) return runHierarchy(input, knownTerms);
+    const hierarchyInput = {
+      ...input,
+      compactWriterContract: undefined,
+      reviewProtocol: undefined,
+    };
+    return runHierarchy(hierarchyInput, knownTerms);
+  }
 
   const draft = await writeDraft(
     input,
     'notesWriter',
     writerPrompt,
-    input.source.segments
-      .filter((segment) => segment.text.trim())
-      .map((segment) => ({
-        segment: segment.index,
-        start: 0,
-        end: segment.text.length,
-      })),
+    evidenceSpans,
   );
   assertNotCancelled(input);
   const auditPrompt = reviewPrompt(input, {
@@ -1242,18 +1364,7 @@ const runMeetingNotes = async (
   ) {
     return runHierarchy(input, knownTerms);
   }
-  const audited = await auditDraft(
-    input,
-    draft,
-    input.source.segments
-      .filter((segment) => segment.text.trim())
-      .map((segment) => ({
-        segment: segment.index,
-        start: 0,
-        end: segment.text.length,
-      })),
-    knownTerms,
-  );
+  const audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
   assertNotCancelled(input);
   return metadataFor(
     input,

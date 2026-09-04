@@ -293,7 +293,9 @@ export const meetingNotesEditorCases: MeetingNotesEditorCase[] = [
         /report|findings/i,
         /Jules/i,
       ]);
-      covers(analysis, [/Mateo/i, /accessibility/i, /Jules/i]);
+      // `action` already verifies Mateo in the visible assignee field. Do not
+      // require the summary to repeat the owner merely to satisfy this probe.
+      covers(analysis, [/accessibility/i, /Jules/i]);
     },
   },
   {

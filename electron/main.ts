@@ -3713,6 +3713,7 @@ app.whenReady().then(async () => {
           template,
           {
             signal: controller.signal,
+            compactWriterContract: true,
             knownTerms: db
               .getAllEntities()
               .filter(

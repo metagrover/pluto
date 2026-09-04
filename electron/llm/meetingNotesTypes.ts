@@ -2,9 +2,9 @@ import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v28';
+export const NOTES_PROMPT_VERSION = 'notes-v29';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
-export const NOTES_EDITOR_PROMPT_VERSION = 'notes-v27';
+export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
 export type SourceSpan = {
   segment: number;
@@ -79,7 +79,11 @@ export type NotesAudit = {
 };
 
 export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
-export type NotesResponseContract = 'draft' | 'audit' | 'editor';
+export type NotesResponseContract =
+  | 'draft'
+  | 'compact_draft'
+  | 'audit'
+  | 'editor';
 
 export type NotesRequest = {
   task: NotesTask;
@@ -101,10 +105,12 @@ export type NotesContext = {
 };
 
 export type GenerateMeetingNotesInput = {
-  /** Internal acceptance route, removed when the editor is promoted. */
+  /** Complete-document review used by the compact direct pipeline. */
   reviewProtocol?: 'editor';
   /** Benchmark-only experiment. Product callers must retain the default. */
-  hierarchyAuditStrategy?: 'every_node' | 'final_only';
+  hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
+  /** Compact direct writer; deterministic-only remains a benchmark route. */
+  compactWriterContract?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
@@ -113,6 +119,9 @@ export type GenerateMeetingNotesInput = {
   contextTokens: number;
   signal?: AbortSignal;
   onRepair?: (task: NotesTask) => void;
+  /** Benchmark-only experiment. Product callers must retain the default. */
+  recoverWriterDraft?: (raw: string) => string | null;
+  onDeterministicWriterRecovery?: () => void;
   onStage?: (task: NotesTask) => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;

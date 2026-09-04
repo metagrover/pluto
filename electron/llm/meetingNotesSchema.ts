@@ -38,6 +38,33 @@ export const buildNotesResponseSchema = (
     text: { type: 'string', minLength: 1, maxLength: 12000 },
     sources,
   };
+  if (contract === 'compact_draft') {
+    const compactSources = { ...sources, maxItems: 3 };
+    const compactItem = object(
+      {
+        kind: {
+          type: 'string',
+          enum: ['point', 'action', 'decision', 'question'],
+        },
+        text: { type: 'string', minLength: 1, maxLength: 12_000 },
+        owner: nullableString,
+        due: nullableString,
+        sources: compactSources,
+      },
+      ['kind', 'text', 'owner', 'due', 'sources'],
+    );
+    return object({
+      sections: {
+        ...array(
+          object({
+            title: { type: 'string', minLength: 1, maxLength: 12_000 },
+            items: { ...array(compactItem), minItems: 1 },
+          }),
+        ),
+        maxItems: 64,
+      },
+    });
+  }
   const text = (requireId: boolean) =>
     object(textProperties, [...(requireId ? ['id'] : []), 'text', 'sources']);
   const item = (requireId: boolean): Schema => ({

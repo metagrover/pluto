@@ -51,16 +51,25 @@ export const buildNotesEditorPrompt = ({
   userNotes,
   knownTerms,
   inherited,
+  compactDraft = false,
 }: {
   sourceText: string;
   draft: unknown;
   userNotes: string;
   knownTerms: NotesKnownTerm[];
   inherited?: unknown[];
+  compactDraft?: boolean;
 }): string =>
   [
     'You are the final meeting-notes editor. Return the complete corrected document against the original source. The draft may contain mistakes or omissions; restore missing material topics and current commitments.',
     notesContentGuidance,
+    ...(compactDraft
+      ? [
+          'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in the overview or topic discussion, even when a related action or decision is also structured separately.',
+          'For every action or decision, copy the source-supported owner into owner and the source-supported deadline into due; use null only when absent.',
+          'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, the speaker who states the settled choice is the decision owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
+        ]
+      : []),
     'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not copy unattributed "I" or "we" statements. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.',
     notesSourceGuidance,
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',
@@ -90,10 +99,12 @@ export const parseEditedNotes = ({
   raw,
   source,
   terminology,
+  compactDraft = false,
 }: {
   raw: string;
   source: NotesSource;
   terminology?: { trustedUserTerms: string[]; provider: string; model: string };
+  compactDraft?: boolean;
 }) => {
   const draft: NotesDraft = parseNotesDraft(raw);
   const extra = JSON.parse(raw) as Record<string, unknown>;
@@ -112,6 +123,7 @@ export const parseEditedNotes = ({
     draft,
     terminology,
     proposals: audit.terminology,
+    compactNormalization: compactDraft,
   });
   return { draft: audited.draft, audited, audit };
 };

@@ -46,7 +46,12 @@ const latencyStageOutcomes = [
 ] as const;
 
 export const summarizeMeetingNotesLatencyStages = (
-  stages: readonly { task: string; outcome: string }[],
+  stages: readonly {
+    task: string;
+    outcome: string;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+  }[],
 ) => ({
   tasks: Object.fromEntries(
     latencyStageTasks.map((task) => [
@@ -60,6 +65,14 @@ export const summarizeMeetingNotesLatencyStages = (
       stages.filter((stage) => stage.outcome === outcome).length,
     ]),
   ) as Record<(typeof latencyStageOutcomes)[number], number>,
+  inputTokens: stages.reduce(
+    (total, stage) => total + (stage.inputTokens ?? 0),
+    0,
+  ),
+  outputTokens: stages.reduce(
+    (total, stage) => total + (stage.outputTokens ?? 0),
+    0,
+  ),
 });
 
 const invalidManifest = (): never => {

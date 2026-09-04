@@ -188,8 +188,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions recoverable local notes as notes-v28', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v28');
+  it('versions compact writer-editor notes as notes-v29', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v29');
   });
 
   beforeEach(() => {

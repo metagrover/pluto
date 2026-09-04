@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import {
   applyNotesAudit,
+  parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
 } from '../../electron/llm/meetingNotesAudit';
@@ -41,10 +42,86 @@ const audit = {
     sources: ['R0'],
   })),
 };
-const validate = (contract: 'draft' | 'audit' | 'editor', value: unknown) =>
-  validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
+const validate = (
+  contract: 'draft' | 'compact_draft' | 'audit' | 'editor',
+  value: unknown,
+) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
+  it('expands a compact writer draft with derived title evidence and empty metadata', () => {
+    const value = {
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: 'action',
+              text: 'Send the outline',
+              sources: ['R0'],
+              owner: 'Ava',
+              due: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validate('compact_draft', value)).toBe(true);
+    const expected = structuredClone(fixture.draft);
+    expected.sections[0]!.items[0]!.owner = 'Ava';
+    expect(parseCompactNotesDraft(wire.decode(JSON.stringify(value)))).toEqual(
+      expected,
+    );
+  });
+
+  it('ignores a leaked compact meeting type because the editor owns final classification', () => {
+    const value = {
+      meetingType: 'interview',
+      sections: [
+        {
+          title: 'Past experience',
+          items: [
+            {
+              kind: 'point',
+              text: 'Inez described completed onboarding work.',
+              sources: ['R0'],
+              owner: null,
+              due: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(parseCompactNotesDraft(wire.decode(JSON.stringify(value)))).toEqual(
+      expect.objectContaining({ meetingType: 'general' }),
+    );
+  });
+
+  it('rejects compact writer items with more than three sources', () => {
+    const value = {
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: 'action',
+              text: 'Send the outline',
+              sources: ['R0', 'R0', 'R0', 'R0'],
+              owner: 'Ava',
+              due: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(validate('compact_draft', value)).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value))),
+    ).toThrow('notes_writer_invalid');
+  });
+
   it('accepts compact drafts without invented ids and round trips exact source spans', () => {
     expect(validate('draft', draft)).toBe(true);
     expect(parseNotesDraft(wire.decode(JSON.stringify(draft)))).toEqual(

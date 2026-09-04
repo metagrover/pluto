@@ -60,6 +60,14 @@ export const notesDraftSchema = [
   'Use null for absent overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
 ].join('\n');
 
+const compactNotesDraftSchema = [
+  'Field definitions (not output content):',
+  'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
+  'Use kind: "point" for discussion.',
+  'Section = {title: nonempty string, items: nonempty Item[]}.',
+  'Document = {sections: Section[]}. The final editor classifies the meeting.',
+].join('\n');
+
 export const notesDispositionSchema =
   'Disposition = {target: string, kind: deduplicated | cancelled | superseded, replacementId: string | null, sources: copied source descriptor[]}.';
 
@@ -119,6 +127,33 @@ export const buildNotesWriterPrompt = ({
     '',
     'Return compact JSON only using these fields:',
     notesDraftSchema,
+  ].join('\n');
+
+export const buildCompactNotesWriterPrompt = ({
+  sourceText,
+  userNotes,
+  knownTerms,
+  template,
+}: WriterPromptInput): string =>
+  [
+    'You produce compact, source-grounded Pluto meeting-note drafts.',
+    notesContentGuidance,
+    'Return only useful note items. Code derives the overview and heading evidence.',
+    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments; compact repetition, not facts.',
+    'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Keep the task, recipient, condition and deadline clear in the text itself.',
+    'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, use its speaker as owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
+    'For each item, cite only the 1 to 3 source labels needed to support its exact claim.',
+    notesSourceGuidance,
+    '',
+    `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
+    `Template: ${template}`,
+    'User-note emphasis:',
+    userNotes,
+    '',
+    sourcePacket(sourceText),
+    '',
+    'Return compact JSON only using these fields:',
+    compactNotesDraftSchema,
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

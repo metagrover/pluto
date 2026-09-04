@@ -1,6 +1,6 @@
 # Measure trust cost across the meeting-intelligence pipeline
 
-**Status:** Approved direction, awaiting written-spec review
+**Status:** First diagnostic iteration and benchmark-only deterministic recovery replay implemented in [PR #740](https://github.com/metagrover/pluto/pull/740)
 
 **Issue:** [#739 — Make short-meeting trusted notes meaningfully faster](https://github.com/metagrover/pluto/issues/739)
 
@@ -16,17 +16,24 @@ The working hypothesis is that Pluto's inexpensive trust boundary remains valuab
 
 ## Pipeline boundaries
 
-Classify existing work into four zones:
+Classify existing work into five zones:
 
-1. **Canonical source:** transcript finalization, trust admission, and revision identity.
-2. **Primary notes:** writer, hierarchy, semantic audits, repairs, merges, and guarded publication.
-3. **Publication trust kernel:** schema, allowed-source, commitment-conservation, revision, and transactional checks that do not call a model.
-4. **Secondary intelligence:** value signals, entities, commitment reconciliation, MID generation, and later knowledge refresh.
+1. **Capture seal:** accepted stop through durable capture-journal seal.
+2. **Canonical source:** audio materialization, final ASR, channel reconciliation, speaker attribution, transcript validation, canonical commit, trust admission, and revision identity.
+3. **Primary notes:** writer, hierarchy, semantic audits, repairs, merges, and guarded publication.
+4. **Publication trust kernel:** schema, allowed-source, commitment-conservation, revision, and transactional checks that do not call a model.
+5. **Secondary intelligence:** value signals, entities, commitment reconciliation, MID generation, and later knowledge refresh.
 
-Report two totals rather than one:
+Report four top-level timing boundaries rather than one aggregate:
 
-- **stop-to-trusted-notes:** work required before notes are safely published;
-- **post-publication compute:** work that enriches People, Projects, commitments, search, or knowledge after notes are available.
+- **stop_to_sealed_capture:** accepted stop through durable capture-journal seal;
+- **sealed_to_canonical_transcript:** media materialization through validated canonical commit;
+- **canonical_to_trusted_notes:** notes generation, review, deterministic checks, and guarded publication;
+- **post_publication_compute:** work that enriches People, Projects, commitments, search, or knowledge after notes are available.
+
+Within `sealed_to_canonical_transcript`, retain content-free stage measurements when the input artifact records them: `materialize_mic`, `materialize_system`, `build_mix`, `transcribe_mic`, `transcribe_system`, `reconcile_channels`, `attribute_speakers`, `validate_transcript`, and `commit_canonical`. Keep queue time separate from active time and retain attempt/resume state when recorded. Missing boundaries or stages are `null`; never infer them or fold them into another boundary.
+
+Finalization recovery remains owned by #718/#446. This issue measures that boundary without changing or bypassing the canonical transcript gate.
 
 ## Inputs
 
@@ -105,7 +112,7 @@ The report may include only committed synthetic fixture identifiers and content-
 - Keep the evaluator independent from the production generation and publication path.
 - Make no provider calls and add no feature flag.
 - Do not alter historical fixture contents.
-- Do not combine primary-note latency with secondary-processing duration.
+- Do not combine capture, canonical-finalization, primary-note, or secondary-processing duration.
 - Do not treat asynchronous publication as evidence that total compute decreased.
 
 ## Verification
@@ -115,7 +122,7 @@ The iteration is complete when:
 - focused tests fail before implementation and pass afterward;
 - the script produces the same report on repeated runs, with no wall-clock timestamp because the report is a comparison artifact;
 - an automated privacy test rejects forbidden text-bearing fields;
-- the report distinguishes stop-to-trusted-notes from post-publication compute;
+- the report distinguishes all four timing boundaries and marks unavailable capture/canonical/secondary evidence as `null`;
 - repeated model consumption of the same source is visible as counts, without exposing that source;
 - TypeScript and Biome pass for touched files;
 - the result is summarized on #739 before deciding whether any production audit can be removed.
@@ -135,3 +142,22 @@ Each later experiment requires its own reviewed design adjustment and failing te
 No production change follows automatically. If the audit adds unique value, retain one final semantic audit and optimize elsewhere. If deterministic checks are sufficient across the reviewed short-meeting fixtures, design a separate benchmark-only audit-ablation experiment. Intermediate hierarchy audits remain out of scope for this iteration.
 
 Secondary intelligence is also out of scope for production changes in this iteration. The ledger may identify it as expensive, but a notes-first replacement must preserve entity/action recall, false-positive limits, exact-evidence rules, and reversible persistence before it can ship.
+
+## Deterministic recovery replay
+
+The first report found five model repairs that returned the same rejected response digest, consuming 209,622 ms across six committed synthetic cases. Before changing production parsing, replay the initial rejected writer responses through a benchmark-only mechanical normalizer.
+
+The normalizer may perform only these lossless schema adaptations:
+
+- flatten an item whose `text` field contains exactly the original string and source array when the outer item has no competing source array;
+- map the unsupported presentation label `discussion` to the existing narrative kind `point` only when owner and due fields are absent or null.
+
+It must preserve text, source references, owner, due date, section order, item order, and every other field byte-for-value after JSON parsing. Unknown fields, competing source arrays, non-null ownership/deadline on a discussion item, invalid JSON, audit responses, or any other shape are not normalizable.
+
+Decode captured request-local source labels through the existing notes wire adapter, parse the candidate through the existing strict draft parser, and run existing source guardrails against the original synthetic source. Report parse recovery, guardrail issue counts/codes, transformation counts, and the captured model time that the replay could have avoided. Do not project or publish the candidate, call a model, change the production parser, or claim semantic correctness from structural recovery.
+
+## Recent-meeting probe
+
+The private latency runner may explicitly supply the deterministic writer recovery function to the otherwise unchanged meeting-notes pipeline. Normal product callers cannot activate it accidentally. A recovery counts only when the normalized response passes the existing strict parser and allowed-source checks; refusal or parse failure falls through to the existing single model repair.
+
+Run only against validated, finalized meetings with the production database opened read-only. Persist content-free counts and timings, never generated notes or raw responses. The first completed recent-meeting run recorded no repair opportunity and failed during hierarchical merge. A second historically repair-prone case expanded beyond 30 merge calls and was stopped rather than spending toward the 128-node bound. These probes did not justify production promotion: writer normalization remains a bounded candidate, while truncation and merge/repartition convergence are the stronger next targets.

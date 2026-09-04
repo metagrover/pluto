@@ -290,7 +290,7 @@ function cancels(
     return true;
   if (!sameSpeaker) return false;
   const withdrawal =
-    /^(?:i take back my (?:earlier )?|i(?:['’]m| am) withdrawing my )(.+?) (?:commitment|promise)[.;!]/i.exec(
+    /^(?:i take back my (?:earlier )?|i(?:['’]m| am) withdrawing my |i withdraw (?:my )?(?:earlier )?)(.+?) (?:commitment|promise)[.;!]/i.exec(
       entry.text,
     );
   if (!withdrawal) return false;
@@ -300,7 +300,7 @@ function cancels(
     (other) =>
       other.order < entry.order &&
       other.speaker === entry.speaker &&
-      identity.every((word) => tokens(other.task).includes(word)),
+      identity.every((word) => tokens(other.exactTask).includes(word)),
   );
   // A noun-only reference cannot choose between multiple tasks on that object.
   return (
@@ -326,7 +326,7 @@ function requiresWithdrawalContext(
   }
   // The caller already proved this noun-only withdrawal identifies one prior
   // task of the same speaker. Do not extend this to ambiguous "will not" text.
-  return /^(?:i take back my (?:earlier )?|i(?:['’]m| am) withdrawing my )(.+?) (?:commitment|promise)[.;!]/i.test(
+  return /^(?:i take back my (?:earlier )?|i(?:['’]m| am) withdrawing my |i withdraw (?:my )?(?:earlier )?)(.+?) (?:commitment|promise)[.;!]/i.test(
     entry.text,
   );
 }
@@ -411,8 +411,17 @@ export function findNotesGuardrailIssues(
       if (matching.length) code = 'conflicting_action';
       else if (
         requiresWithdrawalContext(cancellation, candidate) &&
-        !context.some((block) =>
-          block.sources.some((span) => overlaps(span, cancellation.span)),
+        !context.some(
+          (block) =>
+            block.sources.some((span) => overlaps(span, cancellation.span)) ||
+            (/\b(?:withdraw|retract|cancel|take[n]? back|no longer|replac|supersed)\w*\b/i.test(
+              block.text,
+            ) &&
+              actions.some((action) =>
+                action.sources.some((span) =>
+                  overlaps(span, cancellation.span),
+                ),
+              )),
         )
       ) {
         // Coverage diagnostic only: citations do not prove the wording or the
