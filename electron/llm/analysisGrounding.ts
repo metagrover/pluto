@@ -391,7 +391,7 @@ const isPassiveUnownedNeed = (evidence: string): boolean =>
   !/\b(?:assigned|i can|i will|i'll|owns?|sure|yes|will do)\b/i.test(evidence);
 
 const GENERIC_ACTION_ASSIGNEE =
-  /^(?:group|team|the team|we|everyone|i|me|you)$/i;
+  /^(?:(?:and|so|then)\s+)?(?:group|team|the team|we|everyone|i|me|you)$/i;
 const FIRST_PERSON_ACTION_COMMITMENT =
   /\b(?:i will|i['’]ll|i can|i am going to|i['’]m going to|i commit to)\b/i;
 const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;

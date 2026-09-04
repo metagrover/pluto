@@ -913,13 +913,16 @@ export const acceptEditedNotes = ({
   draft,
   terminology,
   proposals = [],
+  acceptancePolicy = 'strict',
 }: {
   source: NotesSource;
   draft: NotesDraft;
   terminology?: AuditTerminologyContext;
   proposals?: NotesAudit['terminology'];
+  acceptancePolicy?: 'strict' | 'conservative';
 }): AuditedNotes => {
   const next = structuredClone(draft);
+  const issues: string[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
     const evidence = sourceText(source, block.sources);
@@ -932,8 +935,8 @@ export const acceptEditedNotes = ({
     }
   }
   for (const section of next.sections) {
-    for (const item of section.items) {
-      if (item.kind !== 'action' && item.kind !== 'decision') continue;
+    section.items = section.items.flatMap((item) => {
+      if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
       if (
         item.kind === 'action' &&
@@ -959,25 +962,36 @@ export const acceptEditedNotes = ({
           lineIndex: item.sources[0]!.segment,
         },
       );
-      if (
-        !checked ||
-        (item.owner &&
-          normalizeTranscriptEvidence(item.owner) !==
-            normalizeTranscriptEvidence(checked.owner ?? '')) ||
-        (item.due && !checked.due)
-      ) {
+      if (!checked) {
+        if (acceptancePolicy === 'conservative') {
+          issues.push(`deterministic_unsupported_commitment:${item.id}`);
+          return [];
+        }
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
-      Object.assign(item, checked);
-    }
+      const ownerChanged =
+        Boolean(item.owner) &&
+        normalizeTranscriptEvidence(item.owner ?? '') !==
+          normalizeTranscriptEvidence(checked.owner ?? '');
+      const dueRemoved = Boolean(item.due) && !checked.due;
+      if (acceptancePolicy === 'strict' && (ownerChanged || dueRemoved)) {
+        throw new MeetingNotesError(
+          `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
+        );
+      }
+      if (ownerChanged) issues.push(`deterministic_corrected_owner:${item.id}`);
+      if (dueRemoved) issues.push(`deterministic_removed_due:${item.id}`);
+      return [{ ...item, ...checked }];
+    });
   }
   const result: AuditedNotes = {
     source,
     draft: next,
     verdicts: new Map(),
     acceptedTerminology: structuredClone(proposals),
+    ...(issues.length ? { issues } : {}),
     ...(terminology
       ? {
           terminologyArtifact: createEditorTerminologyArtifact({

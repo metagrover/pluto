@@ -4,6 +4,7 @@ import type {
 } from './analysisTypes';
 import {
   type AuditedNotes,
+  acceptEditedNotes,
   applyNotesAudit,
   parseNotesAudit,
   parseNotesDraft,
@@ -491,6 +492,26 @@ const deterministicallyCheckedDraft = (
   };
 };
 
+const deterministicallyAcceptedDraft = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  inherited: NotesItem[] = [],
+): Awaited<ReturnType<typeof auditDraft>> => {
+  const checked = deterministicallyCheckedDraft(
+    input,
+    draft,
+    evidenceSpans,
+    inherited,
+  );
+  const audited = acceptEditedNotes({
+    source: input.source,
+    draft: checked.draft,
+    acceptancePolicy: 'conservative',
+  });
+  return { ...checked, draft: audited.draft, audited };
+};
+
 const auditDraft = async (
   input: GenerateMeetingNotesInput,
   draft: NotesDraft,
@@ -769,6 +790,9 @@ const runHierarchy = async (
 ): Promise<AnalysisDocumentV3> => {
   const capacityInput = { ...input, contextTokens: planningTokens };
   const finalAuditOnly = input.hierarchyAuditStrategy === 'final_only';
+  const deterministicOnly =
+    input.hierarchyAuditStrategy === 'deterministic_only';
+  const skipsIntermediateAudits = finalAuditOnly || deterministicOnly;
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
     const sourceText = serializeSource(input, spans);
     const writerPrompt = buildNotesWriterPrompt({
@@ -786,7 +810,7 @@ const runHierarchy = async (
     ) {
       return false;
     }
-    if (finalAuditOnly) return true;
+    if (skipsIntermediateAudits) return true;
     const auditPrompt = reviewPrompt(input, {
       sourceText,
       draft: {},
@@ -847,8 +871,11 @@ const runHierarchy = async (
       ),
       idPrefix,
     );
-    const audited =
-      !finalAuditOnly || leaves.length === 1
+    const audited = deterministicOnly
+      ? leaves.length === 1
+        ? deterministicallyAcceptedDraft(input, draft, evidenceSpans)
+        : deterministicallyCheckedDraft(input, draft, evidenceSpans)
+      : !finalAuditOnly || leaves.length === 1
         ? await withTruncationRetry(input, (retryInstruction) =>
             auditDraft(
               input,
@@ -954,7 +981,7 @@ const runHierarchy = async (
         ) {
           continue;
         }
-        if (finalAuditOnly && level.length > 2) {
+        if (deterministicOnly || (finalAuditOnly && level.length > 2)) {
           pair = [left, right];
           continue;
         }
@@ -1084,8 +1111,21 @@ const runHierarchy = async (
         ),
         inherited,
       );
-      audited =
-        !finalAuditOnly || level.length === 2
+      audited = deterministicOnly
+        ? level.length === 2
+          ? deterministicallyAcceptedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            )
+          : deterministicallyCheckedDraft(
+              input,
+              merged,
+              evidenceSpans,
+              inherited,
+            )
+        : !finalAuditOnly || level.length === 2
           ? await withTruncationRetry(input, (retryInstruction) =>
               auditDraft(
                 input,
@@ -1211,6 +1251,31 @@ const runMeetingNotes = async (
     knownTerms,
     template: input.context.template,
   });
+  const evidenceSpans = input.source.segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+  if (input.hierarchyAuditStrategy === 'deterministic_only') {
+    if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
+      return runHierarchy(input, knownTerms);
+    }
+    const draft = await writeDraft(
+      input,
+      'notesWriter',
+      writerPrompt,
+      evidenceSpans,
+    );
+    const checked = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
+    return metadataFor(
+      input,
+      projectAuditedNotes(checked.audited),
+      'direct',
+      0,
+    );
+  }
   const preliminaryAuditPrompt = reviewPrompt(input, {
     sourceText,
     draft: {},
@@ -1231,13 +1296,7 @@ const runMeetingNotes = async (
     input,
     'notesWriter',
     writerPrompt,
-    input.source.segments
-      .filter((segment) => segment.text.trim())
-      .map((segment) => ({
-        segment: segment.index,
-        start: 0,
-        end: segment.text.length,
-      })),
+    evidenceSpans,
   );
   assertNotCancelled(input);
   const auditPrompt = reviewPrompt(input, {
@@ -1254,18 +1313,7 @@ const runMeetingNotes = async (
   ) {
     return runHierarchy(input, knownTerms);
   }
-  const audited = await auditDraft(
-    input,
-    draft,
-    input.source.segments
-      .filter((segment) => segment.text.trim())
-      .map((segment) => ({
-        segment: segment.index,
-        start: 0,
-        end: segment.text.length,
-      })),
-    knownTerms,
-  );
+  const audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
   assertNotCancelled(input);
   return metadataFor(
     input,

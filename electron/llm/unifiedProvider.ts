@@ -508,7 +508,10 @@ export class UnifiedLLMProvider implements LLMProvider {
       entityHints?: string[];
       contextTokens?: number;
       /** Explicit benchmark experiment; product callers retain every-node audits. */
-      hierarchyAuditStrategy?: 'every_node' | 'final_only';
+      hierarchyAuditStrategy?:
+        | 'every_node'
+        | 'final_only'
+        | 'deterministic_only';
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;

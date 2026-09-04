@@ -27,7 +27,10 @@ import { normalizeCapturedNotesDraft } from './lib/meeting_notes_recovery_replay
 import { writeOwnerOnlyPrivateFile } from './lib/privateEvaluationFile.ts';
 
 type BenchmarkMode = 'isolated' | 'repeat-30' | 'burst';
-type HierarchyAuditStrategy = 'every_node' | 'final_only';
+type HierarchyAuditStrategy =
+  | 'every_node'
+  | 'final_only'
+  | 'deterministic_only';
 
 const option = (name: string, fallback?: string): string => {
   const index = process.argv.indexOf(name);
@@ -46,7 +49,11 @@ const hierarchyAuditStrategy = option(
   '--hierarchy-audit-strategy',
   'every_node',
 ) as HierarchyAuditStrategy;
-if (!['every_node', 'final_only'].includes(hierarchyAuditStrategy)) {
+if (
+  !['every_node', 'final_only', 'deterministic_only'].includes(
+    hierarchyAuditStrategy,
+  )
+) {
   throw new Error('invalid_meeting_notes_hierarchy_audit_strategy');
 }
 const deterministicWriterRecovery = process.argv.includes(

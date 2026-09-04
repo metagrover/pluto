@@ -104,7 +104,7 @@ export type GenerateMeetingNotesInput = {
   /** Internal acceptance route, removed when the editor is promoted. */
   reviewProtocol?: 'editor';
   /** Benchmark-only experiment. Product callers must retain the default. */
-  hierarchyAuditStrategy?: 'every_node' | 'final_only';
+  hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;

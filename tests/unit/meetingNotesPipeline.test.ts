@@ -122,6 +122,59 @@ it('uses one writer and one complete-document editor without segmentation or a t
   });
 });
 
+it('can benchmark a direct draft with deterministic checks and no model audit', async () => {
+  const fixture = makeDirectNotesFixture();
+  const generate = vi.fn().mockResolvedValue(JSON.stringify(fixture.draft));
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'deterministic_only',
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+  });
+
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+  ]);
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining(fixture.expectedAction),
+  ]);
+  expect(result.generation_metadata.mode).toBe('direct');
+});
+
+it('strips unsupported owner and due fields in the deterministic-only benchmark', async () => {
+  const fixture = makeDirectNotesFixture();
+  const draft = structuredClone(fixture.draft);
+  const action = draft.sections[0]!.items[0]!;
+  action.owner = 'Nira';
+  action.due = 'Friday';
+  const generate = vi.fn().mockResolvedValue(JSON.stringify(draft));
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'deterministic_only',
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+  });
+
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({
+      text: 'Send the outline',
+      assignee: 'Milo',
+    }),
+  ]);
+  expect(result.all_action_items[0]).not.toHaveProperty('due');
+  expect(generate).toHaveBeenCalledTimes(1);
+});
+
 it('plans leaves from leaf work without reserving capacity for a hypothetical merge', async () => {
   const text = 'Agenda update. '.repeat(900);
   const source = makeSyntheticNotesSource([{ speaker: 'Milo', text }]);
@@ -1213,6 +1266,46 @@ it('can benchmark a hierarchy with deterministic intermediate checks and one fin
   );
   expect(tasks).toContain('notesMerge');
   expect(tasks.filter((task) => task === 'notesAudit')).toHaveLength(1);
+  expect(result.generation_metadata.mode).toBe('hierarchical');
+  expect(result.generation_metadata.audit_status).toBe('complete');
+}, 15_000);
+
+it('can benchmark a hierarchy with deterministic checks and no model audit', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Milo' : 'Nira',
+      text: `Turn ${index}: ${'context '.repeat(1000)}`,
+    })),
+  );
+  const generate = vi.fn(async (request) => {
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    if (request.task === 'notesAudit') {
+      throw new Error('deterministic_only_must_not_request_model_audit');
+    }
+    return JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [{ title: { text: 'Context', sources: [span] }, items: [] }],
+    });
+  });
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    hierarchyAuditStrategy: 'deterministic_only',
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+  });
+
+  const tasks = generate.mock.calls.map(([request]) => request.task);
+  expect(tasks.filter((task) => task === 'notesWriter').length).toBeGreaterThan(
+    1,
+  );
+  expect(tasks).toContain('notesMerge');
+  expect(tasks).not.toContain('notesAudit');
   expect(result.generation_metadata.mode).toBe('hierarchical');
   expect(result.generation_metadata.audit_status).toBe('complete');
 }, 15_000);
