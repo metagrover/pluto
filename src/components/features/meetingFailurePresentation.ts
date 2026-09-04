@@ -148,6 +148,7 @@ export const resolveMeetingRegenerationFailurePresentation = (
 type MeetingFailurePresentationInput = {
   retryableFinalTranscription: boolean;
   speakerAttributionFailure: boolean;
+  resourcePolicyDenied: boolean;
   captureRecoveryRequired: boolean;
   captureGap: boolean;
   hasExistingAnalysis: boolean;
@@ -162,6 +163,14 @@ export const resolveMeetingFailurePresentation = (
       title: 'Improve speaker labels',
       detail: 'Pluto can take another pass using the saved recording.',
       actionLabel: 'Improve labels',
+    };
+  }
+  if (input.retryableFinalTranscription && input.resourcePolicyDenied) {
+    return {
+      title: 'Transcription paused',
+      detail:
+        'Your Mac was too busy or warm to retry safely. Try again when system load drops.',
+      actionLabel: 'Retry transcription',
     };
   }
   if (input.retryableFinalTranscription) {

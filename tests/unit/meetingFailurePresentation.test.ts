@@ -11,6 +11,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -28,6 +29,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
         speakerAttributionFailure: true,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -40,11 +42,31 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it('explains when a retry paused to protect system resources', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        speakerAttributionFailure: false,
+        resourcePolicyDenied: true,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Transcription paused',
+      detail:
+        'Your Mac was too busy or warm to retry safely. Try again when system load drops.',
+      actionLabel: 'Retry transcription',
+    });
+  });
+
   it('keeps capture recovery honest when a retry would be unsafe', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: true,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -62,6 +84,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: true,
         hasExistingAnalysis: false,
@@ -79,6 +102,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,

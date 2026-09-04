@@ -261,6 +261,35 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain("Couldn't finish the transcript");
   });
 
+  it('renders the durable system-resource pause instead of repeating generic retry copy', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [
+            { code: 'processing_stage_failed', stage: 'source_transcription' },
+          ],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'resource_policy_denied',
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Transcription paused');
+    expect(markup).toContain('too busy or warm');
+    expect(markup).toContain('Retry transcription');
+    expect(markup).not.toContain('Transcript needs another pass');
+  });
+
   it('offers calm speaker label improvement for a fresh attribution rejection', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

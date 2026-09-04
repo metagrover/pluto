@@ -232,6 +232,7 @@ export const TranscriptIntegrityPanel = ({
   );
   let canRetryFinalTranscription = false;
   let speakerAttributionFailure = false;
+  let resourcePolicyDenied = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
       finalTranscription?: {
@@ -245,10 +246,13 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription.state === 'needs_attention';
     speakerAttributionFailure =
       integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
+    resourcePolicyDenied =
+      integrity.finalTranscription?.failure === 'resource_policy_denied';
     canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
     speakerAttributionFailure = false;
+    resourcePolicyDenied = false;
   }
   canRetryFinalTranscription ||= speakerLabelsRequired;
   speakerAttributionFailure ||= speakerLabelsRequired;
@@ -263,6 +267,7 @@ export const TranscriptIntegrityPanel = ({
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
     speakerAttributionFailure,
+    resourcePolicyDenied,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,

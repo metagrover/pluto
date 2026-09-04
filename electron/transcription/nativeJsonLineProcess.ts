@@ -358,6 +358,8 @@ const NATIVE_FAILURE_CODES = new Set<NativeFailureCode>([
   'parakeet_path_missing',
   'parakeet_model_preparation_failed',
   'parakeet_transcription_failed',
+  'parakeet_audio_analysis_failed',
+  'parakeet_diarization_failed',
   'parakeet_cancelled',
 ]);
 
