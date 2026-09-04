@@ -143,7 +143,11 @@ continues on next line.
     });
   });
 
-  it.each(['writer-audit-v1', 'writer-editor-v1'] as const)(
+  it.each([
+    'writer-audit-v1',
+    'writer-editor-v1',
+    'writer-editor-bounded-v1',
+  ] as const)(
     'treats incomplete %s provenance as a conflict boundary',
     (pipelineVersion) => {
       const blocks = getAnalysisEditBlocks({
@@ -164,7 +168,7 @@ continues on next line.
           model: 'local',
           generation_path: 'single_pass',
           prompt_version:
-            pipelineVersion === 'writer-editor-v1' ? 'notes-v11' : 'notes-v10',
+            pipelineVersion === 'writer-audit-v1' ? 'notes-v10' : 'notes-v11',
           generated_at: '2026-08-26T00:00:00.000Z',
           error_categories: [],
           pipeline_version: pipelineVersion,

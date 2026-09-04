@@ -146,6 +146,42 @@ describe('post-meeting processing coordinator', () => {
     ).toBe(true);
   });
 
+  it('requires reprocessing when microphone identity was left unresolved', () => {
+    const meeting = {
+      id: 'anonymous-local-speakers',
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      final_transcription_policy: 'parakeet_final_v1',
+      final_transcription_state: 'complete',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v3',
+          confidence: 0.92,
+          diarizationAttempted: true,
+          mappingApplied: false,
+          speakerSeparation: 'verified',
+          selfIdentity: 'unresolved',
+        },
+        segments: [],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+    } as const;
+    expect(isParakeetValidatedMeeting(meeting)).toBe(false);
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
+  });
+
   it('offers explicit final-transcription retry for validated channel fallback', () => {
     const meeting = {
       transcript_status: 'validated' as const,

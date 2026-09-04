@@ -8,23 +8,50 @@ const MINIMUM_LOCAL_COVERAGE = 0.5;
 const MINIMUM_CONCURRENT_SYSTEM_COVERAGE = 0.5;
 const MINIMUM_ATTRIBUTION_CONFIDENCE = 0.8;
 
-const activitySeconds = (
-  segment: AttributionSegment,
-  windows: SpeakerActivityWindow[],
-  speaker: SpeakerActivityWindow['speaker'],
-): number =>
-  windows
-    .filter((window) => window.speaker === speaker)
-    .reduce(
-      (total, window) =>
-        total +
-        Math.max(
-          0,
-          Math.min(segment.endTime, window.endTime) -
-            Math.max(segment.startTime, window.startTime),
-        ),
-      0,
-    );
+type Interval = { startTime: number; endTime: number };
+
+// Merge once, then visit only intervals overlapping each query. Duplicate
+// observations are evidence of the same time, not additional speech duration.
+const coverageReader = (input: Interval[]) => {
+  const intervals: Interval[] = [];
+  for (const interval of [...input].sort((a, b) => a.startTime - b.startTime)) {
+    if (
+      !Number.isFinite(interval.startTime) ||
+      !Number.isFinite(interval.endTime) ||
+      interval.endTime <= interval.startTime
+    )
+      continue;
+    const previous = intervals.at(-1);
+    if (previous && interval.startTime <= previous.endTime) {
+      previous.endTime = Math.max(previous.endTime, interval.endTime);
+    } else {
+      intervals.push({
+        startTime: interval.startTime,
+        endTime: interval.endTime,
+      });
+    }
+  }
+  return (query: Interval): number => {
+    let low = 0;
+    let high = intervals.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (intervals[middle].endTime <= query.startTime) low = middle + 1;
+      else high = middle;
+    }
+    let seconds = 0;
+    for (let index = low; index < intervals.length; index++) {
+      const interval = intervals[index];
+      if (interval.startTime >= query.endTime) break;
+      seconds += Math.max(
+        0,
+        Math.min(query.endTime, interval.endTime) -
+          Math.max(query.startTime, interval.startTime),
+      );
+    }
+    return seconds;
+  };
+};
 
 export const applyRecoveredChannelEvidence = <
   T extends AttributionSegment,
@@ -42,29 +69,30 @@ export const applyRecoveredChannelEvidence = <
   attribution: StoredTranscriptSpeakerAttribution;
   reasons: ['low_attribution_confidence'] | [];
 } => {
-  const systemSegments = input.segments.filter(
-    (segment) => segment.speaker === 'Them',
+  const systemCoverage = coverageReader(
+    input.segments.filter((segment) => segment.speaker === 'Them'),
   );
+  let localCoverage: ReturnType<typeof coverageReader> | undefined;
   const segments = input.segments.map((segment) => {
     if (segment.speaker === 'Them' || segment.speaker === 'Unknown') {
       return { ...segment } as T;
     }
+    // Historical retries may preserve a label that fresh channel evidence
+    // could not resolve. Its name does not establish microphone ownership.
+    if (segment.speaker !== 'Me')
+      return { ...segment, speaker: 'Unknown' } as T;
     const duration = Math.max(0.01, segment.endTime - segment.startTime);
-    const concurrentSystemSeconds = systemSegments.reduce(
-      (total, systemSegment) =>
-        total +
-        Math.max(
-          0,
-          Math.min(segment.endTime, systemSegment.endTime) -
-            Math.max(segment.startTime, systemSegment.startTime),
-        ),
-      0,
-    );
+    const concurrentSystemSeconds = systemCoverage(segment);
     if (
-      concurrentSystemSeconds / duration < MINIMUM_CONCURRENT_SYSTEM_COVERAGE ||
-      activitySeconds(segment, input.activityWindows, 'Me') / duration >=
-        MINIMUM_LOCAL_COVERAGE
+      concurrentSystemSeconds / duration <
+      MINIMUM_CONCURRENT_SYSTEM_COVERAGE
     ) {
+      return { ...segment, speaker: 'Me', nearEndEvidence: true } as T;
+    }
+    localCoverage ??= coverageReader(
+      input.activityWindows.filter((window) => window.speaker === 'Me'),
+    );
+    if (localCoverage(segment) / duration >= MINIMUM_LOCAL_COVERAGE) {
       return { ...segment, speaker: 'Me', nearEndEvidence: true } as T;
     }
     return { ...segment, speaker: 'Unknown' } as T;

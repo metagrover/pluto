@@ -19,6 +19,12 @@ public protocol SpeakerEvidenceDriving: Sendable {
     ) async throws -> SpeakerEvidenceOutput
 }
 
+func isExpectedDiarizationSilence(_ error: Error) -> Bool {
+    guard let error = error as? OfflineDiarizationError else { return false }
+    if case .noSpeechDetected = error { return true }
+    return false
+}
+
 public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     private let diarizer: any OfflineSpeakerDiarizing
     private let energyAnalyzer: any SpeakerEnergyAnalyzing
@@ -43,19 +49,23 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
         systemURL: URL
     ) async throws -> SpeakerEvidenceOutput {
         let totalStart = ContinuousClock.now
-        let diarizationStart = ContinuousClock.now
-        // Remote participants are mixed together on the system channel. Keeping
-        // the microphone out of this pass prevents the local speaker from
-        // consuming or splitting a remote cluster identity.
-        let turns = try await diarizer.diarize(audioURL: systemURL)
-        let diarizationMs = elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
-
         let energyStart = ContinuousClock.now
         let windows = try await energyAnalyzer.analyze(micURL: micURL, systemURL: systemURL)
         let energyMs = elapsedMilliseconds(since: energyStart)
         try Task.checkCancellation()
         guard !windows.isEmpty else { throw RuntimeFailure.audioAnalysisFailed }
+
+        let diarizationStart = ContinuousClock.now
+        // Remote participants are mixed together on the system channel. The
+        // microphone is user speech plus possible system echo, so it must not
+        // be diarized as a source of local identity.
+        // Only exact digital silence skips inference; even very quiet audio
+        // still receives the normal model pass.
+        let systemIsSilent = windows.allSatisfy { $0.systemRms == 0 }
+        let turns = systemIsSilent ? [] : try await diarizer.diarize(audioURL: systemURL)
+        let diarizationMs = systemIsSilent ? 0 : elapsedMilliseconds(since: diarizationStart)
+        try Task.checkCancellation()
 
         return SpeakerEvidenceOutput(
             turns: turns,
@@ -108,7 +118,12 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
                 prepared = true
             }
             try Task.checkCancellation()
-            let result = try await manager.process(audioURL)
+            let result: DiarizationResult
+            do {
+                result = try await manager.process(audioURL)
+            } catch where isExpectedDiarizationSilence(error) {
+                return []
+            }
             try Task.checkCancellation()
             let turns = result.segments.compactMap { segment -> SpeakerEvidenceTurn? in
                 let start = Double(segment.startTimeSeconds)

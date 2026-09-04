@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@preconcurrency import FluidAudio
 @testable import ParakeetRuntimeCore
 @testable import ParakeetRuntimeEngine
 
@@ -10,14 +11,14 @@ private struct FixtureDiarizer: OfflineSpeakerDiarizing {
 }
 
 private actor CapturingDiarizer: OfflineSpeakerDiarizing {
-    private var receivedURL: URL?
+    private var receivedURLs: [URL] = []
 
     func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn] {
-        receivedURL = audioURL
+        receivedURLs.append(audioURL)
         return [SpeakerEvidenceTurn(startTime: 0, endTime: 1, cluster: "S1")]
     }
 
-    func capturedURL() -> URL? { receivedURL }
+    func capturedURLsSnapshot() -> [URL] { receivedURLs }
 }
 
 private struct FixtureEnergyAnalyzer: SpeakerEnergyAnalyzing {
@@ -35,7 +36,40 @@ private struct CancellingDiarizer: OfflineSpeakerDiarizing {
 }
 
 final class FluidAudioSpeakerEvidenceTests: XCTestCase {
-    func testCoordinatorDiarizesOnlyTheIsolatedSystemRecording() async throws {
+    func testDigitalSystemSilenceSkipsDiarizerButQuietAudioDoesNot() async throws {
+        for rms in [0.0, 0.0000001] {
+            let diarizer = CapturingDiarizer()
+            let coordinator = SpeakerEvidenceCoordinator(
+                diarizer: diarizer,
+                energyAnalyzer: FixtureEnergyAnalyzer(windows: [
+                    SpeakerEnergyWindow(startTime: 0, endTime: 1, micRms: 0.2, systemRms: rms)
+                ]),
+                manifest: ProductionDiarizationManifest.current,
+                runtimeVersion: "test"
+            )
+            let output = try await coordinator.analyze(
+                mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
+                micURL: URL(fileURLWithPath: "/approved/mic.wav"),
+                systemURL: URL(fileURLWithPath: "/approved/system.wav")
+            )
+            let urls = await diarizer.capturedURLsSnapshot()
+            XCTAssertEqual(urls.count, rms == 0 ? 0 : 1)
+            if rms == 0 {
+                XCTAssertTrue(output.turns.isEmpty)
+                XCTAssertEqual(output.timings.diarizationMs, 0)
+            }
+        }
+    }
+
+    func testOnlyFluidAudioNoSpeechIsAcceptedAsEmptyDiarization() {
+        XCTAssertTrue(isExpectedDiarizationSilence(OfflineDiarizationError.noSpeechDetected))
+        XCTAssertFalse(isExpectedDiarizationSilence(
+            OfflineDiarizationError.processingFailed("model execution failed")
+        ))
+        XCTAssertFalse(isExpectedDiarizationSilence(RuntimeFailure.diarizationFailed))
+    }
+
+    func testCoordinatorDiarizesOnlyTheSystemRecording() async throws {
         let diarizer = CapturingDiarizer()
         let coordinator = SpeakerEvidenceCoordinator(
             diarizer: diarizer,
@@ -46,14 +80,15 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
             runtimeVersion: "fluidaudio-test"
         )
 
-        _ = try await coordinator.analyze(
+        let output = try await coordinator.analyze(
             mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
             micURL: URL(fileURLWithPath: "/approved/mic.wav"),
             systemURL: URL(fileURLWithPath: "/approved/system.wav")
         )
 
-        let capturedURL = await diarizer.capturedURL()
-        XCTAssertEqual(capturedURL?.path, "/approved/system.wav")
+        let capturedURLs = await diarizer.capturedURLsSnapshot()
+        XCTAssertEqual(capturedURLs.map(\.path), ["/approved/system.wav"])
+        XCTAssertEqual(output.turns.map(\.cluster), ["S1"])
     }
 
     func testCoordinatorReturnsOnlyAnonymousTurnsEnergyAndPinnedProvenance() async throws {
@@ -106,7 +141,9 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
     func testCoordinatorPreservesCancellation() async throws {
         let coordinator = SpeakerEvidenceCoordinator(
             diarizer: CancellingDiarizer(),
-            energyAnalyzer: FixtureEnergyAnalyzer(windows: []),
+            energyAnalyzer: FixtureEnergyAnalyzer(windows: [
+                SpeakerEnergyWindow(startTime: 0, endTime: 1, micRms: 0, systemRms: 0.1)
+            ]),
             manifest: ProductionDiarizationManifest.current,
             runtimeVersion: "fluidaudio-test"
         )

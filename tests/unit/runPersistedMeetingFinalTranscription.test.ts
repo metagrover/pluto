@@ -44,7 +44,7 @@ const finalMetadata = {
     droppedEmbeddedMicFragmentCount: 0,
   },
   speakerAttribution: {
-    source: 'recovered_channel_acoustic_v1' as const,
+    source: 'recovered_channel_acoustic_v2' as const,
     confidence: 1,
     diarizationAttempted: true,
     mappingApplied: true,
@@ -224,7 +224,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
     ]);
     expect(persisted.transcription.diarization).toBe(false);
     expect(persisted.speakerAttribution).toMatchObject({
-      source: 'recovered_channel_acoustic_v1',
+      source: 'recovered_channel_acoustic_v2',
       mappingApplied: true,
     });
     expect(

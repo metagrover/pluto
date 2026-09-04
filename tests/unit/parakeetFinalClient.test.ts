@@ -286,6 +286,23 @@ describe('ParakeetFinalClient', () => {
     await expect(request).resolves.toMatchObject({ turns: [] });
   });
 
+  it('accepts speaker evidence without microphone diarization', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const response = speakerEvidenceSuccess(String(child.writes[0].id));
+    child.respond(response);
+
+    await expect(request).resolves.toMatchObject({
+      turns: [{ cluster: 'S1' }],
+    });
+  });
+
   it('rejects malformed speaker evidence and out-of-root evidence paths', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

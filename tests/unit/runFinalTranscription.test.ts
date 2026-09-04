@@ -237,6 +237,39 @@ describe('runFinalTranscription', () => {
     });
   });
 
+  it('keeps every surviving microphone segment attributed to Me', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) => {
+      if (request.source === 'system') return result('system');
+      return {
+        ...result('mic'),
+        segments: [
+          { start: 0, end: 2, text: 'first microphone voice' },
+          { start: 2, end: 4, text: 'second microphone voice' },
+        ],
+      };
+    });
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+    });
+    deps.speakerEvidence.mockClear();
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    expect(deps.commitCanonical.mock.calls[0][0].segments).toEqual([
+      expect.objectContaining({ speaker: 'Me' }),
+      expect.objectContaining({ speaker: 'Me' }),
+      expect.objectContaining({ speaker: 'Them' }),
+    ]);
+    expect(
+      deps.commitCanonical.mock.calls[0][0].metadata.speakerAttribution,
+    ).toMatchObject({
+      source: 'recovered_channel_acoustic_v2',
+      mappingApplied: true,
+    });
+  });
+
   it('pauses before inference when system resources are unsafe', async () => {
     const deps = dependencies();
     const outcome = await runFinalTranscription(baseInput, {

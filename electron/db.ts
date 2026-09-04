@@ -2692,6 +2692,7 @@ export const failMeetingFinalTranscription = (
   meetingId: string | number,
   runId: string,
   failure: Parameters<typeof finishFinalTranscriptionLease>[1],
+  reasons: string[] = [],
 ): boolean =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
@@ -2699,6 +2700,13 @@ export const failMeetingFinalTranscription = (
     const integrity = parseIntegrityRecord(current.transcript_integrity_json);
     const lease = readFinalTranscriptionLease(integrity.finalTranscription);
     if (!lease || lease.runId !== runId || !failure) return false;
+    const boundedReasons = [
+      ...new Set(
+        reasons
+          .filter((reason) => typeof reason === 'string' && reason.length > 0)
+          .map((reason) => reason.slice(0, 128)),
+      ),
+    ].slice(0, 16);
     return (
       db
         .prepare(
@@ -2728,6 +2736,7 @@ export const failMeetingFinalTranscription = (
             ],
             validationProof: undefined,
             retry: undefined,
+            reasons: boundedReasons,
             finalTranscription: finishFinalTranscriptionLease(lease, failure),
           }),
           String(meetingId),
