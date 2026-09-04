@@ -130,6 +130,8 @@ describe('AudioManager Parakeet EOU wiring', () => {
 
   it('claims a synchronous start lock before asynchronous readiness', () => {
     const startIndex = source.indexOf('const startSession = async ()');
+    const stopIndex = source.indexOf('const stopSession = async', startIndex);
+    const startSession = source.slice(startIndex, stopIndex);
     const guardIndex = source.indexOf(
       "captureLifecycleRef.current.state !== 'idle'",
       startIndex,
@@ -139,7 +141,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       guardIndex,
     );
     const readinessIndex = source.indexOf(
-      "'RECORDING_READINESS_STATUS'",
+      "'RECORDING_READINESS_PREPARE'",
       claimIndex,
     );
     const releaseIndex = source.indexOf("state: 'idle'", readinessIndex);
@@ -148,6 +150,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(claimIndex).toBeGreaterThan(guardIndex);
     expect(claimIndex).toBeLessThan(readinessIndex);
     expect(releaseIndex).toBeGreaterThan(readinessIndex);
+    expect(startSession).not.toContain("'RECORDING_READINESS_STATUS'");
   });
 
   it('publishes starting feedback before asynchronous readiness', () => {
@@ -157,7 +160,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       startIndex,
     );
     const readinessIndex = source.indexOf(
-      "'RECORDING_READINESS_STATUS'",
+      "'RECORDING_READINESS_PREPARE'",
       startIndex,
     );
     const stoppedStartingIndex = source.indexOf(
