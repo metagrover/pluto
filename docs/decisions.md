@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-03 - Export meeting notes as clean Markdown rather than raw dumps or heavy PDFs
+
+- **Status:** Accepted
+- **Source:** [Issue #744](https://github.com/metagrover/pluto/issues/744), owner direction on 2026-09-03
+- **Decision:** Pluto's meeting export action produces a clean, portable Markdown file (`.md`) formatted from the active meeting notes document model and calendar context, including user edits, checkboxes, and attendee metadata, while strictly excluding raw transcript JSON and internal generation parameters.
+- **Rationale:** The previous export bundled thousands of lines of raw transcript JSON into an unformatted `.txt` file. Markdown natively supports rich text across standard notes apps (Notion, Obsidian, Bear, GitHub) without adding external PDF rendering dependencies or complex export modals.
+- **Consequences:** The export button in the meeting actions menu is labeled "Export as Markdown" and downloads a sanitized `.md` file; future export features can extend this pure serialization layer without modifying core meeting state.
+
 ## 2026-09-03 - Support multiple local macOS calendars without remote OAuth
 
 - **Status:** Accepted
