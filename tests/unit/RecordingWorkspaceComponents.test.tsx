@@ -28,6 +28,8 @@ describe('recording workspace components', () => {
     expect(html).not.toContain('recording-capture-bar drag-region');
     expect(html).toContain('recording-capture-drag drag-region');
     expect(html).toContain('Back home');
+    expect(html).toContain('aria-label="Back home"');
+    expect(html).toContain('title="Back home"');
     expect(html).toContain('Microphone');
     expect(html).toContain('System audio');
     expect(html).toContain('Finish recording');
