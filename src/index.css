@@ -1697,10 +1697,10 @@
     @apply pointer-events-auto relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .recording-back-home {
-    @apply absolute left-24 top-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .recording-capture-bar {
-    @apply relative grid min-h-[76px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface pb-3 pl-24 pr-6 pt-5;
+    @apply relative grid min-h-[104px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface pb-4 pt-12 px-6;
   }
   .recording-status,
   .recording-actions,
@@ -1709,7 +1709,7 @@
     @apply flex items-center;
   }
   .recording-status {
-    @apply min-w-0 gap-2.5 pl-10 text-sm;
+    @apply min-w-0 gap-2.5 text-sm;
   }
   .recording-status time {
     @apply font-mono text-xs tabular-nums text-pro-text-muted;
@@ -1939,10 +1939,7 @@
   }
   @media (max-width: 980px) {
     .recording-capture-bar {
-      @apply h-auto min-h-[84px] grid-cols-[1fr_auto] gap-2 py-3 pl-20;
-    }
-    .recording-back-home {
-      @apply left-20;
+      @apply h-auto min-h-[96px] grid-cols-[1fr_auto] gap-2 pb-3 pt-12 px-6;
     }
     .recording-health {
       @apply hidden;
