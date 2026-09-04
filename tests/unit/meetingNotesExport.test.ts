@@ -297,5 +297,53 @@ describe('meetingNotesExport', () => {
       expect(markdown).toContain('- Point 1');
       expect(markdown).not.toContain('## Decisions & next steps');
     });
+
+    it('appends a formatted transcript section when includeTranscript is true', () => {
+      const transcriptSegments: TranscriptSegment[] = [
+        { text: 'Hello team, welcome.', speaker: 'Sarah Connor', startTime: 0 },
+        { text: 'Let us begin.', speaker: 'Sarah Connor', startTime: 5 },
+        { text: 'Ready to plan.', speaker: 'David Miller', startTime: 15 },
+      ];
+
+      const markdown = formatMeetingNotesAsMarkdown({
+        meeting: baseMeeting,
+        documentModel: mockDocumentModel,
+        transcriptSegments,
+        includeTranscript: true,
+      });
+
+      expect(markdown).toContain('## Transcript');
+      expect(markdown).toContain('**Sarah Connor** (0:00)');
+      expect(markdown).toContain('Hello team, welcome. Let us begin.');
+      expect(markdown).toContain('**David Miller** (0:15)');
+      expect(markdown).toContain('Ready to plan.');
+    });
+
+    it('does not append transcript section when includeTranscript is false or omitted', () => {
+      const transcriptSegments: TranscriptSegment[] = [
+        { text: 'Hello team, welcome.', speaker: 'Sarah Connor', startTime: 0 },
+      ];
+
+      const markdown = formatMeetingNotesAsMarkdown({
+        meeting: baseMeeting,
+        documentModel: mockDocumentModel,
+        transcriptSegments,
+        includeTranscript: false,
+      });
+
+      expect(markdown).not.toContain('## Transcript');
+      expect(markdown).not.toContain('Hello team, welcome.');
+    });
+
+    it('does not append transcript section when includeTranscript is true but segments are empty', () => {
+      const markdown = formatMeetingNotesAsMarkdown({
+        meeting: baseMeeting,
+        documentModel: mockDocumentModel,
+        transcriptSegments: [],
+        includeTranscript: true,
+      });
+
+      expect(markdown).not.toContain('## Transcript');
+    });
   });
 });

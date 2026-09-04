@@ -1,4 +1,5 @@
 import type { MeetingCalendarContext } from '../../electron/calendar/types';
+import { buildMeetingTranscriptTurns } from '../components/features/meetingTranscriptPresentation';
 import type { Meeting, TranscriptSegment } from '../types';
 import type {
   MeetingNotesBlock,
@@ -12,6 +13,7 @@ export interface MeetingNotesExportOptions {
   documentModel: MeetingNotesDocumentModel;
   calendarContext?: MeetingCalendarContext | null;
   transcriptSegments?: TranscriptSegment[];
+  includeTranscript?: boolean;
 }
 
 /**
@@ -89,6 +91,37 @@ function formatSectionBlocks(section: MeetingNotesSection): string[] {
   return lines;
 }
 
+function formatTranscriptSection(
+  transcriptSegments?: TranscriptSegment[],
+): string[] {
+  if (!transcriptSegments || transcriptSegments.length === 0) return [];
+  const turns = buildMeetingTranscriptTurns(transcriptSegments);
+  if (turns.length === 0) return [];
+
+  const lines: string[] = ['---', '', '## Transcript', ''];
+
+  for (const turn of turns) {
+    const speaker = turn.speaker || 'Unknown speaker';
+    const minutes = Math.floor(turn.startSeconds / 60);
+    const seconds = Math.floor(turn.startSeconds % 60)
+      .toString()
+      .padStart(2, '0');
+    const timestamp = `${minutes}:${seconds}`;
+    const text = turn.segments
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(' ');
+
+    if (text) {
+      lines.push(`**${speaker}** (${timestamp})`);
+      lines.push(text);
+      lines.push('');
+    }
+  }
+
+  return lines;
+}
+
 /**
  * Transforms a meeting and its structured notes document model into clean,
  * portable Markdown, complete with calendar context, attendees, and user edits,
@@ -99,6 +132,7 @@ export function formatMeetingNotesAsMarkdown({
   documentModel,
   calendarContext,
   transcriptSegments,
+  includeTranscript = false,
 }: MeetingNotesExportOptions): string {
   const lines: string[] = [];
 
@@ -189,6 +223,15 @@ export function formatMeetingNotesAsMarkdown({
       meeting.user_notes?.trim() ||
       'No notes recorded.';
     lines.push(content);
+
+    if (includeTranscript) {
+      const transcriptLines = formatTranscriptSection(transcriptSegments);
+      if (transcriptLines.length > 0) {
+        lines.push('');
+        lines.push(...transcriptLines);
+      }
+    }
+
     return lines.join('\n').trimEnd();
   }
 
@@ -205,6 +248,13 @@ export function formatMeetingNotesAsMarkdown({
     const sectionLines = formatSectionBlocks(section);
     lines.push(...sectionLines);
     lines.push('');
+  }
+
+  if (includeTranscript) {
+    const transcriptLines = formatTranscriptSection(transcriptSegments);
+    if (transcriptLines.length > 0) {
+      lines.push(...transcriptLines);
+    }
   }
 
   return lines.join('\n').trimEnd();
