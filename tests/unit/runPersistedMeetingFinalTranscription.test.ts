@@ -44,12 +44,10 @@ const finalMetadata = {
     droppedEmbeddedMicFragmentCount: 0,
   },
   speakerAttribution: {
-    source: 'recovered_channel_acoustic_v3' as const,
-    confidence: 0.94,
+    source: 'recovered_channel_acoustic_v2' as const,
+    confidence: 1,
     diarizationAttempted: true,
-    mappingApplied: false,
-    speakerSeparation: 'verified' as const,
-    selfIdentity: 'unresolved' as const,
+    mappingApplied: true,
   },
   speakerEvidence: {
     provenance: {
@@ -224,22 +222,17 @@ describe('runPersistedMeetingFinalTranscription', () => {
     expect(persisted.liveSegments).toEqual([
       { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
     ]);
-    expect(persisted.transcription.diarization).toBe(true);
+    expect(persisted.transcription.diarization).toBe(false);
     expect(persisted.speakerAttribution).toMatchObject({
-      source: 'recovered_channel_acoustic_v3',
-      mappingApplied: false,
-      speakerSeparation: 'verified',
-      selfIdentity: 'unresolved',
+      source: 'recovered_channel_acoustic_v2',
+      mappingApplied: true,
     });
     expect(
       JSON.parse(
         (commitCall?.[1] as { transcriptIntegrityJson: string })
           .transcriptIntegrityJson,
       ),
-    ).toMatchObject({
-      speakerAttributionVerified: false,
-      speakerSeparationVerified: true,
-    });
+    ).toMatchObject({ speakerAttributionVerified: true });
   });
 
   it('preserves saved transcript text during a validated speaker-label retry', async () => {

@@ -38,15 +38,3 @@ export const isVerifiedSpeakerAttribution = (
             attribution.source === 'local_diarization_acoustic' ||
             attribution.source === 'offline_diarization_acoustic_v1'))),
   );
-
-export const isSpeakerSeparatedAttribution = (
-  attribution: StoredTranscriptSpeakerAttribution | null | undefined,
-): boolean =>
-  isVerifiedSpeakerAttribution(attribution) ||
-  Boolean(
-    attribution &&
-      attribution.source === 'recovered_channel_acoustic_v3' &&
-      attribution.speakerSeparation === 'verified' &&
-      Number.isFinite(attribution.confidence) &&
-      attribution.confidence >= 0.8,
-  );

@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prevent microphone participants from being asserted as the workspace user and make production notes compilation terminate within a deterministic request and time budget.
+**Goal:** Remove System echo from the microphone, preserve the remaining mic speech as the workspace user, diarize remote participants from System only, and make production notes compilation terminate within a deterministic request and time budget.
 
 **Status:** Completed and verified on 2026-09-04. The checklists below preserve the original execution sequence; completion evidence is recorded in issues #725 and #753.
 
-**Architecture:** Extend native evidence with independent microphone clusters, project ambiguous local voices to meeting-local labels, and separate speaker separation from self identity at canonical and downstream gates. Route notes using the encoded provider payload and replace the production compact hierarchy with a bounded leaf writer/editor compiler.
+**Architecture:** Decode mic and System independently, remove System-correlated echo from mic, attribute surviving mic speech to `Me`, and project anonymous diarization clusters only onto System-origin segments. Route notes using the encoded provider payload and replace the production compact hierarchy with a bounded leaf writer/editor compiler.
 
 **Tech Stack:** Swift, FluidAudio, TypeScript, Electron IPC, React meeting identity controls, Vitest, Swift Testing.
 
 ---
 
-### Task 1: Return microphone diarization evidence
+### Corrected speaker-attribution implementation
 
 **Files:**
 - Modify: `native/parakeet-runtime/Sources/ParakeetRuntimeCore/Protocol.swift`
@@ -20,56 +20,14 @@
 - Modify: `native/parakeet-runtime/Tests/ParakeetRuntimeEngineTests/FluidAudioSpeakerEvidenceTests.swift`
 - Modify: `tests/unit/parakeetFinalClient.test.ts`
 
-- [ ] **Step 1: Write failing Swift and client tests**
+- [x] Assert the native coordinator invokes diarization only for System audio.
+- [x] Remove `micTurns` from the native protocol, client validation, and finalizer contract.
+- [x] Remove local microphone-cluster projection and keep every surviving mic segment as `Me`.
+- [x] Keep System-only remote cluster projection after echo removal and recovered-channel validation.
+- [x] Require verified attribution for canonical commit and downstream notes.
+- [x] Preserve v3 schema compatibility while making v3 meetings eligible for explicit reprocessing.
 
-Add assertions that the coordinator diarizes System and microphone inputs independently and returns `turns` for System plus `micTurns` for microphone. Add a client fixture with both arrays and assert malformed `micTurns` fails protocol validation.
-
-- [ ] **Step 2: Verify red**
-
-Run `swift test --package-path native/parakeet-runtime --filter FluidAudioSpeakerEvidenceTests` and `pnpm vitest run tests/unit/parakeetFinalClient.test.ts`. Expect failures because `micTurns` is absent.
-
-- [ ] **Step 3: Implement the minimal protocol extension**
-
-Add `micTurns: [SpeakerEvidenceTurn]` to `SpeakerEvidenceOutput`; invoke the existing actor-backed diarizer for System and microphone; sum both diarization durations; validate and return the new field from `parakeetFinalClient`.
-
-- [ ] **Step 4: Verify green**
-
-Repeat the focused Swift and Vitest commands and expect zero failures.
-
-### Task 2: Separate speaker separation from owner identity
-
-**Files:**
-- Create: `src/services/finalTranscription/applyLocalSpeakerClusters.ts`
-- Create: `tests/unit/applyLocalSpeakerClusters.test.ts`
-- Modify: `src/services/finalTranscription/applyRecoveredChannelEvidence.ts`
-- Modify: `tests/unit/applyRecoveredChannelEvidence.test.ts`
-- Modify: `src/services/finalTranscription/runFinalTranscription.ts`
-- Modify: `tests/unit/runFinalTranscription.test.ts`
-- Modify: `src/utils/transcriptSchema.ts`
-- Modify: `src/utils/speakerAttributionTrust.ts`
-- Modify: `tests/unit/speakerAttributionTrust.test.ts`
-
-- [ ] **Step 1: Write failing projection and trust tests**
-
-Cover deterministic `Local Speaker 1/2` ordering, under-covered cluster abstention, multi-cluster acceptance with unresolved self identity, and single-cluster compatibility. Assert `isVerifiedSpeakerAttribution` remains false while a new `isSpeakerSeparatedAttribution` predicate is true for safe anonymous separation.
-
-- [ ] **Step 2: Verify red**
-
-Run the focused attribution tests and confirm failures are caused by missing local-cluster and separation behavior.
-
-- [ ] **Step 3: Implement projection and trust metadata**
-
-Project microphone words/segments only when one unambiguous cluster covers at least half the item and total supported microphone coverage reaches 0.8. Multi-cluster results use `recovered_channel_acoustic_v3`, `mappingApplied: false`, `speakerSeparation: verified`, and `selfIdentity: unresolved`. Preserve v2 for the compatible single-speaker path.
-
-- [ ] **Step 4: Wire finalization**
-
-Run local projection before recovered-channel evidence and System projection. Commit only accepted separation; never convert `Local Speaker N` back to `Me`.
-
-- [ ] **Step 5: Verify green**
-
-Run the focused attribution and finalization tests and expect zero failures.
-
-### Task 3: Persist the trust vector and exact failure reasons
+### Task 3: Persist exact failure reasons
 
 **Files:**
 - Modify: `src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts`
@@ -83,7 +41,7 @@ Run the focused attribution and finalization tests and expect zero failures.
 
 - [ ] **Step 1: Write failing persistence tests**
 
-Assert canonical commit accepts verified separation with unresolved identity, writes `speakerAttributionVerified: false` and `speakerSeparationVerified: true`, and permits notes processing. Assert `remote_speech_unaccounted` and attribution rejection reasons survive `FAIL_FINAL_TRANSCRIPTION` into the integrity envelope.
+Assert canonical commit requires verified attribution and writes `speakerAttributionVerified: true`. Assert `remote_speech_unaccounted` and attribution rejection reasons survive `FAIL_FINAL_TRANSCRIPTION` into the integrity envelope.
 
 - [ ] **Step 2: Verify red**
 
@@ -91,7 +49,7 @@ Run the focused persisted-finalization, coordinator, trust-envelope, and DB test
 
 - [ ] **Step 3: Implement the compatibility-safe persistence change**
 
-Accept `isSpeakerSeparatedAttribution` at canonical commit, derive both booleans, allow the optional trust key in schema-v2 parsing, forward bounded reason arrays through IPC, and persist them without transcript text or paths.
+Require verified recovered-channel attribution at canonical commit, allow the optional legacy separation key in schema-v2 parsing, forward bounded reason arrays through IPC, and persist them without transcript text or paths.
 
 - [ ] **Step 4: Verify green**
 

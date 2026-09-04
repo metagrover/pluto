@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  isSpeakerSeparatedAttribution,
-  isVerifiedSpeakerAttribution,
-} from '../../src/utils/speakerAttributionTrust';
+import { isVerifiedSpeakerAttribution } from '../../src/utils/speakerAttributionTrust';
 
 describe('speaker attribution trust', () => {
-  it('allows safe anonymous separation without claiming owner identity', () => {
+  it('does not treat anonymous microphone separation as verified identity', () => {
     const attribution = {
       source: 'recovered_channel_acoustic_v3' as const,
       confidence: 0.94,
@@ -16,7 +13,6 @@ describe('speaker attribution trust', () => {
       selfIdentity: 'unresolved' as const,
     };
 
-    expect(isSpeakerSeparatedAttribution(attribution)).toBe(true);
     expect(isVerifiedSpeakerAttribution(attribution)).toBe(false);
   });
 });

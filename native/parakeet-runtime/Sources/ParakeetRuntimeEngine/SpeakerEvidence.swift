@@ -19,6 +19,12 @@ public protocol SpeakerEvidenceDriving: Sendable {
     ) async throws -> SpeakerEvidenceOutput
 }
 
+func isExpectedDiarizationSilence(_ error: Error) -> Bool {
+    guard let error = error as? OfflineDiarizationError else { return false }
+    if case .noSpeechDetected = error { return true }
+    return false
+}
+
 public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     private let diarizer: any OfflineSpeakerDiarizing
     private let energyAnalyzer: any SpeakerEnergyAnalyzing
@@ -44,9 +50,10 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     ) async throws -> SpeakerEvidenceOutput {
         let totalStart = ContinuousClock.now
         let diarizationStart = ContinuousClock.now
+        // Remote participants are mixed together on the system channel. The
+        // microphone is user speech plus possible system echo, so it must not
+        // be diarized as a source of local identity.
         let turns = try await diarizer.diarize(audioURL: systemURL)
-        try Task.checkCancellation()
-        let micTurns = try await diarizer.diarize(audioURL: micURL)
         let diarizationMs = elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
 
@@ -58,7 +65,6 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
 
         return SpeakerEvidenceOutput(
             turns: turns,
-            micTurns: micTurns,
             energyWindows: windows,
             provenance: SpeakerEvidenceProvenance(
                 modelIdentifier: manifest.identifier,
@@ -108,7 +114,12 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
                 prepared = true
             }
             try Task.checkCancellation()
-            let result = try await manager.process(audioURL)
+            let result: DiarizationResult
+            do {
+                result = try await manager.process(audioURL)
+            } catch where isExpectedDiarizationSilence(error) {
+                return []
+            }
             try Task.checkCancellation()
             let turns = result.segments.compactMap { segment -> SpeakerEvidenceTurn? in
                 let start = Double(segment.startTimeSeconds)

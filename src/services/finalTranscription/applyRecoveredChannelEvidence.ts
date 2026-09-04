@@ -36,61 +36,17 @@ export const applyRecoveredChannelEvidence = <
     modelRevision: string;
     artifactDigest: string;
   };
-  localDiarization?: {
-    applied: boolean;
-    multipleSpeakers: boolean;
-    confidence: number;
-    clusterCount: number;
-    labeledSegmentCount: number;
-  };
 }): {
   accepted: boolean;
   segments: T[];
   attribution: StoredTranscriptSpeakerAttribution;
-  reasons:
-    | ['low_attribution_confidence']
-    | ['low_speaker_separation_confidence']
-    | [];
+  reasons: ['low_attribution_confidence'] | [];
 } => {
-  if (input.localDiarization?.multipleSpeakers) {
-    const accepted =
-      input.localDiarization.applied &&
-      input.localDiarization.confidence >= MINIMUM_ATTRIBUTION_CONFIDENCE;
-    return {
-      accepted,
-      segments: input.segments.map((segment) =>
-        segment.speaker === 'Me'
-          ? ({ ...segment, speaker: 'Unknown' } as T)
-          : ({ ...segment } as T),
-      ),
-      reasons: accepted ? [] : ['low_speaker_separation_confidence'],
-      attribution: {
-        source: 'recovered_channel_acoustic_v3',
-        confidence: input.localDiarization.confidence,
-        diarizationAttempted: true,
-        mappingApplied: false,
-        ...(accepted ? {} : { fallbackReason: 'low_confidence' as const }),
-        nearEndEvidenceAttempted: true,
-        speakerSeparation: accepted ? 'verified' : 'unresolved',
-        selfIdentity: 'unresolved',
-        localDiarization: {
-          attempted: true,
-          input: 'mic_audio',
-          applied: input.localDiarization.applied,
-          confidence: input.localDiarization.confidence,
-          clusterCount: input.localDiarization.clusterCount,
-          labeledSegmentCount: input.localDiarization.labeledSegmentCount,
-        },
-        engineVersion: `${input.provenance.runtimeVersion}@${input.provenance.modelRevision}`,
-        modelChecksums: [input.provenance.artifactDigest],
-      },
-    };
-  }
   const systemSegments = input.segments.filter(
     (segment) => segment.speaker === 'Them',
   );
   const segments = input.segments.map((segment) => {
-    if (segment.speaker !== 'Me') {
+    if (segment.speaker === 'Them' || segment.speaker === 'Unknown') {
       return { ...segment } as T;
     }
     const duration = Math.max(0.01, segment.endTime - segment.startTime);

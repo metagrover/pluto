@@ -1,9 +1,6 @@
 import type { Meeting } from '../../types.ts';
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
-import {
-  isSpeakerSeparatedAttribution,
-  isVerifiedSpeakerAttribution,
-} from '../../utils/speakerAttributionTrust.ts';
+import { isVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust.ts';
 import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
@@ -177,7 +174,7 @@ export const runPersistedMeetingFinalTranscription = async (
         } = commit.metadata;
         if (
           !speakerAttribution ||
-          !isSpeakerSeparatedAttribution(speakerAttribution)
+          !isVerifiedSpeakerAttribution(speakerAttribution)
         ) {
           throw new Error(
             'invalid_transcript_trust_candidate:final_transcription_validated:speaker_attribution_unverified',
@@ -223,9 +220,7 @@ export const runPersistedMeetingFinalTranscription = async (
           schemaVersion: 2,
           state: 'validated',
           causes: [],
-          speakerAttributionVerified:
-            isVerifiedSpeakerAttribution(speakerAttribution),
-          speakerSeparationVerified: true,
+          speakerAttributionVerified: true,
           evidenceProvenance: integrity.evidenceProvenance,
           activityEvidence: integrity.activityEvidence,
           evidence: commit.integrity,

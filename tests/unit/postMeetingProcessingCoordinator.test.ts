@@ -138,7 +138,7 @@ describe('post-meeting processing coordinator', () => {
     ).toBe(true);
   });
 
-  it('allows notes for a separated transcript whose self identity is unresolved', () => {
+  it('requires reprocessing when microphone identity was left unresolved', () => {
     const meeting = {
       id: 'anonymous-local-speakers',
       capture_journal_generation: 'generation-1',
@@ -170,8 +170,8 @@ describe('post-meeting processing coordinator', () => {
         },
       }),
     } as const;
-    expect(isParakeetValidatedMeeting(meeting)).toBe(true);
-    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
+    expect(isParakeetValidatedMeeting(meeting)).toBe(false);
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
   });
 
   it('offers explicit final-transcription retry for validated channel fallback', () => {
