@@ -270,6 +270,22 @@ describe('ParakeetFinalClient', () => {
     });
   });
 
+  it('accepts empty system diarization so finalization can fall back safely', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const response = speakerEvidenceSuccess(String(child.writes[0].id));
+    response.result.speakerEvidence.turns = [];
+    child.respond(response);
+
+    await expect(request).resolves.toMatchObject({ turns: [] });
+  });
+
   it('rejects malformed speaker evidence and out-of-root evidence paths', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

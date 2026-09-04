@@ -44,10 +44,12 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     ) async throws -> SpeakerEvidenceOutput {
         let totalStart = ContinuousClock.now
         let diarizationStart = ContinuousClock.now
-        let turns = try await diarizer.diarize(audioURL: mixedURL)
+        // Remote participants are mixed together on the system channel. Keeping
+        // the microphone out of this pass prevents the local speaker from
+        // consuming or splitting a remote cluster identity.
+        let turns = try await diarizer.diarize(audioURL: systemURL)
         let diarizationMs = elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
-        guard !turns.isEmpty else { throw RuntimeFailure.diarizationFailed }
 
         let energyStart = ContinuousClock.now
         let windows = try await energyAnalyzer.analyze(micURL: micURL, systemURL: systemURL)
@@ -120,7 +122,6 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
                     cluster: segment.speakerId
                 )
             }
-            guard !turns.isEmpty else { throw RuntimeFailure.diarizationFailed }
             return turns.sorted { left, right in
                 left.startTime == right.startTime
                     ? left.endTime < right.endTime

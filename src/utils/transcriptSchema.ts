@@ -18,7 +18,7 @@ import type {
   TranscriptLifecycleStatus,
 } from './transcriptIntegrity.ts';
 
-export const TRANSCRIPT_PIPELINE_VERSION = '3.0.0';
+export const TRANSCRIPT_PIPELINE_VERSION = '3.1.0';
 
 export type CanonicalTranscriptSource = 'mic' | 'mix' | 'recovered_channels';
 export type TranscriptPipelineMode =
@@ -85,6 +85,19 @@ export type StoredTranscriptSpeakerAttribution = {
   injectedLocalWindows?: number;
   falseMeEvidenceSeconds?: number;
   missedMeEvidenceSeconds?: number;
+  remoteDiarization?: {
+    attempted: true;
+    input: 'system_audio';
+    applied: boolean;
+    confidence: number;
+    clusterCount: number;
+    labeledSegmentCount: number;
+    fallbackReason?:
+      | 'no_system_speech'
+      | 'no_diarization_segments'
+      | 'not_enough_speakers'
+      | 'low_coverage';
+  };
 };
 
 export type StoredTranscriptIntegrity = TranscriptIntegrityEvidence & {

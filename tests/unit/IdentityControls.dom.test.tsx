@@ -215,6 +215,129 @@ describe('identity controls', () => {
     expect(container.textContent).toContain('recheck pending');
   });
 
+  it('offers calendar attendees as direct choices for anonymous remote speakers', async () => {
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      people: [{ id: 'person-sam', name: 'Sam Lee' }],
+    });
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          attendeeNames={['Sam Lee', 'Jordan Doe']}
+        />,
+      ),
+    );
+    await click('Speaker identities');
+    expect(container.textContent).toContain('Jordan Doe');
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      revision: 5,
+      people: [{ id: 'person-sam', name: 'Sam Lee' }],
+      bindings: [
+        {
+          speaker: 'Remote Speaker 1',
+          personId: 'person-sam',
+          individual: true,
+          source: 'user',
+          sourceRevision: 'source-1',
+          evidence: [],
+        },
+      ],
+    });
+    await click('Sam Lee');
+    expect(invoke).toHaveBeenLastCalledWith('SET_MEETING_IDENTITY_BINDING', {
+      meetingId: 'meeting-a',
+      speaker: 'Remote Speaker 1',
+      personId: 'person-sam',
+      individual: true,
+      expectedRevision: 4,
+    });
+  });
+
+  it('does not offer an ambiguous same-name person as a direct calendar choice', async () => {
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      people: [
+        { id: 'person-sam-a', name: 'Sam Lee' },
+        { id: 'person-sam-b', name: 'Sam Lee' },
+      ],
+    });
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          attendeeNames={['Sam Lee']}
+        />,
+      ),
+    );
+    await click('Speaker identities');
+
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Sam Lee',
+      ),
+    ).toBe(false);
+  });
+
+  it('does not collapse two same-name calendar attendees into one direct choice', async () => {
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      people: [],
+    });
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          attendeeNames={['Sam Lee', 'Sam Lee']}
+        />,
+      ),
+    );
+    await click('Speaker identities');
+
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === 'Sam Lee',
+      ),
+    ).toBe(false);
+  });
+
+  it('publishes confirmed display names when identity state loads', async () => {
+    const onDisplayNamesChange = vi.fn();
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      people: [{ id: 'person-avery', name: 'Avery Chen' }],
+      bindings: [
+        {
+          speaker: 'Remote Speaker 1',
+          personId: 'person-avery',
+          individual: true,
+          source: 'user',
+          sourceRevision: 'source-1',
+          evidence: [],
+        },
+      ],
+    });
+
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          onDisplayNamesChange={onDisplayNamesChange}
+        />,
+      ),
+    );
+
+    expect(onDisplayNamesChange).toHaveBeenLastCalledWith({
+      'Remote Speaker 1': 'Avery Chen',
+    });
+  });
+
   it('confirms an unnamed individual without inventing a person', async () => {
     await openMeeting();
     await confirmScope();

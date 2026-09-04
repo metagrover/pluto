@@ -9,6 +9,17 @@ private struct FixtureDiarizer: OfflineSpeakerDiarizing {
     func diarize(audioURL _: URL) async throws -> [SpeakerEvidenceTurn] { turns }
 }
 
+private actor CapturingDiarizer: OfflineSpeakerDiarizing {
+    private var receivedURL: URL?
+
+    func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn] {
+        receivedURL = audioURL
+        return [SpeakerEvidenceTurn(startTime: 0, endTime: 1, cluster: "S1")]
+    }
+
+    func capturedURL() -> URL? { receivedURL }
+}
+
 private struct FixtureEnergyAnalyzer: SpeakerEnergyAnalyzing {
     let windows: [SpeakerEnergyWindow]
 
@@ -24,6 +35,27 @@ private struct CancellingDiarizer: OfflineSpeakerDiarizing {
 }
 
 final class FluidAudioSpeakerEvidenceTests: XCTestCase {
+    func testCoordinatorDiarizesOnlyTheIsolatedSystemRecording() async throws {
+        let diarizer = CapturingDiarizer()
+        let coordinator = SpeakerEvidenceCoordinator(
+            diarizer: diarizer,
+            energyAnalyzer: FixtureEnergyAnalyzer(windows: [
+                SpeakerEnergyWindow(startTime: 0, endTime: 0.1, micRms: 0, systemRms: 0.2)
+            ]),
+            manifest: ProductionDiarizationManifest.current,
+            runtimeVersion: "fluidaudio-test"
+        )
+
+        _ = try await coordinator.analyze(
+            mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
+            micURL: URL(fileURLWithPath: "/approved/mic.wav"),
+            systemURL: URL(fileURLWithPath: "/approved/system.wav")
+        )
+
+        let capturedURL = await diarizer.capturedURL()
+        XCTAssertEqual(capturedURL?.path, "/approved/system.wav")
+    }
+
     func testCoordinatorReturnsOnlyAnonymousTurnsEnergyAndPinnedProvenance() async throws {
         let manifest = ProductionDiarizationManifest.current
         let coordinator = SpeakerEvidenceCoordinator(
@@ -51,7 +83,7 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(output.timings.totalMs, 0)
     }
 
-    func testCoordinatorRejectsEmptyDiarization() async throws {
+    func testCoordinatorPreservesEmptyDiarizationForFailClosedFallback() async throws {
         let coordinator = SpeakerEvidenceCoordinator(
             diarizer: FixtureDiarizer(turns: []),
             energyAnalyzer: FixtureEnergyAnalyzer(windows: [
@@ -61,16 +93,14 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
             runtimeVersion: "fluidaudio-test"
         )
 
-        do {
-            _ = try await coordinator.analyze(
-                mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
-                micURL: URL(fileURLWithPath: "/approved/mic.wav"),
-                systemURL: URL(fileURLWithPath: "/approved/system.wav")
-            )
-            XCTFail("Expected diarization failure")
-        } catch let failure as RuntimeFailure {
-            XCTAssertEqual(failure, .diarizationFailed)
-        }
+        let output = try await coordinator.analyze(
+            mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
+            micURL: URL(fileURLWithPath: "/approved/mic.wav"),
+            systemURL: URL(fileURLWithPath: "/approved/system.wav")
+        )
+
+        XCTAssertTrue(output.turns.isEmpty)
+        XCTAssertEqual(output.energyWindows.count, 1)
     }
 
     func testCoordinatorPreservesCancellation() async throws {

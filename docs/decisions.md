@@ -776,6 +776,15 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Trust boundary:** Attribution confidence is the duration-weighted share of retained speech backed by System origin or mic-exclusive evidence. Absence of `Unknown` labels is not evidence. The candidate fails closed below 0.8 confidence, preserves genuine double-talk when mic-exclusive evidence is present, and must beat the shipped transcript in private review before merge.
 - **Consequences:** This candidate is a source-correlation mask, not waveform AEC. Complete source-by-source Parakeet and Whisper passes plus isolated-window review are comparison evidence, not automatic ground truth; disagreements stay uncertain. A production residual-mic/AEC stage remains a separately benchmarked improvement and must prove delay/drift handling and local-speech preservation before replacing the mask.
 
+## 2026-09-04 - Separate remote speaker clusters from local identity
+
+- **Status:** Accepted and implemented.
+- **Source:** [Issue #749](https://github.com/metagrover/pluto/issues/749), `docs/superpowers/specs/2026-09-04-remote-participant-diarization-design.md`.
+- **Decision:** Offline FluidAudio diarization receives only the isolated System recording. Recovered microphone/System evidence remains authoritative for `Me`, `Them`, and `Unknown`; a second pass may replace only accepted `Them` speech with deterministic meeting-local `Remote Speaker N` labels using Parakeet word bounds.
+- **Trust boundary:** Pluto publishes anonymous remote labels only when at least two clusters each have one second of System-speech support and aligned coverage reaches 0.8. Short-lived, overlapping, missing, or under-covered evidence falls back to `Them` and records a content-free reason. Remote clustering never changes `Me` or `Unknown`.
+- **Identity boundary:** Anonymous cluster labels remain canonical transcript evidence. A user-confirmed meeting identity binding changes the displayed name across that meeting and rechecks derived ownership without rewriting acoustic evidence. Calendar attendees are choices, not automatic identity claims; conversational cues and stored voiceprints remain outside this release.
+- **Privacy:** Audio and diarization stay inside the checksum-pinned native CoreML runtime. No audio, embedding, transcript, roster, or person data is sent to an external service.
+
 ## 2026-09-02 - Keep idle dreaming proposal-only and evidence-bound
 
 - **Status:** Accepted and implemented.

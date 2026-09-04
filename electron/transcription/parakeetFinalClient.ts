@@ -517,7 +517,6 @@ export class ParakeetFinalClient {
       Number(entry.endTime) > Number(entry.startTime);
     const turnsValid =
       Array.isArray(candidate.turns) &&
-      candidate.turns.length > 0 &&
       candidate.turns.every(
         (turn) =>
           finiteRange(turn) &&
