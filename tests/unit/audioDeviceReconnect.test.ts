@@ -60,7 +60,32 @@ describe('AudioManager dynamic audio device reconnect wiring', () => {
 
   it('awaits old recorder stop and journal drain before starting replacement recorder', () => {
     expect(source).toMatch(
-      /addEventListener\(['"]stop['"][\s\S]*?oldRecorder\.stop\(\)[\s\S]*?drain\(\)/u,
+      /await waitForMediaRecorderStop\(oldRecorder, 500\)[\s\S]*?drain\(\)/u,
+    );
+  });
+
+  it('starts the initial MediaRecorder before publishing recording state', () => {
+    const initialStart = source.indexOf(
+      'await startMicMediaRecorder(micStream, true)',
+    );
+    const recordingPublication = source.indexOf(
+      'isRecordingRef.current = true',
+      initialStart,
+    );
+
+    expect(initialStart).toBeGreaterThan(-1);
+    expect(recordingPublication).toBeGreaterThan(initialStart);
+  });
+
+  it('does not treat the recorder shutdown timeout as a successful rotation', () => {
+    expect(source).toContain('waitForMediaRecorderStop');
+    expect(source).not.toContain('setTimeout(done, 500)');
+  });
+
+  it('reuses the stop-event barrier even after MediaRecorder reports inactive', () => {
+    expect(source).toContain('if (oldRecorder) {');
+    expect(source).not.toContain(
+      "oldRecorder && oldRecorder.state !== 'inactive'",
     );
   });
 

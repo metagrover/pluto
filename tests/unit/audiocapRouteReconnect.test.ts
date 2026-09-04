@@ -1,6 +1,35 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+const compileAudioCap = () => {
+  const outputDirectory = mkdtempSync(join(tmpdir(), 'pluto-audiocap-test-'));
+  const outputPath = join(outputDirectory, 'audiocap');
+  const sourceDirectory = 'resources/swift/audiocap';
+  const sources = readdirSync(sourceDirectory)
+    .filter((entry) => entry.endsWith('.swift'))
+    .map((entry) => join(sourceDirectory, entry));
+
+  execFileSync('xcrun', [
+    'swiftc',
+    ...sources,
+    '-o',
+    outputPath,
+    '-framework',
+    'CoreAudio',
+    '-framework',
+    'AudioToolbox',
+    '-framework',
+    'AVFoundation',
+  ]);
+
+  return {
+    outputPath,
+    cleanup: () => rmSync(outputDirectory, { recursive: true, force: true }),
+  };
+};
 
 describe('Native AudioCap dynamic route listener and watchdog contract', () => {
   const mainSource = readFileSync(
@@ -70,6 +99,22 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     expect(mainSource).toMatch(/self\.tapGeneration\s*==\s*currentGeneration/u);
   });
 
+  it('drops stale tap generations before writing PCM with a generation-local resampler', () => {
+    const callbackStart = mainSource.indexOf('try tap.start(on: queue)');
+    const callbackEnd = mainSource.indexOf('\n        }\n    }', callbackStart);
+    const callbackBody = mainSource.slice(callbackStart, callbackEnd);
+    const generationGuard = callbackBody.indexOf(
+      'self.tapGeneration == currentGeneration',
+    );
+    const stdoutWrite = callbackBody.indexOf('stdout.write');
+
+    expect(mainSource).toContain(
+      'let audioStreamer = AudioStreamer(inputSampleRate: desc.mSampleRate)',
+    );
+    expect(generationGuard).toBeGreaterThan(-1);
+    expect(stdoutWrite).toBeGreaterThan(generationGuard);
+  });
+
   it('rejects out-of-band frequencies (executable stopband test) in native AudioStreamer', () => {
     const streamerSource = readFileSync(
       'resources/swift/audiocap/AudioStreamer.swift',
@@ -78,15 +123,17 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     expect(streamerSource).toContain('sinc');
     expect(streamerSource).toMatch(/cutoff|filterRadius|Blackman/u);
 
-    // Executable test on compiled binary
-    const binOutput = execFileSync(
-      'resources/bin/audiocap',
-      ['--test-stopband'],
-      { encoding: 'utf8' },
-    );
-    const parsed = JSON.parse(binOutput.trim().split('\n').pop()!);
-    expect(parsed.status).toBe('ok');
-    expect(parsed.stopbandRms).toBeLessThan(0.05);
-    expect(parsed.passbandRms).toBeGreaterThan(0.65);
+    const compiled = compileAudioCap();
+    try {
+      const binOutput = execFileSync(compiled.outputPath, ['--test-stopband'], {
+        encoding: 'utf8',
+      });
+      const parsed = JSON.parse(binOutput.trim().split('\n').pop()!);
+      expect(parsed.status).toBe('ok');
+      expect(parsed.stopbandRms).toBeLessThan(0.05);
+      expect(parsed.passbandRms).toBeGreaterThan(0.65);
+    } finally {
+      compiled.cleanup();
+    }
   });
 });

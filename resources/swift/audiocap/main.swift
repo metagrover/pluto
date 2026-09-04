@@ -73,7 +73,6 @@ class AudioCapCLI {
     private var watchdogRetries = 0
     private let maxWatchdogRetries = 2
     private var lastFrameTime: Date = Date()
-    private var audioStreamer: AudioStreamer?
     let targetSampleRate: Double = 48000.0
     
     init(includeSelf: Bool, targetPids: [Int32]?) {
@@ -186,10 +185,6 @@ class AudioCapCLI {
         }
     }
 
-    private func normalizeTo48k(_ samples: [Float]) -> [Float] {
-        return audioStreamer?.resampleTo48k(samples) ?? samples
-    }
-
     private func startTapStreaming(tap: ProcessTap, desc: AudioStreamBasicDescription) throws {
         let flags = desc.mFormatFlags
         let nonInterleaved = (flags & UInt32(kAudioFormatFlagIsNonInterleaved)) != 0
@@ -205,7 +200,7 @@ class AudioCapCLI {
         }
 
         let currentGeneration = self.tapGeneration
-        self.audioStreamer = AudioStreamer(inputSampleRate: desc.mSampleRate)
+        let audioStreamer = AudioStreamer(inputSampleRate: desc.mSampleRate)
         let stdout = FileHandle.standardOutput
         let streamChannels = max(1, Int(desc.mChannelsPerFrame))
         try tap.start(on: queue) { [weak self] (_, inInputData, _, _, _) in
@@ -255,13 +250,13 @@ class AudioCapCLI {
                 }
                 mono = mixed
             }
-            let normalized = self?.normalizeTo48k(mono) ?? mono
+            let normalized = audioStreamer.resampleTo48k(mono)
             let frameCount = UInt64(normalized.count)
-            normalized.withUnsafeBytes { bytes in
-                try? stdout.write(contentsOf: Data(bytes))
-            }
             self?.controlQueue.async { [weak self] in
                 guard let self = self, self.tapGeneration == currentGeneration else { return }
+                normalized.withUnsafeBytes { bytes in
+                    try? stdout.write(contentsOf: Data(bytes))
+                }
                 self.framesReceived += frameCount
                 self.tapFramesReceived += frameCount
                 self.lastFrameTime = Date()

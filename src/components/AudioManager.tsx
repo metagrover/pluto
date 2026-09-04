@@ -36,6 +36,7 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
+import { waitForMediaRecorderStop } from '../utils/mediaRecorderLifecycle';
 import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
@@ -269,7 +270,11 @@ export const AudioManager = ({
   > | null>(null);
   const activeDeviceChangeListenerRef = useRef<(() => void) | null>(null);
   const startMicMediaRecorderRef = useRef<
-    ((stream: MediaStream) => Promise<void>) | null
+    | ((
+        stream: MediaStream,
+        allowBeforeRecording?: boolean,
+      ) => Promise<boolean>)
+    | null
   >(null);
   const deviceChangeDebounceMs = 200;
   const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -1081,33 +1086,26 @@ export const AudioManager = ({
       disableMicChunkTranscriptionRef.current = false;
       micWebmInitSegmentRef.current = null;
 
-      const startMicMediaRecorder = async (stream: MediaStream) => {
+      const startMicMediaRecorder = async (
+        stream: MediaStream,
+        allowBeforeRecording = false,
+      ): Promise<boolean> => {
         const oldRecorder = micRecorderRef.current;
-        if (oldRecorder && oldRecorder.state !== 'inactive') {
-          try {
-            await new Promise<void>((resolve) => {
-              let finished = false;
-              const done = () => {
-                if (!finished) {
-                  finished = true;
-                  resolve();
-                }
-              };
-              oldRecorder.addEventListener('stop', done, { once: true });
-              try {
-                oldRecorder.stop();
-              } catch {
-                done();
-              }
-              setTimeout(done, 500);
-            });
-            await captureActivitySessionRef.current?.drain();
-          } catch {
-            // ignore
+        if (oldRecorder) {
+          const stopped = await waitForMediaRecorderStop(oldRecorder, 500);
+          if (!stopped) {
+            console.warn(
+              '[Pluto] Timed out stopping microphone recorder during device reconfiguration',
+            );
+            return false;
           }
+          await captureActivitySessionRef.current?.drain();
         }
-        if (!isRecordingRef.current || stopInFlightRef.current) {
-          return;
+        if (
+          (!allowBeforeRecording && !isRecordingRef.current) ||
+          stopInFlightRef.current
+        ) {
+          return false;
         }
         const micRecorder = new MediaRecorder(stream, getRecorderOptions());
         micRecorderRef.current = micRecorder;
@@ -1244,6 +1242,7 @@ export const AudioManager = ({
 
         micRecorder.start(CHUNK_SECONDS * 1000);
         console.log('[Pluto] Microphone recording started.');
+        return true;
       };
       startMicMediaRecorderRef.current = startMicMediaRecorder;
 
@@ -1253,7 +1252,10 @@ export const AudioManager = ({
         // otherwise system timestamps can extend beyond the journal interval.
         systemPcmChunksRef.current = [];
         systemPcmCarryoverBytesRef.current = new Uint8Array(0);
-        startMicMediaRecorder(micStream);
+        const recorderStarted = await startMicMediaRecorder(micStream, true);
+        if (!recorderStarted) {
+          throw new Error('microphone_recorder_start_failed');
+        }
       }
 
       // Only expose the recording state once live PCM and durable microphone
@@ -1536,7 +1538,11 @@ export const AudioManager = ({
 
       // Recreate MediaRecorder with the new stream to preserve the 5-second journal cadence
       if (startMicMediaRecorderRef.current) {
-        await startMicMediaRecorderRef.current(newMicStream);
+        const recorderStarted =
+          await startMicMediaRecorderRef.current(newMicStream);
+        if (!recorderStarted && !isSessionAborted()) {
+          throw new Error('microphone_recorder_reconnect_failed');
+        }
       }
 
       if (isSessionAborted()) {
