@@ -14,6 +14,7 @@ export interface AudioResampler {
   getOutputSampleRate(): number;
   setInputSampleRate(newRate: number): void;
   process(input: Float32Array): Float32Array;
+  flush(): Float32Array;
   reset(): void;
 }
 
@@ -126,11 +127,59 @@ export function createAudioResampler(
     return new Float32Array(outSamples);
   };
 
+  const flush = (): Float32Array => {
+    if (carryover.length === 0) {
+      reset();
+      return new Float32Array(0);
+    }
+    const remaining = carryover;
+    carryover = new Float32Array(0);
+    const outSamples: number[] = [];
+    const maxInputIndex = remaining.length - 1;
+    const windowRadius = Math.max(1, Math.round(ratio));
+
+    while (phase <= maxInputIndex) {
+      const center = phase;
+      const startIdx = Math.max(0, Math.floor(center - windowRadius * 0.5));
+      const endIdx = Math.min(
+        maxInputIndex,
+        Math.ceil(center + windowRadius * 0.5),
+      );
+
+      if (ratio > 1.0) {
+        let sum = 0;
+        let weightSum = 0;
+        for (let i = startIdx; i <= endIdx; i++) {
+          const dist = Math.abs(i - center);
+          const weight = Math.max(0, 1 - dist / (windowRadius * 0.5 + 0.5));
+          if (weight > 0) {
+            sum += remaining[i] * weight;
+            weightSum += weight;
+          }
+        }
+        outSamples.push(
+          weightSum > 0 ? sum / weightSum : remaining[Math.round(center)],
+        );
+      } else {
+        const i0 = Math.floor(center);
+        const i1 = Math.min(maxInputIndex, i0 + 1);
+        const frac = center - i0;
+        const s0 = remaining[i0];
+        const s1 = remaining[i1];
+        outSamples.push(s0 + frac * (s1 - s0));
+      }
+      phase += ratio;
+    }
+    reset();
+    return new Float32Array(outSamples);
+  };
+
   return {
     getInputSampleRate: () => inRate,
     getOutputSampleRate: () => outRate,
     setInputSampleRate,
     process,
+    flush,
     reset,
   };
 }

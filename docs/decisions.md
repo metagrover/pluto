@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-04 - Dynamic audio device reconnection with continuous 16kHz resampling
+
+- **Status:** Accepted
+- **Source:** [Issue #746](https://github.com/metagrover/pluto/issues/746), owner direction on 2026-09-04
+- **Decision:** Pluto listens dynamically for audio device changes (`devicechange` in renderer and CoreAudio property listeners in native `audiocap`), seamlessly reconfigures microphone and system-audio tap pipelines during active capture, normalizes all microphone PCM at the capture boundary to 16kHz Float32 via streaming fractional resampling with carryover buffers, drains in-flight audio before tearing down defunct nodes, and reports a calm, non-blocking `'reconfiguring'` health status instead of showing disruptive modals or failing capture.
+- **Rationale:** Disconnecting or reconnecting Bluetooth headphones (e.g. AirPods) or USB audio interfaces previously caused device routing freezes, silent capture deadlocks, or sample rate mismatches against Parakeet EOU's strict timestamp contracts. Handling device switches dynamically with bounded debounce (<200ms) and automatic frame watchdogs ensures uninterrupted recording without requiring user intervention.
+- **Consequences:** Microphones with hardware rates of 44.1kHz, 48kHz, or other rates are resampled immediately to 16kHz; capture journals receive continuous, valid PCM across device transitions; temporary device switches show non-distracting status updates without marking capture as broken or requiring attention unless hardware acquisition is permanently denied.
+
 ## 2026-09-03 - User setting to optionally include transcript in meeting notes export
 
 - **Status:** Accepted

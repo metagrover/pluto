@@ -136,4 +136,21 @@ describe('audioResampler', () => {
     const output = resampler.process(new Float32Array(0));
     expect(output.length).toBe(0);
   });
+
+  it('flushes residual carryover samples on stream end', () => {
+    const resampler = createAudioResampler({
+      inputSampleRate: 44100,
+      outputSampleRate: 16000,
+    });
+    // Send a non-integer multiple chunk (e.g. 500 samples)
+    const input = new Float32Array(500);
+    for (let i = 0; i < input.length; i++) input[i] = 0.5;
+    const chunkOut = resampler.process(input);
+    expect(chunkOut.length).toBeGreaterThan(0);
+
+    const flushed = resampler.flush();
+    expect(flushed).toBeInstanceOf(Float32Array);
+    // After flush, another flush should return empty
+    expect(resampler.flush().length).toBe(0);
+  });
 });
