@@ -519,7 +519,7 @@ export const AudioManager = ({
 
     try {
       const readiness = (await window.ipcRenderer.invoke(
-        'RECORDING_READINESS_STATUS',
+        'RECORDING_READINESS_PREPARE',
       )) as { ready: boolean; blockers: string[] };
       if (!readiness.ready) {
         console.warn('[Pluto] Recording readiness failed:', readiness.blockers);
