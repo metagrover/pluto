@@ -59,10 +59,168 @@ class AudioCapCLI {
     private let includeSelf: Bool
     private let targetPids: [Int32]?
     private var probePlayerProcess: Process?
+
+    private let queue = DispatchQueue(label: "AudioCapQueue")
+    private let controlQueue = DispatchQueue(label: "AudioCapControlQueue")
+    private var isRunning = false
+    private var framesReceived: UInt64 = 0
+    private var watchdogTimer: DispatchSourceTimer?
+    private var reconnectWorkItem: DispatchWorkItem?
+    private var watchdogRetries = 0
+    private let maxWatchdogRetries = 2
+    private var lastFrameTime: Date = Date()
     
     init(includeSelf: Bool, targetPids: [Int32]?) {
         self.includeSelf = includeSelf
         self.targetPids = targetPids
+    }
+
+    private func registerRouteListeners() {
+        let selectors: [AudioObjectPropertySelector] = [
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioHardwarePropertyDevices
+        ]
+        for selector in selectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                controlQueue
+            ) { [weak self] _, _ in
+                guard let self = self, self.isRunning else { return }
+                self.handleRouteChangedDebounced()
+            }
+        }
+    }
+
+    private func handleRouteChangedDebounced() {
+        reconnectWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isRunning else { return }
+            fputs("[AudioCap] CoreAudio device change detected, reconfiguring tap...\n", stderr)
+            self.restartTap()
+        }
+        reconnectWorkItem = workItem
+        controlQueue.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    private func startWatchdogTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: controlQueue)
+        timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.isRunning else { return }
+            let now = Date()
+            let elapsedSinceFrame = now.timeIntervalSince(self.lastFrameTime)
+            if self.framesReceived == 0 && elapsedSinceFrame >= 3.0 {
+                if self.watchdogRetries < self.maxWatchdogRetries {
+                    self.watchdogRetries += 1
+                    fputs("[AudioCap] Watchdog: 0 frames received in 3.0s (retry \(self.watchdogRetries)/\(self.maxWatchdogRetries)), restarting tap...\n", stderr)
+                    self.restartTap()
+                } else {
+                    fputs("[AudioCap] Watchdog: 0 frames received after \(self.maxWatchdogRetries) retries.\n", stderr)
+                }
+            } else if self.framesReceived > 0 {
+                self.watchdogRetries = 0
+            }
+        }
+        timer.resume()
+        self.watchdogTimer = timer
+    }
+
+    private func restartTap() {
+        lastFrameTime = Date()
+        tap?.stop()
+        tap = nil
+        var attempts = 0
+        while attempts < 3 {
+            let foundTargets = refreshTapTargets()
+            if foundTargets, let tap = self.tap {
+                do {
+                    try tap.activate()
+                    if let desc = tap.tapStreamDescription {
+                        try startTapStreaming(tap: tap, desc: desc)
+                        fputs("[AudioCap] Tap restarted successfully.\n", stderr)
+                        return
+                    }
+                } catch {
+                    fputs("[AudioCap] Tap restart attempt \(attempts + 1) failed: \(error.localizedDescription)\n", stderr)
+                }
+            }
+            attempts += 1
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+    }
+
+    private func startTapStreaming(tap: ProcessTap, desc: AudioStreamBasicDescription) throws {
+        let flags = desc.mFormatFlags
+        let nonInterleaved = (flags & UInt32(kAudioFormatFlagIsNonInterleaved)) != 0
+        guard desc.mBitsPerChannel == 32,
+              (flags & UInt32(kAudioFormatFlagIsFloat)) != 0 else {
+            throw ProcessTapError.unsupportedTapFormat
+        }
+
+        let stdout = FileHandle.standardOutput
+        let streamChannels = max(1, Int(desc.mChannelsPerFrame))
+        try tap.start(on: queue) { [weak self] (_, inInputData, _, _, _) in
+            let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
+            let buffers = UnsafeMutableAudioBufferListPointer(mutableInputData).filter {
+                $0.mData != nil && $0.mDataByteSize >= MemoryLayout<Float>.size
+            }
+            guard !buffers.isEmpty else { return }
+
+            let mono: [Float]
+            if nonInterleaved {
+                let frameCount = buffers.map { buffer in
+                    let channels = max(1, Int(buffer.mNumberChannels))
+                    return Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / channels
+                }.min() ?? 0
+                guard frameCount > 0 else { return }
+
+                var mixed = [Float](repeating: 0, count: frameCount)
+                var contributingChannels = 0
+                for buffer in buffers {
+                    guard let data = buffer.mData else { continue }
+                    let channels = max(1, Int(buffer.mNumberChannels))
+                    let samples = data.assumingMemoryBound(to: Float.self)
+                    for frame in 0..<frameCount {
+                        for channel in 0..<channels {
+                            mixed[frame] += samples[(frame * channels) + channel]
+                        }
+                    }
+                    contributingChannels += channels
+                }
+                guard contributingChannels > 0 else { return }
+                let scale = 1.0 / Float(contributingChannels)
+                for frame in 0..<frameCount { mixed[frame] *= scale }
+                mono = mixed
+            } else {
+                guard let buffer = buffers.first, let data = buffer.mData else { return }
+                let availableSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                let frameCount = availableSamples / streamChannels
+                guard frameCount > 0 else { return }
+                let samples = data.assumingMemoryBound(to: Float.self)
+                var mixed = [Float](repeating: 0, count: frameCount)
+                for frame in 0..<frameCount {
+                    for channel in 0..<streamChannels {
+                        mixed[frame] += samples[(frame * streamChannels) + channel]
+                    }
+                    mixed[frame] /= Float(streamChannels)
+                }
+                mono = mixed
+            }
+            if let self = self {
+                self.framesReceived += UInt64(mono.count)
+                self.lastFrameTime = Date()
+            }
+            mono.withUnsafeBytes { bytes in
+                try? stdout.write(contentsOf: Data(bytes))
+            }
+        }
     }
 
     @discardableResult
@@ -92,7 +250,11 @@ class AudioCapCLI {
     }
     
     func start() {
-        let queue = DispatchQueue(label: "AudioCapQueue")
+        let queue = self.queue
+        isRunning = true
+        lastFrameTime = Date()
+        registerRouteListeners()
+        startWatchdogTimer()
         
         do {
             var attempts = 0
@@ -116,7 +278,7 @@ class AudioCapCLI {
 
                         let stdout = FileHandle.standardOutput
                         let streamChannels = max(1, Int(desc.mChannelsPerFrame))
-                        try tap.start(on: queue) { (_, inInputData, _, _, _) in
+                        try tap.start(on: queue) { [weak self] (_, inInputData, _, _, _) in
                             let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
                             let buffers = UnsafeMutableAudioBufferListPointer(mutableInputData).filter {
                                 $0.mData != nil && $0.mDataByteSize >= MemoryLayout<Float>.size
@@ -162,6 +324,10 @@ class AudioCapCLI {
                                     mixed[frame] /= Float(streamChannels)
                                 }
                                 mono = mixed
+                            }
+                            if let self = self {
+                                self.framesReceived += UInt64(mono.count)
+                                self.lastFrameTime = Date()
                             }
                             mono.withUnsafeBytes { bytes in
                                 try? stdout.write(contentsOf: Data(bytes))
