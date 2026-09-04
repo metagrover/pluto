@@ -132,34 +132,61 @@ final class ProcessTap {
         guard err == noErr else { throw ProcessTapError.processTapCreationError(err) }
         self.processTapID = tapID
         
-        // 2. Wrap in Aggregate Device
-        let systemOutputID = try AudioDeviceID.readDefaultSystemOutputDevice()
-        let outputUID = try systemOutputID.readDeviceUID()
-        let aggregateUID = UUID().uuidString
-        
-        let description: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "PlutoTap",
-            kAudioAggregateDeviceUIDKey: aggregateUID,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceIsStackedKey: false,
-            kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceSubDeviceListKey: [
-                [ kAudioSubDeviceUIDKey: outputUID ]
-            ],
-            kAudioAggregateDeviceTapListKey: [
-                [
-                    kAudioSubTapDriftCompensationKey: true,
-                    kAudioSubTapUIDKey: tapDescription.uuid.uuidString
+        // 2. Wrap in Aggregate Device with retry for transient bad object / device transitions
+        var aggregateCreated = false
+        var lastErr: OSStatus = noErr
+        for attempt in 1...3 {
+            do {
+                let systemOutputID = try AudioDeviceID.readDefaultSystemOutputDevice()
+                let outputUID = try systemOutputID.readDeviceUID()
+                let aggregateUID = UUID().uuidString
+                
+                let description: [String: Any] = [
+                    kAudioAggregateDeviceNameKey: "PlutoTap",
+                    kAudioAggregateDeviceUIDKey: aggregateUID,
+                    kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+                    kAudioAggregateDeviceIsPrivateKey: true,
+                    kAudioAggregateDeviceIsStackedKey: false,
+                    kAudioAggregateDeviceTapAutoStartKey: true,
+                    kAudioAggregateDeviceSubDeviceListKey: [
+                        [ kAudioSubDeviceUIDKey: outputUID ]
+                    ],
+                    kAudioAggregateDeviceTapListKey: [
+                        [
+                            kAudioSubTapDriftCompensationKey: true,
+                            kAudioSubTapUIDKey: tapDescription.uuid.uuidString
+                        ]
+                    ]
                 ]
-            ]
-        ]
+                
+                self.tapStreamDescription = try tapID.readAudioTapStreamBasicDescription()
+                
+                err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &self.aggregateDeviceID)
+                if err == noErr {
+                    aggregateCreated = true
+                    break
+                }
+                lastErr = err
+                // Check if bad object error (kAudioHardwareBadObjectError = 560947818 / '!obj')
+                if err == kAudioHardwareBadObjectError || err == 560947818 {
+                    logger.warning("Transient kAudioHardwareBadObjectError (\(err)) during aggregate device creation (attempt \(attempt)/3), retrying...")
+                    Thread.sleep(forTimeInterval: 0.1)
+                } else {
+                    break
+                }
+            } catch {
+                logger.warning("Attempt \(attempt)/3 failed to configure aggregate device: \(error.localizedDescription)")
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+        }
         
-        self.tapStreamDescription = try tapID.readAudioTapStreamBasicDescription()
+        guard aggregateCreated else {
+            AudioHardwareDestroyProcessTap(tapID)
+            self.processTapID = .unknown
+            throw ProcessTapError.aggregateDeviceCreationError(lastErr)
+        }
         
-        err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &self.aggregateDeviceID)
-        guard err == noErr else { throw ProcessTapError.aggregateDeviceCreationError(err) }
-        
+        isActivated = true
         logger.info("Tap Created. Aggregate ID: \(self.aggregateDeviceID)")
     }
     
@@ -190,6 +217,7 @@ final class ProcessTap {
             AudioHardwareDestroyProcessTap(processTapID)
             processTapID = .unknown
         }
+        isActivated = false
     }
     
     // Helper to find AudioObjectIDs for PIDs
