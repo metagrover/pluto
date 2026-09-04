@@ -215,6 +215,7 @@ const withOneRepair = async <T>(
   outputTokens: number,
   parse: (raw: string, repaired: boolean) => T,
   allowedSpans?: SourceSpan[],
+  allowModelRepair = true,
 ): Promise<T> => {
   const failureCode =
     task === 'notesAudit' ? 'notes_audit_invalid' : 'notes_writer_invalid';
@@ -252,6 +253,7 @@ const withOneRepair = async <T>(
         // A benchmark recovery candidate must pass the unchanged strict parser.
       }
     }
+    if (!allowModelRepair) throw new MeetingNotesError(failureCode);
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
@@ -404,6 +406,7 @@ const writeDraft = async (
       return parsed;
     },
     allowedSpans,
+    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   input.stageCache?.set(key, draft);
   return draft;
@@ -672,6 +675,7 @@ const auditDraft = async (
       };
     },
     evidenceSpans,
+    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   assertNotCancelled(input);
   return result;
@@ -1257,9 +1261,12 @@ const runMeetingNotes = async (
   assertNotCancelled(input);
   const sourceText = serializeSource(input);
   const knownTerms = knownTermsFor(input);
+  const compactEditor =
+    input.compactWriterContract && input.reviewProtocol === 'editor';
   if (
     input.compactWriterContract &&
-    input.hierarchyAuditStrategy !== 'deterministic_only'
+    input.hierarchyAuditStrategy !== 'deterministic_only' &&
+    !compactEditor
   ) {
     throw new MeetingNotesError(
       'notes_compact_writer_requires_deterministic_only',
@@ -1311,15 +1318,26 @@ const runMeetingNotes = async (
     userNotes: input.context.userNotes,
     knownTerms,
   });
+  const writerOutputTokens = input.compactWriterContract
+    ? COMPACT_WRITER_OUTPUT_TOKENS
+    : WRITER_OUTPUT_TOKENS;
   const capacity = planNotesCapacity({
     contextTokens: input.contextTokens,
     writerInputTokens: estimateNotesTokens(writerPrompt),
     auditBaseInputTokens: estimateNotesTokens(preliminaryAuditPrompt),
-    writerOutputTokens: WRITER_OUTPUT_TOKENS,
+    writerOutputTokens,
     auditOutputTokens: reviewOutputTokens(input),
     safetyTokens: SAFETY_TOKENS,
   });
-  if (capacity.mode !== 'direct') return runHierarchy(input, knownTerms);
+  if (capacity.mode !== 'direct') {
+    if (!compactEditor) return runHierarchy(input, knownTerms);
+    const hierarchyInput = {
+      ...input,
+      compactWriterContract: undefined,
+      reviewProtocol: undefined,
+    };
+    return runHierarchy(hierarchyInput, knownTerms);
+  }
 
   const draft = await writeDraft(
     input,

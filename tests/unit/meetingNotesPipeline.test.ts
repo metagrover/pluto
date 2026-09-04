@@ -122,6 +122,160 @@ it('uses one writer and one complete-document editor without segmentation or a t
   });
 });
 
+it('uses a compact writer and complete-document editor in exactly two calls without repair', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({
+        meetingType: 'general',
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return auditFor(request.prompt, source);
+  });
+  const onRepair = vi.fn();
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+    onRepair,
+  });
+
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
+  expect(
+    generate.mock.calls.map(([request]) => request.responseContract),
+  ).toEqual(['compact_draft', 'editor']);
+  expect(onRepair).not.toHaveBeenCalled();
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining(fixture.expectedAction),
+  ]);
+});
+
+it('fails a malformed compact writer without a model repair call', async () => {
+  const fixture = makeDirectNotesFixture();
+  const generate = vi.fn().mockResolvedValue('{');
+  const onRepair = vi.fn();
+
+  await expect(
+    generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      contextTokens: 16_384,
+      onRepair,
+    }),
+  ).rejects.toThrow('notes_writer_invalid');
+
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(onRepair).not.toHaveBeenCalled();
+});
+
+it('fails a malformed compact editor without a model repair call', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValue('{');
+  const onRepair = vi.fn();
+
+  await expect(
+    generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      contextTokens: 16_384,
+      onRepair,
+    }),
+  ).rejects.toThrow('notes_audit_invalid');
+
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(onRepair).not.toHaveBeenCalled();
+});
+
+it('keeps the existing writer contract when the compact direct pair does not fit', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'Agenda update. '.repeat(3_000) },
+  ]);
+  const span = { segment: 0, start: 0, end: 14 };
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
+    {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: source.segments[0]!.text.slice(0, span.end),
+      sourceText: source.segments[0]!.text.slice(0, span.end),
+      sourceRevision: source.revision,
+    },
+  ]);
+  let firstRequest: NotesRequest | undefined;
+
+  try {
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate: async (request) => {
+          firstRequest = request;
+          throw new Error('stop-after-first-hierarchy-request');
+        },
+        provider: 'ollama',
+        model: 'qwen3.5:9b',
+        contextTokens: 4_096,
+      }),
+    ).rejects.toThrow('stop-after-first-hierarchy-request');
+    expect(firstRequest?.responseContract).toBe('draft');
+  } finally {
+    plan.mockRestore();
+  }
+});
+
 it('can benchmark a direct draft with deterministic checks and no model audit', async () => {
   const fixture = makeDirectNotesFixture();
   const generate = vi.fn().mockResolvedValue(JSON.stringify(fixture.draft));
