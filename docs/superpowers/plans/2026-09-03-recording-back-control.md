@@ -19,7 +19,7 @@
 
 - [ ] **Step 1: Write failing style assertions**
 
-Require `.recording-back-home` to use 32-pixel square icon geometry, centered content, and the desktop titlebar offset. Require its `max-width: 980px` rule to reset that offset.
+Require `.recording-back-home` to use 32-pixel square icon geometry, centered content, and an absolute desktop titlebar position. Require its `max-width: 980px` rule to follow the narrower safe inset.
 
 - [ ] **Step 2: Verify the regression fails**
 
@@ -27,7 +27,7 @@ Run `pnpm exec vitest run tests/unit/recordingCaptureBarStyles.test.ts`. Expect 
 
 - [ ] **Step 3: Make the minimal component and CSS changes**
 
-Give the button `aria-label` and `title` values of `Back home`, retain a screen-reader-only label, and style it as a quiet 32-pixel icon button positioned on the traffic-light axis. Reset only its vertical offset in the compact media query.
+Give the button `aria-label` and `title` values of `Back home`, retain a screen-reader-only label, and style it as a quiet 32-pixel icon button positioned on the traffic-light axis. Reserve space before the recording status and move only the horizontal anchor at the compact breakpoint.
 
 - [ ] **Step 4: Verify styling and interaction**
 
@@ -36,4 +36,3 @@ Run `pnpm exec vitest run tests/unit/recordingCaptureBarStyles.test.ts tests/uni
 - [ ] **Step 5: Commit the focused UI fix**
 
 Stage only the component, stylesheet, and related tests and commit with `fix(recording): align back control with macOS chrome`.
-
