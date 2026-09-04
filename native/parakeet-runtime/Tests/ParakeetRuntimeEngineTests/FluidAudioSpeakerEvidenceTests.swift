@@ -10,14 +10,15 @@ private struct FixtureDiarizer: OfflineSpeakerDiarizing {
 }
 
 private actor CapturingDiarizer: OfflineSpeakerDiarizing {
-    private var receivedURL: URL?
+    private var receivedURLs: [URL] = []
 
     func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn] {
-        receivedURL = audioURL
-        return [SpeakerEvidenceTurn(startTime: 0, endTime: 1, cluster: "S1")]
+        receivedURLs.append(audioURL)
+        let cluster = audioURL.lastPathComponent == "mic.wav" ? "M1" : "S1"
+        return [SpeakerEvidenceTurn(startTime: 0, endTime: 1, cluster: cluster)]
     }
 
-    func capturedURL() -> URL? { receivedURL }
+    func capturedURLsSnapshot() -> [URL] { receivedURLs }
 }
 
 private struct FixtureEnergyAnalyzer: SpeakerEnergyAnalyzing {
@@ -35,7 +36,7 @@ private struct CancellingDiarizer: OfflineSpeakerDiarizing {
 }
 
 final class FluidAudioSpeakerEvidenceTests: XCTestCase {
-    func testCoordinatorDiarizesOnlyTheIsolatedSystemRecording() async throws {
+    func testCoordinatorDiarizesTheSystemAndMicrophoneRecordingsIndependently() async throws {
         let diarizer = CapturingDiarizer()
         let coordinator = SpeakerEvidenceCoordinator(
             diarizer: diarizer,
@@ -46,14 +47,19 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
             runtimeVersion: "fluidaudio-test"
         )
 
-        _ = try await coordinator.analyze(
+        let output = try await coordinator.analyze(
             mixedURL: URL(fileURLWithPath: "/approved/mixed.wav"),
             micURL: URL(fileURLWithPath: "/approved/mic.wav"),
             systemURL: URL(fileURLWithPath: "/approved/system.wav")
         )
 
-        let capturedURL = await diarizer.capturedURL()
-        XCTAssertEqual(capturedURL?.path, "/approved/system.wav")
+        let capturedURLs = await diarizer.capturedURLsSnapshot()
+        XCTAssertEqual(capturedURLs.map(\.path), [
+            "/approved/system.wav",
+            "/approved/mic.wav"
+        ])
+        XCTAssertEqual(output.turns.map(\.cluster), ["S1"])
+        XCTAssertEqual(output.micTurns.map(\.cluster), ["M1"])
     }
 
     func testCoordinatorReturnsOnlyAnonymousTurnsEnergyAndPinnedProvenance() async throws {
@@ -77,6 +83,7 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         )
 
         XCTAssertEqual(output.turns.map(\.cluster), ["S1"])
+        XCTAssertEqual(output.micTurns.map(\.cluster), ["S1"])
         XCTAssertEqual(output.energyWindows.first?.micRms, 0.2)
         XCTAssertEqual(output.provenance.modelRevision, manifest.revision)
         XCTAssertEqual(output.provenance.artifactDigest, manifest.artifactSHA256)
@@ -100,6 +107,7 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         )
 
         XCTAssertTrue(output.turns.isEmpty)
+        XCTAssertTrue(output.micTurns.isEmpty)
         XCTAssertEqual(output.energyWindows.count, 1)
     }
 

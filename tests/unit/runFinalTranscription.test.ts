@@ -66,6 +66,7 @@ const dependencies = () => {
           { startTime: 0, endTime: 4, cluster: 'S1' },
           { startTime: 5, endTime: 9, cluster: 'S2' },
         ],
+        micTurns: [{ startTime: 0, endTime: 4, cluster: 'M1' }],
         energyWindows: [
           { startTime: 0, endTime: 4, micRms: 0.03, systemRms: 0 },
           { startTime: 5, endTime: 9, micRms: 0, systemRms: 0.02 },
@@ -237,6 +238,45 @@ describe('runFinalTranscription', () => {
     });
   });
 
+  it('separates multiple microphone speakers without claiming either is Me', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) => {
+      if (request.source === 'system') return result('system');
+      return {
+        ...result('mic'),
+        segments: [
+          { start: 0, end: 2, text: 'first microphone voice' },
+          { start: 2, end: 4, text: 'second microphone voice' },
+        ],
+      };
+    });
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+      micTurns: [
+        { startTime: 0, endTime: 2, cluster: 'mic-a' },
+        { startTime: 2, endTime: 4, cluster: 'mic-b' },
+      ],
+    });
+    deps.speakerEvidence.mockClear();
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    expect(deps.commitCanonical.mock.calls[0][0].segments).toEqual([
+      expect.objectContaining({ speaker: 'Local Speaker 1' }),
+      expect.objectContaining({ speaker: 'Local Speaker 2' }),
+      expect.objectContaining({ speaker: 'Them' }),
+    ]);
+    expect(
+      deps.commitCanonical.mock.calls[0][0].metadata.speakerAttribution,
+    ).toMatchObject({
+      source: 'recovered_channel_acoustic_v3',
+      mappingApplied: false,
+      speakerSeparation: 'verified',
+      selfIdentity: 'unresolved',
+    });
+  });
+
   it('pauses before inference when system resources are unsafe', async () => {
     const deps = dependencies();
     const outcome = await runFinalTranscription(baseInput, {
@@ -307,6 +347,7 @@ describe('runFinalTranscription', () => {
     const deps = dependencies();
     deps.speakerEvidence.mockResolvedValue({
       turns: [{ startTime: 0, endTime: 4, cluster: 'S1' }],
+      micTurns: [{ startTime: 0, endTime: 4, cluster: 'M1' }],
       energyWindows: [
         { startTime: 0, endTime: 2, micRms: 0.03, systemRms: 0 },
         { startTime: 2, endTime: 4, micRms: 0, systemRms: 0.02 },

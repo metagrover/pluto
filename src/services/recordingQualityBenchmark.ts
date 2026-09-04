@@ -1150,6 +1150,13 @@ export const runFinalTranscriptionPolicyBenchmarkCase = async (
               endTime: window.endTime,
               cluster: window.speaker === 'Me' ? 'S1' : 'S2',
             })),
+            micTurns: windows
+              .filter((window) => window.speaker === 'Me')
+              .map((window) => ({
+                startTime: window.startTime,
+                endTime: window.endTime,
+                cluster: 'M1',
+              })),
             energyWindows: windows.map((window) => ({
               startTime: window.startTime,
               endTime: window.endTime,

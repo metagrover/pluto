@@ -73,4 +73,55 @@ describe('applyRecoveredChannelEvidence', () => {
       nearEndEvidence: true,
     });
   });
+
+  it('accepts separated local speakers without claiming either one is Me', () => {
+    const result = applyRecoveredChannelEvidence({
+      segments: [
+        {
+          startTime: 0,
+          endTime: 4,
+          speaker: 'Local Speaker 1',
+          text: 'first local voice',
+        },
+        {
+          startTime: 4,
+          endTime: 8,
+          speaker: 'Local Speaker 2',
+          text: 'second local voice',
+        },
+        { startTime: 8, endTime: 10, speaker: 'Them', text: 'remote voice' },
+      ],
+      activityWindows: [],
+      localDiarization: {
+        applied: true,
+        multipleSpeakers: true,
+        confidence: 1,
+        clusterCount: 2,
+        labeledSegmentCount: 2,
+      },
+      provenance: {
+        runtimeVersion: 'fluidaudio-test',
+        modelRevision: 'a'.repeat(40),
+        artifactDigest: 'b'.repeat(64),
+      },
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.segments.map((segment) => segment.speaker)).toEqual([
+      'Local Speaker 1',
+      'Local Speaker 2',
+      'Them',
+    ]);
+    expect(result.attribution).toMatchObject({
+      source: 'recovered_channel_acoustic_v3',
+      confidence: 1,
+      mappingApplied: false,
+      speakerSeparation: 'verified',
+      selfIdentity: 'unresolved',
+      localDiarization: {
+        applied: true,
+        clusterCount: 2,
+      },
+    });
+  });
 });

@@ -25,7 +25,6 @@ export const createNotesWireRequest = (prompt: string, spans: SourceSpan[]) => {
             };
             return JSON.stringify({
               descriptor: bySpan.get(spanKey(parsed.descriptor)),
-              segment: parsed.descriptor.segment,
               speaker: parsed.speaker,
               text: parsed.text,
             });

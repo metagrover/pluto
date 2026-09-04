@@ -47,6 +47,7 @@ export type SpeakerEvidenceRequest = {
 
 export type SpeakerEvidenceResult = {
   turns: Array<{ startTime: number; endTime: number; cluster: string }>;
+  micTurns: Array<{ startTime: number; endTime: number; cluster: string }>;
   energyWindows: Array<{
     startTime: number;
     endTime: number;
@@ -523,6 +524,14 @@ export class ParakeetFinalClient {
           typeof turn.cluster === 'string' &&
           turn.cluster.length > 0,
       );
+    const micTurnsValid =
+      Array.isArray(candidate.micTurns) &&
+      candidate.micTurns.every(
+        (turn) =>
+          finiteRange(turn) &&
+          typeof turn.cluster === 'string' &&
+          turn.cluster.length > 0,
+      );
     const windowsValid =
       Array.isArray(candidate.energyWindows) &&
       candidate.energyWindows.length > 0 &&
@@ -540,6 +549,7 @@ export class ParakeetFinalClient {
       text.length === length && /^[a-f0-9]+$/i.test(text);
     if (
       !turnsValid ||
+      !micTurnsValid ||
       !windowsValid ||
       !provenance ||
       typeof provenance.modelIdentifier !== 'string' ||

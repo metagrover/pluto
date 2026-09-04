@@ -44,10 +44,9 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     ) async throws -> SpeakerEvidenceOutput {
         let totalStart = ContinuousClock.now
         let diarizationStart = ContinuousClock.now
-        // Remote participants are mixed together on the system channel. Keeping
-        // the microphone out of this pass prevents the local speaker from
-        // consuming or splitting a remote cluster identity.
         let turns = try await diarizer.diarize(audioURL: systemURL)
+        try Task.checkCancellation()
+        let micTurns = try await diarizer.diarize(audioURL: micURL)
         let diarizationMs = elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
 
@@ -59,6 +58,7 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
 
         return SpeakerEvidenceOutput(
             turns: turns,
+            micTurns: micTurns,
             energyWindows: windows,
             provenance: SpeakerEvidenceProvenance(
                 modelIdentifier: manifest.identifier,

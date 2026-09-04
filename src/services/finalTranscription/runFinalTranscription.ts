@@ -12,6 +12,7 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
+import { applyLocalSpeakerClusters } from './applyLocalSpeakerClusters.ts';
 import { applyRecoveredChannelEvidence } from './applyRecoveredChannelEvidence.ts';
 import { applyRemoteSpeakerClusters } from './applyRemoteSpeakerClusters.ts';
 import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
@@ -327,9 +328,14 @@ export const runFinalTranscription = async <TTranscript>(
     if (!speakerEvidence) {
       throw new Error('speaker_acoustic_evidence_missing');
     }
-    const attribution = applyRecoveredChannelEvidence({
+    const localSpeakers = applyLocalSpeakerClusters({
       segments: validation.segments,
+      turns: speakerEvidence.micTurns,
+    });
+    const attribution = applyRecoveredChannelEvidence({
+      segments: localSpeakers.segments,
       activityWindows: speakerActivityWindows,
+      localDiarization: localSpeakers,
       provenance: speakerEvidence.provenance,
     });
     metadata.speakerAttribution = attribution.attribution;

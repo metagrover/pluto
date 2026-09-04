@@ -1,6 +1,9 @@
 import type { Meeting } from '../../types.ts';
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
-import { isVerifiedSpeakerAttribution } from '../../utils/speakerAttributionTrust.ts';
+import {
+  isSpeakerSeparatedAttribution,
+  isVerifiedSpeakerAttribution,
+} from '../../utils/speakerAttributionTrust.ts';
 import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
@@ -174,7 +177,7 @@ export const runPersistedMeetingFinalTranscription = async (
         } = commit.metadata;
         if (
           !speakerAttribution ||
-          !isVerifiedSpeakerAttribution(speakerAttribution)
+          !isSpeakerSeparatedAttribution(speakerAttribution)
         ) {
           throw new Error(
             'invalid_transcript_trust_candidate:final_transcription_validated:speaker_attribution_unverified',
@@ -220,7 +223,9 @@ export const runPersistedMeetingFinalTranscription = async (
           schemaVersion: 2,
           state: 'validated',
           causes: [],
-          speakerAttributionVerified: true,
+          speakerAttributionVerified:
+            isVerifiedSpeakerAttribution(speakerAttribution),
+          speakerSeparationVerified: true,
           evidenceProvenance: integrity.evidenceProvenance,
           activityEvidence: integrity.activityEvidence,
           evidence: commit.integrity,
@@ -259,13 +264,14 @@ export const runPersistedMeetingFinalTranscription = async (
         }
         return { committed: false };
       },
-      markNeedsAttention: async ({ failure, lease }) => {
+      markNeedsAttention: async ({ failure, lease, reasons }) => {
         if (lease) {
           await invoke(
             'FAIL_FINAL_TRANSCRIPTION',
             meetingId,
             lease.runId,
             failure,
+            reasons ?? [],
           );
         }
       },

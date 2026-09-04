@@ -21,6 +21,7 @@ import {
   commitMeetingFinalTranscription,
   expireInterruptedDownstreamProcessing,
   expireInterruptedFinalTranscription,
+  failMeetingFinalTranscription,
   finalizeCheckpointTranscript,
   getMeeting,
   getMeetingEntities,
@@ -269,6 +270,44 @@ it('expires interrupted final transcription without replacing provisional text',
   expect(JSON.parse(String(getMeeting(id)?.transcript_json)).segments).toEqual([
     { speaker: 'Me', text: 'provisional' },
   ]);
+});
+
+it('persists bounded final-transcription rejection reasons', () => {
+  const id = 'parakeet-final-reasons';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'provisional',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'provisional',
+      segments: [{ speaker: 'Unknown', text: 'preserved' }],
+    }),
+    transcript_integrity_json: '{}',
+    capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'reason-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+  });
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+
+  expect(
+    failMeetingFinalTranscription(id, lease.runId, 'integrity_rejected', [
+      'remote_speech_unaccounted',
+    ]),
+  ).toBe(true);
+
+  expect(
+    JSON.parse(String(getMeeting(id)?.transcript_integrity_json)),
+  ).toMatchObject({
+    reasons: ['remote_speech_unaccounted'],
+    finalTranscription: {
+      state: 'needs_attention',
+      failure: 'integrity_rejected',
+    },
+  });
 });
 
 const validatedAt = '2026-07-31T08:00:00.000Z';

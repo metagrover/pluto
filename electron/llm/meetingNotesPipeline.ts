@@ -49,6 +49,7 @@ import {
   type NotesTask,
   type SourceSpan,
 } from './meetingNotesTypes';
+import { createNotesWireRequest } from './meetingNotesWire';
 
 const WRITER_OUTPUT_TOKENS = 2048;
 const COMPACT_WRITER_OUTPUT_TOKENS = 1024;
@@ -73,6 +74,10 @@ const NOTES_COMPACT_RETRY_INSTRUCTION =
 export const NOTES_HIERARCHY_LIMITS = {
   maxDepth: 8,
   maxNodes: 128,
+} as const;
+export const NOTES_BOUNDED_LIMITS = {
+  maxLeaves: 3,
+  maxModelCalls: 6,
 } as const;
 
 const uniqueSpans = (spans: SourceSpan[]): SourceSpan[] => {
@@ -153,9 +158,13 @@ const assertFits = (
   input: GenerateMeetingNotesInput,
   prompt: string,
   outputTokens: number,
+  spans?: SourceSpan[],
 ) => {
+  const providerPrompt = spans
+    ? createNotesWireRequest(prompt, spans).prompt
+    : prompt;
   if (
-    estimateNotesTokens(prompt) + outputTokens + SAFETY_TOKENS >
+    estimateNotesTokens(providerPrompt) + outputTokens + SAFETY_TOKENS >
     input.contextTokens
   ) {
     throw new MeetingNotesError('notes_context_exhausted');
@@ -166,8 +175,13 @@ const fits = (
   input: GenerateMeetingNotesInput,
   prompt: string,
   outputTokens: number,
+  spans?: SourceSpan[],
 ) =>
-  estimateNotesTokens(prompt) + outputTokens + SAFETY_TOKENS <=
+  estimateNotesTokens(
+    spans ? createNotesWireRequest(prompt, spans).prompt : prompt,
+  ) +
+    outputTokens +
+    SAFETY_TOKENS <=
   input.contextTokens;
 
 const withTruncationRetry = async <T>(
@@ -224,7 +238,7 @@ const withOneRepair = async <T>(
     task === 'notesAudit' ? 'notes_audit_invalid' : 'notes_writer_invalid';
   const run = async (requestPrompt: string) => {
     assertNotCancelled(input);
-    assertFits(input, requestPrompt, outputTokens);
+    assertFits(input, requestPrompt, outputTokens, allowedSpans);
     input.onStage?.(task);
     return input.generate({
       ...makeRequest(input, task, requestPrompt, outputTokens),
@@ -556,7 +570,7 @@ const auditDraft = async (
   const auditPrompt = retryInstruction
     ? `${baseAuditPrompt}\n\n${retryInstruction}`
     : baseAuditPrompt;
-  assertFits(input, auditPrompt, reviewOutputTokens(input));
+  assertFits(input, auditPrompt, reviewOutputTokens(input), evidenceSpans);
   const result = await withOneRepair(
     input,
     'notesAudit',
@@ -705,7 +719,9 @@ const metadataFor = (
     error_categories: document.generation_metadata?.error_categories ?? [],
     pipeline_version:
       input.reviewProtocol === 'editor'
-        ? 'writer-editor-v1'
+        ? mode === 'hierarchical' && input.compactWriterContract
+          ? 'writer-editor-bounded-v1'
+          : 'writer-editor-v1'
         : 'writer-audit-v1',
     mode,
     audit_status: document.quality.issues.length
@@ -1260,6 +1276,133 @@ const runHierarchy = async (
   });
 };
 
+const runBoundedCompactNotes = async (
+  input: GenerateMeetingNotesInput,
+  knownTerms: NotesKnownTerm[],
+): Promise<AnalysisDocumentV3> => {
+  const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
+    const sourceText = serializeSource(input, spans);
+    const writerPrompt = buildCompactNotesWriterPrompt({
+      sourceText,
+      userNotes: input.context.userNotes,
+      knownTerms,
+      template: input.context.template,
+    });
+    const editorPrompt = buildNotesEditorPrompt({
+      sourceText,
+      draft: {},
+      userNotes: input.context.userNotes,
+      knownTerms,
+      compactDraft: true,
+    });
+    return (
+      fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans) &&
+      estimateNotesTokens(createNotesWireRequest(editorPrompt, spans).prompt) +
+        COMPACT_WRITER_OUTPUT_TOKENS +
+        reviewOutputTokens(input) +
+        SAFETY_TOKENS <=
+        input.contextTokens
+    );
+  });
+  input.onPlan?.({ plannedLeafCount: leaves.length });
+  if (leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves) {
+    throw new MeetingNotesError('notes_bounded_plan_exceeded');
+  }
+
+  const reviewedDrafts: NotesDraft[] = [];
+  const issues: string[] = [];
+  let changes = 0;
+  for (const [index, leaf] of leaves.entries()) {
+    assertNotCancelled(input);
+    const evidenceSpans = leaf.primarySpans;
+    const sourceText = serializeSource(input, evidenceSpans);
+    const writerPrompt = buildCompactNotesWriterPrompt({
+      sourceText,
+      userNotes: input.context.userNotes,
+      knownTerms,
+      template: input.context.template,
+    });
+    const draft = remapDraftIds(
+      await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
+      `leaf${index}`,
+    );
+    const reviewed = await auditDraft(
+      input,
+      draft,
+      evidenceSpans,
+      knownTerms,
+      [],
+      `leaf${index}`,
+    );
+    reviewedDrafts.push(reviewed.draft);
+    changes += reviewed.changeCount;
+    issues.push(...(reviewed.audited.issues ?? []));
+  }
+
+  const meetingType =
+    reviewedDrafts.find((draft) => draft.meetingType !== 'general')
+      ?.meetingType ?? 'general';
+  const overviews = reviewedDrafts.flatMap((draft) =>
+    draft.overview ? [draft.overview] : [],
+  );
+  const recentWins = reviewedDrafts.flatMap((draft) =>
+    draft.recentWin ? [draft.recentWin] : [],
+  );
+  const combined: NotesDraft = {
+    meetingType,
+    overview: overviews.length
+      ? {
+          id: 'overview',
+          text: overviews.map((overview) => overview.text).join(' '),
+          sources: uniqueSpans(
+            overviews.flatMap((overview) => overview.sources),
+          ),
+        }
+      : null,
+    sections: reviewedDrafts.flatMap((draft) =>
+      structuredClone(draft.sections),
+    ),
+    ...(recentWins.length
+      ? {
+          recentWin: {
+            win: {
+              id: 'recent-win',
+              text: recentWins.map(({ win }) => win.text).join(' '),
+              sources: uniqueSpans(
+                recentWins.flatMap(({ win }) => win.sources),
+              ),
+            },
+            impact: {
+              id: 'recent-win-impact',
+              text: recentWins.map(({ impact }) => impact.text).join(' '),
+              sources: uniqueSpans(
+                recentWins.flatMap(({ impact }) => impact.sources),
+              ),
+            },
+          },
+        }
+      : {}),
+  };
+  const accepted = acceptEditedNotes({
+    source: input.source,
+    draft: combined,
+    acceptancePolicy: 'conservative',
+  });
+  accepted.issues = [...new Set(issues)];
+  return metadataFor(
+    input,
+    projectAuditedNotes(accepted),
+    'hierarchical',
+    changes,
+    {
+      depth: 1,
+      nodes: leaves.length * 2,
+      max_depth: 1,
+      max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
+    },
+  );
+};
+
 const runMeetingNotes = async (
   input: GenerateMeetingNotesInput,
 ): Promise<AnalysisDocumentV3> => {
@@ -1328,20 +1471,19 @@ const runMeetingNotes = async (
     : WRITER_OUTPUT_TOKENS;
   const capacity = planNotesCapacity({
     contextTokens: input.contextTokens,
-    writerInputTokens: estimateNotesTokens(writerPrompt),
-    auditBaseInputTokens: estimateNotesTokens(preliminaryAuditPrompt),
+    writerInputTokens: estimateNotesTokens(
+      createNotesWireRequest(writerPrompt, evidenceSpans).prompt,
+    ),
+    auditBaseInputTokens: estimateNotesTokens(
+      createNotesWireRequest(preliminaryAuditPrompt, evidenceSpans).prompt,
+    ),
     writerOutputTokens,
     auditOutputTokens: reviewOutputTokens(input),
     safetyTokens: SAFETY_TOKENS,
   });
   if (capacity.mode !== 'direct') {
     if (!compactEditor) return runHierarchy(input, knownTerms);
-    const hierarchyInput = {
-      ...input,
-      compactWriterContract: undefined,
-      reviewProtocol: undefined,
-    };
-    return runHierarchy(hierarchyInput, knownTerms);
+    return runBoundedCompactNotes(input, knownTerms);
   }
 
   const draft = await writeDraft(
@@ -1358,11 +1500,16 @@ const runMeetingNotes = async (
     knownTerms,
   });
   if (
-    estimateNotesTokens(auditPrompt) +
+    estimateNotesTokens(
+      createNotesWireRequest(auditPrompt, evidenceSpans).prompt,
+    ) +
       reviewOutputTokens(input) +
       SAFETY_TOKENS >
     input.contextTokens
   ) {
+    if (compactEditor) {
+      throw new MeetingNotesError('notes_context_exhausted');
+    }
     return runHierarchy(input, knownTerms);
   }
   const audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
@@ -1380,8 +1527,18 @@ export const generateMeetingNotes = async (
 ): Promise<AnalysisDocumentV3> => {
   let repairs = 0;
   let generatedNodes = 0;
+  let modelCalls = 0;
+  const boundedCompact =
+    input.compactWriterContract && input.reviewProtocol === 'editor';
   const runInput: GenerateMeetingNotesInput = {
     ...input,
+    generate: async (request) => {
+      modelCalls += 1;
+      if (boundedCompact && modelCalls > NOTES_BOUNDED_LIMITS.maxModelCalls) {
+        throw new MeetingNotesError('notes_model_call_limit');
+      }
+      return input.generate(request);
+    },
     onStage: (task) => {
       if (
         task !== 'notesAudit' &&
@@ -1414,6 +1571,9 @@ export const generateMeetingNotes = async (
         error.code !== 'notes_input_overflow'
       )
         throw error;
+      if (boundedCompact) {
+        throw error;
+      }
       planningTokens = Math.floor(planningTokens * 0.75);
     }
   }

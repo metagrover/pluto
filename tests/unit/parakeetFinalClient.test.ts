@@ -63,6 +63,7 @@ const speakerEvidenceSuccess = (id: string) => ({
   result: {
     speakerEvidence: {
       turns: [{ startTime: 0, endTime: 1, cluster: 'S1' }],
+      micTurns: [{ startTime: 0, endTime: 1, cluster: 'M1' }],
       energyWindows: [
         { startTime: 0, endTime: 0.1, micRms: 0.2, systemRms: 0.01 },
       ],
@@ -265,6 +266,7 @@ describe('ParakeetFinalClient', () => {
 
     await expect(request).resolves.toMatchObject({
       turns: [{ cluster: 'S1' }],
+      micTurns: [{ cluster: 'M1' }],
       energyWindows: [{ micRms: 0.2, systemRms: 0.01 }],
       provenance: { modelIdentifier: 'speaker-diarization-offline-v1' },
     });
@@ -284,6 +286,23 @@ describe('ParakeetFinalClient', () => {
     child.respond(response);
 
     await expect(request).resolves.toMatchObject({ turns: [] });
+  });
+
+  it('rejects missing microphone diarization evidence', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const response = speakerEvidenceSuccess(String(child.writes[0].id));
+    (response.result.speakerEvidence as { micTurns?: unknown }).micTurns =
+      undefined;
+    child.respond(response);
+
+    await expect(request).rejects.toThrow('parakeet_protocol_invalid');
   });
 
   it('rejects malformed speaker evidence and out-of-root evidence paths', async () => {

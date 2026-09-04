@@ -14,6 +14,7 @@ import { buildTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.
 
 export type FinalSpeakerEvidence = {
   turns: DiarizationTurn[];
+  micTurns: DiarizationTurn[];
   energyWindows: AlignedEnergyWindow[];
   provenance: {
     modelIdentifier: string;

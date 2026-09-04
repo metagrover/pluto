@@ -1,10 +1,12 @@
 import { expect, it, vi } from 'vitest';
 import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
+import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import * as hierarchy from '../../electron/llm/meetingNotesHierarchy';
 import {
   NOTES_HIERARCHY_LIMITS,
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
+import { buildCompactNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
 import {
   MeetingNotesError,
   type NotesDraft,
@@ -173,6 +175,96 @@ it('uses a compact writer and complete-document editor in exactly two calls with
   ]);
 });
 
+it('routes a highly segmented meeting from the encoded provider payload', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 80 }, (_, index) => ({
+      speaker: index % 2 ? 'Them' : 'Me',
+      text: `Turn ${index} records a concise product fact.`,
+    })),
+  );
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const sourceText = spans
+    .map((span) => {
+      const segment = source.segments[span.segment]!;
+      return JSON.stringify({
+        descriptor: span,
+        speaker: segment.speaker,
+        text: segment.text,
+      });
+    })
+    .join('\n');
+  const writerPrompt = buildCompactNotesWriterPrompt({
+    sourceText,
+    userNotes: '',
+    knownTerms: [],
+    template: 'auto',
+  });
+  const emptyEditorPrompt = buildNotesEditorPrompt({
+    sourceText,
+    draft: {},
+    userNotes: '',
+    knownTerms: [],
+    compactDraft: true,
+  });
+  const encodedMinimum = Math.max(
+    estimateNotesTokens(createNotesWireRequest(writerPrompt, spans).prompt) +
+      1024 +
+      512,
+    estimateNotesTokens(
+      createNotesWireRequest(emptyEditorPrompt, spans).prompt,
+    ) +
+      1024 +
+      2048 +
+      512,
+  );
+  expect(encodedMinimum).toBeLessThan(
+    estimateNotesTokens(emptyEditorPrompt) + 1024 + 2048 + 512,
+  );
+  const first = spans[0]!;
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({
+        sections: [
+          {
+            title: 'Product',
+            items: [
+              {
+                kind: 'point',
+                text: 'A concise product fact was recorded.',
+                owner: null,
+                due: null,
+                sources: [first],
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return auditFor(request.prompt, first);
+  });
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: encodedMinimum + 600,
+  });
+
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesAudit',
+  ]);
+  expect(result.generation_metadata.mode).toBe('direct');
+});
+
 it('fails a malformed compact writer without a model repair call', async () => {
   const fixture = makeDirectNotesFixture();
   const generate = vi.fn().mockResolvedValue('{');
@@ -240,7 +332,7 @@ it('fails a malformed compact editor without a model repair call', async () => {
   expect(onRepair).not.toHaveBeenCalled();
 });
 
-it('keeps the existing writer contract when the compact direct pair does not fit', async () => {
+it('keeps the compact writer contract when the direct pair does not fit', async () => {
   const source = makeSyntheticNotesSource([
     { speaker: 'Milo', text: 'Agenda update. '.repeat(3_000) },
   ]);
@@ -272,7 +364,132 @@ it('keeps the existing writer contract when the compact direct pair does not fit
         contextTokens: 4_096,
       }),
     ).rejects.toThrow('stop-after-first-hierarchy-request');
-    expect(firstRequest?.responseContract).toBe('draft');
+    expect(firstRequest?.responseContract).toBe('compact_draft');
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('reviews at most two calls per compact leaf and combines them without a model merge', async () => {
+  const source = makeSyntheticNotesSource([
+    ...Array.from({ length: 6 }, (_, index) => ({
+      speaker: index % 2 ? 'Nira' : 'Milo',
+      text: `${index ? 'Second' : 'First'} product fact. ${'context '.repeat(500)}`,
+    })),
+  ]);
+  const spans = source.segments.slice(0, 2).map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: 20,
+  }));
+  const leaves = spans.map((span) => ({
+    primarySpans: [span],
+    overlapSpans: [],
+    primaryText: source.segments[span.segment]!.text,
+    sourceText: source.segments[span.segment]!.text,
+    sourceRevision: source.revision,
+  }));
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(leaves);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    if (request.task === 'notesAudit') {
+      const draft = auditDraft(request.prompt);
+      draft.overview = {
+        id: 'overview',
+        text: `Overview ${span.segment + 1}`,
+        sources: [span],
+      };
+      return JSON.stringify({ ...draft, dispositions: [], terminology: [] });
+    }
+    return JSON.stringify({
+      sections: [
+        {
+          title: `Leaf ${span.segment + 1}`,
+          items: [
+            {
+              kind: 'point',
+              text: `Reviewed fact ${span.segment + 1}`,
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      contextTokens: 8_192,
+    });
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesAudit',
+      'notesWriter',
+      'notesAudit',
+    ]);
+    expect(result.topics.map((section) => section.title)).toEqual([
+      'Leaf 1',
+      'Leaf 2',
+    ]);
+    expect(result.overview).toBe('Overview 1 Overview 2');
+    expect(result.generation_metadata.hierarchy).toEqual({
+      depth: 1,
+      nodes: 4,
+      max_depth: 1,
+      max_nodes: 6,
+    });
+    expect(result.generation_metadata.pipeline_version).toBe(
+      'writer-editor-bounded-v1',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('rejects a compact plan above three leaves before making a model call', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'A' },
+    { speaker: 'Nira', text: 'B' },
+    { speaker: 'Milo', text: 'C' },
+    { speaker: 'Nira', text: 'D' },
+  ]);
+  const leaves = source.segments.map((segment) => {
+    const span = { segment: segment.index, start: 0, end: segment.text.length };
+    return {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: segment.text,
+      sourceText: segment.text,
+      sourceRevision: source.revision,
+    };
+  });
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(leaves);
+  const generate = vi.fn();
+
+  try {
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'qwen3.5:9b',
+        contextTokens: 4_096,
+      }),
+    ).rejects.toThrow('notes_bounded_plan_exceeded');
+    expect(generate).not.toHaveBeenCalled();
   } finally {
     plan.mockRestore();
   }

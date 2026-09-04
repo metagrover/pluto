@@ -252,7 +252,8 @@ const parseGenerationMetadata = (
       : {}),
     ...(terminology ? { terminology } : {}),
     ...(record.pipeline_version === 'writer-audit-v1' ||
-    record.pipeline_version === 'writer-editor-v1'
+    record.pipeline_version === 'writer-editor-v1' ||
+    record.pipeline_version === 'writer-editor-bounded-v1'
       ? { pipeline_version: record.pipeline_version }
       : {}),
     ...(record.mode === 'direct' || record.mode === 'hierarchical'

@@ -1,6 +1,7 @@
 import type { Meeting } from '../types.ts';
 import {
   hasVerifiedSpeakerAttribution,
+  isSpeakerSeparatedAttribution,
   readStoredSpeakerAttribution,
 } from '../utils/speakerAttributionTrust.ts';
 import { readDownstreamProcessingLease } from './downstreamProcessingLease.ts';
@@ -106,7 +107,8 @@ export function canImproveHistoricalSpeakerLabels(
     const attribution = readStoredSpeakerAttribution(meeting.transcript_json);
     return (
       attribution?.source === 'recovered_channel_acoustic_v1' ||
-      !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+      (!isSpeakerSeparatedAttribution(attribution) &&
+        !hasVerifiedSpeakerAttribution(meeting.transcript_json))
     );
   }
   return meeting.speaker_attribution_verified === false;
@@ -117,7 +119,9 @@ export const isParakeetValidatedMeeting = (
 ): boolean => {
   if (
     meeting?.transcript_status !== 'validated' ||
-    !hasVerifiedSpeakerAttribution(meeting.transcript_json)
+    !isSpeakerSeparatedAttribution(
+      readStoredSpeakerAttribution(meeting.transcript_json),
+    )
   )
     return false;
   try {

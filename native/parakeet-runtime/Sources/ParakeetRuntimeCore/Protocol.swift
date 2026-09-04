@@ -651,6 +651,7 @@ public struct SpeakerEvidenceTimings: Codable, Equatable, Sendable {
 
 public struct SpeakerEvidenceOutput: Codable, Equatable, Sendable {
     public let turns: [SpeakerEvidenceTurn]
+    public let micTurns: [SpeakerEvidenceTurn]
     public let energyWindows: [SpeakerEnergyWindow]
     public let provenance: SpeakerEvidenceProvenance
     public let timings: SpeakerEvidenceTimings
@@ -658,12 +659,14 @@ public struct SpeakerEvidenceOutput: Codable, Equatable, Sendable {
 
     public init(
         turns: [SpeakerEvidenceTurn],
+        micTurns: [SpeakerEvidenceTurn] = [],
         energyWindows: [SpeakerEnergyWindow],
         provenance: SpeakerEvidenceProvenance,
         timings: SpeakerEvidenceTimings,
         windowSeconds: Double
     ) {
         self.turns = turns
+        self.micTurns = micTurns
         self.energyWindows = energyWindows
         self.provenance = provenance
         self.timings = timings

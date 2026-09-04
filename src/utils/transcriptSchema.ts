@@ -54,6 +54,7 @@ export type TranscriptSpeakerAttributionSource =
   | 'offline_diarization_acoustic_v1'
   | 'recovered_channel_acoustic_v1'
   | 'recovered_channel_acoustic_v2'
+  | 'recovered_channel_acoustic_v3'
   | 'channel_fallback';
 
 export type TranscriptSpeakerAttributionFallbackReason =
@@ -85,6 +86,16 @@ export type StoredTranscriptSpeakerAttribution = {
   injectedLocalWindows?: number;
   falseMeEvidenceSeconds?: number;
   missedMeEvidenceSeconds?: number;
+  speakerSeparation?: 'verified' | 'unresolved';
+  selfIdentity?: 'verified' | 'unresolved';
+  localDiarization?: {
+    attempted: true;
+    input: 'mic_audio';
+    applied: boolean;
+    confidence: number;
+    clusterCount: number;
+    labeledSegmentCount: number;
+  };
   remoteDiarization?: {
     attempted: true;
     input: 'system_audio';
