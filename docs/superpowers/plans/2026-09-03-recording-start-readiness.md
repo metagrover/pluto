@@ -35,4 +35,3 @@ Run `pnpm exec vitest run tests/unit/audioManagerParakeetEouWiring.test.ts tests
 - [ ] **Step 5: Commit the focused fix**
 
 Stage only the two implementation/test files and commit with `fix(recording): warm Parakeet during meeting start`.
-

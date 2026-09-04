@@ -15,4 +15,3 @@ The renderer continues to publish `starting` synchronously before awaiting readi
 ## Testing
 
 Extend the AudioManager startup-boundary regression to require preparation, not a status-only check, between the synchronous starting claim and capture-journal startup. Retain the existing tests for single-flight preparation, idle unload, duplicate-start exclusion, and recording-state publication after microphone capture.
-
