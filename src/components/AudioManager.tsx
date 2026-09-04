@@ -22,6 +22,10 @@ import {
   resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
+import {
+  type AudioResampler,
+  createAudioResampler,
+} from '../utils/audioResampler';
 import { startBoundedSampler } from '../utils/boundedSampler';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
@@ -257,6 +261,14 @@ export const AudioManager = ({
   const micPcmSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
+  const AUDIO_TARGET_SAMPLE_RATE = 16000;
+  const micResamplerRef = useRef<AudioResampler | null>(null);
+  const isReconfiguringRef = useRef<boolean>(false);
+  const pendingReconfigureRef = useRef<boolean>(false);
+  const reconfigureDeviceTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const deviceChangeDebounceMs = 200;
   const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
   const systemAudioChunkSeenRef = useRef(false);
   const systemAudioHealthRef = useRef<CaptureHealth>('warning');
@@ -886,7 +898,11 @@ export const AudioManager = ({
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
-        micPcmSampleRateRef.current = audioContext.sampleRate;
+        micResamplerRef.current = createAudioResampler({
+          inputSampleRate: audioContext.sampleRate,
+          outputSampleRate: AUDIO_TARGET_SAMPLE_RATE,
+        });
+        micPcmSampleRateRef.current = AUDIO_TARGET_SAMPLE_RATE;
         micPcmChunksRef.current = [];
         try {
           const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -895,7 +911,12 @@ export const AudioManager = ({
           processor.onaudioprocess = (evt: AudioProcessingEvent) => {
             const input = evt.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
-            const copied = new Float32Array(input);
+            // Retain for PCM contract compatibility: const copied = new Float32Array(input);
+            const resampled = micResamplerRef.current
+              ? micResamplerRef.current.process(input)
+              : new Float32Array(input);
+            if (resampled.length === 0) return;
+            const copied = new Float32Array(resampled);
             micPcmChunksRef.current.push(copied);
             eouSessionRef.current?.append('mic', copied);
           };
@@ -910,7 +931,7 @@ export const AudioManager = ({
           (window as unknown as Record<string, unknown>).__plutoMicSource =
             micSource;
           console.log(
-            `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz`,
+            `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz -> ${AUDIO_TARGET_SAMPLE_RATE}Hz`,
           );
         } catch (pcmErr) {
           const keepalive = window as unknown as Record<string, unknown>;
@@ -1225,6 +1246,15 @@ export const AudioManager = ({
       isRecordingRef.current = true;
       setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.mediaDevices?.addEventListener
+      ) {
+        navigator.mediaDevices.addEventListener(
+          'devicechange',
+          handleDeviceChangeDebounced,
+        );
+      }
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
@@ -1339,7 +1369,174 @@ export const AudioManager = ({
     );
   };
 
+  const drainInFlightMicPcm = () => {
+    if (micResamplerRef.current) {
+      const flushed = micResamplerRef.current.flush();
+      if (flushed && flushed.length > 0) {
+        micPcmChunksRef.current.push(flushed);
+        eouSessionRef.current?.append('mic', flushed);
+      }
+    }
+  };
+
+  const handleDeviceChangeReconfigure = async () => {
+    if (isReconfiguringRef.current) {
+      pendingReconfigureRef.current = true;
+      return;
+    }
+    if (!isRecordingRef.current) {
+      return;
+    }
+
+    isReconfiguringRef.current = true;
+    publishCaptureHealth({
+      microphone: 'reconfiguring',
+      systemAudio: systemAudioHealthRef.current,
+      captureDurability: captureHealthRef.current.captureDurability,
+    });
+
+    try {
+      drainInFlightMicPcm();
+
+      if (micPcmProcessorRef.current) {
+        micPcmProcessorRef.current.onaudioprocess = null;
+        micPcmProcessorRef.current.disconnect();
+        micPcmProcessorRef.current = null;
+      }
+      if (micPcmSourceRef.current) {
+        micPcmSourceRef.current.disconnect();
+        micPcmSourceRef.current = null;
+      }
+      if (micPcmSinkRef.current) {
+        micPcmSinkRef.current.disconnect();
+        micPcmSinkRef.current = null;
+      }
+      if (micAnalyserRef.current) {
+        micAnalyserRef.current.disconnect();
+        micAnalyserRef.current = null;
+      }
+      if (micStreamRef.current) {
+        for (const track of micStreamRef.current.getTracks()) {
+          track.stop();
+        }
+        micStreamRef.current = null;
+      }
+
+      const newMicStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+      micStreamRef.current = newMicStream;
+
+      let audioContext = audioContextRef.current;
+      if (!audioContext || audioContext.state === 'closed') {
+        audioContext = new (
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext
+        )();
+        audioContextRef.current = audioContext;
+      }
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      micResamplerRef.current = createAudioResampler({
+        inputSampleRate: audioContext.sampleRate,
+        outputSampleRate: AUDIO_TARGET_SAMPLE_RATE,
+      });
+      micPcmSampleRateRef.current = AUDIO_TARGET_SAMPLE_RATE;
+
+      const micSource = audioContext.createMediaStreamSource(newMicStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const sink = audioContext.createGain();
+      sink.gain.value = 0.00001;
+
+      processor.onaudioprocess = (evt: AudioProcessingEvent) => {
+        const input = evt.inputBuffer.getChannelData(0);
+        if (!input || input.length === 0) return;
+        // Retain for PCM contract compatibility: const copied = new Float32Array(input);
+        const resampled = micResamplerRef.current
+          ? micResamplerRef.current.process(input)
+          : new Float32Array(input);
+        if (resampled.length === 0) return;
+        const copied = new Float32Array(resampled);
+        micPcmChunksRef.current.push(copied);
+        eouSessionRef.current?.append('mic', copied);
+      };
+
+      micSource.connect(processor);
+      processor.connect(sink);
+      sink.connect(audioContext.destination);
+
+      micPcmSourceRef.current = micSource;
+      micPcmProcessorRef.current = processor;
+      micPcmSinkRef.current = sink;
+
+      (window as unknown as Record<string, unknown>).__plutoMicProcessor =
+        processor;
+      (window as unknown as Record<string, unknown>).__plutoMicSource =
+        micSource;
+
+      startSpeakingMonitor(audioContext, newMicStream);
+
+      publishCaptureHealth({
+        microphone: 'healthy',
+        systemAudio: systemAudioHealthRef.current,
+        captureDurability: captureHealthRef.current.captureDurability,
+      });
+      console.log(
+        `[Pluto] Mic reconnected successfully at ${audioContext.sampleRate}Hz -> ${AUDIO_TARGET_SAMPLE_RATE}Hz`,
+      );
+    } catch (reconnectErr) {
+      console.warn(
+        '[Pluto] Failed to reconnect microphone dynamically:',
+        reconnectErr,
+      );
+      publishCaptureHealth({
+        microphone: 'warning',
+        systemAudio: systemAudioHealthRef.current,
+        captureDurability: captureHealthRef.current.captureDurability,
+      });
+    } finally {
+      isReconfiguringRef.current = false;
+      if (pendingReconfigureRef.current) {
+        pendingReconfigureRef.current = false;
+        void handleDeviceChangeReconfigure();
+      }
+    }
+  };
+
+  const handleDeviceChangeDebounced = () => {
+    if (!isRecordingRef.current) return;
+    if (reconfigureDeviceTimeoutRef.current) {
+      clearTimeout(reconfigureDeviceTimeoutRef.current);
+    }
+    reconfigureDeviceTimeoutRef.current = setTimeout(() => {
+      reconfigureDeviceTimeoutRef.current = null;
+      void handleDeviceChangeReconfigure();
+    }, deviceChangeDebounceMs);
+  };
+
   const stopAllTracks = () => {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices?.removeEventListener
+    ) {
+      navigator.mediaDevices.removeEventListener(
+        'devicechange',
+        handleDeviceChangeDebounced,
+      );
+    }
+    if (reconfigureDeviceTimeoutRef.current) {
+      clearTimeout(reconfigureDeviceTimeoutRef.current);
+      reconfigureDeviceTimeoutRef.current = null;
+    }
+    drainInFlightMicPcm();
     stopSpeakingSamplerRef.current?.();
     stopSpeakingSamplerRef.current = null;
     if (micPcmProcessorRef.current) {
@@ -2062,6 +2259,19 @@ export const AudioManager = ({
     );
 
     return () => {
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.mediaDevices?.removeEventListener
+      ) {
+        navigator.mediaDevices.removeEventListener(
+          'devicechange',
+          handleDeviceChangeDebounced,
+        );
+      }
+      if (reconfigureDeviceTimeoutRef.current) {
+        clearTimeout(reconfigureDeviceTimeoutRef.current);
+        reconfigureDeviceTimeoutRef.current = null;
+      }
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
       meetingContextIngestionRef.current?.close();
