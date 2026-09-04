@@ -199,13 +199,58 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v28');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v29');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
     expect(result.all_action_items).toHaveLength(1);
   },
 );
+
+it('routes the compact product writer through the complete-document editor', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const provider = new UnifiedLLMProvider('ollama', {});
+  const generate = vi
+    .spyOn(provider as never, 'generateText')
+    .mockRejectedValue(new Error('unexpected_notes_request'))
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(JSON.stringify(fixture.draft));
+
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source: fixture.source,
+    compactWriterContract: true,
+  });
+
+  expect(
+    generate.mock.calls.map(([request]) => (request as { task: string }).task),
+  ).toEqual(['notesWriter', 'notesAudit']);
+  expect(
+    generate.mock.calls.map(([request]) =>
+      (request as { prompt: string }).prompt.includes(
+        'complete corrected document',
+      ),
+    ),
+  ).toEqual([false, true]);
+  expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v29');
+});
 
 it('repairs malformed writer output once and still requires an independent legacy audit', async () => {
   const f = makeDirectNotesFixture();

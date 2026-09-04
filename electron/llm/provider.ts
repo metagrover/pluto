@@ -141,7 +141,7 @@ export interface LLMProvider {
         | 'every_node'
         | 'final_only'
         | 'deterministic_only';
-      /** Explicit benchmark experiment; requires deterministic-only review. */
+      /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
       compactWriterContract?: boolean;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;

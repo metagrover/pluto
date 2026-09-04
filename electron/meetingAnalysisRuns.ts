@@ -146,6 +146,7 @@ type NotesProvider = {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      compactWriterContract?: boolean;
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
@@ -776,6 +777,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
               trustedUserTerms: [],
               entityHints: terms,
               contextTokens: NOTES_CONTEXT_TOKENS,
+              compactWriterContract: true,
               stageCache,
               cacheKey: stageCacheKey,
               onStageEvent: runMetrics.observe,

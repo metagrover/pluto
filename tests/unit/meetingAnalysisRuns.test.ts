@@ -206,7 +206,7 @@ describe('meeting analysis run coordinator', () => {
           thinking: null,
           seed: null,
           contextTokens: 16384,
-          promptVersion: 'notes-v28',
+          promptVersion: 'notes-v29',
         }),
         'utf8',
       )
@@ -400,6 +400,7 @@ describe('meeting analysis run coordinator', () => {
         'Please use the spelling Ogletree.',
         'auto',
         expect.objectContaining({
+          compactWriterContract: true,
           knownTerms: ['Ogletree'],
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
@@ -420,7 +421,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v28',
+            promptVersion: 'notes-v29',
           }),
           'utf8',
         )
@@ -439,7 +440,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v28',
+            promptVersion: 'notes-v29',
           }),
           'utf8',
         )
