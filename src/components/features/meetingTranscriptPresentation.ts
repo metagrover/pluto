@@ -15,6 +15,16 @@ const startSeconds = (segment: TranscriptSegment): number => {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 };
 
+export const applyMeetingSpeakerDisplayNames = <T extends TranscriptSegment>(
+  segments: T[],
+  displayNames: Readonly<Record<string, string>>,
+): T[] =>
+  segments.map((segment) => {
+    const speaker = String(segment.speaker ?? '');
+    const displayName = displayNames[speaker]?.trim();
+    return displayName ? ({ ...segment, speaker: displayName } as T) : segment;
+  });
+
 const turnCharacterCount = <T extends TranscriptSegment>(
   turn: MeetingTranscriptTurn<T>,
 ): number =>

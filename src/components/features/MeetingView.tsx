@@ -10,7 +10,13 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
@@ -52,7 +58,10 @@ import {
   resolveMeetingRegenerationFailurePresentation,
   resolveMeetingRetryProgressPresentation,
 } from './meetingFailurePresentation';
-import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
+import {
+  applyMeetingSpeakerDisplayNames,
+  buildMeetingTranscriptTurns,
+} from './meetingTranscriptPresentation';
 
 const SavedEditConflicts = ({
   conflicts,
@@ -650,6 +659,10 @@ export const MeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
+  const [speakerDisplayNames, setSpeakerDisplayNames] = useState<{
+    meetingId: string;
+    names: Record<string, string>;
+  }>({ meetingId: '', names: {} });
   const titleEdit = useRef({
     meetingId: selectedMeeting.id,
     expectedTitle: selectedMeeting.title,
@@ -769,9 +782,26 @@ export const MeetingView = ({
     selectedMeeting.transcript_json,
     transcriptSegments,
   );
+  const displayNames =
+    speakerDisplayNames.meetingId === String(selectedMeeting.id)
+      ? speakerDisplayNames.names
+      : {};
   const transcriptTurns = buildMeetingTranscriptTurns(
-    readableTranscriptSegments,
+    applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
+  const updateSpeakerDisplayNames = useCallback(
+    (names: Record<string, string>) =>
+      setSpeakerDisplayNames({
+        meetingId: String(selectedMeeting.id),
+        names,
+      }),
+    [selectedMeeting.id],
+  );
+  const calendarAttendeeNames = calendarContext
+    ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
+        .map((person) => person?.name?.trim() || person?.email?.trim() || '')
+        .filter(Boolean)
+    : [];
   const hasTranscriptContent = transcriptTurns.length > 0;
   const participantCount = new Set(
     transcriptSegments
@@ -1382,7 +1412,11 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
-            <MeetingIdentityControls meetingId={String(selectedMeeting.id)} />
+            <MeetingIdentityControls
+              meetingId={String(selectedMeeting.id)}
+              attendeeNames={calendarAttendeeNames}
+              onDisplayNamesChange={updateSpeakerDisplayNames}
+            />
             {hasTranscriptContent ? (
               transcriptTurns.map((turn) => {
                 const text = turn.segments
