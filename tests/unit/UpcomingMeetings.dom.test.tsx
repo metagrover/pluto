@@ -197,7 +197,7 @@ describe('UpcomingMeetings', () => {
     act(() => denied.root.unmount());
   });
 
-  it('supports selecting several calendars with compact checkbox rows and one action', async () => {
+  it('supports single-line dropdown trigger and instant multi-select popover', async () => {
     const onSelectCalendars = vi.fn(async () => {});
     const picker = render({
       snapshot: snapshot({
@@ -211,31 +211,116 @@ describe('UpcomingMeetings', () => {
       onSelectCalendars,
     });
 
-    expect(picker.container.textContent).toContain('Choose calendars');
-    const commitButton = picker.container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Use selected calendars"]',
+    // 1. Initially collapsed to a single line: no bulky instructions or open menu
+    const trigger = picker.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Choose calendars"]',
     );
-    // Disabled until at least one calendar is checked
-    expect(commitButton?.disabled).toBe(true);
+    expect(trigger).not.toBeNull();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(picker.container.textContent).not.toContain(
+      'Pluto will read meetings from selected calendars.',
+    );
+    expect(picker.container.querySelector('[role="menu"]')).toBeNull();
+
+    // 2. Click trigger to open popover
+    await act(async () => trigger?.click());
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    const menu = picker.container.querySelector('[role="menu"]');
+    expect(menu).not.toBeNull();
 
     const checkboxes = Array.from(
-      picker.container.querySelectorAll<HTMLInputElement>(
-        'input[type="checkbox"]',
-      ),
+      menu!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
     );
     expect(checkboxes).toHaveLength(2);
 
-    // Check both calendars
+    // 3. Instant toggle: checking the first calendar immediately commits it
     await act(async () => checkboxes[0].click());
-    expect(commitButton?.disabled).toBe(false);
+    expect(onSelectCalendars).toHaveBeenCalledWith([workCalendar]);
 
+    // 4. Checking second calendar immediately commits both
     await act(async () => checkboxes[1].click());
-    await act(async () => commitButton?.click());
-
     expect(onSelectCalendars).toHaveBeenCalledWith([
       workCalendar,
       personalCalendar,
     ]);
+
+    // 5. Dismiss on Escape
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(picker.container.querySelector('[role="menu"]')).toBeNull();
+
+    // 6. Re-open and test outside click dismissal
+    await act(async () => trigger?.click());
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => {
+      document.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      );
+    });
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(picker.container.querySelector('[role="menu"]')).toBeNull();
+
+    act(() => picker.root.unmount());
+  });
+
+  it('guards against unchecking the last remaining calendar and handles selection errors', async () => {
+    const onSelectCalendars = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    const picker = render({
+      snapshot: snapshot({
+        state: 'needs_selection',
+        enabled: false,
+        selectedCalendar: null,
+        selectedCalendars: [],
+        calendars: [workCalendar],
+      }),
+      events: [],
+      onSelectCalendars,
+    });
+
+    const trigger = picker.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Choose calendars"]',
+    );
+    await act(async () => trigger?.click());
+
+    const menu = picker.container.querySelector('[role="menu"]');
+    const checkbox = menu!.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+
+    // 1. Check the only calendar -> commits
+    await act(async () => checkbox?.click());
+    expect(onSelectCalendars).toHaveBeenCalledTimes(1);
+
+    // 2. Click again: guard prevents deselecting the only remaining calendar
+    await act(async () => checkbox?.click());
+    expect(onSelectCalendars).toHaveBeenCalledTimes(1);
+
+    act(() => picker.root.unmount());
+  });
+
+  it('displays "Choose another calendar" when selected calendar is missing', () => {
+    const picker = render({
+      snapshot: snapshot({
+        state: 'selected_calendar_missing',
+        enabled: false,
+        selectedCalendar: null,
+        selectedCalendars: [],
+        calendars: [workCalendar],
+      }),
+      events: [],
+    });
+
+    const trigger = picker.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Choose another calendar"]',
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger?.textContent).toContain('Choose another calendar');
     act(() => picker.root.unmount());
   });
 

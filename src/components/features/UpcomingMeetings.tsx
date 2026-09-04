@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 import type {
   CalendarDescriptor,
@@ -77,6 +77,8 @@ export const UpcomingMeetings = ({
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     if (snapshot?.selectedCalendars?.length) {
@@ -102,22 +104,53 @@ export const UpcomingMeetings = ({
     selectedList.length > 0 &&
     (snapshot?.state === 'ready' || events.length > 0);
 
-  const toggleCalendar = (id: string) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  useEffect(() => {
+    if (snapshot?.selectedCalendars?.length) {
+      setCheckedIds(
+        new Set(snapshot.selectedCalendars.map((cal) => cal.identifier)),
+      );
+    } else if (snapshot?.selectedCalendar) {
+      setCheckedIds(new Set([snapshot.selectedCalendar.identifier]));
+    }
+  }, [snapshot?.selectedCalendars, snapshot?.selectedCalendar]);
 
-  const handleCommitSelection = async () => {
-    if (checkedIds.size === 0) return;
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+    const handleOutsideClick = (event: PointerEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDropdownOpen]);
+
+  const handleToggleAndCommit = async (id: string) => {
+    const next = new Set(checkedIds);
+    if (next.has(id)) {
+      if (next.size <= 1) return;
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setCheckedIds(next);
     setIsSubmitting(true);
     setSelectionError(null);
     try {
       const chosen = (snapshot?.calendars ?? []).filter((cal) =>
-        checkedIds.has(cal.identifier),
+        next.has(cal.identifier),
       );
       if (onSelectCalendars) {
         await onSelectCalendars(chosen);
@@ -125,11 +158,19 @@ export const UpcomingMeetings = ({
         await onSelectCalendar(chosen[0]);
       }
     } catch {
+      setCheckedIds(checkedIds);
       setSelectionError('Calendar couldn’t be selected. Try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const triggerLabel =
+    snapshot?.state === 'selected_calendar_missing'
+      ? 'Choose another calendar'
+      : checkedIds.size > 0
+        ? `${checkedIds.size} calendar${checkedIds.size === 1 ? '' : 's'} selected`
+        : 'Choose calendars';
 
   return (
     <section
@@ -181,67 +222,85 @@ export const UpcomingMeetings = ({
           />
         ) : snapshot.state === 'needs_selection' ||
           snapshot.state === 'selected_calendar_missing' ? (
-          <div className="pb-5">
-            <p className="text-[13px] font-medium leading-5 text-pro-text-main">
-              {snapshot.state === 'selected_calendar_missing'
-                ? 'Choose another calendar'
-                : 'Choose calendars'}
-            </p>
-            <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-              Pluto will read meetings from selected calendars.
-            </p>
-            <div className="mt-3 max-h-48 divide-y divide-pro-border/50 overflow-y-auto rounded-lg border border-pro-border/60 bg-pro-surface/55">
-              {snapshot.calendars.map((calendar) => {
-                const isChecked = checkedIds.has(calendar.identifier);
-                return (
-                  <label
-                    key={calendar.identifier}
-                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 px-3 text-left transition-colors first:rounded-t-lg last:rounded-b-lg hover:bg-pro-surface"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleCalendar(calendar.identifier)}
-                      className="h-3.5 w-3.5 rounded border-pro-border/70 text-pro-accent focus:ring-pro-accent"
-                      aria-label={`${calendar.title} from ${calendar.sourceTitle}`}
-                    />
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
-                      style={
-                        calendar.colorHex
-                          ? { backgroundColor: calendar.colorHex }
-                          : undefined
-                      }
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-medium text-pro-text-main">
-                        {calendar.title}
-                      </span>
-                      <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
-                        {calendar.sourceTitle}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
+          <div ref={dropdownRef} className="relative pb-5">
             <button
               type="button"
-              aria-label="Use selected calendars"
-              disabled={checkedIds.size === 0 || isSubmitting}
-              onClick={() => void handleCommitSelection()}
-              className="mt-3 inline-flex min-h-8 items-center justify-center rounded-md bg-pro-accent px-3 text-[11px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={triggerLabel}
+              aria-haspopup="true"
+              aria-expanded={isDropdownOpen}
+              onClick={() => setIsDropdownOpen((prev) => !prev)}
+              className="flex min-h-9 w-full items-center justify-between rounded-md border border-pro-border/70 bg-pro-surface/50 px-3 py-1.5 text-left text-[12px] font-medium text-pro-text-main transition-colors hover:border-pro-border hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
-              {isSubmitting ? 'Saving…' : 'Use selected calendars'}
+              <span className="truncate">{triggerLabel}</span>
+              {isSubmitting ? (
+                <Loader2
+                  className="h-3.5 w-3.5 shrink-0 animate-spin text-pro-text-muted"
+                  aria-hidden="true"
+                />
+              ) : isDropdownOpen ? (
+                <ChevronUp
+                  className="h-3.5 w-3.5 shrink-0 text-pro-text-muted"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ChevronDown
+                  className="h-3.5 w-3.5 shrink-0 text-pro-text-muted"
+                  aria-hidden="true"
+                />
+              )}
             </button>
-            {selectionError ? (
-              <p
-                role="alert"
-                className="mt-2 text-[10px] font-semibold text-pro-urgent"
+            {isDropdownOpen ? (
+              <div
+                role="menu"
+                aria-label="Available calendars"
+                className="absolute left-0 right-0 top-full z-30 mt-1.5 max-h-60 overflow-y-auto divide-y divide-pro-border/40 rounded-lg border border-pro-border/70 bg-pro-bg shadow-lg"
               >
-                {selectionError}
-              </p>
+                {snapshot.calendars.map((calendar) => {
+                  const isChecked = checkedIds.has(calendar.identifier);
+                  return (
+                    <label
+                      key={calendar.identifier}
+                      className="flex min-h-10 w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-pro-surface"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={isSubmitting}
+                        onChange={() =>
+                          void handleToggleAndCommit(calendar.identifier)
+                        }
+                        className="h-3.5 w-3.5 rounded border-pro-border/70 text-pro-accent focus:ring-pro-accent"
+                        aria-label={`${calendar.title} from ${calendar.sourceTitle}`}
+                      />
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full bg-pro-accent"
+                        style={
+                          calendar.colorHex
+                            ? { backgroundColor: calendar.colorHex }
+                            : undefined
+                        }
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-medium text-pro-text-main">
+                          {calendar.title}
+                        </span>
+                        <span className="block truncate text-[9px] font-medium text-pro-text-muted/75">
+                          {calendar.sourceTitle}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {selectionError ? (
+                  <p
+                    role="alert"
+                    className="p-2 text-[10px] font-semibold text-pro-urgent"
+                  >
+                    {selectionError}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : snapshot.state === 'no_calendars' ? (
