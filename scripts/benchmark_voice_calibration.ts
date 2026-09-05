@@ -1,4 +1,7 @@
-import type { CanonicalVoiceProfile, SpeakerVoiceRejection } from '../electron/speakerVoiceStore.ts';
+import type {
+  CanonicalVoiceProfile,
+  SpeakerVoiceRejection,
+} from '../electron/speakerVoiceStore.ts';
 import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence.ts';
 import {
   DEFAULT_CALIBRATION_POLICY_V1,
@@ -56,7 +59,9 @@ function createSyntheticUnitVector(dim: number): number[] {
 }
 
 function blendVectors(v1: number[], v2: number[], weightV2: number): number[] {
-  const blended = v1.map((val, i) => val * (1 - weightV2) + (v2[i] ?? 0) * weightV2);
+  const blended = v1.map(
+    (val, i) => val * (1 - weightV2) + (v2[i] ?? 0) * weightV2,
+  );
   return normalizeVector(blended);
 }
 
@@ -113,7 +118,11 @@ export function buildSyntheticCalibrationDataset(
   const cases: SyntheticBenchmarkCase[] = [];
 
   // 1. exact_match: highly similar candidate (cosine similarity ~0.98), clean duration 5s, chunk sim 0.85
-  const alexCloseVector = blendVectors(vAlex, createSyntheticUnitVector(11), 0.05);
+  const alexCloseVector = blendVectors(
+    vAlex,
+    createSyntheticUnitVector(11),
+    0.05,
+  );
   cases.push({
     taxonomyCategory: 'exactMatches',
     candidate: {
@@ -125,7 +134,7 @@ export function buildSyntheticCalibrationDataset(
       cleanSegmentCount: 3,
       cleanChunkCount: 4,
       minimumChunkSimilarity: 0.85,
-      meanChunkSimilarity: 0.90,
+      meanChunkSimilarity: 0.9,
       sampleInterval: { startTime: 0, endTime: 5 },
       provenance: standardProvenance,
     },
@@ -156,7 +165,9 @@ export function buildSyntheticCalibrationDataset(
   // 3. ambiguous_runner_up: similarity ~0.85 to Alex and ~0.80 to Bob (margin ~0.05 < 0.10)
   // vAmbiguous has projection ~0.72 on vAlex and ~0.68 on vBob
   const vAmbiguous = normalizeVector(
-    alexProfile.embedding.map((a, i) => a * 0.72 + bobProfile.embedding[i] * 0.68),
+    alexProfile.embedding.map(
+      (a, i) => a * 0.72 + bobProfile.embedding[i] * 0.68,
+    ),
   );
   cases.push({
     taxonomyCategory: 'ambiguousRunnerUps',
@@ -189,7 +200,7 @@ export function buildSyntheticCalibrationDataset(
       cleanSegmentCount: 2,
       cleanChunkCount: 2,
       minimumChunkSimilarity: 0.85,
-      meanChunkSimilarity: 0.90,
+      meanChunkSimilarity: 0.9,
       sampleInterval: { startTime: 0, endTime: 2.0 },
       provenance: standardProvenance,
     },
@@ -229,7 +240,7 @@ export function buildSyntheticCalibrationDataset(
       cleanSegmentCount: 2,
       cleanChunkCount: 3,
       minimumChunkSimilarity: 0.85,
-      meanChunkSimilarity: 0.90,
+      meanChunkSimilarity: 0.9,
       sampleInterval: { startTime: 0, endTime: 5.0 },
       provenance: {
         modelIdentifier: 'titanet-large',
@@ -276,7 +287,7 @@ export function buildSyntheticCalibrationDataset(
       cleanSegmentCount: 2,
       cleanChunkCount: 2,
       minimumChunkSimilarity: 0.85,
-      meanChunkSimilarity: 0.90,
+      meanChunkSimilarity: 0.9,
       sampleInterval: { startTime: 0, endTime: 4.0 },
       provenance: standardProvenance,
     },
@@ -296,7 +307,7 @@ export function buildSyntheticCalibrationDataset(
       cleanSegmentCount: 2,
       cleanChunkCount: 3,
       minimumChunkSimilarity: 0.85,
-      meanChunkSimilarity: 0.90,
+      meanChunkSimilarity: 0.9,
       sampleInterval: { startTime: 0, endTime: 5.0 },
       provenance: standardProvenance,
     },
@@ -380,9 +391,11 @@ export function runCalibrationBenchmark(
   }
 
   const totalCases = dataset.cases.length;
-  const falseSuggestionRate = totalCases > 0 ? falsePositives / totalCases : 0.0;
+  const falseSuggestionRate =
+    totalCases > 0 ? falsePositives / totalCases : 0.0;
   const zeroFalseSuggestionsObserved = falsePositives === 0;
-  const selectedPolicyPassed = zeroFalseSuggestionsObserved && truePositives > 0;
+  const selectedPolicyPassed =
+    zeroFalseSuggestionsObserved && truePositives > 0;
 
   const report: VoiceCalibrationBenchmarkReport = {
     schemaVersion: 1,
@@ -431,11 +444,19 @@ export function validateReportPrivacy(report: unknown): void {
   }
 
   // Check for any absolute filesystem paths or person names
-  if (json.includes('/Users/') || json.includes('/home/') || json.includes('C:\\')) {
+  if (
+    json.includes('/Users/') ||
+    json.includes('/home/') ||
+    json.includes('C:\\')
+  ) {
     throw new Error('privacy_violation_path_leakage');
   }
 
-  if (json.includes('Alex') || json.includes('Bob') || json.includes('Charlie')) {
+  if (
+    json.includes('Alex') ||
+    json.includes('Bob') ||
+    json.includes('Charlie')
+  ) {
     throw new Error('privacy_violation_identity_leakage');
   }
 }

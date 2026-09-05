@@ -66,7 +66,11 @@ const summary = (id: string, name: string) => ({
   possibleDuplicateCount: 0,
 });
 
-const detail = (id: string, name: string, mergedPeople: Array<{ id: string; name: string }> = []) => ({
+const detail = (
+  id: string,
+  name: string,
+  mergedPeople: Array<{ id: string; name: string }> = [],
+) => ({
   person: entity(id, name),
   meetings: [],
   commitments: { open: [], delivered: [], candidates: [] },
@@ -91,7 +95,9 @@ describe('PeopleTab Voice Profile integration', () => {
       summary('person-2', 'Bob Smith'),
     ]);
     api.getPersonBriefing.mockImplementation((id: string) =>
-      Promise.resolve(detail(id, id === 'person-1' ? 'Avery Chen' : 'Bob Smith')),
+      Promise.resolve(
+        detail(id, id === 'person-1' ? 'Avery Chen' : 'Bob Smith'),
+      ),
     );
 
     voiceApi.getSpeakerVoiceProfiles.mockResolvedValue([
@@ -126,7 +132,10 @@ describe('PeopleTab Voice Profile integration', () => {
   const renderTab = async (selectedPersonId = 'person-1') => {
     await act(async () => {
       root.render(
-        <PeopleTab selectedPersonId={selectedPersonId} onSelectPerson={() => {}} />,
+        <PeopleTab
+          selectedPersonId={selectedPersonId}
+          onSelectPerson={() => {}}
+        />,
       );
     });
     // flush microtasks
@@ -194,7 +203,9 @@ describe('PeopleTab Voice Profile integration', () => {
   it('disables permanent delete and displays disclosure for merged family', async () => {
     api.getPersonBriefing.mockImplementation((id: string) =>
       Promise.resolve(
-        detail('person-1', 'Avery Chen', [{ id: 'person-merged', name: 'Avery C.' }]),
+        detail('person-1', 'Avery Chen', [
+          { id: 'person-merged', name: 'Avery C.' },
+        ]),
       ),
     );
 
@@ -226,6 +237,8 @@ describe('PeopleTab Voice Profile integration', () => {
     });
 
     expect(voiceApi.deleteSpeakerVoiceProfile).toHaveBeenCalledWith('person-1');
-    expect(host.textContent).toContain('No voice profile enrolled for this person.');
+    expect(host.textContent).toContain(
+      'No voice profile enrolled for this person.',
+    );
   });
 });

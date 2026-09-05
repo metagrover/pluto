@@ -45,8 +45,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     root = createRoot(container);
     invoke = vi.fn(async (channel: string, payload: any) => {
       if (channel === 'GET_IDENTITY_STATE') return workspace;
-      if (channel === 'GET_MEETING_IDENTITY')
-        return meeting(payload.meetingId);
+      if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
       if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
         return {
           suggestions: {

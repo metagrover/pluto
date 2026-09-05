@@ -1,6 +1,14 @@
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
 
 const directory = vi.hoisted(() => {

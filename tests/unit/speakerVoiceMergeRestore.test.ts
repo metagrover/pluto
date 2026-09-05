@@ -1,6 +1,14 @@
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 const directory = vi.hoisted(() => {
   const filesystem = require('node:fs') as typeof import('node:fs');

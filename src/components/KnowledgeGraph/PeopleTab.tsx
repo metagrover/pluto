@@ -20,13 +20,6 @@ import {
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  type ClientVoiceProfile,
-  deleteSpeakerVoiceProfile,
-  getSpeakerVoiceProfiles,
-  getVoiceReferenceSample,
-  setSpeakerVoiceProfileStatus,
-} from '../../api/speakerVoice';
-import {
   type Entity,
   type EntityMeeting,
   type PersonBriefingDetail,
@@ -39,6 +32,13 @@ import {
   triggerDreamingNow,
   updatePersonName,
 } from '../../api/knowledgeGraph';
+import {
+  type ClientVoiceProfile,
+  deleteSpeakerVoiceProfile,
+  getSpeakerVoiceProfiles,
+  getVoiceReferenceSample,
+  setSpeakerVoiceProfileStatus,
+} from '../../api/speakerVoice';
 import {
   DREAMING_STATUS_LABEL,
   type DreamingUiStatus,
@@ -539,9 +539,8 @@ export const PersonDossier = ({
     try {
       const profiles = await getSpeakerVoiceProfiles();
       const match =
-        profiles.find(
-          (p) => p.canonicalPersonId === currentDetail.person.id,
-        ) ?? null;
+        profiles.find((p) => p.canonicalPersonId === currentDetail.person.id) ??
+        null;
       setVoiceProfile(match);
     } catch {
       setVoiceProfile(null);
