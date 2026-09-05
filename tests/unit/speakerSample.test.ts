@@ -61,6 +61,47 @@ describe('meeting speaker samples', () => {
     expect(deps.removeFile).toHaveBeenCalledWith('/tmp/speaker-sample.wav');
   });
 
+  it('resolves a bounded sample for the aggregate Them speaker', async () => {
+    const deps = dependencies();
+    deps.getMeeting.mockReturnValue({
+      id: 'meeting-a',
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Them',
+            start: 96.88,
+            end: 101.2,
+            text: 'I think I have aligned successfully.',
+          },
+        ],
+      }),
+      system_audio_path: '/meetings/meeting-a/system.wav',
+    });
+
+    const result = await loadSpeakerSample(
+      {
+        meetingId: 'meeting-a',
+        speaker: 'Them',
+        sampleIndex: 0,
+      },
+      deps,
+    );
+
+    expect(deps.sliceWav).toHaveBeenCalledWith({
+      inputPath: '/meetings/meeting-a/system.wav',
+      outputPath: '/tmp/speaker-sample.wav',
+      startSec: 96.88,
+      durationSec: expect.closeTo(4.32, 6),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        excerpt: 'I think I have aligned successfully.',
+        sampleIndex: 0,
+        sampleCount: 1,
+      }),
+    );
+  });
+
   it.each([
     { meetingId: '', speaker: 'Remote Speaker 1', sampleIndex: 0 },
     { meetingId: 'meeting-a', speaker: 'Speaker 1', sampleIndex: 0 },

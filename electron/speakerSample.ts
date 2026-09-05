@@ -1,7 +1,7 @@
 import { selectSpeakerSampleIntervals } from '../src/utils/speakerReview';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 
-const CANONICAL_REMOTE_SPEAKER = /^Remote Speaker \d+$/u;
+const CANONICAL_REVIEWABLE_SPEAKER = /^(?:Remote Speaker \d+|Them)$/u;
 const MAX_SAMPLE_INDEX = 1;
 const MAX_SAMPLE_BYTES = 10 * 1024 * 1024;
 
@@ -50,7 +50,7 @@ const validRequest = (value: unknown): value is SpeakerSampleRequest => {
     request.meetingId.length > 0 &&
     request.meetingId.length <= 256 &&
     typeof request.speaker === 'string' &&
-    CANONICAL_REMOTE_SPEAKER.test(request.speaker) &&
+    CANONICAL_REVIEWABLE_SPEAKER.test(request.speaker) &&
     Number.isInteger(request.sampleIndex) &&
     Number(request.sampleIndex) >= 0 &&
     Number(request.sampleIndex) <= MAX_SAMPLE_INDEX
