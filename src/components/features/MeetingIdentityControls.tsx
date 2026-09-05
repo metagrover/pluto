@@ -14,6 +14,7 @@ import {
 } from '../../api/identity';
 import type { IdentityBinding, IdentityPerson } from '../../types/identity';
 import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
+import { SearchSelect } from '../ui/SearchSelect';
 import { identityButtonClass, identityFieldClass } from './IdentitySettings';
 import { extractSpeakerDisplayNames } from './meetingTranscriptPresentation';
 
@@ -67,22 +68,23 @@ const SpeakerCorrection = ({
               : 'Individual speaker confirmed, name unknown.'
             : 'No individual identity confirmed.'}
       </p>
-      <select
+      <SearchSelect
         id={id}
-        aria-label={`Person for ${speaker}`}
-        className={identityFieldClass}
+        ariaLabel={`Person for ${speaker}`}
         value={choice}
         disabled={busy}
-        onChange={(event) => setChoice(event.target.value)}
-      >
-        <option value="">Individual speaker (name unknown)</option>
-        {people.map((person) => (
-          <option key={person.id} value={person.id}>
-            {identityPersonLabel(person, people)}
-          </option>
-        ))}
-        <option value="__new__">Create a distinct person…</option>
-      </select>
+        onValueChange={setChoice}
+        placeholder="Individual speaker (name unknown)"
+        searchPlaceholder="Search people…"
+        options={[
+          { value: '', label: 'Individual speaker (name unknown)' },
+          ...people.map((person) => ({
+            value: person.id,
+            label: identityPersonLabel(person, people),
+          })),
+          { value: '__new__', label: 'Create a distinct person…' },
+        ]}
+      />
       {choice === '__new__' && (
         <label className="block text-[13px] text-pro-text-main">
           New person name
@@ -181,6 +183,7 @@ const AnonymousSpeakerReview = ({
   onSave: (selection: IdentitySelection) => void;
   onClear: () => void;
 }) => {
+  const personSelectId = useId();
   const displayLabel = getAnonymousSpeakerDisplayLabel(speaker);
   const [choice, setChoice] = useState('');
   const [name, setName] = useState('');
@@ -338,30 +341,31 @@ const AnonymousSpeakerReview = ({
           </div>
         </div>
       ) : null}
-      <label className="speaker-review-field">
+      <label htmlFor={personSelectId} className="speaker-review-field">
         <span>Choose an existing person or add someone new</span>
-        <select
-          aria-label={`Person for ${speaker}`}
-          className={identityFieldClass}
+        <SearchSelect
+          id={personSelectId}
+          ariaLabel={`Person for ${speaker}`}
           value={choice}
           disabled={busy}
-          onChange={(event) => {
-            const value = event.target.value;
+          placeholder="Choose a person…"
+          searchPlaceholder="Search people…"
+          options={[
+            { value: '', label: 'Choose a person…' },
+            ...people.map((person) => ({
+              value: person.id,
+              label: identityPersonLabel(person, people),
+            })),
+            { value: '__new__', label: 'Create a distinct person…' },
+          ]}
+          onValueChange={(value) => {
             setChoice(value);
             setStaged(null);
             if (value === '__new__') return;
             const person = people.find((candidate) => candidate.id === value);
             if (person) stagePerson(person);
           }}
-        >
-          <option value="">Choose a person…</option>
-          {people.map((person) => (
-            <option key={person.id} value={person.id}>
-              {identityPersonLabel(person, people)}
-            </option>
-          ))}
-          <option value="__new__">Create a distinct person…</option>
-        </select>
+        />
       </label>
       {choice === '__new__' ? (
         <div className="speaker-review-new-person">

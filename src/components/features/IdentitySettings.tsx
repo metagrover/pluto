@@ -8,6 +8,7 @@ import {
   isIdentityRevisionError,
   setSelfIdentity,
 } from '../../api/identity';
+import { SearchSelect } from '../ui/SearchSelect';
 import { IdentityProfileForm } from './IdentityProfileForm';
 
 export const identityFieldClass =
@@ -121,27 +122,33 @@ export const IdentitySettings = () => {
                 >
                   Your person
                 </label>
-                <select
+                <SearchSelect
                   id="self-identity-person"
-                  aria-label="Your person"
-                  className={identityFieldClass}
+                  ariaLabel="Your person"
                   value={choice}
                   disabled={busy}
-                  onChange={(event) => {
-                    setChoice(event.target.value);
+                  placeholder="Not set"
+                  searchPlaceholder="Search people…"
+                  options={[
+                    {
+                      value: '',
+                      label: 'Not set',
+                      disabled: Boolean(state.selfPersonId),
+                    },
+                    ...state.people.map((person) => ({
+                      value: person.id,
+                      label: identityPersonLabel(person, state.people),
+                    })),
+                    {
+                      value: '__new__',
+                      label: 'Create a distinct person…',
+                    },
+                  ]}
+                  onValueChange={(value) => {
+                    setChoice(value);
                     setSaved(false);
                   }}
-                >
-                  <option value="" disabled={Boolean(state.selfPersonId)}>
-                    Not set
-                  </option>
-                  {state.people.map((person) => (
-                    <option key={person.id} value={person.id}>
-                      {identityPersonLabel(person, state.people)}
-                    </option>
-                  ))}
-                  <option value="__new__">Create a distinct person…</option>
-                </select>
+                />
                 {choice === '__new__' && (
                   <label className="block text-[13px] text-pro-text-main">
                     New person name

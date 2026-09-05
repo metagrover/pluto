@@ -15,6 +15,7 @@ import {
 import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
+import { SearchSelect } from '../../ui/SearchSelect';
 import { PreparedUpdates } from '../dreaming/PreparedUpdates';
 import { ProjectCommitments } from './ProjectCommitments';
 import { ProjectMilestones } from './ProjectMilestones';
@@ -823,19 +824,19 @@ export const ProjectDossier = ({
               >
                 Project to merge
               </label>
-              <select
+              <SearchSelect
                 id="merge-project-source"
                 value={mergeSourceId}
-                onChange={(event) => setMergeSourceId(event.target.value)}
-                className="mt-2 w-full rounded-md border border-pro-border bg-pro-bg px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
-              >
-                <option value="">Choose a project</option>
-                {eligibleMergeCandidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-              </select>
+                ariaLabel="Project to merge"
+                onValueChange={setMergeSourceId}
+                placeholder="Choose a project"
+                searchPlaceholder="Search projects…"
+                options={eligibleMergeCandidates.map((candidate) => ({
+                  value: candidate.id,
+                  label: candidate.name,
+                }))}
+                className="mt-2"
+              />
               {selectedMergeSource && (
                 <div className="mt-5 border-y border-pro-border/40 py-4 text-sm">
                   <p className="font-medium">Merge preview</p>

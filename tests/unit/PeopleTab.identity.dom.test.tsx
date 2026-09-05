@@ -167,10 +167,15 @@ describe('People identity controls', () => {
   it('previews, performs, and undoes a reversible person merge', async () => {
     await render();
     await click('Review possible duplicate');
-    const select = host.querySelector<HTMLSelectElement>(
-      '#merge-person-source',
-    )!;
-    await setValue(select, 'person-2');
+    const select = host.querySelector<HTMLElement>('#merge-person-source')!;
+    await act(async () => select.click());
+    await act(async () =>
+      document.body
+        .querySelector<HTMLButtonElement>(
+          '[role="option"][data-value="person-2"]',
+        )
+        ?.click(),
+    );
 
     expect(host.textContent).toContain('Avery C.');
     expect(host.textContent).toContain('2 meetings');

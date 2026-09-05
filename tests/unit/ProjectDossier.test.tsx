@@ -454,16 +454,13 @@ it('previews, performs and undoes a reversible merge', async () => {
     );
   await render({ mergeCandidates: [candidate] });
   await click('Merge another project');
-  const select = host.querySelector<HTMLSelectElement>(
-    '#merge-project-source',
-  )!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLSelectElement.prototype,
-      'value',
-    )?.set?.call(select, 'p2');
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  const select = host.querySelector<HTMLElement>('#merge-project-source')!;
+  await act(async () => select.click());
+  await act(async () =>
+    document.body
+      .querySelector<HTMLButtonElement>('[role="option"][data-value="p2"]')
+      ?.click(),
+  );
   expect(host.textContent).toContain('Meeting references10');
   await click('Merge Archive indexing');
   expect(api.mergeProject).toHaveBeenCalledWith('p2', 'p1');

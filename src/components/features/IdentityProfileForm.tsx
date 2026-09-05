@@ -11,6 +11,27 @@ import {
   type IdentityUseCase,
   emptyIdentityProfile,
 } from '../../types/identity';
+import { SearchSelect } from '../ui/SearchSelect';
+
+const roleOptions = [
+  'Engineering',
+  'Sales',
+  'Business',
+  'Design',
+  'Research',
+  'Teaching',
+  'Student',
+  'Operations',
+].map((value) => ({ value, label: value }));
+
+const industryOptions = [
+  'Technology',
+  'Education',
+  'Healthcare',
+  'Finance',
+  'Creative arts',
+  'Public service',
+].map((value) => ({ value, label: value }));
 
 const fieldClass =
   'w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2 text-[14px] text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50 disabled:opacity-50';
@@ -277,55 +298,45 @@ export const IdentityProfileForm = ({
           </div>
         </fieldset>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block text-[13px] font-medium text-pro-text-main">
+          <label
+            htmlFor={`${id}-role`}
+            className="block text-[13px] font-medium text-pro-text-main"
+          >
             Role or field
-            <input
-              aria-label="Role or field"
-              list={`${id}-roles`}
-              maxLength={160}
+            <SearchSelect
+              id={`${id}-role`}
+              ariaLabel="Role or field"
               value={draft.role}
-              onChange={(event) => update({ role: event.target.value })}
-              className={`${fieldClass} mt-1.5`}
+              options={roleOptions}
+              allowCustomValue
+              maxLength={160}
+              onValueChange={(role) => update({ role: role.slice(0, 160) })}
+              placeholder="Choose or type your role"
+              searchPlaceholder="Search roles or type your own…"
+              className="mt-1.5"
             />
           </label>
-          <label className="block text-[13px] font-medium text-pro-text-main">
+          <label
+            htmlFor={`${id}-industry`}
+            className="block text-[13px] font-medium text-pro-text-main"
+          >
             Industry
-            <input
-              aria-label="Industry"
-              list={`${id}-industries`}
-              maxLength={160}
+            <SearchSelect
+              id={`${id}-industry`}
+              ariaLabel="Industry"
               value={draft.industry}
-              onChange={(event) => update({ industry: event.target.value })}
-              className={`${fieldClass} mt-1.5`}
+              options={industryOptions}
+              allowCustomValue
+              maxLength={160}
+              onValueChange={(industry) =>
+                update({ industry: industry.slice(0, 160) })
+              }
+              placeholder="Choose or type your industry"
+              searchPlaceholder="Search industries or type your own…"
+              className="mt-1.5"
             />
           </label>
         </div>
-        <datalist id={`${id}-roles`}>
-          {[
-            'Engineering',
-            'Sales',
-            'Business',
-            'Design',
-            'Research',
-            'Teaching',
-            'Student',
-            'Operations',
-          ].map((value) => (
-            <option key={value} value={value} />
-          ))}
-        </datalist>
-        <datalist id={`${id}-industries`}>
-          {[
-            'Technology',
-            'Education',
-            'Healthcare',
-            'Finance',
-            'Creative arts',
-            'Public service',
-          ].map((value) => (
-            <option key={value} value={value} />
-          ))}
-        </datalist>
       </fieldset>
       <p className="text-[12px] leading-relaxed text-pro-text-main/75">
         Context is saved in this workspace for future terminology work; it does
