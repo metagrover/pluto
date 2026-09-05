@@ -54,11 +54,7 @@ describe('speaker review', () => {
       selectReviewableAnonymousSpeakers(['Me', 'Them', 'Unknown']),
     ).toEqual(['Them']);
     expect(
-      selectReviewableAnonymousSpeakers([
-        'Me',
-        'Unknown',
-        'Local Speaker 1',
-      ]),
+      selectReviewableAnonymousSpeakers(['Me', 'Unknown', 'Local Speaker 1']),
     ).toEqual([]);
   });
 

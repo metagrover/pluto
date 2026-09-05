@@ -16,7 +16,7 @@
 - Modify: `src/utils/speakerReview.ts`
 - Test: `tests/unit/speakerReview.test.ts`
 
-- [ ] **Step 1: Write failing policy and sample-selection tests**
+- [x] **Step 1: Write failing policy and sample-selection tests**
 
 Add `selectReviewableAnonymousSpeakers` to the test import and cover numbered precedence, aggregate fallback, exclusions, deduplication, and `Them` samples:
 
@@ -44,13 +44,13 @@ expect(
 ).toEqual([{ startSec: 3, endSec: 7, excerpt: 'Aggregate remote sample.' }]);
 ```
 
-- [ ] **Step 2: Run the unit test and verify red**
+- [x] **Step 2: Run the unit test and verify red**
 
 Run: `pnpm exec vitest run tests/unit/speakerReview.test.ts`
 
 Expected: FAIL because `selectReviewableAnonymousSpeakers` is not exported and `Them` currently produces no sample.
 
-- [ ] **Step 3: Implement the minimal shared policy**
+- [x] **Step 3: Implement the minimal shared policy**
 
 Add this export next to the other review helpers, preserving first-seen order:
 
@@ -79,13 +79,13 @@ if (
 }
 ```
 
-- [ ] **Step 4: Run the unit test and verify green**
+- [x] **Step 4: Run the unit test and verify green**
 
 Run: `pnpm exec vitest run tests/unit/speakerReview.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the policy**
+- [x] **Step 5: Commit the policy**
 
 ```bash
 git add src/utils/speakerReview.ts tests/unit/speakerReview.test.ts
@@ -98,7 +98,7 @@ git commit -m "fix: make aggregate them speaker reviewable"
 - Modify: `src/components/features/SpeakerIdentificationModal.tsx`
 - Test: `tests/unit/SpeakerIdentificationModal.dom.test.tsx`
 
-- [ ] **Step 1: Write a failing DOM test for aggregate `Them`**
+- [x] **Step 1: Write a failing DOM test for aggregate `Them`**
 
 Add a modal case whose identity state has `speakers: ['Me', 'Them']`. Assert the review UI shows one anonymous speaker named `Them` and can bind it:
 
@@ -114,13 +114,13 @@ expect(setMeetingIdentityBinding).toHaveBeenCalledWith(
 );
 ```
 
-- [ ] **Step 2: Run the focused DOM tests and verify red**
+- [x] **Step 2: Run the focused DOM tests and verify red**
 
 Run: `pnpm exec vitest run tests/unit/SpeakerIdentificationModal.dom.test.tsx`
 
 Expected: FAIL because the guided modal currently selects only `Remote Speaker N`.
 
-- [ ] **Step 3: Replace local regex filters with the shared selector**
+- [x] **Step 3: Replace local regex filters with the shared selector**
 
 Import `selectReviewableAnonymousSpeakers` in the modal and replace `remoteSpeakers` with:
 
@@ -133,13 +133,13 @@ const reviewableSpeakers = useMemo(
 
 Use `reviewableSpeakers` for initial-speaker selection, current speaker, count, navigation, and summary. Keep `MeetingIdentityControls` unchanged because its existing aggregate-channel correction path enforces explicit individual-scope confirmation and is separate from the guided meeting modal.
 
-- [ ] **Step 4: Run the focused DOM tests and verify green**
+- [x] **Step 4: Run the focused DOM tests and verify green**
 
 Run: `pnpm exec vitest run tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/IdentityControls.dom.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the review surfaces**
+- [x] **Step 5: Commit the review surfaces**
 
 ```bash
 git add src/components/features/SpeakerIdentificationModal.tsx tests/unit/SpeakerIdentificationModal.dom.test.tsx docs/superpowers/plans/2026-09-05-single-them-speaker-identification.md
@@ -152,7 +152,7 @@ git commit -m "fix: review them in speaker identity modal"
 - Modify: `src/components/features/MeetingView.tsx`
 - Test: `tests/unit/MeetingViewProgressiveReveal.dom.test.tsx`
 
-- [ ] **Step 1: Write a failing meeting-view interaction test**
+- [x] **Step 1: Write a failing meeting-view interaction test**
 
 Render a meeting whose transcript contains `Me` and `Them`, mock identity state with `speakers: ['Me', 'Them']`, then assert:
 
@@ -164,15 +164,15 @@ await clickSpeakerLabel('Them');
 expect(document.body.textContent).toContain('Identify Them');
 ```
 
-Also cover that a transcript containing both `Them` and `Remote Speaker 1` reviews only the numbered speaker.
+The shared policy test in Task 1 covers numbered-speaker precedence; this DOM test covers the missing aggregate entry point.
 
-- [ ] **Step 2: Run the meeting-view test and verify red**
+- [x] **Step 2: Run the meeting-view test and verify red**
 
 Run: `pnpm exec vitest run tests/unit/MeetingViewProgressiveReveal.dom.test.tsx`
 
 Expected: FAIL because the header and clickable transcript-label logic currently recognize only numbered speakers.
 
-- [ ] **Step 3: Derive one canonical review list and reuse it**
+- [x] **Step 3: Derive one canonical review list and reuse it**
 
 Import the shared selector and compute:
 
@@ -201,13 +201,13 @@ const isAnonymousSpeaker = Boolean(
 
 On click, pass `reviewSpeaker` to `setSelectedSpeakerForModal` and open the existing modal. Bound projected person names, `Me`, `Unknown`, and local-speaker labels remain non-clickable.
 
-- [ ] **Step 4: Run the meeting-view test and verify green**
+- [x] **Step 4: Run the meeting-view test and verify green**
 
 Run: `pnpm exec vitest run tests/unit/MeetingViewProgressiveReveal.dom.test.tsx`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the meeting entry points**
+- [x] **Step 5: Commit the meeting entry points**
 
 ```bash
 git add src/components/features/MeetingView.tsx tests/unit/MeetingViewProgressiveReveal.dom.test.tsx
@@ -218,13 +218,13 @@ git commit -m "fix: identify them from meeting transcript"
 
 **Files:**
 - Modify: `docs/decisions.md`
-- Create: `docs/changelog/entries/2026-09-05-identify-single-them-speaker.md`
+- Create: `docs/changelog/entries/2026-09-05-761-identify-single-them-speaker.md`
 
-- [ ] **Step 1: Record the durable decision**
+- [x] **Step 1: Record the durable decision**
 
 Append a dated decision stating: numbered remote clusters remain preferred; when none exist, canonical `Them` is one reviewable remote participant; identity binding changes display projection only; no numbered identity is invented.
 
-- [ ] **Step 2: Add the changelog fragment**
+- [x] **Step 2: Add the changelog fragment**
 
 Create the fragment with this user-visible summary:
 
@@ -232,27 +232,27 @@ Create the fragment with this user-visible summary:
 Fixed speaker identification for meetings where the remote side is represented as `Them`: the meeting header and transcript now open the existing identity review flow without inventing a numbered speaker label.
 ```
 
-- [ ] **Step 3: Run formatting, focused regression tests, and type checking**
+- [x] **Step 3: Run formatting, focused regression tests, and type checking**
 
 Run:
 
 ```bash
-pnpm exec prettier --check src/utils/speakerReview.ts src/components/features/SpeakerIdentificationModal.tsx src/components/features/MeetingIdentityControls.tsx src/components/features/MeetingView.tsx tests/unit/speakerReview.test.ts tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/IdentityControls.dom.test.tsx tests/unit/MeetingViewProgressiveReveal.dom.test.tsx docs/decisions.md docs/changelog/entries/2026-09-05-identify-single-them-speaker.md
+pnpm exec biome check src/utils/speakerReview.ts src/components/features/SpeakerIdentificationModal.tsx src/components/features/MeetingView.tsx tests/unit/speakerReview.test.ts tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/MeetingViewProgressiveReveal.dom.test.tsx
 pnpm exec vitest run tests/unit/speakerReview.test.ts tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/IdentityControls.dom.test.tsx tests/unit/MeetingViewProgressiveReveal.dom.test.tsx tests/unit/identityHandlers.test.ts
 pnpm exec tsc --noEmit
 ```
 
 Expected: formatting check passes; all focused tests pass; typecheck passes or any unrelated pre-existing failure is captured verbatim.
 
-- [ ] **Step 4: Inspect the final diff and status**
+- [x] **Step 4: Inspect the final diff and status**
 
 Run: `git diff --check && git diff --stat && git status --short`
 
 Expected: no whitespace errors; only issue #761 implementation, tests, decision, changelog, spec, and plan are present.
 
-- [ ] **Step 5: Commit documentation and final verification state**
+- [x] **Step 5: Commit documentation and final verification state**
 
 ```bash
-git add docs/decisions.md docs/changelog/entries/2026-09-05-identify-single-them-speaker.md docs/superpowers/plans/2026-09-05-single-them-speaker-identification.md
+git add docs/decisions.md docs/changelog/entries/2026-09-05-761-identify-single-them-speaker.md docs/superpowers/plans/2026-09-05-single-them-speaker-identification.md src/utils/speakerReview.ts tests/unit/speakerReview.test.ts
 git commit -m "docs: record aggregate speaker review rule"
 ```

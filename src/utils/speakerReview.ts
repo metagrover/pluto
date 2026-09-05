@@ -71,8 +71,9 @@ export const isGenericSpeakerLabel = (value: unknown): boolean => {
 export const selectReviewableAnonymousSpeakers = (
   speakers: Iterable<string>,
 ): string[] => {
-  const unique = [...new Set([...speakers].map((speaker) => speaker.trim()))]
-    .filter(Boolean);
+  const unique = [
+    ...new Set([...speakers].map((speaker) => speaker.trim())),
+  ].filter(Boolean);
   const numbered = unique.filter((speaker) =>
     REMOTE_SPEAKER_PATTERN.test(speaker),
   );
