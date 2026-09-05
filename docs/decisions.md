@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Guided speaker identification modal and meeting header entry point
+
+- **Status:** Accepted
+- **Source:** [Issue #759](https://github.com/metagrover/pluto/issues/759), owner direction on 2026-09-05
+- **Decision:** Pluto replaces the inline collapsible accordion above the transcript with a guided, one-by-one speaker identification modal (`SpeakerIdentificationModal`). The flow is initiated from a subtle, clickable metadata entry point directly under the meeting title (`September 5, 2026 · 2 participants · 2 unidentified speakers`) or by clicking any unresolved `Speaker N` badge inside transcript turns. In the modal, speakers are reviewed sequentially (`Speaker 1 of 2`) with an isolated audio sample player, quote excerpt, 1-click attendee suggestion chips (filtering out the workspace user and nicknames), and person search/create controls. Confirming or clicking an attendee chip auto-advances to the next speaker, with full `Back` and `Skip` navigation, and a summary review step upon completion. The transcript area remains 100% clean and focused purely on reading.
+- **Rationale:** Stacking multiple speaker review forms and system disclaimers in an accordion directly above the transcript created severe visual clutter and high cognitive load. A focused modal isolates attention to one speaker at a time, makes speaker identification a first-class meeting-level action accessible from the header, and leaves the reading experience pristine.
+- **Consequences:** The transcript reading view contains zero stacked review accordions; unidentified speakers are triaged in seconds via 1-click attendee chips or keyboard navigation; transcript rows immediately reflect identified names without page refresh.
+
 ## 2026-09-05 - Streamline speaker review UX and automatch workspace user profile for Me
 
 - **Status:** Accepted
