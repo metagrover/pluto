@@ -601,7 +601,9 @@ describe('SpeakerIdentificationModal', () => {
     });
 
     // Should NOT offer to create "Remote Speaker 3"
-    expect(document.body.textContent).not.toContain('Create “Remote Speaker 3”');
+    expect(document.body.textContent).not.toContain(
+      'Create “Remote Speaker 3”',
+    );
     expect(document.body.textContent).toContain('No matching people found.');
   });
 });

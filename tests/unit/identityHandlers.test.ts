@@ -92,7 +92,9 @@ describe('identity IPC service', () => {
     }
     const state = handleIdentityRequest('GET_IDENTITY_STATE', {});
     expect(
-      state.people.some((p: { name: string }) => p.name === 'Remote Speaker 99'),
+      state.people.some(
+        (p: { name: string }) => p.name === 'Remote Speaker 99',
+      ),
     ).toBe(false);
     expect(
       state.people.some((p: { name: string }) => p.name === 'Speaker 5'),

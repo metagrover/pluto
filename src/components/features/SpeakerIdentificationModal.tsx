@@ -265,9 +265,7 @@ export const SpeakerIdentificationModal = ({
       width: rect.width > 0 ? `${rect.width}px` : '100%',
       maxWidth: '32rem',
       top: showAbove ? undefined : `${(rect.bottom || 0) + 6}px`,
-      bottom: showAbove
-        ? `${window.innerHeight - rect.top + 6}px`
-        : undefined,
+      bottom: showAbove ? `${window.innerHeight - rect.top + 6}px` : undefined,
       zIndex: 1050,
     });
   }, []);
