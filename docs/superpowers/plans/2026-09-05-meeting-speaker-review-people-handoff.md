@@ -242,6 +242,6 @@ git diff --check
 
 Run `pnpm run ensure:sqlite-abi` before any Electron/package validation if Node tests rebuilt `better-sqlite3` for the Node ABI.
 
-- [ ] **Step 4: Review and delivery**
+- [x] **Step 4: Review and delivery**
 
 Review the complete diff against the approved spec, update PR #754’s description and verification section, push `feat/747-proactive-calendar`, and confirm the remote head SHA.
