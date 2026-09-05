@@ -585,7 +585,7 @@ const auditDraft = async (
         const advisory =
           repaired &&
           input.provider === 'ollama' &&
-          input.reviewProtocol !== 'editor';
+          (input.reviewProtocol !== 'editor' || !fullSource);
         if (advisory && audited) {
           const allowed = fullSource ? undefined : evidenceSpans;
           const issues = findNotesGuardrailIssues(
@@ -660,7 +660,7 @@ const auditDraft = async (
           idPrefix,
         );
         result.audited.draft = preserved;
-        validateFinalDraft(preserved, result.audit);
+        validateFinalDraft(preserved, result.audit, result.audited);
         return {
           ...result,
           draft: preserved,
@@ -1298,7 +1298,9 @@ const runBoundedCompactNotes = async (
     return (
       fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans) &&
       estimateNotesTokens(createNotesWireRequest(editorPrompt, spans).prompt) +
-        COMPACT_WRITER_OUTPUT_TOKENS +
+        // The empty draft above measures the fixed editor envelope. Reserve a
+        // full compact draft for both its JSON body and wire-label expansion.
+        2 * COMPACT_WRITER_OUTPUT_TOKENS +
         reviewOutputTokens(input) +
         SAFETY_TOKENS <=
         input.contextTokens
@@ -1312,31 +1314,83 @@ const runBoundedCompactNotes = async (
   const reviewedDrafts: NotesDraft[] = [];
   const issues: string[] = [];
   let changes = 0;
-  for (const [index, leaf] of leaves.entries()) {
+  let processedLeaves = 0;
+  const processLeaf = async (
+    evidenceSpans: SourceSpan[],
+    idPrefix: string,
+    allowBisection: boolean,
+  ): Promise<void> => {
     assertNotCancelled(input);
-    const evidenceSpans = leaf.primarySpans;
     const sourceText = serializeSource(input, evidenceSpans);
-    const writerPrompt = buildCompactNotesWriterPrompt({
+    const baseWriterPrompt = buildCompactNotesWriterPrompt({
       sourceText,
       userNotes: input.context.userNotes,
       knownTerms,
       template: input.context.template,
     });
-    const draft = remapDraftIds(
-      await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans),
-      `leaf${index}`,
-    );
-    const reviewed = await auditDraft(
-      input,
-      draft,
-      evidenceSpans,
-      knownTerms,
-      [],
-      `leaf${index}`,
-    );
+    let draft: NotesDraft;
+    try {
+      draft = remapDraftIds(
+        await withTruncationRetry(input, (retryInstruction) =>
+          writeDraft(
+            input,
+            'notesWriter',
+            retryInstruction
+              ? `${baseWriterPrompt}\n\n${retryInstruction}`
+              : baseWriterPrompt,
+            evidenceSpans,
+          ),
+        ),
+        idPrefix,
+      );
+    } catch (error) {
+      if (
+        allowBisection &&
+        error instanceof MeetingNotesError &&
+        error.code === 'notes_output_truncated'
+      ) {
+        const split = bisectNotesSourceSpans(input.source, evidenceSpans);
+        if (split?.length === 2) {
+          input.onRepartition?.();
+          await processLeaf(split[0]!, `${idPrefix}a`, false);
+          await processLeaf(split[1]!, `${idPrefix}b`, false);
+          return;
+        }
+      }
+      throw error;
+    }
+    let reviewed: Awaited<ReturnType<typeof auditDraft>>;
+    try {
+      reviewed = await auditDraft(
+        input,
+        draft,
+        evidenceSpans,
+        knownTerms,
+        [],
+        idPrefix,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof MeetingNotesError) ||
+        ![
+          'notes_context_exhausted',
+          'notes_audit_invalid',
+          'notes_model_call_limit',
+        ].includes(error.code)
+      ) {
+        throw error;
+      }
+      reviewed = deterministicallyCheckedDraft(input, draft, evidenceSpans);
+      reviewed.audited.issues ??= [];
+      reviewed.audited.issues.push(`notes_leaf_audit_fallback:${error.code}`);
+    }
     reviewedDrafts.push(reviewed.draft);
     changes += reviewed.changeCount;
     issues.push(...(reviewed.audited.issues ?? []));
+    processedLeaves += 1;
+  };
+  for (const [index, leaf] of leaves.entries()) {
+    await processLeaf(leaf.primarySpans, `leaf${index}`, leaves.length === 1);
   }
 
   const meetingType =
@@ -1396,7 +1450,7 @@ const runBoundedCompactNotes = async (
     changes,
     {
       depth: 1,
-      nodes: leaves.length * 2,
+      nodes: processedLeaves * 2,
       max_depth: 1,
       max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
     },
@@ -1533,10 +1587,10 @@ export const generateMeetingNotes = async (
   const runInput: GenerateMeetingNotesInput = {
     ...input,
     generate: async (request) => {
-      modelCalls += 1;
-      if (boundedCompact && modelCalls > NOTES_BOUNDED_LIMITS.maxModelCalls) {
+      if (boundedCompact && modelCalls >= NOTES_BOUNDED_LIMITS.maxModelCalls) {
         throw new MeetingNotesError('notes_model_call_limit');
       }
+      modelCalls += 1;
       return input.generate(request);
     },
     onStage: (task) => {
@@ -1564,6 +1618,10 @@ export const generateMeetingNotes = async (
               planningTokens,
             );
       result.quality.retry_count = repairs;
+      const hierarchy = result.generation_metadata?.hierarchy;
+      if (boundedCompact && hierarchy) {
+        hierarchy.nodes = modelCalls;
+      }
       return result;
     } catch (error) {
       if (
