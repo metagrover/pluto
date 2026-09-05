@@ -1,4 +1,7 @@
-import type { CanonicalVoiceProfile, SpeakerVoiceRejection } from '../../electron/speakerVoiceStore';
+import type {
+  CanonicalVoiceProfile,
+  SpeakerVoiceRejection,
+} from '../../electron/speakerVoiceStore';
 import {
   type SpeakerCandidateEvidence,
   type SpeakerCandidateProvenance,
@@ -120,7 +123,9 @@ export function matchSpeakerVoice(input: {
   }
 
   // Candidate provenance compatibility
-  if (!isProvenanceCompatible(input.candidate.provenance, policy.compatibilityKey)) {
+  if (
+    !isProvenanceCompatible(input.candidate.provenance, policy.compatibilityKey)
+  ) {
     return null;
   }
 

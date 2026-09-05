@@ -388,10 +388,6 @@ import {
   processExtractedEntities,
 } from './entityPipeline';
 import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
-import {
-  SPEAKER_VOICE_CHANNELS,
-  handleSpeakerVoiceRequest,
-} from './speakerVoiceHandlers';
 import { startIdentityReconciliation } from './identityReconciliation';
 import {
   describePreviousConversationFailure,
@@ -490,6 +486,10 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import {
+  SPEAKER_VOICE_CHANNELS,
+  handleSpeakerVoiceRequest,
+} from './speakerVoiceHandlers';
 import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,

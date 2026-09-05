@@ -1,6 +1,15 @@
+import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
+
+const directory = vi.hoisted(() => {
+  const filesystem = require('node:fs') as typeof import('node:fs');
+  return filesystem.mkdtempSync('/tmp/pluto-voice-store-');
+});
+vi.mock('electron', () => ({ app: { getPath: () => directory } }));
+
+afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe('speakerVoiceStore & candidate database operations', () => {
   let db: Database.Database;

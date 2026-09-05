@@ -1,5 +1,14 @@
+import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const directory = vi.hoisted(() => {
+  const filesystem = require('node:fs') as typeof import('node:fs');
+  return filesystem.mkdtempSync('/tmp/pluto-voice-mergerestore-');
+});
+vi.mock('electron', () => ({ app: { getPath: () => directory } }));
+
+afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe('speakerVoiceMergeRestore & lossless identity integration', () => {
   let db: Database.Database;
@@ -90,10 +99,18 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
     `);
 
     // Seed test entities and meetings
-    db.prepare("INSERT INTO entities (id, name, type) VALUES ('person-alex', 'Alex Smith', 'person')").run();
-    db.prepare("INSERT INTO entities (id, name, type) VALUES ('person-bob', 'Bob Jones', 'person')").run();
-    db.prepare("INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')").run();
-    db.prepare("INSERT INTO meetings (id, capture_journal_generation) VALUES ('m2', 'gen-1')").run();
+    db.prepare(
+      "INSERT INTO entities (id, name, type) VALUES ('person-alex', 'Alex Smith', 'person')",
+    ).run();
+    db.prepare(
+      "INSERT INTO entities (id, name, type) VALUES ('person-bob', 'Bob Jones', 'person')",
+    ).run();
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m2', 'gen-1')",
+    ).run();
   });
 
   afterEach(() => {
@@ -109,7 +126,9 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
   };
 
   it('enrolls a confirmed speaker voice sample under original person_id', async () => {
-    const { enrollSpeakerVoice, getCanonicalVoiceProfiles } = await import('../../electron/speakerVoiceStore');
+    const { enrollSpeakerVoice, getCanonicalVoiceProfiles } = await import(
+      '../../electron/speakerVoiceStore'
+    );
 
     const v1 = new Array(256).fill(0.1);
     db.prepare(`
@@ -120,17 +139,32 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
         reference_start_sec, reference_end_sec, reference_excerpt, provenance_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      'm1', 'Remote Speaker 1', 'gen-1', 'digest-1', JSON.stringify(v1),
-      4.0, 2, 2, 0.85, 0.9, 1.0, 3.0, 'Hello from Alex', JSON.stringify(dummyProvenance)
+      'm1',
+      'Remote Speaker 1',
+      'gen-1',
+      'digest-1',
+      JSON.stringify(v1),
+      4.0,
+      2,
+      2,
+      0.85,
+      0.9,
+      1.0,
+      3.0,
+      'Hello from Alex',
+      JSON.stringify(dummyProvenance),
     );
 
-    const enrollment = enrollSpeakerVoice({
-      personId: 'person-alex',
-      sourceMeetingId: 'm1',
-      sourceRevision: 'gen-1',
-      speaker: 'Remote Speaker 1',
-      candidateDigest: 'digest-1',
-    }, db);
+    const enrollment = enrollSpeakerVoice(
+      {
+        personId: 'person-alex',
+        sourceMeetingId: 'm1',
+        sourceRevision: 'gen-1',
+        speaker: 'Remote Speaker 1',
+        candidateDigest: 'digest-1',
+      },
+      db,
+    );
 
     expect(enrollment.id).toBeDefined();
     expect(enrollment.personId).toBe('person-alex');
@@ -145,8 +179,12 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
   });
 
   it('combines enrollments dynamically on person merge and restores exact uncorrupted profiles on restore', async () => {
-    const { enrollSpeakerVoice, getCanonicalVoiceProfiles, deleteVoiceProfile, setVoiceProfileStatus } =
-      await import('../../electron/speakerVoiceStore');
+    const {
+      enrollSpeakerVoice,
+      getCanonicalVoiceProfiles,
+      deleteVoiceProfile,
+      setVoiceProfileStatus,
+    } = await import('../../electron/speakerVoiceStore');
 
     // Vector 1 (mostly dimension 0)
     const v1 = new Array(256).fill(0);
@@ -159,8 +197,20 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
         reference_start_sec, reference_end_sec, reference_excerpt, provenance_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      'm1', 'Remote Speaker 1', 'gen-1', 'digest-alex', JSON.stringify(v1),
-      4.0, 2, 2, 0.85, 0.9, 1.0, 3.0, 'Alex audio', JSON.stringify(dummyProvenance)
+      'm1',
+      'Remote Speaker 1',
+      'gen-1',
+      'digest-alex',
+      JSON.stringify(v1),
+      4.0,
+      2,
+      2,
+      0.85,
+      0.9,
+      1.0,
+      3.0,
+      'Alex audio',
+      JSON.stringify(dummyProvenance),
     );
 
     // Vector 2 (mostly dimension 1)
@@ -174,32 +224,52 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
         reference_start_sec, reference_end_sec, reference_excerpt, provenance_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      'm2', 'Remote Speaker 1', 'gen-1', 'digest-bob', JSON.stringify(v2),
-      6.0, 3, 3, 0.80, 0.85, 2.0, 5.0, 'Bob audio', JSON.stringify(dummyProvenance)
+      'm2',
+      'Remote Speaker 1',
+      'gen-1',
+      'digest-bob',
+      JSON.stringify(v2),
+      6.0,
+      3,
+      3,
+      0.8,
+      0.85,
+      2.0,
+      5.0,
+      'Bob audio',
+      JSON.stringify(dummyProvenance),
     );
 
-    enrollSpeakerVoice({
-      personId: 'person-alex',
-      sourceMeetingId: 'm1',
-      sourceRevision: 'gen-1',
-      speaker: 'Remote Speaker 1',
-      candidateDigest: 'digest-alex',
-    }, db);
+    enrollSpeakerVoice(
+      {
+        personId: 'person-alex',
+        sourceMeetingId: 'm1',
+        sourceRevision: 'gen-1',
+        speaker: 'Remote Speaker 1',
+        candidateDigest: 'digest-alex',
+      },
+      db,
+    );
 
-    enrollSpeakerVoice({
-      personId: 'person-bob',
-      sourceMeetingId: 'm2',
-      sourceRevision: 'gen-1',
-      speaker: 'Remote Speaker 1',
-      candidateDigest: 'digest-bob',
-    }, db);
+    enrollSpeakerVoice(
+      {
+        personId: 'person-bob',
+        sourceMeetingId: 'm2',
+        sourceRevision: 'gen-1',
+        speaker: 'Remote Speaker 1',
+        candidateDigest: 'digest-bob',
+      },
+      db,
+    );
 
     // Before merge: 2 distinct profiles
     const initialProfiles = getCanonicalVoiceProfiles({ dbInstance: db });
     expect(initialProfiles).toHaveLength(2);
 
     // Merge Bob into Alex (person_aliases: Bob -> Alex)
-    db.prepare("INSERT INTO person_aliases (person_id, canonical_id, active) VALUES ('person-bob', 'person-alex', 1)").run();
+    db.prepare(
+      "INSERT INTO person_aliases (person_id, canonical_id, active) VALUES ('person-bob', 'person-alex', 1)",
+    ).run();
 
     // After merge: 1 profile under Alex combining both enrollments
     const mergedProfiles = getCanonicalVoiceProfiles({ dbInstance: db });
@@ -214,20 +284,26 @@ describe('speakerVoiceMergeRestore & lossless identity integration', () => {
 
     // Permanent delete is BLOCKED while merged
     expect(() => deleteVoiceProfile('person-alex', db)).toThrow(
-      'Restore this person merge before permanently deleting voice samples.'
+      'Restore this person merge before permanently deleting voice samples.',
     );
     expect(() => deleteVoiceProfile('person-bob', db)).toThrow(
-      'Restore this person merge before permanently deleting voice samples.'
+      'Restore this person merge before permanently deleting voice samples.',
     );
 
     // Restore merge (deactivate alias)
-    db.prepare("UPDATE person_aliases SET active = 0 WHERE person_id = 'person-bob' AND canonical_id = 'person-alex'").run();
+    db.prepare(
+      "UPDATE person_aliases SET active = 0 WHERE person_id = 'person-bob' AND canonical_id = 'person-alex'",
+    ).run();
 
     // After restore: both Alex and Bob immediately recover exact original profiles!
     const restoredProfiles = getCanonicalVoiceProfiles({ dbInstance: db });
     expect(restoredProfiles).toHaveLength(2);
-    const restoredAlex = restoredProfiles.find((p) => p.canonicalPersonId === 'person-alex');
-    const restoredBob = restoredProfiles.find((p) => p.canonicalPersonId === 'person-bob');
+    const restoredAlex = restoredProfiles.find(
+      (p) => p.canonicalPersonId === 'person-alex',
+    );
+    const restoredBob = restoredProfiles.find(
+      (p) => p.canonicalPersonId === 'person-bob',
+    );
     expect(restoredAlex?.sampleCount).toBe(1);
     expect(restoredAlex?.cleanDurationSeconds).toBeCloseTo(4.0);
     expect(restoredAlex?.embedding[0]).toBeCloseTo(1.0);

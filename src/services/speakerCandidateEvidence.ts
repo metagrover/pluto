@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { SpeakerClusterEvidence } from '../../electron/transcription/parakeetFinalClient.ts';
 import { selectSpeakerSampleIntervals } from '../../src/utils/speakerReview.ts';
 
+export type { SpeakerClusterEvidence };
+
 export interface SpeakerCandidateProvenance {
   modelIdentifier: string;
   modelRevision: string;

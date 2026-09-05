@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type {
+  CanonicalVoiceProfile,
+  SpeakerVoiceRejection,
+} from '../../electron/speakerVoiceStore';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
 import {
   DEFAULT_CALIBRATION_POLICY_V1,
   type VoiceProfileCalibrationPolicy,
   matchSpeakerVoice,
 } from '../../src/services/speakerVoiceMatcher';
-import type { CanonicalVoiceProfile, SpeakerVoiceRejection } from '../../electron/speakerVoiceStore';
 
 describe('speakerVoiceMatcher & global acoustic calibration', () => {
   const dummyPolicy: VoiceProfileCalibrationPolicy = {

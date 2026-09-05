@@ -9,6 +9,7 @@ import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from '../recordingTranscriptValidation.ts';
+import type { SpeakerCandidateEvidence } from '../speakerCandidateEvidence.ts';
 import type {
   TranscriptionRequest,
   TranscriptionResult,
@@ -24,7 +25,6 @@ import {
   advanceFinalTranscriptionLease,
   buildFinalTranscriptionLease,
 } from './finalTranscriptionLease.ts';
-import type { SpeakerCandidateEvidence } from '../speakerCandidateEvidence.ts';
 
 export type FinalTranscriptionInput = {
   meetingId: string;

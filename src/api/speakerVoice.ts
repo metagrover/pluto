@@ -1,5 +1,5 @@
-import type { MeetingSpeakerSample } from './identity';
 import type { VoiceMatchSuggestion } from '../services/speakerVoiceMatcher';
+import type { MeetingSpeakerSample } from './identity';
 
 export type { VoiceMatchSuggestion };
 
@@ -17,20 +17,34 @@ export interface ClientVoiceProfile {
   };
 }
 
+export interface ClientCandidateMetadata {
+  candidateDigest: string;
+  sourceRevision: string;
+  isEligibleForEnrollment: boolean;
+  cleanDurationSeconds: number;
+}
+
 const invoke = <T>(channel: string, payload: object): Promise<T> =>
   window.ipcRenderer.invoke(channel, payload) as Promise<T>;
 
 export async function getSpeakerVoiceSuggestions(
   meetingId: string,
   calendarAttendeePersonIds?: string[],
-): Promise<Record<string, VoiceMatchSuggestion>> {
+): Promise<{
+  suggestions: Record<string, VoiceMatchSuggestion>;
+  candidates: Record<string, ClientCandidateMetadata>;
+}> {
   const result = await invoke<{
     suggestions: Record<string, VoiceMatchSuggestion>;
+    candidates?: Record<string, ClientCandidateMetadata>;
   }>('SPEAKER_VOICE_GET_SUGGESTIONS', {
     meetingId,
     calendarAttendeePersonIds,
   });
-  return result?.suggestions ?? {};
+  return {
+    suggestions: result?.suggestions ?? {},
+    candidates: result?.candidates ?? {},
+  };
 }
 
 export function enrollSpeakerVoice(params: {

@@ -98,7 +98,17 @@ export async function handleSpeakerVoiceRequest(
         }
       }
 
-      return { suggestions };
+      const clientCandidates: Record<string, unknown> = {};
+      for (const c of candidates) {
+        clientCandidates[c.speaker] = {
+          candidateDigest: c.candidateDigest,
+          sourceRevision: payload?.sourceRevision ?? 'gen-1',
+          isEligibleForEnrollment: c.isEligibleForEnrollment,
+          cleanDurationSeconds: c.cleanDurationSeconds,
+        };
+      }
+
+      return { suggestions, candidates: clientCandidates };
     }
 
     case 'SPEAKER_VOICE_ENROLL': {

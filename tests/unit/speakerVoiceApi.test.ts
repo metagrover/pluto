@@ -42,7 +42,9 @@ describe('speakerVoice API client', () => {
       meetingId: 'm1',
       calendarAttendeePersonIds: ['person-1'],
     });
-    expect(result['Remote Speaker 1'].suggestedPersonName).toBe('Robin');
+    expect(result.suggestions['Remote Speaker 1'].suggestedPersonName).toBe(
+      'Robin',
+    );
   });
 
   it('calls SPEAKER_VOICE_ENROLL with enrollment params', async () => {
