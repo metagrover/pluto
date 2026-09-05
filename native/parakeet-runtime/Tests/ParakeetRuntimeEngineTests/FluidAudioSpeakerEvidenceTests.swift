@@ -255,6 +255,98 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(clusterEvidence[0].meanChunkSimilarity, 0.9)
     }
 
+    func testAggregationAcceptsMaskedChunksBackedByCleanSpeechIntervals() async throws {
+        let v1 = [Float](repeating: 0.1, count: 256)
+        let v2 = [Float](repeating: 0.2, count: 256)
+        let chunks = [
+            ChunkEmbedding(
+                speakerId: "S1",
+                chunkIndex: 0,
+                speakerIndex: 0,
+                startTimeSeconds: 0.0,
+                endTimeSeconds: 4.0,
+                embedding256: v1
+            ),
+            ChunkEmbedding(
+                speakerId: "S1",
+                chunkIndex: 1,
+                speakerIndex: 0,
+                startTimeSeconds: 4.0,
+                endTimeSeconds: 8.0,
+                embedding256: v2
+            ),
+        ]
+        let turns = [
+            SpeakerEvidenceTurn(startTime: 0.0, endTime: 8.0, cluster: "S1")
+        ]
+        let windows = (0..<80).map { index -> SpeakerEnergyWindow in
+            let start = Double(index) * 0.1
+            let micActive = (start >= 2.0 && start < 3.0) || (start >= 5.0 && start < 6.0)
+            return SpeakerEnergyWindow(
+                startTime: start,
+                endTime: start + 0.1,
+                micRms: micActive ? 0.05 : 0.001,
+                systemRms: 0.05
+            )
+        }
+        let coordinator = SpeakerEvidenceCoordinator(
+            diarizer: FixtureDiarizer(turns: turns, chunkEmbeddings: chunks),
+            energyAnalyzer: FixtureEnergyAnalyzer(windows: windows),
+            manifest: ProductionDiarizationManifest.current,
+            runtimeVersion: "test"
+        )
+
+        let output = try await coordinator.analyze(
+            mixedURL: URL(fileURLWithPath: "/dummy/mixed.wav"),
+            micURL: URL(fileURLWithPath: "/dummy/mic.wav"),
+            systemURL: URL(fileURLWithPath: "/dummy/system.wav")
+        )
+
+        let evidence = try XCTUnwrap(output.clusterEvidence?.first)
+        XCTAssertEqual(evidence.cluster, "S1")
+        XCTAssertEqual(evidence.cleanChunkCount, 2)
+        XCTAssertEqual(evidence.cleanSegmentCount, 3)
+        XCTAssertEqual(evidence.cleanDurationSeconds, 6.0, accuracy: 1e-4)
+    }
+
+    func testAggregationDropsADeviantEmbeddingWhenAStableConsensusRemains() async throws {
+        var stable = [Float](repeating: 0.0, count: 256)
+        stable[0] = 1.0
+        var outlier = [Float](repeating: 0.0, count: 256)
+        outlier[1] = 1.0
+        let chunks = (0..<4).map { index in
+            ChunkEmbedding(
+                speakerId: "S1",
+                chunkIndex: index,
+                speakerIndex: 0,
+                startTimeSeconds: Double(index),
+                endTimeSeconds: Double(index + 1),
+                embedding256: index == 3 ? outlier : stable
+            )
+        }
+        let coordinator = SpeakerEvidenceCoordinator(
+            diarizer: FixtureDiarizer(
+                turns: [SpeakerEvidenceTurn(startTime: 0.0, endTime: 4.0, cluster: "S1")],
+                chunkEmbeddings: chunks
+            ),
+            energyAnalyzer: FixtureEnergyAnalyzer(windows: [
+                SpeakerEnergyWindow(startTime: 0.0, endTime: 4.0, micRms: 0.001, systemRms: 0.05)
+            ]),
+            manifest: ProductionDiarizationManifest.current,
+            runtimeVersion: "test"
+        )
+
+        let output = try await coordinator.analyze(
+            mixedURL: URL(fileURLWithPath: "/dummy/mixed.wav"),
+            micURL: URL(fileURLWithPath: "/dummy/mic.wav"),
+            systemURL: URL(fileURLWithPath: "/dummy/system.wav")
+        )
+
+        let evidence = try XCTUnwrap(output.clusterEvidence?.first)
+        XCTAssertEqual(evidence.cleanChunkCount, 3)
+        XCTAssertGreaterThanOrEqual(evidence.minimumChunkSimilarity, 0.7)
+    }
+
     func testExcludesMicSpeechAndOverlappingIntervals() async throws {
         let v1 = [Float](repeating: 0.1, count: 256)
         let v2 = [Float](repeating: 0.2, count: 256)

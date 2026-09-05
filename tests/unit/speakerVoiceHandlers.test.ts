@@ -133,7 +133,7 @@ describe('speaker voice IPC handlers', () => {
     expect(result.enrollmentId).toBeDefined();
   });
 
-  it('returns suggestions when enabled and strips biometric embeddings', async () => {
+  it('uses an explicitly enrolled profile for future suggestions without a hidden flag', async () => {
     saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
@@ -145,34 +145,50 @@ describe('speaker voice IPC handlers', () => {
       expectedRevision: rev,
     });
 
-    // Default disabled -> empty suggestions
-    const disabledResult = (await handleSpeakerVoiceRequest(
+    const optedInResult = (await handleSpeakerVoiceRequest(
       'SPEAKER_VOICE_GET_SUGGESTIONS',
       { meetingId },
       { isFeatureFlagEnabled: () => false },
     )) as {
-      suggestions: Record<string, unknown>;
+      suggestions: Record<string, any>;
       candidates: Record<string, { sourceRevision: string }>;
     };
-    expect(disabledResult.suggestions).toEqual({});
-    expect(disabledResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
+    expect(optedInResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
       sourceRevision,
     );
-
-    // Enabled -> returns suggestion without raw embedding
-    const enabledResult = (await handleSpeakerVoiceRequest(
-      'SPEAKER_VOICE_GET_SUGGESTIONS',
-      { meetingId },
-      { isFeatureFlagEnabled: () => true },
-    )) as { suggestions: Record<string, any> };
-
-    expect(enabledResult.suggestions['Remote Speaker 1']).toBeDefined();
-    const suggestion = enabledResult.suggestions['Remote Speaker 1'];
+    expect(optedInResult.suggestions['Remote Speaker 1']).toBeDefined();
+    const suggestion = optedInResult.suggestions['Remote Speaker 1'];
     expect(suggestion.suggestedPersonId).toBe(personId);
     expect(suggestion.suggestedPersonName).toBe('Robin');
     expect(suggestion.confidenceTier).toBe('strong');
     expect(suggestion.sourceRevision).toBe(sourceRevision);
     expect(suggestion.embedding).toBeUndefined(); // NEVER leaked to renderer!
+  });
+
+  it('loads profile reference audio from the same system channel as modal samples', async () => {
+    const sliceWav = vi.fn(async () => true);
+
+    const result = await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_REFERENCE_SAMPLE',
+      { sourceMeetingId: meetingId, startTime: 2, endTime: 5 },
+      {
+        getMeeting: () => ({
+          id: meetingId,
+          audio_path: '/approved/mic.wav',
+          system_audio_path: '/approved/system.wav',
+        }),
+        fileExists: () => true,
+        createTemporaryPath: () => '/approved/sample.wav',
+        sliceWav,
+        readFile: async () => Buffer.from([1, 2, 3]),
+        removeFile: async () => undefined,
+      },
+    );
+
+    expect(result).toMatchObject({ mimeType: 'audio/wav', durationSeconds: 3 });
+    expect(sliceWav).toHaveBeenCalledWith(
+      expect.objectContaining({ inputPath: '/approved/system.wav' }),
+    );
   });
 
   it('enrolls with the exact candidate revision returned by discovery', async () => {
@@ -291,6 +307,13 @@ describe('speaker voice IPC handlers', () => {
       }
     ).profiles;
     expect(profiles[0].isActive).toBe(false);
+
+    const inactiveResult = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { isFeatureFlagEnabled: () => false },
+    )) as { suggestions: Record<string, unknown> };
+    expect(inactiveResult.suggestions).toEqual({});
 
     // Delete profile
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_DELETE', { personId });

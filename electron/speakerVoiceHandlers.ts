@@ -64,19 +64,21 @@ export async function handleSpeakerVoiceRequest(
         };
       }
 
-      const isEnabled =
-        deps?.isFeatureFlagEnabled?.() ??
-        (db.getSetting('voice_profile_suggestions_v1') === 'true' ||
-          process.env.VOICE_PROFILE_SUGGESTIONS_V1 === 'true');
-
-      if (!isEnabled) {
-        return { suggestions: {}, candidates: clientCandidates };
-      }
-
       const profiles = getCanonicalVoiceProfiles({
         dbInstance: d,
         activeOnly: true,
       });
+      const calibrationFlagEnabled =
+        deps?.isFeatureFlagEnabled?.() ??
+        (db.getSetting('voice_profile_suggestions_v1') === 'true' ||
+          process.env.VOICE_PROFILE_SUGGESTIONS_V1 === 'true');
+
+      // Explicitly enrolling an active profile is the user's opt-in to future
+      // recognition. The flag remains available for calibration before any
+      // real profile exists, but must not make an enrolled profile inert.
+      if (!calibrationFlagEnabled && profiles.length === 0) {
+        return { suggestions: {}, candidates: clientCandidates };
+      }
       const rejections = getVoiceRejections(meetingId, d);
 
       const suggestions: Record<string, unknown> = {};
@@ -205,12 +207,12 @@ export async function handleSpeakerVoiceRequest(
           (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null);
 
       const meeting = getMeeting(sourceMeetingId);
-      if (!meeting?.audio_path) {
+      if (!meeting?.system_audio_path) {
         return null;
       }
 
       const fileExists = deps?.fileExists ?? require('node:fs').existsSync;
-      if (!fileExists(meeting.audio_path)) {
+      if (!fileExists(meeting.system_audio_path)) {
         return null;
       }
 
@@ -225,7 +227,7 @@ export async function handleSpeakerVoiceRequest(
       );
 
       const ok = await deps.sliceWav({
-        inputPath: meeting.audio_path,
+        inputPath: meeting.system_audio_path,
         outputPath: tempPath,
         startSec: Math.max(0, Number(startTime)),
         durationSec,

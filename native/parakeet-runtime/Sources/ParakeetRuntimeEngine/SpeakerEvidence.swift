@@ -39,6 +39,10 @@ func isExpectedDiarizationSilence(_ error: Error) -> Bool {
 struct SpeakerClusterEvidenceAggregator {
     static let micActiveRmsThreshold = 0.012
     static let minimumSegmentDuration = 1.0
+    static let minimumCleanChunkRatio = 0.2
+    static let minimumConsensusSimilarity = 0.7
+    static let minimumConsensusRetentionRatio = 0.6
+    static let minimumConsensusChunkCount = 2
     static let embeddingDimension = 256
     static let maxClusters = 64
 
@@ -87,10 +91,21 @@ struct SpeakerClusterEvidenceAggregator {
 
             for chunk in clusterChunks {
                 guard chunk.endTimeSeconds > chunk.startTimeSeconds else { continue }
-                let fallsInSegment = acceptedSegments.contains { segment in
-                    chunk.startTimeSeconds >= segment.start - 0.05 && chunk.endTimeSeconds <= segment.end + 0.05
+                // FluidAudio embeddings are already speaker-masked and exclude
+                // cross-speaker overlap. Their public interval spans from the
+                // first to last active mask frame, including inactive gaps, so
+                // requiring the whole span to fit one clean interval discards
+                // valid production embeddings. Require meaningful clean support
+                // across the span instead.
+                let chunkDuration = chunk.endTimeSeconds - chunk.startTimeSeconds
+                let cleanOverlap = acceptedSegments.reduce(0.0) { total, segment in
+                    total + max(
+                        0,
+                        min(chunk.endTimeSeconds, segment.end)
+                            - max(chunk.startTimeSeconds, segment.start)
+                    )
                 }
-                guard fallsInSegment else { continue }
+                guard cleanOverlap / chunkDuration >= minimumCleanChunkRatio - 1e-4 else { continue }
 
                 // Validate vector
                 guard chunk.embedding256.count == embeddingDimension else { continue }
@@ -108,11 +123,12 @@ struct SpeakerClusterEvidenceAggregator {
             }
 
             guard !acceptedUnitVectors.isEmpty else { continue }
-            let cleanChunkCount = acceptedUnitVectors.count
+            let consensusUnitVectors = stableConsensus(from: acceptedUnitVectors)
+            let cleanChunkCount = consensusUnitVectors.count
 
             // Compute centroid
             var centroid = [Float](repeating: 0, count: embeddingDimension)
-            for vec in acceptedUnitVectors {
+            for vec in consensusUnitVectors {
                 vDSP_vadd(centroid, 1, vec, 1, &centroid, 1, vDSP_Length(embeddingDimension))
             }
             var countScale = 1.0 / Float(cleanChunkCount)
@@ -129,7 +145,7 @@ struct SpeakerClusterEvidenceAggregator {
 
             // Compute similarities of each chunk to the unit centroid
             var similarities: [Double] = []
-            for vec in acceptedUnitVectors {
+            for vec in consensusUnitVectors {
                 var dot: Float = 0
                 vDSP_dotpr(vec, 1, unitCentroid, 1, &dot, vDSP_Length(embeddingDimension))
                 similarities.append(Double(dot))
@@ -154,6 +170,50 @@ struct SpeakerClusterEvidenceAggregator {
         }
 
         return results
+    }
+
+    private static func stableConsensus(from vectors: [[Float]]) -> [[Float]] {
+        guard vectors.count >= minimumConsensusChunkCount else { return vectors }
+        let minimumRetained = max(
+            minimumConsensusChunkCount,
+            Int(ceil(Double(vectors.count) * minimumConsensusRetentionRatio))
+        )
+        var consensus = vectors
+
+        while let centroid = normalizedCentroid(consensus) {
+            let next = consensus.filter { vector in
+                cosineSimilarity(vector, centroid) >= minimumConsensusSimilarity - 1e-4
+            }
+            if next.count == consensus.count { return consensus }
+            if next.count < minimumRetained { return vectors }
+            consensus = next
+        }
+
+        return vectors
+    }
+
+    private static func normalizedCentroid(_ vectors: [[Float]]) -> [Float]? {
+        guard !vectors.isEmpty else { return nil }
+        var centroid = [Float](repeating: 0, count: embeddingDimension)
+        for vector in vectors {
+            vDSP_vadd(centroid, 1, vector, 1, &centroid, 1, vDSP_Length(embeddingDimension))
+        }
+        var scale = 1.0 / Float(vectors.count)
+        vDSP_vsmul(centroid, 1, &scale, &centroid, 1, vDSP_Length(embeddingDimension))
+        var sumSquares: Float = 0
+        vDSP_svesq(centroid, 1, &sumSquares, vDSP_Length(embeddingDimension))
+        let norm = sqrt(sumSquares)
+        guard norm.isFinite, norm > 1e-6 else { return nil }
+        var unitCentroid = [Float](repeating: 0, count: embeddingDimension)
+        var unitScale = 1.0 / norm
+        vDSP_vsmul(centroid, 1, &unitScale, &unitCentroid, 1, vDSP_Length(embeddingDimension))
+        return unitCentroid
+    }
+
+    private static func cosineSimilarity(_ vector: [Float], _ centroid: [Float]) -> Double {
+        var dot: Float = 0
+        vDSP_dotpr(vector, 1, centroid, 1, &dot, vDSP_Length(embeddingDimension))
+        return Double(dot)
     }
 
     private static func mergeIntervals(_ intervals: [(start: Double, end: Double)]) -> [(start: Double, end: Double)] {
