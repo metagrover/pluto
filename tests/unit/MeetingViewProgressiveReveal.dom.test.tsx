@@ -153,7 +153,7 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
-  it('shows transcript readiness and unresolved remote labeling as separate outcomes', async () => {
+  it('renders transcript content cleanly without noisy remote speaker status banner', async () => {
     const meeting = {
       ...analyzedMeeting,
       transcript_json: JSON.stringify({
@@ -172,16 +172,16 @@ describe('MeetingView progressive reveal', () => {
       }),
     };
     await act(async () => renderMeeting(meeting, true));
-    const status = container.querySelector(
-      '[data-meeting-remote-speaker-status]',
-    );
-    expect(status?.textContent).toContain('Transcript ready');
-    expect(status?.textContent).toContain('Remote speakers not separated');
+    expect(
+      container.querySelector('[data-meeting-remote-speaker-status]'),
+    ).toBeNull();
     expect(container.textContent).toContain('The transcript is ready first.');
     expect(container.textContent).not.toContain(
       'Participant audio could not be verified',
     );
-    expect(status?.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain(
+      'Remote speakers not separated',
+    );
 
     await act(async () => renderMeeting(analyzedMeeting, true));
     expect(

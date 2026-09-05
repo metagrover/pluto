@@ -64,7 +64,6 @@ import {
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
-  getMeetingRemoteSpeakerStatus,
 } from './meetingTranscriptPresentation';
 
 const SavedEditConflicts = ({
@@ -853,7 +852,6 @@ export const MeetingView = ({
         .filter(Boolean)
     : [];
   const hasTranscriptContent = transcriptTurns.length > 0;
-  const remoteSpeakerStatus = getMeetingRemoteSpeakerStatus(selectedMeeting);
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
@@ -1480,18 +1478,6 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
-            {remoteSpeakerStatus &&
-            remoteSpeakerStatus.state !== 'separated' ? (
-              <div
-                data-meeting-remote-speaker-status={remoteSpeakerStatus.state}
-                className="mb-4 text-xs leading-5 text-pro-text-muted"
-              >
-                <p className="font-medium text-pro-text-main">
-                  {remoteSpeakerStatus.title}
-                </p>
-                <p>{remoteSpeakerStatus.detail}</p>
-              </div>
-            ) : null}
             {hasTranscriptContent ? (
               transcriptTurns.map((turn) => {
                 const text = turn.segments
