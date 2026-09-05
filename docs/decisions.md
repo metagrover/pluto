@@ -15,6 +15,17 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Resolve Me speaker name from user profile and wire speaker candidate evidence in final transcription
+
+- **Status:** Accepted
+- **Source:** [Issue #765](https://github.com/metagrover/pluto/issues/765), owner direction on 2026-09-05
+- **Decision:** Two complementary fixes:
+  1. `getMeetingIdentityContext` (`electron/commitmentIdentity.ts`) now permits `capture.origin === 'unknown'` (historical recordings where no capture record was journaled) in addition to `'local'` when binding `Me` to the workspace self person. Acoustic capture evidence (`source: 'capture'`) still requires `origin === 'local'`; historical meetings fall back to `source: 'user'`.
+  2. `extractSpeakerDisplayNames` (`src/components/features/meetingTranscriptPresentation.ts`) now falls back to `identity.profile?.preferredName` then `peopleById.get(identity.selfPersonId)` to populate `names.Me` when no explicit meeting binding resolves a name for the local speaker. This drives `applyMeetingSpeakerDisplayNames` to render `Preferred Name (You)` without requiring a stored binding.
+  3. `FinalSpeakerEvidence` gains an optional `clusterEvidence` field, and `runFinalTranscription.ts` forwards it together with `provenance` into `applyRemoteSpeakerClusters` so `candidateEvidence` is computed and stored in `meeting_speaker_candidates` via `commitCanonical`.
+- **Rationale:** Historical meetings predating voice-enrollment recording had `capture.origin: 'unknown'`, causing `Me` to never bind to the user's workspace identity. The frontend had no secondary path to display the user's name when no explicit meeting binding existed. Speaker candidate embeddings were silently dropped because `clusterEvidence` was never forwarded, preventing cross-meeting voice recognition from improving.
+- **Consequences:** All historical meetings display the user's real name (`Deepak (You)` style) immediately without re-processing. Future meetings where FluidAudio returns `clusterEvidence` will persist speaker embeddings enabling automatic cross-meeting identification to improve over time.
+
 ## 2026-09-05 - In-place adoption and preservation of legacy SQLite databases into Drizzle lifecycle
 
 - **Status:** Accepted
