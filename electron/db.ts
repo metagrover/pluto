@@ -131,9 +131,12 @@ import {
   serializeMeetingNotesRunMetric,
 } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
+import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
+
+const dbLog = createLogger('DB');
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 
@@ -336,7 +339,7 @@ const initDb = () => {
   const hasCreatedAt = tableInfo.some((col) => col.name === 'created_at');
 
   if (tableInfo.length > 0 && !hasCreatedAt) {
-    console.log('[DB] Old schema detected. Dropping tables for migration...');
+    dbLog.info('Old schema detected. Dropping tables for migration...');
     db.exec('DROP TABLE IF EXISTS meetings');
     db.exec('DROP TABLE IF EXISTS meetings_fts');
     db.exec('DROP TABLE IF EXISTS settings');
@@ -352,7 +355,7 @@ const initDb = () => {
       ftsInfo.length > 0 &&
       !ftsInfo.some((col) => col.name === 'meeting_id')
     ) {
-      console.log('[DB] Migrating FTS table for UUID support...');
+      dbLog.debug('Migrating FTS table for UUID support...');
       db.exec('DROP TABLE IF EXISTS meetings_fts');
       db.exec('DROP TABLE IF EXISTS settings');
     }
@@ -365,7 +368,7 @@ const initDb = () => {
       entitiesFtsInfo.length > 0 &&
       !entitiesFtsInfo.some((col) => col.name === 'entity_id')
     ) {
-      console.log('[DB] Migrating Entities FTS table for UUID support...');
+      dbLog.debug('Migrating Entities FTS table for UUID support...');
       db.exec('DROP TABLE IF EXISTS entities_fts');
     }
   } catch (e) {
@@ -857,51 +860,51 @@ const initDb = () => {
       .all() as Array<{ name: string }>;
     if (!meetingColumns.some((col) => col.name === 'analysis_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_json TEXT');
-      console.log('[DB] Added meetings.analysis_json column');
+      dbLog.debug('Added meetings.analysis_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_schema_version')) {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN analysis_schema_version INTEGER',
       );
-      console.log('[DB] Added meetings.analysis_schema_version column');
+      dbLog.debug('Added meetings.analysis_schema_version column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_format_pass')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_format_pass BOOLEAN');
-      console.log('[DB] Added meetings.analysis_format_pass column');
+      dbLog.debug('Added meetings.analysis_format_pass column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_retry_count')) {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN analysis_retry_count INTEGER DEFAULT 0',
       );
-      console.log('[DB] Added meetings.analysis_retry_count column');
+      dbLog.debug('Added meetings.analysis_retry_count column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_fallback_used')) {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN analysis_fallback_used BOOLEAN DEFAULT 0',
       );
-      console.log('[DB] Added meetings.analysis_fallback_used column');
+      dbLog.debug('Added meetings.analysis_fallback_used column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_provider')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_provider TEXT');
-      console.log('[DB] Added meetings.analysis_provider column');
+      dbLog.debug('Added meetings.analysis_provider column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_model')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_model TEXT');
-      console.log('[DB] Added meetings.analysis_model column');
+      dbLog.debug('Added meetings.analysis_model column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'analysis_generation_path')
     ) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_generation_path TEXT');
-      console.log('[DB] Added meetings.analysis_generation_path column');
+      dbLog.debug('Added meetings.analysis_generation_path column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_prompt_version')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_prompt_version TEXT');
-      console.log('[DB] Added meetings.analysis_prompt_version column');
+      dbLog.debug('Added meetings.analysis_prompt_version column');
     }
     if (!meetingColumns.some((col) => col.name === 'analysis_generated_at')) {
       db.exec('ALTER TABLE meetings ADD COLUMN analysis_generated_at DATETIME');
-      console.log('[DB] Added meetings.analysis_generated_at column');
+      dbLog.debug('Added meetings.analysis_generated_at column');
     }
     if (
       !meetingColumns.some(
@@ -911,23 +914,23 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN analysis_error_categories_json TEXT',
       );
-      console.log('[DB] Added meetings.analysis_error_categories_json column');
+      dbLog.debug('Added meetings.analysis_error_categories_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'value_signals_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN value_signals_json TEXT');
-      console.log('[DB] Added meetings.value_signals_json column');
+      dbLog.debug('Added meetings.value_signals_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'end_reason')) {
       db.exec('ALTER TABLE meetings ADD COLUMN end_reason TEXT');
-      console.log('[DB] Added meetings.end_reason column');
+      dbLog.debug('Added meetings.end_reason column');
     }
     if (!meetingColumns.some((col) => col.name === 'mid_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN mid_json TEXT');
-      console.log('[DB] Added meetings.mid_json column');
+      dbLog.debug('Added meetings.mid_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'user_edits_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN user_edits_json TEXT');
-      console.log('[DB] Added meetings.user_edits_json column');
+      dbLog.debug('Added meetings.user_edits_json column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'analysis_edit_conflicts_json')
@@ -935,43 +938,43 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN analysis_edit_conflicts_json TEXT',
       );
-      console.log('[DB] Added meetings.analysis_edit_conflicts_json column');
+      dbLog.debug('Added meetings.analysis_edit_conflicts_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'follow_up_drafts_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN follow_up_drafts_json TEXT');
-      console.log('[DB] Added meetings.follow_up_drafts_json column');
+      dbLog.debug('Added meetings.follow_up_drafts_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'transcript_status')) {
       db.exec(
         "ALTER TABLE meetings ADD COLUMN transcript_status TEXT DEFAULT 'validated'",
       );
-      console.log('[DB] Added meetings.transcript_status column');
+      dbLog.debug('Added meetings.transcript_status column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'transcript_integrity_json')
     ) {
       db.exec('ALTER TABLE meetings ADD COLUMN transcript_integrity_json TEXT');
-      console.log('[DB] Added meetings.transcript_integrity_json column');
+      dbLog.debug('Added meetings.transcript_integrity_json column');
     }
     if (!meetingColumns.some((col) => col.name === 'system_audio_path')) {
       db.exec('ALTER TABLE meetings ADD COLUMN system_audio_path TEXT');
-      console.log('[DB] Added meetings.system_audio_path column');
+      dbLog.debug('Added meetings.system_audio_path column');
     }
     if (!meetingColumns.some((col) => col.name === 'mixed_audio_path')) {
       db.exec('ALTER TABLE meetings ADD COLUMN mixed_audio_path TEXT');
-      console.log('[DB] Added meetings.mixed_audio_path column');
+      dbLog.debug('Added meetings.mixed_audio_path column');
     }
     if (!meetingColumns.some((col) => col.name === 'transcript_validated_at')) {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN transcript_validated_at DATETIME',
       );
-      console.log('[DB] Added meetings.transcript_validated_at column');
+      dbLog.debug('Added meetings.transcript_validated_at column');
     }
     if (!meetingColumns.some((col) => col.name === 'finalization_status')) {
       db.exec(
         "ALTER TABLE meetings ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'finalized'",
       );
-      console.log('[DB] Added meetings.finalization_status column');
+      dbLog.debug('Added meetings.finalization_status column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'finalization_error_category')
@@ -979,7 +982,7 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN finalization_error_category TEXT',
       );
-      console.log('[DB] Added meetings.finalization_error_category column');
+      dbLog.debug('Added meetings.finalization_error_category column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'downstream_processing_json')
@@ -987,7 +990,7 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN downstream_processing_json TEXT',
       );
-      console.log('[DB] Added meetings.downstream_processing_json column');
+      dbLog.debug('Added meetings.downstream_processing_json column');
     }
     if (
       !meetingColumns.some((col) => col.name === 'capture_journal_generation')
@@ -995,10 +998,10 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN capture_journal_generation TEXT',
       );
-      console.log('[DB] Added meetings.capture_journal_generation column');
+      dbLog.debug('Added meetings.capture_journal_generation column');
     }
   } catch (e) {
-    console.warn('[DB] Optional column migration failed:', e);
+    dbLog.warn('Optional column migration failed:', e);
   }
 
   // FTS5 Migration: rebuild with MID-derived columns for unified search
@@ -1010,7 +1013,7 @@ const initDb = () => {
       (col) => col.name === 'mid_participants',
     );
     if (ftsColumns.length > 0 && !hasMidParticipants) {
-      console.log('[DB] Rebuilding meetings_fts with MID columns...');
+      dbLog.debug('Rebuilding meetings_fts with MID columns...');
 
       // Preserve existing FTS data
       const existing = db
@@ -1056,10 +1059,10 @@ const initDb = () => {
         );
       }
 
-      console.log('[DB] meetings_fts rebuilt with MID columns');
+      dbLog.debug('meetings_fts rebuilt with MID columns');
     }
   } catch (e) {
-    console.warn('[DB] FTS5 MID migration failed:', e);
+    dbLog.warn('FTS5 MID migration failed:', e);
   }
 
   // Additive migration for entity columns (Sprint 3 / V1.2)
@@ -1071,14 +1074,14 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE entities ADD COLUMN saliency_score REAL DEFAULT 1.0',
       );
-      console.log('[DB] Added entities.saliency_score column');
+      dbLog.debug('Added entities.saliency_score column');
     }
     if (!entityColumns.some((col) => col.name === 'domain_tag')) {
       db.exec("ALTER TABLE entities ADD COLUMN domain_tag TEXT DEFAULT 'work'");
-      console.log('[DB] Added entities.domain_tag column');
+      dbLog.debug('Added entities.domain_tag column');
     }
   } catch (e) {
-    console.warn('[DB] Entity optional column migration failed:', e);
+    dbLog.warn('Entity optional column migration failed:', e);
   }
 
   try {
@@ -1092,10 +1095,10 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE attention_items ADD COLUMN score_breakdown_json TEXT',
       );
-      console.log('[DB] Added attention_items.score_breakdown_json column');
+      dbLog.debug('Added attention_items.score_breakdown_json column');
     }
   } catch (e) {
-    console.warn('[DB] Attention-item optional column migration failed:', e);
+    dbLog.warn('Attention-item optional column migration failed:', e);
   }
 
   // Additive migration for knowledge doc columns
@@ -1108,7 +1111,7 @@ const initDb = () => {
       !knowledgeDocColumns.some((col) => col.name === 'last_source_cursor')
     ) {
       db.exec('ALTER TABLE knowledge_docs ADD COLUMN last_source_cursor TEXT');
-      console.log('[DB] Added knowledge_docs.last_source_cursor column');
+      dbLog.debug('Added knowledge_docs.last_source_cursor column');
     }
     if (
       knowledgeDocColumns.length > 0 &&
@@ -1117,10 +1120,10 @@ const initDb = () => {
       db.exec(
         'ALTER TABLE knowledge_docs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
       );
-      console.log('[DB] Added knowledge_docs.updated_at column');
+      dbLog.debug('Added knowledge_docs.updated_at column');
     }
   } catch (e) {
-    console.warn('[DB] Knowledge-doc migration checks failed:', e);
+    dbLog.warn('Knowledge-doc migration checks failed:', e);
   }
 
   // Migration: expand knowledge_docs scope_type CHECK and add config column.
@@ -1166,12 +1169,12 @@ const initDb = () => {
         `);
       });
       migrateKnowledgeDocs();
-      console.log(
-        '[DB] Migrated knowledge_docs to v2 (config column + expanded scope types)',
+      dbLog.debug(
+        'Migrated knowledge_docs to v2 (config column + expanded scope types)',
       );
     }
   } catch (e) {
-    console.warn('[DB] knowledge_docs v2 migration failed:', e);
+    dbLog.warn('knowledge_docs v2 migration failed:', e);
   }
 
   try {
@@ -1224,10 +1227,10 @@ const initDb = () => {
         `);
       });
       migrateKnowledgeCorrections();
-      console.log('[DB] Expanded knowledge corrections for claim corrections');
+      dbLog.debug('Expanded knowledge corrections for claim corrections');
     }
   } catch (e) {
-    console.warn('[DB] knowledge_corrections migration failed:', e);
+    dbLog.warn('knowledge_corrections migration failed:', e);
   }
 
   // Hard reset generated Knowledge artifacts for the PRD-native V2 schema.
@@ -1286,10 +1289,10 @@ const initDb = () => {
       });
 
       hardResetGeneratedKnowledge();
-      console.log('[DB] Reset generated Knowledge artifacts for V2 synthesis');
+      dbLog.debug('Reset generated Knowledge artifacts for V2 synthesis');
     }
   } catch (e) {
-    console.warn('[DB] Knowledge V2 generated reset failed:', e);
+    dbLog.warn('Knowledge V2 generated reset failed:', e);
   }
 
   // Migration: rebuild entity_links with typed dependency semantics and state/evidence columns.
@@ -1376,10 +1379,10 @@ const initDb = () => {
       });
 
       migrateEntityLinks();
-      console.log('[DB] Migrated entity_links to v2 dependency schema');
+      dbLog.debug('Migrated entity_links to v2 dependency schema');
     }
   } catch (e) {
-    console.warn('[DB] Entity-link migration failed:', e);
+    dbLog.warn('Entity-link migration failed:', e);
   }
 
   // Create v2 entity-link indexes only when the required columns exist.
@@ -1410,7 +1413,7 @@ const initDb = () => {
       `);
     }
   } catch (e) {
-    console.warn('[DB] Entity-link v2 index creation failed:', e);
+    dbLog.warn('Entity-link v2 index creation failed:', e);
   }
 
   // Backfill notes layer from legacy user edits for docs missing explicit notes.
@@ -1447,18 +1450,18 @@ const initDb = () => {
       );
     }
   } catch (e) {
-    console.warn('[DB] Knowledge note backfill failed:', e);
+    dbLog.warn('Knowledge note backfill failed:', e);
   }
 
   try {
     repairMeetingFtsIndex();
   } catch (e) {
-    console.warn('[DB] Meeting search index repair failed:', e);
+    dbLog.warn('Meeting search index repair failed:', e);
   }
   try {
     repairMeetingNotesFtsIndex();
   } catch (e) {
-    console.warn('[DB] Meeting notes search index repair failed:', e);
+    dbLog.warn('Meeting notes search index repair failed:', e);
   }
   const aliasColumns = db
     .prepare('PRAGMA table_info(commitment_aliases)')
@@ -1611,13 +1614,15 @@ db.exec(`CREATE TRIGGER IF NOT EXISTS identity_input_meetings_update AFTER UPDAT
 try {
   const repairedCount = repairExtractionAuthoredPersonRoles();
   if (repairedCount > 0) {
-    console.log(
-      `[DB] Removed ${repairedCount} extraction-authored person-name roles`,
+    dbLog.debug(
+      `Removed ${repairedCount} extraction-authored person-name roles`,
     );
   }
 } catch (e) {
-  console.warn('[DB] Person role metadata repair failed:', e);
+  dbLog.warn('Person role metadata repair failed:', e);
 }
+
+dbLog.info('Database schema and migrations initialized');
 
 export const getIdentityInputRevision = () =>
   (
@@ -2161,7 +2166,7 @@ function refreshMeetingFts(meeting: PersistedMeeting) {
         .join(' ');
     }
   } catch (e) {
-    console.warn('Failed to parse transcript_json for FTS', e);
+    dbLog.warn('Failed to parse transcript_json for FTS', e);
   }
 
   let midParticipants = '';
@@ -2183,7 +2188,7 @@ function refreshMeetingFts(meeting: PersistedMeeting) {
     }
   }
 
-  console.log(`[DB] Updating FTS index for meeting: ${id}`);
+  dbLog.debug(`Updating FTS index for meeting: ${id}`);
   db.transaction(() => {
     db.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(id);
     db.prepare(`
@@ -2296,9 +2301,7 @@ export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
       throw new Error('meeting_fts_integrity_check_failed');
     }
   })();
-  console.log(
-    `[DB] Rebuilt meeting search index (${meetings.length} meetings)`,
-  );
+  dbLog.debug(`Rebuilt meeting search index (${meetings.length} meetings)`);
   return { rebuilt: true, indexedMeetingCount: meetings.length };
 }
 
@@ -2334,8 +2337,8 @@ export function repairMeetingNotesFtsIndex(options: { force?: boolean } = {}): {
       throw new Error('meeting_notes_fts_integrity_check_failed');
     }
   })();
-  console.log(
-    `[DB] Rebuilt meeting notes search index (${meetings.length} meetings)`,
+  dbLog.debug(
+    `Rebuilt meeting notes search index (${meetings.length} meetings)`,
   );
   return { rebuilt: true, indexedMeetingCount: meetings.length };
 }
@@ -2469,7 +2472,7 @@ const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
 
   refreshMeetingFts(meeting);
 
-  console.log(`[DB] Save successful for meeting: ${id}`);
+  dbLog.info(`Save successful for meeting: ${id}`);
   return result;
 };
 
@@ -4429,7 +4432,7 @@ export const deleteMeeting = (id: string | number) => {
   const meeting = getMeeting(safeId) as PersistedMeeting | undefined;
 
   if (!meeting) {
-    console.warn(`[DB] deleteMeeting: Meeting not found for id: ${safeId}`);
+    dbLog.warn(`deleteMeeting: Meeting not found for id: ${safeId}`);
     return;
   }
 
@@ -4441,12 +4444,9 @@ export const deleteMeeting = (id: string | number) => {
   if (meeting.audio_path && fs.existsSync(meeting.audio_path)) {
     try {
       fs.unlinkSync(meeting.audio_path);
-      console.log(`[DB] Deleted audio file: ${meeting.audio_path}`);
+      dbLog.debug(`Deleted audio file: ${meeting.audio_path}`);
     } catch (e) {
-      console.warn(
-        `[DB] Failed to delete audio file: ${meeting.audio_path}`,
-        e,
-      );
+      dbLog.warn(`Failed to delete audio file: ${meeting.audio_path}`, e);
     }
   }
 
@@ -4486,7 +4486,7 @@ export const deleteMeeting = (id: string | number) => {
     ).run(safeId);
   }
 
-  console.log(`[DB] Deleted meeting: ${safeId}`);
+  dbLog.info(`Deleted meeting: ${safeId}`);
 
   // 5. Clean up orphan entities (optional but requested "knowledge related to the meeting")
   // We delete entities that have no remaining meeting connections AND no remaining links
@@ -4507,7 +4507,7 @@ export const deleteMeeting = (id: string | number) => {
           WHERE a.person_id = entities.id)
     `).run();
   } catch (e) {
-    console.warn('[DB] Failed to clean up orphan entities:', e);
+    dbLog.warn('Failed to clean up orphan entities:', e);
   }
 
   // Update entities FTS
@@ -6184,7 +6184,7 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           );
         }
       } catch (error) {
-        console.warn('[DB] Failed to parse note links for backlinks:', error);
+        dbLog.warn('Failed to parse note links for backlinks:', error);
       }
     }
 
@@ -6267,7 +6267,7 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           }
         }
       } catch (error) {
-        console.warn('[DB] Failed to derive synthesis backlinks:', error);
+        dbLog.warn('Failed to derive synthesis backlinks:', error);
       }
     }
 
@@ -7052,7 +7052,7 @@ export const upsertEntity = (entity: {
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(updated.name, existing.id);
     } catch (e) {
-      console.warn('[DB] Failed to update FTS for entity:', existing.id, e);
+      dbLog.warn('Failed to update FTS for entity:', existing.id, e);
     }
 
     return updated;
@@ -7082,7 +7082,7 @@ export const upsertEntity = (entity: {
     INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)
   `).run(entity.name, id);
 
-  console.log(`[DB] Created entity: ${entity.type} - "${entity.name}"`);
+  dbLog.debug(`Created entity: ${entity.type} - "${entity.name}"`);
   return db.prepare('SELECT * FROM entities WHERE id = ?').get(id) as Entity;
 };
 
@@ -7152,11 +7152,7 @@ export const updatePersonName = (personId: string, name: string): Entity =>
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(trimmed, person.id);
     } catch (error) {
-      console.warn(
-        '[DB] Failed to update person search index:',
-        person.id,
-        error,
-      );
+      dbLog.warn('Failed to update person search index:', person.id, error);
     }
     return getEntity(person.id)!;
   })();
@@ -8168,11 +8164,11 @@ export const deleteEntity = (id: string): void => {
   try {
     db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(id);
   } catch (e) {
-    console.warn('Failed to delete entity from FTS', e);
+    dbLog.warn('Failed to delete entity from FTS', e);
   }
 
   // CASCADE will handle entity_links and meeting_entities
-  console.log(`[DB] Deleted entity: ${id}`);
+  dbLog.debug(`Deleted entity: ${id}`);
 };
 
 /**
@@ -8266,8 +8262,8 @@ export const linkEntities = (link: {
     link.confidence ?? 1.0,
   );
 
-  console.log(
-    `[DB] Linked entities: ${link.source_entity_id} -[${link.relationship}]-> ${link.target_entity_id}`,
+  dbLog.debug(
+    `Linked entities: ${link.source_entity_id} -[${link.relationship}]-> ${link.target_entity_id}`,
   );
   return db
     .prepare('SELECT * FROM entity_links WHERE id = ?')
@@ -9825,7 +9821,7 @@ export const logAutoEndEvent = (event: {
     event.app_name || null,
     event.grace_seconds ?? null,
   );
-  console.log(
+  dbLog.debug(
     `[AutoEnd] Logged event: ${event.reason_code} (app=${event.app_name || 'n/a'}, grace=${event.grace_seconds ?? 'n/a'}s)`,
   );
   return id;
@@ -9835,7 +9831,7 @@ export const logAutoEndEvent = (event: {
  * Reset all knowledge (meetings, entities, etc) but KEEP settings
  */
 export const resetKnowledge = () => {
-  console.log('[DB] Resetting knowledge base...');
+  dbLog.info('Resetting knowledge base');
 
   // 1. Delete all audio files
   const allMeetings = db.prepare('SELECT audio_path FROM meetings').all() as {
@@ -9845,9 +9841,9 @@ export const resetKnowledge = () => {
     if (m.audio_path && fs.existsSync(m.audio_path)) {
       try {
         fs.unlinkSync(m.audio_path);
-        console.log(`[DB] Deleted audio file: ${m.audio_path}`);
+        dbLog.debug(`Deleted audio file: ${m.audio_path}`);
       } catch (e) {
-        console.warn(`[DB] Failed to delete audio file: ${m.audio_path}`, e);
+        dbLog.warn(`Failed to delete audio file: ${m.audio_path}`, e);
       }
     }
   }
@@ -9900,7 +9896,7 @@ export const resetKnowledge = () => {
   // 3. Vacuum to reclaim space
   db.exec('VACUUM');
 
-  console.log('[DB] Knowledge base reset complete.');
+  dbLog.info('Knowledge base reset complete');
   // Re-init FTS table if needed implies ensuring it's empty, which DELETE FROM does.
   return true;
 };
@@ -9929,10 +9925,10 @@ export const saveMeetingMid = (
       .get(meetingId) as PersistedMeeting | undefined;
     if (meeting) refreshMeetingFts(meeting);
   } catch (e) {
-    console.warn('[DB] Failed to update MID FTS fields:', e);
+    dbLog.warn('Failed to update MID FTS fields:', e);
   }
 
-  console.log(`[DB] Saved MID for meeting: ${meetingId}`);
+  dbLog.debug(`Saved MID for meeting: ${meetingId}`);
 };
 
 /**
@@ -9948,7 +9944,7 @@ export const getMeetingMid = (meetingId: string): MidFrontmatter | null => {
   try {
     return JSON.parse(row.mid_json) as MidFrontmatter;
   } catch {
-    console.warn(`[DB] Failed to parse mid_json for meeting: ${meetingId}`);
+    dbLog.warn(`Failed to parse mid_json for meeting: ${meetingId}`);
     return null;
   }
 };
