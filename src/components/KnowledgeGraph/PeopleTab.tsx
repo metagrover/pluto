@@ -53,6 +53,7 @@ import type {
 import { parsePersonRole } from '../../utils/personBriefing';
 import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
+import { SearchSelect } from '../ui/SearchSelect';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
@@ -1034,21 +1035,21 @@ export const PersonDossier = ({
             under one person, and the original evidence will remain intact.
           </p>
           <label htmlFor="merge-person-source">Duplicate record</label>
-          <select
+          <SearchSelect
             id="merge-person-source"
             value={mergeSourceId}
-            onChange={(event) => {
-              setMergeSourceId(event.target.value);
+            ariaLabel="Duplicate record"
+            placeholder="Choose a person"
+            searchPlaceholder="Search people…"
+            options={eligibleMergeCandidates.map((candidate) => ({
+              value: candidate.id,
+              label: candidate.name,
+            }))}
+            onValueChange={(value) => {
+              setMergeSourceId(value);
               setMergeState('idle');
             }}
-          >
-            <option value="">Choose a person</option>
-            {eligibleMergeCandidates.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
+          />
           {selectedMergeSource ? (
             <div className="person-dossier__merge-preview">
               <div>

@@ -19,6 +19,7 @@ import type {
   UserProjectMilestoneInput,
   UserProjectMilestoneStatus,
 } from '../../../utils/projectMilestones';
+import { SearchSelect } from '../../ui/SearchSelect';
 
 const statusLabel: Record<ProjectMilestone['status'], string> = {
   complete: 'Complete',
@@ -280,22 +281,29 @@ export function ProjectMilestones({
                 className={fieldClass}
               />
             </label>
-            <label className="text-xs font-medium text-pro-text-muted">
+            <label
+              htmlFor="project-milestone-status"
+              className="text-xs font-medium text-pro-text-muted"
+            >
               Status
-              <select
+              <SearchSelect
+                id="project-milestone-status"
+                ariaLabel="Milestone status"
                 value={draft.status}
-                onChange={(event) =>
+                searchable={false}
+                options={[
+                  { value: 'planned', label: 'Planned' },
+                  { value: 'in_progress', label: 'In progress' },
+                  { value: 'completed', label: 'Complete' },
+                ]}
+                onValueChange={(value) =>
                   setDraft((current) => ({
                     ...current,
-                    status: event.target.value as UserProjectMilestoneStatus,
+                    status: value as UserProjectMilestoneStatus,
                   }))
                 }
-                className={fieldClass}
-              >
-                <option value="planned">Planned</option>
-                <option value="in_progress">In progress</option>
-                <option value="completed">Complete</option>
-              </select>
+                className="mt-1.5"
+              />
             </label>
             <label className="text-xs font-medium text-pro-text-muted">
               Target date, optional
