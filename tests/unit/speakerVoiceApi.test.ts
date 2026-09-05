@@ -45,6 +45,8 @@ describe('speakerVoice API client', () => {
     expect(result.suggestions['Remote Speaker 1'].suggestedPersonName).toBe(
       'Robin',
     );
+    expect(result.candidates).toEqual({});
+    expect(result.enrollmentAvailability).toEqual({});
   });
 
   it('calls SPEAKER_VOICE_ENROLL with enrollment params', async () => {

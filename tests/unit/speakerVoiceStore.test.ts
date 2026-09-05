@@ -166,6 +166,35 @@ describe('speakerVoiceStore & candidate database operations', () => {
     );
   });
 
+  it('replays the same enrollment without duplicating biometric evidence', async () => {
+    const { enrollSpeakerVoice, saveMeetingSpeakerCandidates } = await import(
+      '../../electron/speakerVoiceStore'
+    );
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    db.prepare(
+      "INSERT INTO entities (id, name, type) VALUES ('person-1', 'Test Person', 'person')",
+    ).run();
+    saveMeetingSpeakerCandidates('m1', 'gen-1', [dummyCandidate], db);
+
+    const input = {
+      personId: 'person-1',
+      sourceMeetingId: 'm1',
+      sourceRevision: 'gen-1',
+      speaker: dummyCandidate.speaker,
+      candidateDigest: dummyCandidate.candidateDigest,
+    };
+    const first = enrollSpeakerVoice(input, db);
+    const replay = enrollSpeakerVoice(input, db);
+    const count = db
+      .prepare('SELECT COUNT(*) AS count FROM speaker_voice_enrollments')
+      .get() as { count: number };
+
+    expect(replay.id).toBe(first.id);
+    expect(count.count).toBe(1);
+  });
+
   it('overwrites prior candidate generations on new commit for the same meeting', async () => {
     const { saveMeetingSpeakerCandidates, getMeetingSpeakerCandidates } =
       await import('../../electron/speakerVoiceStore');
@@ -197,6 +226,41 @@ describe('speakerVoiceStore & candidate database operations', () => {
       'Remote Speaker 1',
       'Remote Speaker 2',
     ]);
+  });
+
+  it('upserts one reviewed candidate without removing another speaker', async () => {
+    const {
+      getMeetingSpeakerCandidates,
+      saveMeetingSpeakerCandidate,
+      saveMeetingSpeakerCandidates,
+    } = await import('../../electron/speakerVoiceStore');
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    const candidate2: SpeakerCandidateEvidence = {
+      ...dummyCandidate,
+      speaker: 'Remote Speaker 2',
+      nativeCluster: 'S2',
+      candidateDigest: 'd'.repeat(64),
+    };
+    saveMeetingSpeakerCandidates(
+      'm1',
+      'gen-1',
+      [dummyCandidate, candidate2],
+      db,
+    );
+
+    saveMeetingSpeakerCandidate(
+      'm1',
+      'gen-1',
+      { ...dummyCandidate, candidateDigest: 'e'.repeat(64) },
+      db,
+    );
+
+    const candidates = getMeetingSpeakerCandidates('m1', db);
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0].candidateDigest).toBe('e'.repeat(64));
+    expect(candidates[1].candidateDigest).toBe('d'.repeat(64));
   });
 
   it('cascades deletion of meeting to wipe all candidate vectors permanently', async () => {

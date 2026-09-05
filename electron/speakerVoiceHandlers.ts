@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
+import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import { matchSpeakerVoice } from '../src/services/speakerVoiceMatcher';
 import * as db from './db';
+import { getSpeakerEnrollmentAvailability } from './speakerEnrollmentCandidate';
 import {
   deleteVoiceProfile,
   enrollSpeakerVoice,
@@ -8,6 +10,8 @@ import {
   getMeetingSpeakerCandidates,
   getVoiceRejections,
   recordVoiceRejection,
+  resolvePersonId,
+  saveMeetingSpeakerCandidate,
   setVoiceProfileStatus,
 } from './speakerVoiceStore';
 
@@ -37,6 +41,13 @@ export interface SpeakerVoiceDependencies {
   }) => Promise<boolean>;
   readFile?: (path: string) => Promise<Buffer>;
   removeFile?: (path: string) => Promise<void>;
+  buildEnrollmentCandidate?: (input: {
+    meetingId: string;
+    speaker: string;
+  }) => Promise<{
+    candidate: SpeakerCandidateEvidence;
+    sourceRevision: string;
+  } | null>;
 }
 
 export async function handleSpeakerVoiceRequest(
@@ -50,7 +61,11 @@ export async function handleSpeakerVoiceRequest(
     case 'SPEAKER_VOICE_GET_SUGGESTIONS': {
       const meetingId = String(payload?.meetingId ?? '');
       if (!meetingId) {
-        return { suggestions: {}, candidates: {} };
+        return {
+          suggestions: {},
+          candidates: {},
+          enrollmentAvailability: {},
+        };
       }
 
       const candidates = getMeetingSpeakerCandidates(meetingId, d);
@@ -64,19 +79,39 @@ export async function handleSpeakerVoiceRequest(
         };
       }
 
-      const isEnabled =
-        deps?.isFeatureFlagEnabled?.() ??
-        (db.getSetting('voice_profile_suggestions_v1') === 'true' ||
-          process.env.VOICE_PROFILE_SUGGESTIONS_V1 === 'true');
-
-      if (!isEnabled) {
-        return { suggestions: {}, candidates: clientCandidates };
-      }
+      const getMeeting =
+        deps?.getMeeting ??
+        ((id: string) =>
+          (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null);
+      const meeting = getMeeting(meetingId);
+      const fileExists = deps?.fileExists ?? require('node:fs').existsSync;
+      const enrollmentAvailability = getSpeakerEnrollmentAvailability(
+        meetingId,
+        {
+          getMeeting: () => meeting,
+          fileExists,
+        },
+      );
 
       const profiles = getCanonicalVoiceProfiles({
         dbInstance: d,
         activeOnly: true,
       });
+      const calibrationFlagEnabled =
+        deps?.isFeatureFlagEnabled?.() ??
+        (db.getSetting('voice_profile_suggestions_v1') === 'true' ||
+          process.env.VOICE_PROFILE_SUGGESTIONS_V1 === 'true');
+
+      // Explicitly enrolling an active profile is the user's opt-in to future
+      // recognition. The flag remains available for calibration before any
+      // real profile exists, but must not make an enrolled profile inert.
+      if (!calibrationFlagEnabled && profiles.length === 0) {
+        return {
+          suggestions: {},
+          candidates: clientCandidates,
+          enrollmentAvailability,
+        };
+      }
       const rejections = getVoiceRejections(meetingId, d);
 
       const suggestions: Record<string, unknown> = {};
@@ -108,7 +143,11 @@ export async function handleSpeakerVoiceRequest(
         }
       }
 
-      return { suggestions, candidates: clientCandidates };
+      return {
+        suggestions,
+        candidates: clientCandidates,
+        enrollmentAvailability,
+      };
     }
 
     case 'SPEAKER_VOICE_ENROLL': {
@@ -128,29 +167,98 @@ export async function handleSpeakerVoiceRequest(
         throw new Error('identity_revision_stale');
       }
 
-      const candidateRow = d
-        .prepare(
-          `SELECT candidate_digest FROM meeting_speaker_candidates
-           WHERE meeting_id = ? AND speaker = ? AND source_revision = ?`,
-        )
-        .get(sourceMeetingId, speaker, sourceRevision) as
-        | { candidate_digest: string }
-        | undefined;
+      const canonicalPersonId = resolvePersonId(String(personId ?? ''), d);
+      const bindingMatches = () => {
+        const binding = db.identityStore
+          .getBindings(String(sourceMeetingId ?? ''))
+          .find((entry) => entry.speaker === speaker);
+        return (
+          binding?.source === 'user' &&
+          typeof binding.personId === 'string' &&
+          resolvePersonId(binding.personId, d) === canonicalPersonId
+        );
+      };
+      if (!bindingMatches()) throw new Error('speaker_enrollment_unconfirmed');
 
-      if (!candidateRow || candidateRow.candidate_digest !== candidateDigest) {
-        throw new Error('speaker_candidate_stale');
+      const suppliedCandidateIdentity =
+        typeof sourceRevision === 'string' &&
+        sourceRevision.length > 0 &&
+        typeof candidateDigest === 'string' &&
+        candidateDigest.length > 0;
+      if (
+        (sourceRevision !== undefined || candidateDigest !== undefined) &&
+        !suppliedCandidateIdentity
+      ) {
+        throw new Error('speaker_candidate_invalid');
       }
 
-      const enrollment = enrollSpeakerVoice(
-        {
-          personId,
-          sourceMeetingId,
-          sourceRevision,
-          speaker,
-          candidateDigest,
-        },
-        d,
-      );
+      let enrollmentSourceRevision = sourceRevision as string | undefined;
+      let enrollmentCandidateDigest = candidateDigest as string | undefined;
+      let builtCandidate: SpeakerCandidateEvidence | null = null;
+
+      if (suppliedCandidateIdentity) {
+        const candidateRow = d
+          .prepare(
+            `SELECT candidate_digest FROM meeting_speaker_candidates
+             WHERE meeting_id = ? AND speaker = ? AND source_revision = ?`,
+          )
+          .get(sourceMeetingId, speaker, sourceRevision) as
+          | { candidate_digest: string }
+          | undefined;
+
+        if (
+          !candidateRow ||
+          candidateRow.candidate_digest !== candidateDigest
+        ) {
+          throw new Error('speaker_candidate_stale');
+        }
+      } else {
+        const built = await deps?.buildEnrollmentCandidate?.({
+          meetingId: String(sourceMeetingId ?? ''),
+          speaker: String(speaker ?? ''),
+        });
+        if (
+          !built?.candidate.isEligibleForEnrollment ||
+          built.candidate.speaker !== speaker ||
+          !built.sourceRevision
+        ) {
+          throw new Error('speaker_enrollment_evidence_unavailable');
+        }
+        if (
+          db.identityStore.getRevision() !== expectedRevision ||
+          !bindingMatches()
+        ) {
+          throw new Error('identity_revision_stale');
+        }
+        builtCandidate = built.candidate;
+        enrollmentSourceRevision = built.sourceRevision;
+        enrollmentCandidateDigest = built.candidate.candidateDigest;
+      }
+
+      if (!enrollmentSourceRevision || !enrollmentCandidateDigest) {
+        throw new Error('speaker_enrollment_evidence_unavailable');
+      }
+
+      const enrollment = d.transaction(() => {
+        if (builtCandidate) {
+          saveMeetingSpeakerCandidate(
+            String(sourceMeetingId),
+            enrollmentSourceRevision,
+            builtCandidate,
+            d,
+          );
+        }
+        return enrollSpeakerVoice(
+          {
+            personId: canonicalPersonId,
+            sourceMeetingId,
+            sourceRevision: enrollmentSourceRevision,
+            speaker,
+            candidateDigest: enrollmentCandidateDigest,
+          },
+          d,
+        );
+      })();
 
       return { success: true, enrollmentId: enrollment.id };
     }
@@ -205,12 +313,12 @@ export async function handleSpeakerVoiceRequest(
           (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null);
 
       const meeting = getMeeting(sourceMeetingId);
-      if (!meeting?.audio_path) {
+      if (!meeting?.system_audio_path) {
         return null;
       }
 
       const fileExists = deps?.fileExists ?? require('node:fs').existsSync;
-      if (!fileExists(meeting.audio_path)) {
+      if (!fileExists(meeting.system_audio_path)) {
         return null;
       }
 
@@ -225,7 +333,7 @@ export async function handleSpeakerVoiceRequest(
       );
 
       const ok = await deps.sliceWav({
-        inputPath: meeting.audio_path,
+        inputPath: meeting.system_audio_path,
         outputPath: tempPath,
         startSec: Math.max(0, Number(startTime)),
         durationSec,

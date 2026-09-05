@@ -20,6 +20,21 @@ afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe('speaker voice IPC handlers', () => {
   const sourceRevision = '7591ab6e-da76-4c45-a04f-ab96b1a6f3bf';
+  const transcriptValidatedAt = '2026-08-15T00:00:00.000Z';
+  const validatedTranscriptTrust = {
+    transcript_status: 'validated' as const,
+    transcript_validated_at: transcriptValidatedAt,
+    transcript_integrity_json: JSON.stringify({
+      schemaVersion: 2,
+      state: 'validated',
+      causes: [],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+      validationProof: {
+        gateVersion: 'canonical_integrity_v1',
+        validatedAt: transcriptValidatedAt,
+      },
+    }),
+  };
   let fixture = 0;
   let meetingId: string;
   let personId: string;
@@ -50,6 +65,14 @@ describe('speaker voice IPC handlers', () => {
       type: 'person',
       name: 'Robin',
       dedupe_by_name: false,
+    });
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Remote Speaker 1',
+      personId,
+      individual: true,
+      source: 'user',
+      sourceRevision,
+      evidence: [],
     });
   });
 
@@ -89,6 +112,16 @@ describe('speaker voice IPC handlers', () => {
       'SPEAKER_VOICE_DELETE',
       'SPEAKER_VOICE_GET_REFERENCE_SAMPLE',
     ]);
+  });
+
+  it('returns empty enrollment metadata when the meeting id is absent', async () => {
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_GET_SUGGESTIONS', {}),
+    ).resolves.toEqual({
+      suggestions: {},
+      candidates: {},
+      enrollmentAvailability: {},
+    });
   });
 
   it('handles enrollment with revision and candidate validation', async () => {
@@ -133,7 +166,7 @@ describe('speaker voice IPC handlers', () => {
     expect(result.enrollmentId).toBeDefined();
   });
 
-  it('returns suggestions when enabled and strips biometric embeddings', async () => {
+  it('uses an explicitly enrolled profile for future suggestions without a hidden flag', async () => {
     saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
@@ -145,35 +178,144 @@ describe('speaker voice IPC handlers', () => {
       expectedRevision: rev,
     });
 
-    // Default disabled -> empty suggestions
-    const disabledResult = (await handleSpeakerVoiceRequest(
+    const optedInResult = (await handleSpeakerVoiceRequest(
       'SPEAKER_VOICE_GET_SUGGESTIONS',
       { meetingId },
       { isFeatureFlagEnabled: () => false },
     )) as {
-      suggestions: Record<string, unknown>;
+      suggestions: Record<string, any>;
       candidates: Record<string, { sourceRevision: string }>;
     };
-    expect(disabledResult.suggestions).toEqual({});
-    expect(disabledResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
+    expect(optedInResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
       sourceRevision,
     );
-
-    // Enabled -> returns suggestion without raw embedding
-    const enabledResult = (await handleSpeakerVoiceRequest(
-      'SPEAKER_VOICE_GET_SUGGESTIONS',
-      { meetingId },
-      { isFeatureFlagEnabled: () => true },
-    )) as { suggestions: Record<string, any> };
-
-    expect(enabledResult.suggestions['Remote Speaker 1']).toBeDefined();
-    const suggestion = enabledResult.suggestions['Remote Speaker 1'];
+    expect(optedInResult.suggestions['Remote Speaker 1']).toBeDefined();
+    const suggestion = optedInResult.suggestions['Remote Speaker 1'];
     expect(suggestion.suggestedPersonId).toBe(personId);
     expect(suggestion.suggestedPersonName).toBe('Robin');
     expect(suggestion.confidenceTier).toBe('strong');
     expect(suggestion.sourceRevision).toBe(sourceRevision);
     expect(suggestion.embedding).toBeUndefined(); // NEVER leaked to renderer!
   });
+
+  it('loads profile reference audio from the same system channel as modal samples', async () => {
+    const sliceWav = vi.fn(async () => true);
+
+    const result = await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_REFERENCE_SAMPLE',
+      { sourceMeetingId: meetingId, startTime: 2, endTime: 5 },
+      {
+        getMeeting: () => ({
+          id: meetingId,
+          audio_path: '/approved/mic.wav',
+          system_audio_path: '/approved/system.wav',
+        }),
+        fileExists: () => true,
+        createTemporaryPath: () => '/approved/sample.wav',
+        sliceWav,
+        readFile: async () => Buffer.from([1, 2, 3]),
+        removeFile: async () => undefined,
+      },
+    );
+
+    expect(result).toMatchObject({ mimeType: 'audio/wav', durationSeconds: 3 });
+    expect(sliceWav).toHaveBeenCalledWith(
+      expect.objectContaining({ inputPath: '/approved/system.wav' }),
+    );
+  });
+
+  it('advertises reviewed-sample enrollment without a stored candidate', async () => {
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        isFeatureFlagEnabled: () => false,
+        fileExists: () => true,
+        getMeeting: () => ({
+          id: meetingId,
+          ...validatedTranscriptTrust,
+          capture_journal_generation: sourceRevision,
+          system_audio_path: '/approved/system.wav',
+          transcript_json: JSON.stringify([
+            {
+              speaker: 'Remote Speaker 1',
+              text: 'First reviewed sample',
+              start: 1,
+              end: 6,
+            },
+            {
+              speaker: 'Remote Speaker 1',
+              text: 'Second reviewed sample',
+              start: 10,
+              end: 14,
+            },
+          ]),
+        }),
+      },
+    )) as { enrollmentAvailability: Record<string, boolean> };
+
+    expect(result.enrollmentAvailability).toEqual({
+      'Remote Speaker 1': true,
+    });
+  });
+
+  it.each([
+    {
+      label: 'unvalidated transcript',
+      transcriptStatus: 'pending',
+      captureGeneration: sourceRevision,
+      fileExists: true,
+    },
+    {
+      label: 'missing capture generation',
+      transcriptStatus: 'validated',
+      captureGeneration: null,
+      fileExists: true,
+    },
+    {
+      label: 'missing system audio',
+      transcriptStatus: 'validated',
+      captureGeneration: sourceRevision,
+      fileExists: false,
+    },
+  ])(
+    'does not advertise reviewed-sample enrollment for $label',
+    async ({ transcriptStatus, captureGeneration, fileExists }) => {
+      const result = (await handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_GET_SUGGESTIONS',
+        { meetingId },
+        {
+          isFeatureFlagEnabled: () => false,
+          fileExists: () => fileExists,
+          getMeeting: () => ({
+            id: meetingId,
+            ...validatedTranscriptTrust,
+            transcript_status: transcriptStatus,
+            capture_journal_generation: captureGeneration,
+            system_audio_path: '/approved/system.wav',
+            transcript_json: JSON.stringify([
+              {
+                speaker: 'Remote Speaker 1',
+                text: 'First reviewed sample',
+                start: 1,
+                end: 6,
+              },
+              {
+                speaker: 'Remote Speaker 1',
+                text: 'Second reviewed sample',
+                start: 10,
+                end: 14,
+              },
+            ]),
+          }),
+        },
+      )) as { enrollmentAvailability: Record<string, boolean> };
+
+      expect(result.enrollmentAvailability).toEqual({
+        'Remote Speaker 1': false,
+      });
+    },
+  );
 
   it('enrolls with the exact candidate revision returned by discovery', async () => {
     saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
@@ -209,6 +351,119 @@ describe('speaker voice IPC handlers', () => {
     expect(profiles).toEqual([
       expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
     ]);
+  });
+
+  it('builds an enrollment candidate from reviewed samples when finalization has none', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
+      meetingId,
+      speaker: 'Remote Speaker 1',
+    });
+    expect(
+      db.db
+        .prepare(
+          'SELECT candidate_digest FROM meeting_speaker_candidates WHERE meeting_id = ?',
+        )
+        .get(meetingId),
+    ).toEqual({ candidate_digest: dummyCandidate.candidateDigest });
+    const profiles = (
+      (await handleSpeakerVoiceRequest('SPEAKER_VOICE_GET_PROFILES', {})) as {
+        profiles: Array<{ canonicalPersonId: string; sampleCount: number }>;
+      }
+    ).profiles;
+    expect(profiles).toEqual([
+      expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
+    ]);
+  });
+
+  it('rejects partially supplied candidate identity', async () => {
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision,
+        speaker: 'Remote Speaker 1',
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).rejects.toThrow('speaker_candidate_invalid');
+  });
+
+  it.each([
+    { label: 'missing candidate', built: null },
+    {
+      label: 'ineligible candidate',
+      built: {
+        candidate: { ...dummyCandidate, isEligibleForEnrollment: false },
+        sourceRevision,
+      },
+    },
+    {
+      label: 'candidate for a different speaker',
+      built: {
+        candidate: { ...dummyCandidate, speaker: 'Remote Speaker 2' },
+        sourceRevision,
+      },
+    },
+  ])('rejects $label from on-demand analysis', async ({ built }) => {
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+        },
+        { buildEnrollmentCandidate: async () => built },
+      ),
+    ).rejects.toThrow('speaker_enrollment_evidence_unavailable');
+  });
+
+  it('requires the confirmed meeting binding to match the enrolled person', async () => {
+    const otherPersonId = `${personId}-other`;
+    db.upsertEntity({
+      id: otherPersonId,
+      type: 'person',
+      name: 'Other Person',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Remote Speaker 1',
+      personId: otherPersonId,
+      individual: true,
+      source: 'user',
+      sourceRevision,
+      evidence: [],
+    });
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision,
+        speaker: 'Remote Speaker 1',
+        candidateDigest: dummyCandidate.candidateDigest,
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).rejects.toThrow('speaker_enrollment_unconfirmed');
   });
 
   it('returns profiles stripped of raw biometric embeddings', async () => {
@@ -291,6 +546,13 @@ describe('speaker voice IPC handlers', () => {
       }
     ).profiles;
     expect(profiles[0].isActive).toBe(false);
+
+    const inactiveResult = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { isFeatureFlagEnabled: () => false },
+    )) as { suggestions: Record<string, unknown> };
+    expect(inactiveResult.suggestions).toEqual({});
 
     // Delete profile
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_DELETE', { personId });
