@@ -331,9 +331,7 @@ it('publishes a deterministically accepted direct draft after a malformed compac
   expect(result.all_action_items).toEqual([
     expect.objectContaining({ text: 'Send the outline' }),
   ]);
-  expect(result.quality.issues).toContain(
-    'notes_direct_audit_fallback:schema',
-  );
+  expect(result.quality.issues).toContain('notes_direct_audit_fallback:schema');
   expect(result.generation_metadata.audit_status).toBe(
     'complete_with_warnings',
   );
@@ -463,10 +461,10 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
         overview: null,
         sections: [
           {
-          title: {
+            title: {
               text: 'Outline',
-            sources: [{ segment: 999, start: 0, end: 1 }],
-          },
+              sources: [{ segment: 999, start: 0, end: 1 }],
+            },
             items: [
               {
                 kind: 'action',
