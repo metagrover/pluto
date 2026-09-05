@@ -1349,4 +1349,61 @@ describe('MeetingView progressive reveal', () => {
     expect(document.body.querySelector('dialog')).not.toBeNull();
     expect(document.body.textContent).toContain('Identify Speakers');
   });
+
+  it('opens identification for Them from the meeting transcript', async () => {
+    const meetingWithAggregateSpeaker: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-with-aggregate-speaker',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Them',
+          text: 'The aggregate remote voice.',
+          startTime: 2,
+          endTime: 5,
+        },
+      ]),
+    };
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke: vi.fn(async (channel: string) =>
+          channel === 'GET_MEETING_IDENTITY'
+            ? {
+                meetingId: meetingWithAggregateSpeaker.id,
+                speakers: ['Me', 'Them'],
+                bindings: [],
+                capture: { origin: 'local', selfPersonId: null },
+                people: [],
+                selfPersonId: null,
+                revision: 1,
+                profile: {},
+                job: null,
+              }
+            : null,
+        ),
+      },
+    });
+
+    await act(async () => renderMeeting(meetingWithAggregateSpeaker, true));
+
+    const trigger = container.querySelector(
+      '#meeting-header-speaker-review-trigger',
+    );
+    expect(trigger?.textContent).toContain('1 unidentified speaker');
+    const transcriptSpeaker = [...container.querySelectorAll('strong')].find(
+      (element) => element.textContent === 'Them',
+    );
+    expect(transcriptSpeaker?.title).toBe(
+      'Click to review and identify this speaker',
+    );
+
+    await act(async () => transcriptSpeaker?.click());
+
+    expect(document.body.querySelector('dialog')).not.toBeNull();
+    expect(document.body.textContent).toContain('Speaker 1 of 1');
+    expect(
+      document.body.querySelector('input[aria-label="Person for Them"]'),
+    ).not.toBeNull();
+  });
 });

@@ -37,6 +37,7 @@ import {
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
+import { selectReviewableAnonymousSpeakers } from '../../utils/speakerReview';
 import {
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
@@ -829,11 +830,12 @@ export const MeetingView = ({
     };
     return summaries;
   }, {});
-  const unidentifiedRemoteSpeakers = Object.keys(speakerSummaries).filter(
-    (speaker) =>
-      /^Remote Speaker \d+$/u.test(speaker) && !displayNames[speaker],
+  const reviewableSpeakers = selectReviewableAnonymousSpeakers(
+    Object.keys(speakerSummaries),
   );
-  const unidentifiedSpeakerCount = unidentifiedRemoteSpeakers.length;
+  const unidentifiedSpeakerCount = reviewableSpeakers.filter(
+    (speaker) => !displayNames[speaker],
+  ).length;
   const transcriptTurns = buildMeetingTranscriptTurns(
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
@@ -1503,7 +1505,15 @@ export const MeetingView = ({
                   .padStart(2, '0')}`;
                 const speakerLabel = String(turn.speaker || 'Unknown speaker');
                 const isSelfSpeaker = speakerLabel.endsWith(' (You)');
-                const isAnonymousSpeaker = /^Speaker \d+$/u.test(speakerLabel);
+                const numberedMatch = speakerLabel.match(/^Speaker (\d+)$/u);
+                const reviewSpeaker = numberedMatch
+                  ? `Remote Speaker ${numberedMatch[1]}`
+                  : speakerLabel === 'Them'
+                    ? 'Them'
+                    : null;
+                const isAnonymousSpeaker = Boolean(
+                  reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
+                );
                 return (
                   <div key={turn.id} className="meeting-transcript-row">
                     <div>
@@ -1521,12 +1531,7 @@ export const MeetingView = ({
                         onClick={
                           isAnonymousSpeaker
                             ? () => {
-                                const remoteMatch =
-                                  speakerLabel.match(/^Speaker (\d+)$/u);
-                                const canonical = remoteMatch
-                                  ? `Remote Speaker ${remoteMatch[1]}`
-                                  : null;
-                                setSelectedSpeakerForModal(canonical);
+                                setSelectedSpeakerForModal(reviewSpeaker);
                                 setIsSpeakerModalOpen(true);
                               }
                             : undefined
