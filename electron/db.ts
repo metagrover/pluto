@@ -7170,7 +7170,10 @@ export const updatePersonName = (personId: string, name: string): Entity =>
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(trimmed, person.id);
     } catch (error) {
-      dbLog.warn(`Failed to update person search index for ${person.id}:`, error);
+      dbLog.warn(
+        `Failed to update person search index for ${person.id}:`,
+        error,
+      );
     }
     return getEntity(person.id)!;
   })();
