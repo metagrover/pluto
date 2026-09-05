@@ -10,13 +10,22 @@ import {
   MessageCircle,
   MoreHorizontal,
   Pencil,
+  Play,
   Quote,
   Search,
   Undo2,
   UserRound,
+  Volume2,
 } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ClientVoiceProfile,
+  deleteSpeakerVoiceProfile,
+  getSpeakerVoiceProfiles,
+  getVoiceReferenceSample,
+  setSpeakerVoiceProfileStatus,
+} from '../../api/speakerVoice';
 import {
   type Entity,
   type EntityMeeting,
@@ -500,6 +509,59 @@ export const PersonDossier = ({
   const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  const [voiceProfile, setVoiceProfile] = useState<ClientVoiceProfile | null>(
+    null,
+  );
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const [samplePlaying, setSamplePlaying] = useState(false);
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const [sampleUnavailable, setSampleUnavailable] = useState(false);
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceUrlRef = useRef<string | null>(null);
+
+  const releaseVoiceAudio = useCallback(() => {
+    if (voiceAudioRef.current) {
+      voiceAudioRef.current.pause();
+      voiceAudioRef.current = null;
+    }
+    if (voiceUrlRef.current) {
+      URL.revokeObjectURL(voiceUrlRef.current);
+      voiceUrlRef.current = null;
+    }
+    setSamplePlaying(false);
+    setSampleLoading(false);
+  }, []);
+
+  const loadVoiceProfile = useCallback(async () => {
+    setVoiceLoading(true);
+    setVoiceError('');
+    try {
+      const profiles = await getSpeakerVoiceProfiles();
+      const match =
+        profiles.find(
+          (p) => p.canonicalPersonId === currentDetail.person.id,
+        ) ?? null;
+      setVoiceProfile(match);
+    } catch {
+      setVoiceProfile(null);
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [currentDetail.person.id]);
+
+  useEffect(() => {
+    releaseVoiceAudio();
+    setSampleUnavailable(false);
+    void loadVoiceProfile();
+  }, [loadVoiceProfile, releaseVoiceAudio]);
+
+  useEffect(() => {
+    return () => {
+      releaseVoiceAudio();
+    };
+  }, [releaseVoiceAudio]);
+
   useEffect(() => {
     setCurrentDetail(detail);
     setNameDraft(detail.person.name);
@@ -601,6 +663,7 @@ export const PersonDossier = ({
       setMergeOpen(false);
       setMergeSourceId('');
       await onIdentityChanged();
+      void loadVoiceProfile();
     } catch {
       setMergeState('error');
     }
@@ -613,8 +676,90 @@ export const PersonDossier = ({
       setLastMerged(null);
       setMergeState('idle');
       await onIdentityChanged();
+      void loadVoiceProfile();
     } catch {
       setMergeState('error');
+    }
+  };
+
+  const isMergedFamily = (currentDetail.mergedPeople ?? []).length > 0;
+
+  const playVoiceSample = async () => {
+    if (!voiceProfile?.referenceInterval) return;
+    releaseVoiceAudio();
+    setSampleLoading(true);
+    setSampleUnavailable(false);
+    try {
+      const sample = await getVoiceReferenceSample(
+        voiceProfile.referenceInterval.sourceMeetingId,
+        voiceProfile.referenceInterval.startTime,
+        voiceProfile.referenceInterval.endTime,
+      );
+      if (!sample) {
+        setSampleUnavailable(true);
+        return;
+      }
+      if (
+        typeof Audio === 'undefined' ||
+        typeof URL.createObjectURL === 'undefined'
+      ) {
+        setSamplePlaying(true);
+        return;
+      }
+      const bytes = Uint8Array.from(sample.bytes);
+      const url = URL.createObjectURL(
+        new Blob([bytes.buffer], { type: sample.mimeType }),
+      );
+      const audio = new Audio(url);
+      voiceUrlRef.current = url;
+      voiceAudioRef.current = audio;
+      audio.addEventListener('ended', () => {
+        releaseVoiceAudio();
+      });
+      setSamplePlaying(true);
+      await audio.play();
+    } catch {
+      releaseVoiceAudio();
+      setSampleUnavailable(true);
+    } finally {
+      setSampleLoading(false);
+    }
+  };
+
+  const handleToggleVoiceStatus = async () => {
+    if (!voiceProfile || voiceLoading) return;
+    const nextStatus = !voiceProfile.isActive;
+    setVoiceLoading(true);
+    setVoiceError('');
+    try {
+      await setSpeakerVoiceProfileStatus(currentDetail.person.id, nextStatus);
+      setVoiceProfile((prev) =>
+        prev ? { ...prev, isActive: nextStatus } : null,
+      );
+      await onIdentityChanged();
+    } catch (err) {
+      setVoiceError(
+        err instanceof Error ? err.message : 'Could not update voice status.',
+      );
+    } finally {
+      setVoiceLoading(false);
+    }
+  };
+
+  const handleDeleteVoiceProfile = async () => {
+    if (isMergedFamily || voiceLoading) return;
+    setVoiceLoading(true);
+    setVoiceError('');
+    try {
+      await deleteSpeakerVoiceProfile(currentDetail.person.id);
+      setVoiceProfile(null);
+      await onIdentityChanged();
+    } catch (err) {
+      setVoiceError(
+        err instanceof Error ? err.message : 'Could not delete voice profile.',
+      );
+    } finally {
+      setVoiceLoading(false);
     }
   };
 
@@ -975,6 +1120,109 @@ export const PersonDossier = ({
           </ul>
         </details>
       ) : null}
+
+      <section
+        className="person-dossier__voice-profile border-b border-pro-border/60 py-7"
+        aria-labelledby="voice-profile-heading"
+      >
+        <div className="person-dossier__major-heading">
+          <div className="flex items-center gap-2 text-pro-text-main">
+            <Volume2 aria-hidden="true" size={16} />
+            <h2 id="voice-profile-heading">Voice Profile</h2>
+          </div>
+          {voiceProfile ? (
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                voiceProfile.isActive
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                  : 'bg-pro-hover text-pro-text-muted border border-pro-border'
+              }`}
+            >
+              {voiceProfile.isActive ? 'Remembered voice (Active)' : 'Disabled'}
+            </span>
+          ) : null}
+        </div>
+
+        {voiceProfile ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs text-pro-text-muted">
+              {voiceProfile.sampleCount}{' '}
+              {voiceProfile.sampleCount === 1 ? 'sample' : 'samples'} (
+              {Math.round(voiceProfile.cleanDurationSeconds)}s speech)
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {voiceProfile.referenceInterval ? (
+                <button
+                  type="button"
+                  disabled={voiceLoading || sampleLoading}
+                  onClick={() => void playVoiceSample()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-pro-border/80 bg-pro-bg px-2.5 py-1 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors disabled:opacity-50"
+                >
+                  <Play
+                    size={10}
+                    className="fill-current mr-0.5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  {sampleLoading
+                    ? 'Loading sample…'
+                    : samplePlaying
+                      ? 'Playing…'
+                      : sampleUnavailable
+                        ? 'Reference recording unavailable'
+                        : 'Play reference sample'}
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                disabled={voiceLoading}
+                onClick={() => void handleToggleVoiceStatus()}
+                className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors disabled:opacity-50"
+              >
+                {voiceProfile.isActive
+                  ? 'Disable voice recognition'
+                  : 'Enable voice recognition'}
+              </button>
+
+              <button
+                type="button"
+                disabled={voiceLoading || isMergedFamily}
+                title={
+                  isMergedFamily
+                    ? 'Restore this person merge before permanently deleting voice samples.'
+                    : undefined
+                }
+                onClick={() => void handleDeleteVoiceProfile()}
+                className="rounded-lg border border-red-500/20 text-red-600 dark:text-red-400 px-2.5 py-1 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Delete voice profile
+              </button>
+            </div>
+
+            {isMergedFamily ? (
+              <p className="text-xs text-pro-text-muted">
+                Restore this person merge before permanently deleting voice
+                samples.
+              </p>
+            ) : null}
+            {sampleUnavailable ? (
+              <p role="alert" className="text-xs text-pro-urgent">
+                Reference recording unavailable
+              </p>
+            ) : null}
+            {voiceError ? (
+              <p role="alert" className="text-xs text-pro-urgent">
+                {voiceError}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-pro-text-muted">
+            No voice profile enrolled for this person.
+          </p>
+        )}
+      </section>
 
       <section className="person-dossier__current-read">
         <div className="person-dossier__current-read-heading">
