@@ -27,7 +27,9 @@ export type FinalSpeakerEvidence = {
     totalMs: number;
   };
   windowSeconds: number;
-  clusterEvidence?: import('../speakerCandidateEvidence.ts').SpeakerClusterEvidence[];
+  clusterEvidence?: import(
+    '../speakerCandidateEvidence.ts',
+  ).SpeakerClusterEvidence[];
 };
 
 export type SpeakerEvidenceRejectionReason =
