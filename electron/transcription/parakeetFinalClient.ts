@@ -585,7 +585,9 @@ export class ParakeetFinalClient {
             evidence.cluster.length > 0 &&
             Array.isArray(evidence.embedding) &&
             evidence.embedding.length === 256 &&
-            evidence.embedding.every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+            evidence.embedding.every(
+              (v) => typeof v === 'number' && Number.isFinite(v),
+            ) &&
             Number.isInteger(evidence.cleanChunkCount) &&
             evidence.cleanChunkCount >= 0 &&
             Number.isInteger(evidence.cleanSegmentCount) &&

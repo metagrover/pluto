@@ -24,6 +24,7 @@ import {
   advanceFinalTranscriptionLease,
   buildFinalTranscriptionLease,
 } from './finalTranscriptionLease.ts';
+import type { SpeakerCandidateEvidence } from '../speakerCandidateEvidence.ts';
 
 export type FinalTranscriptionInput = {
   meetingId: string;
@@ -52,6 +53,7 @@ type CanonicalCommit = {
   segments: AttributionSegment[];
   integrity: RecordingTranscriptValidationResult['evidence'];
   metadata: FinalTranscriptionMetadata;
+  speakerCandidates?: SpeakerCandidateEvidence[];
 };
 
 export type FinalTranscriptionMetadata = {
@@ -381,6 +383,7 @@ export const runFinalTranscription = async <TTranscript>(
       segments: remoteSpeakers.segments,
       integrity: validation.evidence,
       metadata,
+      speakerCandidates: remoteSpeakers.candidateEvidence,
     });
     if (!commit.committed || commit.transcript === undefined) {
       return { status: 'superseded' };

@@ -369,6 +369,7 @@ export const runPersistedMeetingFinalTranscription = async (
           canonicalTranscriptJson,
           transcriptIntegrityJson,
           transcriptValidatedAt,
+          speakerCandidates: commit.speakerCandidates,
         })) as { committed?: boolean; transcriptJson?: string } | false;
         if (outcome && outcome.committed === true) {
           await options.onTranscriptCommitted?.();

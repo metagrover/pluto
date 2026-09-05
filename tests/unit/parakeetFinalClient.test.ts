@@ -324,7 +324,9 @@ describe('ParakeetFinalClient', () => {
         meanChunkSimilarity: 0.88,
       },
     ];
-    (response.result.speakerEvidence.provenance as any).profileAlgorithmVersion = 'v1';
+    (
+      response.result.speakerEvidence.provenance as any
+    ).profileAlgorithmVersion = 'v1';
     child.respond(response);
 
     const result = await request;
@@ -334,7 +336,9 @@ describe('ParakeetFinalClient', () => {
     expect(result.clusterEvidence?.[0].cleanChunkCount).toBe(3);
     expect(result.clusterEvidence?.[0].cleanSegmentCount).toBe(2);
     expect(result.clusterEvidence?.[0].cleanDurationSeconds).toBeCloseTo(4.5);
-    expect(result.clusterEvidence?.[0].minimumChunkSimilarity).toBeCloseTo(0.82);
+    expect(result.clusterEvidence?.[0].minimumChunkSimilarity).toBeCloseTo(
+      0.82,
+    );
     expect(result.clusterEvidence?.[0].meanChunkSimilarity).toBeCloseTo(0.88);
     expect(result.provenance.profileAlgorithmVersion).toBe('v1');
   });
@@ -351,15 +355,18 @@ describe('ParakeetFinalClient', () => {
     });
     await vi.waitFor(() => expect(child.writes).toHaveLength(1));
     const resp1 = speakerEvidenceSuccess(String(child.writes[0].id));
-    (resp1.result.speakerEvidence as any).clusterEvidence = Array.from({ length: 65 }, (_, i) => ({
-      cluster: `S${i + 1}`,
-      embedding: new Array(256).fill(0.1),
-      cleanChunkCount: 1,
-      cleanSegmentCount: 1,
-      cleanDurationSeconds: 1.0,
-      minimumChunkSimilarity: 1.0,
-      meanChunkSimilarity: 1.0,
-    }));
+    (resp1.result.speakerEvidence as any).clusterEvidence = Array.from(
+      { length: 65 },
+      (_, i) => ({
+        cluster: `S${i + 1}`,
+        embedding: new Array(256).fill(0.1),
+        cleanChunkCount: 1,
+        cleanSegmentCount: 1,
+        cleanDurationSeconds: 1.0,
+        minimumChunkSimilarity: 1.0,
+        meanChunkSimilarity: 1.0,
+      }),
+    );
     child.respond(resp1);
     await expect(req1).rejects.toThrow('parakeet_protocol_invalid');
 
