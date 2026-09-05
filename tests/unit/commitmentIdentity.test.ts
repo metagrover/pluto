@@ -258,6 +258,33 @@ describe('identity publication boundary', () => {
       }),
     );
   });
+  it('binds Me to workspace self person for historical meetings with unknown capture origin', () => {
+    const person = db.upsertEntity({
+      type: 'person',
+      name: 'Deepak Grover',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setSelfPersonId(person.id);
+    db.saveMeeting({
+      id: 'historical-meeting-unknown-origin',
+      title: 'Historical sync',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: 'I will follow up with the team.' }],
+      }),
+    });
+
+    const context = identity.getMeetingIdentityContext(
+      'historical-meeting-unknown-origin',
+    );
+    expect(context.bindings).toContainEqual(
+      expect.objectContaining({
+        speaker: 'Me',
+        personId: person.id,
+        individual: true,
+        source: 'user',
+      }),
+    );
+  });
   it('binds Me to workspace self person even when acoustic diarization confidence is absent or below threshold', () => {
     const person = db.upsertEntity({
       type: 'person',
