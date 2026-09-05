@@ -159,13 +159,16 @@ export const PeopleBriefing = ({
   );
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
-    const cue =
+    const rawCue =
       person.briefHeadline ??
       (person.context && !person.context.startsWith('Role:')
         ? person.context
         : null) ??
       person.latestMeetingTitle ??
       'No linked conversation yet';
+    const cue = rawCue.startsWith(`${person.name}: `)
+      ? rawCue.slice(person.name.length + 2).trim() || rawCue
+      : rawCue;
     const showRole = person.role !== 'Known from conversations';
     return (
       <article

@@ -40,6 +40,24 @@ describe('PeopleBriefing', () => {
     expect(markup).not.toContain('>Open <');
   });
 
+  it('strips redundant person name prefix from the row cue', () => {
+    const rowWithPrefix: PersonBriefingRow = {
+      ...rows[0],
+      name: 'Sarah Chen',
+      briefHeadline:
+        'Sarah Chen: The conversation centered around design principles.',
+    };
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing rows={[rowWithPrefix]} onSelectPerson={() => {}} />,
+    );
+    expect(markup).toContain(
+      'The conversation centered around design principles.',
+    );
+    expect(markup).not.toContain(
+      'Sarah Chen: The conversation centered around design principles.',
+    );
+  });
+
   it('renders every linked person in ranked order without a loader', () => {
     const manyRows = Array.from({ length: 12 }, (_, index) => ({
       ...rows[0],
