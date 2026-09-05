@@ -97,6 +97,40 @@ describe('meeting transcript presentation', () => {
     });
     expect(projected[0].speaker).toBe('Aditya Grover (You)');
   });
+
+  it('resolves Me from identity.profile.preferredName when no explicit Me binding exists', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'person-1', name: 'Deepak Grover' }],
+      bindings: [
+        {
+          speaker: 'Remote Speaker 1',
+          personId: 'person-1',
+        },
+      ],
+      profile: { preferredName: 'Deepak' },
+      selfPersonId: 'person-1',
+    });
+    expect(names.Me).toBe('Deepak');
+  });
+
+  it('resolves Me from identity.selfPersonId person name when no explicit Me binding or profile exists', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'self-id', name: 'Deepak Grover' }],
+      bindings: [],
+      selfPersonId: 'self-id',
+    });
+    expect(names.Me).toBe('Deepak Grover');
+  });
+
+  it('respects explicit Me binding over profile.preferredName fallback', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'self-id', name: 'Deepak Grover' }],
+      bindings: [{ speaker: 'Me', personId: 'self-id' }],
+      profile: { preferredName: 'D' },
+      selfPersonId: 'self-id',
+    });
+    expect(names.Me).toBe('Deepak Grover');
+  });
 });
 
 describe('remote speaker completion status', () => {
