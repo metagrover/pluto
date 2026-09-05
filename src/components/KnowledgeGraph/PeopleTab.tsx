@@ -185,11 +185,17 @@ export const PeopleBriefing = ({
           <span className="person-avatar" aria-hidden="true">
             {person.name.slice(0, 1).toUpperCase()}
           </span>
-          <span className="person-identity">
-            <strong>{person.name}</strong>
-            {showRole ? <span>{person.role}</span> : null}
+          <span className="person-copy">
+            <span className="person-identity">
+              <strong>{person.name}</strong>
+            </span>
+            <span className="person-context">
+              {showRole ? (
+                <span className="person-role">{person.role}</span>
+              ) : null}
+              <span>{cue}</span>
+            </span>
           </span>
-          <span className="person-context">{cue}</span>
           <span className="person-meta">
             {person.possibleDuplicateCount > 0 ? (
               <span className="person-possible-duplicate">

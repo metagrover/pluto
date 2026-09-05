@@ -72,20 +72,30 @@
   .person-row__meeting:hover .person-avatar {
     @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
   }
+  .person-copy {
+    @apply flex min-w-0 flex-1 flex-col gap-1;
+  }
   .person-identity {
-    @apply flex min-w-0 flex-1 items-baseline gap-2 sm:w-48 sm:flex-none md:w-56;
+    @apply flex min-w-0 items-baseline gap-2;
   }
   .person-identity strong {
-    @apply truncate text-[13.5px] font-medium leading-none text-pro-text-main transition-colors duration-150;
-  }
-  .person-identity span {
-    @apply truncate text-[11px] leading-none text-pro-text-muted/70;
+    @apply text-[13.5px] font-medium leading-tight text-pro-text-main transition-colors duration-150;
   }
   .person-row__meeting:hover .person-identity strong {
     @apply text-pro-accent;
   }
   .person-context {
-    @apply min-w-0 flex-1 truncate text-[12.5px] text-pro-text-muted/75;
+    @apply flex min-w-0 items-baseline gap-2 text-[12px] leading-tight text-pro-text-muted/75;
+  }
+  .person-context > span:last-child {
+    @apply truncate;
+  }
+  .person-role {
+    @apply shrink-0 text-[11px] text-pro-text-muted/70;
+  }
+  .person-role::after {
+    content: "·";
+    @apply ml-2 text-pro-text-muted/40;
   }
   .person-meta {
     @apply flex shrink-0 items-center gap-3 text-[11px] text-pro-text-muted/70;
