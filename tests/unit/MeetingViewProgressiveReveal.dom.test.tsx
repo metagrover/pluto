@@ -1309,4 +1309,42 @@ describe('MeetingView progressive reveal', () => {
     expect(container.querySelector('[aria-label="Ask Pluto"]')).toBeNull();
     expect(container.textContent).not.toContain('Ask about this meeting');
   });
+
+  it('displays unidentified speakers in header metadata and opens identification modal', async () => {
+    const meetingWithSpeakers: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-with-speakers',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'Good morning.',
+          startTime: 2,
+          endTime: 4,
+        },
+        {
+          speaker: 'Remote Speaker 2',
+          text: 'Hi all.',
+          startTime: 4,
+          endTime: 6,
+        },
+      ]),
+    };
+
+    await act(async () => renderMeeting(meetingWithSpeakers, true));
+
+    const trigger = container.querySelector(
+      '#meeting-header-speaker-review-trigger',
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger?.textContent).toContain('2 unidentified speakers');
+
+    // Bulky accordion above transcript should be removed
+    expect(container.querySelector('#meeting-speaker-review-toggle')).toBeNull();
+
+    // Clicking header metadata trigger opens the modal
+    await act(async () => (trigger as HTMLButtonElement)?.click());
+    expect(document.body.querySelector('dialog')).not.toBeNull();
+    expect(document.body.textContent).toContain('Identify Speakers');
+  });
 });

@@ -18,7 +18,7 @@ import {
   isIdentityRevisionError,
   setMeetingIdentityBinding,
 } from '../../api/identity';
-import type { IdentityBinding, IdentityPerson } from '../../types/identity';
+import type { IdentityPerson } from '../../types/identity';
 import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
 import type { SpeakerReviewSummary } from './MeetingIdentityControls';
 
@@ -229,9 +229,6 @@ export const SpeakerIdentificationModal = ({
 
   const currentSpeaker = remoteSpeakers[stepIndex];
   const totalSpeakers = remoteSpeakers.length;
-  const currentBinding = state?.bindings.find(
-    (b) => b.speaker === currentSpeaker,
-  );
   const summary = currentSpeaker ? speakerSummaries[currentSpeaker] : undefined;
   const displayLabel = currentSpeaker
     ? getAnonymousSpeakerDisplayLabel(currentSpeaker)

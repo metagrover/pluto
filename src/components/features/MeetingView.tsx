@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   Sparkles,
   Undo2,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -47,8 +48,8 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
-import { MeetingIdentityControls } from './MeetingIdentityControls';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
+import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
 import {
@@ -679,6 +680,11 @@ export const MeetingView = ({
     meetingId: string;
     names: Record<string, string>;
   }>({ meetingId: '', names: {} });
+  const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
+  const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
+    string | null
+  >(null);
+
   const titleEdit = useRef({
     meetingId: selectedMeeting.id,
     expectedTitle: selectedMeeting.title,
@@ -823,6 +829,10 @@ export const MeetingView = ({
     };
     return summaries;
   }, {});
+  const unidentifiedRemoteSpeakers = Object.keys(speakerSummaries).filter(
+    (speaker) => /^Remote Speaker \d+$/u.test(speaker) && !displayNames[speaker],
+  );
+  const unidentifiedSpeakerCount = unidentifiedRemoteSpeakers.length;
   const transcriptTurns = buildMeetingTranscriptTurns(
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
@@ -1053,6 +1063,23 @@ export const MeetingView = ({
                     ? '< 1 min'
                     : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
+              ) : null}
+              {unidentifiedSpeakerCount > 0 ? (
+                <button
+                  type="button"
+                  id="meeting-header-speaker-review-trigger"
+                  onClick={() => {
+                    setSelectedSpeakerForModal(null);
+                    setIsSpeakerModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                >
+                  <Users size={12} className="opacity-70" />
+                  <span>
+                    {unidentifiedSpeakerCount} unidentified{' '}
+                    {unidentifiedSpeakerCount === 1 ? 'speaker' : 'speakers'}
+                  </span>
+                </button>
               ) : null}
             </div>
             <div className="meeting-document-actions">
@@ -1462,13 +1489,6 @@ export const MeetingView = ({
                 <p>{remoteSpeakerStatus.detail}</p>
               </div>
             ) : null}
-            <MeetingIdentityControls
-              meetingId={String(selectedMeeting.id)}
-              attendeeNames={calendarAttendeeNames}
-              hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
-              speakerSummaries={speakerSummaries}
-              onDisplayNamesChange={updateSpeakerDisplayNames}
-            />
             {hasTranscriptContent ? (
               transcriptTurns.map((turn) => {
                 const text = turn.segments
@@ -1500,19 +1520,14 @@ export const MeetingView = ({
                         onClick={
                           isAnonymousSpeaker
                             ? () => {
-                                const btn = document.getElementById(
-                                  'meeting-speaker-review-toggle',
+                                const remoteMatch = speakerLabel.match(
+                                  /^Speaker (\d+)$/u,
                                 );
-                                if (
-                                  btn &&
-                                  btn.getAttribute('aria-expanded') !== 'true'
-                                ) {
-                                  btn.click();
-                                }
-                                btn?.scrollIntoView({
-                                  behavior: 'smooth',
-                                  block: 'nearest',
-                                });
+                                const canonical = remoteMatch
+                                  ? `Remote Speaker ${remoteMatch[1]}`
+                                  : null;
+                                setSelectedSpeakerForModal(canonical);
+                                setIsSpeakerModalOpen(true);
                               }
                             : undefined
                         }
@@ -1540,6 +1555,19 @@ export const MeetingView = ({
           </div>
         </section>
       )}
+      <SpeakerIdentificationModal
+        isOpen={isSpeakerModalOpen}
+        onClose={() => {
+          setIsSpeakerModalOpen(false);
+          setSelectedSpeakerForModal(null);
+        }}
+        meetingId={String(selectedMeeting.id)}
+        initialSpeaker={selectedSpeakerForModal}
+        attendeeNames={calendarAttendeeNames}
+        hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
+        speakerSummaries={speakerSummaries}
+        onDisplayNamesChange={updateSpeakerDisplayNames}
+      />
     </div>
   );
 };
