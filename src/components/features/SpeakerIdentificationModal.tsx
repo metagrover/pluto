@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   type IdentitySelection,
   type MeetingIdentityState,
@@ -363,7 +364,9 @@ export const SpeakerIdentificationModal = ({
     }
   };
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <dialog
       open
       className="fixed inset-0 z-[1000] m-0 flex h-full w-full max-h-none max-w-none items-center justify-center border-none bg-black/40 p-4 backdrop-blur-sm animate-in"
@@ -669,6 +672,7 @@ export const SpeakerIdentificationModal = ({
           </div>
         </footer>
       </div>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 };
