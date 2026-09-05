@@ -69,7 +69,10 @@ describe('post-meeting processing coordinator', () => {
       'shouldStartMeetingFinalTranscription(detail, reason)',
     );
     expect(appSource).toContain(
-      "runMeetingFinalTranscription(meeting, 'manual')",
+      "kind === 'speaker_labels' ? 'speaker_labels' : 'manual'",
+    );
+    expect(appSource).toContain(
+      "rebuildSealedAudio: reason === 'speaker_labels'",
     );
   });
 

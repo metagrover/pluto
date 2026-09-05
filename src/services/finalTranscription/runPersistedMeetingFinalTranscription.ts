@@ -28,6 +28,68 @@ import { hasCompleteSystemCapture } from './systemCaptureEvidence.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
+const rebuildSealedAudioForRetry = async (
+  meeting: Meeting,
+  invoke: Invoke,
+): Promise<Meeting> => {
+  const meetingId = String(meeting.id);
+  const journal = (await invoke('AUDIO_CAPTURE_JOURNAL_READ', {
+    meetingId,
+  })) as {
+    schemaVersion?: unknown;
+    lifecycleState?: unknown;
+    generation?: unknown;
+  } | null;
+  if (
+    journal?.schemaVersion !== 3 ||
+    journal.lifecycleState !== 'sealed' ||
+    journal.generation !== meeting.capture_journal_generation
+  ) {
+    throw new Error('sealed_capture_generation_unavailable');
+  }
+  if (!meeting.audio_path) throw new Error('sealed_capture_mic_unavailable');
+
+  const createdPaths: string[] = [];
+  try {
+    const systemAudioPath = await invoke(
+      'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+      {
+        meetingId,
+        source: 'system',
+        outputTag: `${meetingId}-repaired-system`,
+      },
+    );
+    if (typeof systemAudioPath !== 'string' || systemAudioPath.length === 0) {
+      throw new Error('sealed_capture_system_rebuild_failed');
+    }
+    createdPaths.push(systemAudioPath);
+
+    const mixedAudioPath = await invoke('AUDIO_MIX_WAV', {
+      inputPaths: [meeting.audio_path, systemAudioPath],
+      outputTag: `${meetingId}-repaired-mix`,
+    });
+    if (typeof mixedAudioPath !== 'string' || mixedAudioPath.length === 0) {
+      throw new Error('sealed_capture_mix_rebuild_failed');
+    }
+    createdPaths.push(mixedAudioPath);
+
+    const rebuiltMeeting = {
+      ...meeting,
+      system_audio_path: systemAudioPath,
+      mixed_audio_path: mixedAudioPath,
+    };
+    if ((await invoke('SAVE_MEETING', rebuiltMeeting)) === false) {
+      throw new Error('sealed_capture_audio_save_superseded');
+    }
+    return rebuiltMeeting;
+  } catch (error) {
+    if (createdPaths.length > 0) {
+      await invoke('AUDIO_DELETE_FILES', createdPaths).catch(() => null);
+    }
+    throw error;
+  }
+};
+
 type StoredIntegrity = Record<string, unknown> & {
   activityEvidence?: unknown;
   evidenceProvenance?: { kind?: unknown; digestSha256?: unknown };
@@ -86,15 +148,19 @@ const sanitizeVocabularyTerms = (value: unknown): string[] =>
     : [];
 
 export const runPersistedMeetingFinalTranscription = async (
-  meeting: Meeting,
+  inputMeeting: Meeting,
   invoke: Invoke,
   options: {
     signal?: AbortSignal;
     runId?: string;
     manualRetry?: boolean;
+    rebuildSealedAudio?: boolean;
     onTranscriptCommitted?: () => Promise<void> | void;
   } = {},
 ): Promise<FinalTranscriptionOutcome> => {
+  const meeting = options.rebuildSealedAudio
+    ? await rebuildSealedAudioForRetry(inputMeeting, invoke)
+    : inputMeeting;
   const captureGeneration = meeting.capture_journal_generation || '';
   const integrity = parseObject(
     meeting.transcript_integrity_json,

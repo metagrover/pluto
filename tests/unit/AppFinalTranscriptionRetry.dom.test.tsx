@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const runFinal = vi.hoisted(() => vi.fn());
+const requestedRetry = vi.hoisted(() => ({
+  kind: 'transcript' as 'transcript' | 'speaker_labels',
+}));
 vi.mock(
   '../../src/services/finalTranscription/runPersistedMeetingFinalTranscription',
   () => ({
@@ -27,10 +30,14 @@ vi.mock('../../src/components/features/Dashboard', () => ({
 vi.mock('../../src/components/features/MeetingView', () => ({
   MeetingView: ({
     onRetryTranscriptValidation,
-  }: { onRetryTranscriptValidation: (kind: 'transcript') => void }) => (
+  }: {
+    onRetryTranscriptValidation: (
+      kind: 'transcript' | 'speaker_labels',
+    ) => void;
+  }) => (
     <button
       type="button"
-      onClick={() => onRetryTranscriptValidation('transcript')}
+      onClick={() => onRetryTranscriptValidation(requestedRetry.kind)}
     >
       Retry transcript
     </button>
@@ -42,19 +49,40 @@ const flush = async () => {
 };
 afterEach(() => {
   vi.clearAllMocks();
+  requestedRetry.kind = 'transcript';
   window.__PLUTO_BROWSER_PREVIEW__ = undefined;
 });
 
 describe('App final transcription retry boundary', () => {
-  it.each(['manual', 'automatic'] as const)(
-    'forwards %s admission to the persisted worker',
-    async (reason) => {
+  it.each([
+    {
+      reason: 'manual',
+      retryKind: 'transcript' as const,
+      manualRetry: true,
+      rebuildSealedAudio: false,
+    },
+    {
+      reason: 'speaker labels',
+      retryKind: 'speaker_labels' as const,
+      manualRetry: true,
+      rebuildSealedAudio: true,
+    },
+    {
+      reason: 'automatic',
+      retryKind: 'transcript' as const,
+      manualRetry: false,
+      rebuildSealedAudio: false,
+    },
+  ])(
+    'forwards $reason admission to the persisted worker',
+    async ({ reason, retryKind, manualRetry, rebuildSealedAudio }) => {
+      requestedRetry.kind = retryKind;
       const meeting = {
         id: 'retry-meeting',
         title: 'Retry meeting',
         created_at: '2026-09-04T00:00:00Z',
         transcript_status:
-          reason === 'manual' ? 'needs_attention' : 'provisional',
+          reason === 'automatic' ? 'provisional' : 'needs_attention',
         finalization_status: 'finalized',
         capture_journal_generation: 'generation-1',
         audio_path: '/fixture/mic.wav',
@@ -112,7 +140,7 @@ describe('App final transcription retry boundary', () => {
           root.render(<App />);
           await flush();
         });
-        if (reason === 'manual') {
+        if (reason !== 'automatic') {
           expect(runFinal).not.toHaveBeenCalled();
           await act(async () => {
             Array.from(container.querySelectorAll('button'))
@@ -131,7 +159,8 @@ describe('App final transcription retry boundary', () => {
         }
         expect(runFinal).toHaveBeenCalledOnce();
         expect(runFinal.mock.calls[0][2]).toMatchObject({
-          manualRetry: reason === 'manual',
+          manualRetry,
+          rebuildSealedAudio,
           signal: expect.any(AbortSignal),
         });
       } finally {

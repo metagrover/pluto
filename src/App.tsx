@@ -879,7 +879,10 @@ function App() {
             )) as Meeting | null);
       const route = resolveMeetingRetryRoute(kind, meeting);
       if (route === 'final_transcription' && meeting) {
-        await runMeetingFinalTranscription(meeting, 'manual');
+        await runMeetingFinalTranscription(
+          meeting,
+          kind === 'speaker_labels' ? 'speaker_labels' : 'manual',
+        );
         return;
       }
       if (route === 'analysis' && meeting) {
@@ -1070,7 +1073,7 @@ function App() {
 
   const runMeetingFinalTranscription = async (
     meeting: Pick<Meeting, 'id'>,
-    reason: 'automatic' | 'manual' = 'automatic',
+    reason: 'automatic' | 'manual' | 'speaker_labels' = 'automatic',
   ) => {
     if (finalTranscriptionAbortRef.current) return;
     const detail = (await window.ipcRenderer.invoke(
@@ -1088,7 +1091,8 @@ function App() {
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
         {
           signal: controller.signal,
-          manualRetry: reason === 'manual',
+          manualRetry: reason !== 'automatic',
+          rebuildSealedAudio: reason === 'speaker_labels',
           onTranscriptCommitted: refreshSelectedMeetingState,
         },
       );

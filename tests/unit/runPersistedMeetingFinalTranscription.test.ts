@@ -326,6 +326,116 @@ describe('runPersistedMeetingFinalTranscription', () => {
     },
   );
 
+  it('rebuilds sealed System audio and its mix before an explicit historical retry', async () => {
+    const meeting = {
+      id: 'meeting-mixed-rate-retry',
+      title: 'Meeting',
+      created_at: '2026-09-04T00:00:00.000Z',
+      duration_seconds: 60,
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/damaged/system.wav',
+      mixed_audio_path: '/damaged/mix.wav',
+      capture_journal_generation: 'generation-1',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({ segments: [] }),
+      transcript_integrity_json: JSON.stringify({
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        activityEvidence: { private: 'verified by parser' },
+      }),
+    } as Meeting;
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+        return {
+          schemaVersion: 3,
+          lifecycleState: 'sealed',
+          generation: 'generation-1',
+          sourceAvailability: { system: 'available' },
+          intervals: [{ sources: { system: { disposition: 'captured' } } }],
+        };
+      }
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE') {
+        expect(args[0]).toMatchObject({
+          meetingId: 'meeting-mixed-rate-retry',
+          source: 'system',
+        });
+        return '/repaired/system.wav';
+      }
+      if (channel === 'AUDIO_MIX_WAV') {
+        expect(args[0]).toEqual({
+          inputPaths: ['/approved/mic.wav', '/repaired/system.wav'],
+          outputTag: 'meeting-mixed-rate-retry-repaired-mix',
+        });
+        return '/repaired/mix.wav';
+      }
+      if (channel === 'SAVE_MEETING') {
+        expect(args[0]).toMatchObject({
+          audio_path: '/approved/mic.wav',
+          system_audio_path: '/repaired/system.wav',
+          mixed_audio_path: '/repaired/mix.wav',
+        });
+        return true;
+      }
+      if (channel === 'GET_TRANSCRIPTION_VOCABULARY') return { terms: [] };
+      return null;
+    });
+    mocks.runFinal.mockImplementation(async (input) => {
+      expect(input).toMatchObject({
+        micAudioPath: '/approved/mic.wav',
+        systemAudioPath: '/repaired/system.wav',
+        mixedAudioPath: '/repaired/mix.wav',
+      });
+      return { status: 'cancelled' };
+    });
+
+    await runPersistedMeetingFinalTranscription(meeting, invoke, {
+      manualRetry: true,
+      rebuildSealedAudio: true,
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'AUDIO_DELETE_FILES',
+      expect.anything(),
+    );
+  });
+
+  it('keeps the persisted meeting untouched when historical audio rebuilding fails', async () => {
+    const meeting = {
+      id: 'meeting-rebuild-failure',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/damaged/system.wav',
+      mixed_audio_path: '/damaged/mix.wav',
+      capture_journal_generation: 'generation-1',
+    } as Meeting;
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+        return {
+          schemaVersion: 3,
+          lifecycleState: 'sealed',
+          generation: 'generation-1',
+        };
+      }
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE') {
+        return '/repaired/system.wav';
+      }
+      if (channel === 'AUDIO_MIX_WAV') return null;
+      if (channel === 'AUDIO_DELETE_FILES') return { deleted: 1 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      runPersistedMeetingFinalTranscription(meeting, invoke, {
+        manualRetry: true,
+        rebuildSealedAudio: true,
+      }),
+    ).rejects.toThrow('sealed_capture_mix_rebuild_failed');
+
+    expect(invoke).toHaveBeenCalledWith('AUDIO_DELETE_FILES', [
+      '/repaired/system.wav',
+    ]);
+    expect(invoke).not.toHaveBeenCalledWith('SAVE_MEETING', expect.anything());
+    expect(mocks.runFinal).not.toHaveBeenCalled();
+  });
+
   it.each(['preserved', 'empty', 'missing', 'invalid'] as const)(
     'keeps %s live evidence separate from canonical text on a successful retry',
     async (kind) => {

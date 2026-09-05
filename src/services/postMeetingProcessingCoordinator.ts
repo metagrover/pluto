@@ -72,11 +72,11 @@ export const canRetryMeetingFinalTranscription = (
 
 export const shouldStartMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
-  reason: 'automatic' | 'manual',
+  reason: 'automatic' | 'manual' | 'speaker_labels',
 ): boolean =>
-  reason === 'manual'
-    ? canRetryMeetingFinalTranscription(meeting)
-    : shouldRunMeetingFinalTranscription(meeting);
+  reason === 'automatic'
+    ? shouldRunMeetingFinalTranscription(meeting)
+    : canRetryMeetingFinalTranscription(meeting);
 
 export function canImproveHistoricalSpeakerLabels(
   meeting: Partial<Meeting> | null | undefined,
