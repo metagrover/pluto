@@ -68,12 +68,29 @@ export const isGenericSpeakerLabel = (value: unknown): boolean => {
   );
 };
 
+export const selectReviewableAnonymousSpeakers = (
+  speakers: Iterable<string>,
+): string[] => {
+  const unique = [...new Set([...speakers].map((speaker) => speaker.trim()))]
+    .filter(Boolean);
+  const numbered = unique.filter((speaker) =>
+    REMOTE_SPEAKER_PATTERN.test(speaker),
+  );
+  if (numbered.length > 0) return numbered;
+  return unique.includes('Them') ? ['Them'] : [];
+};
+
 export const selectSpeakerSampleIntervals = (
   segments: SpeakerSegment[],
   speaker: string,
   limit = SAMPLE_LIMIT,
 ): SpeakerSampleInterval[] => {
-  if (!REMOTE_SPEAKER_PATTERN.test(speaker) || limit <= 0) return [];
+  if (
+    (!REMOTE_SPEAKER_PATTERN.test(speaker) && speaker !== 'Them') ||
+    limit <= 0
+  ) {
+    return [];
+  }
   const timed = segments
     .map(timedSegment)
     .filter((segment): segment is TimedSpeakerSegment => segment !== null)

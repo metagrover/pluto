@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getAnonymousSpeakerDisplayLabel,
   isGenericSpeakerLabel,
+  selectReviewableAnonymousSpeakers,
   selectSpeakerSampleIntervals,
 } from '../../src/utils/speakerReview';
 
@@ -34,6 +35,31 @@ describe('speaker review', () => {
   it('does not reject a real person whose name contains speaker words', () => {
     expect(isGenericSpeakerLabel('Speaker Johnson')).toBe(false);
     expect(isGenericSpeakerLabel('Alex Voice')).toBe(false);
+  });
+
+  it('prefers numbered remote speakers over the aggregate Them label', () => {
+    expect(
+      selectReviewableAnonymousSpeakers([
+        'Me',
+        'Them',
+        'Remote Speaker 2',
+        'Remote Speaker 2',
+        'Remote Speaker 1',
+      ]),
+    ).toEqual(['Remote Speaker 2', 'Remote Speaker 1']);
+  });
+
+  it('reviews Them only when no numbered remote speaker is available', () => {
+    expect(
+      selectReviewableAnonymousSpeakers(['Me', 'Them', 'Unknown']),
+    ).toEqual(['Them']);
+    expect(
+      selectReviewableAnonymousSpeakers([
+        'Me',
+        'Unknown',
+        'Local Speaker 1',
+      ]),
+    ).toEqual([]);
   });
 
   it('selects clean, bounded, deterministic samples and excludes overlap', () => {
@@ -116,6 +142,28 @@ describe('speaker review', () => {
         startSec: 4,
         endSec: 6,
         excerpt: 'Short but usable.',
+      },
+    ]);
+  });
+
+  it('selects a clean sample for the aggregate Them speaker', () => {
+    expect(
+      selectSpeakerSampleIntervals(
+        [
+          {
+            speaker: 'Them',
+            start: 3,
+            end: 7,
+            text: 'Aggregate remote sample.',
+          },
+        ],
+        'Them',
+      ),
+    ).toEqual([
+      {
+        startSec: 3,
+        endSec: 7,
+        excerpt: 'Aggregate remote sample.',
       },
     ]);
   });
