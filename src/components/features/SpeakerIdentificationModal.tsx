@@ -28,6 +28,14 @@ import {
   isIdentityRevisionError,
   setMeetingIdentityBinding,
 } from '../../api/identity';
+import {
+  type ClientCandidateMetadata,
+  type VoiceMatchSuggestion,
+  enrollSpeakerVoice,
+  getSpeakerVoiceSuggestions,
+  getVoiceReferenceSample,
+  rejectSpeakerVoiceSuggestion,
+} from '../../api/speakerVoice';
 import type { IdentityPerson } from '../../types/identity';
 import {
   getAnonymousSpeakerDisplayLabel,
@@ -95,12 +103,86 @@ export const SpeakerIdentificationModal = ({
   const [sampleLoading, setSampleLoading] = useState<string | null>(null);
   const [sampleError, setSampleError] = useState<string | null>(null);
 
+  // Voice profiles & match suggestions state
+  const [voiceSuggestions, setVoiceSuggestions] = useState<
+    Record<string, VoiceMatchSuggestion>
+  >({});
+  const [speakerCandidates, setSpeakerCandidates] = useState<
+    Record<string, ClientCandidateMetadata>
+  >({});
+  const [rememberVoice, setRememberVoice] = useState(false);
+  const [refSampleLoading, setRefSampleLoading] = useState(false);
+  const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
+
   const releaseSample = useCallback(() => {
     sampleAudio.current?.pause();
     sampleAudio.current = null;
     if (sampleUrl.current) URL.revokeObjectURL(sampleUrl.current);
     sampleUrl.current = null;
+    setRefSampleLoading(false);
   }, []);
+
+  const playReferenceSample = useCallback(
+    async (suggestion: VoiceMatchSuggestion) => {
+      if (!suggestion.referenceInterval) return;
+      const token = ++sampleRequest.current;
+      releaseSample();
+      setSampleState(null);
+      setSampleError(null);
+      setRefSampleLoading(true);
+      setRefSampleUnavailable(false);
+      try {
+        const result = await getVoiceReferenceSample(
+          suggestion.referenceInterval.sourceMeetingId,
+          suggestion.referenceInterval.startTime,
+          suggestion.referenceInterval.endTime,
+        );
+        if (token !== sampleRequest.current) return;
+        if (!result) {
+          setRefSampleUnavailable(true);
+          return;
+        }
+        const bytes = Uint8Array.from(result.bytes);
+        const url = URL.createObjectURL(
+          new Blob([bytes.buffer], { type: result.mimeType }),
+        );
+        const audio = new Audio(url);
+        sampleUrl.current = url;
+        sampleAudio.current = audio;
+        audio.addEventListener('ended', () => {
+          if (sampleAudio.current !== audio) return;
+          releaseSample();
+        });
+        await audio.play();
+      } catch {
+        if (token === sampleRequest.current) {
+          releaseSample();
+          setRefSampleUnavailable(true);
+        }
+      } finally {
+        if (token === sampleRequest.current) {
+          setRefSampleLoading(false);
+        }
+      }
+    },
+    [releaseSample],
+  );
+
+  const attendeeNamesRef = useRef(attendeeNames);
+  attendeeNamesRef.current = attendeeNames;
+
+  const loadVoiceSuggestions = useCallback(async () => {
+    try {
+      const res = await getSpeakerVoiceSuggestions(
+        meetingId,
+        attendeeNamesRef.current,
+      );
+      setVoiceSuggestions(res.suggestions);
+      setSpeakerCandidates(res.candidates);
+    } catch {
+      // non-fatal
+    }
+  }, [meetingId]);
 
   const playSample = useCallback(
     async (speaker: string, sampleIdx: number) => {
@@ -173,13 +255,14 @@ export const SpeakerIdentificationModal = ({
   useEffect(() => {
     if (isOpen) {
       void loadIdentity();
+      void loadVoiceSuggestions();
       setIsSummaryView(false);
     } else {
       releaseSample();
       setSampleState(null);
       setSampleLoading(null);
     }
-  }, [isOpen, loadIdentity, releaseSample]);
+  }, [isOpen, loadIdentity, loadVoiceSuggestions, releaseSample]);
 
   const reviewableSpeakers = useMemo(
     () => selectReviewableAnonymousSpeakers(state?.speakers ?? []),
@@ -331,6 +414,8 @@ export const SpeakerIdentificationModal = ({
     setSelectedLabel('');
     setIsComboboxOpen(false);
     setHighlightedIndex(-1);
+    setRememberVoice(false);
+    setRefSampleUnavailable(false);
     releaseSample();
     setSampleState(null);
     setSampleLoading(null);
@@ -463,6 +548,29 @@ export const SpeakerIdentificationModal = ({
         state.revision,
       );
       setState(next);
+
+      // Opt-in voice profile enrollment
+      const candidate = speakerCandidates[speaker];
+      if (
+        rememberVoice &&
+        selection.personId &&
+        candidate &&
+        candidate.isEligibleForEnrollment
+      ) {
+        try {
+          await enrollSpeakerVoice({
+            personId: selection.personId,
+            sourceMeetingId: meetingId,
+            sourceRevision: candidate.sourceRevision,
+            speaker,
+            candidateDigest: candidate.candidateDigest,
+            expectedRevision: next.revision,
+          });
+        } catch {
+          // non-fatal if enrollment fails
+        }
+      }
+
       if (autoAdvance) {
         if (stepIndex + 1 < totalSpeakers) {
           setStepIndex(stepIndex + 1);
@@ -478,6 +586,39 @@ export const SpeakerIdentificationModal = ({
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleRejectSuggestion = async (suggestion: VoiceMatchSuggestion) => {
+    if (!currentSpeaker || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await rejectSpeakerVoiceSuggestion({
+        meetingId,
+        speaker: currentSpeaker,
+        sourceRevision: suggestion.sourceRevision,
+        candidateDigest: suggestion.candidateDigest,
+        personId: suggestion.suggestedPersonId,
+      });
+      setVoiceSuggestions((prev) => {
+        const next = { ...prev };
+        delete next[currentSpeaker];
+        return next;
+      });
+    } catch {
+      setError('Could not record voice rejection.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmSuggestion = async (suggestion: VoiceMatchSuggestion) => {
+    if (!currentSpeaker || !state || busy) return;
+    await saveBinding(
+      currentSpeaker,
+      { personId: suggestion.suggestedPersonId },
+      true,
+    );
   };
 
   const handleClearBinding = async (speaker: string) => {
@@ -775,6 +916,81 @@ export const SpeakerIdentificationModal = ({
                 ) : null}
               </div>
 
+              {/* Voice Match Suggestion Banner */}
+              {currentSpeaker && voiceSuggestions[currentSpeaker] ? (
+                <div className="rounded-xl border border-pro-accent/40 bg-pro-accent/5 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-pro-text-main">
+                        {displayLabel} may be{' '}
+                        {voiceSuggestions[currentSpeaker].suggestedPersonName}
+                      </span>
+                      <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-medium">
+                        Strong match
+                      </span>
+                      {voiceSuggestions[currentSpeaker].isCalendarAttendee ? (
+                        <span className="rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 px-2 py-0.5 text-[10px] font-medium">
+                          On calendar
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {voiceSuggestions[currentSpeaker].referenceInterval ? (
+                      <button
+                        type="button"
+                        disabled={busy || refSampleLoading}
+                        onClick={() =>
+                          void playReferenceSample(
+                            voiceSuggestions[currentSpeaker],
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-full border border-pro-border/80 bg-pro-bg px-2.5 py-1 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors disabled:opacity-50"
+                      >
+                        <Play
+                          size={10}
+                          className="fill-current mr-0.5 shrink-0"
+                          aria-hidden="true"
+                        />
+                        {refSampleLoading
+                          ? 'Loading reference…'
+                          : refSampleUnavailable
+                            ? 'Reference recording unavailable'
+                            : 'Play reference sample'}
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void handleConfirmSuggestion(
+                          voiceSuggestions[currentSpeaker],
+                        )
+                      }
+                      className="rounded-lg bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90 transition-colors"
+                    >
+                      Confirm{' '}
+                      {voiceSuggestions[currentSpeaker].suggestedPersonName}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void handleRejectSuggestion(
+                          voiceSuggestions[currentSpeaker],
+                        )
+                      }
+                      className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors"
+                    >
+                      Not {voiceSuggestions[currentSpeaker].suggestedPersonName}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               {/* Attendee 1-click suggestion chips */}
               {attendeeChoices.length > 0 ? (
                 <div className="space-y-2">
@@ -1007,6 +1223,22 @@ export const SpeakerIdentificationModal = ({
                     )
                   : null}
               </div>
+
+              {/* Opt-in voice profile enrollment choice */}
+              {currentSpeaker &&
+              speakerCandidates[currentSpeaker]?.isEligibleForEnrollment ? (
+                <div className="pt-2">
+                  <label className="flex items-center gap-2 text-xs text-pro-text-muted cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberVoice}
+                      onChange={(e) => setRememberVoice(e.target.checked)}
+                      className="rounded border-pro-border text-pro-accent focus:ring-pro-accent"
+                    />
+                    <span>Remember this voice for future meetings</span>
+                  </label>
+                </div>
+              ) : null}
             </div>
           )}
         </div>

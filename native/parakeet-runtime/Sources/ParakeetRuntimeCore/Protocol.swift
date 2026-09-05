@@ -618,22 +618,70 @@ public struct SpeakerEnergyWindow: Codable, Equatable, Sendable {
     }
 }
 
+public struct SpeakerClusterEvidence: Codable, Equatable, Sendable {
+    public let cluster: String
+    public let embedding: [Float]
+    public let cleanChunkCount: Int
+    public let cleanSegmentCount: Int
+    public let cleanDurationSeconds: Double
+    public let minimumChunkSimilarity: Double
+    public let meanChunkSimilarity: Double
+
+    public init(
+        cluster: String,
+        embedding: [Float],
+        cleanChunkCount: Int,
+        cleanSegmentCount: Int,
+        cleanDurationSeconds: Double,
+        minimumChunkSimilarity: Double,
+        meanChunkSimilarity: Double
+    ) {
+        self.cluster = cluster
+        self.embedding = embedding
+        self.cleanChunkCount = cleanChunkCount
+        self.cleanSegmentCount = cleanSegmentCount
+        self.cleanDurationSeconds = cleanDurationSeconds
+        self.minimumChunkSimilarity = minimumChunkSimilarity
+        self.meanChunkSimilarity = meanChunkSimilarity
+    }
+}
+
 public struct SpeakerEvidenceProvenance: Codable, Equatable, Sendable {
     public let modelIdentifier: String
     public let modelRevision: String
     public let artifactDigest: String
     public let runtimeVersion: String
+    public let profileAlgorithmVersion: String
 
     public init(
         modelIdentifier: String,
         modelRevision: String,
         artifactDigest: String,
-        runtimeVersion: String
+        runtimeVersion: String,
+        profileAlgorithmVersion: String = "v1"
     ) {
         self.modelIdentifier = modelIdentifier
         self.modelRevision = modelRevision
         self.artifactDigest = artifactDigest
         self.runtimeVersion = runtimeVersion
+        self.profileAlgorithmVersion = profileAlgorithmVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case modelIdentifier
+        case modelRevision
+        case artifactDigest
+        case runtimeVersion
+        case profileAlgorithmVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        modelIdentifier = try container.decode(String.self, forKey: .modelIdentifier)
+        modelRevision = try container.decode(String.self, forKey: .modelRevision)
+        artifactDigest = try container.decode(String.self, forKey: .artifactDigest)
+        runtimeVersion = try container.decode(String.self, forKey: .runtimeVersion)
+        profileAlgorithmVersion = try container.decodeIfPresent(String.self, forKey: .profileAlgorithmVersion) ?? "v1"
     }
 }
 
@@ -655,18 +703,21 @@ public struct SpeakerEvidenceOutput: Codable, Equatable, Sendable {
     public let provenance: SpeakerEvidenceProvenance
     public let timings: SpeakerEvidenceTimings
     public let windowSeconds: Double
+    public let clusterEvidence: [SpeakerClusterEvidence]?
 
     public init(
         turns: [SpeakerEvidenceTurn],
         energyWindows: [SpeakerEnergyWindow],
         provenance: SpeakerEvidenceProvenance,
         timings: SpeakerEvidenceTimings,
-        windowSeconds: Double
+        windowSeconds: Double,
+        clusterEvidence: [SpeakerClusterEvidence]? = nil
     ) {
         self.turns = turns
         self.energyWindows = energyWindows
         self.provenance = provenance
         self.timings = timings
         self.windowSeconds = windowSeconds
+        self.clusterEvidence = clusterEvidence
     }
 }

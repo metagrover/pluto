@@ -303,6 +303,120 @@ describe('ParakeetFinalClient', () => {
     });
   });
 
+  it('deserializes clusterEvidence and profileAlgorithmVersion when present', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const response = speakerEvidenceSuccess(String(child.writes[0].id));
+    (response.result.speakerEvidence as any).clusterEvidence = [
+      {
+        cluster: 'S1',
+        embedding: new Array(256).fill(0.1),
+        cleanChunkCount: 3,
+        cleanSegmentCount: 2,
+        cleanDurationSeconds: 4.5,
+        minimumChunkSimilarity: 0.82,
+        meanChunkSimilarity: 0.88,
+      },
+    ];
+    (
+      response.result.speakerEvidence.provenance as any
+    ).profileAlgorithmVersion = 'v1';
+    child.respond(response);
+
+    const result = await request;
+    expect(result.clusterEvidence).toHaveLength(1);
+    expect(result.clusterEvidence?.[0].cluster).toBe('S1');
+    expect(result.clusterEvidence?.[0].embedding).toHaveLength(256);
+    expect(result.clusterEvidence?.[0].cleanChunkCount).toBe(3);
+    expect(result.clusterEvidence?.[0].cleanSegmentCount).toBe(2);
+    expect(result.clusterEvidence?.[0].cleanDurationSeconds).toBeCloseTo(4.5);
+    expect(result.clusterEvidence?.[0].minimumChunkSimilarity).toBeCloseTo(
+      0.82,
+    );
+    expect(result.clusterEvidence?.[0].meanChunkSimilarity).toBeCloseTo(0.88);
+    expect(result.provenance.profileAlgorithmVersion).toBe('v1');
+  });
+
+  it('rejects speaker evidence with invalid clusterEvidence bounds or malformed vectors', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+
+    // Test 1: > 64 clusters
+    const req1 = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const resp1 = speakerEvidenceSuccess(String(child.writes[0].id));
+    (resp1.result.speakerEvidence as any).clusterEvidence = Array.from(
+      { length: 65 },
+      (_, i) => ({
+        cluster: `S${i + 1}`,
+        embedding: new Array(256).fill(0.1),
+        cleanChunkCount: 1,
+        cleanSegmentCount: 1,
+        cleanDurationSeconds: 1.0,
+        minimumChunkSimilarity: 1.0,
+        meanChunkSimilarity: 1.0,
+      }),
+    );
+    child.respond(resp1);
+    await expect(req1).rejects.toThrow('parakeet_protocol_invalid');
+
+    // Test 2: wrong embedding dimension
+    const req2 = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    const resp2 = speakerEvidenceSuccess(String(child.writes[1].id));
+    (resp2.result.speakerEvidence as any).clusterEvidence = [
+      {
+        cluster: 'S1',
+        embedding: new Array(128).fill(0.1),
+        cleanChunkCount: 1,
+        cleanSegmentCount: 1,
+        cleanDurationSeconds: 1.0,
+        minimumChunkSimilarity: 1.0,
+        meanChunkSimilarity: 1.0,
+      },
+    ];
+    child.respond(resp2);
+    await expect(req2).rejects.toThrow('parakeet_protocol_invalid');
+
+    // Test 3: non-finite embedding values
+    const req3 = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
+    const resp3 = speakerEvidenceSuccess(String(child.writes[2].id));
+    const badEmbedding = new Array(256).fill(0.1);
+    badEmbedding[5] = Number.NaN;
+    (resp3.result.speakerEvidence as any).clusterEvidence = [
+      {
+        cluster: 'S1',
+        embedding: badEmbedding,
+        cleanChunkCount: 1,
+        cleanSegmentCount: 1,
+        cleanDurationSeconds: 1.0,
+        minimumChunkSimilarity: 1.0,
+        meanChunkSimilarity: 1.0,
+      },
+    ];
+    child.respond(resp3);
+    await expect(req3).rejects.toThrow('parakeet_protocol_invalid');
+  });
+
   it('rejects malformed speaker evidence and out-of-root evidence paths', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

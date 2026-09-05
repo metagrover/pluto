@@ -124,3 +124,5 @@ export const identityErrorMessage = (error: unknown) =>
   isIdentityRevisionError(error)
     ? 'Identity information changed elsewhere. Reloaded the latest state; review your choice and try again.'
     : 'Could not confirm the update. Reload to check the saved identity, then try again.';
+
+export * from './speakerVoice';

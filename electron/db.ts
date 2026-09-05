@@ -13,6 +13,7 @@ import {
   finishFinalTranscriptionLease,
   readFinalTranscriptionLease,
 } from '../src/services/finalTranscription/finalTranscriptionLease';
+import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import {
   type TranscriptValidationRetryFailure,
   type TranscriptValidationRetryLease,
@@ -135,6 +136,7 @@ import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
+import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
 const dbLog = createLogger('DB');
 
@@ -144,7 +146,7 @@ const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
-const db = new Database(dbPath);
+export const db = new Database(dbPath);
 
 type TableInfoColumn = {
   name: string;
@@ -799,6 +801,71 @@ const initDb = () => {
       );
 
       CREATE INDEX IF NOT EXISTS idx_auto_end_log_meeting ON auto_end_log(meeting_id);
+
+      -- Cross-meeting speaker voice candidates
+      CREATE TABLE IF NOT EXISTS meeting_speaker_candidates (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        speaker TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        candidate_digest TEXT NOT NULL,
+        embedding_json TEXT NOT NULL,
+        clean_duration_sec REAL NOT NULL,
+        clean_segment_count INTEGER NOT NULL,
+        clean_chunk_count INTEGER NOT NULL,
+        minimum_chunk_similarity REAL NOT NULL,
+        mean_chunk_similarity REAL NOT NULL,
+        reference_start_sec REAL NOT NULL,
+        reference_end_sec REAL NOT NULL,
+        reference_excerpt TEXT NOT NULL,
+        provenance_json TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (meeting_id, speaker, source_revision)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_meeting_speaker_candidates_meeting ON meeting_speaker_candidates(meeting_id);
+
+      -- Confirmed speaker voice enrollments
+      CREATE TABLE IF NOT EXISTS speaker_voice_enrollments (
+        id TEXT PRIMARY KEY,
+        person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        source_meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        source_revision TEXT NOT NULL,
+        speaker TEXT NOT NULL,
+        embedding_json TEXT NOT NULL,
+        chunk_count INTEGER NOT NULL,
+        clean_duration_sec REAL NOT NULL,
+        minimum_chunk_similarity REAL NOT NULL,
+        mean_chunk_similarity REAL NOT NULL,
+        reference_start_sec REAL NOT NULL,
+        reference_end_sec REAL NOT NULL,
+        reference_excerpt TEXT NOT NULL,
+        provenance_json TEXT NOT NULL,
+        candidate_digest TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_speaker_voice_enrollments_person ON speaker_voice_enrollments(person_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_voice_enrollments_meeting ON speaker_voice_enrollments(source_meeting_id);
+
+      -- Speaker voice profile settings (active / disabled)
+      CREATE TABLE IF NOT EXISTS speaker_voice_profile_settings (
+        person_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Rejections: suppress specific candidate digest for a person
+      CREATE TABLE IF NOT EXISTS speaker_voice_rejections (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        speaker TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        candidate_digest TEXT NOT NULL,
+        person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (meeting_id, speaker, source_revision, candidate_digest, person_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_speaker_voice_rejections_meeting ON speaker_voice_rejections(meeting_id);
 
       -- Backfill FTS if needed (Self-healing)
       INSERT INTO entities_fts (name, entity_id)
@@ -2651,6 +2718,7 @@ export const commitMeetingFinalTranscription = (input: {
   canonicalTranscriptJson: string;
   transcriptIntegrityJson: string;
   transcriptValidatedAt: string;
+  speakerCandidates?: SpeakerCandidateEvidence[];
 }): false | { committed: true; transcriptJson: string } =>
   db.transaction(() => {
     const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
@@ -2727,6 +2795,14 @@ export const commitMeetingFinalTranscription = (input: {
         current.transcript_integrity_json,
       ).changes;
     if (changed !== 1) return false;
+    if (input.speakerCandidates !== undefined) {
+      saveMeetingSpeakerCandidates(
+        String(input.meetingId),
+        input.captureGeneration,
+        input.speakerCandidates,
+        db,
+      );
+    }
     const updated = getMeeting(input.meetingId) as PersistedMeeting | undefined;
     if (updated) refreshMeetingFts(updated);
     return {
@@ -4511,12 +4587,17 @@ export const deleteMeeting = (id: string | number) => {
   // 4. Delete the meeting itself
   // meeting_entities will be deleted by CASCADE
   for (const table of [
+    'meeting_speaker_candidates',
+    'speaker_voice_rejections',
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',
   ]) {
     db.prepare(`DELETE FROM ${table} WHERE meeting_id = ?`).run(safeId);
   }
+  db.prepare(
+    'DELETE FROM speaker_voice_enrollments WHERE source_meeting_id = ?',
+  ).run(safeId);
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
@@ -9932,6 +10013,10 @@ export const resetKnowledge = () => {
 
   // 2. Clear tables within a transaction
   const tables = [
+    'speaker_voice_rejections',
+    'speaker_voice_profile_settings',
+    'speaker_voice_enrollments',
+    'meeting_speaker_candidates',
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',

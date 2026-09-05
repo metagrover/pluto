@@ -45,6 +45,16 @@ export type SpeakerEvidenceRequest = {
   signal?: AbortSignal;
 };
 
+export type SpeakerClusterEvidence = {
+  cluster: string;
+  embedding: number[];
+  cleanChunkCount: number;
+  cleanSegmentCount: number;
+  cleanDurationSeconds: number;
+  minimumChunkSimilarity: number;
+  meanChunkSimilarity: number;
+};
+
 export type SpeakerEvidenceResult = {
   turns: Array<{ startTime: number; endTime: number; cluster: string }>;
   energyWindows: Array<{
@@ -58,6 +68,7 @@ export type SpeakerEvidenceResult = {
     modelRevision: string;
     artifactDigest: string;
     runtimeVersion: string;
+    profileAlgorithmVersion?: string;
   };
   timings: {
     diarizationMs: number;
@@ -65,6 +76,7 @@ export type SpeakerEvidenceResult = {
     totalMs: number;
   };
   windowSeconds: number;
+  clusterEvidence?: SpeakerClusterEvidence[];
 };
 
 type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
@@ -546,6 +558,9 @@ export class ParakeetFinalClient {
       !hex(provenance.modelRevision, 40) ||
       !hex(provenance.artifactDigest, 64) ||
       typeof provenance.runtimeVersion !== 'string' ||
+      (provenance.profileAlgorithmVersion !== undefined &&
+        (typeof provenance.profileAlgorithmVersion !== 'string' ||
+          provenance.profileAlgorithmVersion.length === 0)) ||
       !timings ||
       !Number.isFinite(timings.diarizationMs) ||
       !Number.isFinite(timings.energyAnalysisMs) ||
@@ -557,6 +572,34 @@ export class ParakeetFinalClient {
       Number(candidate.windowSeconds) <= 0
     ) {
       throw new Error('parakeet_protocol_invalid');
+    }
+    if (candidate.clusterEvidence !== undefined) {
+      if (
+        !Array.isArray(candidate.clusterEvidence) ||
+        candidate.clusterEvidence.length > 64 ||
+        !candidate.clusterEvidence.every(
+          (evidence) =>
+            evidence &&
+            typeof evidence === 'object' &&
+            typeof evidence.cluster === 'string' &&
+            evidence.cluster.length > 0 &&
+            Array.isArray(evidence.embedding) &&
+            evidence.embedding.length === 256 &&
+            evidence.embedding.every(
+              (v) => typeof v === 'number' && Number.isFinite(v),
+            ) &&
+            Number.isInteger(evidence.cleanChunkCount) &&
+            evidence.cleanChunkCount >= 0 &&
+            Number.isInteger(evidence.cleanSegmentCount) &&
+            evidence.cleanSegmentCount >= 0 &&
+            Number.isFinite(evidence.cleanDurationSeconds) &&
+            evidence.cleanDurationSeconds >= 0 &&
+            Number.isFinite(evidence.minimumChunkSimilarity) &&
+            Number.isFinite(evidence.meanChunkSimilarity),
+        )
+      ) {
+        throw new Error('parakeet_protocol_invalid');
+      }
     }
     return candidate as SpeakerEvidenceResult;
   }

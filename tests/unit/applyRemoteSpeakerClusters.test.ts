@@ -381,4 +381,112 @@ describe('applyRemoteSpeakerClusters', () => {
     input.turns[1].endTime = 10;
     expect(applyRemoteSpeakerClusters(input).applied).toBe(false);
   });
+
+  it('single remote speaker meeting retains Them in transcript while producing Them candidate', () => {
+    const dummyProvenance = {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+      profileAlgorithmVersion: 'v1',
+    };
+    const embedding = new Array(256).fill(0.1);
+    const result = applyRemoteSpeakerClusters({
+      segments: [
+        {
+          startTime: 0,
+          endTime: 4,
+          speaker: 'Them',
+          text: 'single remote speaker meeting',
+          words: words([
+            ['single', 0, 1],
+            ['remote', 1, 2],
+            ['speaker', 2, 3],
+            ['meeting', 3, 4],
+          ]),
+        },
+      ],
+      turns: [{ startTime: 0, endTime: 4, cluster: 'S1' }],
+      clusterEvidence: [
+        {
+          cluster: 'S1',
+          embedding,
+          cleanChunkCount: 3,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 4.0,
+          minimumChunkSimilarity: 0.85,
+          meanChunkSimilarity: 0.9,
+        },
+      ],
+      provenance: dummyProvenance,
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.metadata.fallbackReason).toBe('not_enough_speakers');
+    expect(result.segments[0].speaker).toBe('Them');
+    expect(result.candidateEvidence).toHaveLength(1);
+    expect(result.candidateEvidence?.[0].speaker).toBe('Them');
+    expect(result.candidateEvidence?.[0].nativeCluster).toBe('S1');
+    expect(result.candidateEvidence?.[0].isEligibleForEnrollment).toBe(true);
+    expect(result.candidateEvidence?.[0].candidateDigest).toHaveLength(64);
+  });
+
+  it('multi-speaker meeting maps candidate evidence to Remote Speaker 1 and 2', () => {
+    const dummyProvenance = {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+      profileAlgorithmVersion: 'v1',
+    };
+    const embedding = new Array(256).fill(0.1);
+    const result = applyRemoteSpeakerClusters({
+      segments: [
+        {
+          startTime: 0,
+          endTime: 4,
+          speaker: 'Them',
+          text: 'hello there yes agreed',
+          words: words([
+            ['hello', 0, 0.8],
+            ['there', 0.8, 1.8],
+            ['yes', 2.1, 2.8],
+            ['agreed', 2.8, 4],
+          ]),
+        },
+      ],
+      turns: [
+        { startTime: 0, endTime: 1.9, cluster: 'S1' },
+        { startTime: 2, endTime: 4, cluster: 'S2' },
+      ],
+      clusterEvidence: [
+        {
+          cluster: 'S1',
+          embedding,
+          cleanChunkCount: 3,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 3.5,
+          minimumChunkSimilarity: 0.85,
+          meanChunkSimilarity: 0.9,
+        },
+        {
+          cluster: 'S2',
+          embedding,
+          cleanChunkCount: 2,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 3.0,
+          minimumChunkSimilarity: 0.75,
+          meanChunkSimilarity: 0.8,
+        },
+      ],
+      provenance: dummyProvenance,
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.candidateEvidence).toHaveLength(2);
+    expect(result.candidateEvidence?.map((c) => c.speaker)).toEqual([
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+  });
 });

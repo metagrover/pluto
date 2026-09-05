@@ -487,6 +487,10 @@ import {
   prepareRecordingReadiness,
 } from './recordingReadiness';
 import {
+  SPEAKER_VOICE_CHANNELS,
+  handleSpeakerVoiceRequest,
+} from './speakerVoiceHandlers';
+import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
   shouldCleanupTranscriptOnSave,
@@ -1001,6 +1005,33 @@ app.whenReady().then(async () => {
         invalidateDreamingCatalog();
       }
       return result;
+    });
+  }
+  for (const channel of SPEAKER_VOICE_CHANNELS) {
+    ipcMain.handle(channel, async (_event, payload) => {
+      return await handleSpeakerVoiceRequest(channel, payload, {
+        getMeeting: (meetingId) =>
+          (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
+        fileExists: (inputPath) => fs.existsSync(inputPath),
+        createTemporaryPath: () =>
+          path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+        sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+          await new Promise<boolean>((resolve) => {
+            ffmpeg(inputPath)
+              .setStartTime(startSec)
+              .setDuration(durationSec)
+              .audioChannels(1)
+              .audioFrequency(16000)
+              .toFormat('wav')
+              .on('end', () => resolve(true))
+              .on('error', () => resolve(false))
+              .save(outputPath);
+          }),
+        readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+        removeFile: async (outputPath) => {
+          await fs.promises.unlink(outputPath);
+        },
+      });
     });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
