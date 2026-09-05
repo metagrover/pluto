@@ -21,6 +21,7 @@ import {
   commitMeetingFinalTranscription,
   expireInterruptedDownstreamProcessing,
   expireInterruptedFinalTranscription,
+  failMeetingFinalTranscription,
   finalizeCheckpointTranscript,
   getMeeting,
   getMeetingEntities,
@@ -52,6 +53,7 @@ it('claims and commits final transcription only for the exact capture generation
     }),
     transcript_integrity_json: '{}',
     capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
     analysis_json: JSON.stringify({ stale: true }),
   });
   const lease = buildFinalTranscriptionLease({
@@ -195,6 +197,52 @@ it('claims a verified v1 attribution upgrade but rejects a completed v2 result',
   expect(claimMeetingFinalTranscription('parakeet-v2-complete', lease)).toBe(
     false,
   );
+  expect(
+    claimMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      {
+        ...lease,
+        captureGeneration: 'wrong-generation',
+      },
+      { manualRetry: true },
+    ),
+  ).toBe(false);
+  expect(
+    claimMeetingFinalTranscription('parakeet-v2-complete', lease, {
+      manualRetry: true,
+    }),
+  ).toBe(true);
+  expect(
+    claimMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      {
+        ...lease,
+        runId: 'duplicate-manual-run',
+      },
+      { manualRetry: true },
+    ),
+  ).toBe(false);
+  const beforeFailure = JSON.parse(
+    getMeeting('parakeet-v2-complete')?.transcript_json || '{}',
+  );
+  expect(
+    failMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      lease.runId,
+      'required_source_failed',
+      ['system_capture_incomplete'],
+    ),
+  ).toBe(true);
+  const failedMeeting = getMeeting('parakeet-v2-complete');
+  expect(failedMeeting?.transcript_status).toBe('needs_attention');
+  const afterFailure = JSON.parse(failedMeeting?.transcript_json || '{}');
+  expect(afterFailure.segments).toEqual(beforeFailure.segments);
+  expect(afterFailure.speakerAttribution).toEqual(
+    beforeFailure.speakerAttribution,
+  );
+  expect(
+    JSON.parse(failedMeeting?.transcript_integrity_json || '{}').reasons,
+  ).toEqual(['system_capture_incomplete']);
 });
 
 it('rejects an invalid v2 final commit without publishing the transcript', () => {
@@ -250,6 +298,7 @@ it('expires interrupted final transcription without replacing provisional text',
     transcript_json: provisional,
     transcript_integrity_json: '{}',
     capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
   });
   const lease = buildFinalTranscriptionLease({
     runId: 'interrupted-run',
@@ -262,10 +311,49 @@ it('expires interrupted final transcription without replacing provisional text',
   expect(expireInterruptedFinalTranscription()).toBeGreaterThanOrEqual(1);
   expect(getMeeting(id)).toMatchObject({
     transcript_status: 'needs_attention',
+    finalization_status: 'needs_attention',
   });
   expect(JSON.parse(String(getMeeting(id)?.transcript_json)).segments).toEqual([
     { speaker: 'Me', text: 'provisional' },
   ]);
+});
+
+it('persists bounded final-transcription rejection reasons', () => {
+  const id = 'parakeet-final-reasons';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'provisional',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'provisional',
+      segments: [{ speaker: 'Unknown', text: 'preserved' }],
+    }),
+    transcript_integrity_json: '{}',
+    capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'reason-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+  });
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+
+  expect(
+    failMeetingFinalTranscription(id, lease.runId, 'integrity_rejected', [
+      'remote_speech_unaccounted',
+    ]),
+  ).toBe(true);
+
+  expect(
+    JSON.parse(String(getMeeting(id)?.transcript_integrity_json)),
+  ).toMatchObject({
+    reasons: ['remote_speech_unaccounted'],
+    finalTranscription: {
+      state: 'needs_attention',
+      failure: 'integrity_rejected',
+    },
+  });
 });
 
 const validatedAt = '2026-07-31T08:00:00.000Z';

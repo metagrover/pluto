@@ -1,4 +1,8 @@
-export type CaptureHealth = 'healthy' | 'warning' | 'unavailable';
+export type CaptureHealth =
+  | 'healthy'
+  | 'warning'
+  | 'unavailable'
+  | 'reconfiguring';
 export type LiveTranscriptIntegrity = 'healthy' | 'lagging';
 export type CaptureHealthState = {
   microphone: CaptureHealth;
@@ -14,9 +18,24 @@ export type LiveTranscriptSegment = {
   source?: 'mic' | 'system';
   timestampMs: number;
   endTimestampMs?: number;
+  wordTimings?: Array<{
+    text: string;
+    timestampMs: number;
+    endTimestampMs: number;
+  }>;
   confirmed: boolean;
-  presentation?: {
-    visibility: 'suppressed_echo';
+  presentation?: (
+    | {
+        visibility: 'suppressed_echo';
+      }
+    | {
+        visibility: 'echo_span_removed';
+        text: string;
+        /** Display bounds of retained words; raw source timing stays unchanged. */
+        timestampMs?: number;
+        endTimestampMs?: number;
+      }
+  ) & {
     matchedSegmentId: string;
     confidence: number;
     reason: 'cross_channel_echo';
@@ -72,14 +91,17 @@ const formatElapsed = (milliseconds: number) => {
 export const buildRecordingWorkspaceModel = (
   input: RecordingWorkspaceInput,
 ) => {
-  const microphoneWarning = input.microphone !== 'healthy';
-  const systemAudioWarning = input.systemAudio !== 'healthy';
+  const isReconfiguring =
+    input.microphone === 'reconfiguring' ||
+    input.systemAudio === 'reconfiguring';
+  const microphoneWarning =
+    input.microphone !== 'healthy' && input.microphone !== 'reconfiguring';
+  const systemAudioWarning =
+    input.systemAudio !== 'healthy' && input.systemAudio !== 'reconfiguring';
   const durabilityWarning = input.captureDurability !== 'healthy';
   const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
-  const visibleTranscript = input.segments.filter(
-    (segment) =>
-      segment.text.trim() &&
-      segment.presentation?.visibility !== 'suppressed_echo',
+  const nonEmptyTranscript = input.segments.filter((segment) =>
+    segment.text.trim(),
   );
   return {
     status: input.isStarting
@@ -98,20 +120,22 @@ export const buildRecordingWorkspaceModel = (
       systemAudioWarning ||
       durabilityWarning ||
       transcriptWarning,
-    statusMessage: microphoneWarning
-      ? 'Microphone needs attention'
-      : systemAudioWarning
-        ? 'System audio needs attention'
-        : durabilityWarning
-          ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
-          : transcriptWarning
-            ? 'Your audio is recording, but live transcription is falling behind'
-            : input.isStarting
-              ? 'Preparing capture'
-              : input.isProcessing
-                ? 'Finalizing notes. Keep Pluto open.'
-                : 'Capture is healthy',
-    transcript: visibleTranscript,
+    statusMessage: isReconfiguring
+      ? 'Reconfiguring audio devices...'
+      : microphoneWarning
+        ? 'Microphone needs attention'
+        : systemAudioWarning
+          ? 'System audio needs attention'
+          : durabilityWarning
+            ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
+            : transcriptWarning
+              ? 'Your audio is recording, but live transcription is falling behind'
+              : input.isStarting
+                ? 'Preparing capture'
+                : input.isProcessing
+                  ? 'Finalizing notes. Keep Pluto open.'
+                  : 'Capture is healthy',
+    transcript: nonEmptyTranscript,
     interimText: input.interimText.trim(),
   };
 };

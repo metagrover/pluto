@@ -143,7 +143,10 @@ export interface AnalysisGenerationMetadata {
       status: 'applied' | 'proposed' | 'confirmed' | 'rejected' | 'preserved';
     }>;
   };
-  pipeline_version?: 'writer-audit-v1' | 'writer-editor-v1';
+  pipeline_version?:
+    | 'writer-audit-v1'
+    | 'writer-editor-v1'
+    | 'writer-editor-bounded-v1';
   mode?: 'direct' | 'hierarchical';
   audit_status?: 'complete' | 'complete_with_warnings';
   audit_change_count?: number;
@@ -182,7 +185,11 @@ export interface UserEditsMap {
   [path: string]: UserEdit;
 }
 
-export type MeetingFinalizationStatus = 'finalized' | 'recovery_required';
+export type MeetingFinalizationStatus =
+  | 'processing'
+  | 'finalized'
+  | 'needs_attention'
+  | 'recovery_required';
 
 export interface Meeting {
   id: string | number;

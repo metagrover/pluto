@@ -508,11 +508,19 @@ export class UnifiedLLMProvider implements LLMProvider {
       entityHints?: string[];
       contextTokens?: number;
       /** Explicit benchmark experiment; product callers retain every-node audits. */
-      hierarchyAuditStrategy?: 'every_node' | 'final_only';
+      hierarchyAuditStrategy?:
+        | 'every_node'
+        | 'final_only'
+        | 'deterministic_only';
+      /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
+      compactWriterContract?: boolean;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      /** Explicit benchmark experiment; product callers retain model repair. */
+      recoverWriterDraft?: (raw: string) => string | null;
+      onDeterministicWriterRecovery?: () => void;
       onStageEvent?: NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
       onRepartition?: () => void;
@@ -535,8 +543,16 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
       hierarchyAuditStrategy: options.hierarchyAuditStrategy,
+      reviewProtocol:
+        options.compactWriterContract &&
+        options.hierarchyAuditStrategy !== 'deterministic_only'
+          ? 'editor'
+          : undefined,
+      compactWriterContract: options.compactWriterContract,
       onStage: options.onStage,
       onRepair: options.onRepair,
+      recoverWriterDraft: options.recoverWriterDraft,
+      onDeterministicWriterRecovery: options.onDeterministicWriterRecovery,
       onPlan: options.onPlan,
       onRepartition: options.onRepartition,
       generate: async (request) => {

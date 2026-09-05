@@ -9,6 +9,7 @@ import {
 import { createNotesSource } from './llm/meetingNotesSource';
 import { NotesStageCache } from './llm/meetingNotesStageCache';
 import {
+  MeetingNotesError,
   NOTES_OLLAMA_MODEL,
   NOTES_PROMPT_VERSION,
 } from './llm/meetingNotesTypes';
@@ -146,6 +147,7 @@ type NotesProvider = {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      compactWriterContract?: boolean;
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
@@ -215,6 +217,7 @@ type ActiveRun = {
 };
 
 const NOTES_CONTEXT_TOKENS = 16_384;
+export const MEETING_NOTES_ABSOLUTE_DEADLINE_MS = 12 * 60_000;
 export const MAX_AUTOMATIC_MEETING_NOTES_ATTEMPTS = 2;
 
 const hashFingerprint = (value: unknown): string =>
@@ -307,6 +310,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   getSettings(): Promise<SettingsRecord>;
   getProvider(settings: SettingsRecord): Promise<NotesProvider>;
   createRunId?: () => string;
+  /** Test seam; production runs use the fixed absolute deadline. */
+  notesDeadlineMs?: number;
   onUpdated?: (meetingId: string) => void;
   runSecondary?: (input: {
     meetingId: string;
@@ -765,44 +770,67 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           });
           notify(meetingId);
           let generatedNodeCount = 0;
-          const analysis = await provider.generateStructuredAnalysis(
-            buildAnalysisTranscriptFromJson(admittedMeeting.transcript_json),
-            admittedMeeting.user_notes ?? '',
-            input.template,
-            {
-              signal: controller.signal,
-              source,
-              knownTerms: terms,
-              trustedUserTerms: [],
-              entityHints: terms,
-              contextTokens: NOTES_CONTEXT_TOKENS,
-              stageCache,
-              cacheKey: stageCacheKey,
-              onStageEvent: runMetrics.observe,
-              onPlan: ({ plannedLeafCount }) =>
-                runMetrics.setPlannedLeafCount(plannedLeafCount),
-              onRepair: () => runMetrics.recordRepair(),
-              onRepartition: () => runMetrics.recordRepartition(),
-              workClass:
-                primaryReason === 'manual' ? 'manual_notes' : 'automatic_notes',
-              onStage: (task) => {
-                if (task !== 'notesAudit') {
-                  generatedNodeCount += 1;
-                  runMetrics.setGeneratedNodeCount(generatedNodeCount);
-                }
-                dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
-                  meetingId,
-                  runId,
-                  inputRevision: fingerprint,
-                  ...revisions,
-                  notesStatus: 'running',
-                  secondaryStatus: 'pending',
-                  stage: task,
-                });
-                notify(meetingId);
-              },
-            },
-          );
+          const analysis = await (async () => {
+            let deadline: ReturnType<typeof setTimeout> | undefined;
+            const deadlineExceeded = new Promise<never>((_resolve, reject) => {
+              deadline = setTimeout(() => {
+                const error = new MeetingNotesError('notes_deadline_exceeded');
+                controller.abort(error);
+                reject(error);
+              }, dependencies.notesDeadlineMs ??
+                MEETING_NOTES_ABSOLUTE_DEADLINE_MS);
+            });
+            try {
+              return await Promise.race([
+                provider.generateStructuredAnalysis(
+                  buildAnalysisTranscriptFromJson(
+                    admittedMeeting.transcript_json!,
+                  ),
+                  admittedMeeting.user_notes ?? '',
+                  input.template,
+                  {
+                    signal: controller.signal,
+                    source,
+                    knownTerms: terms,
+                    trustedUserTerms: [],
+                    entityHints: terms,
+                    contextTokens: NOTES_CONTEXT_TOKENS,
+                    compactWriterContract: true,
+                    stageCache,
+                    cacheKey: stageCacheKey,
+                    onStageEvent: runMetrics.observe,
+                    onPlan: ({ plannedLeafCount }) =>
+                      runMetrics.setPlannedLeafCount(plannedLeafCount),
+                    onRepair: () => runMetrics.recordRepair(),
+                    onRepartition: () => runMetrics.recordRepartition(),
+                    workClass:
+                      primaryReason === 'manual'
+                        ? 'manual_notes'
+                        : 'automatic_notes',
+                    onStage: (task) => {
+                      if (task !== 'notesAudit') {
+                        generatedNodeCount += 1;
+                        runMetrics.setGeneratedNodeCount(generatedNodeCount);
+                      }
+                      dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
+                        meetingId,
+                        runId,
+                        inputRevision: fingerprint,
+                        ...revisions,
+                        notesStatus: 'running',
+                        secondaryStatus: 'pending',
+                        stage: task,
+                      });
+                      notify(meetingId);
+                    },
+                  },
+                ),
+                deadlineExceeded,
+              ]);
+            } finally {
+              if (deadline) clearTimeout(deadline);
+            }
+          })();
           if (controller.signal.aborted) throw controller.signal.reason;
           const published = dependencies.db.publishMeetingNotesIfCurrent({
             meetingId,
@@ -842,7 +870,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           }
           return { meetingId, runId, status: 'published' };
         } catch (error) {
-          const code = errorCode(error);
+          const terminalError = controller.signal.aborted
+            ? controller.signal.reason
+            : error;
+          const code = errorCode(terminalError);
           dependencies.db.updateMeetingAnalysisRunStatus({
             meetingId,
             runId,
@@ -857,7 +888,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             code,
           );
           notify(meetingId);
-          throw error;
+          throw terminalError;
         } finally {
           if (activeByMeeting.get(meetingId)?.runId === runId) {
             activeByMeeting.delete(meetingId);

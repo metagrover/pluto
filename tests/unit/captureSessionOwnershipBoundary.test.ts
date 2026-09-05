@@ -99,6 +99,25 @@ describe('capture session production ownership boundary', () => {
     expect(audioManager).toContain("'AUDIO_CAPTURE_JOURNAL_ABORT_START'");
   });
 
+  it('requires the recording owner before persisting a source failure', () => {
+    const sourceFailureHandler = sliceBetween(
+      main,
+      "'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED'",
+      "'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT'",
+    );
+
+    expect(sourceFailureHandler).toContain(
+      'captureSessionLease.requireRecordingOwner(meetingId, event.sender.id)',
+    );
+    expect(
+      sourceFailureHandler.indexOf(
+        'captureSessionLease.requireRecordingOwner(meetingId, event.sender.id)',
+      ),
+    ).toBeLessThan(
+      sourceFailureHandler.indexOf('markCaptureJournalSourceFailed('),
+    );
+  });
+
   it('hard-rejects lease conflicts before microphone acquisition', () => {
     const startSession = sliceBetween(
       audioManager,

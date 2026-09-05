@@ -49,6 +49,7 @@ CREATE TABLE `calendar_integration` (
 	`singleton` integer PRIMARY KEY NOT NULL,
 	`enabled` integer DEFAULT 0 NOT NULL,
 	`selected_calendar_json` text,
+	`selected_calendars_json` text,
 	`cache_revision` integer DEFAULT 0 NOT NULL,
 	`last_attempt_at` text,
 	`last_read_at` text,
@@ -492,6 +493,27 @@ CREATE TABLE `meeting_entities` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_meeting_entities_entity_meeting` ON `meeting_entities` (`entity_id`,`meeting_id`);--> statement-breakpoint
+CREATE TABLE `meeting_speaker_candidates` (
+	`meeting_id` text NOT NULL,
+	`speaker` text NOT NULL,
+	`source_revision` text NOT NULL,
+	`candidate_digest` text NOT NULL,
+	`embedding_json` text NOT NULL,
+	`clean_duration_sec` real NOT NULL,
+	`clean_segment_count` integer NOT NULL,
+	`clean_chunk_count` integer NOT NULL,
+	`minimum_chunk_similarity` real NOT NULL,
+	`mean_chunk_similarity` real NOT NULL,
+	`reference_start_sec` real NOT NULL,
+	`reference_end_sec` real NOT NULL,
+	`reference_excerpt` text NOT NULL,
+	`provenance_json` text NOT NULL,
+	`created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(`meeting_id`, `speaker`, `source_revision`),
+	FOREIGN KEY (`meeting_id`) REFERENCES `meetings`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_meeting_speaker_candidates_meeting` ON `meeting_speaker_candidates` (`meeting_id`);--> statement-breakpoint
 CREATE TABLE `meetings` (
 	`id` text PRIMARY KEY NOT NULL,
 	`title` text NOT NULL,
@@ -575,6 +597,49 @@ CREATE TABLE `settings` (
 	`value` text
 );
 --> statement-breakpoint
+CREATE TABLE `speaker_voice_enrollments` (
+	`id` text PRIMARY KEY NOT NULL,
+	`person_id` text NOT NULL,
+	`source_meeting_id` text NOT NULL,
+	`source_revision` text NOT NULL,
+	`speaker` text NOT NULL,
+	`embedding_json` text NOT NULL,
+	`chunk_count` integer NOT NULL,
+	`clean_duration_sec` real NOT NULL,
+	`minimum_chunk_similarity` real NOT NULL,
+	`mean_chunk_similarity` real NOT NULL,
+	`reference_start_sec` real NOT NULL,
+	`reference_end_sec` real NOT NULL,
+	`reference_excerpt` text NOT NULL,
+	`provenance_json` text NOT NULL,
+	`candidate_digest` text NOT NULL,
+	`created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (`person_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`source_meeting_id`) REFERENCES `meetings`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_speaker_voice_enrollments_person` ON `speaker_voice_enrollments` (`person_id`);--> statement-breakpoint
+CREATE INDEX `idx_speaker_voice_enrollments_meeting` ON `speaker_voice_enrollments` (`source_meeting_id`);--> statement-breakpoint
+CREATE TABLE `speaker_voice_profile_settings` (
+	`person_id` text PRIMARY KEY NOT NULL,
+	`is_active` integer DEFAULT 1 NOT NULL,
+	`updated_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (`person_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `speaker_voice_rejections` (
+	`meeting_id` text NOT NULL,
+	`speaker` text NOT NULL,
+	`source_revision` text NOT NULL,
+	`candidate_digest` text NOT NULL,
+	`person_id` text NOT NULL,
+	`created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY(`meeting_id`, `speaker`, `source_revision`, `candidate_digest`, `person_id`),
+	FOREIGN KEY (`meeting_id`) REFERENCES `meetings`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`person_id`) REFERENCES `entities`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_speaker_voice_rejections_meeting` ON `speaker_voice_rejections` (`meeting_id`);--> statement-breakpoint
 CREATE TABLE `working_memory_snapshots` (
 	`id` text PRIMARY KEY NOT NULL,
 	`scope_type` text NOT NULL,

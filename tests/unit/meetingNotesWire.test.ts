@@ -8,6 +8,7 @@ it('uses compact source handles without changing immutable source text and decod
   const wire = createNotesWireRequest(prompt, [span]);
   expect(wire.sourceLabels).toEqual(['R0']);
   expect(wire.prompt).toContain('"descriptor":"R0"');
+  expect(wire.prompt).not.toContain('"segment":8');
   expect(wire.prompt).toContain(JSON.stringify(sourceText));
   expect(wire.prompt).toContain('"sources":["R0"]');
   expect(

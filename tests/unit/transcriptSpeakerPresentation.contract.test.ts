@@ -41,7 +41,7 @@ describe('saved transcript speaker-presentation contract', () => {
       expected: ['Them', 'Me'],
     },
     {
-      name: 'assigns materially overlapping mic speech to Them',
+      name: 'keeps materially overlapping mic speech neutral',
       segments: [
         { speaker: 'Them', startTime: 0, endTime: 4, text: 'Remote speech.' },
         {
@@ -51,7 +51,7 @@ describe('saved transcript speaker-presentation contract', () => {
           text: 'Different degraded words here.',
         },
       ],
-      expected: ['Them', 'Them'],
+      expected: ['Them', 'Speaker'],
     },
     {
       name: 'keeps short isolated mic speech neutral',
@@ -93,7 +93,7 @@ describe('saved transcript speaker-presentation contract', () => {
     ).toEqual(expected);
   });
 
-  it('uses a 50 percent overlap boundary for System authority', () => {
+  it('keeps unverified simultaneous mic speech explicitly uncertain', () => {
     const segments = [
       { speaker: 'Them', startTime: 0, endTime: 1, text: 'Remote speech.' },
       {
@@ -114,7 +114,7 @@ describe('saved transcript speaker-presentation contract', () => {
       applyTranscriptSpeakerPresentation(fallbackJson(segments), segments).map(
         (segment) => segment.speaker,
       ),
-    ).toEqual(['Them', 'Them', 'Me']);
+    ).toEqual(['Them', 'Speaker', 'Me']);
   });
 
   it('preserves a confident mapped Me label during overlap', () => {
@@ -134,7 +134,7 @@ describe('saved transcript speaker-presentation contract', () => {
     ).toEqual(['Them', 'Me']);
   });
 
-  it('suppresses matching loudspeaker echo but retains phonetic mismatch as Them', () => {
+  it('suppresses matching loudspeaker echo but keeps phonetic mismatch neutral', () => {
     const segments = [
       {
         speaker: 'Them',
@@ -163,7 +163,7 @@ describe('saved transcript speaker-presentation contract', () => {
       ),
     ).toEqual([
       ['Them', 'Switch the task to Orion then.'],
-      ['Them', 'Or Ryan then.'],
+      ['Speaker', 'Or Ryan then.'],
     ]);
   });
 

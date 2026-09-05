@@ -24,8 +24,88 @@ import {
   type FinalTranscriptionOutcome,
   runFinalTranscription,
 } from './runFinalTranscription.ts';
+import { hasCompleteSystemCapture } from './systemCaptureEvidence.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
+
+const rebuildSealedAudioForRetry = async (
+  meeting: Meeting,
+  invoke: Invoke,
+): Promise<Meeting> => {
+  const meetingId = String(meeting.id);
+  const journal = (await invoke('AUDIO_CAPTURE_JOURNAL_READ', {
+    meetingId,
+  })) as {
+    schemaVersion?: unknown;
+    lifecycleState?: unknown;
+    generation?: unknown;
+    intervals?: Array<{ sources?: { system?: { disposition?: unknown } } }>;
+  } | null;
+  if (
+    journal?.schemaVersion !== 3 ||
+    journal.lifecycleState !== 'sealed' ||
+    journal.generation !== meeting.capture_journal_generation
+  ) {
+    throw new Error('sealed_capture_generation_unavailable');
+  }
+  const intervals = journal.intervals;
+  if (
+    !Array.isArray(intervals) ||
+    intervals.length === 0 ||
+    !intervals.every((interval) =>
+      ['captured', 'verified_silence'].includes(
+        String(interval.sources?.system?.disposition),
+      ),
+    )
+  ) {
+    throw new Error('sealed_capture_system_incomplete');
+  }
+  if (!meeting.audio_path) throw new Error('sealed_capture_mic_unavailable');
+
+  const createdPaths: string[] = [];
+  try {
+    const systemAudioPath = await invoke(
+      'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+      {
+        meetingId,
+        source: 'system',
+        outputTag: `${meetingId}-repaired-system`,
+      },
+    );
+    if (typeof systemAudioPath !== 'string' || systemAudioPath.length === 0) {
+      throw new Error('sealed_capture_system_rebuild_failed');
+    }
+    createdPaths.push(systemAudioPath);
+
+    const mixedAudioPath = await invoke('AUDIO_MIX_WAV', {
+      inputPaths: [meeting.audio_path, systemAudioPath],
+      outputTag: `${meetingId}-repaired-mix`,
+    });
+    if (typeof mixedAudioPath !== 'string' || mixedAudioPath.length === 0) {
+      throw new Error('sealed_capture_mix_rebuild_failed');
+    }
+    createdPaths.push(mixedAudioPath);
+
+    const rebuiltMeeting = {
+      ...meeting,
+      system_audio_path: systemAudioPath,
+      mixed_audio_path: mixedAudioPath,
+      transcript_validated_at:
+        meeting.transcript_status === 'validated'
+          ? meeting.transcript_validated_at
+          : undefined,
+    };
+    if ((await invoke('SAVE_MEETING', rebuiltMeeting)) === false) {
+      throw new Error('sealed_capture_audio_save_superseded');
+    }
+    return rebuiltMeeting;
+  } catch (error) {
+    if (createdPaths.length > 0) {
+      await invoke('AUDIO_DELETE_FILES', createdPaths).catch(() => null);
+    }
+    throw error;
+  }
+};
 
 type StoredIntegrity = Record<string, unknown> & {
   activityEvidence?: unknown;
@@ -85,20 +165,45 @@ const sanitizeVocabularyTerms = (value: unknown): string[] =>
     : [];
 
 export const runPersistedMeetingFinalTranscription = async (
-  meeting: Meeting,
+  inputMeeting: Meeting,
   invoke: Invoke,
   options: {
     signal?: AbortSignal;
     runId?: string;
+    manualRetry?: boolean;
+    rebuildSealedAudio?: boolean;
     onTranscriptCommitted?: () => Promise<void> | void;
   } = {},
 ): Promise<FinalTranscriptionOutcome> => {
+  const meeting = options.rebuildSealedAudio
+    ? await rebuildSealedAudioForRetry(inputMeeting, invoke)
+    : inputMeeting;
   const captureGeneration = meeting.capture_journal_generation || '';
   const integrity = parseObject(
     meeting.transcript_integrity_json,
   ) as StoredIntegrity;
   const activityEvidence = await readSealedActivityEvidence(integrity);
   const provisional = parseProvisionalTranscript(meeting.transcript_json);
+  // A retry changes canonical attribution, not the original live evidence.
+  const savedLiveSegments = provisional.payload.liveSegments;
+  const liveSegments =
+    Array.isArray(savedLiveSegments) &&
+    savedLiveSegments.every((segment) => {
+      if (!segment || typeof segment !== 'object') return false;
+      const row = segment as Partial<AttributionSegment>;
+      return (
+        typeof row.text === 'string' &&
+        typeof row.speaker === 'string' &&
+        typeof row.startTime === 'number' &&
+        typeof row.endTime === 'number' &&
+        Number.isFinite(row.startTime) &&
+        Number.isFinite(row.endTime) &&
+        row.startTime >= 0 &&
+        row.endTime >= row.startTime
+      );
+    })
+      ? savedLiveSegments
+      : provisional.segments;
   const runId = options.runId ?? crypto.randomUUID();
   const meetingId = String(meeting.id);
   const language = provisional.payload.transcription?.language || 'en';
@@ -119,6 +224,17 @@ export const runPersistedMeetingFinalTranscription = async (
     }
   }
   let committedSegments: AttributionSegment[] = [];
+  let systemCaptureComplete = false;
+  try {
+    systemCaptureComplete =
+      options.rebuildSealedAudio === true ||
+      hasCompleteSystemCapture(
+        await invoke('AUDIO_CAPTURE_JOURNAL_READ', { meetingId }),
+        captureGeneration,
+      );
+  } catch {
+    // A missing journal cannot establish that a quiet System WAV is complete.
+  }
 
   const outcome = await runFinalTranscription(
     {
@@ -127,13 +243,17 @@ export const runPersistedMeetingFinalTranscription = async (
       captureEvidence: {
         sealed: Boolean(activityEvidence && captureGeneration),
         generation: captureGeneration,
+        systemCaptureIncomplete: !systemCaptureComplete,
       },
       recordingDurationSeconds: meeting.duration_seconds || 0,
       micAudioPath: meeting.audio_path || '',
       mixedAudioPath: meeting.mixed_audio_path || '',
       systemAudioPath: meeting.system_audio_path || '',
       provisionalSegments: provisional.segments,
-      preserveProvisionalText: meeting.transcript_status === 'validated',
+      // An explicit retranscription must rebuild machine text too, otherwise
+      // echo fragments retained by a previous validated run survive forever.
+      preserveProvisionalText:
+        meeting.transcript_status === 'validated' && !options.manualRetry,
       activityWindows: activityEvidence?.windows || [],
       language,
       vocabulary,
@@ -143,7 +263,9 @@ export const runPersistedMeetingFinalTranscription = async (
     },
     {
       claimLease: async (lease) =>
-        (await invoke('CLAIM_FINAL_TRANSCRIPTION', meetingId, lease)) === true,
+        (await invoke('CLAIM_FINAL_TRANSCRIPTION', meetingId, lease, {
+          manualRetry: options.manualRetry === true,
+        })) === true,
       admit: async () =>
         evaluateFinalTranscriptionAdmission(
           (await invoke(
@@ -213,7 +335,7 @@ export const runPersistedMeetingFinalTranscription = async (
             stopToValidatedLatency: provisional.payload.stopToValidatedLatency,
             lifecycleStatus: 'validated',
             integrity: { ...commit.integrity, reasons: [] },
-            liveSegments: provisional.segments,
+            liveSegments,
           }),
         );
         const transcriptIntegrityJson = JSON.stringify({
@@ -247,6 +369,7 @@ export const runPersistedMeetingFinalTranscription = async (
           canonicalTranscriptJson,
           transcriptIntegrityJson,
           transcriptValidatedAt,
+          speakerCandidates: commit.speakerCandidates,
         })) as { committed?: boolean; transcriptJson?: string } | false;
         if (outcome && outcome.committed === true) {
           await options.onTranscriptCommitted?.();
@@ -259,13 +382,14 @@ export const runPersistedMeetingFinalTranscription = async (
         }
         return { committed: false };
       },
-      markNeedsAttention: async ({ failure, lease }) => {
+      markNeedsAttention: async ({ failure, lease, reasons }) => {
         if (lease) {
           await invoke(
             'FAIL_FINAL_TRANSCRIPTION',
             meetingId,
             lease.runId,
             failure,
+            reasons ?? [],
           );
         }
       },

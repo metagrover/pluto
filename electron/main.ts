@@ -4,9 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import {
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   type WebContents,
   app,
@@ -17,7 +19,6 @@ import {
   systemPreferences,
 } from 'electron';
 import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type {
@@ -42,6 +43,7 @@ import {
   authorizeCaptureJournalInterval,
   completeCaptureJournalCapturedChunk,
   deleteCaptureJournal,
+  markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
@@ -65,10 +67,12 @@ import {
 } from './incrementalMeetingNotesCoordinator';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import { createLogger } from './logger';
 import {
   canReuseRunningCaptureForProbe,
-  waitForNativeAudioSpawn,
+  waitForNativeAudioPcm,
 } from './nativeAudioCapture';
+import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
   isProjectScopeReviewBusy,
@@ -86,6 +90,8 @@ import {
   buildSaveMeetingFailureDiagnostic,
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
+import { loadSpeakerSample } from './speakerSample';
+import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
@@ -96,13 +102,21 @@ import {
 } from './transcription/parakeetRuntimeHost';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
+const plutoLog = createLogger('Pluto');
+const captureLog = createLogger('Capture');
+const audioCapLog = createLogger('AudioCap');
+const recorderLog = createLogger('Recorder');
+const llmLog = createLogger('LLM');
+
 if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic);
+  ffmpeg.setFfmpegPath(resolveUnpackedExecutablePath(ffmpegStatic));
 }
+const ffprobePath = resolveUnpackedExecutablePath(ffprobeStatic.path);
+ffmpeg.setFfprobePath(ffprobePath);
 
 const probeAudioDuration = async (inputPath: string) =>
   await new Promise<number | null>((resolve) => {
-    const probe = spawn(ffprobeStatic.path, [
+    const probe = spawn(ffprobePath, [
       '-v',
       'error',
       '-show_entries',
@@ -288,7 +302,7 @@ function createWindow() {
     win?.webContents.send('main-process-message', new Date().toLocaleString());
   });
   win.webContents.on('will-prevent-unload', () => {
-    console.warn('[CaptureLease] navigation prevented: capture_active');
+    captureLog.warn('Navigation prevented: capture_active');
   });
   win.webContents.on('before-input-event', notifyRendererActivity);
   win.on('focus', notifyForegroundActivity);
@@ -475,6 +489,10 @@ import {
   prepareRecordingReadiness,
 } from './recordingReadiness';
 import {
+  SPEAKER_VOICE_CHANNELS,
+  handleSpeakerVoiceRequest,
+} from './speakerVoiceHandlers';
+import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
   shouldCleanupTranscriptOnSave,
@@ -515,6 +533,18 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+    }
+    try {
+      if (Notification.isSupported()) {
+        const meeting = db.getMeeting(meetingId) as { title?: string } | null;
+        const title = meeting?.title || 'Meeting';
+        new Notification({
+          title: 'Meeting notes ready',
+          body: `Notes for "${title}" are ready.`,
+        }).show();
+      }
+    } catch {
+      // Non-fatal notification error
     }
   },
   runSecondary: async (input) => {
@@ -717,8 +747,8 @@ function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
   knowledgeSynthesisPause.acquire('transcription');
   if (activeTranscriptionCount === 1) {
-    console.log(
-      '[Pluto] Pausing queued knowledge-doc synthesis during transcription',
+    plutoLog.info(
+      'Pausing queued knowledge-doc synthesis during transcription',
     );
   }
 }
@@ -730,8 +760,8 @@ function endTranscriptionWork() {
     knowledgeSynthesisPause.release('transcription');
   }
   if (activeTranscriptionCount === 0) {
-    console.log(
-      '[Pluto] Resuming queued knowledge-doc synthesis after transcription',
+    plutoLog.info(
+      'Resuming queued knowledge-doc synthesis after transcription',
     );
   }
 }
@@ -767,7 +797,7 @@ function clearAbortControllerForMeeting(meetingId: string) {
 function abortMeetingTasks(meetingId: string) {
   const controller = activeMeetingTasks.get(meetingId);
   if (controller) {
-    console.log(`[Pluto] Aborting background tasks for meeting: ${meetingId}`);
+    plutoLog.info(`Aborting background tasks for meeting: ${meetingId}`);
     controller.abort();
     activeMeetingTasks.delete(meetingId);
   }
@@ -790,7 +820,7 @@ const shutdownMainProcessConsumers = async () => {
   dreamingEntityQueue = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
-  console.log('[Pluto] Shutting down...');
+  plutoLog.info('Shutting down...');
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
   await parakeetEouCoordinator?.fail('parakeet_app_quit');
@@ -807,7 +837,7 @@ app.on(
     shutdownConsumers: shutdownMainProcessConsumers,
     closeDatabase: closeApplicationDatabase,
     quit: () => app.quit(),
-    onError: (error) => console.error('[Pluto] Shutdown failed', error),
+    onError: (error) => plutoLog.error('Shutdown failed:', error),
   }),
 );
 
@@ -955,7 +985,15 @@ app.whenReady().then(async () => {
   scheduleDreaming(0);
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) => {
-      const result = handleIdentityRequest(channel, payload);
+      const result = handleIdentityRequest(channel, payload, {
+        onBindingChange: ({ meetingId, personIds }) => {
+          queueKnowledgeDocsRefreshForMeeting(meetingId);
+          for (const personId of personIds) {
+            const doc = db.getKnowledgeDocByScope('person_context', personId);
+            if (doc) queueKnowledgeDocRefresh(doc.id);
+          }
+        },
+      });
       if (
         channel !== 'GET_IDENTITY_STATE' &&
         channel !== 'GET_MEETING_IDENTITY'
@@ -963,6 +1001,33 @@ app.whenReady().then(async () => {
         invalidateDreamingCatalog();
       }
       return result;
+    });
+  }
+  for (const channel of SPEAKER_VOICE_CHANNELS) {
+    ipcMain.handle(channel, async (_event, payload) => {
+      return await handleSpeakerVoiceRequest(channel, payload, {
+        getMeeting: (meetingId) =>
+          (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
+        fileExists: (inputPath) => fs.existsSync(inputPath),
+        createTemporaryPath: () =>
+          path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+        sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+          await new Promise<boolean>((resolve) => {
+            ffmpeg(inputPath)
+              .setStartTime(startSec)
+              .setDuration(durationSec)
+              .audioChannels(1)
+              .audioFrequency(16000)
+              .toFormat('wav')
+              .on('end', () => resolve(true))
+              .on('error', () => resolve(false))
+              .save(outputPath);
+          }),
+        readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+        removeFile: async (outputPath) => {
+          await fs.promises.unlink(outputPath);
+        },
+      });
     });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
@@ -988,8 +1053,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('CALENDAR_GET_STATE', () => calendarService.getSnapshot());
   ipcMain.handle('CALENDAR_CONNECT', () => calendarService.connect());
-  ipcMain.handle('CALENDAR_SELECT', (_event, calendar) =>
-    calendarService.selectCalendar(calendar),
+  ipcMain.handle('CALENDAR_SELECT', (_event, calendarOrCalendars) =>
+    Array.isArray(calendarOrCalendars)
+      ? calendarService.selectCalendars(calendarOrCalendars)
+      : calendarService.selectCalendar(calendarOrCalendars),
   );
   ipcMain.handle('CALENDAR_REFRESH', async () => {
     await calendarService.refresh();
@@ -1004,6 +1071,19 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('CALENDAR_GET_MEETING_CONTEXT', (_event, meetingId) =>
     db.calendarStore.getMeetingContext(String(meetingId)),
+  );
+  ipcMain.handle(
+    'CALENDAR_MATCH_ACTIVE',
+    (_event, payload?: { atTime?: string }) =>
+      calendarService.matchActiveEvent(payload?.atTime),
+  );
+  ipcMain.handle(
+    'CALENDAR_ASSOCIATE_START',
+    (_event, payload: { meetingId: string; atTime?: string }) =>
+      calendarService.associateMeetingAtStart(
+        String(payload.meetingId),
+        payload?.atTime,
+      ),
   );
   ipcMain.handle('OPEN_CALENDAR_SYSTEM_SETTINGS', async (_event, target) => {
     if (process.platform !== 'darwin') return false;
@@ -1138,6 +1218,7 @@ app.whenReady().then(async () => {
   let recorderProcess: ChildProcess | null = null;
   let nativeAudioProcess: ChildProcess | null = null;
   let nativeAudioOwner: WebContents | null = null;
+  let nativeAudioReadiness: Promise<boolean> | null = null;
   const captureSessionLease = createCaptureSessionLeaseRegistry();
   const watchedCaptureOwners = new Set<number>();
   type CaptureIncrementalNotesOffer = IncrementalMeetingNotesOffer & {
@@ -1177,6 +1258,7 @@ app.whenReady().then(async () => {
     const processToStop = nativeAudioProcess;
     nativeAudioProcess = null;
     nativeAudioOwner = null;
+    nativeAudioReadiness = null;
     processToStop?.kill('SIGINT');
   };
 
@@ -1197,7 +1279,7 @@ app.whenReady().then(async () => {
       if (released) {
         incrementalNotesCoordinator.cancel(released.meetingId);
         knowledgeSynthesisPause.release('capture');
-        console.warn('[CaptureLease] released: owner_destroyed');
+        captureLog.warn('Released: owner_destroyed');
       }
     });
   };
@@ -1407,10 +1489,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
-    console.log('[Pluto] Request to start native recorder...');
+    recorderLog.info('Request to start native recorder...');
 
     if (recorderProcess) {
-      console.log('[Pluto] Recorder already running, killing old instance.');
+      recorderLog.info('Recorder already running, killing old instance.');
       recorderProcess.kill();
       recorderProcess = null;
     }
@@ -1420,11 +1502,11 @@ app.whenReady().then(async () => {
       : path.join(__dirname, '..', 'resources', 'bin', 'recorder');
 
     if (!fs.existsSync(recorderPath)) {
-      console.error('[Pluto] Recorder binary not found at:', recorderPath);
+      recorderLog.error('Recorder binary not found at:', recorderPath);
       throw new Error('Recorder binary not found');
     }
 
-    console.log('[Pluto] Spawning recorder:', recorderPath);
+    recorderLog.info('Spawning recorder:', recorderPath);
 
     // Spawn without arguments to stream to stdout (default)
     // Pass exclude bundle ID to prevent echo
@@ -1437,9 +1519,9 @@ app.whenReady().then(async () => {
         try {
           const json = JSON.parse(text);
           if (json.status === 'started') {
-            console.log('[Pluto] Native recorder started successfully.');
+            recorderLog.info('Native recorder started successfully.');
           } else if (json.error) {
-            console.error('[Pluto] Native recorder error:', json.error);
+            recorderLog.error('Native recorder error:', json.error);
           }
           return; // Don't forward JSON as audio
         } catch (e) {
@@ -1455,11 +1537,11 @@ app.whenReady().then(async () => {
     });
 
     recorderProcess.stderr?.on('data', (data: Buffer | string) => {
-      console.error(`[Pluto] Recorder stderr: ${data}`);
+      recorderLog.warn(`Recorder stderr: ${data}`);
     });
 
     recorderProcess.on('close', (code: number | null) => {
-      console.log(`[Pluto] Recorder exited with code ${code}`);
+      recorderLog.info(`Recorder exited with code ${code}`);
       recorderProcess = null;
     });
 
@@ -1467,7 +1549,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('AUDIO_RECORDER_STOP', async () => {
-    console.log('[Pluto] Request to stop native recorder...');
+    recorderLog.info('Request to stop native recorder...');
     if (recorderProcess) {
       recorderProcess.kill();
       recorderProcess = null;
@@ -1547,7 +1629,7 @@ app.whenReady().then(async () => {
       } finally {
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
-          console.warn('[CaptureLease] released: capture_start_aborted');
+          captureLog.warn('Released: capture_start_aborted');
         }
       }
       return true;
@@ -1561,6 +1643,21 @@ app.whenReady().then(async () => {
         getMeetingArtifactsRootDir(),
         String(meetingId || ''),
       ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
+    async (event, request = {}) => {
+      const meetingId = String(request.meetingId || '');
+      captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      return await markCaptureJournalSourceFailed(
+        getMeetingArtifactsRootDir(),
+        {
+          ...request,
+          meetingId,
+        },
+      );
+    },
   );
 
   ipcMain.handle(
@@ -1695,7 +1792,7 @@ app.whenReady().then(async () => {
     });
     await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
-    console.log('[CaptureLease] transitioned: capture_stopped');
+    captureLog.info('Transitioned: capture_stopped');
     return manifest;
   });
 
@@ -1717,13 +1814,13 @@ app.whenReady().then(async () => {
       } catch (error) {
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
-          console.warn('[CaptureLease] released: seal_failed_after_stop');
+          captureLog.warn('Released: seal_failed_after_stop');
         }
         throw error;
       }
       if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
         knowledgeSynthesisPause.release('capture');
-        console.log('[CaptureLease] released: capture_sealed');
+        captureLog.info('Released: capture_sealed');
       }
       return manifest;
     },
@@ -1753,12 +1850,16 @@ app.whenReady().then(async () => {
     if (
       canReuseRunningCaptureForProbe(Boolean(nativeAudioProcess), targetPids)
     ) {
-      return true;
+      const runningProcess = nativeAudioProcess;
+      return (
+        (await nativeAudioReadiness) === true &&
+        nativeAudioProcess === runningProcess
+      );
     }
 
     const execPath = getAudioCapExecPath();
     if (!fs.existsSync(execPath)) {
-      console.error('[Pluto] AudioCap binary not found at:', execPath);
+      audioCapLog.error('AudioCap binary not found at:', execPath);
       return false;
     }
 
@@ -1876,17 +1977,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('NATIVE_AUDIO_START', async (event) => {
     if (!captureSessionLease.recordingForOwner(event.sender.id)) {
-      console.warn('[CaptureLease] native audio rejected: owner_missing');
+      captureLog.warn('Native audio rejected: owner_missing');
       throw new Error('capture_session_not_owned');
     }
     if (nativeAudioProcess) {
-      return nativeAudioOwner?.id === event.sender.id;
+      const existingProcess = nativeAudioProcess;
+      return (
+        nativeAudioOwner?.id === event.sender.id &&
+        (await nativeAudioReadiness) === true &&
+        nativeAudioProcess === existingProcess
+      );
     }
 
     // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
     const execPath = getAudioCapExecPath();
 
-    console.log('[Pluto] Spawning AudioCap:', execPath);
+    audioCapLog.info('Spawning AudioCap:', execPath);
 
     try {
       if (!fs.existsSync(execPath)) {
@@ -1898,6 +2004,8 @@ app.whenReady().then(async () => {
       const captureOwner = event.sender;
       nativeAudioProcess = spawnedProcess;
       nativeAudioOwner = captureOwner;
+      const pcmReady = waitForNativeAudioPcm(spawnedProcess);
+      nativeAudioReadiness = pcmReady;
 
       spawnedProcess.stdout?.on('data', (chunk) => {
         // chunk is Buffer (PCM data)
@@ -1910,32 +2018,41 @@ app.whenReady().then(async () => {
       });
 
       spawnedProcess.stderr?.on('data', (data) => {
-        console.error('[Pluto-AudioCap]', data.toString());
+        const line = data.toString().trim();
+        if (line) audioCapLog.debug(line);
       });
 
-      spawnedProcess.on('close', (code) => {
-        console.log('[Pluto] AudioCap exited with code', code);
-        if (nativeAudioProcess === spawnedProcess) {
-          nativeAudioProcess = null;
-          nativeAudioOwner = null;
+      const captureFailed = () => {
+        if (nativeAudioProcess !== spawnedProcess) return;
+        if (!captureOwner.isDestroyed()) {
+          captureOwner.send('NATIVE_AUDIO_FAILURE');
         }
+        nativeAudioProcess = null;
+        nativeAudioOwner = null;
+        nativeAudioReadiness = null;
+      };
+      spawnedProcess.on('error', captureFailed);
+      spawnedProcess.on('close', (code) => {
+        audioCapLog.info('AudioCap exited with code', code);
+        captureFailed();
       });
 
-      const nativeStarted = await waitForNativeAudioSpawn(spawnedProcess);
+      const nativeStarted = await pcmReady;
       if (!nativeStarted) {
-        console.error('[Pluto] AudioCap failed to spawn');
+        audioCapLog.error('AudioCap failed to produce PCM');
         if (nativeAudioProcess === spawnedProcess) {
-          nativeAudioProcess = null;
-          nativeAudioOwner = null;
+          captureFailed();
+          spawnedProcess.kill('SIGINT');
         }
         return false;
       }
 
-      return true;
+      return nativeAudioProcess === spawnedProcess;
     } catch (e) {
-      console.error('[Pluto] Failed to spawn audiocap:', e);
+      audioCapLog.error('Failed to spawn audiocap:', e);
       nativeAudioProcess = null;
       nativeAudioOwner = null;
+      nativeAudioReadiness = null;
       return false;
     }
   });
@@ -1946,10 +2063,10 @@ app.whenReady().then(async () => {
       nativeAudioOwner &&
       nativeAudioOwner.id !== event.sender.id
     ) {
-      console.warn('[CaptureLease] native audio stop rejected: owner_mismatch');
+      captureLog.warn('Native audio stop rejected: owner_mismatch');
       return false;
     }
-    if (nativeAudioProcess) console.log('[Pluto] Stopping AudioCap...');
+    if (nativeAudioProcess) audioCapLog.info('Stopping AudioCap...');
     stopNativeAudioCapture();
     return true;
   });
@@ -2125,57 +2242,92 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE', async (_event, request) =>
+    loadSpeakerSample(request, {
+      getMeeting: (meetingId) =>
+        (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
+      fileExists: (inputPath) => fs.existsSync(inputPath),
+      createTemporaryPath: () =>
+        path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+      sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+        await new Promise<boolean>((resolve) => {
+          ffmpeg(inputPath)
+            .setStartTime(startSec)
+            .setDuration(durationSec)
+            .audioChannels(1)
+            .audioFrequency(16000)
+            .toFormat('wav')
+            .on('end', () => resolve(true))
+            .on('error', () => resolve(false))
+            .save(outputPath);
+        }),
+      readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+      removeFile: async (outputPath) => {
+        await fs.promises.unlink(outputPath);
+      },
+    }),
+  );
+
+  const mixWavSources = async ({
+    inputPaths,
+    outputTag,
+  }: {
+    inputPaths?: unknown[];
+    outputTag?: string;
+  }) => {
+    if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
+    const validPaths = inputPaths.filter(
+      (value): value is string =>
+        typeof value === 'string' && value.length > 0 && fs.existsSync(value),
+    );
+    if (validPaths.length < 2) return null;
+
+    const tag =
+      (typeof outputTag === 'string' ? outputTag : 'mix')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '')
+        .slice(0, 24) || 'mix';
+    const outputDir = path.join(app.getPath('userData'), 'meetings');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    const outputPath = path.join(
+      outputDir,
+      `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
+    );
+
+    return await new Promise<string | null>((resolve) => {
+      const command = ffmpeg();
+      for (const inputPath of validPaths) {
+        command.input(inputPath);
+      }
+      command
+        .complexFilter(
+          `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
+        )
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .toFormat('wav')
+        .on('end', () => {
+          console.log(`[Pluto] Mixed audio created: ${outputPath}`);
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          console.warn(
+            '[Pluto] Mixed audio failed:',
+            err instanceof Error ? err.message : err,
+          );
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          resolve(null);
+        })
+        .save(outputPath);
+    });
+  };
+
   ipcMain.handle(
     'AUDIO_MIX_WAV',
-    async (_event, { inputPaths, outputTag } = {}) => {
-      if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
-      const validPaths = inputPaths.filter(
-        (value): value is string =>
-          typeof value === 'string' && value.length > 0 && fs.existsSync(value),
-      );
-      if (validPaths.length < 2) return null;
-
-      const tag =
-        (typeof outputTag === 'string' ? outputTag : 'mix')
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]/g, '')
-          .slice(0, 24) || 'mix';
-      const outputDir = path.join(app.getPath('userData'), 'meetings');
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-      const outputPath = path.join(
-        outputDir,
-        `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
-      );
-
-      return await new Promise<string | null>((resolve) => {
-        const command = ffmpeg();
-        for (const inputPath of validPaths) {
-          command.input(inputPath);
-        }
-        command
-          .complexFilter(
-            `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
-          )
-          .audioChannels(1)
-          .audioFrequency(16000)
-          .toFormat('wav')
-          .on('end', () => {
-            console.log(`[Pluto] Mixed audio created: ${outputPath}`);
-            resolve(outputPath);
-          })
-          .on('error', (err) => {
-            console.warn(
-              '[Pluto] Mixed audio failed:',
-              err instanceof Error ? err.message : err,
-            );
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-            resolve(null);
-          })
-          .save(outputPath);
-      });
-    },
+    async (_event, { inputPaths, outputTag } = {}) =>
+      await mixWavSources({ inputPaths, outputTag }),
   );
 
   const stitchWavSegments = async ({
@@ -2189,89 +2341,14 @@ app.whenReady().then(async () => {
       chunkIndex?: number;
     }>;
     outputTag?: string;
-  }) => {
-    if (!Array.isArray(segments) || segments.length === 0) return null;
-
-    const validSegments = segments
-      .filter(
-        (
-          value,
-        ): value is {
-          path: string;
-          startSec: number;
-          endSec: number;
-          chunkIndex?: number;
-        } =>
-          value &&
-          typeof value === 'object' &&
-          typeof value.path === 'string' &&
-          value.path.length > 0 &&
-          fs.existsSync(value.path) &&
-          typeof value.startSec === 'number' &&
-          Number.isFinite(value.startSec) &&
-          value.startSec >= 0 &&
-          typeof value.endSec === 'number' &&
-          Number.isFinite(value.endSec) &&
-          value.endSec > value.startSec,
-      )
-      .sort((left, right) => left.startSec - right.startSec);
-
-    if (validSegments.length === 0) return null;
-
-    const tag =
-      (typeof outputTag === 'string' ? outputTag : 'stitched')
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, '')
-        .slice(0, 24) || 'stitched';
-    const outputDir = path.join(app.getPath('userData'), 'meetings');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-    const outputPath = path.join(
-      outputDir,
-      `${tag}_${Date.now()}_${randomUUID()}.wav`,
-    );
-
-    return await new Promise<string | null>((resolve) => {
-      const command = ffmpeg();
-      const filterParts: string[] = [];
-      const mixInputs: string[] = [];
-
-      for (let i = 0; i < validSegments.length; i++) {
-        const segment = validSegments[i];
-        command.input(segment.path);
-        const delayMs = Math.max(0, Math.round(segment.startSec * 1000));
-        filterParts.push(
-          `[${i}:a]adelay=${delayMs}|${delayMs},volume=1[a${i}]`,
-        );
-        mixInputs.push(`[a${i}]`);
-      }
-
-      command
-        .complexFilter([
-          ...filterParts,
-          `${mixInputs.join('')}amix=inputs=${validSegments.length}:duration=longest:normalize=0`,
-        ])
-        .audioChannels(1)
-        .audioFrequency(16000)
-        .toFormat('wav')
-        .on('end', () => {
-          console.log(
-            `[Pluto] Reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
-          );
-          resolve(outputPath);
-        })
-        .on('error', (err) => {
-          console.warn(
-            '[Pluto] Timed WAV reconstruction failed:',
-            err instanceof Error ? err.message : err,
-          );
-          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-          resolve(null);
-        })
-        .save(outputPath);
+  }) =>
+    await stitchTimedWavSegments({
+      segments,
+      outputTag,
+      outputDir: path.join(app.getPath('userData'), 'meetings'),
+      tempDir: app.getPath('temp'),
+      probeAudioDuration,
     });
-  };
 
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',
@@ -2565,8 +2642,12 @@ app.whenReady().then(async () => {
     (_event, meetingId, lease) =>
       db.claimMeetingTranscriptValidationRetry(meetingId, lease),
   );
-  ipcMain.handle('CLAIM_FINAL_TRANSCRIPTION', (_event, meetingId, lease) =>
-    db.claimMeetingFinalTranscription(meetingId, lease),
+  ipcMain.handle(
+    'CLAIM_FINAL_TRANSCRIPTION',
+    (_event, meetingId, lease, options) =>
+      db.claimMeetingFinalTranscription(meetingId, lease, {
+        manualRetry: options?.manualRetry === true,
+      }),
   );
   ipcMain.handle(
     'UPDATE_FINAL_TRANSCRIPTION_STAGE',
@@ -2578,8 +2659,8 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'FAIL_FINAL_TRANSCRIPTION',
-    (_event, meetingId, runId, failure) =>
-      db.failMeetingFinalTranscription(meetingId, runId, failure),
+    (_event, meetingId, runId, failure, reasons) =>
+      db.failMeetingFinalTranscription(meetingId, runId, failure, reasons),
   );
   ipcMain.handle(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
@@ -3640,6 +3721,7 @@ app.whenReady().then(async () => {
           template,
           {
             signal: controller.signal,
+            compactWriterContract: true,
             knownTerms: db
               .getAllEntities()
               .filter(
@@ -3696,10 +3778,10 @@ app.whenReady().then(async () => {
       if (!transcript || !transcript.trim()) return null;
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      console.log(`[LLM] Using provider: ${provider.name}`);
+      llmLog.info(`Using provider: ${provider.name}`);
       return await provider.extractSpeakerIdentity(transcript);
     } catch (error) {
-      console.error('[LLM] Speaker extraction failed:', error);
+      llmLog.error('Speaker extraction failed:', error);
       return null; // Graceful fallback
     }
   });
@@ -3709,10 +3791,10 @@ app.whenReady().then(async () => {
       if (!transcript || !transcript.trim()) return 'New Meeting';
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      console.log(`[LLM] Generating title with provider: ${provider.name}`);
+      llmLog.info(`Generating title with provider: ${provider.name}`);
       return await provider.generateTitle(transcript);
     } catch (error) {
-      console.error('[LLM] Title generation failed:', error);
+      llmLog.error('Title generation failed:', error);
       return 'Meeting'; // Graceful fallback
     }
   });
@@ -3732,7 +3814,7 @@ app.whenReady().then(async () => {
         const signals = await provider.extractValueSignals(transcript, summary);
         return normalizeValueSignals(signals);
       } catch (error) {
-        console.error('[LLM] Value signal extraction failed:', error);
+        llmLog.error('Value signal extraction failed:', error);
         throw error;
       }
     },
@@ -3773,7 +3855,7 @@ app.whenReady().then(async () => {
           priorityHints: mergedPriorityHints,
         });
       } catch (error) {
-        console.error('[LLM] Entity extraction failed:', error);
+        llmLog.error('Entity extraction failed:', error);
         throw error;
       }
     },
@@ -3796,7 +3878,7 @@ app.whenReady().then(async () => {
     ) => {
       try {
         if (!transcript || !transcript.trim()) {
-          console.log('[LLM] Skipping entity extraction for empty transcript');
+          llmLog.debug('Skipping entity extraction for empty transcript');
           return { created: 0, linked: 0 };
         }
         const settings = await getAllSettings(db);
@@ -3943,7 +4025,7 @@ app.whenReady().then(async () => {
         clearAbortControllerForMeeting(String(meetingId));
         return result;
       } catch (error) {
-        console.error('[LLM] Entity extraction and processing failed:', error);
+        llmLog.error('Entity extraction and processing failed:', error);
         throw error;
       }
     },
@@ -5176,9 +5258,17 @@ app.whenReady().then(async () => {
       {
         getMeeting: (meetingId) =>
           (db.getMeeting(meetingId) as db.PersistedMeeting | null) ?? null,
-        saveMeeting: (meeting) => db.saveMeeting(meeting),
+        saveMeeting: (meeting) => {
+          const saved = db.saveMeeting(meeting);
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('MEETING_NOTES_UPDATED', meeting.id);
+          }
+          return saved;
+        },
         stitchWavSegments: async (segments, outputTag) =>
           await stitchWavSegments({ segments, outputTag }),
+        mixWavSources: async (inputPaths, outputTag) =>
+          await mixWavSources({ inputPaths, outputTag }),
         repairRawChunk: async (inputPath) => {
           const outputPath = path.join(
             app.getPath('temp'),
@@ -5281,7 +5371,7 @@ app.whenReady().then(async () => {
       recovery.failedRecoveryCount > 0 ||
       recovery.skippedInvalidManifestCount > 0
     ) {
-      console.log('[Pluto] Capture-journal recovery summary:', recovery);
+      plutoLog.info('Capture-journal recovery summary:', recovery);
     }
   } catch (error) {
     console.warn(

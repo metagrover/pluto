@@ -11,7 +11,8 @@ export type RecordingStopSnapshot = {
 };
 
 export const canDeleteMeeting = (finalizationStatus?: string) =>
-  finalizationStatus !== 'recovery_required';
+  finalizationStatus !== 'recovery_required' &&
+  finalizationStatus !== 'processing';
 
 export const getTerminalRecordingFailureMessage = () =>
   "Recording saved, but Pluto couldn't finish the transcript.";

@@ -77,6 +77,7 @@ const run = async (
       contextTokens: 16384,
       signal: controller.signal,
       reviewProtocol: 'editor',
+      compactWriterContract: true,
       generate: async (request) => {
         stages.push(request.task);
         const wire = createNotesWireRequest(

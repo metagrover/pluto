@@ -93,6 +93,35 @@ const dependencies = () => {
 };
 
 describe('runFinalTranscription', () => {
+  it('does not publish all-Me speech when the System reference capture is incomplete', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) =>
+      result(request.source, { noSpeech: request.source === 'system' }),
+    );
+    const outcome = await runFinalTranscription(
+      {
+        ...baseInput,
+        captureEvidence: {
+          ...baseInput.captureEvidence,
+          systemCaptureIncomplete: true,
+        },
+      },
+      deps,
+    );
+    expect(outcome).toEqual({
+      status: 'needs_attention',
+      reasons: ['system_capture_incomplete'],
+    });
+    expect(deps.transcribe).not.toHaveBeenCalled();
+    expect(deps.commitCanonical).not.toHaveBeenCalled();
+    expect(deps.startAnalysis).not.toHaveBeenCalled();
+    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failure: 'required_source_failed',
+        reasons: ['system_capture_incomplete'],
+      }),
+    );
+  });
   it('persists unsealed evidence through a generation-bound lease', async () => {
     const deps = dependencies();
 
@@ -182,6 +211,144 @@ describe('runFinalTranscription', () => {
     expect(deps.startAnalysis.mock.calls[0][0].transcript).toBe(
       committed.transcript,
     );
+  });
+
+  it('persists stable anonymous labels for multiple supported system speakers', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) => {
+      if (request.source === 'mic') return result('mic');
+      return {
+        ...result('system'),
+        segments: [
+          {
+            start: 5,
+            end: 9,
+            text: 'first remote second remote',
+            words: [
+              { word: 'first', start: 5, end: 5.8 },
+              { word: 'remote', start: 5.8, end: 7 },
+              { word: 'second', start: 7, end: 7.8 },
+              { word: 'remote', start: 7.8, end: 9 },
+            ],
+          },
+        ],
+      };
+    });
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+      turns: [
+        { startTime: 5, endTime: 7, cluster: 'speaker-b' },
+        { startTime: 7, endTime: 9, cluster: 'speaker-a' },
+      ],
+    });
+    deps.speakerEvidence.mockClear();
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    const commit = deps.commitCanonical.mock.calls[0][0];
+    expect(commit.segments.map((segment) => segment.speaker)).toEqual([
+      'Me',
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+    expect(commit.metadata.speakerAttribution).toMatchObject({
+      source: 'recovered_channel_acoustic_v2',
+      mappingApplied: true,
+      remoteDiarization: {
+        attempted: true,
+        input: 'system_audio',
+        applied: true,
+        confidence: 1,
+        clusterCount: 2,
+        labeledSegmentCount: 2,
+      },
+    });
+  });
+
+  it('uses native System energy to label words whose decoder spans include silence', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) =>
+      request.source === 'mic'
+        ? result('mic')
+        : {
+            ...result('system'),
+            segments: [
+              {
+                start: 5,
+                end: 10,
+                text: 'first ending second ending',
+                words: [
+                  { word: 'first', start: 5, end: 6 },
+                  { word: 'ending', start: 6, end: 8 },
+                  { word: 'second', start: 8, end: 9 },
+                  { word: 'ending', start: 9, end: 10 },
+                ],
+              },
+            ],
+          },
+    );
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+      turns: [
+        { startTime: 5, endTime: 6.6, cluster: 'S1' },
+        { startTime: 8, endTime: 9.6, cluster: 'S2' },
+      ],
+      energyWindows: [
+        { startTime: 0, endTime: 4, micRms: 0.03, systemRms: 0 },
+        { startTime: 4, endTime: 5, micRms: 0, systemRms: 0 },
+        { startTime: 5, endTime: 6.6, micRms: 0, systemRms: 0.03 },
+        { startTime: 6.6, endTime: 8, micRms: 0, systemRms: 0 },
+        { startTime: 8, endTime: 9.6, micRms: 0, systemRms: 0.03 },
+        { startTime: 9.6, endTime: 10, micRms: 0, systemRms: 0 },
+      ],
+    });
+    const outcome = await runFinalTranscription(baseInput, deps);
+    expect(outcome.status).toBe('validated');
+    const commit = deps.commitCanonical.mock.calls[0][0];
+    expect(commit.segments.map((segment) => segment.speaker)).toEqual([
+      'Me',
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+    expect(commit.metadata.speakerAttribution.remoteDiarization).toMatchObject({
+      applied: true,
+      confidence: 1,
+      clusterCount: 2,
+    });
+  });
+
+  it('keeps every surviving microphone segment attributed to Me', async () => {
+    const deps = dependencies();
+    deps.transcribe.mockImplementation(async (request) => {
+      if (request.source === 'system') return result('system');
+      return {
+        ...result('mic'),
+        segments: [
+          { start: 0, end: 2, text: 'first microphone voice' },
+          { start: 2, end: 4, text: 'second microphone voice' },
+        ],
+      };
+    });
+    deps.speakerEvidence.mockResolvedValue({
+      ...(await deps.speakerEvidence()),
+    });
+    deps.speakerEvidence.mockClear();
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    expect(deps.commitCanonical.mock.calls[0][0].segments).toEqual([
+      expect.objectContaining({ speaker: 'Me' }),
+      expect.objectContaining({ speaker: 'Me' }),
+      expect.objectContaining({ speaker: 'Them' }),
+    ]);
+    expect(
+      deps.commitCanonical.mock.calls[0][0].metadata.speakerAttribution,
+    ).toMatchObject({
+      source: 'recovered_channel_acoustic_v2',
+      mappingApplied: true,
+    });
   });
 
   it('pauses before inference when system resources are unsafe', async () => {
@@ -277,6 +444,15 @@ describe('runFinalTranscription', () => {
       expect.objectContaining({ speaker: 'Me' }),
       expect.objectContaining({ speaker: 'Them' }),
     ]);
+    expect(
+      deps.commitCanonical.mock.calls[0][0].metadata.speakerAttribution,
+    ).toMatchObject({
+      remoteDiarization: {
+        attempted: true,
+        applied: false,
+        fallbackReason: 'not_enough_speakers',
+      },
+    });
     expect(deps.startAnalysis).toHaveBeenCalledOnce();
   });
 

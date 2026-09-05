@@ -10,6 +10,7 @@ import {
   finishFinalTranscriptionLease,
   readFinalTranscriptionLease,
 } from '../src/services/finalTranscription/finalTranscriptionLease';
+import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import {
   type TranscriptValidationRetryFailure,
   type TranscriptValidationRetryLease,
@@ -134,11 +135,15 @@ import {
   serializeMeetingNotesRunMetric,
 } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
+import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
+import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
-const db = getApplicationDatabase();
+const dbLog = createLogger('DB');
+
+export const db = getApplicationDatabase();
 
 type AttentionItemRow = {
   id: string;
@@ -1106,7 +1111,7 @@ const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
 
   refreshMeetingFts(meeting);
 
-  console.log(`[DB] Save successful for meeting: ${id}`);
+  dbLog.info(`Save successful for meeting: ${id}`);
   return result;
 };
 
@@ -1142,6 +1147,7 @@ const finalTranscriptionSourcePathsDigest = (
 export const claimMeetingFinalTranscription = (
   meetingId: string | number,
   lease: FinalTranscriptionLease,
+  options: { manualRetry?: boolean } = {},
 ): boolean =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
@@ -1153,8 +1159,9 @@ export const claimMeetingFinalTranscription = (
       ) &&
         !(
           current.transcript_status === 'validated' &&
-          (readStoredSpeakerAttribution(current.transcript_json)?.source ===
-            'recovered_channel_acoustic_v1' ||
+          (options.manualRetry === true ||
+            readStoredSpeakerAttribution(current.transcript_json)?.source ===
+              'recovered_channel_acoustic_v1' ||
             !hasVerifiedSpeakerAttribution(current.transcript_json))
         ))
     ) {
@@ -1241,6 +1248,7 @@ export const commitMeetingFinalTranscription = (input: {
   canonicalTranscriptJson: string;
   transcriptIntegrityJson: string;
   transcriptValidatedAt: string;
+  speakerCandidates?: SpeakerCandidateEvidence[];
 }): false | { committed: true; transcriptJson: string } =>
   db.transaction(() => {
     const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
@@ -1317,6 +1325,14 @@ export const commitMeetingFinalTranscription = (input: {
         current.transcript_integrity_json,
       ).changes;
     if (changed !== 1) return false;
+    if (input.speakerCandidates !== undefined) {
+      saveMeetingSpeakerCandidates(
+        String(input.meetingId),
+        input.captureGeneration,
+        input.speakerCandidates,
+        db,
+      );
+    }
     const updated = getMeeting(input.meetingId) as PersistedMeeting | undefined;
     if (updated) refreshMeetingFts(updated);
     return {
@@ -1329,6 +1345,7 @@ export const failMeetingFinalTranscription = (
   meetingId: string | number,
   runId: string,
   failure: Parameters<typeof finishFinalTranscriptionLease>[1],
+  reasons: string[] = [],
 ): boolean =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
@@ -1336,11 +1353,19 @@ export const failMeetingFinalTranscription = (
     const integrity = parseIntegrityRecord(current.transcript_integrity_json);
     const lease = readFinalTranscriptionLease(integrity.finalTranscription);
     if (!lease || lease.runId !== runId || !failure) return false;
+    const boundedReasons = [
+      ...new Set(
+        reasons
+          .filter((reason) => typeof reason === 'string' && reason.length > 0)
+          .map((reason) => reason.slice(0, 128)),
+      ),
+    ].slice(0, 16);
     return (
       db
         .prepare(
           `UPDATE meetings
            SET transcript_status = 'needs_attention',
+               finalization_status = 'needs_attention',
                transcript_json = ?,
                transcript_integrity_json = ?
            WHERE id = ? AND transcript_integrity_json IS ?`,
@@ -1364,6 +1389,7 @@ export const failMeetingFinalTranscription = (
             ],
             validationProof: undefined,
             retry: undefined,
+            reasons: boundedReasons,
             finalTranscription: finishFinalTranscriptionLease(lease, failure),
           }),
           String(meetingId),
@@ -1393,6 +1419,7 @@ export const expireInterruptedFinalTranscription = (): number =>
         .prepare(
           `UPDATE meetings
            SET transcript_status = 'needs_attention',
+               finalization_status = 'needs_attention',
                transcript_json = ?,
                transcript_integrity_json = ?
            WHERE id = ? AND transcript_integrity_json IS ?`,
@@ -3053,7 +3080,7 @@ export const deleteMeeting = (id: string | number) => {
   const meeting = getMeeting(safeId) as PersistedMeeting | undefined;
 
   if (!meeting) {
-    console.warn(`[DB] deleteMeeting: Meeting not found for id: ${safeId}`);
+    dbLog.warn(`deleteMeeting: Meeting not found for id: ${safeId}`);
     return;
   }
 
@@ -3065,12 +3092,9 @@ export const deleteMeeting = (id: string | number) => {
   if (meeting.audio_path && fs.existsSync(meeting.audio_path)) {
     try {
       fs.unlinkSync(meeting.audio_path);
-      console.log(`[DB] Deleted audio file: ${meeting.audio_path}`);
+      dbLog.debug(`Deleted audio file: ${meeting.audio_path}`);
     } catch (e) {
-      console.warn(
-        `[DB] Failed to delete audio file: ${meeting.audio_path}`,
-        e,
-      );
+      dbLog.warn(`Failed to delete audio file: ${meeting.audio_path}`, e);
     }
   }
 
@@ -3093,12 +3117,17 @@ export const deleteMeeting = (id: string | number) => {
   // 4. Delete the meeting itself
   // meeting_entities will be deleted by CASCADE
   for (const table of [
+    'meeting_speaker_candidates',
+    'speaker_voice_rejections',
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',
   ]) {
     db.prepare(`DELETE FROM ${table} WHERE meeting_id = ?`).run(safeId);
   }
+  db.prepare(
+    'DELETE FROM speaker_voice_enrollments WHERE source_meeting_id = ?',
+  ).run(safeId);
   const result = db.prepare('DELETE FROM meetings WHERE id = ?').run(safeId);
 
   if (result.changes === 1) {
@@ -3110,7 +3139,7 @@ export const deleteMeeting = (id: string | number) => {
     ).run(safeId);
   }
 
-  console.log(`[DB] Deleted meeting: ${safeId}`);
+  dbLog.info(`Deleted meeting: ${safeId}`);
 
   // 5. Clean up orphan entities (optional but requested "knowledge related to the meeting")
   // We delete entities that have no remaining meeting connections AND no remaining links
@@ -3131,7 +3160,7 @@ export const deleteMeeting = (id: string | number) => {
           WHERE a.person_id = entities.id)
     `).run();
   } catch (e) {
-    console.warn('[DB] Failed to clean up orphan entities:', e);
+    dbLog.warn('Failed to clean up orphan entities:', e);
   }
 
   // Update entities FTS
@@ -4067,14 +4096,30 @@ export const getProjectEntityIdsForMeeting = (meetingId: string): string[] => {
 export const getPersonEntityIdsForMeeting = (meetingId: string): string[] => {
   const rows = db
     .prepare(`
-      SELECT DISTINCT COALESCE(alias.canonical_id, e.id) AS id
-      FROM entities e
-      JOIN meeting_entities me ON me.entity_id = e.id
-      LEFT JOIN person_aliases alias
-        ON alias.person_id = e.id AND alias.active = 1
-      WHERE me.meeting_id = ? AND e.type = 'person'
+      WITH person_identity AS (
+        SELECT person.id AS source_id,
+          COALESCE(alias.canonical_id, person.id) AS canonical_id
+        FROM entities person
+        LEFT JOIN person_aliases alias
+          ON alias.person_id = person.id AND alias.active = 1
+        WHERE person.type = 'person'
+      )
+      SELECT DISTINCT identity.canonical_id AS id
+      FROM person_identity identity
+      JOIN meeting_entities me ON me.entity_id = identity.source_id
+      WHERE me.meeting_id = ?
+      UNION
+      SELECT DISTINCT identity.canonical_id AS id
+      FROM identity_bindings binding
+      JOIN person_identity identity
+        ON identity.source_id = json_extract(binding.payload, '$.personId')
+      WHERE binding.meeting_id = ?
+        AND json_valid(binding.payload)
+        AND json_extract(binding.payload, '$.individual') = 1
+        AND json_type(binding.payload, '$.personId') = 'text'
+      ORDER BY id
     `)
-    .all(meetingId) as Array<{ id: string }>;
+    .all(meetingId, meetingId) as Array<{ id: string }>;
   return rows.map((row) => row.id);
 };
 
@@ -4126,13 +4171,15 @@ export const getTranscriptionPersonCandidates =
       last_mentioned_at: string | null;
     }>;
 
-    return rows.map((row) => ({
-      name: row.name,
-      saliencyScore: row.saliency_score,
-      meetingCount: row.meeting_count,
-      mentionCount: row.mention_count,
-      lastMentionedAt: row.last_mentioned_at,
-    }));
+    return rows
+      .filter((row) => isUsablePersonName(row.name))
+      .map((row) => ({
+        name: row.name,
+        saliencyScore: row.saliency_score,
+        meetingCount: row.meeting_count,
+        mentionCount: row.mention_count,
+        lastMentionedAt: row.last_mentioned_at,
+      }));
   };
 
 /**
@@ -4808,7 +4855,7 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           );
         }
       } catch (error) {
-        console.warn('[DB] Failed to parse note links for backlinks:', error);
+        dbLog.warn('Failed to parse note links for backlinks:', error);
       }
     }
 
@@ -4891,7 +4938,7 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           }
         }
       } catch (error) {
-        console.warn('[DB] Failed to derive synthesis backlinks:', error);
+        dbLog.warn('Failed to derive synthesis backlinks:', error);
       }
     }
 
@@ -5676,7 +5723,7 @@ export const upsertEntity = (entity: {
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(updated.name, existing.id);
     } catch (e) {
-      console.warn('[DB] Failed to update FTS for entity:', existing.id, e);
+      dbLog.warn(`Failed to update FTS for entity ${existing.id}:`, e);
     }
 
     return updated;
@@ -5706,7 +5753,7 @@ export const upsertEntity = (entity: {
     INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)
   `).run(entity.name, id);
 
-  console.log(`[DB] Created entity: ${entity.type} - "${entity.name}"`);
+  dbLog.debug(`Created entity: ${entity.type} - "${entity.name}"`);
   return db.prepare('SELECT * FROM entities WHERE id = ?').get(id) as Entity;
 };
 
@@ -5776,9 +5823,8 @@ export const updatePersonName = (personId: string, name: string): Entity =>
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(trimmed, person.id);
     } catch (error) {
-      console.warn(
-        '[DB] Failed to update person search index:',
-        person.id,
+      dbLog.warn(
+        `Failed to update person search index for ${person.id}:`,
         error,
       );
     }
@@ -6792,11 +6838,11 @@ export const deleteEntity = (id: string): void => {
   try {
     db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(id);
   } catch (e) {
-    console.warn('Failed to delete entity from FTS', e);
+    dbLog.warn('Failed to delete entity from FTS', e);
   }
 
   // CASCADE will handle entity_links and meeting_entities
-  console.log(`[DB] Deleted entity: ${id}`);
+  dbLog.debug(`Deleted entity: ${id}`);
 };
 
 /**
@@ -6890,8 +6936,8 @@ export const linkEntities = (link: {
     link.confidence ?? 1.0,
   );
 
-  console.log(
-    `[DB] Linked entities: ${link.source_entity_id} -[${link.relationship}]-> ${link.target_entity_id}`,
+  dbLog.debug(
+    `Linked entities: ${link.source_entity_id} -[${link.relationship}]-> ${link.target_entity_id}`,
   );
   return db
     .prepare('SELECT * FROM entity_links WHERE id = ?')
@@ -7799,18 +7845,37 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         LEFT JOIN person_aliases alias
           ON alias.person_id = person.id AND alias.active = 1
         WHERE person.type = 'person'
-      ), person_meetings AS (
+      ), person_meeting_evidence AS (
         SELECT
           identity.canonical_id AS person_id,
+          me.meeting_id,
+          me.mention_count,
+          me.context
+        FROM meeting_entities me
+        JOIN person_identity identity ON identity.source_id = me.entity_id
+        UNION ALL
+        SELECT
+          identity.canonical_id AS person_id,
+          binding.meeting_id,
+          0 AS mention_count,
+          NULL AS context
+        FROM identity_bindings binding
+        JOIN person_identity identity
+          ON identity.source_id = json_extract(binding.payload, '$.personId')
+        WHERE json_valid(binding.payload)
+          AND json_extract(binding.payload, '$.individual') = 1
+          AND json_type(binding.payload, '$.personId') = 'text'
+      ), person_meetings AS (
+        SELECT
+          evidence.person_id,
           m.id AS meeting_id,
           m.title AS meeting_title,
           COALESCE(m.started_at, m.created_at) AS meeting_at,
-          SUM(me.mention_count) AS mention_count,
-          GROUP_CONCAT(DISTINCT me.context) AS context
-        FROM meeting_entities me
-        JOIN person_identity identity ON identity.source_id = me.entity_id
-        JOIN meetings m ON m.id = me.meeting_id
-        GROUP BY identity.canonical_id, m.id
+          SUM(evidence.mention_count) AS mention_count,
+          GROUP_CONCAT(DISTINCT evidence.context) AS context
+        FROM person_meeting_evidence evidence
+        JOIN meetings m ON m.id = evidence.meeting_id
+        GROUP BY evidence.person_id, m.id
       ), ranked_meetings AS (
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY person_id
@@ -8449,7 +8514,7 @@ export const logAutoEndEvent = (event: {
     event.app_name || null,
     event.grace_seconds ?? null,
   );
-  console.log(
+  dbLog.debug(
     `[AutoEnd] Logged event: ${event.reason_code} (app=${event.app_name || 'n/a'}, grace=${event.grace_seconds ?? 'n/a'}s)`,
   );
   return id;
@@ -8459,7 +8524,7 @@ export const logAutoEndEvent = (event: {
  * Reset all knowledge (meetings, entities, etc) but KEEP settings
  */
 export const resetKnowledge = () => {
-  console.log('[DB] Resetting knowledge base...');
+  dbLog.info('Resetting knowledge base');
 
   // 1. Delete all audio files
   const allMeetings = db.prepare('SELECT audio_path FROM meetings').all() as {
@@ -8469,15 +8534,19 @@ export const resetKnowledge = () => {
     if (m.audio_path && fs.existsSync(m.audio_path)) {
       try {
         fs.unlinkSync(m.audio_path);
-        console.log(`[DB] Deleted audio file: ${m.audio_path}`);
+        dbLog.debug(`Deleted audio file: ${m.audio_path}`);
       } catch (e) {
-        console.warn(`[DB] Failed to delete audio file: ${m.audio_path}`, e);
+        dbLog.warn(`Failed to delete audio file: ${m.audio_path}`, e);
       }
     }
   }
 
   // 2. Clear tables within a transaction
   const tables = [
+    'speaker_voice_rejections',
+    'speaker_voice_profile_settings',
+    'speaker_voice_enrollments',
+    'meeting_speaker_candidates',
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',
@@ -8524,7 +8593,7 @@ export const resetKnowledge = () => {
   // 3. Vacuum to reclaim space
   db.exec('VACUUM');
 
-  console.log('[DB] Knowledge base reset complete.');
+  dbLog.info('Knowledge base reset complete');
   // Re-init FTS table if needed implies ensuring it's empty, which DELETE FROM does.
   return true;
 };
@@ -8553,10 +8622,10 @@ export const saveMeetingMid = (
       .get(meetingId) as PersistedMeeting | undefined;
     if (meeting) refreshMeetingFts(meeting);
   } catch (e) {
-    console.warn('[DB] Failed to update MID FTS fields:', e);
+    dbLog.warn('Failed to update MID FTS fields:', e);
   }
 
-  console.log(`[DB] Saved MID for meeting: ${meetingId}`);
+  dbLog.debug(`Saved MID for meeting: ${meetingId}`);
 };
 
 /**
@@ -8572,7 +8641,7 @@ export const getMeetingMid = (meetingId: string): MidFrontmatter | null => {
   try {
     return JSON.parse(row.mid_json) as MidFrontmatter;
   } catch {
-    console.warn(`[DB] Failed to parse mid_json for meeting: ${meetingId}`);
+    dbLog.warn(`Failed to parse mid_json for meeting: ${meetingId}`);
     return null;
   }
 };

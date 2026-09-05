@@ -175,6 +175,58 @@ describe('meeting analysis run coordinator', () => {
     ).toBeGreaterThanOrEqual(25);
   });
 
+  it('aborts an admitted notes run at the absolute deadline with an exact failure code', async () => {
+    const updateMeetingAnalysisRunStatus = vi.fn().mockReturnValue(true);
+    const generateStructuredAnalysis = vi.fn(
+      async () => new Promise<never>(() => undefined),
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'deadline-run',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'A complete transcript.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'deadline-source',
+          eligibilityRevision: 'deadline-eligibility',
+          userNotesHash: 'deadline-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus,
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      createRunId: () => 'deadline-run-id',
+      notesDeadlineMs: 10,
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'deadline-run',
+        requestId: 'deadline-request',
+        template: 'auto',
+        reason: 'manual',
+      }),
+    ).rejects.toThrow('notes_deadline_exceeded');
+    expect(updateMeetingAnalysisRunStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notesStatus: 'failed',
+        stage: 'notes_failed',
+        errorCode: 'notes_deadline_exceeded',
+      }),
+    );
+  }, 500);
+
   it('stops automatic retries after two failures for the same fingerprint while allowing manual retry', async () => {
     const generateStructuredAnalysis = vi.fn().mockResolvedValue({
       analysis_schema_version: 3,
@@ -206,7 +258,7 @@ describe('meeting analysis run coordinator', () => {
           thinking: null,
           seed: null,
           contextTokens: 16384,
-          promptVersion: 'notes-v28',
+          promptVersion: 'notes-v29',
         }),
         'utf8',
       )
@@ -400,6 +452,7 @@ describe('meeting analysis run coordinator', () => {
         'Please use the spelling Ogletree.',
         'auto',
         expect.objectContaining({
+          compactWriterContract: true,
           knownTerms: ['Ogletree'],
           trustedUserTerms: [],
           entityHints: ['Ogletree'],
@@ -420,7 +473,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v28',
+            promptVersion: 'notes-v29',
           }),
           'utf8',
         )
@@ -439,7 +492,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v28',
+            promptVersion: 'notes-v29',
           }),
           'utf8',
         )

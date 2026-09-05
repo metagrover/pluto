@@ -153,6 +153,51 @@ describe('cross-conversation project theme synthesis', () => {
     expect(fixture.deps.saveTheme).toHaveBeenCalledOnce();
   });
 
+  it('does not feed a saved review theme back into its own source fingerprint', async () => {
+    const fixture = makeDeps();
+    const changingSources = structuredClone(sources);
+    const projects = new Map(
+      ['candidate-1', 'candidate-2'].map((id) => [
+        id,
+        { id, type: 'project', name: id, metadata: null },
+      ]),
+    );
+    let savedThemeId: string | null = null;
+    fixture.deps.listSources = () => changingSources;
+    fixture.deps.getSource = (id: string) =>
+      changingSources.find((source) => source.id === id);
+    fixture.deps.getProject = (id: string) => projects.get(id);
+    fixture.deps.generate.mockImplementation(async () =>
+      JSON.stringify({
+        themes: [
+          {
+            ...response.themes[0],
+            candidateProjectIds: savedThemeId
+              ? [savedThemeId]
+              : response.themes[0].candidateProjectIds,
+          },
+        ],
+      }),
+    );
+    fixture.deps.saveTheme = vi.fn((theme: any) => {
+      savedThemeId = theme.id;
+      projects.set(theme.id, {
+        id: theme.id,
+        type: 'project',
+        name: theme.name,
+        metadata: JSON.stringify(theme.metadata),
+      });
+      for (const source of changingSources)
+        source.candidateProjects.push({ id: theme.id, name: theme.name });
+    });
+
+    await synthesizeProjectThemes(fixture.deps);
+    await synthesizeProjectThemes(fixture.deps);
+
+    expect(fixture.deps.generate).toHaveBeenCalledOnce();
+    expect(fixture.deps.saveTheme).toHaveBeenCalledOnce();
+  });
+
   it('reuses a user-confirmed project identity instead of creating a duplicate theme', async () => {
     const fixture = makeDeps();
     fixture.deps.getProject = (id: string) => {

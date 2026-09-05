@@ -9,6 +9,10 @@ import {
   type ParakeetEouUpdate,
   createEouTranscriptProjection,
 } from './eouTranscriptProjection';
+import {
+  type LiveEchoEvidenceWindow,
+  createLiveEchoEvidence,
+} from './liveEchoEvidence';
 
 export type EouRendererTransport = {
   invoke(channel: string, payload: unknown): Promise<unknown>;
@@ -39,7 +43,11 @@ export function createEouRendererSession(options: {
   sampleRates: Record<LiveSource, number | (() => number)>;
   transport: EouRendererTransport;
   nowSeconds?: () => number;
-  onSegments(segments: LiveTranscriptSegment[]): void;
+  onSegments(
+    segments: LiveTranscriptSegment[],
+    echoEvidence: LiveEchoEvidenceWindow[],
+    reason: 'recognition' | 'echo_evidence',
+  ): void;
   onUnavailable(code: string): void;
 }) {
   if (
@@ -52,6 +60,8 @@ export function createEouRendererSession(options: {
   }
   const projection = createEouTranscriptProjection();
   projection.reset(options.generation);
+  const echoEvidence = createLiveEchoEvidence();
+  let lastProjectedSegments: LiveTranscriptSegment[] = [];
   let currentStatus: SessionStatus = 'idle';
   let accepting = false;
   let detachListeners: () => void = () => undefined;
@@ -68,6 +78,8 @@ export function createEouRendererSession(options: {
     if (currentStatus === 'unavailable' || currentStatus === 'finished') return;
     currentStatus = 'unavailable';
     accepting = false;
+    echoEvidence.reset();
+    lastProjectedSegments = [];
     detachListeners();
     options.onUnavailable(code);
     void options.transport
@@ -84,6 +96,25 @@ export function createEouRendererSession(options: {
     if (source.outstanding >= MAX_OUTSTANDING) {
       fail('parakeet_backpressure');
       return;
+    }
+    const sourceOffset = sourceOffsetsSeconds[frame.source];
+    if (sourceOffset !== null) {
+      const evidenceChanged = echoEvidence.append({
+        source: frame.source,
+        sampleRate: frame.sampleRate,
+        samples: frame.samples,
+        startTimeMs: (sourceOffset + frame.audioStartSeconds) * 1_000,
+        endTimeMs: (sourceOffset + frame.audioEndSeconds) * 1_000,
+      });
+      // Acoustic corroboration can arrive after the final ASR revision. Refresh
+      // its presentation when support changes, without waiting for more speech.
+      if (evidenceChanged && lastProjectedSegments.length > 0) {
+        options.onSegments(
+          lastProjectedSegments,
+          echoEvidence.snapshot(),
+          'echo_evidence',
+        );
+      }
     }
     source.outstanding += 1;
     const operation = source.tail.then(async () => {
@@ -126,11 +157,14 @@ export function createEouRendererSession(options: {
     )
       return;
     try {
+      lastProjectedSegments = projection.apply(
+        payload.event,
+        sourceOffsetsSeconds[payload.event.source] ?? 0,
+      );
       options.onSegments(
-        projection.apply(
-          payload.event,
-          sourceOffsetsSeconds[payload.event.source] ?? 0,
-        ),
+        lastProjectedSegments,
+        echoEvidence.snapshot(),
+        'recognition',
       );
     } catch (error) {
       fail(

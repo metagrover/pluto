@@ -3,16 +3,19 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../../utils/speakerAttribution.ts';
+import { SYSTEM_CAPTURE_INCOMPLETE_REASON } from '../../utils/transcriptIntegrity.ts';
 import type { StoredTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.ts';
 import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from '../recordingTranscriptValidation.ts';
+import type { SpeakerCandidateEvidence } from '../speakerCandidateEvidence.ts';
 import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
 import { applyRecoveredChannelEvidence } from './applyRecoveredChannelEvidence.ts';
+import { applyRemoteSpeakerClusters } from './applyRemoteSpeakerClusters.ts';
 import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
 import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
 import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
@@ -26,7 +29,11 @@ import {
 export type FinalTranscriptionInput = {
   meetingId: string;
   runId: string;
-  captureEvidence: { sealed: boolean; generation: string };
+  captureEvidence: {
+    sealed: boolean;
+    generation: string;
+    systemCaptureIncomplete?: boolean;
+  };
   recordingDurationSeconds: number;
   micAudioPath: string;
   mixedAudioPath: string;
@@ -46,6 +53,7 @@ type CanonicalCommit = {
   segments: AttributionSegment[];
   integrity: RecordingTranscriptValidationResult['evidence'];
   metadata: FinalTranscriptionMetadata;
+  speakerCandidates?: SpeakerCandidateEvidence[];
 };
 
 export type FinalTranscriptionMetadata = {
@@ -153,6 +161,19 @@ export const runFinalTranscription = async <TTranscript>(
       lease,
     });
     return { status: 'needs_attention', reasons: ['evidence_unsealed'] };
+  }
+  if (input.captureEvidence.systemCaptureIncomplete) {
+    await dependencies.markNeedsAttention({
+      meetingId: input.meetingId,
+      captureGeneration: input.captureEvidence.generation,
+      failure: 'required_source_failed',
+      lease,
+      reasons: [SYSTEM_CAPTURE_INCOMPLETE_REASON],
+    });
+    return {
+      status: 'needs_attention',
+      reasons: [SYSTEM_CAPTURE_INCOMPLETE_REASON],
+    };
   }
   const admission = await dependencies.admit?.();
   if (admission && !admission.admitted) {
@@ -344,14 +365,25 @@ export const runFinalTranscription = async <TTranscript>(
       return { status: 'needs_attention', reasons: attribution.reasons };
     }
 
+    const remoteSpeakers = applyRemoteSpeakerClusters({
+      segments: attribution.segments,
+      turns: speakerEvidence.turns,
+      systemEnergyWindows: speakerEvidence.energyWindows,
+    });
+    metadata.speakerAttribution = {
+      ...attribution.attribution,
+      remoteDiarization: remoteSpeakers.metadata,
+    };
+
     lease = advanceFinalTranscriptionLease(lease, 'saving');
     await dependencies.updateLease?.(lease);
     const commit = await dependencies.commitCanonical({
       meetingId: input.meetingId,
       expectedCaptureGeneration: input.captureEvidence.generation,
-      segments: attribution.segments,
+      segments: remoteSpeakers.segments,
       integrity: validation.evidence,
       metadata,
+      speakerCandidates: remoteSpeakers.candidateEvidence,
     });
     if (!commit.committed || commit.transcript === undefined) {
       return { status: 'superseded' };

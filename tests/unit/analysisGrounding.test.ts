@@ -256,6 +256,32 @@ const document = (): AnalysisDocumentV3 => ({
 });
 
 describe('analysis grounding', () => {
+  it('does not parse a leading discourse phrase as a named action owner', () => {
+    const evidence =
+      'Yeah, I can generate a snapshot. So I will create a single HTML and send it.';
+
+    expect(
+      groundSourceReviewedItem(
+        {
+          text: 'Create and send a single HTML snapshot',
+          kind: 'action',
+          owner: 'Them',
+          due: null,
+        },
+        {
+          evidence,
+          quotedEvidence: evidence,
+          sourceLine: `Me: ${evidence}`,
+          sourceLines: [
+            'Me: Yeah, I can generate a snapshot.',
+            'Them: So I will create a single HTML and send it.',
+          ],
+          lineIndex: 0,
+        },
+      )?.owner,
+    ).toBeNull();
+  });
+
   it('derives a first-person action owner from the evidence speaker and removes team framing', () => {
     const input = document();
     input.topics[0].action_items = [

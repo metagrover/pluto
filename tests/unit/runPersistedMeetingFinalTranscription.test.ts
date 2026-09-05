@@ -44,7 +44,7 @@ const finalMetadata = {
     droppedEmbeddedMicFragmentCount: 0,
   },
   speakerAttribution: {
-    source: 'recovered_channel_acoustic_v1' as const,
+    source: 'recovered_channel_acoustic_v2' as const,
     confidence: 1,
     diarizationAttempted: true,
     mappingApplied: true,
@@ -84,6 +84,51 @@ describe('runPersistedMeetingFinalTranscription', () => {
     });
     mocks.processDownstream.mockResolvedValue({ status: 'complete' });
   });
+
+  it.each([
+    'available',
+    'failed_during_capture',
+    'unavailable_at_start',
+    'stale',
+    'missing',
+  ])(
+    'passes %s journal capture evidence through the persisted production boundary',
+    async (status) => {
+      const meeting = {
+        id: 'source-check',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{}',
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        }),
+      } as Meeting;
+      const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+          if (status === 'missing') throw new Error('missing');
+          return {
+            schemaVersion: 3,
+            generation: status === 'stale' ? 'old' : 'generation-1',
+            lifecycleState: 'sealed',
+            sourceAvailability: {
+              system: status === 'stale' ? 'available' : status,
+            },
+            intervals: [{ sources: { system: { disposition: 'captured' } } }],
+          };
+        }
+        return null;
+      });
+      mocks.runFinal.mockImplementation(async (input) => {
+        expect(input.captureEvidence.systemCaptureIncomplete).toBe(
+          status !== 'available',
+        );
+        return { status: 'needs_attention' };
+      });
+      await runPersistedMeetingFinalTranscription(meeting, invoke);
+      expect(invoke).toHaveBeenCalledWith('AUDIO_CAPTURE_JOURNAL_READ', {
+        meetingId: 'source-check',
+      });
+    },
+  );
 
   it('reconstructs sealed inputs and hands the exact canonical commit downstream', async () => {
     const meeting = {
@@ -224,7 +269,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
     ]);
     expect(persisted.transcription.diarization).toBe(false);
     expect(persisted.speakerAttribution).toMatchObject({
-      source: 'recovered_channel_acoustic_v1',
+      source: 'recovered_channel_acoustic_v2',
       mappingApplied: true,
     });
     expect(
@@ -235,47 +280,254 @@ describe('runPersistedMeetingFinalTranscription', () => {
     ).toMatchObject({ speakerAttributionVerified: true });
   });
 
-  it('preserves saved transcript text during a validated speaker-label retry', async () => {
+  it.each([false, true])(
+    'preserves saved text only for automatic label repair (manual retry: %s)',
+    async (manualRetry) => {
+      const meeting = {
+        id: 'meeting-speaker-retry',
+        title: 'Meeting',
+        created_at: '2026-08-15T00:00:00.000Z',
+        started_at: '2026-08-15T00:00:00.000Z',
+        duration_seconds: 60,
+        audio_path: '/approved/mic.wav',
+        mixed_audio_path: '/approved/mixed.wav',
+        system_audio_path: '/approved/system.wav',
+        capture_journal_generation: 'generation-1',
+        transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          segments: [
+            { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
+          ],
+        }),
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: {
+            kind: 'sealed_capture_activity_v2',
+            digestSha256: 'digest',
+          },
+          activityEvidence: { private: 'verified by parser' },
+        }),
+      } as Meeting;
+      mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
+      const invoke = vi.fn(async (channel: string) =>
+        channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
+      );
+
+      await runPersistedMeetingFinalTranscription(meeting, invoke, {
+        runId: 'run-speaker-retry',
+        manualRetry,
+      });
+
+      expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+        preserveProvisionalText: !manualRetry,
+        provisionalSegments: [
+          expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
+        ],
+      });
+    },
+  );
+
+  it('rebuilds sealed System audio and its mix before an explicit historical retry', async () => {
     const meeting = {
-      id: 'meeting-speaker-retry',
+      id: 'meeting-mixed-rate-retry',
       title: 'Meeting',
-      created_at: '2026-08-15T00:00:00.000Z',
-      started_at: '2026-08-15T00:00:00.000Z',
+      created_at: '2026-09-04T00:00:00.000Z',
       duration_seconds: 60,
       audio_path: '/approved/mic.wav',
-      mixed_audio_path: '/approved/mixed.wav',
-      system_audio_path: '/approved/system.wav',
+      system_audio_path: '/damaged/system.wav',
+      mixed_audio_path: '/damaged/mix.wav',
       capture_journal_generation: 'generation-1',
-      transcript_status: 'validated',
-      transcript_json: JSON.stringify({
-        segments: [
-          { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
-        ],
-      }),
+      transcript_status: 'needs_attention',
+      transcript_validated_at: '2026-09-04T00:01:00.000Z',
+      transcript_json: JSON.stringify({ segments: [] }),
       transcript_integrity_json: JSON.stringify({
-        evidenceProvenance: {
-          kind: 'sealed_capture_activity_v2',
-          digestSha256: 'digest',
-        },
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
         activityEvidence: { private: 'verified by parser' },
       }),
     } as Meeting;
-    mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
-    const invoke = vi.fn(async (channel: string) =>
-      channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
-    );
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+        return {
+          schemaVersion: 3,
+          lifecycleState: 'sealed',
+          generation: 'generation-1',
+          sourceAvailability: { system: 'unavailable_at_start' },
+          intervals: [{ sources: { system: { disposition: 'captured' } } }],
+        };
+      }
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE') {
+        expect(args[0]).toMatchObject({
+          meetingId: 'meeting-mixed-rate-retry',
+          source: 'system',
+        });
+        return '/repaired/system.wav';
+      }
+      if (channel === 'AUDIO_MIX_WAV') {
+        expect(args[0]).toEqual({
+          inputPaths: ['/approved/mic.wav', '/repaired/system.wav'],
+          outputTag: 'meeting-mixed-rate-retry-repaired-mix',
+        });
+        return '/repaired/mix.wav';
+      }
+      if (channel === 'SAVE_MEETING') {
+        expect(args[0]).toMatchObject({
+          audio_path: '/approved/mic.wav',
+          system_audio_path: '/repaired/system.wav',
+          mixed_audio_path: '/repaired/mix.wav',
+          transcript_validated_at: undefined,
+        });
+        return true;
+      }
+      if (channel === 'GET_TRANSCRIPTION_VOCABULARY') return { terms: [] };
+      return null;
+    });
+    mocks.runFinal.mockImplementation(async (input) => {
+      expect(input).toMatchObject({
+        captureEvidence: { systemCaptureIncomplete: false },
+        micAudioPath: '/approved/mic.wav',
+        systemAudioPath: '/repaired/system.wav',
+        mixedAudioPath: '/repaired/mix.wav',
+      });
+      return { status: 'cancelled' };
+    });
 
     await runPersistedMeetingFinalTranscription(meeting, invoke, {
-      runId: 'run-speaker-retry',
+      manualRetry: true,
+      rebuildSealedAudio: true,
     });
 
-    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
-      preserveProvisionalText: true,
-      provisionalSegments: [
-        expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
-      ],
-    });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'AUDIO_DELETE_FILES',
+      expect.anything(),
+    );
   });
+
+  it('keeps the persisted meeting untouched when historical audio rebuilding fails', async () => {
+    const meeting = {
+      id: 'meeting-rebuild-failure',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/damaged/system.wav',
+      mixed_audio_path: '/damaged/mix.wav',
+      capture_journal_generation: 'generation-1',
+    } as Meeting;
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+        return {
+          schemaVersion: 3,
+          lifecycleState: 'sealed',
+          generation: 'generation-1',
+          intervals: [{ sources: { system: { disposition: 'captured' } } }],
+        };
+      }
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE') {
+        return '/repaired/system.wav';
+      }
+      if (channel === 'AUDIO_MIX_WAV') return null;
+      if (channel === 'AUDIO_DELETE_FILES') return { deleted: 1 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      runPersistedMeetingFinalTranscription(meeting, invoke, {
+        manualRetry: true,
+        rebuildSealedAudio: true,
+      }),
+    ).rejects.toThrow('sealed_capture_mix_rebuild_failed');
+
+    expect(invoke).toHaveBeenCalledWith('AUDIO_DELETE_FILES', [
+      '/repaired/system.wav',
+    ]);
+    expect(invoke).not.toHaveBeenCalledWith('SAVE_MEETING', expect.anything());
+    expect(mocks.runFinal).not.toHaveBeenCalled();
+  });
+
+  it.each(['preserved', 'empty', 'missing', 'invalid'] as const)(
+    'keeps %s live evidence separate from canonical text on a successful retry',
+    async (kind) => {
+      const canonical = [
+        {
+          text: 'saved canonical words',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Them',
+        },
+      ];
+      const originalLive = [
+        {
+          text: 'raw microphone echo',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Me',
+          source: 'mic',
+          providerSegmentId: 'raw-mic-1',
+        },
+        {
+          text: 'raw system speech',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Them',
+          source: 'system',
+          providerSegmentId: 'raw-system-1',
+        },
+      ];
+      const liveSegments =
+        kind === 'preserved'
+          ? originalLive
+          : kind === 'empty'
+            ? []
+            : kind === 'invalid'
+              ? [{ text: 'invalid timing', startTime: 'bad', endTime: 1 }]
+              : undefined;
+      const meeting = {
+        id: 'retry-live-evidence',
+        transcript_status: 'validated',
+        capture_journal_generation: 'generation-1',
+        transcript_json: JSON.stringify({ segments: canonical, liveSegments }),
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: {
+            kind: 'sealed_capture_activity_v2',
+            digestSha256: 'digest',
+          },
+          activityEvidence: { private: 'verified by parser' },
+        }),
+      } as Meeting;
+      const before = meeting.transcript_json;
+      const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+        if (channel === 'COMMIT_FINAL_TRANSCRIPTION') {
+          return {
+            committed: true,
+            transcriptJson: (args[0] as { canonicalTranscriptJson: string })
+              .canonicalTranscriptJson,
+          };
+        }
+        return null;
+      });
+      mocks.runFinal.mockImplementation(async (input, dependencies) => {
+        expect(input.provisionalSegments).toEqual(canonical);
+        await dependencies.commitCanonical({
+          segments: canonical.map((segment) => ({
+            ...segment,
+            speaker: 'Remote Speaker 1',
+          })),
+          integrity: {},
+          metadata: finalMetadata,
+        });
+        return { status: 'validated' };
+      });
+
+      await runPersistedMeetingFinalTranscription(meeting, invoke, {
+        manualRetry: true,
+      });
+      const commit = invoke.mock.calls.find(
+        ([channel]) => channel === 'COMMIT_FINAL_TRANSCRIPTION',
+      )?.[1] as { canonicalTranscriptJson: string };
+      const saved = JSON.parse(commit.canonicalTranscriptJson);
+      expect(saved.liveSegments).toEqual(
+        kind === 'preserved' ? originalLive : kind === 'empty' ? [] : canonical,
+      );
+      expect(saved.segments[0].speaker).toBe('Remote Speaker 1');
+      expect(meeting.transcript_json).toBe(before);
+    },
+  );
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
     const meeting = {

@@ -82,7 +82,33 @@ export const buildLiveTranscriptTurns = (
 ): LiveTranscriptTurn[] => {
   const turns: LiveTranscriptTurn[] = [];
 
-  for (const segment of segments) {
+  const visible = segments
+    .filter((raw) => raw.presentation?.visibility !== 'suppressed_echo')
+    .map((raw) =>
+      raw.presentation?.visibility === 'echo_span_removed'
+        ? {
+            ...raw,
+            text: raw.presentation.text,
+            timestampMs: raw.presentation.timestampMs ?? raw.timestampMs,
+            endTimestampMs:
+              raw.presentation.endTimestampMs ?? raw.endTimestampMs,
+          }
+        : raw,
+    );
+  // Ordinary EOU ordering keeps tentative text at the live edge. Reorder only
+  // when retained speech moved within a raw row after removing its echo prefix.
+  if (
+    segments.some(
+      (raw) =>
+        raw.presentation?.visibility === 'echo_span_removed' &&
+        raw.presentation.timestampMs !== undefined &&
+        raw.presentation.timestampMs !== raw.timestampMs,
+    )
+  ) {
+    visible.sort((left, right) => left.timestampMs - right.timestampMs);
+  }
+
+  for (const segment of visible) {
     const current = turns.at(-1);
     const canContinueTurn =
       current?.speaker === segment.speaker &&

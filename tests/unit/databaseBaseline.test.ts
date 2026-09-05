@@ -44,12 +44,16 @@ const expectedTables = [
   'meeting_context_snapshots',
   'meeting_entities',
   'meeting_notes_fts',
+  'meeting_speaker_candidates',
   'meetings',
   'meetings_fts',
   'person_aliases',
   'person_name_aliases',
   'project_aliases',
   'settings',
+  'speaker_voice_enrollments',
+  'speaker_voice_profile_settings',
+  'speaker_voice_rejections',
   'working_memory_snapshots',
 ];
 

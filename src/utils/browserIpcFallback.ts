@@ -24,18 +24,21 @@ type BrowserCaptureJournal = {
 
 const now = new Date().toISOString();
 
+const previewCalendar = {
+  identifier: 'preview-work',
+  title: 'Work',
+  sourceTitle: 'iCloud',
+  sourceType: 'calDAV',
+  colorHex: '#6478D3',
+};
+
 const previewCalendarSnapshot: CalendarIntegrationSnapshot = {
   state: 'ready',
   authorization: 'full_access',
   enabled: true,
-  selectedCalendar: {
-    identifier: 'preview-work',
-    title: 'Work',
-    sourceTitle: 'iCloud',
-    sourceType: 'calDAV',
-    colorHex: '#6478D3',
-  },
-  calendars: [],
+  selectedCalendar: previewCalendar,
+  selectedCalendars: [previewCalendar],
+  calendars: [previewCalendar],
   lastAttemptAt: now,
   lastReadAt: now,
   cacheStart: now,
@@ -661,6 +664,8 @@ const getSetting = (key: unknown) => {
       return 'system';
     case 'auto_end_enabled':
       return 'true';
+    case 'export_include_transcript':
+      return 'false';
     case 'transcription_language':
       return '';
     default:

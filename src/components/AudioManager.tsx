@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  type SilenceWatchdog,
+  createSilenceWatchdog,
+} from '../autoStop/silenceWatchdog';
 import type {
   CaptureLifecycleSnapshot,
   CaptureStartResult,
@@ -19,9 +23,12 @@ import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
-  resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
+import {
+  type AudioResampler,
+  createAudioResampler,
+} from '../utils/audioResampler';
 import { startBoundedSampler } from '../utils/boundedSampler';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
@@ -33,6 +40,8 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
+import { waitForMediaRecorderStop } from '../utils/mediaRecorderLifecycle';
+import { createPcmLivenessMonitor } from '../utils/pcmLiveness';
 import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
@@ -64,6 +73,7 @@ import {
 import {
   KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
   type TranscriptionVocabularySelection,
+  buildTranscriptionParticipantHints,
 } from '../utils/transcriptionVocabulary';
 import {
   type CaptureHealth,
@@ -72,7 +82,6 @@ import {
   type LiveTranscriptSegment,
   type RecordingFinalizationPreview,
   resolveSystemCaptureHealth,
-  scheduleSystemCaptureTimeout,
   withCaptureDurabilityWarning,
 } from './features/recordingWorkspaceModel';
 
@@ -93,8 +102,11 @@ interface AudioManagerProps {
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
+  transcriptionParticipantHints?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
+  silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
+  calendarEndTimeMs?: number | null;
 
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
@@ -198,6 +210,7 @@ export const AudioManager = ({
   userNotes = '',
   userTitle = '',
   participants = [],
+  transcriptionParticipantHints = [],
   transcriptionSettings,
   onStopSessionRef,
   onStartSessionRef,
@@ -208,6 +221,8 @@ export const AudioManager = ({
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
   systemAudioStatus = 'unknown',
+  silenceAutoStopDuration = '5',
+  calendarEndTimeMs = null,
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const captureHealthRef = useRef<CaptureHealthState>({
@@ -257,6 +272,22 @@ export const AudioManager = ({
   const micPcmSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
+  const AUDIO_TARGET_SAMPLE_RATE = 16000;
+  const micResamplerRef = useRef<AudioResampler | null>(null);
+  const isReconfiguringRef = useRef<boolean>(false);
+  const pendingReconfigureRef = useRef<boolean>(false);
+  const reconfigureDeviceTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const activeDeviceChangeListenerRef = useRef<(() => void) | null>(null);
+  const startMicMediaRecorderRef = useRef<
+    | ((
+        stream: MediaStream,
+        allowBeforeRecording?: boolean,
+      ) => Promise<boolean>)
+    | null
+  >(null);
+  const deviceChangeDebounceMs = 200;
   const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
   const systemAudioChunkSeenRef = useRef(false);
   const systemAudioHealthRef = useRef<CaptureHealth>('warning');
@@ -293,6 +324,31 @@ export const AudioManager = ({
   const stopSessionActionRef = useRef<(endReason?: string) => void>(
     () => undefined,
   );
+  const silenceWatchdogRef = useRef<SilenceWatchdog | null>(null);
+  const calendarEndTimeMsRef = useRef<number | null>(null);
+  const silenceAutoStopDurationRef = useRef<string | undefined>(
+    silenceAutoStopDuration,
+  );
+
+  useEffect(() => {
+    calendarEndTimeMsRef.current = calendarEndTimeMs ?? null;
+  }, [calendarEndTimeMs]);
+
+  useEffect(() => {
+    silenceAutoStopDurationRef.current = silenceAutoStopDuration;
+  }, [silenceAutoStopDuration]);
+
+  const getSilenceTimeoutMs = (): number | null => {
+    const raw = silenceAutoStopDurationRef.current;
+    if (raw === 'off' || raw === 'disabled' || raw === '0') {
+      return null;
+    }
+    const minutes = Number.parseInt(raw || '5', 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return null;
+    }
+    return minutes * 60 * 1000;
+  };
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
     terms: [],
@@ -519,7 +575,7 @@ export const AudioManager = ({
 
     try {
       const readiness = (await window.ipcRenderer.invoke(
-        'RECORDING_READINESS_STATUS',
+        'RECORDING_READINESS_PREPARE',
       )) as { ready: boolean; blockers: string[] };
       if (!readiness.ready) {
         console.warn('[Pluto] Recording readiness failed:', readiness.blockers);
@@ -641,7 +697,12 @@ export const AudioManager = ({
       try {
         const vocabulary = (await window.ipcRenderer.invoke(
           'GET_TRANSCRIPTION_VOCABULARY',
-          { participants },
+          {
+            participants: buildTranscriptionParticipantHints(
+              participants,
+              transcriptionParticipantHints,
+            ),
+          },
         )) as TranscriptionVocabularySelection;
         const initialPrompt =
           typeof vocabulary?.initialPrompt === 'string' &&
@@ -711,15 +772,15 @@ export const AudioManager = ({
           },
         },
         nowSeconds: getMeetingElapsedSeconds,
-        onSegments: (segments) => {
+        onSegments: (segments, echoEvidence, reason) => {
           if (
             currentMeetingIdRef.current !== meetingId ||
             eouGenerationRef.current !== eouGeneration
           )
             return;
-          processedMicSegmentsRef.current = segments.map(
-            toStoredLiveTranscriptCandidate,
-          );
+          if (segments.length > 0) {
+            silenceWatchdogRef.current?.recordSpeechActivity(Date.now());
+          }
           const activeWindow = activeSpeakerWindowRef.current;
           const activityWindows = activeWindow
             ? [
@@ -733,7 +794,15 @@ export const AudioManager = ({
           const readingSegments = reconcileLiveTranscriptSegments({
             segments,
             activityWindows,
+            echoEvidence,
           });
+          if (reason === 'echo_evidence') {
+            onLiveTranscript?.(readingSegments);
+            return;
+          }
+          processedMicSegmentsRef.current = segments.map(
+            toStoredLiveTranscriptCandidate,
+          );
           liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
             segments,
             () => {
@@ -886,7 +955,11 @@ export const AudioManager = ({
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
-        micPcmSampleRateRef.current = audioContext.sampleRate;
+        micResamplerRef.current = createAudioResampler({
+          inputSampleRate: audioContext.sampleRate,
+          outputSampleRate: AUDIO_TARGET_SAMPLE_RATE,
+        });
+        micPcmSampleRateRef.current = AUDIO_TARGET_SAMPLE_RATE;
         micPcmChunksRef.current = [];
         try {
           const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -895,7 +968,12 @@ export const AudioManager = ({
           processor.onaudioprocess = (evt: AudioProcessingEvent) => {
             const input = evt.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
-            const copied = new Float32Array(input);
+            // Retain for PCM contract compatibility: const copied = new Float32Array(input);
+            const resampled = micResamplerRef.current
+              ? micResamplerRef.current.process(input)
+              : new Float32Array(input);
+            if (resampled.length === 0) return;
+            const copied = new Float32Array(resampled);
             micPcmChunksRef.current.push(copied);
             eouSessionRef.current?.append('mic', copied);
           };
@@ -910,7 +988,7 @@ export const AudioManager = ({
           (window as unknown as Record<string, unknown>).__plutoMicSource =
             micSource;
           console.log(
-            `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz`,
+            `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz -> ${AUDIO_TARGET_SAMPLE_RATE}Hz`,
           );
         } catch (pcmErr) {
           const keepalive = window as unknown as Record<string, unknown>;
@@ -927,37 +1005,74 @@ export const AudioManager = ({
 
       // 4. System Audio: Native AudioCap
       console.log('[Pluto] Starting Native AudioCap...');
-      try {
-        const nativeStarted =
-          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
-        hasSystemRecorderRef.current = nativeStarted === true;
-        systemAudioChunkSeenRef.current = false;
-        systemAudioHealthRef.current = resolveSystemCaptureHealth({
-          nativeStarted: nativeStarted === true,
-          validPcmSeen: false,
-        });
+      const systemCaptureGeneration =
+        captureJournalStateRef.current?.generation;
+      let systemFailureRecorded = false;
+      const markSystemCaptureUnresponsive = () => {
+        if (
+          systemFailureRecorded ||
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'warning';
         publishCaptureHealth({
-          microphone: 'healthy',
-          systemAudio: systemAudioHealthRef.current,
-          captureDurability: captureHealthRef.current.captureDurability,
+          ...captureHealthRef.current,
+          systemAudio: 'warning',
         });
-        if (!nativeStarted) {
-          throw new Error('Native system audio capture did not start');
-        }
-        cancelSystemAudioHealthTimeoutRef.current =
-          scheduleSystemCaptureTimeout(() => {
-            systemAudioHealthRef.current = resolveSystemCaptureHealth({
-              nativeStarted: true,
-              validPcmSeen: false,
-              timedOut: true,
-            });
-            publishCaptureHealth({
-              microphone: 'healthy',
-              systemAudio: systemAudioHealthRef.current,
-              captureDurability: captureHealthRef.current.captureDurability,
-            });
-          }, 3_000);
-
+      };
+      const markSystemCaptureFailed = () => {
+        if (
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'unavailable';
+        publishCaptureHealth({
+          ...captureHealthRef.current,
+          systemAudio: 'unavailable',
+        });
+        if (systemFailureRecorded) return;
+        systemFailureRecorded = true;
+        void captureJournalMutationCoordinatorRef.current
+          .run(async () => {
+            try {
+              const manifest = await refreshCaptureJournalState(meetingId);
+              if (
+                !manifest ||
+                manifest.generation !== systemCaptureGeneration
+              ) {
+                throw new Error('system_capture_failure_generation_mismatch');
+              }
+              captureJournalStateRef.current = await window.ipcRenderer.invoke(
+                'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
+                {
+                  meetingId,
+                  generation: manifest.generation,
+                  expectedRevision: manifest.revision,
+                  source: 'system',
+                },
+              );
+            } catch (error) {
+              captureActivitySessionRef.current?.markDurabilityFailure();
+              throw error;
+            }
+          })
+          .catch((error) => {
+            warnCaptureDurability();
+            console.warn(
+              '[Pluto] Failed to persist System capture failure:',
+              error,
+            );
+          });
+      };
+      systemAudioChunkSeenRef.current = false;
+      systemAudioHealthRef.current = 'warning';
+      const systemLiveness = createPcmLivenessMonitor(
+        markSystemCaptureUnresponsive,
+      );
+      cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
+      try {
         // Setup Listener
         const handler = (_: unknown, chunk: NativeAudioChunk) => {
           if (chunk) {
@@ -997,11 +1112,12 @@ export const AudioManager = ({
               systemPcmCarryoverBytesRef.current,
             );
             systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
-            if (decoded.samples.length === 0) return;
+            if (!systemLiveness.received(decoded.samples)) return;
             eouSessionRef.current?.append('system', decoded.samples);
-            if (systemAudioHealthRef.current !== 'healthy') {
-              cancelSystemAudioHealthTimeoutRef.current?.();
-              cancelSystemAudioHealthTimeoutRef.current = null;
+            if (
+              !systemFailureRecorded &&
+              systemAudioHealthRef.current !== 'healthy'
+            ) {
               systemAudioHealthRef.current = resolveSystemCaptureHealth({
                 nativeStarted: true,
                 validPcmSeen: true,
@@ -1018,19 +1134,31 @@ export const AudioManager = ({
             systemRmsUpdatedAtRef.current = performance.now();
           }
         };
-        nativeAudioUnsubscribeRef.current = window.ipcRenderer.on(
+        const unsubscribeChunks = window.ipcRenderer.on(
           'NATIVE_AUDIO_CHUNK',
           handler,
         );
+        const unsubscribeFailures = window.ipcRenderer.on(
+          'NATIVE_AUDIO_FAILURE',
+          markSystemCaptureFailed,
+        );
+        nativeAudioUnsubscribeRef.current = () => {
+          unsubscribeChunks();
+          unsubscribeFailures();
+        };
+        const nativeStarted =
+          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        hasSystemRecorderRef.current = nativeStarted === true;
+        if (!nativeStarted) {
+          throw new Error('Native system audio capture did not produce PCM');
+        }
         console.log('[Pluto] Native AudioCap started & listening.');
       } catch (sysErr) {
         hasSystemRecorderRef.current = false;
-        systemAudioHealthRef.current = 'unavailable';
-        publishCaptureHealth({
-          microphone: 'healthy',
-          systemAudio: systemAudioHealthRef.current,
-          captureDurability: captureHealthRef.current.captureDurability,
-        });
+        systemLiveness.stop();
+        nativeAudioUnsubscribeRef.current?.();
+        nativeAudioUnsubscribeRef.current = null;
+        markSystemCaptureFailed();
         console.warn('[Pluto] System audio failed:', sysErr);
       }
 
@@ -1057,8 +1185,28 @@ export const AudioManager = ({
       disableMicChunkTranscriptionRef.current = false;
       micWebmInitSegmentRef.current = null;
 
-      if (micStream) {
-        const micRecorder = new MediaRecorder(micStream, getRecorderOptions());
+      const startMicMediaRecorder = async (
+        stream: MediaStream,
+        allowBeforeRecording = false,
+      ): Promise<boolean> => {
+        const oldRecorder = micRecorderRef.current;
+        if (oldRecorder) {
+          const stopped = await waitForMediaRecorderStop(oldRecorder, 500);
+          if (!stopped) {
+            console.warn(
+              '[Pluto] Timed out stopping microphone recorder during device reconfiguration',
+            );
+            return false;
+          }
+          await captureActivitySessionRef.current?.drain();
+        }
+        if (
+          (!allowBeforeRecording && !isRecordingRef.current) ||
+          stopInFlightRef.current
+        ) {
+          return false;
+        }
+        const micRecorder = new MediaRecorder(stream, getRecorderOptions());
         micRecorderRef.current = micRecorder;
         micMimeTypeRef.current = micRecorder.mimeType || null;
         console.log(
@@ -1150,33 +1298,15 @@ export const AudioManager = ({
                 0.2,
                 chunkEndSec - chunkStartSec,
               );
-              const rawSampleRateEstimate = totalLen / chunkDurationSec;
-              if (
-                rawSampleRateEstimate >= 8000 &&
-                rawSampleRateEstimate <= 768000
-              ) {
-                systemPcmSampleRateRef.current = resolvePcmTimelineSampleRate(
-                  totalLen,
-                  chunkDurationSec,
-                  systemPcmSampleRateRef.current,
-                );
-              }
-              if (index < 3) {
-                console.log(
-                  `[Pluto] System chunk #${index} sampleRate estimate: raw=${rawSampleRateEstimate.toFixed(0)}Hz, ` +
-                    `using=${systemPcmSampleRateRef.current}Hz, samples=${totalLen}, duration=${chunkDurationSec.toFixed(2)}s`,
-                );
-              }
+              // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
+              // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
+              systemPcmSampleRateRef.current = 48000;
               const intervalPcm = trimPcmLeadingOverflow(
                 merged,
-                systemPcmSampleRateRef.current,
+                48000,
                 chunkDurationSec,
               );
-              systemBlob = createWavBlob(
-                intervalPcm,
-                systemPcmSampleRateRef.current,
-                1,
-              );
+              systemBlob = createWavBlob(intervalPcm, 48000, 1);
               // Clear for next chunk
               systemPcmChunksRef.current = [];
             }
@@ -1209,13 +1339,22 @@ export const AudioManager = ({
           }
         };
 
+        micRecorder.start(CHUNK_SECONDS * 1000);
+        console.log('[Pluto] Microphone recording started.');
+        return true;
+      };
+      startMicMediaRecorderRef.current = startMicMediaRecorder;
+
+      if (micStream) {
         // AudioCap starts before MediaRecorder so the native tap can become
         // healthy. Discard that setup pre-roll at the synchronization point;
         // otherwise system timestamps can extend beyond the journal interval.
         systemPcmChunksRef.current = [];
         systemPcmCarryoverBytesRef.current = new Uint8Array(0);
-        micRecorder.start(CHUNK_SECONDS * 1000);
-        console.log('[Pluto] Microphone recording started.');
+        const recorderStarted = await startMicMediaRecorder(micStream, true);
+        if (!recorderStarted) {
+          throw new Error('microphone_recorder_start_failed');
+        }
       }
 
       // Only expose the recording state once live PCM and durable microphone
@@ -1225,9 +1364,55 @@ export const AudioManager = ({
       isRecordingRef.current = true;
       setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
+      void window.ipcRenderer
+        ?.invoke('CALENDAR_ASSOCIATE_START', { meetingId })
+        .catch(() => {});
+
+      silenceWatchdogRef.current?.disarm();
+      const watchdog = createSilenceWatchdog({
+        silenceTimeoutMs: getSilenceTimeoutMs,
+        calendarEndTimeMs: () => calendarEndTimeMsRef.current,
+        isConferenceSilent: () => {
+          const now = performance.now();
+          const systemRmsAgeMs =
+            systemRmsUpdatedAtRef.current > 0
+              ? now - systemRmsUpdatedAtRef.current
+              : Number.POSITIVE_INFINITY;
+          const currentRms = systemRmsAgeMs <= 1000 ? systemRmsRef.current : 0;
+          return currentRms < SPEAKING_RMS_THRESHOLD;
+        },
+        onTriggerAutoStop: (reason) => {
+          console.log('[Pluto] Silence watchdog triggered auto-stop:', reason);
+          stopSessionActionRef.current(reason);
+        },
+      });
+      silenceWatchdogRef.current = watchdog;
+      watchdog.start(5000);
+
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.mediaDevices?.addEventListener
+      ) {
+        if (activeDeviceChangeListenerRef.current) {
+          navigator.mediaDevices.removeEventListener(
+            'devicechange',
+            activeDeviceChangeListenerRef.current,
+          );
+          activeDeviceChangeListenerRef.current = null;
+        }
+        const listener = () => handleDeviceChangeDebounced();
+        activeDeviceChangeListenerRef.current = listener;
+        navigator.mediaDevices.addEventListener('devicechange', listener);
+      }
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      silenceWatchdogRef.current?.disarm();
+      silenceWatchdogRef.current = null;
+      cancelSystemAudioHealthTimeoutRef.current?.();
+      cancelSystemAudioHealthTimeoutRef.current = null;
+      nativeAudioUnsubscribeRef.current?.();
+      nativeAudioUnsubscribeRef.current = null;
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
       meetingContextIngestionRef.current?.close();
@@ -1324,6 +1509,14 @@ export const AudioManager = ({
       });
 
       if (
+        micRms >= SPEAKING_RMS_THRESHOLD ||
+        systemRms >= SPEAKING_RMS_THRESHOLD ||
+        nextSpeaker !== null
+      ) {
+        silenceWatchdogRef.current?.recordSpeechActivity(Date.now());
+      }
+
+      if (
         now - lastSpeakerTsRef.current >= SPEAKING_MIN_INTERVAL_MS &&
         nextSpeaker !== lastSpeakerRef.current
       ) {
@@ -1339,7 +1532,226 @@ export const AudioManager = ({
     );
   };
 
+  const drainInFlightMicPcm = () => {
+    if (micResamplerRef.current) {
+      const flushed = micResamplerRef.current.flush();
+      if (flushed && flushed.length > 0) {
+        micPcmChunksRef.current.push(flushed);
+        eouSessionRef.current?.append('mic', flushed);
+      }
+    }
+  };
+
+  const handleDeviceChangeReconfigure = async () => {
+    if (isReconfiguringRef.current) {
+      pendingReconfigureRef.current = true;
+      return;
+    }
+    if (!isRecordingRef.current || stopInFlightRef.current) {
+      return;
+    }
+
+    const reconfigureSessionId = currentMeetingIdRef.current;
+    isReconfiguringRef.current = true;
+    publishCaptureHealth({
+      microphone: 'reconfiguring',
+      systemAudio: systemAudioHealthRef.current,
+      captureDurability: captureHealthRef.current.captureDurability,
+    });
+
+    try {
+      drainInFlightMicPcm();
+
+      if (micPcmProcessorRef.current) {
+        micPcmProcessorRef.current.onaudioprocess = null;
+        micPcmProcessorRef.current.disconnect();
+        micPcmProcessorRef.current = null;
+      }
+      if (micPcmSourceRef.current) {
+        micPcmSourceRef.current.disconnect();
+        micPcmSourceRef.current = null;
+      }
+      if (micPcmSinkRef.current) {
+        micPcmSinkRef.current.disconnect();
+        micPcmSinkRef.current = null;
+      }
+      if (micAnalyserRef.current) {
+        micAnalyserRef.current.disconnect();
+        micAnalyserRef.current = null;
+      }
+      if (micStreamRef.current) {
+        for (const track of micStreamRef.current.getTracks()) {
+          track.stop();
+        }
+        micStreamRef.current = null;
+      }
+
+      const newMicStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+
+      const isSessionAborted = () =>
+        !isRecordingRef.current ||
+        stopInFlightRef.current ||
+        currentMeetingIdRef.current !== reconfigureSessionId;
+
+      if (isSessionAborted()) {
+        console.log(
+          '[Pluto] Capture stopped while awaiting getUserMedia; stopping returned tracks',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        return;
+      }
+
+      micStreamRef.current = newMicStream;
+
+      let audioContext = audioContextRef.current;
+      if (!audioContext || audioContext.state === 'closed') {
+        audioContext = new (
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext })
+            .webkitAudioContext
+        )();
+        audioContextRef.current = audioContext;
+      }
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      if (isSessionAborted()) {
+        console.log(
+          '[Pluto] Capture stopped while resuming audioContext; stopping returned tracks',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        return;
+      }
+
+      micResamplerRef.current = createAudioResampler({
+        inputSampleRate: audioContext.sampleRate,
+        outputSampleRate: AUDIO_TARGET_SAMPLE_RATE,
+      });
+      micPcmSampleRateRef.current = AUDIO_TARGET_SAMPLE_RATE;
+
+      const micSource = audioContext.createMediaStreamSource(newMicStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const sink = audioContext.createGain();
+      sink.gain.value = 0.00001;
+
+      processor.onaudioprocess = (evt: AudioProcessingEvent) => {
+        const input = evt.inputBuffer.getChannelData(0);
+        if (!input || input.length === 0) return;
+        // Retain for PCM contract compatibility: const copied = new Float32Array(input);
+        const resampled = micResamplerRef.current
+          ? micResamplerRef.current.process(input)
+          : new Float32Array(input);
+        if (resampled.length === 0) return;
+        const copied = new Float32Array(resampled);
+        micPcmChunksRef.current.push(copied);
+        eouSessionRef.current?.append('mic', copied);
+      };
+
+      micSource.connect(processor);
+      processor.connect(sink);
+      sink.connect(audioContext.destination);
+
+      micPcmSourceRef.current = micSource;
+      micPcmProcessorRef.current = processor;
+      micPcmSinkRef.current = sink;
+
+      (window as unknown as Record<string, unknown>).__plutoMicProcessor =
+        processor;
+      (window as unknown as Record<string, unknown>).__plutoMicSource =
+        micSource;
+
+      startSpeakingMonitor(audioContext, newMicStream);
+
+      // Recreate MediaRecorder with the new stream to preserve the 5-second journal cadence
+      if (startMicMediaRecorderRef.current) {
+        const recorderStarted =
+          await startMicMediaRecorderRef.current(newMicStream);
+        if (!recorderStarted && !isSessionAborted()) {
+          throw new Error('microphone_recorder_reconnect_failed');
+        }
+      }
+
+      if (isSessionAborted()) {
+        console.log(
+          '[Pluto] Capture stopped while starting replacement recorder; stopping tracks and cleaning nodes',
+        );
+        for (const track of newMicStream.getTracks()) {
+          track.stop();
+        }
+        processor.onaudioprocess = null;
+        processor.disconnect();
+        micSource.disconnect();
+        sink.disconnect();
+        return;
+      }
+
+      publishCaptureHealth({
+        microphone: 'healthy',
+        systemAudio: systemAudioHealthRef.current,
+        captureDurability: captureHealthRef.current.captureDurability,
+      });
+      console.log(
+        `[Pluto] Mic reconnected successfully at ${audioContext.sampleRate}Hz -> ${AUDIO_TARGET_SAMPLE_RATE}Hz`,
+      );
+    } catch (reconnectErr) {
+      console.warn(
+        '[Pluto] Failed to reconnect microphone dynamically:',
+        reconnectErr,
+      );
+      publishCaptureHealth({
+        microphone: 'warning',
+        systemAudio: systemAudioHealthRef.current,
+        captureDurability: captureHealthRef.current.captureDurability,
+      });
+    } finally {
+      isReconfiguringRef.current = false;
+      if (pendingReconfigureRef.current) {
+        pendingReconfigureRef.current = false;
+        void handleDeviceChangeReconfigure();
+      }
+    }
+  };
+
+  const handleDeviceChangeDebounced = () => {
+    if (!isRecordingRef.current) return;
+    if (reconfigureDeviceTimeoutRef.current) {
+      clearTimeout(reconfigureDeviceTimeoutRef.current);
+    }
+    reconfigureDeviceTimeoutRef.current = setTimeout(() => {
+      reconfigureDeviceTimeoutRef.current = null;
+      void handleDeviceChangeReconfigure();
+    }, deviceChangeDebounceMs);
+  };
+
   const stopAllTracks = () => {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices?.removeEventListener &&
+      activeDeviceChangeListenerRef.current
+    ) {
+      navigator.mediaDevices.removeEventListener(
+        'devicechange',
+        activeDeviceChangeListenerRef.current,
+      );
+      activeDeviceChangeListenerRef.current = null;
+    }
+    if (reconfigureDeviceTimeoutRef.current) {
+      clearTimeout(reconfigureDeviceTimeoutRef.current);
+      reconfigureDeviceTimeoutRef.current = null;
+    }
+    drainInFlightMicPcm();
     stopSpeakingSamplerRef.current?.();
     stopSpeakingSamplerRef.current = null;
     if (micPcmProcessorRef.current) {
@@ -1475,6 +1887,9 @@ export const AudioManager = ({
   };
 
   const stopSession = async (endReason?: string) => {
+    silenceWatchdogRef.current?.disarm();
+    silenceWatchdogRef.current = null;
+
     const stopSnapshot = beginRecordingFinalization({
       meetingId: currentMeetingIdRef.current,
       stopInFlight: stopInFlightRef.current,
@@ -1708,11 +2123,11 @@ export const AudioManager = ({
       const sealedActivityHandoff = createSealedCaptureActivityHandoff(
         journalSealOutcome.activityEvidence,
       );
-      const capturedSegments = mergeConsecutiveSpeakerSegments(
-        [...processedMicSegmentsRef.current].sort(
-          (left, right) => left.startTime - right.startTime,
-        ),
+      const capturedLiveSegments = [...processedMicSegmentsRef.current].sort(
+        (left, right) => left.startTime - right.startTime,
       );
+      const capturedSegments =
+        mergeConsecutiveSpeakerSegments(capturedLiveSegments);
       const capturedVocabulary = {
         terms: [...transcriptionVocabularyRef.current.terms],
         provenance: { ...transcriptionVocabularyRef.current.provenance },
@@ -1732,6 +2147,7 @@ export const AudioManager = ({
       const buildProvisionalTranscriptJson = (canonicalSource: 'mic' | 'mix') =>
         JSON.stringify(
           buildTranscriptJsonPayload(capturedSegments, {
+            liveSegments: capturedLiveSegments,
             pipelineMode,
             canonicalSource,
             postHydrationBleedPass: false,
@@ -1775,7 +2191,7 @@ export const AudioManager = ({
         folder_id: null,
         is_favorite: false,
         end_reason: endReason || 'manual',
-        finalization_status: 'finalized',
+        finalization_status: 'processing',
         finalization_error_category: null,
       };
       const provisionalIntegrity = {
@@ -2031,6 +2447,8 @@ export const AudioManager = ({
         );
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
+        silenceWatchdogRef.current?.disarm();
+        silenceWatchdogRef.current = null;
         currentMeetingIdRef.current = null;
         eouSessionRef.current?.cancel();
         eouSessionRef.current = null;
@@ -2053,6 +2471,8 @@ export const AudioManager = ({
         }
         cancelSystemAudioHealthTimeoutRef.current?.();
         cancelSystemAudioHealthTimeoutRef.current = null;
+        nativeAudioUnsubscribeRef.current?.();
+        nativeAudioUnsubscribeRef.current = null;
         window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
       }
     };
@@ -2062,12 +2482,31 @@ export const AudioManager = ({
     );
 
     return () => {
+      silenceWatchdogRef.current?.disarm();
+      silenceWatchdogRef.current = null;
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator.mediaDevices?.removeEventListener &&
+        activeDeviceChangeListenerRef.current
+      ) {
+        navigator.mediaDevices.removeEventListener(
+          'devicechange',
+          activeDeviceChangeListenerRef.current,
+        );
+        activeDeviceChangeListenerRef.current = null;
+      }
+      if (reconfigureDeviceTimeoutRef.current) {
+        clearTimeout(reconfigureDeviceTimeoutRef.current);
+        reconfigureDeviceTimeoutRef.current = null;
+      }
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
       meetingContextIngestionRef.current?.close();
       meetingContextIngestionRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
+      nativeAudioUnsubscribeRef.current?.();
+      nativeAudioUnsubscribeRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);
       window.removeEventListener('START_RECORDING', handleStartRecording);
       unsubscribeMeetingDeleted();

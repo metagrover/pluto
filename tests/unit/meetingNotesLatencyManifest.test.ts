@@ -123,9 +123,24 @@ describe('private meeting-notes latency manifest', () => {
   it('summarizes stage tasks and outcomes without retaining stage payloads', () => {
     expect(
       summarizeMeetingNotesLatencyStages([
-        { task: 'notesWriter', outcome: 'complete' },
-        { task: 'notesAudit', outcome: 'truncated' },
-        { task: 'notesAudit', outcome: 'complete' },
+        {
+          task: 'notesWriter',
+          outcome: 'complete',
+          inputTokens: 800,
+          outputTokens: 400,
+        },
+        {
+          task: 'notesAudit',
+          outcome: 'truncated',
+          inputTokens: 900,
+          outputTokens: 500,
+        },
+        {
+          task: 'notesAudit',
+          outcome: 'complete',
+          inputTokens: null,
+          outputTokens: null,
+        },
         { task: 'notesMerge', outcome: 'failed' },
       ]),
     ).toEqual({
@@ -137,6 +152,8 @@ describe('private meeting-notes latency manifest', () => {
         cancelled: 0,
         failed: 1,
       },
+      inputTokens: 1700,
+      outputTokens: 900,
     });
   });
 

@@ -24,11 +24,15 @@ type CalendarStorePort = Pick<
   CalendarStore,
   | 'getState'
   | 'selectCalendar'
+  | 'selectCalendars'
   | 'replaceEvents'
   | 'listEvents'
   | 'recordFailure'
   | 'disconnect'
->;
+> & {
+  matchActiveEvent?: CalendarStore['matchActiveEvent'];
+  associateMeetingAtStart?: CalendarStore['associateMeetingAtStart'];
+};
 
 const authorizationState = (
   authorization: CalendarAuthorizationStatus,
@@ -71,6 +75,7 @@ export const createCalendarService = (deps: {
         authorization: 'restricted',
         enabled: false,
         selectedCalendar: null,
+        selectedCalendars: [],
         calendars: [],
         lastAttemptAt: persisted.lastAttemptAt,
         lastReadAt: persisted.lastReadAt,
@@ -87,17 +92,27 @@ export const createCalendarService = (deps: {
     }
     let state = authorizationState(authorization);
     if (authorization === 'full_access') {
-      if (!calendars.length) state = 'no_calendars';
-      else if (
-        persisted.selectedCalendar &&
-        !calendars.some(
-          (calendar) =>
-            calendar.identifier === persisted.selectedCalendar?.identifier,
-        )
-      ) {
-        state = 'selected_calendar_missing';
-      } else if (persisted.enabled && persisted.selectedCalendar) {
-        state = persisted.errorCode ?? 'ready';
+      if (!calendars.length) {
+        state = 'no_calendars';
+      } else if (persisted.selectedCalendars.length > 0) {
+        const availableIds = new Set(calendars.map((c) => c.identifier));
+        const missing = persisted.selectedCalendars.some(
+          (c) => !availableIds.has(c.identifier),
+        );
+        if (missing) {
+          state = 'selected_calendar_missing';
+        } else if (persisted.enabled) {
+          state = persisted.errorCode ?? 'ready';
+        }
+      } else if (persisted.selectedCalendar) {
+        const exists = calendars.some(
+          (c) => c.identifier === persisted.selectedCalendar?.identifier,
+        );
+        if (!exists) {
+          state = 'selected_calendar_missing';
+        } else if (persisted.enabled) {
+          state = persisted.errorCode ?? 'ready';
+        }
       }
     }
     return {
@@ -105,6 +120,7 @@ export const createCalendarService = (deps: {
       authorization,
       enabled: persisted.enabled,
       selectedCalendar: persisted.selectedCalendar,
+      selectedCalendars: persisted.selectedCalendars,
       calendars,
       lastAttemptAt: persisted.lastAttemptAt,
       lastReadAt: persisted.lastReadAt,
@@ -118,23 +134,36 @@ export const createCalendarService = (deps: {
     if (refreshPromise) return refreshPromise;
     const runGeneration = generation;
     const state = deps.store.getState();
-    if (!state.enabled || !state.selectedCalendar) return Promise.resolve();
+    const targets =
+      state.selectedCalendars.length > 0
+        ? state.selectedCalendars
+        : state.selectedCalendar
+          ? [state.selectedCalendar]
+          : [];
+    if (!state.enabled || targets.length === 0) return Promise.resolve();
+
     const readAt = now();
     const start = new Date(readAt);
     start.setDate(start.getDate() - 14);
     const end = new Date(readAt);
     end.setDate(end.getDate() + 30);
     const nextRevision = state.cacheRevision + 1;
-    refreshPromise = deps.client
-      .listEvents(
-        state.selectedCalendar.identifier,
-        start.toISOString(),
-        end.toISOString(),
-      )
-      .then((events) => {
+
+    refreshPromise = Promise.all(
+      targets.map((cal) =>
+        deps.client.listEvents(
+          cal.identifier,
+          start.toISOString(),
+          end.toISOString(),
+        ),
+      ),
+    )
+      .then((eventLists) => {
         if (runGeneration !== generation) return;
+        const events = eventLists.flat();
         deps.store.replaceEvents({
-          calendarIdentifier: state.selectedCalendar!.identifier,
+          calendarIdentifier:
+            targets.length === 1 ? targets[0].identifier : undefined,
           revision: nextRevision,
           cacheStart: start.toISOString(),
           cacheEnd: end.toISOString(),
@@ -162,14 +191,18 @@ export const createCalendarService = (deps: {
     return snapshotFor(authorization);
   };
 
-  const selectCalendar = async (calendar: CalendarDescriptor) => {
+  const selectCalendars = async (selected: CalendarDescriptor[]) => {
+    if (!selected.length) throw new Error('needs_selection');
     const calendars = await deps.client.listCalendars();
-    const current = calendars.find(
-      (candidate) => candidate.identifier === calendar.identifier,
-    );
-    if (!current) throw new Error('selected_calendar_missing');
+    const availableMap = new Map(calendars.map((c) => [c.identifier, c]));
+    const matching: CalendarDescriptor[] = [];
+    for (const candidate of selected) {
+      const found = availableMap.get(candidate.identifier);
+      if (!found) throw new Error('selected_calendar_missing');
+      matching.push(found);
+    }
     generation += 1;
-    deps.store.selectCalendar(current);
+    deps.store.selectCalendars(matching);
     try {
       await refresh();
     } catch {
@@ -177,6 +210,9 @@ export const createCalendarService = (deps: {
     }
     return snapshotFor('full_access');
   };
+
+  const selectCalendar = (calendar: CalendarDescriptor) =>
+    selectCalendars([calendar]);
 
   const listDay = (start: string, end: string) => {
     const startDate = new Date(start);
@@ -222,12 +258,35 @@ export const createCalendarService = (deps: {
     deps.store.disconnect();
   };
 
+  const matchActiveEvent = (atTime?: string) => {
+    const time = atTime ?? now().toISOString();
+    return (
+      deps.store.matchActiveEvent?.(time) ?? {
+        match: { kind: 'none' as const },
+        event: null,
+      }
+    );
+  };
+
+  const associateMeetingAtStart = (meetingId: string, atTime?: string) => {
+    const time = atTime ?? now().toISOString();
+    return (
+      deps.store.associateMeetingAtStart?.(meetingId, time) ?? {
+        context: null,
+        event: null,
+      }
+    );
+  };
+
   return {
     getSnapshot: snapshotFor,
     connect,
     selectCalendar,
+    selectCalendars,
     refresh,
     listDay,
+    matchActiveEvent,
+    associateMeetingAtStart,
     start,
     stop,
     disconnect,

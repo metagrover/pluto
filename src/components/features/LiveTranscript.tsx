@@ -78,6 +78,7 @@ export const LiveTranscript = ({
   const followingLiveRef = useRef(true);
   const [isFollowingLive, setIsFollowingLive] = useState(true);
   const turns = useMemo(() => buildLiveTranscriptTurns(segments), [segments]);
+  const visibleSegments = turns.flatMap((turn) => turn.segments);
 
   const updateFollowingLive = (following: boolean) => {
     followingLiveRef.current = following;
@@ -118,19 +119,19 @@ export const LiveTranscript = ({
             <h1 id="live-transcript-title">Live transcript</h1>
           </div>
           <span>
-            {segments.length === 0
+            {visibleSegments.length === 0
               ? 'Listening'
               : !isFollowingLive
                 ? 'Reviewing earlier'
                 : integrity === 'lagging'
                   ? 'Falling behind'
-                  : segments.some((segment) => !segment.confirmed)
+                  : visibleSegments.some((segment) => !segment.confirmed)
                     ? 'Refining'
                     : 'Caught up'}
           </span>
         </div>
         <div className="live-transcript-body">
-          {segments.length === 0 && !interimText ? (
+          {visibleSegments.length === 0 && !interimText ? (
             <div className="transcript-waiting">
               <p>Pluto is listening.</p>
               <span>

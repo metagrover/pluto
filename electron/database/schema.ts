@@ -872,6 +872,7 @@ export const calendarIntegration = sqliteTable(
     singleton: integer('singleton').primaryKey(),
     enabled: integer('enabled').notNull().default(0),
     selectedCalendarJson: text('selected_calendar_json'),
+    selectedCalendarsJson: text('selected_calendars_json'),
     cacheRevision: integer('cache_revision').notNull().default(0),
     lastAttemptAt: text('last_attempt_at'),
     lastReadAt: text('last_read_at'),
@@ -1017,3 +1018,101 @@ export const identityInputRevision = sqliteTable('identity_input_revision', {
   singleton: integer('singleton').primaryKey(),
   revision: integer('revision').notNull(),
 });
+
+export const meetingSpeakerCandidates = sqliteTable(
+  'meeting_speaker_candidates',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    speaker: text('speaker').notNull(),
+    sourceRevision: text('source_revision').notNull(),
+    candidateDigest: text('candidate_digest').notNull(),
+    embeddingJson: text('embedding_json').notNull(),
+    cleanDurationSec: real('clean_duration_sec').notNull(),
+    cleanSegmentCount: integer('clean_segment_count').notNull(),
+    cleanChunkCount: integer('clean_chunk_count').notNull(),
+    minimumChunkSimilarity: real('minimum_chunk_similarity').notNull(),
+    meanChunkSimilarity: real('mean_chunk_similarity').notNull(),
+    referenceStartSec: real('reference_start_sec').notNull(),
+    referenceEndSec: real('reference_end_sec').notNull(),
+    referenceExcerpt: text('reference_excerpt').notNull(),
+    provenanceJson: text('provenance_json').notNull(),
+    createdAt: datetime('created_at').default(now),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.meetingId, table.speaker, table.sourceRevision],
+    }),
+    index('idx_meeting_speaker_candidates_meeting').on(table.meetingId),
+  ],
+);
+
+export const speakerVoiceEnrollments = sqliteTable(
+  'speaker_voice_enrollments',
+  {
+    id: text('id').primaryKey(),
+    personId: text('person_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    sourceMeetingId: text('source_meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    sourceRevision: text('source_revision').notNull(),
+    speaker: text('speaker').notNull(),
+    embeddingJson: text('embedding_json').notNull(),
+    chunkCount: integer('chunk_count').notNull(),
+    cleanDurationSec: real('clean_duration_sec').notNull(),
+    minimumChunkSimilarity: real('minimum_chunk_similarity').notNull(),
+    meanChunkSimilarity: real('mean_chunk_similarity').notNull(),
+    referenceStartSec: real('reference_start_sec').notNull(),
+    referenceEndSec: real('reference_end_sec').notNull(),
+    referenceExcerpt: text('reference_excerpt').notNull(),
+    provenanceJson: text('provenance_json').notNull(),
+    candidateDigest: text('candidate_digest').notNull(),
+    createdAt: datetime('created_at').default(now),
+  },
+  (table) => [
+    index('idx_speaker_voice_enrollments_person').on(table.personId),
+    index('idx_speaker_voice_enrollments_meeting').on(table.sourceMeetingId),
+  ],
+);
+
+export const speakerVoiceProfileSettings = sqliteTable(
+  'speaker_voice_profile_settings',
+  {
+    personId: text('person_id')
+      .primaryKey()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    isActive: integer('is_active').notNull().default(1),
+    updatedAt: datetime('updated_at').default(now),
+  },
+);
+
+export const speakerVoiceRejections = sqliteTable(
+  'speaker_voice_rejections',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    speaker: text('speaker').notNull(),
+    sourceRevision: text('source_revision').notNull(),
+    candidateDigest: text('candidate_digest').notNull(),
+    personId: text('person_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    createdAt: datetime('created_at').default(now),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.meetingId,
+        table.speaker,
+        table.sourceRevision,
+        table.candidateDigest,
+        table.personId,
+      ],
+    }),
+    index('idx_speaker_voice_rejections_meeting').on(table.meetingId),
+  ],
+);

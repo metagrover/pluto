@@ -39,6 +39,23 @@ pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json
 
 This flag affects the private benchmark only. Product generation retains an audit at every hierarchy node. Do not promote the experiment unless the case publishes and separately passes the existing source-grounded semantic quality gate.
 
+To measure the writer and merge stages with deterministic validation only and no model audit calls, use the same single-case constraint:
+
+```bash
+pnpm run benchmark:meeting-notes-latency -- --manifest .private/one-meeting.json --mode isolated --hierarchy-audit-strategy deterministic_only --output .artifacts/meeting-notes-latency/deterministic-only.json
+```
+
+This is also benchmark-only. It retains the strict output parser, allowed-source checks, commitment guardrails, and deterministic action/decision owner and deadline grounding. It does not claim semantic equivalence to the audited product path.
+
+To measure the smaller direct-writer response contract, add
+`--compact-writer-contract` to that deterministic-only command. The compact
+contract limits each item to its kind, text, and at most three source labels;
+code derives title evidence, overview, owner, and deadline. It deliberately
+fails instead of entering the hierarchy when the direct request does not fit.
+Do not combine it with another audit strategy or treat a schema-valid result as
+semantic acceptance.
+
+
 Reports contain opaque case keys, source counts, planned leaf and generated-node counts, writer/audit/merge and terminal-outcome counts, aggregate stage timings, repair/repartition counts, status, and stable error categories. They exclude meeting IDs, database paths, transcript text, prompts, generated notes, titles, speakers, source spans, audio paths, raw provider responses, and individual stage payloads.
 
 To summarize the newest 100 organic attempts without reading meeting content:

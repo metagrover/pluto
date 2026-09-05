@@ -8,38 +8,52 @@ import {
   MoreHorizontal,
   Sparkles,
   Undo2,
+  Users,
   X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
-import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
+import {
+  canImproveHistoricalSpeakerLabels,
+  canRetryMeetingSpeakerLabels,
+} from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
-  analysisDocumentToMarkdown,
-  analysisDocumentV3ToMarkdown,
   parseAnalysisEditConflictsJson,
   parseUserEditsJson,
   resolveMeetingAnalysis,
 } from '../../utils/analysisDocument';
 import { buildMeetingNotesDocument } from '../../utils/meetingNotesDocument';
 import {
+  buildMeetingExportFilename,
+  formatMeetingNotesAsMarkdown,
+} from '../../utils/meetingNotesExport';
+import {
   ANALYSIS_SNAPSHOT_PATH,
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
+import { selectReviewableAnonymousSpeakers } from '../../utils/speakerReview';
 import {
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
 } from '../../utils/transcript';
+import { SYSTEM_CAPTURE_INCOMPLETE_REASON } from '../../utils/transcriptIntegrity';
 import {
   buildTranscriptTrustCapabilities,
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
-import { MeetingIdentityControls } from './MeetingIdentityControls';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
+import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
 import {
@@ -50,7 +64,10 @@ import {
   resolveMeetingRegenerationFailurePresentation,
   resolveMeetingRetryProgressPresentation,
 } from './meetingFailurePresentation';
-import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
+import {
+  applyMeetingSpeakerDisplayNames,
+  buildMeetingTranscriptTurns,
+} from './meetingTranscriptPresentation';
 
 const SavedEditConflicts = ({
   conflicts,
@@ -120,6 +137,7 @@ interface MeetingViewProps {
   onRetryTranscriptValidation?: (kind: MeetingRetryKind) => void;
   transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
+  exportIncludeTranscript?: boolean;
 }
 
 type MeetingNotesTemplate =
@@ -220,8 +238,11 @@ export const TranscriptIntegrityPanel = ({
   );
   let canRetryFinalTranscription = false;
   let speakerAttributionFailure = false;
+  let resourcePolicyDenied = false;
+  let systemCaptureIncomplete = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
+      reasons?: unknown;
       finalTranscription?: {
         policy?: unknown;
         state?: unknown;
@@ -233,15 +254,22 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription.state === 'needs_attention';
     speakerAttributionFailure =
       integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
+    resourcePolicyDenied =
+      integrity.finalTranscription?.failure === 'resource_policy_denied';
+    systemCaptureIncomplete =
+      Array.isArray(integrity.reasons) &&
+      integrity.reasons.includes(SYSTEM_CAPTURE_INCOMPLETE_REASON);
     canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
     speakerAttributionFailure = false;
+    resourcePolicyDenied = false;
   }
   canRetryFinalTranscription ||= speakerLabelsRequired;
   speakerAttributionFailure ||= speakerLabelsRequired;
   if (
     hasExistingAnalysis &&
+    !systemCaptureIncomplete &&
     trust.kind !== 'capture_gap' &&
     !speakerAttributionFailure &&
     !retryOperationKind
@@ -250,7 +278,10 @@ export const TranscriptIntegrityPanel = ({
 
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
+    systemCaptureIncomplete,
+    hasExistingTranscript: Boolean(transcriptJson),
     speakerAttributionFailure,
+    resourcePolicyDenied,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,
@@ -261,7 +292,8 @@ export const TranscriptIntegrityPanel = ({
   // committed, let the notes skeleton communicate that remaining work instead
   // of leaving the speaker-label repair banner spinning until analysis ends.
   const visibleRetryOperationKind =
-    retryOperationKind === 'speaker_labels' && !speakerAttributionFailure
+    systemCaptureIncomplete ||
+    (retryOperationKind === 'speaker_labels' && !speakerAttributionFailure)
       ? null
       : retryOperationKind;
   const progressCopy = visibleRetryOperationKind
@@ -633,6 +665,7 @@ export const MeetingView = ({
   onRetryTranscriptValidation,
   transcriptValidationRetryOperation = null,
   calendarContext = null,
+  exportIncludeTranscript = false,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
@@ -646,6 +679,15 @@ export const MeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
+  const [speakerDisplayNames, setSpeakerDisplayNames] = useState<{
+    meetingId: string;
+    names: Record<string, string>;
+  }>({ meetingId: '', names: {} });
+  const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
+  const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
+    string | null
+  >(null);
+
   const titleEdit = useRef({
     meetingId: selectedMeeting.id,
     expectedTitle: selectedMeeting.title,
@@ -765,9 +807,53 @@ export const MeetingView = ({
     selectedMeeting.transcript_json,
     transcriptSegments,
   );
-  const transcriptTurns = buildMeetingTranscriptTurns(
+  const displayNames =
+    speakerDisplayNames.meetingId === String(selectedMeeting.id)
+      ? speakerDisplayNames.names
+      : {};
+  const rawTranscriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,
   );
+  const speakerSummaries = rawTranscriptTurns.reduce<
+    Record<string, { turnCount: number; excerpt: string }>
+  >((summaries, turn) => {
+    const speaker = String(turn.speaker ?? '');
+    if (!speaker) return summaries;
+    const text = turn.segments
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(' ');
+    const current = summaries[speaker];
+    summaries[speaker] = {
+      turnCount: (current?.turnCount ?? 0) + 1,
+      excerpt:
+        current?.excerpt ??
+        (text.length > 180 ? `${text.slice(0, 179).trimEnd()}…` : text),
+    };
+    return summaries;
+  }, {});
+  const reviewableSpeakers = selectReviewableAnonymousSpeakers(
+    Object.keys(speakerSummaries),
+  );
+  const unidentifiedSpeakerCount = reviewableSpeakers.filter(
+    (speaker) => !displayNames[speaker],
+  ).length;
+  const transcriptTurns = buildMeetingTranscriptTurns(
+    applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
+  );
+  const updateSpeakerDisplayNames = useCallback(
+    (names: Record<string, string>) =>
+      setSpeakerDisplayNames({
+        meetingId: String(selectedMeeting.id),
+        names,
+      }),
+    [selectedMeeting.id],
+  );
+  const calendarAttendeeNames = calendarContext
+    ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
+        .map((person) => person?.name?.trim() || person?.email?.trim() || '')
+        .filter(Boolean)
+    : [];
   const hasTranscriptContent = transcriptTurns.length > 0;
   const participantCount = new Set(
     transcriptSegments
@@ -783,13 +869,9 @@ export const MeetingView = ({
   const transcriptValidationRetrying = Boolean(selectedMeetingRetryOperation);
   const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
   const canImproveHistoricalSpeakerLabelsForMeeting =
-    canImproveHistoricalSpeakerLabels(selectedMeeting);
-
-  const canonicalAnalysisMarkdown = v3
-    ? analysisDocumentV3ToMarkdown(v3)
-    : v2
-      ? analysisDocumentToMarkdown(v2)
-      : selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '';
+    canImproveHistoricalSpeakerLabels(selectedMeeting) ||
+    (unidentifiedSpeakerCount > 0 &&
+      canRetryMeetingSpeakerLabels(selectedMeeting));
 
   const notesDocument = buildMeetingNotesDocument({
     v2,
@@ -988,6 +1070,23 @@ export const MeetingView = ({
                     : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
               ) : null}
+              {unidentifiedSpeakerCount > 0 ? (
+                <button
+                  type="button"
+                  id="meeting-header-speaker-review-trigger"
+                  onClick={() => {
+                    setSelectedSpeakerForModal(null);
+                    setIsSpeakerModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                >
+                  <Users size={12} className="opacity-70" />
+                  <span>
+                    {unidentifiedSpeakerCount} unidentified{' '}
+                    {unidentifiedSpeakerCount === 1 ? 'speaker' : 'speakers'}
+                  </span>
+                </button>
+              ) : null}
             </div>
             <div className="meeting-document-actions">
               {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
@@ -1105,20 +1204,31 @@ export const MeetingView = ({
                       type="button"
                       onClick={() => {
                         if (selectedMeeting) {
-                          const summaryText = canonicalAnalysisMarkdown;
-                          const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
-                          const blob = new Blob([content], {
-                            type: 'text/plain',
+                          const markdown = formatMeetingNotesAsMarkdown({
+                            meeting: selectedMeeting,
+                            documentModel: notesDocument,
+                            calendarContext,
+                            transcriptSegments,
+                            includeTranscript: exportIncludeTranscript,
+                          });
+                          const filename = buildMeetingExportFilename(
+                            selectedMeeting.title || 'Untitled Session',
+                            selectedMeeting.created_at || Date.now(),
+                            selectedMeeting.id,
+                          );
+                          const blob = new Blob([markdown], {
+                            type: 'text/markdown;charset=utf-8',
                           });
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = url;
-                          a.download = `pluto-session-${selectedMeeting.id}.txt`;
+                          a.download = filename;
                           a.click();
+                          URL.revokeObjectURL(url);
                         }
                       }}
                       className="meeting-toolbar-button"
-                      aria-label="Export meeting"
+                      aria-label="Export meeting notes"
                     >
                       <svg
                         aria-hidden="true"
@@ -1134,7 +1244,7 @@ export const MeetingView = ({
                           d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                         />
                       </svg>
-                      <span>Export meeting</span>
+                      <span>Export meeting notes</span>
                     </button>
                   </div>
                   {selectedMeeting.finalization_status !==
@@ -1373,7 +1483,6 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
-            <MeetingIdentityControls meetingId={String(selectedMeeting.id)} />
             {hasTranscriptContent ? (
               transcriptTurns.map((turn) => {
                 const text = turn.segments
@@ -1385,10 +1494,51 @@ export const MeetingView = ({
                 )
                   .toString()
                   .padStart(2, '0')}`;
+                const speakerLabel = String(turn.speaker || 'Unknown speaker');
+                const isSelfSpeaker = speakerLabel.endsWith(' (You)');
+                const numberedMatch = speakerLabel.match(/^Speaker (\d+)$/u);
+                const reviewSpeaker = numberedMatch
+                  ? `Remote Speaker ${numberedMatch[1]}`
+                  : speakerLabel === 'Them'
+                    ? 'Them'
+                    : null;
+                const isAnonymousSpeaker = Boolean(
+                  reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
+                );
                 return (
                   <div key={turn.id} className="meeting-transcript-row">
                     <div>
-                      <strong>{turn.speaker || 'Unknown speaker'}</strong>
+                      <strong
+                        className={
+                          isAnonymousSpeaker
+                            ? 'cursor-pointer transition-colors hover:text-pro-accent'
+                            : undefined
+                        }
+                        title={
+                          isAnonymousSpeaker
+                            ? 'Click to review and identify this speaker'
+                            : undefined
+                        }
+                        onClick={
+                          isAnonymousSpeaker
+                            ? () => {
+                                setSelectedSpeakerForModal(reviewSpeaker);
+                                setIsSpeakerModalOpen(true);
+                              }
+                            : undefined
+                        }
+                      >
+                        {isSelfSpeaker ? (
+                          <span>
+                            {speakerLabel.replace(/ \(You\)$/, '')}
+                            <span className="ml-1.5 text-[11px] font-normal text-pro-text-muted">
+                              (You)
+                            </span>
+                          </span>
+                        ) : (
+                          speakerLabel
+                        )}
+                      </strong>
                       <time>{timestamp}</time>
                     </div>
                     <p>{text}</p>
@@ -1401,6 +1551,19 @@ export const MeetingView = ({
           </div>
         </section>
       )}
+      <SpeakerIdentificationModal
+        isOpen={isSpeakerModalOpen}
+        onClose={() => {
+          setIsSpeakerModalOpen(false);
+          setSelectedSpeakerForModal(null);
+        }}
+        meetingId={String(selectedMeeting.id)}
+        initialSpeaker={selectedSpeakerForModal}
+        attendeeNames={calendarAttendeeNames}
+        hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
+        speakerSummaries={speakerSummaries}
+        onDisplayNamesChange={updateSpeakerDisplayNames}
+      />
     </div>
   );
 };

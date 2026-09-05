@@ -1,0 +1,8 @@
+### Recognize confirmed meeting speakers using opt-in local voice profiles
+
+- **Issue:** [#755](https://github.com/metagrover/pluto/issues/755)
+- **PR:** [#762](https://github.com/metagrover/pluto/pull/762)
+- **Changed:** Added cross-meeting speaker recognition using opt-in local voice profiles. ParakeetRuntime computes bounded centroid embeddings and purity statistics during final diarization without raw chunk arrays crossing IPC; candidate embeddings are isolated in a dedicated SQLite table (`meeting_speaker_candidates`) and stripped before reaching the renderer. The SpeakerIdentificationModal presents high-confidence match suggestions with reference audio sample playback, one-click confirmation and rejection, and an opt-in enrollment checkbox. PeopleTab features a Voice Profile management section for inspecting speech evidence, playing reference audio, toggling recognition active/disabled, and permanently deleting voice samples with active-merge family protections.
+- **Why:** Re-identifying frequent meeting participants manually in every session is tedious and repetitive. Opt-in local voice recognition preserves strict biometric privacy (raw embeddings never leave the local database, never enter transcripts, meeting metadata, or renderer IPC) while streamlining participant identification across recurring meetings.
+- **Replaced:** Manual speaker binding as the sole mechanism for participant identification across recurring meetings.
+- **Notes:** Suggestions are default-off (`voice_profile_suggestions_v1`) until validated by private calibration benchmarks with zero false suggestions. Voice profile enrollments and person merges/restores are completely lossless and reversible.

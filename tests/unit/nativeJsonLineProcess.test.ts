@@ -281,6 +281,34 @@ describe('NativeJsonLineProcess live events', () => {
   });
 
   it.each([
+    'parakeet_audio_analysis_failed',
+    'parakeet_diarization_failed',
+  ] as const)(
+    'accepts the declared speaker-evidence failure code %s',
+    async (code) => {
+      const child = new FakeChild();
+      const process = makeProcess(child);
+      const request = process.request({ schemaVersion: 1, id: 'speaker-1' });
+
+      child.stdout.write(
+        `${JSON.stringify({
+          schemaVersion: 1,
+          id: 'speaker-1',
+          ok: false,
+          error: { code },
+        })}\n`,
+      );
+
+      await expect(request).resolves.toMatchObject({
+        id: 'speaker-1',
+        ok: false,
+        error: { code },
+      });
+      expect(child.kill).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     null,
     [],
     { schemaVersion: 1, id: 'open-1', ok: true, result: [] },

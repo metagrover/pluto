@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingFinalTranscription,
+  canRetryMeetingSpeakerLabels,
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
@@ -9,6 +11,8 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
+  shouldRunMeetingFinalTranscription,
+  shouldStartMeetingFinalTranscription,
 } from '../../src/services/postMeetingProcessingCoordinator';
 
 const incomplete = (id: string) => ({
@@ -33,13 +37,44 @@ describe('post-meeting processing coordinator', () => {
         {
           id: 'meeting-1',
           transcript_status: 'provisional',
-          finalization_status: 'finalized',
+          finalization_status: 'processing',
           capture_journal_generation: 'generation-1',
           transcript_json: '{"segments":[]}',
           audio_path: '/approved/mic.wav',
+          system_audio_path: '/approved/system.wav',
+          mixed_audio_path: '/approved/mixed.wav',
         },
       ])?.id,
     ).toBe('meeting-1');
+  });
+
+  it('waits for all recovered audio artifacts before final transcription', () => {
+    expect(
+      shouldRunMeetingFinalTranscription({
+        id: 'meeting-1',
+        transcript_status: 'provisional',
+        finalization_status: 'processing',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{"segments":[]}',
+        has_audio: true,
+        audio_path: '/approved/mic.wav',
+        system_audio_path: '/approved/system.wav',
+        mixed_audio_path: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('rechecks full meeting detail using the initiating retry reason', () => {
+    const appSource = readFileSync('src/App.tsx', 'utf8');
+    expect(appSource).toContain(
+      'shouldStartMeetingFinalTranscription(detail, reason)',
+    );
+    expect(appSource).toContain(
+      "kind === 'speaker_labels' ? 'speaker_labels' : 'manual'",
+    );
+    expect(appSource).toContain(
+      "rebuildSealedAudio: reason === 'speaker_labels'",
+    );
   });
 
   it('does not finalize an unsealed or recovery-required recording', () => {
@@ -81,6 +116,10 @@ describe('post-meeting processing coordinator', () => {
       }),
     };
     expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(shouldStartMeetingFinalTranscription(meeting, 'manual')).toBe(true);
+    expect(shouldStartMeetingFinalTranscription(meeting, 'automatic')).toBe(
+      false,
+    );
     expect(selectNextMeetingForProcessing([meeting], new Set())).toBeNull();
   });
 
@@ -109,6 +148,42 @@ describe('post-meeting processing coordinator', () => {
         }),
       }),
     ).toBe(true);
+  });
+
+  it('requires reprocessing when microphone identity was left unresolved', () => {
+    const meeting = {
+      id: 'anonymous-local-speakers',
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      final_transcription_policy: 'parakeet_final_v1',
+      final_transcription_state: 'complete',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v3',
+          confidence: 0.92,
+          diarizationAttempted: true,
+          mappingApplied: false,
+          speakerSeparation: 'verified',
+          selfIdentity: 'unresolved',
+        },
+        segments: [],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+        finalTranscriptionResult: {
+          policy: 'parakeet_final_v1',
+          engine: 'parakeet_coreml',
+        },
+      }),
+    } as const;
+    expect(isParakeetValidatedMeeting(meeting)).toBe(false);
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
   });
 
   it('offers explicit final-transcription retry for validated channel fallback', () => {
@@ -208,6 +283,10 @@ describe('post-meeting processing coordinator', () => {
 
     expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
     expect(canRetryMeetingFinalTranscription(meeting)).toBe(false);
+    expect(canRetryMeetingSpeakerLabels(meeting)).toBe(true);
+    expect(
+      shouldStartMeetingFinalTranscription(meeting, 'speaker_labels'),
+    ).toBe(true);
     expect(isParakeetValidatedMeeting(meeting)).toBe(true);
   });
 

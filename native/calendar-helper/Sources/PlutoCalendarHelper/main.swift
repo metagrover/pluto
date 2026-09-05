@@ -104,7 +104,8 @@ private func colorHex(_ color: CGColor) -> String? {
 
 @MainActor
 private func calendars() -> [CalendarDescriptor] {
-    eventStore.calendars(for: .event)
+    eventStore.refreshSourcesIfNecessary()
+    return eventStore.calendars(for: .event)
         .filter { $0.type != .birthday }
         .map {
             CalendarDescriptor(

@@ -49,6 +49,7 @@ export interface CalendarIntegrationSnapshot {
   authorization: CalendarAuthorizationStatus;
   enabled: boolean;
   selectedCalendar: CalendarDescriptor | null;
+  selectedCalendars: CalendarDescriptor[];
   calendars: CalendarDescriptor[];
   lastAttemptAt: string | null;
   lastReadAt: string | null;

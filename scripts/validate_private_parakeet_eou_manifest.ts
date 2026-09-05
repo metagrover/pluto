@@ -6,8 +6,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
+import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 
 export type PrivateParakeetEouSource = {
   path: string;

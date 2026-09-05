@@ -18,7 +18,7 @@ import type {
   TranscriptLifecycleStatus,
 } from './transcriptIntegrity.ts';
 
-export const TRANSCRIPT_PIPELINE_VERSION = '3.0.0';
+export const TRANSCRIPT_PIPELINE_VERSION = '3.1.0';
 
 export type CanonicalTranscriptSource = 'mic' | 'mix' | 'recovered_channels';
 export type TranscriptPipelineMode =
@@ -54,6 +54,7 @@ export type TranscriptSpeakerAttributionSource =
   | 'offline_diarization_acoustic_v1'
   | 'recovered_channel_acoustic_v1'
   | 'recovered_channel_acoustic_v2'
+  | 'recovered_channel_acoustic_v3'
   | 'channel_fallback';
 
 export type TranscriptSpeakerAttributionFallbackReason =
@@ -85,6 +86,29 @@ export type StoredTranscriptSpeakerAttribution = {
   injectedLocalWindows?: number;
   falseMeEvidenceSeconds?: number;
   missedMeEvidenceSeconds?: number;
+  speakerSeparation?: 'verified' | 'unresolved';
+  selfIdentity?: 'verified' | 'unresolved';
+  localDiarization?: {
+    attempted: true;
+    input: 'mic_audio';
+    applied: boolean;
+    confidence: number;
+    clusterCount: number;
+    labeledSegmentCount: number;
+  };
+  remoteDiarization?: {
+    attempted: true;
+    input: 'system_audio';
+    applied: boolean;
+    confidence: number;
+    clusterCount: number;
+    labeledSegmentCount: number;
+    fallbackReason?:
+      | 'no_system_speech'
+      | 'no_diarization_segments'
+      | 'not_enough_speakers'
+      | 'low_coverage';
+  };
 };
 
 export type StoredTranscriptIntegrity = TranscriptIntegrityEvidence & {
@@ -267,7 +291,7 @@ export function buildTranscriptJsonPayload(
       : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
-    ...(options.liveSegments?.length
+    ...(Array.isArray(options.liveSegments)
       ? { liveSegments: options.liveSegments }
       : {}),
     readability: {

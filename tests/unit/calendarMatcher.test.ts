@@ -95,4 +95,29 @@ describe('calendar event matcher', () => {
       ),
     ).toEqual({ kind: 'none' });
   });
+
+  it('keeps ambiguous cross-calendar matches ambiguous', () => {
+    const workEvent = event(
+      'work-event',
+      '2026-08-30T17:30:00.000Z',
+      '2026-08-30T18:30:00.000Z',
+      { calendarIdentifier: 'calendar-work' },
+    );
+    const personalEvent = event(
+      'personal-event',
+      '2026-08-30T17:30:00.000Z',
+      '2026-08-30T18:30:00.000Z',
+      { calendarIdentifier: 'calendar-personal' },
+    );
+    expect(
+      matchCalendarEvent(
+        '2026-08-30T17:31:00.000Z',
+        '2026-08-30T18:15:00.000Z',
+        [workEvent, personalEvent],
+      ),
+    ).toEqual({
+      kind: 'ambiguous',
+      occurrenceKeys: ['personal-event', 'work-event'],
+    });
+  });
 });

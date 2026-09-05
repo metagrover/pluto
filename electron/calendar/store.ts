@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 
-import { matchCalendarEvent } from './matcher';
+import {
+  type CalendarMatch,
+  matchActiveCalendarEvent,
+  matchCalendarEvent,
+} from './matcher';
 import type {
   CalendarCapabilityState,
   CalendarDescriptor,
@@ -13,6 +17,7 @@ type SqlDatabase = Database.Database;
 interface IntegrationRow {
   enabled: number;
   selected_calendar_json: string | null;
+  selected_calendars_json: string | null;
   cache_revision: number;
   last_attempt_at: string | null;
   last_read_at: string | null;
@@ -32,7 +37,6 @@ interface ContextRow {
   match_origin: 'automatic' | 'user';
   match_evidence: 'time_overlap' | 'user_selected';
 }
-
 export const createCalendarStore = (sql: SqlDatabase) => {
   const readIntegration = () =>
     sql
@@ -41,11 +45,42 @@ export const createCalendarStore = (sql: SqlDatabase) => {
 
   const getState = () => {
     const row = readIntegration();
+    let selectedCalendars: CalendarDescriptor[] = [];
+    if (row.selected_calendars_json) {
+      try {
+        const parsed = JSON.parse(row.selected_calendars_json);
+        if (Array.isArray(parsed)) {
+          selectedCalendars = parsed as CalendarDescriptor[];
+        }
+      } catch {
+        selectedCalendars = [];
+      }
+    } else if (row.selected_calendar_json) {
+      try {
+        const parsed = JSON.parse(row.selected_calendar_json);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed) &&
+          parsed.identifier
+        ) {
+          selectedCalendars = [parsed as CalendarDescriptor];
+        }
+      } catch {
+        selectedCalendars = [];
+      }
+    }
+
+    const selectedCalendar =
+      selectedCalendars[0] ??
+      (row.selected_calendar_json
+        ? (JSON.parse(row.selected_calendar_json) as CalendarDescriptor)
+        : null);
+
     return {
       enabled: row.enabled === 1,
-      selectedCalendar: row.selected_calendar_json
-        ? (JSON.parse(row.selected_calendar_json) as CalendarDescriptor)
-        : null,
+      selectedCalendar,
+      selectedCalendars,
       cacheRevision: row.cache_revision,
       lastAttemptAt: row.last_attempt_at,
       lastReadAt: row.last_read_at,
@@ -55,15 +90,17 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     };
   };
 
-  const selectCalendar = (calendar: CalendarDescriptor) => {
+  const selectCalendars = (calendars: CalendarDescriptor[]) => {
     sql.transaction(() => {
       sql.prepare('DELETE FROM calendar_events').run();
       sql.prepare('DELETE FROM meeting_calendar_context').run();
+      const primaryCalendar = calendars[0] ?? null;
       sql
         .prepare(`
           UPDATE calendar_integration
           SET enabled = 1,
               selected_calendar_json = ?,
+              selected_calendars_json = ?,
               cache_revision = 0,
               last_attempt_at = NULL,
               last_read_at = NULL,
@@ -72,13 +109,19 @@ export const createCalendarStore = (sql: SqlDatabase) => {
               error_code = NULL
           WHERE singleton = 1
         `)
-        .run(JSON.stringify(calendar));
+        .run(
+          primaryCalendar ? JSON.stringify(primaryCalendar) : null,
+          JSON.stringify(calendars),
+        );
     })();
     return getState();
   };
 
+  const selectCalendar = (calendar: CalendarDescriptor) =>
+    selectCalendars([calendar]);
+
   const replaceEvents = (input: {
-    calendarIdentifier: string;
+    calendarIdentifier?: string;
     revision: number;
     cacheStart: string;
     cacheEnd: string;
@@ -87,13 +130,21 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   }): boolean =>
     sql.transaction(() => {
       const state = getState();
+      if (!state.enabled || input.revision <= state.cacheRevision) {
+        return false;
+      }
       if (
-        !state.enabled ||
-        state.selectedCalendar?.identifier !== input.calendarIdentifier ||
-        input.revision <= state.cacheRevision
+        input.calendarIdentifier &&
+        state.selectedCalendars.length > 0 &&
+        !state.selectedCalendars.some(
+          (c) => c.identifier === input.calendarIdentifier,
+        )
       ) {
         return false;
       }
+      const allowedCalendarIds = new Set(
+        state.selectedCalendars.map((c) => c.identifier),
+      );
       sql.prepare('DELETE FROM calendar_events').run();
       const insert = sql.prepare(`
         INSERT INTO calendar_events(
@@ -109,7 +160,12 @@ export const createCalendarStore = (sql: SqlDatabase) => {
           event_json = excluded.event_json
       `);
       for (const event of input.events) {
-        if (event.calendarIdentifier !== input.calendarIdentifier) continue;
+        if (
+          allowedCalendarIds.size > 0 &&
+          !allowedCalendarIds.has(event.calendarIdentifier)
+        ) {
+          continue;
+        }
         insert.run(
           event.occurrenceKey,
           event.calendarIdentifier,
@@ -179,7 +235,19 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       )
       .get(occurrenceKey) as EventRow | undefined;
     const state = getState();
-    if (!eventRow || !state.selectedCalendar) return null;
+    if (
+      !eventRow ||
+      (!state.selectedCalendar && state.selectedCalendars.length === 0)
+    ) {
+      return null;
+    }
+    const event = JSON.parse(eventRow.event_json) as CalendarEvent;
+    const matchedCalendar = state.selectedCalendars.find(
+      (c) => c.identifier === event.calendarIdentifier,
+    );
+    const calendarTitle =
+      matchedCalendar?.title ?? state.selectedCalendar?.title ?? 'Calendar';
+
     sql
       .prepare(`
         INSERT INTO meeting_calendar_context(
@@ -198,7 +266,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       .run(
         meetingId,
         occurrenceKey,
-        state.selectedCalendar.title,
+        calendarTitle,
         eventRow.event_json,
         origin,
         origin === 'user' ? 'user_selected' : 'time_overlap',
@@ -226,6 +294,42 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       : existing;
   };
 
+  const matchActiveEvent = (
+    atTime: string,
+  ): { match: CalendarMatch; event: CalendarEvent | null } => {
+    const state = getState();
+    if (!state.enabled || !state.cacheStart || !state.cacheEnd) {
+      return { match: { kind: 'none' }, event: null };
+    }
+    const events = listEvents(state.cacheStart, state.cacheEnd);
+    const match = matchActiveCalendarEvent(atTime, events);
+    if (match.kind === 'matched') {
+      const found =
+        events.find((e) => e.occurrenceKey === match.occurrenceKey) ?? null;
+      return { match, event: found };
+    }
+    return { match, event: null };
+  };
+
+  const associateMeetingAtStart = (
+    meetingId: string,
+    atTime: string,
+  ): {
+    context: MeetingCalendarContext | null;
+    event: CalendarEvent | null;
+  } => {
+    const { match, event } = matchActiveEvent(atTime);
+    if (match.kind === 'matched' && event) {
+      const context = setMeetingContext(
+        meetingId,
+        match.occurrenceKey,
+        'automatic',
+      );
+      return { context, event };
+    }
+    return { context: null, event: null };
+  };
+
   const recordFailure = (errorCode: CalendarCapabilityState, at: string) => {
     sql
       .prepare(`
@@ -243,9 +347,14 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       sql
         .prepare(`
           UPDATE calendar_integration
-          SET enabled = 0, selected_calendar_json = NULL,
-              cache_revision = 0, last_attempt_at = NULL,
-              last_read_at = NULL, cache_start = NULL, cache_end = NULL,
+          SET enabled = 0,
+              selected_calendar_json = NULL,
+              selected_calendars_json = NULL,
+              cache_revision = 0,
+              last_attempt_at = NULL,
+              last_read_at = NULL,
+              cache_start = NULL,
+              cache_end = NULL,
               error_code = NULL
           WHERE singleton = 1
         `)
@@ -256,9 +365,12 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   return {
     getState,
     selectCalendar,
+    selectCalendars,
     replaceEvents,
     listEvents,
     associateMeeting,
+    associateMeetingAtStart,
+    matchActiveEvent,
     setMeetingContext,
     getMeetingContext,
     recordFailure,

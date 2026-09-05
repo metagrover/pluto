@@ -266,4 +266,49 @@ describe('canonical person identity', () => {
       }),
     );
   });
+
+  it('derives confirmed People evidence from a binding and removes it when cleared', () => {
+    const person = db.upsertEntity({
+      id: 'binding-only-person',
+      type: 'person',
+      name: 'Morgan Hale',
+      dedupe_by_name: false,
+    });
+    saveMeeting('binding-only-meeting', 22);
+    db.identityStore.setBinding('binding-only-meeting', {
+      speaker: 'Remote Speaker 1',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'source-v1',
+      evidence: [],
+    });
+
+    expect(db.getPersonEntityIdsForMeeting('binding-only-meeting')).toEqual([
+      person.id,
+    ]);
+    expect(db.getPeopleBriefingSummaries()).toContainEqual(
+      expect.objectContaining({
+        id: person.id,
+        meetingCount: 1,
+        mentionCount: 0,
+        latestMeetingId: 'binding-only-meeting',
+      }),
+    );
+    expect(db.getPersonBriefing(person.id)?.meetings).toEqual([
+      expect.objectContaining({
+        id: 'binding-only-meeting',
+        evidence: 'confirmed',
+      }),
+    ]);
+
+    db.identityStore.clearBinding('binding-only-meeting', 'Remote Speaker 1');
+
+    expect(db.getPersonEntityIdsForMeeting('binding-only-meeting')).toEqual([]);
+    expect(
+      db.getPeopleBriefingSummaries().find(({ id }) => id === person.id)
+        ?.meetingCount,
+    ).toBe(0);
+    expect(db.getPersonBriefing(person.id)?.meetings).toEqual([]);
+  });
 });

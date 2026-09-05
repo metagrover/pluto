@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  associateMeetingAtStart,
   connectCalendar,
   disconnectCalendar,
   getCalendarState,
   listCalendarDay,
+  matchActiveCalendarEvent,
   selectCalendar,
+  selectCalendars,
 } from '../../src/api/calendar';
 
 describe('calendar renderer API', () => {
@@ -49,5 +52,30 @@ describe('calendar renderer API', () => {
       ],
       ['CALENDAR_DISCONNECT'],
     ]);
+  });
+
+  it('selectCalendars sends array to CALENDAR_SELECT', async () => {
+    const calendar = {
+      identifier: 'calendar-a',
+      title: 'Work',
+      sourceTitle: 'iCloud',
+      sourceType: 'icloud',
+      colorHex: null,
+    };
+    await selectCalendars([calendar]);
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_SELECT', [calendar]);
+  });
+
+  it('invokes CALENDAR_MATCH_ACTIVE and CALENDAR_ASSOCIATE_START', async () => {
+    await matchActiveCalendarEvent('2026-09-04T17:30:00.000Z');
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_MATCH_ACTIVE', {
+      atTime: '2026-09-04T17:30:00.000Z',
+    });
+
+    await associateMeetingAtStart('meeting-1', '2026-09-04T17:30:00.000Z');
+    expect(invoke).toHaveBeenCalledWith('CALENDAR_ASSOCIATE_START', {
+      meetingId: 'meeting-1',
+      atTime: '2026-09-04T17:30:00.000Z',
+    });
   });
 });

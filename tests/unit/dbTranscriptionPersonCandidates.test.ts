@@ -70,4 +70,14 @@ describe('transcription person candidate query', () => {
       ),
     ).toBe(false);
   });
+
+  it('does not expose generic speaker placeholders as person candidates', () => {
+    expect(() =>
+      upsertEntity({
+        type: 'person',
+        name: 'Remote Speaker 3',
+        saliency_score: 1,
+      }),
+    ).toThrow('person_name_invalid');
+  });
 });

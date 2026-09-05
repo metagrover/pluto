@@ -46,6 +46,22 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
+  it('persists original EOU rows separately from the merged canonical preview', () => {
+    const snapshotStart = source.indexOf('const capturedLiveSegments =');
+    const snapshotEnd = source.indexOf(
+      'const provisionalMeeting =',
+      snapshotStart,
+    );
+    const snapshot = source.slice(snapshotStart, snapshotEnd);
+    expect(snapshotStart).toBeGreaterThan(-1);
+    expect(snapshot).toContain('[...processedMicSegmentsRef.current]');
+    expect(snapshot).toMatch(
+      /mergeConsecutiveSpeakerSegments\(\s*capturedLiveSegments/,
+    );
+    expect(snapshot).toContain('buildTranscriptJsonPayload(capturedSegments,');
+    expect(snapshot).toContain('liveSegments: capturedLiveSegments');
+  });
+
   it('finishes EOU before closing context ingestion', () => {
     const finishIndex = source.indexOf('await eouSessionAtStop?.finish()');
     const closeIndex = source.indexOf(
@@ -105,6 +121,12 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(materializeIndex).toBeGreaterThan(releaseIndex);
   });
 
+  it('keeps the sealed provisional handoff in a processing state', () => {
+    expect(source).toMatch(
+      /transcript_status: 'provisional',[\s\S]{0,700}finalization_status: 'processing'/u,
+    );
+  });
+
   it('keeps the active EOU session across ordinary AudioManager rerenders', () => {
     const listenerEffectStart = source.indexOf(
       '// Set up event listeners for external control',
@@ -124,6 +146,8 @@ describe('AudioManager Parakeet EOU wiring', () => {
 
   it('claims a synchronous start lock before asynchronous readiness', () => {
     const startIndex = source.indexOf('const startSession = async ()');
+    const stopIndex = source.indexOf('const stopSession = async', startIndex);
+    const startSession = source.slice(startIndex, stopIndex);
     const guardIndex = source.indexOf(
       "captureLifecycleRef.current.state !== 'idle'",
       startIndex,
@@ -133,7 +157,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       guardIndex,
     );
     const readinessIndex = source.indexOf(
-      "'RECORDING_READINESS_STATUS'",
+      "'RECORDING_READINESS_PREPARE'",
       claimIndex,
     );
     const releaseIndex = source.indexOf("state: 'idle'", readinessIndex);
@@ -142,6 +166,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(claimIndex).toBeGreaterThan(guardIndex);
     expect(claimIndex).toBeLessThan(readinessIndex);
     expect(releaseIndex).toBeGreaterThan(readinessIndex);
+    expect(startSession).not.toContain("'RECORDING_READINESS_STATUS'");
   });
 
   it('publishes starting feedback before asynchronous readiness', () => {
@@ -151,7 +176,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
       startIndex,
     );
     const readinessIndex = source.indexOf(
-      "'RECORDING_READINESS_STATUS'",
+      "'RECORDING_READINESS_PREPARE'",
       startIndex,
     );
     const stoppedStartingIndex = source.indexOf(

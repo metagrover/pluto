@@ -6,11 +6,33 @@ import {
 } from '../../src/components/features/meetingFailurePresentation';
 
 describe('meeting failure presentation', () => {
+  it('does not offer transcription retry as a remedy for incomplete participant audio', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        systemCaptureIncomplete: true,
+        hasExistingTranscript: true,
+        speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: true,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Participant audio could not be verified',
+      detail:
+        'The System recording is incomplete or could not be verified. Your existing transcript has been kept. Retrying transcription cannot restore missing audio.',
+      actionLabel: null,
+    });
+  });
+
   it('offers the only recovery action for a retryable final transcription', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -28,6 +50,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: true,
         speakerAttributionFailure: true,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -40,11 +63,31 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it('explains when a retry paused to protect system resources', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        speakerAttributionFailure: false,
+        resourcePolicyDenied: true,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Transcription paused',
+      detail:
+        'Your Mac was too busy or warm to retry safely. Try again when system load drops.',
+      actionLabel: 'Retry transcription',
+    });
+  });
+
   it('keeps capture recovery honest when a retry would be unsafe', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: true,
         captureGap: false,
         hasExistingAnalysis: false,
@@ -62,6 +105,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: true,
         hasExistingAnalysis: false,
@@ -79,6 +123,7 @@ describe('meeting failure presentation', () => {
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
         speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
         captureRecoveryRequired: false,
         captureGap: false,
         hasExistingAnalysis: false,

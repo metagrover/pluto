@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const directory = vi.hoisted(() => {
@@ -71,6 +73,35 @@ describe('identity IPC service', () => {
       'revision',
       'profile',
     ]);
+  });
+  it('filters out generic speaker placeholders from global identity state people', () => {
+    const rawDb = new Database(path.join(directory, 'pluto.db'));
+    try {
+      rawDb
+        .prepare(
+          "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-rs-99', 'person', 'Remote Speaker 99', 'remote speaker 99', datetime('now'), datetime('now'))",
+        )
+        .run();
+      rawDb
+        .prepare(
+          "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-spk-5', 'person', 'Speaker 5', 'speaker 5', datetime('now'), datetime('now'))",
+        )
+        .run();
+    } finally {
+      rawDb.close();
+    }
+    const state = handleIdentityRequest('GET_IDENTITY_STATE', {});
+    expect(
+      state.people.some(
+        (p: { name: string }) => p.name === 'Remote Speaker 99',
+      ),
+    ).toBe(false);
+    expect(
+      state.people.some((p: { name: string }) => p.name === 'Speaker 5'),
+    ).toBe(false);
+    expect(state.people.some((p: { name: string }) => p.name === 'Robin')).toBe(
+      true,
+    );
   });
   it('selects and clears self only at the expected revision', () => {
     expect(
@@ -157,6 +188,30 @@ describe('identity IPC service', () => {
       db.identityStore.getBindings(meetingId)[0].sourceRevision,
     ).toHaveLength(64);
   });
+  it('reports affected people after commit and ignores refresh failures', () => {
+    const onBindingChange = vi.fn(() => {
+      throw new Error('refresh unavailable');
+    });
+    const state = handleIdentityRequest(
+      'SET_MEETING_IDENTITY_BINDING',
+      {
+        meetingId,
+        speaker: 'Them',
+        personId,
+        individual: true,
+        expectedRevision: revision(),
+      },
+      { onBindingChange },
+    );
+
+    expect(onBindingChange).toHaveBeenCalledWith({
+      meetingId,
+      personIds: [personId],
+    });
+    expect(state).toMatchObject({
+      bindings: [expect.objectContaining({ personId })],
+    });
+  });
   it('allows a corrected individual speaker without a real-world person and can clear it', () => {
     handleIdentityRequest('SET_MEETING_IDENTITY_BINDING', {
       meetingId,
@@ -221,6 +276,9 @@ describe('identity IPC service', () => {
     { personId: null, newName: 'Robin' },
     { newName: '' },
     { newName: 'x'.repeat(257) },
+    { newName: 'Remote Speaker 1' },
+    { newName: 'Speaker 2' },
+    { newName: 'Me' },
     { personId: null, extra: true },
     { personId: null, expectedRevision: -1 },
     { personId: null, expectedRevision: 1.5 },

@@ -2,6 +2,7 @@ import type {
   IdentityProfileInput,
   IdentityUseCase,
 } from '../src/types/identity';
+import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
 import { getMeetingIdentityContext } from './commitmentIdentity';
 import * as db from './db';
 
@@ -74,7 +75,8 @@ function selectedPerson(payload: Record<string, unknown>): string | null {
     typeof payload.newName !== 'string' ||
     !payload.newName.trim() ||
     payload.newName.length > 256 ||
-    /[\p{Cc}]/u.test(payload.newName)
+    /[\p{Cc}]/u.test(payload.newName) ||
+    isGenericSpeakerLabel(payload.newName)
   )
     throw invalid('person_name');
   return db.upsertEntity({
@@ -95,6 +97,7 @@ function globalState() {
     selfPersonId,
     people: db
       .getEntitiesByType('person')
+      .filter(({ name }) => !isGenericSpeakerLabel(name))
       .map(({ id, name }) => ({ id, name })),
     revision: db.identityStore.getRevision(),
     profile: self ? { ...profile, preferredName: self.name } : profile,
@@ -161,8 +164,19 @@ function meetingState(meetingId: string) {
   };
 }
 
+export interface IdentityRequestOptions {
+  onBindingChange?: (change: {
+    meetingId: string;
+    personIds: string[];
+  }) => void;
+}
+
 /** Synchronous transactions ensure person creation, correction and queueing are atomic. */
-export function handleIdentityRequest(channel: string, value: unknown) {
+export function handleIdentityRequest(
+  channel: string,
+  value: unknown,
+  options: IdentityRequestOptions = {},
+) {
   if (channel === 'GET_IDENTITY_STATE') {
     payloadFields(value, []);
     return globalState();
@@ -249,19 +263,24 @@ export function handleIdentityRequest(channel: string, value: unknown) {
       ],
       setting ? ['personId', 'newName'] : [],
     );
-    return db.withCommitmentTransaction(() => {
+    let affectedPersonIds: string[] = [];
+    const result = db.withCommitmentTransaction(() => {
       const expectedRevision = requireRevision(payload.expectedRevision);
       const context = meetingContext(payload.meetingId);
       const speaker = id(payload.speaker, 'speaker');
       if (!context.turns.some((turn) => turn.speaker === speaker))
         throw invalid('speaker');
+      const previousPersonId = context.bindings.find(
+        (binding) => binding.speaker === speaker,
+      )?.personId;
       if (setting) {
         if (payload.individual !== true) throw invalid('individual');
+        const personId = selectedPerson(payload);
         db.identityStore.setBinding(
           context.meetingId,
           {
             speaker,
-            personId: selectedPerson(payload),
+            personId,
             individual: true,
             source: 'user',
             sourceRevision: context.sourceRevision,
@@ -269,15 +288,33 @@ export function handleIdentityRequest(channel: string, value: unknown) {
           },
           expectedRevision,
         );
+        affectedPersonIds = [previousPersonId, personId]
+          .filter((personId): personId is string => Boolean(personId))
+          .map(db.resolvePersonIdentityId);
       } else {
         db.identityStore.clearBinding(
           context.meetingId,
           speaker,
           expectedRevision,
         );
+        affectedPersonIds = previousPersonId
+          ? [db.resolvePersonIdentityId(previousPersonId)]
+          : [];
       }
       return meetingState(context.meetingId);
     });
+    try {
+      options.onBindingChange?.({
+        meetingId: result.meetingId,
+        personIds: [...new Set(affectedPersonIds)],
+      });
+    } catch (error) {
+      console.warn(
+        '[Identity] Person context refresh could not be queued',
+        error,
+      );
+    }
+    return result;
   }
   throw invalid('channel');
 }

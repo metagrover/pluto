@@ -47,9 +47,11 @@ export const RecordingCaptureBar = ({
           type="button"
           className="recording-back-home no-drag"
           onClick={onBackHome}
+          aria-label="Back home"
+          title="Back home"
         >
           <ArrowLeft aria-hidden="true" size={16} />
-          Back home
+          <span className="sr-only">Back home</span>
         </button>
       )}
       <span

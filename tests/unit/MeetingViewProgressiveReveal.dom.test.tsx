@@ -153,6 +153,42 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
+  it('renders transcript content cleanly without noisy remote speaker status banner', async () => {
+    const meeting = {
+      ...analyzedMeeting,
+      transcript_json: JSON.stringify({
+        ...JSON.parse(analyzedMeeting.transcript_json!),
+        speakerAttribution: {
+          remoteDiarization: {
+            attempted: true,
+            input: 'system_audio',
+            applied: false,
+            clusterCount: 1,
+            labeledSegmentCount: 0,
+            confidence: 0,
+            fallbackReason: 'not_enough_speakers',
+          },
+        },
+      }),
+    };
+    await act(async () => renderMeeting(meeting, true));
+    expect(
+      container.querySelector('[data-meeting-remote-speaker-status]'),
+    ).toBeNull();
+    expect(container.textContent).toContain('The transcript is ready first.');
+    expect(container.textContent).not.toContain(
+      'Participant audio could not be verified',
+    );
+    expect(container.textContent).not.toContain(
+      'Remote speakers not separated',
+    );
+
+    await act(async () => renderMeeting(analyzedMeeting, true));
+    expect(
+      container.querySelector('[data-meeting-remote-speaker-status]'),
+    ).toBeNull();
+  });
+
   it('saves a title without sending a stale notes or edit snapshot', async () => {
     const fetchMeetings = vi.fn();
     await act(async () =>
@@ -1040,7 +1076,7 @@ describe('MeetingView progressive reveal', () => {
     });
     expect(template?.value).toBe('project_kickoff');
     expect(container.textContent).toContain('Notes template');
-    expect(container.textContent).toContain('Export meeting');
+    expect(container.textContent).toContain('Export meeting notes');
     expect(container.textContent).toContain('Delete meeting');
     expect(
       Array.from(template?.options || []).map((option) => option.text),
@@ -1272,5 +1308,102 @@ describe('MeetingView progressive reveal', () => {
 
     expect(container.querySelector('[aria-label="Ask Pluto"]')).toBeNull();
     expect(container.textContent).not.toContain('Ask about this meeting');
+  });
+
+  it('displays unidentified speakers in header metadata and opens identification modal', async () => {
+    const meetingWithSpeakers: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-with-speakers',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'Good morning.',
+          startTime: 2,
+          endTime: 4,
+        },
+        {
+          speaker: 'Remote Speaker 2',
+          text: 'Hi all.',
+          startTime: 4,
+          endTime: 6,
+        },
+      ]),
+    };
+
+    await act(async () => renderMeeting(meetingWithSpeakers, true));
+
+    const trigger = container.querySelector(
+      '#meeting-header-speaker-review-trigger',
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger?.textContent).toContain('2 unidentified speakers');
+
+    // Bulky accordion above transcript should be removed
+    expect(
+      container.querySelector('#meeting-speaker-review-toggle'),
+    ).toBeNull();
+
+    // Clicking header metadata trigger opens the modal
+    await act(async () => (trigger as HTMLButtonElement)?.click());
+    expect(document.body.querySelector('dialog')).not.toBeNull();
+    expect(document.body.textContent).toContain('Identify Speakers');
+  });
+
+  it('opens identification for Them from the meeting transcript', async () => {
+    const meetingWithAggregateSpeaker: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-with-aggregate-speaker',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Them',
+          text: 'The aggregate remote voice.',
+          startTime: 2,
+          endTime: 5,
+        },
+      ]),
+    };
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke: vi.fn(async (channel: string) =>
+          channel === 'GET_MEETING_IDENTITY'
+            ? {
+                meetingId: meetingWithAggregateSpeaker.id,
+                speakers: ['Me', 'Them'],
+                bindings: [],
+                capture: { origin: 'local', selfPersonId: null },
+                people: [],
+                selfPersonId: null,
+                revision: 1,
+                profile: {},
+                job: null,
+              }
+            : null,
+        ),
+      },
+    });
+
+    await act(async () => renderMeeting(meetingWithAggregateSpeaker, true));
+
+    const trigger = container.querySelector(
+      '#meeting-header-speaker-review-trigger',
+    );
+    expect(trigger?.textContent).toContain('1 unidentified speaker');
+    const transcriptSpeaker = [...container.querySelectorAll('strong')].find(
+      (element) => element.textContent === 'Them',
+    );
+    expect(transcriptSpeaker?.title).toBe(
+      'Click to review and identify this speaker',
+    );
+
+    await act(async () => transcriptSpeaker?.click());
+
+    expect(document.body.querySelector('dialog')).not.toBeNull();
+    expect(document.body.textContent).toContain('Speaker 1 of 1');
+    expect(
+      document.body.querySelector('input[aria-label="Person for Them"]'),
+    ).not.toBeNull();
   });
 });

@@ -248,8 +248,26 @@ export async function synthesizeProjectThemes(
 ): Promise<ProjectThemeSynthesisResult> {
   const fullSources = deps
     .listSources()
-    .filter((source) => source.notes.trim());
+    .filter((source) => source.notes.trim())
+    .map((source) => ({
+      ...source,
+      candidateProjects: source.candidateProjects.filter((candidate) => {
+        const project = deps.getProject(candidate.id);
+        const qualification = readProjectQualification(
+          project?.metadata || null,
+        );
+        return (
+          !parseMetadata(project?.metadata || null).projectThemeSynthesis ||
+          qualification?.source === 'user'
+        );
+      }),
+    }));
   const sources = selectedSources(fullSources);
+  const candidateProjectIdsFromSources = new Set(
+    sources.flatMap((source) =>
+      source.candidateProjects.map((candidate) => candidate.id),
+    ),
+  );
   const sourceHash = evidenceHash(fullSources);
   const previous = deps.getState();
   const current =
@@ -367,7 +385,9 @@ ${JSON.stringify(
       ...new Set(
         theme.candidateProjectIds.filter(
           (id: unknown): id is string =>
-            typeof id === 'string' && deps.getProject(id)?.type === 'project',
+            typeof id === 'string' &&
+            candidateProjectIdsFromSources.has(id) &&
+            deps.getProject(id)?.type === 'project',
         ),
       ),
     ];

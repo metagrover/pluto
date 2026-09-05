@@ -6,6 +6,85 @@ import {
 } from '../../src/utils/transcript';
 
 describe('buildAnalysisTranscriptFromJson', () => {
+  it.each(['validated', 'validating', 'needs_attention'])(
+    'keeps finalized recovered text and speakers authoritative during %s',
+    (lifecycleStatus) => {
+      const transcript = {
+        pipelineMode: 'parakeet_final_v1',
+        canonicalSource: 'recovered_channels',
+        lifecycleStatus,
+        speakerAttribution: { source: 'recovered_channel_acoustic_v2' },
+        segments: [
+          { speaker: 'Me', startTime: 0, endTime: 2, text: 'My update.' },
+          {
+            speaker: 'Speaker 1',
+            startTime: 3,
+            endTime: 5,
+            text: 'Participant response.',
+          },
+          {
+            speaker: 'Unknown',
+            startTime: 6,
+            endTime: 8,
+            text: 'Uncertain voice.',
+          },
+        ],
+        liveSegments: [
+          {
+            speaker: 'Local Speaker 2',
+            startTime: 0,
+            endTime: 2,
+            text: 'My update.',
+          },
+          {
+            speaker: 'Me',
+            startTime: 3,
+            endTime: 5,
+            text: 'Participant response.',
+          },
+          {
+            speaker: 'Local Speaker 3',
+            startTime: 6,
+            endTime: 8,
+            text: 'Uncertain voice.',
+          },
+          {
+            speaker: 'Me',
+            startTime: 9,
+            endTime: 10,
+            text: 'Rejected old evidence.',
+          },
+        ],
+      };
+      const raw = JSON.stringify(transcript);
+      expect(buildAnalysisTranscriptFromJson(raw)).toBe(
+        'Me: My update.\nSpeaker 1: Participant response.\nUnknown: Uncertain voice.',
+      );
+      expect(JSON.stringify(transcript)).toBe(raw);
+    },
+  );
+
+  it('does not resurrect live speech after an empty final result', () => {
+    expect(
+      buildAnalysisTranscriptFromJson(
+        JSON.stringify({
+          pipelineMode: 'parakeet_final_v1',
+          canonicalSource: 'recovered_channels',
+          lifecycleStatus: 'validated',
+          segments: [],
+          liveSegments: [
+            {
+              speaker: 'Local Speaker 1',
+              startTime: 0,
+              endTime: 2,
+              text: 'Rejected speech.',
+            },
+          ],
+        }),
+      ),
+    ).toBe('');
+  });
+
   it('formats transcript arrays with speaker labels', () => {
     const transcriptJson = JSON.stringify([
       { speaker: 'Me', text: 'Shared the rollout status.' },
@@ -30,7 +109,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
     );
   });
 
-  it('retains confident channel attribution and assigns overlapping mic rows to Them', () => {
+  it('retains source labels and neutralizes unverified overlapping mic rows', () => {
     const transcriptJson = JSON.stringify({
       speakerAttribution: {
         source: 'channel_fallback',
@@ -81,9 +160,9 @@ describe('buildAnalysisTranscriptFromJson', () => {
       parseTranscriptSegmentsForPresentation(transcriptJson).map(
         (segment) => segment.speaker,
       ),
-    ).toEqual(['Them', 'Them', 'Me', 'Them', 'Speaker', 'Speaker']);
+    ).toEqual(['Them', 'Speaker', 'Me', 'Speaker', 'Speaker', 'Speaker']);
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Them: A longer remote sentence from system audio.\nThem: Short echo.\nMe: Do these match the original format?\nThem: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
+      'Them: A longer remote sentence from system audio.\nSpeaker: Short echo.\nMe: Do these match the original format?\nSpeaker: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
     );
   });
 
@@ -105,7 +184,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
 
     expect(
       parseTranscriptSegmentsForPresentation(transcriptJson).at(-1)?.speaker,
-    ).toBe('Them');
+    ).toBe('Speaker');
   });
 
   it('uses legacy start and end timing as attribution evidence', () => {

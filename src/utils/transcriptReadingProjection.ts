@@ -31,6 +31,7 @@ export type StoredLiveTranscriptInput = {
   timestampMs?: unknown;
   endTimestampMs?: unknown;
   confirmed?: unknown;
+  wordTimings?: unknown;
 };
 
 export type StoredLiveTranscriptCandidate = TranscriptReadingCandidate & {
@@ -40,6 +41,11 @@ export type StoredLiveTranscriptCandidate = TranscriptReadingCandidate & {
   startTime: number;
   endTime: number;
   validationState: 'validated' | 'preview';
+  wordTimings?: Array<{
+    text: string;
+    timestampMs: number;
+    endTimestampMs: number;
+  }>;
 };
 
 type Utterance = {
@@ -127,6 +133,7 @@ export const toStoredLiveTranscriptCandidate = (
 ): StoredLiveTranscriptCandidate => {
   const timestampMs = finiteTime(segment.timestampMs) ?? 0;
   const endTimestampMs = finiteTime(segment.endTimestampMs) ?? timestampMs + 10;
+  const wordTimings = copyStoredLiveWordTimings(segment.wordTimings);
   return {
     id: typeof segment.id === 'string' ? segment.id : 'live-segment',
     speaker:
@@ -146,7 +153,32 @@ export const toStoredLiveTranscriptCandidate = (
     startTime: Math.max(0, timestampMs / 1_000),
     endTime: Math.max(timestampMs + 10, endTimestampMs) / 1_000,
     validationState: segment.confirmed ? 'validated' : 'preview',
+    ...(wordTimings ? { wordTimings } : {}),
   };
+};
+
+// Preserve native timing as raw evidence, independently of display projection.
+const copyStoredLiveWordTimings = (
+  value: unknown,
+): StoredLiveTranscriptCandidate['wordTimings'] => {
+  if (!Array.isArray(value)) return undefined;
+  const words: NonNullable<StoredLiveTranscriptCandidate['wordTimings']> = [];
+  for (const word of value) {
+    if (!word || typeof word !== 'object') return undefined;
+    const start = finiteTime(word.timestampMs);
+    const end = finiteTime(word.endTimestampMs);
+    if (
+      typeof word.text !== 'string' ||
+      !word.text.trim() ||
+      start === null ||
+      end === null ||
+      start < 0 ||
+      end < start
+    )
+      return undefined;
+    words.push({ text: word.text, timestampMs: start, endTimestampMs: end });
+  }
+  return words;
 };
 
 const finiteTime = (value: unknown): number | null =>

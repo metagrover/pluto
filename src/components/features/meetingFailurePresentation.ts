@@ -147,7 +147,10 @@ export const resolveMeetingRegenerationFailurePresentation = (
 
 type MeetingFailurePresentationInput = {
   retryableFinalTranscription: boolean;
+  systemCaptureIncomplete?: boolean;
+  hasExistingTranscript?: boolean;
   speakerAttributionFailure: boolean;
+  resourcePolicyDenied: boolean;
   captureRecoveryRequired: boolean;
   captureGap: boolean;
   hasExistingAnalysis: boolean;
@@ -157,11 +160,32 @@ type MeetingFailurePresentationInput = {
 export const resolveMeetingFailurePresentation = (
   input: MeetingFailurePresentationInput,
 ): MeetingFailurePresentation | null => {
+  if (input.systemCaptureIncomplete) {
+    return {
+      title: 'Participant audio could not be verified',
+      detail: [
+        'The System recording is incomplete or could not be verified.',
+        ...(input.hasExistingTranscript
+          ? ['Your existing transcript has been kept.']
+          : []),
+        'Retrying transcription cannot restore missing audio.',
+      ].join(' '),
+      actionLabel: null,
+    };
+  }
   if (input.retryableFinalTranscription && input.speakerAttributionFailure) {
     return {
       title: 'Improve speaker labels',
       detail: 'Pluto can take another pass using the saved recording.',
       actionLabel: 'Improve labels',
+    };
+  }
+  if (input.retryableFinalTranscription && input.resourcePolicyDenied) {
+    return {
+      title: 'Transcription paused',
+      detail:
+        'Your Mac was too busy or warm to retry safely. Try again when system load drops.',
+      actionLabel: 'Retry transcription',
     };
   }
   if (input.retryableFinalTranscription) {

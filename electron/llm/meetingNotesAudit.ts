@@ -204,6 +204,90 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
   };
 };
 
+export const parseCompactNotesDraft = (raw: string): NotesDraft => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
+  const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
+  const compactKeys =
+    isRecord(parsed) &&
+    Object.keys(parsed).every((key) =>
+      ['meetingType', 'sections'].includes(key),
+    );
+  if (
+    !isRecord(parsed) ||
+    !compactKeys ||
+    !Object.hasOwn(parsed, 'sections') ||
+    !Array.isArray(parsed.sections) ||
+    parsed.sections.length > 64
+  ) {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
+  const sections = parsed.sections.map((section) => {
+    if (
+      !isRecord(section) ||
+      !exactKeys(section, ['title', 'items']) ||
+      typeof section.title !== 'string' ||
+      !section.title.trim() ||
+      section.title.length > 12_000 ||
+      !Array.isArray(section.items) ||
+      section.items.length === 0
+    ) {
+      throw new MeetingNotesError('notes_writer_invalid');
+    }
+    const items = section.items.map((item) => {
+      if (
+        !isRecord(item) ||
+        !exactKeys(item, ['kind', 'text', 'owner', 'due', 'sources']) ||
+        !['point', 'action', 'decision', 'question'].includes(
+          String(item.kind),
+        ) ||
+        typeof item.text !== 'string' ||
+        !item.text.trim() ||
+        item.text.length > 12_000 ||
+        (item.owner !== null && typeof item.owner !== 'string') ||
+        (item.due !== null && typeof item.due !== 'string') ||
+        !Array.isArray(item.sources) ||
+        item.sources.length === 0 ||
+        item.sources.length > 3 ||
+        item.sources.some((source) => parseSpan(source) === null)
+      ) {
+        throw new MeetingNotesError('notes_writer_invalid');
+      }
+      return {
+        kind: item.kind,
+        text: item.text,
+        sources: item.sources,
+        owner: item.owner,
+        due: item.due,
+      };
+    });
+    const titleSources = [
+      ...new Map(
+        items
+          .flatMap((item) => item.sources as SourceSpan[])
+          .map((span) => [`${span.segment}:${span.start}:${span.end}`, span]),
+      ).values(),
+    ];
+    return {
+      title: { text: section.title.trim(), sources: titleSources },
+      items,
+    };
+  });
+  return parseNotesDraft(
+    JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections,
+    }),
+  );
+};
+
 export const parseNotesAudit = (raw: string): NotesAudit => {
   let parsed: unknown;
   try {
@@ -908,18 +992,44 @@ export const applyNotesAudit = ({
 /** Complete-document source review uses the same provenance and projection boundary,
  * without pretending the editor returned per-block audit verdicts. Invalid settled
  * claims fail the review; they must not silently erase otherwise useful discussion. */
+const explicitDecisionOwner = (
+  source: NotesSource,
+  item: NotesItem,
+): string | null => {
+  const speakers = new Set(
+    item.sources.flatMap((span) => {
+      const segment = source.segments.find(
+        (candidate) => candidate.index === span.segment,
+      );
+      if (!segment?.speaker) return [];
+      const text = resolveSourceSpan(source, span);
+      return /\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
+        text,
+      )
+        ? [segment.speaker]
+        : [];
+    }),
+  );
+  return speakers.size === 1 ? [...speakers][0]! : null;
+};
+
 export const acceptEditedNotes = ({
   source,
   draft,
   terminology,
   proposals = [],
+  acceptancePolicy = 'strict',
+  compactNormalization = false,
 }: {
   source: NotesSource;
   draft: NotesDraft;
   terminology?: AuditTerminologyContext;
   proposals?: NotesAudit['terminology'];
+  acceptancePolicy?: 'strict' | 'conservative';
+  compactNormalization?: boolean;
 }): AuditedNotes => {
   const next = structuredClone(draft);
+  const issues: string[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
     const evidence = sourceText(source, block.sources);
@@ -932,9 +1042,16 @@ export const acceptEditedNotes = ({
     }
   }
   for (const section of next.sections) {
-    for (const item of section.items) {
-      if (item.kind !== 'action' && item.kind !== 'decision') continue;
+    section.items = section.items.flatMap((item) => {
+      if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
+      const declaredDecisionOwner =
+        compactNormalization && item.kind === 'decision'
+          ? explicitDecisionOwner(source, item)
+          : null;
+      const reviewedItem = declaredDecisionOwner
+        ? { ...item, owner: item.owner ?? declaredDecisionOwner }
+        : item;
       if (
         item.kind === 'action' &&
         isUnacceptedConditionalWillingness(evidence)
@@ -950,7 +1067,7 @@ export const acceptEditedNotes = ({
         return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
       });
       const checked = groundSourceReviewedItem(
-        { ...item, kind: item.kind },
+        { ...reviewedItem, kind: item.kind },
         {
           evidence,
           quotedEvidence: evidence,
@@ -959,25 +1076,51 @@ export const acceptEditedNotes = ({
           lineIndex: item.sources[0]!.segment,
         },
       );
-      if (
-        !checked ||
-        (item.owner &&
-          normalizeTranscriptEvidence(item.owner) !==
-            normalizeTranscriptEvidence(checked.owner ?? '')) ||
-        (item.due && !checked.due)
-      ) {
+      if (!checked) {
+        const statusExplanation =
+          /\b(?:withdraw|retract|cancel|replac|supersed)\w*\b/i;
+        if (
+          item.kind === 'decision' &&
+          compactNormalization &&
+          !declaredDecisionOwner &&
+          statusExplanation.test(item.text) &&
+          statusExplanation.test(evidence)
+        ) {
+          issues.push(`deterministic_reclassified_decision:${item.id}`);
+          return [{ ...item, kind: 'point' as const, owner: null, due: null }];
+        }
+        if (item.kind === 'decision' && declaredDecisionOwner) {
+          return [{ ...item, owner: declaredDecisionOwner, due: null }];
+        }
+        if (acceptancePolicy === 'conservative') {
+          issues.push(`deterministic_unsupported_commitment:${item.id}`);
+          return [];
+        }
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
       }
-      Object.assign(item, checked);
-    }
+      const ownerChanged =
+        Boolean(item.owner) &&
+        normalizeTranscriptEvidence(item.owner ?? '') !==
+          normalizeTranscriptEvidence(checked.owner ?? '');
+      const dueRemoved = Boolean(item.due) && !checked.due;
+      if (acceptancePolicy === 'strict' && (ownerChanged || dueRemoved)) {
+        throw new MeetingNotesError(
+          `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
+        );
+      }
+      if (ownerChanged) issues.push(`deterministic_corrected_owner:${item.id}`);
+      if (dueRemoved) issues.push(`deterministic_removed_due:${item.id}`);
+      return [{ ...item, ...checked }];
+    });
   }
   const result: AuditedNotes = {
     source,
     draft: next,
     verdicts: new Map(),
     acceptedTerminology: structuredClone(proposals),
+    ...(issues.length ? { issues } : {}),
     ...(terminology
       ? {
           terminologyArtifact: createEditorTerminologyArtifact({

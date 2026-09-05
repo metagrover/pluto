@@ -45,6 +45,7 @@ export type TranscriptTrustEnvelopeV2 = {
   causes: TranscriptTrustCause[];
   evidenceProvenance: Record<string, unknown> & { kind: string };
   speakerAttributionVerified?: boolean;
+  speakerSeparationVerified?: boolean;
   activityEvidence?: unknown;
   evidence?: Record<string, number>;
   validationProof?: {
@@ -156,7 +157,12 @@ export type TranscriptTrustMeetingFields = {
   transcript_integrity_json?: string | null;
   transcript_validated_at?: string | null;
   transcript_json?: string | null;
-  finalization_status?: 'finalized' | 'recovery_required' | null;
+  finalization_status?:
+    | 'processing'
+    | 'finalized'
+    | 'needs_attention'
+    | 'recovery_required'
+    | null;
 };
 
 export type TranscriptTrustCapabilityInput = {
@@ -585,6 +591,7 @@ export const parseTranscriptTrustEnvelope = (
         'activityEvidence',
         'evidence',
         'speakerAttributionVerified',
+        'speakerSeparationVerified',
         'validationProof',
         'retry',
         'finalTranscription',
@@ -599,6 +606,8 @@ export const parseTranscriptTrustEnvelope = (
     !raw.causes.every(validCause) ||
     (raw.speakerAttributionVerified !== undefined &&
       typeof raw.speakerAttributionVerified !== 'boolean') ||
+    (raw.speakerSeparationVerified !== undefined &&
+      typeof raw.speakerSeparationVerified !== 'boolean') ||
     (raw.reasons !== undefined &&
       (!Array.isArray(raw.reasons) ||
         !raw.reasons.every((reason) => typeof reason === 'string'))) ||

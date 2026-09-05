@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2b4bfdae-7377-41ee-b9ad-da4683b60bc8",
+  "id": "82216abb-cb9e-4bd8-b065-9afc24948b11",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "attention_items": {
@@ -320,6 +320,13 @@
         },
         "selected_calendar_json": {
           "name": "selected_calendar_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "selected_calendars_json": {
+          "name": "selected_calendars_json",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3009,6 +3016,143 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "meeting_speaker_candidates": {
+      "name": "meeting_speaker_candidates",
+      "columns": {
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speaker": {
+          "name": "speaker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_revision": {
+          "name": "source_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "candidate_digest": {
+          "name": "candidate_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "embedding_json": {
+          "name": "embedding_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "clean_duration_sec": {
+          "name": "clean_duration_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "clean_segment_count": {
+          "name": "clean_segment_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "clean_chunk_count": {
+          "name": "clean_chunk_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "minimum_chunk_similarity": {
+          "name": "minimum_chunk_similarity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mean_chunk_similarity": {
+          "name": "mean_chunk_similarity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_start_sec": {
+          "name": "reference_start_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_end_sec": {
+          "name": "reference_end_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_excerpt": {
+          "name": "reference_excerpt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provenance_json": {
+          "name": "provenance_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_meeting_speaker_candidates_meeting": {
+          "name": "idx_meeting_speaker_candidates_meeting",
+          "columns": ["meeting_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "meeting_speaker_candidates_meeting_id_meetings_id_fk": {
+          "name": "meeting_speaker_candidates_meeting_id_meetings_id_fk",
+          "tableFrom": "meeting_speaker_candidates",
+          "tableTo": "meetings",
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "meeting_speaker_candidates_meeting_id_speaker_source_revision_pk": {
+          "columns": ["meeting_id", "speaker", "source_revision"],
+          "name": "meeting_speaker_candidates_meeting_id_speaker_source_revision_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "meetings": {
       "name": "meetings",
       "columns": {
@@ -3549,6 +3693,291 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "speaker_voice_enrollments": {
+      "name": "speaker_voice_enrollments",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_meeting_id": {
+          "name": "source_meeting_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_revision": {
+          "name": "source_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speaker": {
+          "name": "speaker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "embedding_json": {
+          "name": "embedding_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chunk_count": {
+          "name": "chunk_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "clean_duration_sec": {
+          "name": "clean_duration_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "minimum_chunk_similarity": {
+          "name": "minimum_chunk_similarity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mean_chunk_similarity": {
+          "name": "mean_chunk_similarity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_start_sec": {
+          "name": "reference_start_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_end_sec": {
+          "name": "reference_end_sec",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reference_excerpt": {
+          "name": "reference_excerpt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provenance_json": {
+          "name": "provenance_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "candidate_digest": {
+          "name": "candidate_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_speaker_voice_enrollments_person": {
+          "name": "idx_speaker_voice_enrollments_person",
+          "columns": ["person_id"],
+          "isUnique": false
+        },
+        "idx_speaker_voice_enrollments_meeting": {
+          "name": "idx_speaker_voice_enrollments_meeting",
+          "columns": ["source_meeting_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "speaker_voice_enrollments_person_id_entities_id_fk": {
+          "name": "speaker_voice_enrollments_person_id_entities_id_fk",
+          "tableFrom": "speaker_voice_enrollments",
+          "tableTo": "entities",
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "speaker_voice_enrollments_source_meeting_id_meetings_id_fk": {
+          "name": "speaker_voice_enrollments_source_meeting_id_meetings_id_fk",
+          "tableFrom": "speaker_voice_enrollments",
+          "tableTo": "meetings",
+          "columnsFrom": ["source_meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "speaker_voice_profile_settings": {
+      "name": "speaker_voice_profile_settings",
+      "columns": {
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "speaker_voice_profile_settings_person_id_entities_id_fk": {
+          "name": "speaker_voice_profile_settings_person_id_entities_id_fk",
+          "tableFrom": "speaker_voice_profile_settings",
+          "tableTo": "entities",
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "speaker_voice_rejections": {
+      "name": "speaker_voice_rejections",
+      "columns": {
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "speaker": {
+          "name": "speaker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_revision": {
+          "name": "source_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "candidate_digest": {
+          "name": "candidate_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "idx_speaker_voice_rejections_meeting": {
+          "name": "idx_speaker_voice_rejections_meeting",
+          "columns": ["meeting_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "speaker_voice_rejections_meeting_id_meetings_id_fk": {
+          "name": "speaker_voice_rejections_meeting_id_meetings_id_fk",
+          "tableFrom": "speaker_voice_rejections",
+          "tableTo": "meetings",
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "speaker_voice_rejections_person_id_entities_id_fk": {
+          "name": "speaker_voice_rejections_person_id_entities_id_fk",
+          "tableFrom": "speaker_voice_rejections",
+          "tableTo": "entities",
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "speaker_voice_rejections_meeting_id_speaker_source_revision_candidate_digest_person_id_pk": {
+          "columns": [
+            "meeting_id",
+            "speaker",
+            "source_revision",
+            "candidate_digest",
+            "person_id"
+          ],
+          "name": "speaker_voice_rejections_meeting_id_speaker_source_revision_candidate_digest_person_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

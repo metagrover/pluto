@@ -2,6 +2,7 @@ import { constants, readFileSync, statSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { verifyMediaExecutable } from './verify_media_executable.mjs';
 
 const requestedPath = process.argv
   .slice(2)
@@ -9,7 +10,8 @@ const requestedPath = process.argv
 const appPath = path.resolve(
   requestedPath ?? 'release/0.1.0/mac-arm64/Pluto.app',
 );
-const resourcesPath = path.join(appPath, 'Contents', 'Resources', 'bin');
+const resourcesRoot = path.join(appPath, 'Contents', 'Resources');
+const resourcesPath = path.join(resourcesRoot, 'bin');
 const requiredExecutables = [
   'recorder',
   'audiocap',
@@ -27,16 +29,39 @@ for (const relativePath of requiredExecutables) {
 }
 
 const calendarInfo = readFileSync(
-  path.join(
-    resourcesPath,
-    'PlutoCalendarHelper.app',
-    'Contents',
-    'Info.plist',
-  ),
+  path.join(resourcesPath, 'PlutoCalendarHelper.app', 'Contents', 'Info.plist'),
   'utf8',
 );
 if (!calendarInfo.includes('NSCalendarsFullAccessUsageDescription')) {
   throw new Error('Packaged Calendar helper is missing its purpose string.');
 }
 
-console.log(`Verified ${requiredExecutables.length} packaged runtimes.`);
+const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+const mediaTools = [
+  ['ffmpeg', path.join('ffmpeg-static', `ffmpeg${executableSuffix}`)],
+  [
+    'ffprobe',
+    path.join(
+      '@ffprobe-installer',
+      `${process.platform}-${process.arch}`,
+      `ffprobe${executableSuffix}`,
+    ),
+  ],
+];
+for (const [name, relativePath] of mediaTools) {
+  const executablePath = path.join(
+    resourcesRoot,
+    'app.asar.unpacked',
+    'node_modules',
+    relativePath,
+  );
+  if (!statSync(executablePath).isFile()) {
+    throw new Error(`Packaged media tool is not a file: ${name}`);
+  }
+  await access(executablePath, constants.X_OK);
+  await verifyMediaExecutable(executablePath, name);
+}
+
+console.log(
+  `Verified ${requiredExecutables.length + mediaTools.length} packaged runtimes.`,
+);

@@ -39,6 +39,15 @@ interface SettingsTabProps {
   setTheme: (val: 'light' | 'dark' | 'system') => void;
   calendarSnapshot?: CalendarIntegrationSnapshot | null;
   onCalendarSnapshotChange?: (snapshot: CalendarIntegrationSnapshot) => void;
+  initialTab?: SettingsTabId;
+  exportIncludeTranscript?: boolean;
+  setExportIncludeTranscript?: (val: boolean) => void;
+  calendarAutoNameEnabled?: boolean;
+  setCalendarAutoNameEnabled?: (val: boolean) => void;
+  calendarPromptEnabled?: boolean;
+  setCalendarPromptEnabled?: (val: boolean) => void;
+  silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
+  setSilenceAutoStopDuration?: (val: '3' | '5' | '10' | 'disabled') => void;
 }
 
 const providerOptions = [
@@ -61,7 +70,7 @@ const settingsTabs = [
   { id: 'advanced', label: 'Advanced' },
 ] as const;
 
-type SettingsTabId = (typeof settingsTabs)[number]['id'];
+export type SettingsTabId = (typeof settingsTabs)[number]['id'];
 
 const Section = ({
   title,
@@ -160,9 +169,25 @@ export const SettingsTab = ({
   setTheme,
   calendarSnapshot = null,
   onCalendarSnapshotChange = () => {},
+  initialTab,
+  exportIncludeTranscript = false,
+  setExportIncludeTranscript,
+  calendarAutoNameEnabled = true,
+  setCalendarAutoNameEnabled,
+  calendarPromptEnabled = true,
+  setCalendarPromptEnabled,
+  silenceAutoStopDuration = '5',
+  setSilenceAutoStopDuration,
 }: SettingsTabProps) => {
-  const [activeSettingsTab, setActiveSettingsTab] =
-    useState<SettingsTabId>('personal');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
+    initialTab ?? 'personal',
+  );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveSettingsTab(initialTab);
+    }
+  }, [initialTab]);
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
@@ -389,6 +414,84 @@ export const SettingsTab = ({
                   const next = !autoEndEnabled;
                   setAutoEndEnabled(next);
                   persistSetting('auto_end_enabled', next ? 'true' : 'false');
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Auto-name meetings from calendar"
+              helper="Automatically title new recordings and attach attendees from matching calendar events."
+              actionControl
+            >
+              <Toggle
+                checked={calendarAutoNameEnabled !== false}
+                onChange={() => {
+                  const next = !(calendarAutoNameEnabled !== false);
+                  setCalendarAutoNameEnabled?.(next);
+                  persistSetting(
+                    'calendar_auto_name_enabled',
+                    next ? 'true' : 'false',
+                  );
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Prompt to record upcoming meetings"
+              helper="Show a quick start prompt when a scheduled calendar meeting with conference links begins."
+              actionControl
+            >
+              <Toggle
+                checked={calendarPromptEnabled !== false}
+                onChange={() => {
+                  const next = !(calendarPromptEnabled !== false);
+                  setCalendarPromptEnabled?.(next);
+                  persistSetting(
+                    'calendar_prompt_enabled',
+                    next ? 'true' : 'false',
+                  );
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Auto-stop on prolonged silence"
+              helper="Automatically stop recording after continuous silence once the scheduled meeting ends or conference audio goes quiet."
+              actionControl={false}
+            >
+              <select
+                aria-label="Auto-stop on prolonged silence duration"
+                value={silenceAutoStopDuration || '5'}
+                onChange={(e) => {
+                  const val = e.target.value as '3' | '5' | '10' | 'disabled';
+                  setSilenceAutoStopDuration?.(val);
+                  persistSetting('silence_auto_stop_duration', val);
+                }}
+                className="w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2 text-[13px] font-medium text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50 cursor-pointer"
+              >
+                <option value="3">3 minutes</option>
+                <option value="5">5 minutes (Default)</option>
+                <option value="10">10 minutes</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </SettingsRow>
+          </Section>
+
+          <Section title="Export">
+            <SettingsRow
+              label="Include transcript in exports"
+              helper="Append the speaker-attributed transcript to exported Markdown notes."
+              actionControl
+            >
+              <Toggle
+                checked={Boolean(exportIncludeTranscript)}
+                onChange={() => {
+                  const next = !exportIncludeTranscript;
+                  setExportIncludeTranscript?.(next);
+                  persistSetting(
+                    'export_include_transcript',
+                    next ? 'true' : 'false',
+                  );
                 }}
               />
             </SettingsRow>

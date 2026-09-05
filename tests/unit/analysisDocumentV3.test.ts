@@ -188,7 +188,7 @@ describe('parseAnalysisDocumentV3', () => {
     });
   });
 
-  it.each(['writer-audit-v1', 'writer-editor-v1'])(
+  it.each(['writer-audit-v1', 'writer-editor-v1', 'writer-editor-bounded-v1'])(
     'round-trips additive %s provenance metadata',
     (pipelineVersion) => {
       const source_provenance = {

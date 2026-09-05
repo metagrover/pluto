@@ -40,11 +40,14 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
       : null,
   }));
   const storedCapture = db.identityStore.getCapture(meetingId);
+  const currentSelfPersonId = db.identityStore.getSelfPersonId();
+  const rawSelfPersonId = storedCapture.selfPersonId ?? currentSelfPersonId;
+  const resolvedSelfPersonId = rawSelfPersonId
+    ? db.resolvePersonIdentityId(rawSelfPersonId)
+    : null;
   const capture = {
     ...storedCapture,
-    selfPersonId: storedCapture.selfPersonId
-      ? db.resolvePersonIdentityId(storedCapture.selfPersonId)
-      : null,
+    selfPersonId: resolvedSelfPersonId,
   };
   // A high-confidence individual near-end attribution plus capture-time self
   // confirmation can name Me. A remote channel may contain several people.
@@ -62,30 +65,38 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
     capture.origin === 'local' &&
     capture.selfPersonId &&
     people.some((person) => person.id === capture.selfPersonId) &&
-    (attribution.source === 'local_diarization_acoustic' ||
-      attribution.source === 'offline_diarization_acoustic_v1') &&
-    attribution.mappingApplied === true &&
-    typeof attribution.confidence === 'number' &&
-    attribution.confidence >= 0.85 &&
-    !attribution.fallbackReason &&
     nearEnd &&
     !bindings.some((binding) => binding.speaker === 'Me')
   ) {
+    const hasAcousticCaptureEvidence =
+      (attribution.source === 'local_diarization_acoustic' ||
+        attribution.source === 'offline_diarization_acoustic_v1') &&
+      attribution.mappingApplied === true &&
+      typeof attribution.confidence === 'number' &&
+      attribution.confidence >= 0.85 &&
+      !attribution.fallbackReason;
+
     bindings.push({
       speaker: 'Me',
       personId: capture.selfPersonId,
       individual: true,
-      source: 'capture',
+      source: hasAcousticCaptureEvidence ? 'capture' : 'user',
       sourceRevision,
       evidence: [],
-      captureEvidence: {
-        origin: 'local',
-        selfPersonId: capture.selfPersonId,
-        attributionSource: attribution.source,
-        confidence: attribution.confidence,
-        mappingApplied: true,
-        sourceRevision,
-      },
+      ...(hasAcousticCaptureEvidence
+        ? {
+            captureEvidence: {
+              origin: 'local',
+              selfPersonId: capture.selfPersonId,
+              attributionSource: attribution.source as
+                | 'local_diarization_acoustic'
+                | 'offline_diarization_acoustic_v1',
+              confidence: attribution.confidence as number,
+              mappingApplied: true,
+              sourceRevision,
+            },
+          }
+        : {}),
     });
   }
   return { meetingId, sourceRevision, turns, people, bindings, capture };

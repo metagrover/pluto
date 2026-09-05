@@ -8,6 +8,7 @@ import {
 export interface StartupRecoveryResult {
   identityJobsRecovered: number;
   orphanContextRowsRemoved: number;
+  genericSpeakerEntitiesPurged: number;
   meetingFtsRebuilt: boolean;
   meetingNotesFtsRebuilt: boolean;
 }
@@ -34,9 +35,44 @@ export const runDatabaseStartupRecovery = (
          )`,
       )
       .run().changes;
+
+    const genericCandidates = sqlite
+      .prepare(
+        `SELECT id FROM entities
+         WHERE type = 'person'
+           AND (
+             name LIKE 'Remote Speaker%'
+             OR name LIKE 'Speaker %'
+             OR LOWER(name) IN ('remote speaker', 'local speaker', 'me', 'them', 'you', 'unknown', 'unknown speaker')
+           )`,
+      )
+      .all() as { id: string }[];
+
+    for (const candidate of genericCandidates) {
+      sqlite.prepare('DELETE FROM entities WHERE id = ?').run(candidate.id);
+      try {
+        sqlite
+          .prepare('DELETE FROM entities_fts WHERE entity_id = ?')
+          .run(candidate.id);
+      } catch {}
+      try {
+        sqlite
+          .prepare(
+            'DELETE FROM entity_links WHERE source_entity_id = ? OR target_entity_id = ?',
+          )
+          .run(candidate.id, candidate.id);
+      } catch {}
+      try {
+        sqlite
+          .prepare('DELETE FROM meeting_entities WHERE entity_id = ?')
+          .run(candidate.id);
+      } catch {}
+    }
+
     return {
       identityJobsRecovered: recoverInterruptedIdentityJobs(sqlite),
       orphanContextRowsRemoved: events + snapshots,
+      genericSpeakerEntitiesPurged: genericCandidates.length,
     };
   })();
   const meetingFts = repairMeetingFtsIndex(sqlite);

@@ -64,6 +64,112 @@ const makeSession = (transport = makeTransport()) => {
 };
 
 describe('EOU renderer session', () => {
+  it('publishes acoustic echo evidence on the same meeting clock as its tokens', async () => {
+    const transport = makeTransport();
+    const onSegments = vi.fn();
+    let meetingSeconds = 10.32;
+    const session = createEouRendererSession({
+      meetingId: 'meeting-1',
+      generation: 1,
+      sampleRates: { mic: 8_000, system: 8_000 },
+      nowSeconds: () => meetingSeconds,
+      transport,
+      onSegments,
+      onUnavailable: vi.fn(),
+    });
+    await session.start();
+    const waveform = (sample: number): number => {
+      if (sample < 0) return 0;
+      const bin = Math.floor(sample / 80);
+      const amplitude =
+        0.03 + ((Math.imul(bin + 7, 1_103_515_245) >>> 8) % 100) / 500;
+      return amplitude * Math.sin((2 * Math.PI * 500 * sample) / 8_000);
+    };
+    for (let frame = 0; frame < 20; frame += 1) {
+      meetingSeconds = 10 + (frame + 1) * 0.32;
+      session.append(
+        'mic',
+        Float32Array.from(
+          { length: 2_560 },
+          (_, sample) => 0.6 * waveform(frame * 2_560 + sample - 2_240),
+        ),
+      );
+      meetingSeconds += 0.16;
+      session.append(
+        'system',
+        Float32Array.from({ length: 2_560 }, (_, sample) =>
+          waveform(frame * 2_560 + sample),
+        ),
+      );
+      await session.drain();
+      if (frame === 3) {
+        transport.emitUpdate({
+          meetingId: 'meeting-1',
+          generation: 1,
+          event: {
+            streamId: 'eou-meeting-1-system',
+            source: 'system',
+            generation: 1,
+            revision: 1,
+            processedAudioSeconds: 1.28,
+            committedText: 'reference',
+            tentativeText: '',
+            tokens: [
+              {
+                text: 'reference',
+                startSeconds: 1,
+                endSeconds: 1.2,
+                committed: true,
+              },
+            ],
+          },
+        });
+        // Earlier speech can already have proof; this recognized word does not.
+        for (const window of onSegments.mock.calls.at(-1)?.[1] ?? []) {
+          expect(window.systemEndMs).toBeLessThanOrEqual(11_160);
+        }
+      }
+    }
+    const [segments, evidence] = onSegments.mock.calls.at(-1) ?? [];
+    expect(segments).toEqual(onSegments.mock.calls[0][0]);
+    expect(onSegments.mock.calls[0][2]).toBe('recognition');
+    expect(onSegments.mock.calls.at(-1)?.[2]).toBe('echo_evidence');
+    expect(segments[0].timestampMs).toBeCloseTo(11_160);
+    expect(evidence).toEqual(expect.any(Array));
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(
+      evidence.some(
+        (window: { systemStartMs: number; systemEndMs: number }) =>
+          window.systemStartMs <= 11_160 && window.systemEndMs >= 11_360,
+      ),
+    ).toBe(true);
+    for (const window of evidence) {
+      expect(window.micStartMs).toBeGreaterThanOrEqual(10_000);
+      expect(window.systemStartMs).toBeGreaterThanOrEqual(10_160);
+      expect(window.micStartMs - window.systemStartMs).toBeCloseTo(120, -1);
+    }
+    session.cancel();
+    const fresh = makeSession();
+    await fresh.session.start();
+    fresh.transport.emitUpdate({
+      meetingId: 'meeting-1',
+      generation: 1,
+      event: {
+        streamId: 'eou-meeting-1-system',
+        source: 'system',
+        generation: 1,
+        revision: 1,
+        processedAudioSeconds: 0.32,
+        committedText: 'new',
+        tentativeText: '',
+        tokens: [
+          { text: 'new', startSeconds: 0, endSeconds: 0.2, committed: true },
+        ],
+      },
+    });
+    expect(fresh.onSegments.mock.calls.at(-1)?.[1]).toEqual([]);
+  });
+
   it('starts once and dispatches independent mic and System 320 ms frames', async () => {
     const { session, transport } = makeSession();
     await session.start();
@@ -129,9 +235,11 @@ describe('EOU renderer session', () => {
       },
     });
 
-    expect(onSegments).toHaveBeenCalledWith([
-      expect.objectContaining({ timestampMs: 4_180, endTimestampMs: 4_380 }),
-    ]);
+    expect(onSegments).toHaveBeenCalledWith(
+      [expect.objectContaining({ timestampMs: 4_180, endTimestampMs: 4_380 })],
+      [],
+      'recognition',
+    );
   });
 
   it('fails unavailable once at four outstanding frames without stopping capture', async () => {
@@ -242,14 +350,18 @@ describe('EOU renderer session', () => {
 
     await session.finish();
 
-    expect(onSegments).toHaveBeenCalledWith([
-      expect.objectContaining({
-        text: 'Final tail.',
-        rawText: 'final tail',
-        speaker: 'Speaker',
-        confirmed: true,
-      }),
-    ]);
+    expect(onSegments).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          text: 'Final tail.',
+          rawText: 'final tail',
+          speaker: 'Speaker',
+          confirmed: true,
+        }),
+      ],
+      [],
+      'recognition',
+    );
   });
 
   it('switches unavailable once when an append rejects', async () => {

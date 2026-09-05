@@ -10,6 +10,9 @@ export type TranscriptLifecycleStatus =
   | 'validated'
   | 'needs_attention';
 
+export const SYSTEM_CAPTURE_INCOMPLETE_REASON =
+  'system_capture_incomplete' as const;
+
 export type TranscriptIntegrityReason =
   | 'local_transcript_coverage_low'
   | 'local_speech_unaccounted'
@@ -21,6 +24,7 @@ export type TranscriptIntegrityReason =
   | 'capture_activity_unsupported'
   | 'capture_journal_write_failed'
   | 'required_source_failed'
+  | typeof SYSTEM_CAPTURE_INCOMPLETE_REASON
   | 'channel_duration_mismatch'
   | 'ambiguous_pass_through';
 
@@ -127,6 +131,7 @@ export const reconcileCanonicalTranscript = <
   T extends AttributionSegment,
 >(input: {
   mixedSegments: T[];
+  preserveSourceSpeakers?: boolean;
   micSegments: T[];
   systemSegments: T[];
   provisionalSegments: T[];
@@ -180,15 +185,17 @@ export const reconcileCanonicalTranscript = <
     if (ambiguousPassThrough) {
       unresolvedAmbiguousSeconds += canonical.endTime - canonical.startTime;
     }
-    const speaker = systemPassThrough
-      ? micActivity > systemActivity
-        ? 'Me'
-        : 'Them'
-      : systemEvidence > micEvidence
-        ? 'Them'
-        : micEvidence > 0
+    const speaker = input.preserveSourceSpeakers
+      ? canonical.speaker
+      : systemPassThrough
+        ? micActivity > systemActivity
           ? 'Me'
-          : provisionalSpeaker || 'Unknown';
+          : 'Them'
+        : systemEvidence > micEvidence
+          ? 'Them'
+          : micEvidence > 0
+            ? 'Me'
+            : provisionalSpeaker || 'Unknown';
     return { ...canonical, speaker } as T;
   });
 

@@ -71,6 +71,10 @@ type RecoveryDependencies = {
     segments: TimedSegment[],
     outputTag: string,
   ) => Promise<string | null>;
+  mixWavSources?: (
+    inputPaths: string[],
+    outputTag: string,
+  ) => Promise<string | null>;
   nowMs?: number;
   repairRawChunk?: (inputPath: string) => Promise<Buffer | null>;
   transcribeChunk?: (
@@ -1364,16 +1368,31 @@ export const recoverInterruptedCaptureJournals = async (
     const existingMeeting = deps.getMeeting(manifest.meetingId);
     const isRecoveryRequiredMeeting =
       existingMeeting?.finalization_status === 'recovery_required';
+    const isResumableSealedMeeting = Boolean(
+      manifest.schemaVersion === 3 &&
+        manifest.lifecycleState === 'sealed' &&
+        existingMeeting?.transcript_status === 'provisional' &&
+        existingMeeting.capture_journal_generation === manifest.generation &&
+        existingMeeting.finalization_status !== 'recovery_required' &&
+        (!existingMeeting.audio_path ||
+          !existingMeeting.system_audio_path ||
+          !existingMeeting.mixed_audio_path),
+    );
     if (
       manifest.lifecycleState === 'sealed' &&
       existingMeeting &&
-      !isRecoveryRequiredMeeting
+      !isRecoveryRequiredMeeting &&
+      !isResumableSealedMeeting
     ) {
       result.skippedSealedCount += 1;
       continue;
     }
 
-    if (existingMeeting && !isRecoveryRequiredMeeting) {
+    if (
+      existingMeeting &&
+      !isRecoveryRequiredMeeting &&
+      !isResumableSealedMeeting
+    ) {
       result.skippedExistingCount += 1;
       continue;
     }
@@ -1449,19 +1468,24 @@ export const recoverInterruptedCaptureJournals = async (
           ? await Promise.all([
               buildV3SourceSegments(rootDir, manifest, 'mic'),
               buildV3SourceSegments(rootDir, manifest, 'system'),
-              // Checkpoints are authoritative for an interrupted recording.
-              // readV3AcceptedSegments still enforces that every accepted
-              // checkpoint uses one internally consistent configuration.
-              readV3AcceptedSegments(
-                rootDir,
-                manifest,
-                deps.transcriptionConfig
-                  ? getAcceptedRecoveryCheckpointConfigKeys(
-                      deps.transcriptionConfig,
-                    )
-                  : undefined,
-                { allowCaptureFailures: true },
-              ),
+              isResumableSealedMeeting
+                ? Promise.resolve({
+                    segments: [],
+                    sourceCoverageSegments: [],
+                  })
+                : // Checkpoints are authoritative for an interrupted recording.
+                  // readV3AcceptedSegments still enforces that every accepted
+                  // checkpoint uses one internally consistent configuration.
+                  readV3AcceptedSegments(
+                    rootDir,
+                    manifest,
+                    deps.transcriptionConfig
+                      ? getAcceptedRecoveryCheckpointConfigKeys(
+                          deps.transcriptionConfig,
+                        )
+                      : undefined,
+                    { allowCaptureFailures: true },
+                  ),
             ])
           : await Promise.all([
               buildSourceSegments(rootDir, micEntries),
@@ -1481,24 +1505,82 @@ export const recoverInterruptedCaptureJournals = async (
         });
       }
       const activityEvidence = await getRecoveryActivityEvidence(manifest);
+      let resumableMeeting = existingMeeting;
+      const persistResumableStage = async (
+        patch: Partial<PersistedMeeting>,
+      ) => {
+        if (!resumableMeeting) {
+          throw new Error('sealed_capture_meeting_missing');
+        }
+        resumableMeeting = {
+          ...resumableMeeting,
+          ...patch,
+          finalization_status: 'processing',
+          finalization_error_category: null,
+        };
+        await deps.saveMeeting(resumableMeeting);
+      };
 
       const micAudioPath =
-        micRecovery.segments.length > 0
+        (isResumableSealedMeeting && resumableMeeting?.audio_path) ||
+        (micRecovery.segments.length > 0
           ? await deps.stitchWavSegments(
               micRecovery.segments,
               `${manifest.meetingId}-mic-recovered`,
             )
-          : null;
+          : null);
+      if (
+        isResumableSealedMeeting &&
+        micAudioPath &&
+        !resumableMeeting?.audio_path
+      ) {
+        await persistResumableStage({ audio_path: micAudioPath });
+      }
       const systemAudioPath =
-        systemRecovery.segments.length > 0
+        (isResumableSealedMeeting && resumableMeeting?.system_audio_path) ||
+        (systemRecovery.segments.length > 0
           ? await deps.stitchWavSegments(
               systemRecovery.segments,
               `${manifest.meetingId}-system-recovered`,
             )
-          : null;
+          : null);
+      if (
+        isResumableSealedMeeting &&
+        systemAudioPath &&
+        !resumableMeeting?.system_audio_path
+      ) {
+        await persistResumableStage({ system_audio_path: systemAudioPath });
+      }
 
       if (!micAudioPath && !systemAudioPath) {
         result.skippedEmptyCount += 1;
+        continue;
+      }
+
+      if (isResumableSealedMeeting) {
+        if (
+          !resumableMeeting ||
+          !micAudioPath ||
+          !systemAudioPath ||
+          !deps.mixWavSources
+        ) {
+          throw new Error('sealed_capture_materialization_incomplete');
+        }
+        const mixedAudioPath =
+          resumableMeeting.mixed_audio_path ||
+          (await deps.mixWavSources(
+            [micAudioPath, systemAudioPath],
+            `${manifest.meetingId}-mix-recovered`,
+          ));
+        if (!mixedAudioPath) {
+          throw new Error('sealed_capture_mix_failed');
+        }
+        await persistResumableStage({
+          audio_path: micAudioPath,
+          system_audio_path: systemAudioPath,
+          mixed_audio_path: mixedAudioPath,
+        });
+        result.recoveredCount += 1;
         continue;
       }
 

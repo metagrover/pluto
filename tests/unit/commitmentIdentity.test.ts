@@ -231,6 +231,68 @@ describe('identity publication boundary', () => {
       }),
     );
   });
+  it('binds Me to workspace self person when capture selfPersonId was null at recording time', () => {
+    const person = db.upsertEntity({
+      type: 'person',
+      name: 'Aditya Grover',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setSelfPersonId(person.id);
+    db.saveMeeting({
+      id: 'null-capture-self-meeting',
+      title: 'Local sync',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: 'I will prepare the slides.' }],
+      }),
+    });
+    db.identityStore.recordCapture('null-capture-self-meeting', 'local', null);
+
+    const context = identity.getMeetingIdentityContext(
+      'null-capture-self-meeting',
+    );
+    expect(context.bindings).toContainEqual(
+      expect.objectContaining({
+        speaker: 'Me',
+        personId: person.id,
+        individual: true,
+      }),
+    );
+  });
+  it('binds Me to workspace self person even when acoustic diarization confidence is absent or below threshold', () => {
+    const person = db.upsertEntity({
+      type: 'person',
+      name: 'Aditya Grover',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setSelfPersonId(person.id);
+    db.saveMeeting({
+      id: 'low-confidence-meeting',
+      title: 'Streaming meeting',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: 'Let me double check.' }],
+        speakerAttribution: {
+          confidence: 0.5,
+          mappingApplied: false,
+        },
+      }),
+    });
+    db.identityStore.recordCapture(
+      'low-confidence-meeting',
+      'local',
+      person.id,
+    );
+
+    const context = identity.getMeetingIdentityContext(
+      'low-confidence-meeting',
+    );
+    expect(context.bindings).toContainEqual(
+      expect.objectContaining({
+        speaker: 'Me',
+        personId: person.id,
+        individual: true,
+      }),
+    );
+  });
   it('uses source-backed resolutions and caches them without altering extracted ownership', async () => {
     db.saveMeeting({
       id: 'resolution-source',

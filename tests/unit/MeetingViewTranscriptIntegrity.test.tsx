@@ -261,6 +261,74 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain("Couldn't finish the transcript");
   });
 
+  it.each([
+    [false, null],
+    [true, null],
+    [true, 'transcript'],
+  ] as const)(
+    'shows incomplete participant audio honestly with existing analysis=%s and retry=%s',
+    (hasExistingAnalysis, retryOperationKind) => {
+      const markup = renderToStaticMarkup(
+        <TranscriptIntegrityPanel
+          status="needs_attention"
+          integrityJson={JSON.stringify({
+            schemaVersion: 2,
+            state: 'needs_attention',
+            reasons: ['system_capture_incomplete'],
+            finalTranscription: {
+              policy: 'parakeet_final_v1',
+              state: 'needs_attention',
+              failure: 'required_source_failed',
+            },
+          })}
+          transcriptJson={JSON.stringify({
+            segments: [{ text: 'Preserved speech' }],
+          })}
+          hasExistingAnalysis={hasExistingAnalysis}
+          retryOperationKind={retryOperationKind}
+          onRetry={vi.fn()}
+        />,
+      );
+      expect(markup).toContain('Participant audio could not be verified');
+      expect(markup).toContain('Your existing transcript has been kept.');
+      expect(markup).toContain(
+        'Retrying transcription cannot restore missing audio.',
+      );
+      expect(markup).not.toContain('Your recording is safe');
+      expect(markup).not.toContain('Transcript needs another pass');
+      expect(markup).not.toContain('<button');
+    },
+  );
+
+  it('renders the durable system-resource pause instead of repeating generic retry copy', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [
+            { code: 'processing_stage_failed', stage: 'source_transcription' },
+          ],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'resource_policy_denied',
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Transcription paused');
+    expect(markup).toContain('too busy or warm');
+    expect(markup).toContain('Retry transcription');
+    expect(markup).not.toContain('Transcript needs another pass');
+  });
+
   it('offers calm speaker label improvement for a fresh attribution rejection', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
@@ -515,6 +583,7 @@ describe('MeetingView transcript integrity', () => {
 
   it('does not offer deletion for a recovery-required meeting', () => {
     expect(canDeleteMeeting('recovery_required')).toBe(false);
+    expect(canDeleteMeeting('processing')).toBe(false);
     expect(canDeleteMeeting('finalized')).toBe(true);
 
     const markup = renderToStaticMarkup(

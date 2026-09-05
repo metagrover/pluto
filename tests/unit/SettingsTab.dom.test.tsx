@@ -139,4 +139,21 @@ describe('SettingsTab', () => {
 
     act(() => root.unmount());
   });
+
+  it('opens directly on the specified initialTab', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
+    );
+
+    const tabs = getTabs(container);
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+    expect(container.textContent).toContain('Calendar settings content');
+    expect(container.textContent).not.toContain('Identity settings content');
+
+    act(() => root.unmount());
+  });
 });
