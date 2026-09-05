@@ -8,6 +8,7 @@ import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import {
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   type WebContents,
   app,
@@ -86,6 +87,7 @@ import {
   buildSaveMeetingFailureDiagnostic,
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
+import { loadSpeakerSample } from './speakerSample';
 import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
@@ -518,6 +520,18 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+    }
+    try {
+      if (Notification.isSupported()) {
+        const meeting = db.getMeeting(meetingId) as { title?: string } | null;
+        const title = meeting?.title || 'Meeting';
+        new Notification({
+          title: 'Meeting notes ready',
+          body: `Notes for "${title}" are ready.`,
+        }).show();
+      }
+    } catch {
+      // Non-fatal notification error
     }
   },
   runSecondary: async (input) => {
@@ -964,7 +978,15 @@ app.whenReady().then(async () => {
   scheduleDreaming(0);
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) => {
-      const result = handleIdentityRequest(channel, payload);
+      const result = handleIdentityRequest(channel, payload, {
+        onBindingChange: ({ meetingId, personIds }) => {
+          queueKnowledgeDocsRefreshForMeeting(meetingId);
+          for (const personId of personIds) {
+            const doc = db.getKnowledgeDocByScope('person_context', personId);
+            if (doc) queueKnowledgeDocRefresh(doc.id);
+          }
+        },
+      });
       if (
         channel !== 'GET_IDENTITY_STATE' &&
         channel !== 'GET_MEETING_IDENTITY'
@@ -1015,6 +1037,19 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('CALENDAR_GET_MEETING_CONTEXT', (_event, meetingId) =>
     db.calendarStore.getMeetingContext(String(meetingId)),
+  );
+  ipcMain.handle(
+    'CALENDAR_MATCH_ACTIVE',
+    (_event, payload?: { atTime?: string }) =>
+      calendarService.matchActiveEvent(payload?.atTime),
+  );
+  ipcMain.handle(
+    'CALENDAR_ASSOCIATE_START',
+    (_event, payload: { meetingId: string; atTime?: string }) =>
+      calendarService.associateMeetingAtStart(
+        String(payload.meetingId),
+        payload?.atTime,
+      ),
   );
   ipcMain.handle('OPEN_CALENDAR_SYSTEM_SETTINGS', async (_event, target) => {
     if (process.platform !== 'darwin') return false;
@@ -2170,6 +2205,32 @@ app.whenReady().then(async () => {
 
       return outputPaths;
     },
+  );
+
+  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE', async (_event, request) =>
+    loadSpeakerSample(request, {
+      getMeeting: (meetingId) =>
+        (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
+      fileExists: (inputPath) => fs.existsSync(inputPath),
+      createTemporaryPath: () =>
+        path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+      sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+        await new Promise<boolean>((resolve) => {
+          ffmpeg(inputPath)
+            .setStartTime(startSec)
+            .setDuration(durationSec)
+            .audioChannels(1)
+            .audioFrequency(16000)
+            .toFormat('wav')
+            .on('end', () => resolve(true))
+            .on('error', () => resolve(false))
+            .save(outputPath);
+        }),
+      readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+      removeFile: async (outputPath) => {
+        await fs.promises.unlink(outputPath);
+      },
+    }),
   );
 
   const mixWavSources = async ({

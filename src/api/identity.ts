@@ -25,6 +25,15 @@ export interface MeetingIdentityState extends IdentityState {
   } | null;
 }
 
+export interface MeetingSpeakerSample {
+  bytes: Uint8Array;
+  mimeType: 'audio/wav';
+  durationSeconds: number;
+  excerpt: string;
+  sampleIndex: number;
+  sampleCount: number;
+}
+
 export type IdentitySelection =
   | { personId: string | null; newName?: never }
   | { newName: string; personId?: never };
@@ -83,6 +92,16 @@ export const clearMeetingIdentityBinding = (
   });
 export const retryIdentityReconciliation = (meetingId: string) =>
   invoke<MeetingIdentityState>('RETRY_IDENTITY_RECONCILIATION', { meetingId });
+export const getMeetingSpeakerSample = (
+  meetingId: string,
+  speaker: string,
+  sampleIndex: number,
+) =>
+  invoke<MeetingSpeakerSample | null>('GET_MEETING_SPEAKER_SAMPLE', {
+    meetingId,
+    speaker,
+    sampleIndex,
+  });
 
 export const identityPersonLabel = (
   person: IdentityPerson,

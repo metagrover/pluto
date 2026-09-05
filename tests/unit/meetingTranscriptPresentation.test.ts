@@ -67,7 +67,7 @@ describe('meeting transcript presentation', () => {
 
     expect(projected.map((segment) => segment.speaker)).toEqual([
       'Avery Chen',
-      'Remote Speaker 2',
+      'Speaker 2',
       'Avery Chen',
     ]);
     expect(segments.map((segment) => segment.speaker)).toEqual([

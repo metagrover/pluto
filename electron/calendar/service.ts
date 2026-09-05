@@ -29,7 +29,10 @@ type CalendarStorePort = Pick<
   | 'listEvents'
   | 'recordFailure'
   | 'disconnect'
->;
+> & {
+  matchActiveEvent?: CalendarStore['matchActiveEvent'];
+  associateMeetingAtStart?: CalendarStore['associateMeetingAtStart'];
+};
 
 const authorizationState = (
   authorization: CalendarAuthorizationStatus,
@@ -255,6 +258,26 @@ export const createCalendarService = (deps: {
     deps.store.disconnect();
   };
 
+  const matchActiveEvent = (atTime?: string) => {
+    const time = atTime ?? now().toISOString();
+    return (
+      deps.store.matchActiveEvent?.(time) ?? {
+        match: { kind: 'none' as const },
+        event: null,
+      }
+    );
+  };
+
+  const associateMeetingAtStart = (meetingId: string, atTime?: string) => {
+    const time = atTime ?? now().toISOString();
+    return (
+      deps.store.associateMeetingAtStart?.(meetingId, time) ?? {
+        context: null,
+        event: null,
+      }
+    );
+  };
+
   return {
     getSnapshot: snapshotFor,
     connect,
@@ -262,6 +285,8 @@ export const createCalendarService = (deps: {
     selectCalendars,
     refresh,
     listDay,
+    matchActiveEvent,
+    associateMeetingAtStart,
     start,
     stop,
     disconnect,

@@ -226,10 +226,21 @@ describe('identity controls', () => {
         <MeetingIdentityControls
           meetingId="meeting-a"
           attendeeNames={['Sam Lee', 'Jordan Doe']}
+          speakerSummaries={{
+            'Remote Speaker 1': {
+              turnCount: 3,
+              excerpt: 'The launch plan is ready for review.',
+            },
+          }}
         />,
       ),
     );
-    await click('Speaker identities');
+    expect(container.textContent).toContain('1 unidentified speaker');
+    await click('1 unidentified speaker · Review');
+    expect(container.textContent).toContain('Speaker 1');
+    expect(container.textContent).toContain(
+      'The launch plan is ready for review.',
+    );
     expect(container.textContent).toContain('Jordan Doe');
     invoke.mockResolvedValueOnce({
       ...meeting(),
@@ -247,13 +258,36 @@ describe('identity controls', () => {
         },
       ],
     });
-    await click('Sam Lee');
+    await click('Sam Lee · Invited');
+    expect(container.textContent).toContain('Speaker 1 will appear as Sam Lee');
+    expect(container.textContent).toContain(
+      '3 transcript turns will be linked to Sam Lee in People',
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.anything(),
+    );
+    await click('Confirm Sam Lee');
     expect(invoke).toHaveBeenLastCalledWith('SET_MEETING_IDENTITY_BINDING', {
       meetingId: 'meeting-a',
       speaker: 'Remote Speaker 1',
       personId: 'person-sam',
       individual: true,
       expectedRevision: 4,
+    });
+    expect(container.textContent).toContain('Speaker 1 is Sam Lee');
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+      revision: 6,
+      people: [{ id: 'person-sam', name: 'Sam Lee' }],
+      bindings: [],
+    });
+    await click('Undo');
+    expect(invoke).toHaveBeenLastCalledWith('CLEAR_MEETING_IDENTITY_BINDING', {
+      meetingId: 'meeting-a',
+      speaker: 'Remote Speaker 1',
+      expectedRevision: 5,
     });
   });
 
@@ -274,7 +308,7 @@ describe('identity controls', () => {
         />,
       ),
     );
-    await click('Speaker identities');
+    await click('1 unidentified speaker · Review');
 
     expect(
       [...container.querySelectorAll('button')].some(
@@ -297,13 +331,103 @@ describe('identity controls', () => {
         />,
       ),
     );
-    await click('Speaker identities');
+    await click('1 unidentified speaker · Review');
 
     expect(
       [...container.querySelectorAll('button')].some(
         (button) => button.textContent === 'Sam Lee',
       ),
     ).toBe(false);
+  });
+
+  it('plays isolated samples one at a time, offers an alternate, and cleans up object URLs', async () => {
+    const createObjectURL = vi.fn(() => `blob:sample-${Math.random()}`);
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const play = vi.fn(async () => {});
+    const pause = vi.fn();
+    vi.stubGlobal(
+      'Audio',
+      class {
+        play = play;
+        pause = pause;
+        addEventListener = vi.fn();
+        constructor(public src: string) {}
+      },
+    );
+    invoke.mockImplementation(
+      async (
+        channel: string,
+        payload: { meetingId?: string; sampleIndex?: number },
+      ) =>
+        channel === 'GET_MEETING_SPEAKER_SAMPLE'
+          ? {
+              bytes: new Uint8Array([1, 2, 3]),
+              mimeType: 'audio/wav',
+              durationSeconds: 5,
+              excerpt: 'A clean sample excerpt.',
+              sampleIndex: payload.sampleIndex ?? 0,
+              sampleCount: 2,
+            }
+          : {
+              ...meeting(payload.meetingId),
+              speakers: ['Remote Speaker 1'],
+            },
+    );
+
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          hasSystemAudio
+          speakerSummaries={{
+            'Remote Speaker 1': { turnCount: 2, excerpt: 'Initial excerpt.' },
+          }}
+        />,
+      ),
+    );
+    await click('1 unidentified speaker · Review');
+    await click('Play voice sample');
+    expect(invoke).toHaveBeenLastCalledWith('GET_MEETING_SPEAKER_SAMPLE', {
+      meetingId: 'meeting-a',
+      speaker: 'Remote Speaker 1',
+      sampleIndex: 0,
+    });
+    expect(play).toHaveBeenCalledTimes(1);
+    await click('Try another sample');
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenLastCalledWith('GET_MEETING_SPEAKER_SAMPLE', {
+      meetingId: 'meeting-a',
+      speaker: 'Remote Speaker 1',
+      sampleIndex: 1,
+    });
+
+    await act(async () =>
+      root.render(<MeetingIdentityControls meetingId="meeting-b" />),
+    );
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains when a meeting has no isolated voice sample', async () => {
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      speakers: ['Remote Speaker 1'],
+    });
+    await act(async () =>
+      root.render(<MeetingIdentityControls meetingId="meeting-a" />),
+    );
+    await click('1 unidentified speaker · Review');
+    expect(container.textContent).toContain(
+      'Voice sample unavailable for this meeting.',
+    );
   });
 
   it('publishes confirmed display names when identity state loads', async () => {

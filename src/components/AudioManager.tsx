@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  type SilenceWatchdog,
+  createSilenceWatchdog,
+} from '../autoStop/silenceWatchdog';
 import type {
   CaptureLifecycleSnapshot,
   CaptureStartResult,
@@ -69,6 +73,7 @@ import {
 import {
   KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
   type TranscriptionVocabularySelection,
+  buildTranscriptionParticipantHints,
 } from '../utils/transcriptionVocabulary';
 import {
   type CaptureHealth,
@@ -97,8 +102,11 @@ interface AudioManagerProps {
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
+  transcriptionParticipantHints?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
+  silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
+  calendarEndTimeMs?: number | null;
 
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
@@ -202,6 +210,7 @@ export const AudioManager = ({
   userNotes = '',
   userTitle = '',
   participants = [],
+  transcriptionParticipantHints = [],
   transcriptionSettings,
   onStopSessionRef,
   onStartSessionRef,
@@ -212,6 +221,8 @@ export const AudioManager = ({
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
   systemAudioStatus = 'unknown',
+  silenceAutoStopDuration = '5',
+  calendarEndTimeMs = null,
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const captureHealthRef = useRef<CaptureHealthState>({
@@ -313,6 +324,31 @@ export const AudioManager = ({
   const stopSessionActionRef = useRef<(endReason?: string) => void>(
     () => undefined,
   );
+  const silenceWatchdogRef = useRef<SilenceWatchdog | null>(null);
+  const calendarEndTimeMsRef = useRef<number | null>(null);
+  const silenceAutoStopDurationRef = useRef<string | undefined>(
+    silenceAutoStopDuration,
+  );
+
+  useEffect(() => {
+    calendarEndTimeMsRef.current = calendarEndTimeMs ?? null;
+  }, [calendarEndTimeMs]);
+
+  useEffect(() => {
+    silenceAutoStopDurationRef.current = silenceAutoStopDuration;
+  }, [silenceAutoStopDuration]);
+
+  const getSilenceTimeoutMs = (): number | null => {
+    const raw = silenceAutoStopDurationRef.current;
+    if (raw === 'off' || raw === 'disabled' || raw === '0') {
+      return null;
+    }
+    const minutes = Number.parseInt(raw || '5', 10);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return null;
+    }
+    return minutes * 60 * 1000;
+  };
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
     terms: [],
@@ -661,7 +697,12 @@ export const AudioManager = ({
       try {
         const vocabulary = (await window.ipcRenderer.invoke(
           'GET_TRANSCRIPTION_VOCABULARY',
-          { participants },
+          {
+            participants: buildTranscriptionParticipantHints(
+              participants,
+              transcriptionParticipantHints,
+            ),
+          },
         )) as TranscriptionVocabularySelection;
         const initialPrompt =
           typeof vocabulary?.initialPrompt === 'string' &&
@@ -737,6 +778,9 @@ export const AudioManager = ({
             eouGenerationRef.current !== eouGeneration
           )
             return;
+          if (segments.length > 0) {
+            silenceWatchdogRef.current?.recordSpeechActivity(Date.now());
+          }
           const activeWindow = activeSpeakerWindowRef.current;
           const activityWindows = activeWindow
             ? [
@@ -1320,6 +1364,31 @@ export const AudioManager = ({
       isRecordingRef.current = true;
       setIsRecording(true);
       publishCaptureLifecycle({ state: 'recording', meetingId });
+      void window.ipcRenderer
+        ?.invoke('CALENDAR_ASSOCIATE_START', { meetingId })
+        .catch(() => {});
+
+      silenceWatchdogRef.current?.disarm();
+      const watchdog = createSilenceWatchdog({
+        silenceTimeoutMs: getSilenceTimeoutMs,
+        calendarEndTimeMs: () => calendarEndTimeMsRef.current,
+        isConferenceSilent: () => {
+          const now = performance.now();
+          const systemRmsAgeMs =
+            systemRmsUpdatedAtRef.current > 0
+              ? now - systemRmsUpdatedAtRef.current
+              : Number.POSITIVE_INFINITY;
+          const currentRms = systemRmsAgeMs <= 1000 ? systemRmsRef.current : 0;
+          return currentRms < SPEAKING_RMS_THRESHOLD;
+        },
+        onTriggerAutoStop: (reason) => {
+          console.log('[Pluto] Silence watchdog triggered auto-stop:', reason);
+          stopSessionActionRef.current(reason);
+        },
+      });
+      silenceWatchdogRef.current = watchdog;
+      watchdog.start(5000);
+
       if (
         typeof navigator !== 'undefined' &&
         navigator.mediaDevices?.addEventListener
@@ -1338,6 +1407,8 @@ export const AudioManager = ({
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      silenceWatchdogRef.current?.disarm();
+      silenceWatchdogRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
       nativeAudioUnsubscribeRef.current?.();
@@ -1436,6 +1507,14 @@ export const AudioManager = ({
         threshold: SPEAKING_RMS_THRESHOLD,
         ratio: SPEAKING_RATIO,
       });
+
+      if (
+        micRms >= SPEAKING_RMS_THRESHOLD ||
+        systemRms >= SPEAKING_RMS_THRESHOLD ||
+        nextSpeaker !== null
+      ) {
+        silenceWatchdogRef.current?.recordSpeechActivity(Date.now());
+      }
 
       if (
         now - lastSpeakerTsRef.current >= SPEAKING_MIN_INTERVAL_MS &&
@@ -1808,6 +1887,9 @@ export const AudioManager = ({
   };
 
   const stopSession = async (endReason?: string) => {
+    silenceWatchdogRef.current?.disarm();
+    silenceWatchdogRef.current = null;
+
     const stopSnapshot = beginRecordingFinalization({
       meetingId: currentMeetingIdRef.current,
       stopInFlight: stopInFlightRef.current,
@@ -2365,6 +2447,8 @@ export const AudioManager = ({
         );
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
+        silenceWatchdogRef.current?.disarm();
+        silenceWatchdogRef.current = null;
         currentMeetingIdRef.current = null;
         eouSessionRef.current?.cancel();
         eouSessionRef.current = null;
@@ -2398,6 +2482,8 @@ export const AudioManager = ({
     );
 
     return () => {
+      silenceWatchdogRef.current?.disarm();
+      silenceWatchdogRef.current = null;
       if (
         typeof navigator !== 'undefined' &&
         navigator.mediaDevices?.removeEventListener &&
