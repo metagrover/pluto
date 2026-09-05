@@ -47,6 +47,7 @@ import {
   type NotesItem,
   type NotesRequest,
   type NotesTask,
+  type NotesValidationCategory,
   type SourceSpan,
 } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
@@ -149,6 +150,32 @@ const makeRequest = (
   contextTokens: input.contextTokens,
   ...(input.signal ? { signal: input.signal } : {}),
 });
+
+const validationCategoryFor = (error: unknown): NotesValidationCategory => {
+  if (!(error instanceof MeetingNotesError)) return 'validation';
+  if (
+    error.code === 'notes_audit_invalid' ||
+    error.code.startsWith('notes_writer_invalid')
+  ) {
+    return 'schema';
+  }
+  if (
+    error.code === 'invalid_notes_audit' ||
+    error.code === 'invalid_source_span'
+  ) {
+    return 'source_reference';
+  }
+  if (
+    error.code.startsWith('notes_guardrail:') ||
+    error.code.startsWith('notes_audit_invalid_commitment:')
+  ) {
+    return 'guardrail';
+  }
+  if (error.code === 'notes_merge_dropped_commitment') {
+    return 'inherited_commitment';
+  }
+  return 'validation';
+};
 
 const assertNotCancelled = (input: GenerateMeetingNotesInput) => {
   if (input.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
@@ -270,7 +297,9 @@ const withOneRepair = async <T>(
         // A benchmark recovery candidate must pass the unchanged strict parser.
       }
     }
-    if (!allowModelRepair) throw new MeetingNotesError(failureCode);
+    if (!allowModelRepair) {
+      throw new MeetingNotesError(failureCode, validationCategoryFor(error));
+    }
     const repairPrompt = [
       'Repair the prior response into the required JSON contract.',
       'Return only valid JSON. Correct against original SOURCE DATA, not the rejected draft as ground truth. Restore supported missing content; retain unaffected material and metadata.',
@@ -291,8 +320,11 @@ const withOneRepair = async <T>(
     assertNotCancelled(input);
     try {
       return parse(repairedRaw, true);
-    } catch {
-      throw new MeetingNotesError(failureCode);
+    } catch (repairError) {
+      throw new MeetingNotesError(
+        failureCode,
+        validationCategoryFor(repairError),
+      );
     }
   }
 };
@@ -1566,7 +1598,24 @@ const runMeetingNotes = async (
     }
     return runHierarchy(input, knownTerms);
   }
-  const audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
+  let audited: Awaited<ReturnType<typeof auditDraft>>;
+  try {
+    audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
+  } catch (error) {
+    const canUseDeterministicFallback =
+      input.provider === 'ollama' &&
+      compactEditor &&
+      error instanceof MeetingNotesError &&
+      error.code === 'notes_audit_invalid' &&
+      (error.validationCategory === 'schema' ||
+        error.validationCategory === 'guardrail');
+    if (!canUseDeterministicFallback) throw error;
+    audited = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
+    audited.audited.issues ??= [];
+    audited.audited.issues.push(
+      `notes_direct_audit_fallback:${error.validationCategory}`,
+    );
+  }
   assertNotCancelled(input);
   return metadataFor(
     input,

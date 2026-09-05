@@ -288,7 +288,7 @@ it('fails a malformed compact writer without a model repair call', async () => {
   expect(onRepair).not.toHaveBeenCalled();
 });
 
-it('fails a malformed compact editor without a model repair call', async () => {
+it('publishes a deterministically accepted direct draft after a malformed compact editor', async () => {
   const fixture = makeDirectNotesFixture();
   const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi
@@ -314,22 +314,193 @@ it('fails a malformed compact editor without a model repair call', async () => {
     .mockResolvedValue('{');
   const onRepair = vi.fn();
 
-  await expect(
-    generateMeetingNotes({
-      reviewProtocol: 'editor',
-      compactWriterContract: true,
-      source: fixture.source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'qwen3.5:9b',
-      contextTokens: 16_384,
-      onRepair,
-    }),
-  ).rejects.toThrow('notes_audit_invalid');
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'qwen3.5:9b',
+    contextTokens: 16_384,
+    onRepair,
+  });
 
   expect(generate).toHaveBeenCalledTimes(2);
   expect(onRepair).not.toHaveBeenCalled();
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline' }),
+  ]);
+  expect(result.quality.issues).toContain(
+    'notes_direct_audit_fallback:schema',
+  );
+  expect(result.generation_metadata.audit_status).toBe(
+    'complete_with_warnings',
+  );
+});
+
+it('publishes a deterministically accepted direct draft after an editor guardrail failure', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [],
+        recentWin: null,
+        dispositions: [],
+        terminology: [],
+      }),
+    );
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16_384,
+  });
+
+  expect(result.all_action_items).toHaveLength(1);
+  expect(result.quality.issues).toContain(
+    'notes_direct_audit_fallback:guardrail',
+  );
+  expect(generate).toHaveBeenCalledTimes(2);
+});
+
+it('keeps malformed direct cloud editors fail-closed with a sanitized category', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce('{');
+
+  const error = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'openai',
+    model: 'test',
+    contextTokens: 16_384,
+  }).catch((failure: unknown) => failure);
+
+  expect(error).toMatchObject({
+    code: 'notes_audit_invalid',
+    validationCategory: 'schema',
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
+});
+
+it('keeps an unknown direct editor source fail-closed with a sanitized category', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+          title: {
+              text: 'Outline',
+            sources: [{ segment: 999, start: 0, end: 1 }],
+          },
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+        recentWin: null,
+        dispositions: [],
+        terminology: [],
+      }),
+    );
+
+  const error = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16_384,
+  }).catch((failure: unknown) => failure);
+
+  expect(error).toBeInstanceOf(MeetingNotesError);
+  expect(error).toMatchObject({
+    code: 'notes_audit_invalid',
+    validationCategory: 'source_reference',
+  });
+  expect(generate).toHaveBeenCalledTimes(2);
 });
 
 it('retries a truncated compact leaf writer with the concise contract', async () => {
