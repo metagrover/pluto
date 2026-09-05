@@ -2,6 +2,8 @@ packages:
   - .
 
 onlyBuiltDependencies:
+  - '@ffprobe-installer/darwin-arm64'
+  - '@ffprobe-installer/darwin-x64'
   - better-sqlite3
   - electron
   - esbuild

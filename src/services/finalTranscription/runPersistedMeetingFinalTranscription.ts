@@ -24,6 +24,7 @@ import {
   type FinalTranscriptionOutcome,
   runFinalTranscription,
 } from './runFinalTranscription.ts';
+import { hasCompleteSystemCapture } from './systemCaptureEvidence.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
@@ -90,6 +91,7 @@ export const runPersistedMeetingFinalTranscription = async (
   options: {
     signal?: AbortSignal;
     runId?: string;
+    manualRetry?: boolean;
     onTranscriptCommitted?: () => Promise<void> | void;
   } = {},
 ): Promise<FinalTranscriptionOutcome> => {
@@ -99,6 +101,26 @@ export const runPersistedMeetingFinalTranscription = async (
   ) as StoredIntegrity;
   const activityEvidence = await readSealedActivityEvidence(integrity);
   const provisional = parseProvisionalTranscript(meeting.transcript_json);
+  // A retry changes canonical attribution, not the original live evidence.
+  const savedLiveSegments = provisional.payload.liveSegments;
+  const liveSegments =
+    Array.isArray(savedLiveSegments) &&
+    savedLiveSegments.every((segment) => {
+      if (!segment || typeof segment !== 'object') return false;
+      const row = segment as Partial<AttributionSegment>;
+      return (
+        typeof row.text === 'string' &&
+        typeof row.speaker === 'string' &&
+        typeof row.startTime === 'number' &&
+        typeof row.endTime === 'number' &&
+        Number.isFinite(row.startTime) &&
+        Number.isFinite(row.endTime) &&
+        row.startTime >= 0 &&
+        row.endTime >= row.startTime
+      );
+    })
+      ? savedLiveSegments
+      : provisional.segments;
   const runId = options.runId ?? crypto.randomUUID();
   const meetingId = String(meeting.id);
   const language = provisional.payload.transcription?.language || 'en';
@@ -119,6 +141,15 @@ export const runPersistedMeetingFinalTranscription = async (
     }
   }
   let committedSegments: AttributionSegment[] = [];
+  let systemCaptureComplete = false;
+  try {
+    systemCaptureComplete = hasCompleteSystemCapture(
+      await invoke('AUDIO_CAPTURE_JOURNAL_READ', { meetingId }),
+      captureGeneration,
+    );
+  } catch {
+    // A missing journal cannot establish that a quiet System WAV is complete.
+  }
 
   const outcome = await runFinalTranscription(
     {
@@ -127,13 +158,17 @@ export const runPersistedMeetingFinalTranscription = async (
       captureEvidence: {
         sealed: Boolean(activityEvidence && captureGeneration),
         generation: captureGeneration,
+        systemCaptureIncomplete: !systemCaptureComplete,
       },
       recordingDurationSeconds: meeting.duration_seconds || 0,
       micAudioPath: meeting.audio_path || '',
       mixedAudioPath: meeting.mixed_audio_path || '',
       systemAudioPath: meeting.system_audio_path || '',
       provisionalSegments: provisional.segments,
-      preserveProvisionalText: meeting.transcript_status === 'validated',
+      // An explicit retranscription must rebuild machine text too, otherwise
+      // echo fragments retained by a previous validated run survive forever.
+      preserveProvisionalText:
+        meeting.transcript_status === 'validated' && !options.manualRetry,
       activityWindows: activityEvidence?.windows || [],
       language,
       vocabulary,
@@ -143,7 +178,9 @@ export const runPersistedMeetingFinalTranscription = async (
     },
     {
       claimLease: async (lease) =>
-        (await invoke('CLAIM_FINAL_TRANSCRIPTION', meetingId, lease)) === true,
+        (await invoke('CLAIM_FINAL_TRANSCRIPTION', meetingId, lease, {
+          manualRetry: options.manualRetry === true,
+        })) === true,
       admit: async () =>
         evaluateFinalTranscriptionAdmission(
           (await invoke(
@@ -213,7 +250,7 @@ export const runPersistedMeetingFinalTranscription = async (
             stopToValidatedLatency: provisional.payload.stopToValidatedLatency,
             lifecycleStatus: 'validated',
             integrity: { ...commit.integrity, reasons: [] },
-            liveSegments: provisional.segments,
+            liveSegments,
           }),
         );
         const transcriptIntegrityJson = JSON.stringify({

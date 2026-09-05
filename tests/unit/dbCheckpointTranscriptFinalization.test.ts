@@ -197,6 +197,52 @@ it('claims a verified v1 attribution upgrade but rejects a completed v2 result',
   expect(claimMeetingFinalTranscription('parakeet-v2-complete', lease)).toBe(
     false,
   );
+  expect(
+    claimMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      {
+        ...lease,
+        captureGeneration: 'wrong-generation',
+      },
+      { manualRetry: true },
+    ),
+  ).toBe(false);
+  expect(
+    claimMeetingFinalTranscription('parakeet-v2-complete', lease, {
+      manualRetry: true,
+    }),
+  ).toBe(true);
+  expect(
+    claimMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      {
+        ...lease,
+        runId: 'duplicate-manual-run',
+      },
+      { manualRetry: true },
+    ),
+  ).toBe(false);
+  const beforeFailure = JSON.parse(
+    getMeeting('parakeet-v2-complete')?.transcript_json || '{}',
+  );
+  expect(
+    failMeetingFinalTranscription(
+      'parakeet-v2-complete',
+      lease.runId,
+      'required_source_failed',
+      ['system_capture_incomplete'],
+    ),
+  ).toBe(true);
+  const failedMeeting = getMeeting('parakeet-v2-complete');
+  expect(failedMeeting?.transcript_status).toBe('needs_attention');
+  const afterFailure = JSON.parse(failedMeeting?.transcript_json || '{}');
+  expect(afterFailure.segments).toEqual(beforeFailure.segments);
+  expect(afterFailure.speakerAttribution).toEqual(
+    beforeFailure.speakerAttribution,
+  );
+  expect(
+    JSON.parse(failedMeeting?.transcript_integrity_json || '{}').reasons,
+  ).toEqual(['system_capture_incomplete']);
 });
 
 it('rejects an invalid v2 final commit without publishing the transcript', () => {

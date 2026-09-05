@@ -291,7 +291,7 @@ export function buildTranscriptJsonPayload(
       : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
-    ...(options.liveSegments?.length
+    ...(Array.isArray(options.liveSegments)
       ? { liveSegments: options.liveSegments }
       : {}),
     readability: {

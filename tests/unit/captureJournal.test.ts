@@ -20,6 +20,7 @@ import {
   completeCaptureJournalCapturedChunk,
   createCaptureJournal,
   deleteCaptureJournal,
+  markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
@@ -48,6 +49,53 @@ describe('capture journal', () => {
     tempRoots.push(root);
     return root;
   };
+
+  it('durably records a generation-fenced source failure without replacing captured evidence', async () => {
+    const root = await makeRoot();
+    const manifest = await createCaptureJournal(root, {
+      meetingId: 'failure',
+      startedAtMs: 1000,
+      schemaVersion: 3,
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3');
+    const identity = {
+      meetingId: 'failure',
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system' as const,
+    };
+    await expect(
+      markCaptureJournalSourceFailed(root, {
+        ...identity,
+        generation: 'stale',
+      }),
+    ).rejects.toThrow('generation mismatch');
+    await expect(
+      markCaptureJournalSourceFailed(root, {
+        ...identity,
+        source: 'renderer-controlled' as never,
+      }),
+    ).rejects.toThrow('Invalid capture source');
+    expect(await readCaptureJournalManifest(root, 'failure')).toEqual(manifest);
+    const failed = await markCaptureJournalSourceFailed(root, identity);
+    expect(failed.sourceAvailability.system).toBe('failed_during_capture');
+    expect(failed.intervals).toEqual(manifest.intervals);
+    expect(failed.revision).toBe(manifest.revision + 1);
+    expect(await readCaptureJournalManifest(root, 'failure')).toEqual(failed);
+    await expect(
+      markCaptureJournalSourceFailed(root, identity),
+    ).rejects.toThrow('revision conflict');
+    const again = await markCaptureJournalSourceFailed(root, {
+      ...identity,
+      expectedRevision: failed.revision,
+    });
+    expect(again.revision).toBe(failed.revision);
+    const stopping = await stopCaptureJournal(root, {
+      ...identity,
+      expectedRevision: failed.revision,
+    });
+    expect(stopping.sourceAvailability.system).toBe('failed_during_capture');
+  });
 
   const mutateManifest = async (
     root: string,

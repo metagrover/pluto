@@ -418,6 +418,9 @@ export const runRecordingTranscriptValidation = async (input: {
           input.canonicalMode === 'recovered_channels'
             ? recoveredChannelSegments
             : mixedSegments,
+        // Source-owned words still need duplicate and uncertainty checks, but
+        // padded decoder timestamps must never change their capture source.
+        preserveSourceSpeakers: input.canonicalMode === 'recovered_channels',
         micSegments,
         systemSegments,
         provisionalSegments: input.provisionalSegments,

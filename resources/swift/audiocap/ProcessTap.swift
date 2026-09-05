@@ -18,61 +18,11 @@ extension OSStatus {
     var isNoError: Bool { self == noErr }
 }
 
-extension AudioDeviceID {
-    static func readDefaultSystemOutputDevice() throws -> AudioDeviceID {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID()
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let err = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
-        guard err == noErr else { throw ProcessTapError.failedToGetDefaultOutputDevice(err) }
-        return deviceID
-    }
-    
-    func readDeviceUID() throws -> String {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var uid: CFString? = nil
-        var size = UInt32(MemoryLayout<CFString?>.size)
-        // Pass address of the optional CFString
-        let err = withUnsafeMutablePointer(to: &uid) { ptr in
-            AudioObjectGetPropertyData(self, &address, 0, nil, &size, ptr)
-        }
-        guard err == noErr, let actualUid = uid else { throw ProcessTapError.failedToGetDeviceUID(err) }
-        return actualUid as String
-    }
-}
-
-extension AudioObjectID {
-    func readAudioTapStreamBasicDescription() throws -> AudioStreamBasicDescription {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioTapPropertyFormat,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var desc = AudioStreamBasicDescription()
-        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        let err = AudioObjectGetPropertyData(self, &address, 0, nil, &size, &desc)
-        guard err == noErr else { throw ProcessTapError.failedToGetTapDescription(err) }
-        return desc
-    }
-}
-
 enum ProcessTapError: Error {
-    case failedToGetDefaultOutputDevice(OSStatus)
-    case failedToGetDeviceUID(OSStatus)
-    case failedToGetTapDescription(OSStatus)
     case processTapCreationError(OSStatus)
     case aggregateDeviceCreationError(OSStatus)
     case deviceIOProcCreationError(OSStatus)
     case deviceStartError(OSStatus)
-    case tapStreamDescriptionUnavailable
     case failedToCreatePCMBuffer
     case unsupportedTapFormat
 }
@@ -84,47 +34,55 @@ final class ProcessTap {
     private var processTapID: AudioObjectID = .unknown
     private var aggregateDeviceID: AudioObjectID = .unknown
     private var deviceProcID: AudioDeviceIOProcID?
-    private(set) var tapStreamDescription: AudioStreamBasicDescription?
+    private var inputStreamID: AudioObjectID = .unknown
+    private var formatListener: AudioObjectPropertyListenerBlock?
+    private var formatListenerQueue: DispatchQueue?
     
     private var isActivated = false
     
     // Target Processes
     let pids: [Int32]
-    
-    init(pids: [Int32]) {
+    private let isGlobal: Bool
+
+    init(pids: [Int32], isGlobal: Bool = false) {
         self.pids = pids
+        self.isGlobal = isGlobal
+    }
+
+    static func makeDescription(processObjectIDs: [AudioObjectID], isGlobal: Bool) -> CATapDescription {
+        isGlobal
+            ? CATapDescription(stereoGlobalTapButExcludeProcesses: processObjectIDs)
+            : CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
     }
     
+    static func makeAggregateDescription(tapUUID: UUID) -> [String: Any] {
+        [
+            kAudioAggregateDeviceNameKey: "PlutoTap",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            // Start IO immediately, including when every app is quiet.
+            // Tap autostart instead waits for application playback before delivering PCM.
+            kAudioAggregateDeviceTapAutoStartKey: false,
+            kAudioAggregateDeviceTapListKey: [
+                [
+                    kAudioSubTapDriftCompensationKey: true,
+                    kAudioSubTapUIDKey: tapUUID.uuidString
+                ]
+            ]
+        ]
+    }
+
     func activate() throws {
         guard !isActivated else { return }
         isActivated = true
         
         logger.info("Activating ProcessTap for PIDs: \(self.pids)")
         
-        // 1. Create Process Tap
-        // We map Int32 PIDs to AudioProcessID (which is implicitly generic, usually pid_t is compatible)
-        // Verify CATapDescription API expects `[ProcessID]`?
-        // Actually, in the newer SDK, `CATapDescription` takes `[AUAudioObjectID]` which wraps PIDs?
-        // Wait, the fetched code was `CATapDescription(stereoMixdownOfProcesses: [objectID])`.
-        // `objectID` there was `AudioObjectID`.
-        // So we need to convert PIDs to AudioObjectIDs?
-        // Or does `CATapDescription` accept PIDs directly in a different init?
-        // The header says `init(stereoMixdownOfProcesses processes: [AudioObjectID])`.
-        //
-        // NOTE: We need to find the `AudioObjectID` for a given PID.
-        // There isn't a direct "Get AudioObjectID from PID" API commonly exposed without iterating `kAudioHardwarePropertyProcessObjectList`.
-        //
-        // However, for Simplicity in this CLI, we might just filter *later* or tap *everything*.
-        // But `CATapDescription` requires explicit processes.
-        //
-        // Workaround: We will implement a helper to find AudioObjectID for a PID.
-        
+        // Global taps automatically include output processes created after recording starts.
+        // Explicit PID probes keep their inclusion-only semantics.
         let processObjectIDs = try findAudioObjectIDs(for: pids)
-        if processObjectIDs.isEmpty {
-            logger.warning("No matching AudioObjects found for PIDs: \(self.pids)")
-        }
-        
-        let tapDescription = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+        let tapDescription = Self.makeDescription(processObjectIDs: processObjectIDs, isGlobal: isGlobal)
         tapDescription.uuid = UUID()
         
         var tapID: AUAudioObjectID = .unknown
@@ -136,50 +94,21 @@ final class ProcessTap {
         var aggregateCreated = false
         var lastErr: OSStatus = noErr
         for attempt in 1...3 {
-            do {
-                let systemOutputID = try AudioDeviceID.readDefaultSystemOutputDevice()
-                let outputUID = try systemOutputID.readDeviceUID()
-                let aggregateUID = UUID().uuidString
-                
-                let description: [String: Any] = [
-                    kAudioAggregateDeviceNameKey: "PlutoTap",
-                    kAudioAggregateDeviceUIDKey: aggregateUID,
-                    kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-                    kAudioAggregateDeviceIsPrivateKey: true,
-                    kAudioAggregateDeviceIsStackedKey: false,
-                    kAudioAggregateDeviceTapAutoStartKey: true,
-                    kAudioAggregateDeviceSubDeviceListKey: [
-                        [ kAudioSubDeviceUIDKey: outputUID ]
-                    ],
-                    kAudioAggregateDeviceTapListKey: [
-                        [
-                            kAudioSubTapDriftCompensationKey: true,
-                            kAudioSubTapUIDKey: tapDescription.uuid.uuidString
-                        ]
-                    ]
-                ]
-                
-                self.tapStreamDescription = try tapID.readAudioTapStreamBasicDescription()
-                
-                err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &self.aggregateDeviceID)
-                if err == noErr {
-                    aggregateCreated = true
-                    break
-                }
-                lastErr = err
-                // Check if bad object error (kAudioHardwareBadObjectError = 560947818 / '!obj')
-                if err == kAudioHardwareBadObjectError || err == 560947818 {
-                    logger.warning("Transient kAudioHardwareBadObjectError (\(err)) during aggregate device creation (attempt \(attempt)/3), retrying...")
-                    Thread.sleep(forTimeInterval: 0.1)
-                } else {
-                    break
-                }
-            } catch {
-                logger.warning("Attempt \(attempt)/3 failed to configure aggregate device: \(error.localizedDescription)")
+            let description = Self.makeAggregateDescription(tapUUID: tapDescription.uuid)
+            err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &self.aggregateDeviceID)
+            if err == noErr {
+                aggregateCreated = true
+                break
+            }
+            lastErr = err
+            if err == kAudioHardwareBadObjectError || err == 560947818 {
+                logger.warning("Transient kAudioHardwareBadObjectError (\(err)) during aggregate device creation (attempt \(attempt)/3), retrying...")
                 Thread.sleep(forTimeInterval: 0.1)
+            } else {
+                break
             }
         }
-        
+
         guard aggregateCreated else {
             AudioHardwareDestroyProcessTap(tapID)
             self.processTapID = .unknown
@@ -190,19 +119,123 @@ final class ProcessTap {
         logger.info("Tap Created. Aggregate ID: \(self.aggregateDeviceID)")
     }
     
-    func start(on queue: DispatchQueue, block: @escaping AudioDeviceIOBlock) throws {
-        if !isActivated { try activate() }
-        
-        var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue, block)
-        guard err == noErr else { throw ProcessTapError.deviceIOProcCreationError(err) }
-        
-        err = AudioDeviceStart(aggregateDeviceID, deviceProcID)
-        guard err == noErr else { throw ProcessTapError.deviceStartError(err) }
-        
-        logger.info("Recording Started.")
+    private func readInputFormat() throws -> AudioStreamBasicDescription {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(aggregateDeviceID, &address, 0, nil, &size)
+        // The aggregate contains only our tap, so physical microphone streams cannot leak in.
+        guard status == noErr, size == MemoryLayout<AudioObjectID>.size else {
+            throw ProcessTapError.unsupportedTapFormat
+        }
+        var stream: AudioObjectID = .unknown
+        guard AudioObjectGetPropertyData(aggregateDeviceID, &address, 0, nil, &size, &stream) == noErr else {
+            throw ProcessTapError.unsupportedTapFormat
+        }
+        inputStreamID = stream
+        return try Self.readVirtualFormat(stream)
     }
-    
+
+    private static func readVirtualFormat(_ stream: AudioObjectID) throws -> AudioStreamBasicDescription {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioStreamPropertyVirtualFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioObjectGetPropertyData(stream, &address, 0, nil, &size, &format) == noErr,
+              format.mSampleRate.isFinite, format.mSampleRate > 0,
+              format.mFormatID == kAudioFormatLinearPCM,
+              format.mBitsPerChannel == 32,
+              format.mChannelsPerFrame > 0,
+              (format.mFormatFlags & UInt32(kAudioFormatFlagIsFloat)) != 0 else {
+            throw ProcessTapError.unsupportedTapFormat
+        }
+        return format
+    }
+
+    static func sameCaptureFormat(_ left: AudioStreamBasicDescription, _ right: AudioStreamBasicDescription) -> Bool {
+        left.mSampleRate == right.mSampleRate &&
+        left.mChannelsPerFrame == right.mChannelsPerFrame &&
+        left.mFormatID == right.mFormatID && left.mFormatFlags == right.mFormatFlags &&
+        left.mBytesPerFrame == right.mBytesPerFrame && left.mBitsPerChannel == right.mBitsPerChannel
+    }
+
+    func start(on queue: DispatchQueue, block: @escaping AudioDeviceIOBlock) throws {
+        try start(on: queue, prepare: { _ in block })
+    }
+
+    func start(
+        on queue: DispatchQueue,
+        onFormatChange: @escaping () -> Void = {},
+        prepare: (AudioStreamBasicDescription) throws -> AudioDeviceIOBlock
+    ) throws {
+        if !isActivated { try activate() }
+        final class CallbackState {
+            var block: AudioDeviceIOBlock?
+        }
+        let callback = CallbackState()
+        // Read the IOProc's format after AudioDeviceStart; queued callbacks cannot
+        // run until their converter and format-change guard have been installed.
+        queue.suspend()
+        defer { queue.resume() }
+        var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue) { now, input, inputTime, output, outputTime in
+            callback.block?(now, input, inputTime, output, outputTime)
+        }
+        guard err == noErr else { throw ProcessTapError.deviceIOProcCreationError(err) }
+        do {
+            err = AudioDeviceStart(aggregateDeviceID, deviceProcID)
+            guard err == noErr else { throw ProcessTapError.deviceStartError(err) }
+            let format = try readInputFormat()
+            callback.block = try prepare(format)
+
+            let stream = inputStreamID
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioStreamPropertyVirtualFormat,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let listener: AudioObjectPropertyListenerBlock = { _, _ in
+                guard callback.block != nil else { return }
+                if let current = try? Self.readVirtualFormat(stream), Self.sameCaptureFormat(format, current) { return }
+                // This listener runs on the IO queue: stop stale-format PCM before
+                // asking the control queue to construct a new tap generation.
+                callback.block = nil
+                onFormatChange()
+            }
+            err = AudioObjectAddPropertyListenerBlock(stream, &address, queue, listener)
+            guard err == noErr else { throw ProcessTapError.unsupportedTapFormat }
+            formatListener = listener
+            formatListenerQueue = queue
+            // Close the read/register window before queued IO can use the converter.
+            guard let confirmedFormat = try? Self.readVirtualFormat(stream),
+                  Self.sameCaptureFormat(format, confirmedFormat) else {
+                callback.block = nil
+                throw ProcessTapError.unsupportedTapFormat
+            }
+            logger.info("Recording Started.")
+        } catch {
+            callback.block = nil
+            stop()
+            throw error
+        }
+    }
+
     func stop() {
+        if let listener = formatListener, let queue = formatListenerQueue {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioStreamPropertyVirtualFormat,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectRemovePropertyListenerBlock(inputStreamID, &address, queue, listener)
+            formatListener = nil
+            formatListenerQueue = nil
+        }
         if let proc = deviceProcID {
             AudioDeviceStop(aggregateDeviceID, proc)
             AudioDeviceDestroyIOProcID(aggregateDeviceID, proc)

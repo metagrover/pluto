@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   canReuseRunningCaptureForProbe,
-  waitForNativeAudioSpawn,
+  waitForNativeAudioPcm,
 } from '../../electron/nativeAudioCapture';
 
 describe('canReuseRunningCaptureForProbe', () => {
@@ -15,22 +15,51 @@ describe('canReuseRunningCaptureForProbe', () => {
   });
 });
 
-describe('waitForNativeAudioSpawn', () => {
-  it('resolves true after the child confirms it spawned', async () => {
-    const child = new EventEmitter();
-    const started = waitForNativeAudioSpawn(child);
+describe('native PCM readiness', () => {
+  afterEach(() => vi.useRealTimers());
+  const child = () =>
+    Object.assign(new EventEmitter(), { stdout: new EventEmitter() });
 
-    child.emit('spawn');
-
-    await expect(started).resolves.toBe(true);
+  it('waits beyond spawn and split bytes for a complete silent Float32 sample', async () => {
+    const capture = child();
+    const settled = vi.fn();
+    const ready = waitForNativeAudioPcm(capture, 3000).then(settled);
+    capture.emit('spawn');
+    capture.stdout.emit('data', Buffer.alloc(3));
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    capture.stdout.emit('data', Buffer.alloc(1));
+    await ready;
+    expect(settled).toHaveBeenCalledWith(true);
+    expect(capture.stdout.listenerCount('data')).toBe(0);
   });
 
-  it('resolves false when the child emits an asynchronous spawn error', async () => {
-    const child = new EventEmitter();
-    const started = waitForNativeAudioSpawn(child);
+  it.each(['error', 'close'])(
+    'fails on %s before PCM and removes listeners',
+    async (event) => {
+      const capture = child();
+      const ready = waitForNativeAudioPcm(capture, 3000);
+      capture.emit(event, new Error('capture failed'));
+      await expect(ready).resolves.toBe(false);
+      expect(capture.stdout.listenerCount('data')).toBe(0);
+    },
+  );
 
-    child.emit('error', new Error('spawn EACCES'));
+  it('times out without PCM even if the process spawned', async () => {
+    vi.useFakeTimers();
+    const capture = child();
+    const ready = waitForNativeAudioPcm(capture, 3000);
+    capture.emit('spawn');
+    vi.advanceTimersByTime(3000);
+    await expect(ready).resolves.toBe(false);
+  });
 
-    await expect(started).resolves.toBe(false);
+  it('rejects a non-finite first PCM frame', async () => {
+    const capture = child();
+    const ready = waitForNativeAudioPcm(capture, 3000);
+    const invalid = Buffer.alloc(4);
+    invalid.writeFloatLE(Number.NaN);
+    capture.stdout.emit('data', invalid);
+    await expect(ready).resolves.toBe(false);
   });
 });

@@ -144,6 +144,55 @@ const emptyProjections = (): Record<LiveSource, SourceProjection> => ({
   },
 });
 
+const projectWordTimings = (
+  text: string,
+  tokens: ParakeetEouToken[],
+  offsetSeconds: number,
+): LiveTranscriptSegment['wordTimings'] => {
+  if (
+    tokens.some(
+      (token, index) =>
+        index > 0 &&
+        (token.startSeconds < tokens[index - 1].startSeconds ||
+          token.endSeconds < tokens[index - 1].endSeconds),
+    )
+  )
+    return undefined;
+  const normalized = (value: string) => value.trim().replace(/\s+/gu, ' ');
+  const pieces = tokens.map((token) => token.text.replace(/▁/gu, ' '));
+  const separator = normalized(pieces.join('')) === normalized(text) ? '' : ' ';
+  const decoded = pieces.join(separator);
+  if (normalized(decoded) !== normalized(text)) return undefined;
+  let cursor = 0;
+  const ranges = pieces.map((piece, index) => {
+    const start = cursor;
+    cursor += piece.length;
+    const range = { start, end: cursor, token: tokens[index] };
+    cursor += separator.length;
+    return range;
+  });
+  const words: NonNullable<LiveTranscriptSegment['wordTimings']> = [];
+  let tokenIndex = 0;
+  for (const word of decoded.matchAll(/\S+/gu)) {
+    const start = word.index ?? 0;
+    const end = start + word[0].length;
+    while (tokenIndex < ranges.length && ranges[tokenIndex].end <= start)
+      tokenIndex += 1;
+    const first = ranges[tokenIndex];
+    if (!first) return undefined;
+    let lastIndex = tokenIndex;
+    while (lastIndex + 1 < ranges.length && ranges[lastIndex + 1].start < end)
+      lastIndex += 1;
+    const last = ranges[lastIndex];
+    words.push({
+      text: word[0],
+      timestampMs: (first.token.startSeconds + offsetSeconds) * 1000,
+      endTimestampMs: (last.token.endSeconds + offsetSeconds) * 1000,
+    });
+  }
+  return words;
+};
+
 const makeSegment = (
   update: ParakeetEouUpdate,
   kind: 'committed' | 'tentative',
@@ -176,6 +225,11 @@ const makeSegment = (
           ? punctuateCommittedText(rawText, selectedTokens)
           : rawText,
       rawText,
+      wordTimings: projectWordTimings(
+        rawText,
+        selectedTokens,
+        override?.sourceOffsetSeconds ?? 0,
+      ),
       source: update.source,
       timestampMs:
         ((override?.startSeconds ??

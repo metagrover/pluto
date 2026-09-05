@@ -85,6 +85,51 @@ describe('runPersistedMeetingFinalTranscription', () => {
     mocks.processDownstream.mockResolvedValue({ status: 'complete' });
   });
 
+  it.each([
+    'available',
+    'failed_during_capture',
+    'unavailable_at_start',
+    'stale',
+    'missing',
+  ])(
+    'passes %s journal capture evidence through the persisted production boundary',
+    async (status) => {
+      const meeting = {
+        id: 'source-check',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{}',
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        }),
+      } as Meeting;
+      const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'AUDIO_CAPTURE_JOURNAL_READ') {
+          if (status === 'missing') throw new Error('missing');
+          return {
+            schemaVersion: 3,
+            generation: status === 'stale' ? 'old' : 'generation-1',
+            lifecycleState: 'sealed',
+            sourceAvailability: {
+              system: status === 'stale' ? 'available' : status,
+            },
+            intervals: [{ sources: { system: { disposition: 'captured' } } }],
+          };
+        }
+        return null;
+      });
+      mocks.runFinal.mockImplementation(async (input) => {
+        expect(input.captureEvidence.systemCaptureIncomplete).toBe(
+          status !== 'available',
+        );
+        return { status: 'needs_attention' };
+      });
+      await runPersistedMeetingFinalTranscription(meeting, invoke);
+      expect(invoke).toHaveBeenCalledWith('AUDIO_CAPTURE_JOURNAL_READ', {
+        meetingId: 'source-check',
+      });
+    },
+  );
+
   it('reconstructs sealed inputs and hands the exact canonical commit downstream', async () => {
     const meeting = {
       id: 'meeting-1',
@@ -235,47 +280,140 @@ describe('runPersistedMeetingFinalTranscription', () => {
     ).toMatchObject({ speakerAttributionVerified: true });
   });
 
-  it('preserves saved transcript text during a validated speaker-label retry', async () => {
-    const meeting = {
-      id: 'meeting-speaker-retry',
-      title: 'Meeting',
-      created_at: '2026-08-15T00:00:00.000Z',
-      started_at: '2026-08-15T00:00:00.000Z',
-      duration_seconds: 60,
-      audio_path: '/approved/mic.wav',
-      mixed_audio_path: '/approved/mixed.wav',
-      system_audio_path: '/approved/system.wav',
-      capture_journal_generation: 'generation-1',
-      transcript_status: 'validated',
-      transcript_json: JSON.stringify({
-        segments: [
-          { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
+  it.each([false, true])(
+    'preserves saved text only for automatic label repair (manual retry: %s)',
+    async (manualRetry) => {
+      const meeting = {
+        id: 'meeting-speaker-retry',
+        title: 'Meeting',
+        created_at: '2026-08-15T00:00:00.000Z',
+        started_at: '2026-08-15T00:00:00.000Z',
+        duration_seconds: 60,
+        audio_path: '/approved/mic.wav',
+        mixed_audio_path: '/approved/mixed.wav',
+        system_audio_path: '/approved/system.wav',
+        capture_journal_generation: 'generation-1',
+        transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          segments: [
+            { text: 'saved words', startTime: 0, endTime: 1, speaker: 'Them' },
+          ],
+        }),
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: {
+            kind: 'sealed_capture_activity_v2',
+            digestSha256: 'digest',
+          },
+          activityEvidence: { private: 'verified by parser' },
+        }),
+      } as Meeting;
+      mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
+      const invoke = vi.fn(async (channel: string) =>
+        channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
+      );
+
+      await runPersistedMeetingFinalTranscription(meeting, invoke, {
+        runId: 'run-speaker-retry',
+        manualRetry,
+      });
+
+      expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
+        preserveProvisionalText: !manualRetry,
+        provisionalSegments: [
+          expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
         ],
-      }),
-      transcript_integrity_json: JSON.stringify({
-        evidenceProvenance: {
-          kind: 'sealed_capture_activity_v2',
-          digestSha256: 'digest',
+      });
+    },
+  );
+
+  it.each(['preserved', 'empty', 'missing', 'invalid'] as const)(
+    'keeps %s live evidence separate from canonical text on a successful retry',
+    async (kind) => {
+      const canonical = [
+        {
+          text: 'saved canonical words',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Them',
         },
-        activityEvidence: { private: 'verified by parser' },
-      }),
-    } as Meeting;
-    mocks.runFinal.mockResolvedValue({ status: 'cancelled' });
-    const invoke = vi.fn(async (channel: string) =>
-      channel === 'GET_TRANSCRIPTION_VOCABULARY' ? { terms: [] } : null,
-    );
+      ];
+      const originalLive = [
+        {
+          text: 'raw microphone echo',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Me',
+          source: 'mic',
+          providerSegmentId: 'raw-mic-1',
+        },
+        {
+          text: 'raw system speech',
+          startTime: 0,
+          endTime: 1,
+          speaker: 'Them',
+          source: 'system',
+          providerSegmentId: 'raw-system-1',
+        },
+      ];
+      const liveSegments =
+        kind === 'preserved'
+          ? originalLive
+          : kind === 'empty'
+            ? []
+            : kind === 'invalid'
+              ? [{ text: 'invalid timing', startTime: 'bad', endTime: 1 }]
+              : undefined;
+      const meeting = {
+        id: 'retry-live-evidence',
+        transcript_status: 'validated',
+        capture_journal_generation: 'generation-1',
+        transcript_json: JSON.stringify({ segments: canonical, liveSegments }),
+        transcript_integrity_json: JSON.stringify({
+          evidenceProvenance: {
+            kind: 'sealed_capture_activity_v2',
+            digestSha256: 'digest',
+          },
+          activityEvidence: { private: 'verified by parser' },
+        }),
+      } as Meeting;
+      const before = meeting.transcript_json;
+      const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+        if (channel === 'COMMIT_FINAL_TRANSCRIPTION') {
+          return {
+            committed: true,
+            transcriptJson: (args[0] as { canonicalTranscriptJson: string })
+              .canonicalTranscriptJson,
+          };
+        }
+        return null;
+      });
+      mocks.runFinal.mockImplementation(async (input, dependencies) => {
+        expect(input.provisionalSegments).toEqual(canonical);
+        await dependencies.commitCanonical({
+          segments: canonical.map((segment) => ({
+            ...segment,
+            speaker: 'Remote Speaker 1',
+          })),
+          integrity: {},
+          metadata: finalMetadata,
+        });
+        return { status: 'validated' };
+      });
 
-    await runPersistedMeetingFinalTranscription(meeting, invoke, {
-      runId: 'run-speaker-retry',
-    });
-
-    expect(mocks.runFinal.mock.calls[0]?.[0]).toMatchObject({
-      preserveProvisionalText: true,
-      provisionalSegments: [
-        expect.objectContaining({ text: 'saved words', speaker: 'Them' }),
-      ],
-    });
-  });
+      await runPersistedMeetingFinalTranscription(meeting, invoke, {
+        manualRetry: true,
+      });
+      const commit = invoke.mock.calls.find(
+        ([channel]) => channel === 'COMMIT_FINAL_TRANSCRIPTION',
+      )?.[1] as { canonicalTranscriptJson: string };
+      const saved = JSON.parse(commit.canonicalTranscriptJson);
+      expect(saved.liveSegments).toEqual(
+        kind === 'preserved' ? originalLive : kind === 'empty' ? [] : canonical,
+      );
+      expect(saved.segments[0].speaker).toBe('Remote Speaker 1');
+      expect(meeting.transcript_json).toBe(before);
+    },
+  );
 
   it('rejects invalid final metadata before canonical commit or downstream work', async () => {
     const meeting = {

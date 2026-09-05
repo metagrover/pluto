@@ -4,6 +4,12 @@ import type {
   WordTimestamp,
 } from '../../utils/speakerAttribution.ts';
 
+import {
+  type RemoteSpeechSupport,
+  type SystemEnergyWindow,
+  createRemoteSpeechSupport,
+} from './remoteSpeakerSupport.ts';
+
 const MINIMUM_CLUSTER_SECONDS = 1;
 const MINIMUM_ALIGNMENT_COVERAGE = 0.8;
 const MINIMUM_ITEM_COVERAGE = 0.5;
@@ -45,32 +51,59 @@ const roundConfidence = (value: number) =>
   Math.round(Math.max(0, Math.min(1, value)) * 1000) / 1000;
 
 const bestCluster = (
-  interval: { startTime: number; endTime: number },
+  support: RemoteSpeechSupport,
   turns: DiarizationTurn[],
   labels: Map<string, string>,
 ): string | null => {
-  const duration = interval.endTime - interval.startTime;
+  const duration = support.duration;
   if (duration <= 0) return null;
-  const scores = new Map<string, number>();
-  for (const turn of turns) {
-    if (!labels.has(turn.cluster)) continue;
-    scores.set(
-      turn.cluster,
-      (scores.get(turn.cluster) ?? 0) + overlapSeconds(interval, turn),
-    );
-  }
-  const ranked = [...scores.entries()].sort(
-    (left, right) => right[1] - left[1],
-  );
-  const winner = ranked[0];
+  const rank = (padding: number) => {
+    const scores = new Map<string, number>();
+    const coveredUntil = new Map<string, number>();
+    for (const turn of turns) {
+      if (!labels.has(turn.cluster)) continue;
+      // Turns are chronological. Count their union for each speaker so nearby
+      // expanded boundaries cannot credit the same speech interval twice.
+      const startTime = Math.max(
+        0,
+        turn.startTime - padding,
+        coveredUntil.get(turn.cluster) ?? 0,
+      );
+      const endTime = turn.endTime + padding;
+      coveredUntil.set(turn.cluster, Math.max(startTime, endTime));
+      if (endTime <= startTime) continue;
+      scores.set(
+        turn.cluster,
+        (scores.get(turn.cluster) ?? 0) +
+          support.intervals.reduce(
+            (total, interval) =>
+              total +
+              overlapSeconds(interval, {
+                startTime,
+                endTime,
+              }),
+            0,
+          ),
+      );
+    }
+    return [...scores.entries()].sort((left, right) => right[1] - left[1]);
+  };
+  const raw = rank(0);
+  // Never resolve an actual overlap by enlarging or preferring either speaker.
+  if ((raw[1]?.[1] ?? 0) > 0.001) return null;
+  if (raw[0] && raw[0][1] / duration >= MINIMUM_ITEM_COVERAGE)
+    return labels.get(raw[0][0]) ?? null;
+  if (!support.measured) return null;
+  // Permit at most one native energy frame of boundary disagreement. This is
+  // only a fallback; padding cannot make an already aligned word ambiguous.
+  const padded = rank(0.1);
   if (
-    !winner ||
-    winner[1] / duration < MINIMUM_ITEM_COVERAGE ||
-    (ranked[1]?.[1] ?? 0) > 0.001
-  ) {
+    !padded[0] ||
+    padded[0][1] / duration < MINIMUM_ITEM_COVERAGE ||
+    (padded[1]?.[1] ?? 0) > 0.001
+  )
     return null;
-  }
-  return labels.get(winner[0]) ?? null;
+  return labels.get(padded[0][0]) ?? null;
 };
 
 const wordInterval = (word: WordTimestamp) => ({
@@ -94,6 +127,7 @@ export const applyRemoteSpeakerClusters = <
 >(input: {
   segments: T[];
   turns: DiarizationTurn[];
+  systemEnergyWindows?: SystemEnergyWindow[];
 }): {
   applied: boolean;
   segments: T[];
@@ -180,6 +214,7 @@ export const applyRemoteSpeakerClusters = <
     return turn;
   });
 
+  const speechSupport = createRemoteSpeechSupport(input.systemEnergyWindows);
   let totalSpeechSeconds = 0;
   let labeledSpeechSeconds = 0;
   const aligned: T[] = [];
@@ -195,11 +230,14 @@ export const applyRemoteSpeakerClusters = <
         word.end >= word.start,
     );
     if (timedWords?.length) {
-      const assignments = timedWords.map((word) => ({
-        word,
-        speaker:
-          bestCluster(wordInterval(word), alignmentTurns, labels) ?? 'Them',
-      }));
+      const assignments = timedWords.map((word) => {
+        const support = speechSupport(wordInterval(word));
+        return {
+          word,
+          support,
+          speaker: bestCluster(support, alignmentTurns, labels) ?? 'Them',
+        };
+      });
       for (let index = 0; index < assignments.length; index++) {
         const assignment = assignments[index];
         if (
@@ -217,7 +255,7 @@ export const applyRemoteSpeakerClusters = <
         }
       }
       for (const assignment of assignments) {
-        const duration = assignment.word.end - assignment.word.start;
+        const duration = assignment.support.duration;
         totalSpeechSeconds += duration;
         if (assignment.speaker !== 'Them') labeledSpeechSeconds += duration;
       }
@@ -243,8 +281,9 @@ export const applyRemoteSpeakerClusters = <
       continue;
     }
 
-    const duration = Math.max(0, segment.endTime - segment.startTime);
-    const speaker = bestCluster(segment, alignmentTurns, labels) ?? 'Them';
+    const support = speechSupport(segment);
+    const duration = support.duration;
+    const speaker = bestCluster(support, alignmentTurns, labels) ?? 'Them';
     totalSpeechSeconds += duration;
     if (speaker !== 'Them') labeledSpeechSeconds += duration;
     aligned.push({ ...segment, speaker } as T);

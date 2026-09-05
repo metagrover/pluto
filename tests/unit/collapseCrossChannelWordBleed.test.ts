@@ -22,6 +22,39 @@ const timedWords = (text: string, start: number) =>
   }));
 
 describe('collapseCrossChannelWordBleed', () => {
+  it.each(['remote', 'missing', 'local', 'later'] as const)(
+    'handles a silence-padded final System word with %s onset evidence',
+    (evidence) => {
+      const shared = timedWords('check the final transcript', 42);
+      const micTail = {
+        word: 'today',
+        start: evidence === 'later' ? 46 : 42.8,
+        end: evidence === 'later' ? 46.8 : 44,
+      };
+      const systemTail = { word: 'today', start: 42.8, end: 53 };
+      const local = segment('Me', timedWords('please verify the result', 46.2));
+      const system = segment('Them', [...shared, systemTail]);
+      const result = collapseCrossChannelWordBleed({
+        micSegments: [segment('Me', [...shared, micTail]), local],
+        systemSegments: [system],
+        activityWindows:
+          evidence === 'missing'
+            ? []
+            : [
+                { speaker: 'Them', startTime: 42, endTime: 43.1 },
+                { speaker: 'Me', startTime: 46.2, endTime: 47 },
+                ...(evidence === 'local'
+                  ? [{ speaker: 'Me' as const, startTime: 42.8, endTime: 44 }]
+                  : []),
+              ],
+      });
+      expect(result.systemSegments).toEqual([system]);
+      expect(result.micSegments.map((row) => row.text)).toEqual(
+        evidence === 'remote' ? [local.text] : ['today', local.text],
+      );
+    },
+  );
+
   it('removes an exact time-aligned phrase from mic while retaining system', () => {
     const shared = [
       { word: 'shared', start: 1, end: 1.4 },
@@ -67,6 +100,32 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.systemSegments).toHaveLength(1);
     expect(result.droppedMicWordCount).toBe(4);
     expect(result.reconciliation.droppedSystemExplainedMicSegmentCount).toBe(1);
+  });
+
+  it('never drops the System counterpart of a mic word already removed by segment evidence', () => {
+    const first = timedWords('we can discuss this next', 0);
+    first[first.length - 1].end = 2;
+    const second = [
+      { word: 'please', start: 2, end: 2.4 },
+      { word: 'keep', start: 2.4, end: 2.8 },
+      { word: 'the', start: 2.8, end: 3.2 },
+      { word: 'last', start: 3.2, end: 3.9 },
+      { word: 'word', start: 3.9, end: 4 },
+    ];
+    const system = [segment('Them', first), segment('Them', second)];
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [segment('Me', first), segment('Me', second)],
+      systemSegments: system,
+      activityWindows: [
+        { speaker: 'Them', startTime: 0, endTime: 1 },
+        { speaker: 'Them', startTime: 2, endTime: 3.9 },
+        { speaker: 'Me', startTime: 3.9, endTime: 4 },
+      ],
+    });
+
+    expect(result.reconciliation.droppedSystemExplainedMicSegmentCount).toBe(1);
+    expect(result.micSegments).toEqual([]);
+    expect(result.systemSegments).toEqual(system);
   });
 
   it('preserves a divergent mic turn when near-end evidence overlaps remote speech', () => {

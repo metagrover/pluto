@@ -46,6 +46,22 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
+  it('persists original EOU rows separately from the merged canonical preview', () => {
+    const snapshotStart = source.indexOf('const capturedLiveSegments =');
+    const snapshotEnd = source.indexOf(
+      'const provisionalMeeting =',
+      snapshotStart,
+    );
+    const snapshot = source.slice(snapshotStart, snapshotEnd);
+    expect(snapshotStart).toBeGreaterThan(-1);
+    expect(snapshot).toContain('[...processedMicSegmentsRef.current]');
+    expect(snapshot).toMatch(
+      /mergeConsecutiveSpeakerSegments\(\s*capturedLiveSegments/,
+    );
+    expect(snapshot).toContain('buildTranscriptJsonPayload(capturedSegments,');
+    expect(snapshot).toContain('liveSegments: capturedLiveSegments');
+  });
+
   it('finishes EOU before closing context ingestion', () => {
     const finishIndex = source.indexOf('await eouSessionAtStop?.finish()');
     const closeIndex = source.indexOf(

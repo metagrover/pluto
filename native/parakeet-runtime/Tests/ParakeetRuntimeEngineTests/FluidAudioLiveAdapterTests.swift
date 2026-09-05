@@ -14,6 +14,8 @@ private actor AcknowledgedBackendProbe: FluidAudioAcknowledgedLiveBackend {
     private let finishReport: SlidingWindowFinishReport
     private let blocksIngestion: Bool
     private var waiter: CheckedContinuation<Void, Never>?
+    let ingestionStarted: AsyncStream<Void>
+    private let signalIngestionStarted: AsyncStream<Void>.Continuation
     private var acceptedSampleCount = 0
     private(set) var receipts: [String] = []
     private(set) var frameCounts: [Int] = []
@@ -36,6 +38,9 @@ private actor AcknowledgedBackendProbe: FluidAudioAcknowledgedLiveBackend {
         self.updates = updates
         self.finishReport = finishReport
         self.blocksIngestion = blocksIngestion
+        (ingestionStarted, signalIngestionStarted) = AsyncStream.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
     }
 
     func ingestAudio(
@@ -45,7 +50,10 @@ private actor AcknowledgedBackendProbe: FluidAudioAcknowledgedLiveBackend {
         receipts.append(receipt)
         frameCounts.append(Int(buffer.frameLength))
         if blocksIngestion {
-            await withCheckedContinuation { waiter = $0 }
+            await withCheckedContinuation {
+                waiter = $0
+                signalIngestionStarted.yield(())
+            }
         }
         let count = Int(buffer.frameLength)
         let accepted = SlidingWindowSampleRange(
@@ -119,7 +127,7 @@ final class FluidAudioLiveAdapterTests: XCTestCase {
             await completion.markCompleted()
             return outcome
         }
-        await waitForReceipt(backend)
+        try await waitForReceipt(backend)
         let completedBeforeAcknowledgement = await completion.completed
         XCTAssertFalse(completedBeforeAcknowledgement)
         await backend.releaseIngestion()
@@ -197,7 +205,7 @@ final class FluidAudioLiveAdapterTests: XCTestCase {
         let append = Task {
             try await manager.append(request: request)
         }
-        await waitForReceipt(backend)
+        try await waitForReceipt(backend)
 
         await manager.cancel()
 
@@ -250,11 +258,23 @@ final class FluidAudioLiveAdapterTests: XCTestCase {
         )
     }
 
-    private func waitForReceipt(_ backend: AcknowledgedBackendProbe) async {
-        for _ in 0..<1_000 {
-            if await !backend.receipts.isEmpty { return }
-            await Task.yield()
+    private enum ProbeFailure: Error { case ingestionDidNotStart }
+
+    private func waitForReceipt(_ backend: AcknowledgedBackendProbe) async throws {
+        // Wait for the installed continuation, not a scheduler-dependent number
+        // of yields. Never release ingestion before the backend can receive it.
+        let started = backend.ingestionStarted
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in started { return }
+                throw ProbeFailure.ingestionDidNotStart
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(2))
+                throw ProbeFailure.ingestionDidNotStart
+            }
+            defer { group.cancelAll() }
+            _ = try await group.next()
         }
-        XCTFail("backend did not receive ingestion")
     }
 }

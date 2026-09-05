@@ -6,6 +6,27 @@ import {
 } from '../../src/components/features/meetingFailurePresentation';
 
 describe('meeting failure presentation', () => {
+  it('does not offer transcription retry as a remedy for incomplete participant audio', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        systemCaptureIncomplete: true,
+        hasExistingTranscript: true,
+        speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: true,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Participant audio could not be verified',
+      detail:
+        'The System recording is incomplete or could not be verified. Your existing transcript has been kept. Retrying transcription cannot restore missing audio.',
+      actionLabel: null,
+    });
+  });
+
   it('offers the only recovery action for a retryable final transcription', () => {
     expect(
       resolveMeetingFailurePresentation({

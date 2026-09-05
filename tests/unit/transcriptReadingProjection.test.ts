@@ -74,6 +74,41 @@ describe('saved transcript reading projection', () => {
     });
   });
 
+  it('retains the original native word timing as live evidence', () => {
+    const wordTimings = [
+      { text: 'remote', timestampMs: 1_000, endTimestampMs: 1_500 },
+      { text: 'local', timestampMs: 2_000, endTimestampMs: 2_400 },
+    ];
+    const result = toStoredLiveTranscriptCandidate({
+      id: 'timed-live',
+      source: 'mic',
+      text: 'Local.',
+      rawText: 'remote local',
+      timestampMs: 1_000,
+      endTimestampMs: 2_400,
+      wordTimings,
+      confirmed: true,
+    });
+    expect(result.text).toBe('remote local');
+    expect(result.startTime).toBe(1);
+    expect(result.wordTimings).toEqual(wordTimings);
+    expect(result.wordTimings?.[0]).not.toBe(wordTimings[0]);
+    wordTimings[0].timestampMs = 99_000;
+    expect(result.wordTimings?.[0].timestampMs).toBe(1_000);
+  });
+
+  it('does not persist malformed word timing as usable live evidence', () => {
+    expect(
+      toStoredLiveTranscriptCandidate({
+        text: 'retained wording',
+        timestampMs: 1_000,
+        wordTimings: [
+          { text: 'retained', timestampMs: Number.NaN, endTimestampMs: 2_000 },
+        ],
+      }),
+    ).not.toHaveProperty('wordTimings');
+  });
+
   it('keeps coherent live wording when the recovered decode is materially fragmented', () => {
     const recovered = [
       candidate('Them', 10, 11, 'The release'),

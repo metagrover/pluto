@@ -3,6 +3,7 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../../utils/speakerAttribution.ts';
+import { SYSTEM_CAPTURE_INCOMPLETE_REASON } from '../../utils/transcriptIntegrity.ts';
 import type { StoredTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.ts';
 import {
   type RecordingTranscriptValidationResult,
@@ -27,7 +28,11 @@ import {
 export type FinalTranscriptionInput = {
   meetingId: string;
   runId: string;
-  captureEvidence: { sealed: boolean; generation: string };
+  captureEvidence: {
+    sealed: boolean;
+    generation: string;
+    systemCaptureIncomplete?: boolean;
+  };
   recordingDurationSeconds: number;
   micAudioPath: string;
   mixedAudioPath: string;
@@ -154,6 +159,19 @@ export const runFinalTranscription = async <TTranscript>(
       lease,
     });
     return { status: 'needs_attention', reasons: ['evidence_unsealed'] };
+  }
+  if (input.captureEvidence.systemCaptureIncomplete) {
+    await dependencies.markNeedsAttention({
+      meetingId: input.meetingId,
+      captureGeneration: input.captureEvidence.generation,
+      failure: 'required_source_failed',
+      lease,
+      reasons: [SYSTEM_CAPTURE_INCOMPLETE_REASON],
+    });
+    return {
+      status: 'needs_attention',
+      reasons: [SYSTEM_CAPTURE_INCOMPLETE_REASON],
+    };
   }
   const admission = await dependencies.admit?.();
   if (admission && !admission.admitted) {
@@ -348,6 +366,7 @@ export const runFinalTranscription = async <TTranscript>(
     const remoteSpeakers = applyRemoteSpeakerClusters({
       segments: attribution.segments,
       turns: speakerEvidence.turns,
+      systemEnergyWindows: speakerEvidence.energyWindows,
     });
     metadata.speakerAttribution = {
       ...attribution.attribution,
