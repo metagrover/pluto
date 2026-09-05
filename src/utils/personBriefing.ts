@@ -1,4 +1,5 @@
 import { getCommitmentState, parseActionMetadata } from './actionCommitment';
+import { isGenericSpeakerLabel } from './speakerReview';
 
 export type PersonMeetingEvidence = 'confirmed' | 'scheduled' | 'mentioned';
 
@@ -42,7 +43,8 @@ export const isUsablePersonName = (value: unknown): value is string => {
   const normalized = normalizePersonLabel(value);
   return (
     !NON_PERSON_LABELS.has(normalized) &&
-    !/^(?:i|me|myself|speaker|them|you) again$/.test(normalized)
+    !/^(?:i|me|myself|speaker|them|you) again$/.test(normalized) &&
+    !isGenericSpeakerLabel(value)
   );
 };
 

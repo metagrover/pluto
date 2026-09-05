@@ -165,23 +165,23 @@ Run the focused calendar/recording tests and commit the roster semantics change.
 - Modify: `tests/unit/dbTranscriptionPersonCandidates.test.ts`
 - Modify: `tests/unit/identityHandlers.test.ts`
 
-- [ ] **Step 1: Write failing trust tests**
+- [x] **Step 1: Write failing trust tests**
 
 Assert that numbered generic speaker labels are rejected, confirmed bindings contribute to People summary meeting counts and meeting-scoped person IDs, invited-only calendar attendees remain scheduled, and clearing a binding removes only binding-derived confirmed evidence.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `pnpm exec vitest run tests/unit/personBriefing.test.ts tests/unit/personIdentityDb.test.ts tests/unit/dbTranscriptionPersonCandidates.test.ts tests/unit/identityHandlers.test.ts`
 
-- [ ] **Step 3: Implement derived binding evidence**
+- [x] **Step 3: Implement derived binding evidence**
 
 Use the shared generic-label predicate in `isUsablePersonName`. Extend People summary and `getPersonEntityIdsForMeeting()` queries to union canonical person IDs from valid individual `identity_bindings`. Do not insert synthetic `meeting_entities` rows. Keep detail precedence `confirmed > scheduled > mentioned` and make binding clear automatically remove the derived relationship.
 
-- [ ] **Step 4: Refresh affected person context after mutations**
+- [x] **Step 4: Refresh affected person context after mutations**
 
 Return mutation metadata or invoke the existing bounded knowledge-refresh path after a successful binding change without blocking the transaction. Ensure failure to refresh cannot roll back or erase the saved correction.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the focused database and identity tests, then commit.
 

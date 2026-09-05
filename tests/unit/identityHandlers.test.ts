@@ -157,6 +157,30 @@ describe('identity IPC service', () => {
       db.identityStore.getBindings(meetingId)[0].sourceRevision,
     ).toHaveLength(64);
   });
+  it('reports affected people after commit and ignores refresh failures', () => {
+    const onBindingChange = vi.fn(() => {
+      throw new Error('refresh unavailable');
+    });
+    const state = handleIdentityRequest(
+      'SET_MEETING_IDENTITY_BINDING',
+      {
+        meetingId,
+        speaker: 'Them',
+        personId,
+        individual: true,
+        expectedRevision: revision(),
+      },
+      { onBindingChange },
+    );
+
+    expect(onBindingChange).toHaveBeenCalledWith({
+      meetingId,
+      personIds: [personId],
+    });
+    expect(state).toMatchObject({
+      bindings: [expect.objectContaining({ personId })],
+    });
+  });
   it('allows a corrected individual speaker without a real-world person and can clear it', () => {
     handleIdentityRequest('SET_MEETING_IDENTITY_BINDING', {
       meetingId,

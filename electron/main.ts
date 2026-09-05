@@ -974,7 +974,15 @@ app.whenReady().then(async () => {
   scheduleDreaming(0);
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) => {
-      const result = handleIdentityRequest(channel, payload);
+      const result = handleIdentityRequest(channel, payload, {
+        onBindingChange: ({ meetingId, personIds }) => {
+          queueKnowledgeDocsRefreshForMeeting(meetingId);
+          for (const personId of personIds) {
+            const doc = db.getKnowledgeDocByScope('person_context', personId);
+            if (doc) queueKnowledgeDocRefresh(doc.id);
+          }
+        },
+      });
       if (
         channel !== 'GET_IDENTITY_STATE' &&
         channel !== 'GET_MEETING_IDENTITY'

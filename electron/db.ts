@@ -5441,14 +5441,30 @@ export const getProjectEntityIdsForMeeting = (meetingId: string): string[] => {
 export const getPersonEntityIdsForMeeting = (meetingId: string): string[] => {
   const rows = db
     .prepare(`
-      SELECT DISTINCT COALESCE(alias.canonical_id, e.id) AS id
-      FROM entities e
-      JOIN meeting_entities me ON me.entity_id = e.id
-      LEFT JOIN person_aliases alias
-        ON alias.person_id = e.id AND alias.active = 1
-      WHERE me.meeting_id = ? AND e.type = 'person'
+      WITH person_identity AS (
+        SELECT person.id AS source_id,
+          COALESCE(alias.canonical_id, person.id) AS canonical_id
+        FROM entities person
+        LEFT JOIN person_aliases alias
+          ON alias.person_id = person.id AND alias.active = 1
+        WHERE person.type = 'person'
+      )
+      SELECT DISTINCT identity.canonical_id AS id
+      FROM person_identity identity
+      JOIN meeting_entities me ON me.entity_id = identity.source_id
+      WHERE me.meeting_id = ?
+      UNION
+      SELECT DISTINCT identity.canonical_id AS id
+      FROM identity_bindings binding
+      JOIN person_identity identity
+        ON identity.source_id = json_extract(binding.payload, '$.personId')
+      WHERE binding.meeting_id = ?
+        AND json_valid(binding.payload)
+        AND json_extract(binding.payload, '$.individual') = 1
+        AND json_type(binding.payload, '$.personId') = 'text'
+      ORDER BY id
     `)
-    .all(meetingId) as Array<{ id: string }>;
+    .all(meetingId, meetingId) as Array<{ id: string }>;
   return rows.map((row) => row.id);
 };
 
@@ -5500,13 +5516,15 @@ export const getTranscriptionPersonCandidates =
       last_mentioned_at: string | null;
     }>;
 
-    return rows.map((row) => ({
-      name: row.name,
-      saliencyScore: row.saliency_score,
-      meetingCount: row.meeting_count,
-      mentionCount: row.mention_count,
-      lastMentionedAt: row.last_mentioned_at,
-    }));
+    return rows
+      .filter((row) => isUsablePersonName(row.name))
+      .map((row) => ({
+        name: row.name,
+        saliencyScore: row.saliency_score,
+        meetingCount: row.meeting_count,
+        mentionCount: row.mention_count,
+        lastMentionedAt: row.last_mentioned_at,
+      }));
   };
 
 /**
@@ -9173,18 +9191,37 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         LEFT JOIN person_aliases alias
           ON alias.person_id = person.id AND alias.active = 1
         WHERE person.type = 'person'
-      ), person_meetings AS (
+      ), person_meeting_evidence AS (
         SELECT
           identity.canonical_id AS person_id,
+          me.meeting_id,
+          me.mention_count,
+          me.context
+        FROM meeting_entities me
+        JOIN person_identity identity ON identity.source_id = me.entity_id
+        UNION ALL
+        SELECT
+          identity.canonical_id AS person_id,
+          binding.meeting_id,
+          0 AS mention_count,
+          NULL AS context
+        FROM identity_bindings binding
+        JOIN person_identity identity
+          ON identity.source_id = json_extract(binding.payload, '$.personId')
+        WHERE json_valid(binding.payload)
+          AND json_extract(binding.payload, '$.individual') = 1
+          AND json_type(binding.payload, '$.personId') = 'text'
+      ), person_meetings AS (
+        SELECT
+          evidence.person_id,
           m.id AS meeting_id,
           m.title AS meeting_title,
           COALESCE(m.started_at, m.created_at) AS meeting_at,
-          SUM(me.mention_count) AS mention_count,
-          GROUP_CONCAT(DISTINCT me.context) AS context
-        FROM meeting_entities me
-        JOIN person_identity identity ON identity.source_id = me.entity_id
-        JOIN meetings m ON m.id = me.meeting_id
-        GROUP BY identity.canonical_id, m.id
+          SUM(evidence.mention_count) AS mention_count,
+          GROUP_CONCAT(DISTINCT evidence.context) AS context
+        FROM person_meeting_evidence evidence
+        JOIN meetings m ON m.id = evidence.meeting_id
+        GROUP BY evidence.person_id, m.id
       ), ranked_meetings AS (
         SELECT *, ROW_NUMBER() OVER (
           PARTITION BY person_id
