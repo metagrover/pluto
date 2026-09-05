@@ -7070,7 +7070,7 @@ export const upsertEntity = (entity: {
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(updated.name, existing.id);
     } catch (e) {
-      dbLog.warn('Failed to update FTS for entity:', existing.id, e);
+      dbLog.warn(`Failed to update FTS for entity ${existing.id}:`, e);
     }
 
     return updated;
@@ -7170,7 +7170,7 @@ export const updatePersonName = (personId: string, name: string): Entity =>
         'INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)',
       ).run(trimmed, person.id);
     } catch (error) {
-      dbLog.warn('Failed to update person search index:', person.id, error);
+      dbLog.warn(`Failed to update person search index for ${person.id}:`, error);
     }
     return getEntity(person.id)!;
   })();
