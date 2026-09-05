@@ -4,6 +4,7 @@ const GENERIC_SPEAKER_PATTERN =
 const GENERIC_PARTICIPANT_PATTERN = /^(?:participant|voice)(?:\s+\d+)?$/iu;
 const UNKNOWN_SPEAKER_PATTERN =
   /^(?:unknown|unidentified)\s+speaker(?:\s+\d+)?$/iu;
+const CHANNEL_SPEAKER_PATTERN = /^(?:me|them|you|unknown)$/iu;
 
 const SAMPLE_MIN_SECONDS = 2;
 const SAMPLE_PREFERRED_SECONDS = 5;
@@ -62,7 +63,8 @@ export const isGenericSpeakerLabel = (value: unknown): boolean => {
   return (
     GENERIC_SPEAKER_PATTERN.test(label) ||
     GENERIC_PARTICIPANT_PATTERN.test(label) ||
-    UNKNOWN_SPEAKER_PATTERN.test(label)
+    UNKNOWN_SPEAKER_PATTERN.test(label) ||
+    CHANNEL_SPEAKER_PATTERN.test(label)
   );
 };
 

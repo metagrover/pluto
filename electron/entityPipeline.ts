@@ -13,6 +13,7 @@ import {
   assessProjectProposal,
   readProjectQualification,
 } from '../src/utils/projectQualification';
+import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
 import { resolveRecordIdentity } from './commitmentIdentity';
 import {
   commitmentRecord,
@@ -393,7 +394,7 @@ function persistExtractedEntities(
     extracted.people,
     transcriptForGrounding,
     existingPeople.map((person) => person.name),
-  );
+  ).filter((person) => !isGenericSpeakerLabel(person.name));
   const existingTopics = db.getEntitiesByType('topic');
   const existingProjects = db.getEntitiesByType('project');
 
@@ -594,7 +595,7 @@ function persistExtractedEntities(
           confidence,
         });
         linked++;
-      } else {
+      } else if (!isGenericSpeakerLabel(assigneeName)) {
         // Create the assignee as a person
         const newAssignee = db.upsertEntity({
           type: 'person',

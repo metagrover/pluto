@@ -325,9 +325,9 @@ describe('SpeakerIdentificationModal', () => {
     expect(listbox?.textContent).not.toContain('Jordan Doe');
 
     // Click Alex Chen option
-    const option = [
-      ...document.body.querySelectorAll('[role="option"]'),
-    ].find((el) => el.textContent?.includes('Alex Chen'));
+    const option = [...document.body.querySelectorAll('[role="option"]')].find(
+      (el) => el.textContent?.includes('Alex Chen'),
+    );
     expect(option).toBeTruthy();
     await act(async () => {
       option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -533,5 +533,75 @@ describe('SpeakerIdentificationModal', () => {
     });
 
     expect(input.value).toBe('');
+  });
+
+  it('excludes generic speaker placeholder names from suggestions and attendee chips, and prevents creating them', async () => {
+    // Inject a generic speaker into people state
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_MEETING_IDENTITY') {
+        const base = meeting(payload.meetingId);
+        return {
+          ...base,
+          people: [
+            ...base.people,
+            { id: 'person-remote-1', name: 'Remote Speaker 1' },
+            { id: 'person-speaker-2', name: 'Speaker 2' },
+            { id: 'person-me', name: 'Me' },
+          ],
+        };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={['Remote Speaker 1', 'Alice Walker']}
+          hasSystemAudio={true}
+          speakerSummaries={{
+            'Remote Speaker 1': { turnCount: 2, excerpt: 'Hello' },
+          }}
+        />,
+      );
+    });
+
+    // Attendee chips should have Alice Walker but NOT Remote Speaker 1
+    expect(document.body.textContent).toContain('+ Alice Walker');
+    expect(document.body.textContent).not.toContain('+ Remote Speaker 1');
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    // Open suggestions list
+    await act(async () => {
+      input.focus();
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+
+    const listbox = document.body.querySelector('[role="listbox"]');
+    expect(listbox).toBeTruthy();
+
+    // Suggestions should NOT contain Remote Speaker 1, Speaker 2, or Me
+    expect(listbox?.textContent).not.toContain('Remote Speaker 1');
+    expect(listbox?.textContent).not.toContain('Speaker 2');
+    expect(listbox?.textContent).not.toContain('Me');
+    // Valid people should be present
+    expect(listbox?.textContent).toContain('Alex Chen');
+
+    // Type a generic speaker name
+    await act(async () => {
+      typeInput(input, 'Remote Speaker 3');
+    });
+
+    // Should NOT offer to create "Remote Speaker 3"
+    expect(document.body.textContent).not.toContain('Create “Remote Speaker 3”');
+    expect(document.body.textContent).toContain('No matching people found.');
   });
 });

@@ -11,6 +11,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,7 +29,10 @@ import {
   setMeetingIdentityBinding,
 } from '../../api/identity';
 import type { IdentityPerson } from '../../types/identity';
-import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
+import {
+  getAnonymousSpeakerDisplayLabel,
+  isGenericSpeakerLabel,
+} from '../../utils/speakerReview';
 import type { SpeakerReviewSummary } from './MeetingIdentityControls';
 
 export interface SpeakerIdentificationModalProps {
@@ -75,6 +79,8 @@ export const SpeakerIdentificationModal = ({
 
   const comboboxContainerRef = useRef<HTMLDivElement | null>(null);
   const comboboxInputRef = useRef<HTMLInputElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
   // Audio sample playback
   const sampleRequest = useRef(0);
@@ -245,13 +251,53 @@ export const SpeakerIdentificationModal = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  const updatePopoverPosition = useCallback(() => {
+    if (!comboboxInputRef.current) return;
+    const rect = comboboxInputRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const popoverHeight = 220;
+    const showAbove =
+      rect.bottom > 0 && spaceBelow < popoverHeight && rect.top > popoverHeight;
+
+    setPopoverStyle({
+      position: 'fixed',
+      left: `${rect.left}px`,
+      width: rect.width > 0 ? `${rect.width}px` : '100%',
+      maxWidth: '32rem',
+      top: showAbove ? undefined : `${(rect.bottom || 0) + 6}px`,
+      bottom: showAbove
+        ? `${window.innerHeight - rect.top + 6}px`
+        : undefined,
+      zIndex: 1050,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isComboboxOpen) return;
+    updatePopoverPosition();
+
+    const handleScrollOrResize = () => {
+      updatePopoverPosition();
+    };
+
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    return () => {
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+    };
+  }, [isComboboxOpen, updatePopoverPosition]);
+
   // Handle click outside combobox to close suggestions
   useEffect(() => {
     if (!isComboboxOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
         comboboxContainerRef.current &&
-        !comboboxContainerRef.current.contains(event.target as Node)
+        !comboboxContainerRef.current.contains(target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(target)
       ) {
         setIsComboboxOpen(false);
       }
@@ -297,25 +343,46 @@ export const SpeakerIdentificationModal = ({
   // Filtered people and create-new calculation
   const trimmedQuery = searchQuery.trim().toLowerCase();
 
+  const eligiblePeople = useMemo(() => {
+    return (state?.people ?? []).filter((p) => {
+      const name = p.name.trim();
+      if (!name) return false;
+      if (isGenericSpeakerLabel(name)) return false;
+      if (
+        currentSpeaker &&
+        name.toLowerCase() === currentSpeaker.toLowerCase()
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [state?.people, currentSpeaker]);
+
   const filteredPeople = useMemo(() => {
-    const list = state?.people ?? [];
-    if (!trimmedQuery) return list;
-    return list.filter(
+    if (!trimmedQuery) return eligiblePeople;
+    return eligiblePeople.filter(
       (p) =>
         p.name.toLowerCase().includes(trimmedQuery) ||
         p.aliases?.some((a) => a.toLowerCase().includes(trimmedQuery)),
     );
-  }, [state?.people, trimmedQuery]);
+  }, [eligiblePeople, trimmedQuery]);
 
   const exactMatch = useMemo(() => {
-    if (!trimmedQuery || !state?.people) return null;
+    if (!trimmedQuery) return null;
     return (
-      state.people.find((p) => p.name.trim().toLowerCase() === trimmedQuery) ??
-      null
+      eligiblePeople.find(
+        (p) => p.name.trim().toLowerCase() === trimmedQuery,
+      ) ?? null
     );
-  }, [state?.people, trimmedQuery]);
+  }, [eligiblePeople, trimmedQuery]);
 
-  const canCreateNew = Boolean(searchQuery.trim() && !exactMatch);
+  const canCreateNew = Boolean(
+    searchQuery.trim() &&
+      !exactMatch &&
+      !isGenericSpeakerLabel(searchQuery.trim()) &&
+      (!currentSpeaker ||
+        searchQuery.trim().toLowerCase() !== currentSpeaker.toLowerCase()),
+  );
   const totalComboboxItems = filteredPeople.length + (canCreateNew ? 1 : 0);
 
   if (!isOpen) return null;
@@ -365,6 +432,13 @@ export const SpeakerIdentificationModal = ({
 
   const attendeeChoices = [...attendeesByName].flatMap(([key, attendee]) => {
     if (userNames.has(key)) return [];
+    if (isGenericSpeakerLabel(attendee.name)) return [];
+    if (
+      currentSpeaker &&
+      attendee.name.toLowerCase() === currentSpeaker.toLowerCase()
+    ) {
+      return [];
+    }
     const matches = peopleByName.get(key) ?? [];
     if (attendee.count > 1 || matches.length > 1) return [];
     return [
@@ -831,100 +905,111 @@ export const SpeakerIdentificationModal = ({
                 </div>
 
                 {/* Floating Suggestions Dropdown Popover */}
-                {isComboboxOpen ? (
-                  <div
-                    id={comboboxListId}
-                    role="listbox"
-                    tabIndex={-1}
-                    aria-label="People suggestions"
-                    className="absolute left-0 right-0 top-full mt-1.5 z-30 max-h-52 overflow-y-auto rounded-xl border border-pro-border/80 bg-pro-surface shadow-xl p-1 custom-scrollbar space-y-0.5"
-                  >
-                    {filteredPeople.map((person, idx) => {
-                      const isSelected =
-                        selectedSelection &&
-                        'personId' in selectedSelection &&
-                        selectedSelection.personId === person.id;
-                      const isHighlighted = highlightedIndex === idx;
+                {isComboboxOpen && typeof document !== 'undefined'
+                  ? createPortal(
+                      <div
+                        ref={popoverRef}
+                        id={comboboxListId}
+                        role="listbox"
+                        tabIndex={-1}
+                        aria-label="People suggestions"
+                        style={popoverStyle}
+                        onMouseDown={(e) => {
+                          // Prevent input from losing focus on suggestion click
+                          e.preventDefault();
+                        }}
+                        className="max-h-52 overflow-y-auto rounded-xl border border-pro-border/80 bg-pro-surface shadow-2xl p-1 custom-scrollbar space-y-0.5 animate-in fade-in zoom-in-95 duration-100"
+                      >
+                        {filteredPeople.map((person, idx) => {
+                          const isSelected =
+                            selectedSelection &&
+                            'personId' in selectedSelection &&
+                            selectedSelection.personId === person.id;
+                          const isHighlighted = highlightedIndex === idx;
 
-                      return (
-                        <div
-                          key={person.id}
-                          id={`${comboboxListId}-option-${idx}`}
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={isSelected || isHighlighted}
-                          onMouseEnter={() => setHighlightedIndex(idx)}
-                          onClick={() => handleSelectPerson(person)}
-                          className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs cursor-pointer select-none transition-colors ${
-                            isHighlighted
-                              ? 'bg-pro-hover text-pro-text-main'
-                              : 'text-pro-text-muted hover:bg-pro-hover/70 hover:text-pro-text-main'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pro-bg border border-pro-border/80 text-[10px] font-semibold text-pro-text-muted">
-                              {person.name.charAt(0).toUpperCase()}
+                          return (
+                            <div
+                              key={person.id}
+                              id={`${comboboxListId}-option-${idx}`}
+                              role="option"
+                              tabIndex={-1}
+                              aria-selected={isSelected || isHighlighted}
+                              onMouseEnter={() => setHighlightedIndex(idx)}
+                              onClick={() => handleSelectPerson(person)}
+                              className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs cursor-pointer select-none transition-colors ${
+                                isHighlighted
+                                  ? 'bg-pro-hover text-pro-text-main'
+                                  : 'text-pro-text-muted hover:bg-pro-hover/70 hover:text-pro-text-main'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pro-bg border border-pro-border/80 text-[10px] font-semibold text-pro-text-muted">
+                                  {person.name.charAt(0).toUpperCase()}
+                                </div>
+                                <span className="truncate text-pro-text-main font-medium">
+                                  {identityPersonLabel(
+                                    person,
+                                    state?.people ?? [],
+                                  )}
+                                </span>
+                              </div>
+                              {isSelected ? (
+                                <Check
+                                  size={13}
+                                  className="text-pro-accent shrink-0 ml-2"
+                                />
+                              ) : null}
                             </div>
-                            <span className="truncate text-pro-text-main font-medium">
-                              {identityPersonLabel(
-                                person,
-                                state?.people ?? [],
-                              )}
+                          );
+                        })}
+
+                        {canCreateNew ? (
+                          <div
+                            key="__create_new__"
+                            id={`${comboboxListId}-option-${filteredPeople.length}`}
+                            role="option"
+                            tabIndex={-1}
+                            aria-selected={
+                              highlightedIndex === filteredPeople.length
+                            }
+                            onMouseEnter={() =>
+                              setHighlightedIndex(filteredPeople.length)
+                            }
+                            onClick={() => handleCreateNew(searchQuery.trim())}
+                            className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-xs cursor-pointer select-none transition-colors border-t border-pro-border/40 mt-1 ${
+                              highlightedIndex === filteredPeople.length
+                                ? 'bg-pro-hover text-pro-text-main'
+                                : 'text-pro-text-muted hover:bg-pro-hover/70 hover:text-pro-text-main'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pro-accent/15 text-pro-accent">
+                                <Plus size={12} />
+                              </div>
+                              <div className="truncate">
+                                <span className="text-pro-text-muted">
+                                  Create{' '}
+                                </span>
+                                <strong className="text-pro-text-main">
+                                  “{searchQuery.trim()}”
+                                </strong>
+                              </div>
+                            </div>
+                            <span className="rounded-full bg-pro-accent/10 px-2 py-0.5 text-[10px] font-medium text-pro-accent shrink-0 ml-2">
+                              New person
                             </span>
                           </div>
-                          {isSelected ? (
-                            <Check
-                              size={13}
-                              className="text-pro-accent shrink-0 ml-2"
-                            />
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                        ) : null}
 
-                    {canCreateNew ? (
-                      <div
-                        key="__create_new__"
-                        id={`${comboboxListId}-option-${filteredPeople.length}`}
-                        role="option"
-                        tabIndex={-1}
-                        aria-selected={
-                          highlightedIndex === filteredPeople.length
-                        }
-                        onMouseEnter={() =>
-                          setHighlightedIndex(filteredPeople.length)
-                        }
-                        onClick={() => handleCreateNew(searchQuery.trim())}
-                        className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-xs cursor-pointer select-none transition-colors border-t border-pro-border/40 mt-1 ${
-                          highlightedIndex === filteredPeople.length
-                            ? 'bg-pro-hover text-pro-text-main'
-                            : 'text-pro-text-muted hover:bg-pro-hover/70 hover:text-pro-text-main'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-pro-accent/15 text-pro-accent">
-                            <Plus size={12} />
+                        {filteredPeople.length === 0 && !canCreateNew ? (
+                          <div className="px-3 py-3 text-center text-xs text-pro-text-muted select-none">
+                            No matching people found.
                           </div>
-                          <div className="truncate">
-                            <span className="text-pro-text-muted">Create </span>
-                            <strong className="text-pro-text-main">
-                              “{searchQuery.trim()}”
-                            </strong>
-                          </div>
-                        </div>
-                        <span className="rounded-full bg-pro-accent/10 px-2 py-0.5 text-[10px] font-medium text-pro-accent shrink-0 ml-2">
-                          New person
-                        </span>
-                      </div>
-                    ) : null}
-
-                    {filteredPeople.length === 0 && !canCreateNew ? (
-                      <div className="px-3 py-3 text-center text-xs text-pro-text-muted select-none">
-                        No matching people found.
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
+                        ) : null}
+                      </div>,
+                      document.body,
+                    )
+                  : null}
               </div>
             </div>
           )}
@@ -967,10 +1052,7 @@ export const SpeakerIdentificationModal = ({
                 </button>
                 <button
                   type="button"
-                  disabled={
-                    busy ||
-                    (!selectedSelection && !searchQuery.trim())
-                  }
+                  disabled={busy || (!selectedSelection && !searchQuery.trim())}
                   onClick={handleConfirmCurrent}
                   className="inline-flex items-center justify-center rounded-lg bg-pro-accent px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-pro-accent/90 disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                 >

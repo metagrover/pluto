@@ -23,6 +23,10 @@ describe('speaker review', () => {
     'Voice 4',
     'Unknown speaker',
     'Unidentified speaker 2',
+    'Me',
+    'Them',
+    'You',
+    'Unknown',
   ])('rejects %s as a generic person label', (label) => {
     expect(isGenericSpeakerLabel(label)).toBe(true);
   });

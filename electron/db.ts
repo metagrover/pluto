@@ -1479,6 +1479,48 @@ const initDb = () => {
     !projectAliasColumns.some((column) => column.name === 'moved_aliases_json')
   )
     db.exec('ALTER TABLE project_aliases ADD COLUMN moved_aliases_json TEXT');
+
+  try {
+    const genericCandidates = db
+      .prepare(
+        `SELECT id FROM entities
+         WHERE type = 'person'
+           AND (
+             name LIKE 'Remote Speaker%'
+             OR name LIKE 'Speaker %'
+             OR LOWER(name) IN ('remote speaker', 'local speaker', 'me', 'them', 'you', 'unknown', 'unknown speaker')
+           )`,
+      )
+      .all() as { id: string }[];
+
+    if (genericCandidates.length > 0) {
+      db.transaction(() => {
+        for (const candidate of genericCandidates) {
+          db.prepare('DELETE FROM entities WHERE id = ?').run(candidate.id);
+          try {
+            db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(
+              candidate.id,
+            );
+          } catch {}
+          try {
+            db.prepare(
+              'DELETE FROM entity_links WHERE source_entity_id = ? OR target_entity_id = ?',
+            ).run(candidate.id, candidate.id);
+          } catch {}
+          try {
+            db.prepare('DELETE FROM meeting_entities WHERE entity_id = ?').run(
+              candidate.id,
+            );
+          } catch {}
+        }
+      })();
+      dbLog.info(
+        `Purged ${genericCandidates.length} generic speaker placeholder entities`,
+      );
+    }
+  } catch (e) {
+    dbLog.warn('Generic speaker entity purge failed:', e);
+  }
 };
 
 type ExtractionAuthoredPersonRole = {

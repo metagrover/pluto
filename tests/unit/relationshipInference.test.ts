@@ -14,6 +14,7 @@ vi.mock('../../electron/db', () => ({
     getRevision: vi.fn(() => 0),
     getResolution: vi.fn(),
     saveResolution: vi.fn(),
+    getSelfPersonId: vi.fn(() => null),
   },
   resolveCommitmentIdentity: vi.fn(),
   findEntity: vi.fn(),

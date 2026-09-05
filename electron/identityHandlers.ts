@@ -2,6 +2,7 @@ import type {
   IdentityProfileInput,
   IdentityUseCase,
 } from '../src/types/identity';
+import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
 import { getMeetingIdentityContext } from './commitmentIdentity';
 import * as db from './db';
 
@@ -74,7 +75,8 @@ function selectedPerson(payload: Record<string, unknown>): string | null {
     typeof payload.newName !== 'string' ||
     !payload.newName.trim() ||
     payload.newName.length > 256 ||
-    /[\p{Cc}]/u.test(payload.newName)
+    /[\p{Cc}]/u.test(payload.newName) ||
+    isGenericSpeakerLabel(payload.newName)
   )
     throw invalid('person_name');
   return db.upsertEntity({
@@ -95,6 +97,7 @@ function globalState() {
     selfPersonId,
     people: db
       .getEntitiesByType('person')
+      .filter(({ name }) => !isGenericSpeakerLabel(name))
       .map(({ id, name }) => ({ id, name })),
     revision: db.identityStore.getRevision(),
     profile: self ? { ...profile, preferredName: self.name } : profile,
