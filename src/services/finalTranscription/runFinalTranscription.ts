@@ -369,6 +369,8 @@ export const runFinalTranscription = async <TTranscript>(
       segments: attribution.segments,
       turns: speakerEvidence.turns,
       systemEnergyWindows: speakerEvidence.energyWindows,
+      clusterEvidence: speakerEvidence.clusterEvidence,
+      provenance: speakerEvidence.provenance,
     });
     metadata.speakerAttribution = {
       ...attribution.attribution,
