@@ -1063,26 +1063,23 @@ describe('MeetingView progressive reveal', () => {
   it('offers the approved notes templates', async () => {
     await act(async () => renderMeeting(analyzedMeeting));
 
-    const template = container.querySelector<HTMLSelectElement>(
-      'select[aria-label="Notes template"]',
+    const template = container.querySelector<HTMLElement>(
+      '[role="combobox"][aria-label="Notes template"]',
     );
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLSelectElement.prototype,
-      'value',
-    )?.set;
-
-    await act(async () => {
-      if (!template || !valueSetter) return;
-      valueSetter.call(template, 'project_kickoff');
-      template.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(template?.value).toBe('project_kickoff');
+    await act(async () => template?.click());
+    const options = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="option"]'),
+    ];
+    await act(async () =>
+      options
+        .find((option) => option.dataset.value === 'project_kickoff')
+        ?.click(),
+    );
+    expect(template?.textContent).toContain('Project kickoff');
     expect(container.textContent).toContain('Notes template');
     expect(container.textContent).toContain('Export meeting notes');
     expect(container.textContent).toContain('Delete meeting');
-    expect(
-      Array.from(template?.options || []).map((option) => option.text),
-    ).toEqual([
+    expect(options.map((option) => option.textContent)).toEqual([
       'Auto',
       '1:1',
       'Team sync',
