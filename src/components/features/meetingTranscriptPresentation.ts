@@ -1,4 +1,5 @@
 import type { TranscriptSegment } from '../../types';
+import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
 
 export type MeetingTranscriptTurn<T extends TranscriptSegment> = {
   id: string;
@@ -22,7 +23,11 @@ export const applyMeetingSpeakerDisplayNames = <T extends TranscriptSegment>(
   segments.map((segment) => {
     const speaker = String(segment.speaker ?? '');
     const displayName = displayNames[speaker]?.trim();
-    return displayName ? ({ ...segment, speaker: displayName } as T) : segment;
+    const projectedSpeaker =
+      displayName || getAnonymousSpeakerDisplayLabel(speaker);
+    return projectedSpeaker !== speaker
+      ? ({ ...segment, speaker: projectedSpeaker } as T)
+      : segment;
   });
 
 const turnCharacterCount = <T extends TranscriptSegment>(

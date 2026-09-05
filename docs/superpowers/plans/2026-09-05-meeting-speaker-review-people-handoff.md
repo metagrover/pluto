@@ -18,7 +18,7 @@
 - Modify: `src/components/features/meetingTranscriptPresentation.ts`
 - Modify: `tests/unit/meetingTranscriptPresentation.test.ts`
 
-- [ ] **Step 1: Write failing pure tests**
+- [x] **Step 1: Write failing pure tests**
 
 Cover canonical recognition, display projection, numbered-placeholder rejection, deterministic grouping of adjacent same-speaker turns, exclusion of overlaps, duration bounds, and indexed alternate samples:
 
@@ -30,13 +30,13 @@ expect(selectSpeakerSampleIntervals(segments, 'Remote Speaker 1')).toEqual([
 ]);
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `pnpm exec vitest run tests/unit/speakerReview.test.ts tests/unit/meetingTranscriptPresentation.test.ts`
 
 Expected: failure because `speakerReview.ts` and anonymous display projection do not exist.
 
-- [ ] **Step 3: Implement the pure boundary**
+- [x] **Step 3: Implement the pure boundary**
 
 Export explicit functions and a bounded return type:
 
@@ -58,11 +58,11 @@ export const selectSpeakerSampleIntervals = (
 
 Use 5–8 second clean groups when available, accept a minimum two-second clean fallback, return at most two non-overlapping candidates, and never join across another speaker's overlapping interval.
 
-- [ ] **Step 4: Apply display-only projection and verify GREEN**
+- [x] **Step 4: Apply display-only projection and verify GREEN**
 
 Make transcript presentation convert only canonical `Remote Speaker N` labels to `Speaker N`; confirmed person projection continues to take precedence. Run the focused tests and expect both files to pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/speakerReview.ts src/components/features/meetingTranscriptPresentation.ts tests/unit/speakerReview.test.ts tests/unit/meetingTranscriptPresentation.test.ts
