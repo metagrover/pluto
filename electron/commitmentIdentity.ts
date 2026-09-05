@@ -62,13 +62,14 @@ export function getMeetingIdentityContext(meetingId: string): IdentityContext {
     (turn) => turn.speaker === 'Me' && turn.text.trim(),
   );
   if (
-    capture.origin === 'local' &&
+    (capture.origin === 'local' || capture.origin === 'unknown') &&
     capture.selfPersonId &&
     people.some((person) => person.id === capture.selfPersonId) &&
     nearEnd &&
     !bindings.some((binding) => binding.speaker === 'Me')
   ) {
     const hasAcousticCaptureEvidence =
+      capture.origin === 'local' &&
       (attribution.source === 'local_diarization_acoustic' ||
         attribution.source === 'offline_diarization_acoustic_v1') &&
       attribution.mappingApplied === true &&
