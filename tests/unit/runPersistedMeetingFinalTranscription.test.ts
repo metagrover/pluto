@@ -336,7 +336,8 @@ describe('runPersistedMeetingFinalTranscription', () => {
       system_audio_path: '/damaged/system.wav',
       mixed_audio_path: '/damaged/mix.wav',
       capture_journal_generation: 'generation-1',
-      transcript_status: 'validated',
+      transcript_status: 'needs_attention',
+      transcript_validated_at: '2026-09-04T00:01:00.000Z',
       transcript_json: JSON.stringify({ segments: [] }),
       transcript_integrity_json: JSON.stringify({
         evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
@@ -372,6 +373,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
           audio_path: '/approved/mic.wav',
           system_audio_path: '/repaired/system.wav',
           mixed_audio_path: '/repaired/mix.wav',
+          transcript_validated_at: undefined,
         });
         return true;
       }

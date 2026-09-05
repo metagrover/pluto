@@ -77,6 +77,10 @@ const rebuildSealedAudioForRetry = async (
       ...meeting,
       system_audio_path: systemAudioPath,
       mixed_audio_path: mixedAudioPath,
+      transcript_validated_at:
+        meeting.transcript_status === 'validated'
+          ? meeting.transcript_validated_at
+          : undefined,
     };
     if ((await invoke('SAVE_MEETING', rebuiltMeeting)) === false) {
       throw new Error('sealed_capture_audio_save_superseded');
