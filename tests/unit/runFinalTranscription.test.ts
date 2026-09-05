@@ -520,4 +520,49 @@ describe('runFinalTranscription', () => {
     );
     expect(deps.commitCanonical).not.toHaveBeenCalled();
   });
+
+  it('passes clusterEvidence and provenance into applyRemoteSpeakerClusters so speakerCandidates reach commitCanonical', async () => {
+    const deps = dependencies();
+    // Return a single remote-side cluster with a real-looking embedding so
+    // applyRemoteSpeakerClusters can produce candidateEvidence.
+    const clusterEvidenceFake = [
+      {
+        cluster: 'S2',
+        embedding: Array.from({ length: 192 }, (_, i) => i / 192),
+        cleanChunkCount: 5,
+        cleanSegmentCount: 3,
+        cleanDurationSeconds: 12,
+        minimumChunkSimilarity: 0.88,
+        meanChunkSimilarity: 0.92,
+      },
+    ];
+    const provenanceFake = {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+    };
+    deps.speakerEvidence.mockResolvedValueOnce({
+      turns: [
+        { startTime: 0, endTime: 4, cluster: 'S1' },
+        { startTime: 5, endTime: 9, cluster: 'S2' },
+      ],
+      energyWindows: [
+        { startTime: 0, endTime: 4, micRms: 0.03, systemRms: 0 },
+        { startTime: 5, endTime: 9, micRms: 0, systemRms: 0.02 },
+      ],
+      provenance: provenanceFake,
+      clusterEvidence: clusterEvidenceFake,
+      timings: { diarizationMs: 10, energyAnalysisMs: 2, totalMs: 12 },
+      windowSeconds: 0.1,
+    });
+
+    const outcome = await runFinalTranscription(baseInput, deps);
+
+    expect(outcome.status).toBe('validated');
+    // speakerCandidates must be present (non-empty) when clusterEvidence is wired.
+    const committedWith = deps.commitCanonical.mock.calls[0][0];
+    expect(committedWith.speakerCandidates).toBeDefined();
+    expect(committedWith.speakerCandidates.length).toBeGreaterThan(0);
+  });
 });
