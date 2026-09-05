@@ -241,4 +241,17 @@ describe('PeopleTab Voice Profile integration', () => {
       'No voice profile enrolled for this person.',
     );
   });
+
+  it('does not misreport a profile-loading failure as no enrollment', async () => {
+    voiceApi.getSpeakerVoiceProfiles.mockRejectedValueOnce(
+      new Error('profile read failed'),
+    );
+
+    await renderTab();
+
+    expect(host.textContent).toContain('Voice profile could not be loaded.');
+    expect(host.textContent).not.toContain(
+      'No voice profile enrolled for this person.',
+    );
+  });
 });

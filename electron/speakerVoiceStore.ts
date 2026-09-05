@@ -51,6 +51,11 @@ export interface SpeakerVoiceRejection {
   createdAt: string;
 }
 
+export interface StoredSpeakerCandidateEvidence
+  extends SpeakerCandidateEvidence {
+  sourceRevision: string;
+}
+
 import * as dbModule from './db';
 
 function getDb(dbInstance?: Database.Database): Database.Database {
@@ -129,7 +134,7 @@ export function saveMeetingSpeakerCandidates(
 export function getMeetingSpeakerCandidates(
   meetingId: string,
   dbInstance?: Database.Database,
-): SpeakerCandidateEvidence[] {
+): StoredSpeakerCandidateEvidence[] {
   const d = getDb(dbInstance);
   const rows = d
     .prepare(
@@ -161,6 +166,7 @@ export function getMeetingSpeakerCandidates(
     ) as SpeakerCandidateProvenance;
     return {
       speaker: r.speaker,
+      sourceRevision: r.source_revision,
       nativeCluster: r.speaker,
       candidateDigest: r.candidate_digest,
       embedding: JSON.parse(r.embedding_json),

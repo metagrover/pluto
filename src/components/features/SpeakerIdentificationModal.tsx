@@ -540,15 +540,18 @@ export const SpeakerIdentificationModal = ({
 
       // Opt-in voice profile enrollment
       const candidate = speakerCandidates[speaker];
+      const enrolledPersonId =
+        next.bindings.find((binding) => binding.speaker === speaker)
+          ?.personId ?? selection.personId;
       if (
         rememberVoice &&
-        selection.personId &&
+        enrolledPersonId &&
         candidate &&
         candidate.isEligibleForEnrollment
       ) {
         try {
           await enrollSpeakerVoice({
-            personId: selection.personId,
+            personId: enrolledPersonId,
             sourceMeetingId: meetingId,
             sourceRevision: candidate.sourceRevision,
             speaker,
@@ -556,7 +559,19 @@ export const SpeakerIdentificationModal = ({
             expectedRevision: next.revision,
           });
         } catch {
-          // non-fatal if enrollment fails
+          const enrolledPerson = next.people.find(
+            (person) => person.id === enrolledPersonId,
+          );
+          setSelectedSelection({ personId: enrolledPersonId });
+          if (enrolledPerson) {
+            setSelectedLabel(enrolledPerson.name);
+            setSearchQuery(enrolledPerson.name);
+          }
+          await loadVoiceSuggestions();
+          setError(
+            'This person was identified, but Pluto could not remember their voice. Try again.',
+          );
+          return;
         }
       }
 

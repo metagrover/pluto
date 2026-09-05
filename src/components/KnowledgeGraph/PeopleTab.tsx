@@ -553,6 +553,7 @@ export const PersonDossier = ({
       setVoiceProfile(match);
     } catch {
       setVoiceProfile(null);
+      setVoiceError('Voice profile could not be loaded.');
     } finally {
       setVoiceLoading(false);
     }
@@ -1225,6 +1226,10 @@ export const PersonDossier = ({
               </p>
             ) : null}
           </div>
+        ) : voiceError ? (
+          <p role="alert" className="mt-4 text-sm text-pro-urgent">
+            {voiceError}
+          </p>
         ) : (
           <p className="mt-4 text-sm text-pro-text-muted">
             No voice profile enrolled for this person.

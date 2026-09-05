@@ -48,21 +48,31 @@ export async function handleSpeakerVoiceRequest(
 
   switch (channel) {
     case 'SPEAKER_VOICE_GET_SUGGESTIONS': {
+      const meetingId = String(payload?.meetingId ?? '');
+      if (!meetingId) {
+        return { suggestions: {}, candidates: {} };
+      }
+
+      const candidates = getMeetingSpeakerCandidates(meetingId, d);
+      const clientCandidates: Record<string, unknown> = {};
+      for (const candidate of candidates) {
+        clientCandidates[candidate.speaker] = {
+          candidateDigest: candidate.candidateDigest,
+          sourceRevision: candidate.sourceRevision,
+          isEligibleForEnrollment: candidate.isEligibleForEnrollment,
+          cleanDurationSeconds: candidate.cleanDurationSeconds,
+        };
+      }
+
       const isEnabled =
         deps?.isFeatureFlagEnabled?.() ??
         (db.getSetting('voice_profile_suggestions_v1') === 'true' ||
           process.env.VOICE_PROFILE_SUGGESTIONS_V1 === 'true');
 
       if (!isEnabled) {
-        return { suggestions: {} };
+        return { suggestions: {}, candidates: clientCandidates };
       }
 
-      const meetingId = String(payload?.meetingId ?? '');
-      if (!meetingId) {
-        return { suggestions: {} };
-      }
-
-      const candidates = getMeetingSpeakerCandidates(meetingId, d);
       const profiles = getCanonicalVoiceProfiles({
         dbInstance: d,
         activeOnly: true,
@@ -74,7 +84,7 @@ export async function handleSpeakerVoiceRequest(
       for (const candidate of candidates) {
         const match = matchSpeakerVoice({
           meetingId,
-          sourceRevision: payload?.sourceRevision ?? 'gen-1',
+          sourceRevision: candidate.sourceRevision,
           candidate,
           profiles,
           rejections,
@@ -96,16 +106,6 @@ export async function handleSpeakerVoiceRequest(
             referenceInterval: match.referenceInterval,
           };
         }
-      }
-
-      const clientCandidates: Record<string, unknown> = {};
-      for (const c of candidates) {
-        clientCandidates[c.speaker] = {
-          candidateDigest: c.candidateDigest,
-          sourceRevision: payload?.sourceRevision ?? 'gen-1',
-          isEligibleForEnrollment: c.isEligibleForEnrollment,
-          cleanDurationSeconds: c.cleanDurationSeconds,
-        };
       }
 
       return { suggestions, candidates: clientCandidates };

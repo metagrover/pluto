@@ -19,6 +19,7 @@ import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandida
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
 describe('speaker voice IPC handlers', () => {
+  const sourceRevision = '7591ab6e-da76-4c45-a04f-ab96b1a6f3bf';
   let fixture = 0;
   let meetingId: string;
   let personId: string;
@@ -37,7 +38,7 @@ describe('speaker voice IPC handlers', () => {
     db.saveMeeting({
       id: meetingId,
       title: 'Voice Test Meeting',
-      capture_journal_generation: 'gen-1',
+      capture_journal_generation: sourceRevision,
       transcript_status: 'validated',
       transcript_json: JSON.stringify([
         { speaker: 'Remote Speaker 1', text: 'Hello, this is Robin speaking.' },
@@ -91,7 +92,7 @@ describe('speaker voice IPC handlers', () => {
   });
 
   it('handles enrollment with revision and candidate validation', async () => {
-    saveMeetingSpeakerCandidates(meetingId, 'gen-1', [dummyCandidate]);
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
 
     // Invalid revision throws
@@ -99,7 +100,7 @@ describe('speaker voice IPC handlers', () => {
       handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
         personId,
         sourceMeetingId: meetingId,
-        sourceRevision: 'gen-1',
+        sourceRevision,
         speaker: 'Remote Speaker 1',
         candidateDigest: 'cand-digest-abc',
         expectedRevision: rev + 999,
@@ -111,7 +112,7 @@ describe('speaker voice IPC handlers', () => {
       handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
         personId,
         sourceMeetingId: meetingId,
-        sourceRevision: 'gen-1',
+        sourceRevision,
         speaker: 'Remote Speaker 1',
         candidateDigest: 'wrong-digest',
         expectedRevision: rev,
@@ -122,7 +123,7 @@ describe('speaker voice IPC handlers', () => {
     const result = (await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
       personId,
       sourceMeetingId: meetingId,
-      sourceRevision: 'gen-1',
+      sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-abc',
       expectedRevision: rev,
@@ -133,12 +134,12 @@ describe('speaker voice IPC handlers', () => {
   });
 
   it('returns suggestions when enabled and strips biometric embeddings', async () => {
-    saveMeetingSpeakerCandidates(meetingId, 'gen-1', [dummyCandidate]);
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
       personId,
       sourceMeetingId: meetingId,
-      sourceRevision: 'gen-1',
+      sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-abc',
       expectedRevision: rev,
@@ -149,8 +150,14 @@ describe('speaker voice IPC handlers', () => {
       'SPEAKER_VOICE_GET_SUGGESTIONS',
       { meetingId },
       { isFeatureFlagEnabled: () => false },
-    )) as { suggestions: Record<string, unknown> };
+    )) as {
+      suggestions: Record<string, unknown>;
+      candidates: Record<string, { sourceRevision: string }>;
+    };
     expect(disabledResult.suggestions).toEqual({});
+    expect(disabledResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
+      sourceRevision,
+    );
 
     // Enabled -> returns suggestion without raw embedding
     const enabledResult = (await handleSpeakerVoiceRequest(
@@ -164,16 +171,53 @@ describe('speaker voice IPC handlers', () => {
     expect(suggestion.suggestedPersonId).toBe(personId);
     expect(suggestion.suggestedPersonName).toBe('Robin');
     expect(suggestion.confidenceTier).toBe('strong');
+    expect(suggestion.sourceRevision).toBe(sourceRevision);
     expect(suggestion.embedding).toBeUndefined(); // NEVER leaked to renderer!
   });
 
+  it('enrolls with the exact candidate revision returned by discovery', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+
+    const discovery = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { isFeatureFlagEnabled: () => false },
+    )) as {
+      candidates: Record<
+        string,
+        { sourceRevision: string; candidateDigest: string }
+      >;
+    };
+    const candidate = discovery.candidates['Remote Speaker 1'];
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision: candidate.sourceRevision,
+        speaker: 'Remote Speaker 1',
+        candidateDigest: candidate.candidateDigest,
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    const profiles = (
+      (await handleSpeakerVoiceRequest('SPEAKER_VOICE_GET_PROFILES', {})) as {
+        profiles: Array<{ canonicalPersonId: string; sampleCount: number }>;
+      }
+    ).profiles;
+    expect(profiles).toEqual([
+      expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
+    ]);
+  });
+
   it('returns profiles stripped of raw biometric embeddings', async () => {
-    saveMeetingSpeakerCandidates(meetingId, 'gen-1', [dummyCandidate]);
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
       personId,
       sourceMeetingId: meetingId,
-      sourceRevision: 'gen-1',
+      sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-abc',
       expectedRevision: rev,
@@ -193,12 +237,12 @@ describe('speaker voice IPC handlers', () => {
   });
 
   it('rejects candidate and suppresses suggestion', async () => {
-    saveMeetingSpeakerCandidates(meetingId, 'gen-1', [dummyCandidate]);
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
       personId,
       sourceMeetingId: meetingId,
-      sourceRevision: 'gen-1',
+      sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-abc',
       expectedRevision: rev,
@@ -208,7 +252,7 @@ describe('speaker voice IPC handlers', () => {
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_REJECT', {
       meetingId,
       speaker: 'Remote Speaker 1',
-      sourceRevision: 'gen-1',
+      sourceRevision,
       candidateDigest: 'cand-digest-abc',
       personId,
     });
@@ -224,12 +268,12 @@ describe('speaker voice IPC handlers', () => {
   });
 
   it('updates profile active status and deletes voice profile', async () => {
-    saveMeetingSpeakerCandidates(meetingId, 'gen-1', [dummyCandidate]);
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     const rev = db.identityStore.getRevision();
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
       personId,
       sourceMeetingId: meetingId,
-      sourceRevision: 'gen-1',
+      sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-abc',
       expectedRevision: rev,

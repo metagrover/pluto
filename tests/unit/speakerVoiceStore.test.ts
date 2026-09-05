@@ -156,6 +156,7 @@ describe('speakerVoiceStore & candidate database operations', () => {
 
     const candidates = getMeetingSpeakerCandidates('m1', db);
     expect(candidates).toHaveLength(1);
+    expect(candidates[0].sourceRevision).toBe('gen-1');
     expect(candidates[0].speaker).toBe('Remote Speaker 1');
     expect(candidates[0].candidateDigest).toBe('c'.repeat(64));
     expect(candidates[0].embedding).toHaveLength(256);
