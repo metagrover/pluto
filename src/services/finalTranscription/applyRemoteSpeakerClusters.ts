@@ -3,6 +3,12 @@ import type {
   AttributionSegment,
   WordTimestamp,
 } from '../../utils/speakerAttribution.ts';
+import {
+  type SpeakerCandidateEvidence,
+  type SpeakerCandidateProvenance,
+  type SpeakerClusterEvidence,
+  deriveSpeakerCandidates,
+} from '../speakerCandidateEvidence.ts';
 
 import {
   type RemoteSpeechSupport,
@@ -128,10 +134,13 @@ export const applyRemoteSpeakerClusters = <
   segments: T[];
   turns: DiarizationTurn[];
   systemEnergyWindows?: SystemEnergyWindow[];
+  clusterEvidence?: SpeakerClusterEvidence[];
+  provenance?: SpeakerCandidateProvenance;
 }): {
   applied: boolean;
   segments: T[];
   metadata: RemoteDiarizationMetadata;
+  candidateEvidence?: SpeakerCandidateEvidence[];
 } => {
   const systemSegments = input.segments.filter(
     (segment) => segment.speaker === 'Them',
@@ -140,6 +149,7 @@ export const applyRemoteSpeakerClusters = <
     fallbackReason: RemoteDiarizationFallbackReason,
     confidence = 0,
     clusterCount = 0,
+    candidateEvidence: SpeakerCandidateEvidence[] = [],
   ) => ({
     applied: false,
     segments: input.segments.map((segment) => ({ ...segment })),
@@ -152,6 +162,7 @@ export const applyRemoteSpeakerClusters = <
       labeledSegmentCount: 0,
       fallbackReason,
     },
+    candidateEvidence,
   });
 
   if (systemSegments.length === 0) return fallback('no_system_speech');
@@ -181,7 +192,23 @@ export const applyRemoteSpeakerClusters = <
         left[1].first - right[1].first || left[0].localeCompare(right[0]),
     );
   if (established.length < 2) {
-    return fallback('not_enough_speakers', 0, established.length);
+    const candidateEvidence =
+      established.length === 1 && input.clusterEvidence && input.provenance
+        ? deriveSpeakerCandidates({
+            clusterEvidence: input.clusterEvidence,
+            segments: input.segments,
+            establishedClusters: [
+              { cluster: established[0][0], label: 'Them' },
+            ],
+            provenance: input.provenance,
+          })
+        : [];
+    return fallback(
+      'not_enough_speakers',
+      0,
+      established.length,
+      candidateEvidence,
+    );
   }
   const labels = new Map(
     established.map(([cluster], index) => [
@@ -297,6 +324,18 @@ export const applyRemoteSpeakerClusters = <
   const labeledSegmentCount = aligned.filter((segment) =>
     /^Remote Speaker \d+$/u.test(segment.speaker),
   ).length;
+  const candidateEvidence =
+    input.clusterEvidence && input.provenance
+      ? deriveSpeakerCandidates({
+          clusterEvidence: input.clusterEvidence,
+          segments: aligned,
+          establishedClusters: established.map(([cluster], index) => ({
+            cluster,
+            label: `Remote Speaker ${index + 1}`,
+          })),
+          provenance: input.provenance,
+        })
+      : [];
   return {
     applied: true,
     segments: aligned,
@@ -308,5 +347,6 @@ export const applyRemoteSpeakerClusters = <
       clusterCount: established.length,
       labeledSegmentCount,
     },
+    candidateEvidence,
   };
 };
