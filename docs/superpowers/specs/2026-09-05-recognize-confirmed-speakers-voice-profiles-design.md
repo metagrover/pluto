@@ -9,91 +9,206 @@ After a user explicitly confirms an anonymous meeting speaker as a person, Pluto
 
 ## Architecture
 
-### 1. Native Runtime Diarization Bridge
+### 1. Native Runtime Diarization Bridge & Clean-Chunk Evidence
 - `FluidAudioOfflineDiarizer` runs against the meeting's System recording.
-- The underlying `OfflineDiarizerManager` extracts 256-dimensional unit-normalized speaker embeddings per segment and calculates cluster centroids in `DiarizationResult.speakerDatabase` (`[String: [Float]]`).
-- `SpeakerEvidenceOutput` in `native/parakeet-runtime` is extended to expose `clusterEmbeddings: [String: [Float]]`. Each cluster vector is guaranteed to be L2-normalized (`||v|| = 1.0`).
-- Digital silence, single speaker, or failure gracefully returns empty embeddings without blocking transcription or downstream pipelines.
+- `OfflineDiarizerConfig.exposeChunkEmbeddings` is enabled.
+- `DiarizationResult.chunkEmbeddings` provides time-aligned 256-dimensional unit-normalized chunk embeddings:
+  ```swift
+  public struct SpeakerChunkEvidence: Codable, Equatable, Sendable {
+      public let cluster: String
+      public let startTime: Double
+      public let endTime: Double
+      public let embedding: [Float]
+  }
+  ```
+- `SpeakerEvidenceOutput` exposes `chunkEmbeddings: [SpeakerChunkEvidence]` alongside `turns`, `energyWindows`, `provenance`, and `timings`.
+- `SpeakerEvidenceProvenance` provides the complete immutable provenance tuple:
+  - `modelIdentifier: String`
+  - `modelRevision: String`
+  - `artifactDigest: String`
+  - `runtimeVersion: String`
+- Validation checks ensure:
+  - Wrong dimensions (!= 256), zero norm (`||v|| == 0`), and NaN/Infinity vectors are strictly rejected.
+  - Digital silence or diarization failure returns empty turns and chunk embeddings without throwing or blocking transcription.
 
-### 2. Final Transcription Pipeline Integration
-- `parakeetFinalClient.ts` deserializes `clusterEmbeddings`.
-- `applyRemoteSpeakerClusters.ts` maps native clusters (`S1`, `S2`) to canonical labels (`Remote Speaker 1`, `Remote Speaker 2`). It associates each established cluster's 256-d embedding vector with its canonical speaker label and returns `speakerClusterEmbeddings: Record<string, number[]>`.
-- `runFinalTranscription.ts` preserves `speakerClusterEmbeddings` in final meeting transcription metadata (`metadata.speakerAttribution.remoteDiarization.speakerClusterEmbeddings`) for suggestion matching.
+### 2. Single and Multi-Speaker Candidate Mapping
+- `applyRemoteSpeakerClusters.ts` preserves issue #749's conservative canonical transcript rules:
+  - If fewer than 2 established clusters exist on System audio, transcript turns remain `Them` with fallback reason `not_enough_speakers`.
+  - If 2 or more established clusters exist, transcript turns receive deterministic labels `Remote Speaker 1`, `Remote Speaker 2`, etc.
+- **Candidate Evidence Extraction**:
+  - Independent of transcript label projection, if System audio contains valid speech, candidate clusters are derived for review and recognition:
+    - In a 1-on-1 meeting with 1 remote speaker, candidate key is `'Them'`.
+    - In a multi-speaker meeting, candidate keys are `'Remote Speaker 1'`, `'Remote Speaker 2'`, etc.
+  - For each candidate speaker:
+    - Select accepted, non-overlapping clean intervals (excluding Mic speech, cross-speaker overlap, and utterances < 1s).
+    - Collect only the time-aligned chunk embeddings whose `[startTime, endTime]` fall strictly within those accepted clean intervals.
+    - If clean speech $\ge 3.0$s across $\ge 2$ segments and clean chunks exist:
+      - Compute the candidate centroid: average the clean chunk embeddings and re-normalize to unit length:
+        $$\mathbf{v}_{\text{cand}} = \frac{\sum_i \mathbf{c}_i}{\|\sum_i \mathbf{c}_i\|}$$
+      - Compute a deterministic `candidateDigest` (`sha256(embedding).slice(0, 16)`).
+      - Mark candidate as `isEligibleForEnrollment = true`.
+    - Otherwise, mark `isEligibleForEnrollment = false`.
 
-### 3. Voice Profile Storage & Rejection Memory
-- Database schema additions in `electron/db.ts` / `identityStore.ts`:
-  - **`speaker_voice_profiles`**:
-    - `person_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE`
-    - `status TEXT NOT NULL DEFAULT 'active'` (`'active' | 'disabled'`)
-    - `embedding_json TEXT NOT NULL` (JSON array of 256 floats, L2-normalized)
-    - `sample_count INTEGER NOT NULL DEFAULT 1`
-    - `total_duration_sec REAL NOT NULL DEFAULT 0`
-    - `reference_meeting_id TEXT`
-    - `reference_start_sec REAL`
-    - `reference_end_sec REAL`
-    - `reference_excerpt TEXT`
-    - `model_version TEXT NOT NULL` (e.g. `'fluid-audio-cam++-v1'`)
-    - `created_at DATETIME DEFAULT CURRENT_TIMESTAMP`
-    - `updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`
-  - **`speaker_voice_rejections`**:
-    - `meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE`
-    - `speaker TEXT NOT NULL` (e.g. `'Remote Speaker 1'`)
-    - `person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE`
-    - `created_at DATETIME DEFAULT CURRENT_TIMESTAMP`
-    - `PRIMARY KEY (meeting_id, speaker, person_id)`
-    - Used so selecting "Not Alex" suppresses re-suggesting Alex for that turn in that meeting without corrupting Alex's persistent profile.
+### 3. Biometric Data Protection & Meeting Candidate Evidence Table
+- **No Unconsented Voiceprints in Transcripts:** Candidate embeddings are NEVER written into `transcript_json`, `meetings.metadata`, client-facing logs, or renderer IPC transcripts.
+- Dedicated local evidence table in SQLite (`electron/db.ts`):
+  ```sql
+  CREATE TABLE IF NOT EXISTS meeting_speaker_candidates (
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker TEXT NOT NULL,
+    source_revision TEXT NOT NULL,
+    candidate_digest TEXT NOT NULL,
+    embedding_json TEXT NOT NULL,
+    clean_duration_sec REAL NOT NULL,
+    clean_segment_count INTEGER NOT NULL,
+    reference_start_sec REAL NOT NULL,
+    reference_end_sec REAL NOT NULL,
+    reference_excerpt TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (meeting_id, speaker, source_revision)
+  );
+  ```
+- **Lifecycle & Deletion Policy**:
+  - `ON DELETE CASCADE` ensures deleting a meeting permanently wipes all its candidate vectors.
+  - Resetting the knowledge base (`resetKnowledgeBase`) truncates `meeting_speaker_candidates`.
+  - Database exports / sync exclude `meeting_speaker_candidates` and `speaker_voice_enrollments`.
+  - **Renderer Boundary**: The renderer receives only high-level suggestion descriptors (`{ speaker, suggestion: { personId, personName, confidence, isCalendarAttendee } | null, candidateDigest, sourceRevision, isEligibleForEnrollment }`). Raw embedding arrays are never sent across the IPC bridge to the renderer.
 
-### 4. Enrollment Quality Gates
-- Enrollment is strictly opt-in via an explicit user choice (`Remember this voice for future meetings`).
-- Audio samples must come exclusively from non-overlapping System-audio intervals corresponding to the confirmed turn.
-- The turn must meet quality thresholds: at least 2 distinct clean segments and >= 3.0 seconds of cumulative speech.
-- Updating an existing profile calculates a weighted average of normalized embeddings and re-normalizes to unit length:
-  $$\mathbf{v}_{\text{new}} = \frac{n_1 \mathbf{v}_1 + n_2 \mathbf{v}_2}{\|n_1 \mathbf{v}_1 + n_2 \mathbf{v}_2\|}$$
+### 4. Lossless Person-Merge and Restoration (Immutable Enrollments)
+- Rather than maintaining a single mutable centroid per person that cannot be unmerged, Pluto stores immutable per-enrollment samples:
+  ```sql
+  CREATE TABLE IF NOT EXISTS speaker_voice_enrollments (
+    id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    source_meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    source_revision TEXT NOT NULL,
+    speaker TEXT NOT NULL,
+    embedding_json TEXT NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    clean_duration_sec REAL NOT NULL,
+    reference_start_sec REAL NOT NULL,
+    reference_end_sec REAL NOT NULL,
+    reference_excerpt TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  ```
+- **Dynamic Canonical Aggregation**:
+  - When matching or inspecting profiles, Pluto resolves each enrollment's owner via `canonicalPersonId = resolvePersonIdentityId(person_id)`.
+  - If a canonical person has active enrollments:
+    - Aggregate centroid: $\mathbf{v}_{\text{agg}} = \frac{\sum_k w_k \mathbf{v}_k}{\|\sum_k w_k \mathbf{v}_k\|}$ where $w_k = \text{clean\_duration\_sec}_k$.
+    - Representative reference clip: selected from the enrollment with the longest clean duration.
+  - **Person Merge (`mergePerson`)**: Adds alias in `person_aliases`. `resolvePersonIdentityId` points the source person to the destination. Destination dynamically combines all active enrollments.
+  - **Person Merge Restore (`restorePersonMerge`)**: Deactivates alias. `resolvePersonIdentityId` immediately returns the original person ID. Both original persons immediately recover their exact, uncorrupted original profiles with zero precision loss.
+  - **Disable / Delete**: A user can disable a person's voice recognition (sets `status = 'disabled'` on their enrollments) or delete their voice profile (deletes rows in `speaker_voice_enrollments` for `person_id`).
 
-### 5. Matcher & Calibration Contract
-- For a candidate cluster embedding $\mathbf{v}_{\text{cand}}$:
-  1. Filter active voice profiles with matching `model_version`, excluding any `person_id` in `speaker_voice_rejections` for `(meetingId, speaker)`.
-  2. Compute cosine similarity $s_i = \mathbf{v}_{\text{cand}} \cdot \mathbf{v}_i$.
-  3. **Absolute Threshold:** Top candidate must have $s_{\text{top}} \ge 0.72$.
-  4. **Margin Requirement:** Margin over the runner-up must satisfy $s_{\text{top}} - s_{\text{second}} \ge 0.10$. If the runner-up is within $0.10$, the match is flagged as ambiguous and suppressed.
-  5. **Calendar Roster Prioritization:** If an enrolled person matches the meeting's calendar invitees, they are ranked higher among close scores, but must still independently satisfy $s \ge 0.72$ and margin $\ge 0.10$.
-  6. Returns suggestion `{ personId, personName, confidence: s_top, referenceMeetingId, referenceStartSec, referenceEndSec, referenceExcerpt }` or `null`.
+### 5. Deterministic Matcher & Global Acoustic Calibration
+- For a candidate cluster $(\mathbf{v}_{\text{cand}}, \text{provenance}_{\text{cand}})$:
+  1. Retrieve all active canonical profiles with matching provenance (`modelIdentifier`, `modelRevision`, `artifactDigest`). Any profile trained under a different model artifact is excluded from matching.
+  2. Exclude any `person_id` that has a rejection recorded for `(meeting_id, speaker, source_revision)`.
+  3. Compute cosine similarity $s_i = \mathbf{v}_{\text{cand}} \cdot \mathbf{v}_{\text{profile}_i}$ for all eligible profiles.
+  4. Order all candidates strictly by acoustic score: $s_1 \ge s_2 \ge \dots$
+  5. **Global Acoustic Threshold & Margin Rule**:
+     - Top candidate must satisfy: $s_1 \ge 0.72$.
+     - If a second profile exists, require margin: $s_1 - s_2 \ge 0.10$.
+     - If $s_1 < 0.72$ or $s_1 - s_2 < 0.10$, return `null` (remains anonymous).
+  6. **Calendar Context Isolation**:
+     - Calendar context MUST NOT alter the acoustic score, threshold, runner-up margin, or winner.
+     - If and only if candidate 1 independently satisfies the global acoustic threshold and margin, calendar attendance is passed as metadata (`isCalendarAttendee: true`) for UI annotation (`"Alex (on calendar)"`).
 
-### 6. User Interface & Interaction Surfaces
-- **Speaker Review Modal (`SpeakerIdentificationModal.tsx`)**:
-  - Displays match suggestion banner: `Speaker 1 may be Alex` (`High match`).
-  - Audio playback controls:
+### 6. Revision-Bound Rejections and Concurrency Protection
+- Rejections table:
+  ```sql
+  CREATE TABLE IF NOT EXISTS speaker_voice_rejections (
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    speaker TEXT NOT NULL,
+    person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    source_revision TEXT NOT NULL,
+    candidate_digest TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (meeting_id, speaker, person_id, source_revision)
+  );
+  ```
+- **Staleness & Concurrency Safeguards**:
+  - Actions (`confirmSuggestion`, `rejectSuggestion`, `enrollVoiceProfile`) must supply:
+    - `sourceRevision`: must match `hash(meeting.transcript_json)`.
+    - `candidateDigest`: must match `meeting_speaker_candidates.candidate_digest`.
+    - `expectedRevision`: must match `identity_workspace.revision`.
+  - If a meeting's transcription is regenerated or the identity workspace is concurrently modified, stale writes fail with `identity_revision_stale` or `speaker_candidate_stale`.
+  - Rejection suppresses "Not Alex" only for that exact transcription generation. If transcription is regenerated into a new acoustic partition, old rejections do not falsely suppress the new turn.
+
+### 7. User Interface Surfaces
+
+#### Speaker Review Modal (`SpeakerIdentificationModal.tsx`)
+- **Voice Match Suggestion**:
+  - Displays banner: `Speaker 1 may be Alex` (or `Them may be Alex`).
+  - Badges: `Strong match` (and `On calendar` if applicable).
+  - Audio playback:
     - `Play current sample`: Slices and streams candidate turn from current meeting.
-    - `Play reference sample`: Streams confirmed reference excerpt from Alex's profile source meeting.
-  - Action buttons:
-    - `Confirm Alex`: Creates meeting-scoped identity binding for Alex, updates People evidence, and auto-advances.
-    - `Not Alex`: Records rejection in `speaker_voice_rejections`, clears suggestion, and returns to standard person search combobox.
-  - Opt-in checkbox on confirmation:
-    - `[ ] Remember this voice for future meetings` (shown when speaker meets enrollment quality gates).
-- **Person Dossier (`PeopleTab.tsx`)**:
-  - Voice profile section under Person details:
-    - Displays status (`Remembered voice (Active)` or `Disabled`), sample count, and speech duration.
-    - Listen to reference sample.
-    - `Disable matching` / `Enable matching` toggle.
-    - `Delete voice profile` button to permanently delete the stored embedding.
-- **Settings (`IdentitySettings.tsx`)**:
-  - Voice profiles management section: lists all enrolled people with active/disabled toggles, delete action, and local privacy explanation.
+    - `Play reference sample`: Slices and streams confirmed reference clip from the enrollment source meeting. If the source meeting recording was deleted, button shows `Reference recording unavailable` without error.
+  - Actions:
+    - `Confirm Alex`: Creates meeting-scoped identity binding for Alex and auto-advances.
+    - `Not Alex`: Transactionally records rejection in `speaker_voice_rejections`, clears suggestion, and returns to standard person search combobox.
+- **Opt-In Enrollment Choice**:
+  - Whenever an anonymous speaker is confirmed to a person:
+    - If the turn satisfies enrollment gates (`isEligibleForEnrollment: true`):
+      - Shows checkbox: `[ ] Remember this voice for future meetings` (default unchecked).
+      - If checked, creates enrollment record under that `person_id`.
 
-### 7. Lifecycle & Reversibility Rules
-- **Person Rename:** Profile preserved via immutable entity ID.
-- **Person Merge:** Destination person inherits the voice profile. If both have profiles, centroids are combined with running weight averages.
-- **Person Deletion (`deleteEntity`):** Cascades deletion of `speaker_voice_profiles` and `speaker_voice_rejections`.
-- **Meeting Deletion:** Mathematical embedding remains intact; reference audio playback displays "Reference recording unavailable".
-- **Knowledge Base Reset (`resetKnowledgeBase`):** Truncates `speaker_voice_profiles` and `speaker_voice_rejections`.
+#### Person Dossier (`PeopleTab.tsx`)
+- Displays "Voice Profile" card under Person details:
+  - Status: `Remembered voice (Active)` or `Disabled`.
+  - Evidence: enrollment count, total clean speech duration.
+  - `Play reference sample` button.
+  - `Disable voice recognition` / `Enable voice recognition` toggle.
+  - `Delete voice profile` button (permanently deletes all enrollment records for that person).
 
-## Verification
+## Verification Plan
 
-- **Offline / Unit Tests:**
-  - Protocol tests for `SpeakerEvidenceOutput` cluster embeddings.
-  - Diarization pipeline tests verifying `speakerClusterEmbeddings` association with `Remote Speaker N`.
-  - Quality gate tests rejecting short utterances (< 3s), overlapping turns, and single-segment artifacts.
-  - Calibration and matcher tests: repeat-speaker matches, unseen speakers, near-miss speakers with margin checks, calendar candidate prioritization, and rejection suppression.
-  - Reversibility and lifecycle tests: person rename, merge, delete, meeting delete, and knowledge base reset.
-- **UI Tests:**
-  - `SpeakerIdentificationModal` rendering of suggestions, sample playback triggers, `Confirm`, `Not Alex`, and `Remember voice` checkbox.
-  - `PeopleTab` dossier voice profile inspection, disable/enable, and delete actions.
+### Automated Unit & Integration Tests
+
+1. **Native Clean-Interval Embedding**:
+   - `tests/unit/speakerEvidence.test.ts`: verify `chunkEmbeddings` are populated, unit-normalized, have dimension 256, and zero/NaN vectors are rejected.
+   - Non-overlapping clean interval filtering excludes short segments (< 1s) and overlap windows.
+   - Non-collinear centroid calculation and re-normalization verified.
+
+2. **Single and Multi-Speaker Candidate Mapping**:
+   - `tests/unit/applyRemoteSpeakerClusters.test.ts`:
+     - Single remote speaker meeting retains `Them` canonical transcript turn while producing candidate `Them`.
+     - Multi-speaker meeting produces candidate `Remote Speaker 1`, `Remote Speaker 2`.
+
+3. **Global Acoustic Threshold & Margin Matcher**:
+   - `tests/unit/speakerVoiceMatcher.test.ts`:
+     - Single stored profile matches when $\ge 0.72$.
+     - Two profiles: matches top candidate when margin $\ge 0.10$; suppresses match when margin $< 0.10$ (ambiguous candidate).
+     - Roster test: Calendar attendee cannot change the acoustic winner or override margin requirement.
+     - Provenance test: Incompatible model revision or artifact digest is excluded from matching.
+
+4. **Biometric Protection & Lifecycle Verification**:
+   - `tests/unit/speakerVoiceStore.test.ts`:
+     - Meeting deletion cascades and wipes candidate evidence.
+     - Knowledge base reset wipes candidates and enrollments.
+     - Raw embeddings never exist in `transcript_json` or meeting metadata.
+
+5. **Lossless Person Merge & Restore**:
+   - `tests/unit/speakerVoiceMergeRestore.test.ts`:
+     - Enroll Person A and Person B.
+     - Merge Person A $\rightarrow$ Person B: destination combines enrollments.
+     - Restore merge: Person A and Person B recover exact original profiles and centroids.
+
+6. **Revision-Bound Actions & Concurrency**:
+   - `tests/unit/speakerVoiceRevision.test.ts`:
+     - Rejection suppresses suggestion for matching `sourceRevision`.
+     - Regenerating transcription changes `sourceRevision` and invalidates stale rejection/candidate bindings.
+     - Stale `expectedRevision` throws `identity_revision_stale`.
+
+7. **UI Component Tests**:
+   - `tests/unit/SpeakerIdentificationModal.dom.test.tsx`:
+     - Suggestion banner rendering (`Them may be Alex` / `Speaker 1 may be Alex`).
+     - Reference sample and current sample play buttons.
+     - `Confirm` and `Not Alex` button clicks.
+     - Opt-in `Remember this voice for future meetings` checkbox.
+   - `tests/unit/PeopleTab.dom.test.tsx`:
+     - Voice profile card, toggle disable/enable, delete voice profile.
