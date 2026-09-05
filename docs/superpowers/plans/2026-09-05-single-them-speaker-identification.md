@@ -92,17 +92,15 @@ git add src/utils/speakerReview.ts tests/unit/speakerReview.test.ts
 git commit -m "fix: make aggregate them speaker reviewable"
 ```
 
-### Task 2: Use the policy in both identity-review surfaces
+### Task 2: Use the policy in the guided identity-review modal
 
 **Files:**
 - Modify: `src/components/features/SpeakerIdentificationModal.tsx`
-- Modify: `src/components/features/MeetingIdentityControls.tsx`
 - Test: `tests/unit/SpeakerIdentificationModal.dom.test.tsx`
-- Test: `tests/unit/IdentityControls.dom.test.tsx`
 
-- [ ] **Step 1: Write failing DOM tests for aggregate `Them`**
+- [ ] **Step 1: Write a failing DOM test for aggregate `Them`**
 
-Add modal and legacy-control cases whose identity state has `speakers: ['Me', 'Them']`. Assert the review UI shows one anonymous speaker named `Them`, can bind it, and does not duplicate it in the generic correction list:
+Add a modal case whose identity state has `speakers: ['Me', 'Them']`. Assert the review UI shows one anonymous speaker named `Them` and can bind it:
 
 ```ts
 expect(document.body.textContent).toContain('Them');
@@ -116,17 +114,15 @@ expect(setMeetingIdentityBinding).toHaveBeenCalledWith(
 );
 ```
 
-For `MeetingIdentityControls`, assert `1 unidentified speaker · Review` and exactly one `Person for Them` control after expansion.
-
 - [ ] **Step 2: Run the focused DOM tests and verify red**
 
-Run: `pnpm exec vitest run tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/IdentityControls.dom.test.tsx`
+Run: `pnpm exec vitest run tests/unit/SpeakerIdentificationModal.dom.test.tsx`
 
-Expected: FAIL because both surfaces currently select only `Remote Speaker N`.
+Expected: FAIL because the guided modal currently selects only `Remote Speaker N`.
 
 - [ ] **Step 3: Replace local regex filters with the shared selector**
 
-Import `selectReviewableAnonymousSpeakers` in both components. In the modal, replace `remoteSpeakers` with:
+Import `selectReviewableAnonymousSpeakers` in the modal and replace `remoteSpeakers` with:
 
 ```ts
 const reviewableSpeakers = useMemo(
@@ -135,17 +131,7 @@ const reviewableSpeakers = useMemo(
 );
 ```
 
-Use `reviewableSpeakers` for initial-speaker selection, current speaker, count, navigation, and summary. In legacy controls, derive the same list, count its unbound user identities, render it through `AnonymousSpeakerReview`, and exclude those exact values from the generic `SpeakerCorrection` list:
-
-```ts
-const reviewableSpeakers = selectReviewableAnonymousSpeakers(
-  state?.speakers ?? [],
-);
-const otherSpeakers =
-  state?.speakers.filter(
-    (speaker) => !reviewableSpeakers.includes(speaker),
-  ) ?? [];
-```
+Use `reviewableSpeakers` for initial-speaker selection, current speaker, count, navigation, and summary. Keep `MeetingIdentityControls` unchanged because its existing aggregate-channel correction path enforces explicit individual-scope confirmation and is separate from the guided meeting modal.
 
 - [ ] **Step 4: Run the focused DOM tests and verify green**
 
@@ -156,8 +142,8 @@ Expected: PASS.
 - [ ] **Step 5: Commit the review surfaces**
 
 ```bash
-git add src/components/features/SpeakerIdentificationModal.tsx src/components/features/MeetingIdentityControls.tsx tests/unit/SpeakerIdentificationModal.dom.test.tsx tests/unit/IdentityControls.dom.test.tsx
-git commit -m "fix: review them in speaker identity controls"
+git add src/components/features/SpeakerIdentificationModal.tsx tests/unit/SpeakerIdentificationModal.dom.test.tsx docs/superpowers/plans/2026-09-05-single-them-speaker-identification.md
+git commit -m "fix: review them in speaker identity modal"
 ```
 
 ### Task 3: Add header and transcript entry points
@@ -270,4 +256,3 @@ Expected: no whitespace errors; only issue #761 implementation, tests, decision,
 git add docs/decisions.md docs/changelog/entries/2026-09-05-identify-single-them-speaker.md docs/superpowers/plans/2026-09-05-single-them-speaker-identification.md
 git commit -m "docs: record aggregate speaker review rule"
 ```
-

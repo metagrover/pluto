@@ -175,6 +175,47 @@ describe('SpeakerIdentificationModal', () => {
     expect(dialog?.textContent).not.toContain('Grover ·');
   });
 
+  it('reviews an aggregate Them speaker when no numbered speaker exists', async () => {
+    invoke.mockImplementation(
+      async (channel: string, payload: { meetingId?: string }) => {
+        if (channel === 'GET_MEETING_IDENTITY') {
+          return {
+            ...meeting(payload.meetingId),
+            speakers: ['Me', 'Them'],
+          };
+        }
+        return workspace;
+      },
+    );
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={['Jordan Doe']}
+          hasSystemAudio={true}
+          speakerSummaries={{
+            Them: { turnCount: 4, excerpt: 'The aggregate remote voice.' },
+          }}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain('Speaker 1 of 1');
+    expect(document.body.textContent).toContain('Them');
+    expect(document.body.textContent).toContain('The aggregate remote voice.');
+    await click('+ Jordan Doe');
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Them',
+        personId: 'person-jordan',
+      }),
+    );
+  });
+
   it('1-click attendee chip auto-advances to next speaker and saves binding', async () => {
     const onDisplayNamesChange = vi.fn();
     await act(async () => {

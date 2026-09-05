@@ -32,6 +32,7 @@ import type { IdentityPerson } from '../../types/identity';
 import {
   getAnonymousSpeakerDisplayLabel,
   isGenericSpeakerLabel,
+  selectReviewableAnonymousSpeakers,
 } from '../../utils/speakerReview';
 import type { SpeakerReviewSummary } from './MeetingIdentityControls';
 
@@ -180,22 +181,19 @@ export const SpeakerIdentificationModal = ({
     }
   }, [isOpen, loadIdentity, releaseSample]);
 
-  // Compute remote speakers list
-  const remoteSpeakers = useMemo(() => {
-    if (!state) return [];
-    return state.speakers.filter((speaker) =>
-      /^Remote Speaker \d+$/u.test(speaker),
-    );
-  }, [state]);
+  const reviewableSpeakers = useMemo(
+    () => selectReviewableAnonymousSpeakers(state?.speakers ?? []),
+    [state],
+  );
 
   // Set initial step if initialSpeaker passed
   useEffect(() => {
-    if (!isOpen || !initialSpeaker || remoteSpeakers.length === 0) return;
-    const index = remoteSpeakers.indexOf(initialSpeaker);
+    if (!isOpen || !initialSpeaker || reviewableSpeakers.length === 0) return;
+    const index = reviewableSpeakers.indexOf(initialSpeaker);
     if (index >= 0) {
       setStepIndex(index);
     }
-  }, [isOpen, initialSpeaker, remoteSpeakers]);
+  }, [isOpen, initialSpeaker, reviewableSpeakers]);
 
   // Sync display names callback
   useEffect(() => {
@@ -222,8 +220,8 @@ export const SpeakerIdentificationModal = ({
     };
   }, [releaseSample]);
 
-  const currentSpeaker = remoteSpeakers[stepIndex];
-  const totalSpeakers = remoteSpeakers.length;
+  const currentSpeaker = reviewableSpeakers[stepIndex];
+  const totalSpeakers = reviewableSpeakers.length;
   const summary = currentSpeaker ? speakerSummaries[currentSpeaker] : undefined;
   const displayLabel = currentSpeaker
     ? getAnonymousSpeakerDisplayLabel(currentSpeaker)
@@ -666,7 +664,7 @@ export const SpeakerIdentificationModal = ({
               </div>
 
               <div className="divide-y divide-pro-border/30 rounded-xl border border-pro-border/60 bg-pro-bg/40">
-                {remoteSpeakers.map((speaker) => {
+                {reviewableSpeakers.map((speaker) => {
                   const binding = state?.bindings.find(
                     (b) => b.speaker === speaker,
                   );
