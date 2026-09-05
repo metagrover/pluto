@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Searchable combobox and autofill for speaker identification modal
+
+- **Status:** Accepted
+- **Source:** [Issue #760](https://github.com/metagrover/pluto/issues/760), owner direction on 2026-09-05
+- **Decision:** Pluto replaces the native `<select>` dropdown in `SpeakerIdentificationModal` with an accessible Notion/Linear-style searchable combobox with real-time autofill suggestions. As the user types, existing workspace People are filtered in real-time, matching against names and aliases. When the typed name does not match an existing person, an inline `+ Create "<name>"` option appears with a subtle badge. The combobox provides full keyboard navigation (`ArrowDown`, `ArrowUp`, `Enter`, `Escape`), auto-advance upon selection or creation, clear `×` button, and Escape key priority (closing suggestions when open, and closing the modal only when suggestions are closed).
+- **Rationale:** The native browser select control felt rigid, disrupted fast keyboard review, and required multiple clunky clicks to create a new person. A searchable combobox enables fluid, keyboard-driven speaker tagging matching the app's refined aesthetic.
+- **Consequences:** Identifying speakers with custom names or workspace people requires only typing and pressing Enter; native OS dropdowns are removed from the modal flow; keyboard accessibility is preserved with standard ARIA roles and tab indices.
+
 ## 2026-09-05 - Guided speaker identification modal and meeting header entry point
 
 - **Status:** Accepted

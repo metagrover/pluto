@@ -47,20 +47,45 @@ describe('SpeakerIdentificationModal', () => {
     invoke = vi.fn(
       async (
         channel: string,
-        payload: { meetingId?: string; speaker?: string; selection?: unknown },
+        payload: {
+          meetingId?: string;
+          speaker?: string;
+          personId?: string;
+          newName?: string;
+        },
       ) => {
         if (channel === 'GET_IDENTITY_STATE') return workspace;
         if (channel === 'GET_MEETING_IDENTITY')
           return meeting(payload.meetingId);
         if (channel === 'SET_MEETING_IDENTITY_BINDING') {
           const next = meeting(payload.meetingId);
-          next.bindings.push({
-            speaker: payload.speaker!,
-            source: 'user',
-            personId:
-              (payload.selection as { personId?: string })?.personId ?? null,
-            individual: true,
-          });
+          if (payload.newName) {
+            const newPerson = {
+              id: `person-${payload.newName.toLowerCase().replace(/\s+/g, '-')}`,
+              name: payload.newName,
+            };
+            next.people = [...next.people, newPerson];
+            next.bindings.push({
+              speaker: payload.speaker!,
+              source: 'user',
+              personId: newPerson.id,
+              individual: true,
+            });
+          } else {
+            next.bindings.push({
+              speaker: payload.speaker!,
+              source: 'user',
+              personId: payload.personId ?? null,
+              individual: true,
+            });
+          }
+          return next;
+        }
+        if (channel === 'CLEAR_MEETING_IDENTITY_BINDING') {
+          const next = meeting(payload.meetingId);
+          next.bindings = next.bindings.filter(
+            (b) => b.speaker !== payload.speaker,
+          );
           return next;
         }
         return null;
@@ -77,6 +102,15 @@ describe('SpeakerIdentificationModal', () => {
     container.remove();
     vi.useRealTimers();
   });
+
+  const typeInput = (input: HTMLInputElement, value: string) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    nativeSetter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
 
   const click = async (text: string) => {
     const button = [...document.body.querySelectorAll('button')].find(
@@ -255,5 +289,249 @@ describe('SpeakerIdentificationModal', () => {
 
     expect(document.body.textContent).toContain('Speaker 2 of 2');
     expect(document.body.textContent).toContain('Quote 2');
+  });
+
+  it('filters people in combobox suggestions on input typing and auto-advances when clicked', async () => {
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={[]}
+          hasSystemAudio={true}
+          speakerSummaries={{
+            'Remote Speaker 1': { turnCount: 2, excerpt: 'Quote 1' },
+            'Remote Speaker 2': { turnCount: 4, excerpt: 'Quote 2' },
+          }}
+        />,
+      );
+    });
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    // Type "Alex"
+    await act(async () => {
+      input.focus();
+      typeInput(input, 'Alex');
+    });
+
+    const listbox = document.body.querySelector('[role="listbox"]');
+    expect(listbox).toBeTruthy();
+    expect(listbox?.textContent).toContain('Alex Chen');
+    expect(listbox?.textContent).not.toContain('Jordan Doe');
+
+    // Click Alex Chen option
+    const option = [
+      ...document.body.querySelectorAll('[role="option"]'),
+    ].find((el) => el.textContent?.includes('Alex Chen'));
+    expect(option).toBeTruthy();
+    await act(async () => {
+      option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-alex',
+      }),
+    );
+
+    // Auto-advances to Remote Speaker 2
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+    expect(document.body.textContent).toContain('Quote 2');
+  });
+
+  it('supports ArrowDown, ArrowUp, and Enter keyboard navigation in combobox', async () => {
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={[]}
+          hasSystemAudio={true}
+          speakerSummaries={{
+            'Remote Speaker 1': { turnCount: 2, excerpt: 'Quote 1' },
+            'Remote Speaker 2': { turnCount: 4, excerpt: 'Quote 2' },
+          }}
+        />,
+      );
+    });
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    // Focus and press ArrowDown to open listbox
+    await act(async () => {
+      input.focus();
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+
+    const listbox = document.body.querySelector('[role="listbox"]');
+    expect(listbox).toBeTruthy();
+
+    // Press Enter to select the highlighted first person (Aditya Grover)
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-aditya',
+      }),
+    );
+
+    // Auto-advances to Remote Speaker 2
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+  });
+
+  it('supports creating a new distinct person from search query and auto-advances', async () => {
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={[]}
+          hasSystemAudio={true}
+          speakerSummaries={{
+            'Remote Speaker 1': { turnCount: 2, excerpt: 'Quote 1' },
+            'Remote Speaker 2': { turnCount: 4, excerpt: 'Quote 2' },
+          }}
+        />,
+      );
+    });
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+
+    // Type a new name
+    await act(async () => {
+      input.focus();
+      typeInput(input, 'Samantha Miller');
+    });
+
+    const listbox = document.body.querySelector('[role="listbox"]');
+    expect(listbox?.textContent).toContain('Create “Samantha Miller”');
+    expect(listbox?.textContent).toContain('New person');
+
+    // Click the create new person item
+    const createOption = [
+      ...document.body.querySelectorAll('[role="option"]'),
+    ].find((el) => el.textContent?.includes('Samantha Miller'));
+    expect(createOption).toBeTruthy();
+    await act(async () => {
+      createOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        newName: 'Samantha Miller',
+      }),
+    );
+
+    // Auto-advances to Remote Speaker 2
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+  });
+
+  it('Escape key closes combobox suggestions first, without closing modal', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={onClose}
+          meetingId="meeting-modal"
+          attendeeNames={[]}
+          hasSystemAudio={true}
+          speakerSummaries={{}}
+        />,
+      );
+    });
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+
+    // Open combobox
+    await act(async () => {
+      input.focus();
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+
+    expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
+
+    // First Escape: closes suggestions dropdown, modal remains open
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Second Escape: closes modal
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears combobox input and resets selection on Clear click', async () => {
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          attendeeNames={[]}
+          hasSystemAudio={true}
+          speakerSummaries={{}}
+        />,
+      );
+    });
+
+    const input = document.body.querySelector(
+      'input[role="combobox"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      input.focus();
+      typeInput(input, 'Jordan');
+    });
+
+    expect(input.value).toBe('Jordan');
+    const clearButton = document.body.querySelector(
+      'button[aria-label="Clear person input"]',
+    ) as HTMLButtonElement;
+    expect(clearButton).toBeTruthy();
+
+    await act(async () => {
+      clearButton.click();
+    });
+
+    expect(input.value).toBe('');
   });
 });
