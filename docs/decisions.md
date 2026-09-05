@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Structured application logging with environment-aware transports
+
+- **Status:** Accepted
+- **Source:** [Issue #756](https://github.com/metagrover/pluto/issues/756)
+- **Decision:** Pluto introduces a zero-dependency structured logger module (`electron/logger.ts`) with distinct environment behaviors. In development (`!app.isPackaged`), logs are formatted with ANSI colors, compact timestamps (`HH:mm:ss.SSS`), log levels (`DEBUG`, `INFO`, `WARN`, `ERROR`), and bright subsystem scopes (e.g. `[DB]`, `[Pluto]`, `[AudioCap]`, `[Recorder]`, `[LLM]`). Noisy startup operations (such as individual DB migration statements) are demoted to `debug` so developer terminals remain focused on high-level milestones. In packaged releases (`app.isPackaged`), logs are persisted to a rotating file (`~/Library/Logs/Pluto/main.log`, max 5MB, up to 3 backup files) while console output is silenced for non-error events to prevent detached stdout broken-pipe exceptions.
+- **Rationale:** Terminal logging was previously an uncoordinated mix of raw `console.log` calls that flooded developer terminals with dozens of column checks on every restart and lacked standard macOS file logs in production for troubleshooting.
+- **Consequences:** All Electron main process and native subprocess logging passes through scoped `createLogger(scope)` instances; log levels are configurable via `process.env.PLUTO_LOG_LEVEL`; file rotation prevents unbounded disk growth.
+
 ## 2026-09-04 - Dynamic audio device reconnection with continuous 16kHz resampling
 
 - **Status:** Accepted
