@@ -20,6 +20,7 @@ import {
 } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
+import { getMeetingIdentity } from '../../api/identity';
 import {
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingSpeakerLabels,
@@ -67,7 +68,10 @@ import {
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
+  extractSpeakerDisplayNames,
 } from './meetingTranscriptPresentation';
+
+const speakerDisplayNamesCache: Record<string, Record<string, string>> = {};
 
 const SavedEditConflicts = ({
   conflicts,
@@ -679,10 +683,10 @@ export const MeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
-  const [speakerDisplayNames, setSpeakerDisplayNames] = useState<{
-    meetingId: string;
-    names: Record<string, string>;
-  }>({ meetingId: '', names: {} });
+  const [speakerDisplayNamesByMeeting, setSpeakerDisplayNamesByMeeting] =
+    useState<Record<string, Record<string, string>>>(() => ({
+      ...speakerDisplayNamesCache,
+    }));
   const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
   const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
     string | null
@@ -808,9 +812,7 @@ export const MeetingView = ({
     transcriptSegments,
   );
   const displayNames =
-    speakerDisplayNames.meetingId === String(selectedMeeting.id)
-      ? speakerDisplayNames.names
-      : {};
+    speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ?? {};
   const rawTranscriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,
   );
@@ -842,13 +844,50 @@ export const MeetingView = ({
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
   const updateSpeakerDisplayNames = useCallback(
-    (names: Record<string, string>) =>
-      setSpeakerDisplayNames({
-        meetingId: String(selectedMeeting.id),
-        names,
-      }),
+    (names: Record<string, string>) => {
+      const meetingId = String(selectedMeeting.id);
+      speakerDisplayNamesCache[meetingId] = names;
+      setSpeakerDisplayNamesByMeeting((prev) => ({
+        ...prev,
+        [meetingId]: names,
+      }));
+    },
     [selectedMeeting.id],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const meetingId = String(selectedMeeting.id);
+    if (
+      !meetingId ||
+      reviewableSpeakers.length === 0 ||
+      !window?.ipcRenderer?.invoke
+    ) {
+      return;
+    }
+
+    void getMeetingIdentity(meetingId)
+      .then((identity) => {
+        if (cancelled) return;
+        const names = extractSpeakerDisplayNames(identity);
+        speakerDisplayNamesCache[meetingId] = names;
+        setSpeakerDisplayNamesByMeeting((prev) => ({
+          ...prev,
+          [meetingId]: names,
+        }));
+      })
+      .catch((error) => {
+        console.error('Failed to load speaker identity for meeting:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedMeeting.id,
+    selectedMeeting.transcript_validated_at,
+    reviewableSpeakers.length,
+  ]);
   const calendarAttendeeNames = calendarContext
     ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
         .map((person) => person?.name?.trim() || person?.email?.trim() || '')

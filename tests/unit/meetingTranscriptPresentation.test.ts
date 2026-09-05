@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
+  extractSpeakerDisplayNames,
   getMeetingRemoteSpeakerStatus,
 } from '../../src/components/features/meetingTranscriptPresentation';
 import type { TranscriptSegment } from '../../src/types';
@@ -210,5 +211,54 @@ describe('remote speaker completion status', () => {
         }),
       }),
     ).toBeNull();
+  });
+
+  describe('extractSpeakerDisplayNames', () => {
+    it('returns empty object when identity is null, undefined, or malformed', () => {
+      expect(extractSpeakerDisplayNames(null)).toEqual({});
+      expect(extractSpeakerDisplayNames(undefined)).toEqual({});
+      expect(extractSpeakerDisplayNames({} as any)).toEqual({});
+      expect(
+        extractSpeakerDisplayNames({ people: [], bindings: undefined as any }),
+      ).toEqual({});
+    });
+
+    it('maps bound speakers to their trimmed person names', () => {
+      const identity = {
+        people: [
+          { id: 'person-1', name: ' Alice Smith ' },
+          { id: 'person-2', name: 'Bob Jones' },
+        ],
+        bindings: [
+          { speaker: 'Remote Speaker 1', personId: 'person-1' },
+          { speaker: 'Remote Speaker 2', personId: 'person-2' },
+        ],
+      };
+
+      expect(extractSpeakerDisplayNames(identity)).toEqual({
+        'Remote Speaker 1': 'Alice Smith',
+        'Remote Speaker 2': 'Bob Jones',
+      });
+    });
+
+    it('ignores bindings with missing personId, unbound persons, or whitespace-only names', () => {
+      const identity = {
+        people: [
+          { id: 'person-1', name: 'Alice' },
+          { id: 'person-empty', name: '   ' },
+        ],
+        bindings: [
+          { speaker: 'Remote Speaker 1', personId: 'person-1' },
+          { speaker: 'Remote Speaker 2', personId: null },
+          { speaker: 'Remote Speaker 3', personId: 'person-unknown' },
+          { speaker: 'Remote Speaker 4', personId: 'person-empty' },
+          { speaker: 'Remote Speaker 5' },
+        ],
+      };
+
+      expect(extractSpeakerDisplayNames(identity)).toEqual({
+        'Remote Speaker 1': 'Alice',
+      });
+    });
   });
 });

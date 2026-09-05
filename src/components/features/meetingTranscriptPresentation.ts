@@ -16,6 +16,35 @@ const startSeconds = (segment: TranscriptSegment): number => {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 };
 
+export const extractSpeakerDisplayNames = (
+  identity:
+    | {
+        people?: Array<{ id: string; name: string }>;
+        bindings?: Array<{ speaker: string; personId?: string | null }>;
+      }
+    | null
+    | undefined,
+): Record<string, string> => {
+  if (
+    !identity ||
+    !Array.isArray(identity.people) ||
+    !Array.isArray(identity.bindings)
+  ) {
+    return {};
+  }
+  const peopleById = new Map(
+    identity.people.map((person) => [person.id, person.name]),
+  );
+  return Object.fromEntries(
+    identity.bindings.flatMap((binding) => {
+      const name = binding.personId
+        ? peopleById.get(binding.personId)?.trim()
+        : '';
+      return name ? [[binding.speaker, name]] : [];
+    }),
+  );
+};
+
 export const applyMeetingSpeakerDisplayNames = <T extends TranscriptSegment>(
   segments: T[],
   displayNames: Readonly<Record<string, string>>,

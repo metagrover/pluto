@@ -43,6 +43,7 @@ import {
   selectReviewableAnonymousSpeakers,
 } from '../../utils/speakerReview';
 import type { SpeakerReviewSummary } from './MeetingIdentityControls';
+import { extractSpeakerDisplayNames } from './meetingTranscriptPresentation';
 
 export interface SpeakerIdentificationModalProps {
   isOpen: boolean;
@@ -281,19 +282,7 @@ export const SpeakerIdentificationModal = ({
   // Sync display names callback
   useEffect(() => {
     if (!state) return;
-    const peopleById = new Map(
-      state.people.map((person) => [person.id, person.name]),
-    );
-    onDisplayNamesChange?.(
-      Object.fromEntries(
-        state.bindings.flatMap((binding) => {
-          const name = binding.personId
-            ? peopleById.get(binding.personId)?.trim()
-            : '';
-          return name ? [[binding.speaker, name]] : [];
-        }),
-      ),
-    );
+    onDisplayNamesChange?.(extractSpeakerDisplayNames(state));
   }, [state, onDisplayNamesChange]);
 
   // Clean up audio on unmount

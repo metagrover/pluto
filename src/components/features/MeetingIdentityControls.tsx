@@ -15,6 +15,7 @@ import {
 import type { IdentityBinding, IdentityPerson } from '../../types/identity';
 import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
 import { identityButtonClass, identityFieldClass } from './IdentitySettings';
+import { extractSpeakerDisplayNames } from './meetingTranscriptPresentation';
 
 const SpeakerCorrection = ({
   speaker,
@@ -545,19 +546,7 @@ const MeetingIdentityPanel = ({
 
   useEffect(() => {
     if (!state) return;
-    const peopleById = new Map(
-      state.people.map((person) => [person.id, person.name]),
-    );
-    onDisplayNamesChange?.(
-      Object.fromEntries(
-        state.bindings.flatMap((binding) => {
-          const name = binding.personId
-            ? peopleById.get(binding.personId)?.trim()
-            : '';
-          return name ? [[binding.speaker, name]] : [];
-        }),
-      ),
-    );
+    onDisplayNamesChange?.(extractSpeakerDisplayNames(state));
   }, [state, onDisplayNamesChange]);
 
   useEffect(
