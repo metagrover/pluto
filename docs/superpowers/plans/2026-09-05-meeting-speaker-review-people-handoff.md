@@ -220,15 +220,15 @@ Run the DOM and meeting presentation tests, inspect the rendered layout in Elect
 - Modify: `docs/changelog/entries/2026-09-04-747-proactive-calendar-auto-stop.md`
 - Modify: `docs/superpowers/plans/2026-09-05-meeting-speaker-review-people-handoff.md`
 
-- [ ] **Step 1: Record the durable trust decision**
+- [x] **Step 1: Record the durable trust decision**
 
 Document that calendar invitees are roster evidence, confirmed bindings are direct People evidence, anonymous labels stay canonical, and voice samples are ephemeral local review aids.
 
-- [ ] **Step 2: Update the shipped summary**
+- [x] **Step 2: Update the shipped summary**
 
 Extend the existing #747 changelog fragment with the user outcome and link #755 as the deferred persistent-recognition work.
 
-- [ ] **Step 3: Run verification**
+- [x] **Step 3: Run verification**
 
 Run focused suites after each task, then:
 
