@@ -1450,7 +1450,8 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
-            {remoteSpeakerStatus && remoteSpeakerStatus.state !== 'separated' ? (
+            {remoteSpeakerStatus &&
+            remoteSpeakerStatus.state !== 'separated' ? (
               <div
                 data-meeting-remote-speaker-status={remoteSpeakerStatus.state}
                 className="mb-4 text-xs leading-5 text-pro-text-muted"

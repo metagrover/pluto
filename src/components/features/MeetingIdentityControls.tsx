@@ -292,7 +292,11 @@ const AnonymousSpeakerReview = ({
               disabled={busy || sampleLoading}
               onClick={() => onPlaySample(0)}
             >
-              <Play size={11} className="fill-current mr-1 shrink-0" aria-hidden="true" />
+              <Play
+                size={11}
+                className="fill-current mr-1 shrink-0"
+                aria-hidden="true"
+              />
               {sampleLoading ? 'Loading sample…' : 'Play voice sample'}
             </button>
             {sample && sample.sampleIndex + 1 < sample.sampleCount ? (
