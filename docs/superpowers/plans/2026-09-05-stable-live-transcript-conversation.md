@@ -1,467 +1,204 @@
 # Stable Live Transcript Conversation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Issue:** [#670](https://github.com/metagrover/pluto/issues/670)
+**Status:** Engineering-reviewed plan; implementation and acceptance evidence remain outstanding.
+**Baseline:** Product source verified against `origin/master` at `f7aa680824ff7b84ae3c9975786e200aeed77ddf` on 2026-09-05. Refresh the seams below if master advances.
+**Goal:** Preserve local contributions and readable conversation order during dual-source loudspeaker meetings while preserving trustworthy raw capture, final transcripts, and notes evidence.
 
-**Goal:** Make the live transcript readable during loudspeaker meetings by rendering append-only conversation history plus one bounded, revisable draft, while preserving raw dual-source evidence and final-transcript behavior.
+## Scope and governing decision
 
-**Architecture:** Keep native mic and System EOU output as immutable source evidence. Convert that evidence into reversible, time-bounded reading fragments, then feed a meeting-scoped stateful conversation projection that is the sole owner of visible ordering. Confirmed visible fragments append to history; tentative fragments occupy one draft at the live edge. A raw segment may yield several visible and suppressed fragments, but no presentation decision rewrites persisted transcript evidence.
+Ship #670 independently before #770. Retain multi-span echo reconciliation in this issue: the long mic hypothesis contains remote spans separated by local replies, so layout changes alone leave the reported duplication unresolved. Implement reconciliation and UI ownership in separate reviewable steps.
 
-**Tech Stack:** TypeScript, React 18, Electron, Vitest/happy-dom, Swift Parakeet EOU tests, TailwindCSS/Biome.
+The original byte-immutable visible-history promise was incorrect. EOU confirmation commits a recognizer's lexical prefix; it does not mean echo reconciliation is complete. Acoustic evidence and the other channel's hypothesis can arrive later. Freezing presentation at commit permanently preserves duplicates or prematurely suppressed local words.
 
-**Issue:** [#670 — Make dual-source live transcripts readable during loudspeaker meetings](https://github.com/metagrover/pluto/issues/670)
+The corrected contract is stable row identity and relative order, with evidence-driven corrections in place. Tentative text revises in one draft region. Existing history rows never reorder or regroup. A later echo decision may change an affected row's retained ranges, with a quiet `Updated` qualifier. If an already displayed row becomes entirely duplicated, keep its keyed shell with `Duplicate removed`; restore original wording there if support is withdrawn. Preserve the reader's visible anchor through height changes. Accuracy takes precedence over pixel-identical layout.
 
----
+Do not promise zero duplicates before sufficient evidence exists. Require supported echo spans to appear once after reconciliation. Genuine repeated phrases must survive even when their strings match.
 
-## Product and trust contract
+## What already exists
 
-- History is append-only within a recording session. A visible history turn never moves because a source changes from tentative to confirmed.
-- At most one draft appears below history. While speech is active, it revises in place and shows at most the latest 24 visible words total, merged into one chronological reading region.
-- The draft label is `Listening now` when speaker ownership is uncertain. It may show `You` or `Call` only when all visible draft fragments agree on one source.
-- `Refining last words` appears beside the draft, not as a page-wide status that makes settled history look unstable.
-- A confirmed fragment arriving behind the history frontier appends at the live edge with its original timestamp and an `Earlier speech` qualifier; it never inserts above existing DOM nodes.
-- Source labels, raw alternate rows, match confidence, and suppression diagnostics are excluded from the normal reading surface. They remain available through existing raw evidence and content-free diagnostics.
-- This plan changes live presentation only. It does not modify stored live candidates, final transcription, notes evidence, or canonical speaker identity.
+| Seam | Verified behavior and reuse |
+| --- | --- |
+| `src/services/liveTranscription/eouTranscriptProjection.ts:61` | Checks source revisions and committed prefixes. Committed IDs use generation/source/commit revision; tentative IDs are stable per source. Reuse untouched. |
+| `src/services/liveTranscription/eouTranscriptProjection.ts:111` | Raw rows sort confirmed-first and reach non-UI consumers. Sort only a derived reading copy; do not change upstream ordering for #670. |
+| `src/services/liveTranscription/eouRendererSession.ts:109` | Echo-only callbacks refresh presentation without another recognition event. Both paths must reach the projector. |
+| `src/services/liveTranscription/liveTranscriptReconciliation.ts:88` | Recomputes reversible annotations from raw rows. Reuse whole-row, bounded fuzzy, padded-word and exact-subsequence checks. |
+| `src/services/liveTranscription/liveTranscriptReconciliation.ts:334` | Tracks one best span; local comparisons are bounded to 256 normalized tokens and six adjacent rows. Extend range enumeration without weakening individual checks. |
+| `src/components/AudioManager.tsx:794` | Separates reading segments from raw evidence; echo-only updates return before persistence/notes. |
+| `src/components/AudioManager.tsx:803` | Stored live candidates, context ingestion at line 814, and incremental notes at line 815 consume raw rows. Preserve these inputs. |
+| `src/components/features/liveTranscriptPresentation.ts:80` | Existing paragraph layout and dynamic turn grouping. Reuse paragraph helpers; replace historical regrouping only on the new path. |
+| `src/components/features/LiveTranscript.tsx:83` | Manual-scroll interruption and Return to live already work. Preserve the 48 px follow tolerance and keyboard behavior. |
+| `electron/main.ts:3522` | Existing `GET_SETTING`/`SET_SETTING`; no new rollout IPC is needed. |
 
-## State model
+Graph discovery used Verify tier, project `Users-metagrover-Desktop-pluto`, generation `2026-09-05T23:05:24Z`. The graph indexed the separate voice branch; candidate-path coverage reported no recorded gap, which is not completeness proof. Direct worktree reads and an empty product diff against the pinned master are authoritative here.
 
-```ts
-export type LiveReadingFragment = {
-  id: string;
-  sourceSegmentId: string;
-  source: 'mic' | 'system';
-  text: string;
-  timestampMs: number;
-  endTimestampMs: number;
-  confirmed: boolean;
-  wordRange: { start: number; end: number };
-  evidence: 'raw' | 'cross_channel_echo_retained';
-};
+Freshness note: `origin/master` advanced to `44985401eca906f61ee47801ee8010aabb814393` during this review. The isolated product tree still matches the pinned `f7aa6808` baseline; this review did not rebase it. Refresh voice-related seams against the delivered commit before implementation.
 
-export type LiveConversationTurn = {
-  id: string;
-  speaker: 'You' | 'Call';
-  timestampMs: number;
-  endTimestampMs: number;
-  text: string;
-  fragmentIds: string[];
-  arrival: 'chronological' | 'late';
-};
+## Data flow and ownership
 
-export type LiveConversationDraft = {
-  id: 'live-draft';
-  speaker: 'You' | 'Call' | 'Listening now';
-  text: string;
-  fragmentIds: string[];
-} | null;
+```text
+mic/System PCM -> existing EOU session -> raw committed/tentative rows
+                       |                          |
+                       +-> echo evidence ---------+----------+
+                                                  |          |
+                RAW BRANCH (unchanged)             |          v
+ stored candidates / context / incremental notes <-+    reading ranges
+                                                           |
+                                              meeting-scoped projector
+                                               /                  \
+                                       stable row shells        one draft
+                                               \                  /
+                                                App -> ZenMode -> UI
 
-export type LiveConversationView = {
-  history: LiveConversationTurn[];
-  draft: LiveConversationDraft;
-};
+stop -> EOU finish -> journal seal -> sealed mic/System final transcription
+     -> existing trust validation + canonical commit -> trusted notes
+     (no reading ranges or conversation state enter this branch)
 ```
 
-`LiveReadingFragment` is derived and disposable. `LiveTranscriptSegment` remains the raw renderer evidence type.
+Own one projector in AudioManager for each meeting/capture generation. It survives navigation and ordinary React renders. Do not create stateful projectors during render. React keys preserve component identity; they do not prevent reordering or height changes. [React state guidance](https://react.dev/learn/preserving-and-resetting-state).
 
----
+## Reading and state contracts
 
-### Task 1: Freeze the Sep 5 failure shape as a non-sensitive regression
+Define proposed renderer-local view types in new `src/services/liveTranscription/liveConversationProjection.ts`; define range results beside the reconciler. Do not add schema fields to raw EOU updates or persisted transcript JSON.
 
-**Files:**
-- Create: `tests/fixtures/liveTranscriptJumbledSources.ts`
-- Modify: `tests/unit/LiveTranscript.dom.test.tsx`
-- Modify: `tests/unit/eouTranscriptProjection.test.ts`
+- Reading ranges reference the source segment ID, half-open original-word/character bounds, verified source times where available, and supporting System IDs. Explicitly map normalized tokens back to original text, including fillers and punctuation.
+- Own history rows by committed raw source ID, not fragment bounds. A changed split must not create duplicate historical rows or strand restored words.
+- Allocate visible order once, on first visible committed arrival. Sort newly arriving rows within that batch by source time and deterministic source/ID tie-breaks. Append older arrivals with `Earlier speech` and their original timestamp. This is arrival-stable history, not a claim of globally chronological delivery.
+- Track fully suppressed rows which have not yet displayed. If restored later, append them as late speech. Already displayed rows retain their original keyed shell through suppression/restoration.
+- Recompute retained parts of owned rows. An emitted-fragment set alone is insufficient: split changes would repeat or lose words.
+- Preserve raw text, rawText, word timing, timestamps, and confirmed flags. Display corrections only remove/restore supported ranges; never paraphrase or invent timing.
+- The draft holds the latest tentative rows from both sources, with source boundaries retained. One container may contain multiple labeled parts; do not concatenate overlapping voices into a fabricated sentence.
+- Show at most **24 words in the collapsed draft**. Make full current tentative text keyboard-expandable in that same region. The limit is display clipping, not evidence deletion. Confirmed wording is never clipped; long committed suffixes enter history in full.
+- Keep `You`/`Call` as existing source-level conventions, not confirmed personal identities. Use `Listening now` for mixed/unknown draft ownership.
 
-- [ ] **Step 1: Add a synthetic causal fixture matching the observed topology**
-
-Build a fixture with a 43.5-second, 105-word mic buffer, three System turns, six disjoint echo spans, and short unmatched local replies. Use invented wording only. Export monotonic EOU revisions and acoustic evidence windows; do not copy production transcript text, meeting IDs, embeddings, audio paths, or person names.
-
-- [ ] **Step 2: Write the failing end-to-end DOM regression**
-
-Replay each fixture revision through `createEouTranscriptProjection`, reconciliation, and `LiveTranscript`. Assert after every render:
-
-```ts
-expect(committedNodeIds(next)).toEqual([
-  ...committedNodeIds(previous),
-  ...newCommittedNodeIds,
-]);
-expect(container.querySelectorAll('[data-live-draft]')).toHaveLength(1);
-expect(duplicateVisiblePhrases(container)).toEqual([]);
+```text
+new generation -> empty history + no draft
+recognition:
+  stale owner/generation -> ignore
+  tentative revision    -> replace tentative parts only
+  new committed ID      -> append visible row once; remove superseded draft
+echo-only:
+  supported new range   -> correct its owned row + current draft
+  support withdrawn     -> restore original owned words exactly once
+finish:
+  accept last EOU update -> full committed suffix -> clear tentative UI
+unavailable:
+  retain history -> mark draft unavailable -> capture/finalization continue
+next meeting:
+  reset projector, counters, expansion/follow state; fence old callbacks
 ```
 
-Also assert that the six remote spans appear once, every local reply remains visible, and a committed row never moves ahead of an already rendered row.
+## Conservative multi-span reconciliation
 
-- [ ] **Step 3: Replace the old ordering expectation with the desired behavior**
+Add a range-returning entry point, proposed name `reconcileLiveTranscriptReading`, while retaining `reconcileLiveTranscriptSegments` for the fallback. Share candidate validation; do not copy lexical/acoustic thresholds into another matcher.
 
-In `tests/unit/eouTranscriptProjection.test.ts`, replace `keeps an older tentative buffer at the live edge after committed history` with a test that requires raw source rows to remain timestamp ordered. The dedicated conversation projector, not the raw EOU projection, owns the live edge.
+Enumerate individually supported disjoint ranges through the existing alignment helpers. Newly generalized interior suppression requires verified word timing and paired acoustic evidence for that span. Preserve negations, numbers, currency/sign tokens, unmatched local words and ambiguous overlap. Missing/ambiguous proof retains raw wording. Keep current legacy cases covered; not all existing whole-row and exact-prefix suppression requires paired acoustic proof.
 
-- [ ] **Step 4: Run the regressions and verify failure**
+Select deterministic non-overlapping candidates: strongest support first, then longest range, then start index and source ID. Reject conflicts; no combinatorial global optimizer. Retained parts partition the complement. Every suppressed range references an actually displayed System counterpart; withdrawal of a tentative counterpart restores mic words.
 
-Run:
+Keep the current 256-token/six-adjacent-row local limits. They do not bound total history scans or candidate combinations. Measure candidate/evidence work and long-meeting runtime before adding further caps. Budget exhaustion retains affected raw words and increments a content-free degraded counter; never truncate speech or block PCM dispatch.
+
+## NOT in scope
+
+- Native EOU model/commit timing, raw row sorting, and extra raw provenance fields: unnecessary for this UI ownership repair.
+- Final transcription, attribution, capture journals, trust validation, context ingestion or incremental-notes semantics: protect their unchanged input contracts.
+- New rollout IPC, database migrations, diagnostics services, general event sourcing or background workers: existing settings plus one projector suffice.
+- Voice profiles or personal naming: independent #770 feasibility/quality gates.
+- Claiming improved canonical transcript or notes accuracy from display cleanup: this change preserves their inputs.
+- Global virtualization: profile first and add targeted rendering work only if measurements require it.
+
+## Implementation Tasks
+
+Use TDD for non-UI logic; commit green reviewable increments only when implementation is authorized. Estimates are planning ranges. This docs review makes no product changes.
+
+- [ ] **T1 (P1, human: 0.5–1 day / agent: 1–3 hours): Freeze causal regressions.** Create `tests/fixtures/liveTranscriptJumbledSources.ts` with invented words, a long mic hypothesis, three System turns, six supported disjoint spans and local interruptions. Extend `tests/unit/liveTranscriptReconciliation.test.ts`, `tests/unit/eouRendererSession.test.ts`, and `tests/unit/LiveTranscript.dom.test.tsx`. Cover late evidence after commit, tentative counterpart withdrawal, genuine repetitions, missing timing and event permutations. Assert original-word conservation, not string-level duplicate bans. Keep existing raw EOU ordering tests.
+- [ ] **T2 (P1, human: 1–2 days / agent: 3–6 hours): Produce supported reading ranges.** Modify `src/services/liveTranscription/liveTranscriptReconciliation.ts` and only necessary candidate enumeration in `src/services/liveTranscription/liveEchoSubsequenceAlignment.ts` / `src/services/liveTranscription/liveEchoTokenAlignment.ts`. Create `tests/unit/liveTranscriptReadingFragments.test.ts`. Return raw rows plus display ranges; retain the compatibility wrapper. Test range bounds, conflict resolution, normalization, padded final words, punctuation, six spans, local replies, exact limits and evidence removal. No uncalibrated confidence thresholds.
+- [ ] **T3 (P1, human: 1 day / agent: 2–4 hours): Implement source-owned history.** Create `src/services/liveTranscription/liveConversationProjection.ts` and `tests/unit/liveConversationProjection.test.ts`. Cover generation fences, stable committed IDs, append order, range correction/restoration, full commits, expandable draft and terminal states. Reuse unchanged row references for memoization. Add a short state diagram comment at the transition implementation.
+- [ ] **T4 (P1, human: 1 day / agent: 2–4 hours): Wire without contaminating evidence.** Modify `src/components/AudioManager.tsx`, `src/App.tsx`, `src/components/features/ZenMode.tsx`, and `src/components/features/recordingWorkspaceModel.ts`. Add `onLiveConversation` alongside the fallback callback during rollout. Update on recognition and echo-only callbacks. Catch presentation errors so they cannot escape into EOU and cancel transcription; raw persistence/ingestion must still run. Create behavioral `tests/unit/audioManagerLiveConversation.dom.test.tsx` with mocked capture transport and actual callbacks. Extend `tests/unit/audioManagerParakeetEouWiring.test.ts`, `tests/unit/recordingWorkspaceModel.test.ts`, and `tests/unit/AppRecordingNavigation.dom.test.tsx`. The existing wiring suite reads source strings and cannot prove data separation alone.
+- [ ] **T5 (P1, human: 0.5–1 day / agent: 1–3 hours): Render stable corrections.** Modify `src/components/features/LiveTranscript.tsx`, `src/components/features/liveTranscriptPresentation.ts`, and `src/index.css`; extend `tests/unit/liveTranscriptPresentation.test.ts` and `tests/unit/LiveTranscript.dom.test.tsx`. Render keyed row shells, one expandable draft, late timestamps, correction qualifiers and Return to live. Preserve the first visible row/offset through corrections above it; keep focus and manual-follow state. Use a small deduplicated status announcement rather than putting revised transcript content in aria-live. Verify narrow layouts and reduced motion.
+- [ ] **T6 (P1, human: 0.5 day / agent: 1–2 hours): Rollout and diagnostics.** Read proposed setting `stable_live_conversation_v1` once at capture start through existing GET_SETTING; missing/read failure uses fallback. Never switch algorithms mid-meeting. Keep counts/durations in projector/session state: corrections/restorations, late arrivals, degraded reconciliation, draft size and projection runtime. Create `tests/unit/liveConversationRollout.test.ts`; disabled/read-failure paths never construct the projector. Presentation failure retains prior view plus visible degraded status, while raw capture continues. During implementation add `docs/changelog/entries/2026-09-05-stable-live-transcript.md` and `docs/qa/live-transcript-stable-conversation.md`.
+- [ ] **T7 (P1, human: 1–2 days / agent: 2–4 hours plus recording time): Causal and final acceptance.** Extend `scripts/run_private_parakeet_eou_replay.ts` and `tests/manual/parakeetEouCausalReplay.test.ts` so actual revisions/evidence exercise the projector in memory. Keep aggregate reports content-free. Compare enabled/disabled long sessions; verify stop, sealed artifacts, persisted final transcript, reload and trusted notes. Keep default-off and #670 open until all gates below pass.
+
+## Test coverage and failure modes
+
+```text
+INPUT / DECISION                        COVERAGE
+EOU prefix/revision/queue               existing projection/session suites
+ + delayed echo-only callback          new causal integration regression
+range candidates
+ + disjoint supported spans            new reading-fragment unit tests
+ + protected/ambiguous/missing timing   raw retention and immutability tests
+ + counterpart withdrawn/restored      restoration conservation tests
+projector
+ + commit / long suffix / late row     ID/order/full-word tests
+ + changed split / full retraction     same shell + restored words
+ + reset / unavailable / finish        lifecycle tests
+AudioManager -> App -> ZenMode -> UI    actual payload/navigation integration
+ + projection throws                   raw consumers continue
+ + scroll/correct/expand                DOM + real Electron anchor/focus QA
+stop -> seal -> final -> reload         trusted artifact/notes Electron QA
+```
+
+New behavior is planned coverage, not already passing tests. Existing negative controls do not establish multi-span accuracy. No prompts change, so new LLM evals are unnecessary.
+
+| Failure | Handling and visible outcome | Proof |
+| --- | --- | --- |
+| Late echo evidence changes committed mic row | Correct owned ranges with quiet qualifier; preserve reader anchor | T1–T5 delayed-evidence integration |
+| Tentative System counterpart disappears | Restore original mic words once | T2/T3 withdrawal tests |
+| Negation, local repetition, overlap or missing timing | Retain uncertain words; duplicates may remain | T2 negative controls/private cases |
+| Range split changes fragment IDs | Raw committed ID owns correction; no duplicate local words | T3 conservation |
+| Long hypothesis/commit | Full draft expandable; full commit retained | T3/T5 |
+| Projection throws in recognition callback | Isolate UI failure; raw consumers/capture continue | T4 injected throw + final QA |
+| Stale callbacks/navigation/new meeting | Owner fences; no view-remount reset; new-capture reset | T3/T4 |
+| Correction above viewport changes height | Preserve visible row/offset and focus | T5 DOM + Electron |
+| Long-session reconciliation exceeds budget | Retain raw wording, record degraded count; no PCM drop | T7 benchmark |
+| Corpus missing or real test skipped | Acceptance NOT RUN; rollout stays off | T7 release evidence |
+
+## Sequencing and parallelization
+
+| Step | Modules | Dependencies |
+| --- | --- | --- |
+| T1 baseline/fixtures | tests | None |
+| T2 ranges, T3 projector | src/services/liveTranscription, tests | T1; T3 waits for T2 contract |
+| T4/T5 wiring/view | src/components, src/App, tests | T2/T3 |
+| T6 rollout | recording integration, tests | T4/T5 |
+| T7 acceptance | scripts, tests/manual, docs/qa | T1–T6 |
+
+Prefer sequential implementation because range ownership and rendering share contracts/fixtures. Independent read-only corpus preparation can accompany T2/T3. Do not split AudioManager or reconciliation edits between worktrees. #770 offline measurements can be prepared separately; identity product integration waits for delivered #670 and voice-profile fixes.
+
+## Validation and rollout gates
+
+Run changed focused suites after each task, then during implementation:
 
 ```bash
-pnpm vitest run tests/unit/eouTranscriptProjection.test.ts tests/unit/LiveTranscript.dom.test.tsx
-```
-
-Expected: FAIL because confirmed-first sorting moves rows and `LiveTranscript` has no single draft/history contract.
-
-- [ ] **Step 5: Commit the red tests**
-
-```bash
-git add tests/fixtures/liveTranscriptJumbledSources.ts tests/unit/LiveTranscript.dom.test.tsx tests/unit/eouTranscriptProjection.test.ts
-git commit -m "test(transcript): reproduce jumbled dual-source live revisions (#670)"
-```
-
----
-
-### Task 2: Make the EOU projection chronological and provenance-complete
-
-**Files:**
-- Modify: `src/services/liveTranscription/eouTranscriptProjection.ts`
-- Modify: `src/components/features/recordingWorkspaceModel.ts`
-- Modify: `tests/unit/eouTranscriptProjection.test.ts`
-- Modify: `tests/unit/eouRendererSession.test.ts`
-
-- [ ] **Step 1: Add source revision metadata to raw live rows**
-
-Extend `LiveTranscriptSegment` with optional presentation-neutral provenance:
-
-```ts
-sourceRevision?: {
-  streamId: string;
-  generation: number;
-  revision: number;
-  processedAudioMs: number;
-  kind: 'committed' | 'tentative';
-};
-```
-
-Populate it in `makeSegment`. Keep `toStoredLiveTranscriptCandidate` unchanged so this renderer metadata is not persisted into canonical transcript JSON.
-
-- [ ] **Step 2: Remove global confirmed-first ordering**
-
-Sort projected rows by `timestampMs`, then source rank, revision, and ID. Never use `confirmed` as a global ordering key.
-
-- [ ] **Step 3: Prove stale revisions and immutable committed prefixes still fail closed**
-
-Keep existing generation, duplicate revision, and `parakeet_prefix_mutated` tests passing. Add a test that a tentative replacement retains the same raw row ID while a newly committed suffix receives a durable ID.
-
-- [ ] **Step 4: Run focused tests**
-
-```bash
-pnpm vitest run tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/services/liveTranscription/eouTranscriptProjection.ts src/components/features/recordingWorkspaceModel.ts tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts
-git commit -m "fix(transcript): preserve chronological raw EOU projection (#670)"
-```
-
----
-
-### Task 3: Reconcile raw rows into multiple stable reading fragments
-
-**Files:**
-- Create: `src/services/liveTranscription/liveTranscriptReadingFragments.ts`
-- Modify: `src/services/liveTranscription/liveTranscriptReconciliation.ts`
-- Modify: `src/services/liveTranscription/liveEchoSubsequenceAlignment.ts`
-- Modify: `src/services/liveTranscription/liveEchoTokenAlignment.ts`
-- Modify: `tests/unit/liveTranscriptReconciliation.test.ts`
-- Create: `tests/unit/liveTranscriptReadingFragments.test.ts`
-
-- [ ] **Step 1: Write failing tests for disjoint spans**
-
-Cover one long mic row containing `remote A → local reply → remote B → local reply → remote C`. Assert that reconciliation emits three suppressed ranges and two visible mic fragments with word-level timestamps. Add fail-closed cases for negation, numbers, currency, reordered phrases, mixed overlap, missing word timing, and acoustic evidence that supports only one channel.
-
-- [ ] **Step 2: Add a range-first reconciliation result**
-
-Introduce:
-
-```ts
-export type LiveEchoMatchRange = {
-  sourceSegmentId: string;
-  startWord: number;
-  endWord: number;
-  matchedSegmentIds: string[];
-  confidence: number;
-};
-
-export type LiveTranscriptReconciliation = {
-  segments: LiveTranscriptSegment[];
-  fragments: LiveReadingFragment[];
-  suppressedRanges: LiveEchoMatchRange[];
-};
-```
-
-Add `reconcileLiveTranscriptReading(...)`. Keep `reconcileLiveTranscriptSegments(...)` temporarily as a compatibility wrapper for callers outside the recording surface.
-
-- [ ] **Step 3: Generalize from one best span to non-overlapping ranges**
-
-Collect all acoustically and lexically supported matches for each mic row, sort by word range, reject overlaps, and choose the deterministic set with the greatest supported remote-word coverage. Protected polarity, numeric, symbol, and unmatched local words are never suppressed. Cap work at 256 tokens and six adjacent rows as today.
-
-- [ ] **Step 4: Build visible fragments without mutating raw rows**
-
-Split retained word ranges into `LiveReadingFragment` records. Use IDs of the form `${sourceSegmentId}:words:${start}-${end}` so identical evidence retains DOM identity across revisions. System rows yield raw visible fragments; fully matched mic rows yield none.
-
-- [ ] **Step 5: Run focused reconciliation tests**
-
-```bash
-pnpm vitest run tests/unit/liveTranscriptReconciliation.test.ts tests/unit/liveTranscriptReadingFragments.test.ts tests/unit/liveEchoEvidence.test.ts
-```
-
-Expected: PASS with the existing conservative safeguards unchanged.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/services/liveTranscription tests/unit/liveTranscriptReconciliation.test.ts tests/unit/liveTranscriptReadingFragments.test.ts tests/unit/liveEchoEvidence.test.ts
-git commit -m "fix(transcript): reconcile disjoint echo spans into reading fragments (#670)"
-```
-
----
-
-### Task 4: Add the meeting-scoped append-only conversation projector
-
-**Files:**
-- Create: `src/services/liveTranscription/liveConversationProjection.ts`
-- Create: `tests/unit/liveConversationProjection.test.ts`
-
-- [ ] **Step 1: Write state-machine tests before implementation**
-
-Cover:
-
-- tentative revisions replace only `draft`;
-- confirmed fragments append to `history` exactly once;
-- previously appended turn IDs and text remain byte-for-byte stable;
-- same-speaker adjacent confirmed fragments merge only before the turn is first emitted;
-- a late confirmed fragment appends with `arrival: 'late'` and its original timestamp;
-- draft text is bounded to the latest 18 words and never duplicates history;
-- simultaneous mic and System tentative fragments produce one `Listening now` draft;
-- `reset(generation)` clears all state and stale generations are ignored.
-
-- [ ] **Step 2: Implement the projector as a pure meeting-local state machine**
-
-```ts
-export function createLiveConversationProjection(): {
-  apply(input: {
-    generation: number;
-    fragments: LiveReadingFragment[];
-  }): LiveConversationView;
-  reset(generation: number): void;
-};
-```
-
-Maintain an emitted-fragment set and immutable history snapshots. Do not infer speaker identity from text. Map mic to `You`, System to `Call`, and mixed drafts to `Listening now`.
-
-- [ ] **Step 3: Run projector tests**
-
-```bash
-pnpm vitest run tests/unit/liveConversationProjection.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/services/liveTranscription/liveConversationProjection.ts tests/unit/liveConversationProjection.test.ts
-git commit -m "feat(transcript): add append-only live conversation projection (#670)"
-```
-
----
-
-### Task 5: Wire one reading model through AudioManager and the workspace
-
-**Files:**
-- Modify: `src/components/AudioManager.tsx`
-- Modify: `src/App.tsx`
-- Modify: `src/components/features/ZenMode.tsx`
-- Modify: `src/components/features/recordingWorkspaceModel.ts`
-- Modify: `tests/unit/audioManagerParakeetEouWiring.test.ts`
-- Modify: `tests/unit/recordingWorkspaceModel.test.ts`
-- Modify: `tests/unit/AppRecordingNavigation.dom.test.tsx`
-
-- [ ] **Step 1: Change the renderer callback contract**
-
-Replace `onLiveTranscript(segments)` with `onLiveConversation(view)` through `AudioManager`, `App`, and `ZenMode`. Keep raw `segments` inside `AudioManager` for persistence, meeting-context ingestion, and finalization.
-
-- [ ] **Step 2: Create and reset one projector per capture generation**
-
-In the EOU `onSegments` callback, call `reconcileLiveTranscriptReading`, then apply its fragments to the conversation projector. Echo-evidence-only revisions may update the draft but may not remove or rewrite history.
-
-- [ ] **Step 3: Protect downstream canonical consumers**
-
-Assert in wiring tests that `processedMicSegmentsRef`, `toStoredLiveTranscriptCandidate`, `meetingContextIngestion.accept`, and incremental-notes input still consume raw segments rather than reading fragments or frozen history.
-
-- [ ] **Step 4: Run focused wiring tests**
-
-```bash
-pnpm vitest run tests/unit/audioManagerParakeetEouWiring.test.ts tests/unit/recordingWorkspaceModel.test.ts tests/unit/AppRecordingNavigation.dom.test.tsx
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/components/AudioManager.tsx src/App.tsx src/components/features/ZenMode.tsx src/components/features/recordingWorkspaceModel.ts tests/unit/audioManagerParakeetEouWiring.test.ts tests/unit/recordingWorkspaceModel.test.ts tests/unit/AppRecordingNavigation.dom.test.tsx
-git commit -m "refactor(transcript): publish one stable live conversation view (#670)"
-```
-
----
-
-### Task 6: Render settled history and one calm draft
-
-**Files:**
-- Modify: `src/components/features/LiveTranscript.tsx`
-- Modify: `src/components/features/liveTranscriptPresentation.ts`
-- Modify: `src/index.css`
-- Modify: `tests/unit/liveTranscriptPresentation.test.ts`
-- Modify: `tests/unit/LiveTranscript.dom.test.tsx`
-
-- [ ] **Step 1: Replace flat segment rendering with explicit history and draft regions**
-
-Render history turns as keyed `<article data-turn-id={turn.id}>` nodes. Render one `<aside data-live-draft aria-live="polite" aria-atomic="true">` after history. Do not put the history list in a live region.
-
-- [ ] **Step 2: Apply the agreed copy and hierarchy**
-
-- Heading status: `Listening`, `Reviewing earlier`, `Falling behind`, or `Caught up`.
-- Draft label: `You`, `Call`, or `Listening now`.
-- Draft secondary copy: `Refining last words`.
-- Late confirmed turn qualifier: `Earlier speech · 00:14`.
-- Keep `Return to live`; do not force-scroll while the user is reviewing history.
-
-- [ ] **Step 3: Style the draft as one anchored mutable surface**
-
-Use existing typography and neutral tokens. Give the draft a subtle top rule and muted background tint; avoid bubbles, source colors, pulsing text, typewriter effects, and movement animations. Preserve `prefers-reduced-motion` behavior and the existing 760px responsive rule.
-
-- [ ] **Step 4: Add DOM and accessibility assertions**
-
-Assert one draft, stable history node identity across rerenders, no duplicate phrases, correct labels, no history `aria-live`, draft `aria-live="polite"`, keyboard-operable `Return to live`, and no automatic scrolling after manual review.
-
-- [ ] **Step 5: Run focused renderer tests**
-
-```bash
-pnpm vitest run tests/unit/liveTranscriptPresentation.test.ts tests/unit/LiveTranscript.dom.test.tsx
-```
-
-Expected: PASS, including the Sep 5 topology fixture.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/components/features/LiveTranscript.tsx src/components/features/liveTranscriptPresentation.ts src/index.css tests/unit/liveTranscriptPresentation.test.ts tests/unit/LiveTranscript.dom.test.tsx
-git commit -m "feat(transcript): render stable history with one live draft (#670)"
-```
-
----
-
-### Task 7: Add bounded diagnostics and rollout gates
-
-**Files:**
-- Create: `src/services/liveTranscription/liveConversationDiagnostics.ts`
-- Modify: `src/components/AudioManager.tsx`
-- Modify: `electron/main.ts`
-- Create: `tests/unit/liveConversationDiagnostics.test.ts`
-- Create: `tests/unit/liveConversationRollout.test.ts`
-- Create: `docs/changelog/entries/2026-09-05-stable-live-transcript.md`
-
-- [ ] **Step 1: Add content-free counters**
-
-Track only counts and durations: raw mic/System rows, visible fragments, suppressed ranges, late arrivals, draft revisions, maximum draft words, history mutation attempts, and reconciliation time. Never log text, meeting IDs, word timings, audio paths, or acoustic values.
-
-- [ ] **Step 2: Fail closed on invariant violations**
-
-If a projector revision would mutate history, retain the prior history, publish the newest bounded draft, increment `historyMutationPrevented`, and keep recording healthy. Do not throw through the capture path.
-
-- [ ] **Step 3: Add rollout documentation**
-
-Document the renderer-only trust boundary, fallback behavior, and the acceptance gate in the changelog fragment. Add a main-process `LIVE_TRANSCRIPT_GET_ROLLOUT` handler backed by the existing settings store and ship the new projection behind `stable_live_conversation_v1` for dogfood; the fallback is the current presentation path. Do not expose a user-facing toggle and do not remove the fallback until Task 8 passes.
-
-- [ ] **Step 4: Run tests**
-
-```bash
-pnpm vitest run tests/unit/liveConversationDiagnostics.test.ts tests/unit/liveConversationRollout.test.ts tests/unit/audioManagerParakeetEouWiring.test.ts
-pnpm run changelog:check
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/services/liveTranscription/liveConversationDiagnostics.ts src/components/AudioManager.tsx electron/main.ts tests/unit/liveConversationDiagnostics.test.ts tests/unit/liveConversationRollout.test.ts docs/changelog/entries/2026-09-05-stable-live-transcript.md
-git commit -m "chore(transcript): add stable conversation rollout diagnostics (#670)"
-```
-
----
-
-### Task 8: Verify synthetic, repository, and real-meeting acceptance
-
-**Files:**
-- Modify: `tests/manual/parakeetEouCausalReplay.test.ts`
-- Create: `docs/qa/live-transcript-stable-conversation.md`
-
-- [ ] **Step 1: Add causal replay invariants**
-
-Extend the manual replay to feed revisions incrementally and report content-free counts. Require zero history mutation attempts, one maximum live draft, bounded queue depth, and no raw prefix mutation.
-
-- [ ] **Step 2: Run focused and full automated gates**
-
-```bash
-pnpm vitest run tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts tests/unit/liveEchoEvidence.test.ts tests/unit/liveTranscriptReconciliation.test.ts tests/unit/liveTranscriptReadingFragments.test.ts tests/unit/liveConversationProjection.test.ts tests/unit/liveConversationDiagnostics.test.ts tests/unit/liveTranscriptPresentation.test.ts tests/unit/LiveTranscript.dom.test.tsx tests/unit/audioManagerParakeetEouWiring.test.ts
+pnpm vitest run tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts tests/unit/liveEchoEvidence.test.ts tests/unit/liveTranscriptReconciliation.test.ts tests/unit/liveTranscriptReadingFragments.test.ts tests/unit/liveConversationProjection.test.ts tests/unit/audioManagerLiveConversation.dom.test.tsx tests/unit/audioManagerParakeetEouWiring.test.ts tests/unit/liveConversationRollout.test.ts tests/unit/liveTranscriptPresentation.test.ts tests/unit/LiveTranscript.dom.test.tsx tests/unit/recordingWorkspaceModel.test.ts tests/unit/AppRecordingNavigation.dom.test.tsx tests/unit/transcriptTrustState.test.ts tests/unit/retryMeetingTranscriptValidation.test.ts
 pnpm exec tsc --noEmit
 pnpm run lint
 pnpm run changelog:check
 pnpm run test -- --run
-```
-
-Expected: all gates PASS. If Node tests rebuild `better-sqlite3`, run `pnpm run ensure:sqlite-abi` before Electron acceptance.
-
-- [ ] **Step 3: Run private causal replay**
-
-```bash
 pnpm run benchmark:private-parakeet-eou:validate
-pnpm run replay:parakeet-eou
+RUN_PARAKEET_EOU_CAUSAL_REPLAY=1 pnpm run replay:parakeet-eou
 ```
 
-Expected: no prefix mutation, no history mutation, one draft maximum, and no content-bearing committed artifact.
+The last command also requires `PLUTO_PRIVATE_PARAKEET_EOU_MANIFEST` pointing to a consented local manifest. Without it the real test skips. Successful exit with skipped tests is not acceptance. The current runner checks EOU metrics; T7 must add projector checks before claiming #670 coverage.
 
-- [ ] **Step 4: Perform rendered Electron acceptance with fresh recordings**
+Use fresh built Electron code and restore Electron SQLite ABI with `pnpm run ensure:sqlite-abi` after Node test rebuilds. Record consented headphones, remote-only loudspeaker, alternating local/remote, overlap, and sustained remote speech with short local interruptions, plus a long-session stress run and delayed/failed source. Review local audio to distinguish actual speech from echo; identical strings are not the oracle.
 
-Run `pnpm start` and record five consented cases: headphones, remote-only loudspeaker, alternating local/remote, genuine overlap, and a sustained remote monologue with short local interruptions. For every revision, verify:
+Require zero missing/duplicated owned confirmed words in synthetic conservation tests, zero unsupported suppression in the labeled private corpus, supported multi-span suppression, stable existing row order, at most one draft, correct restoration, and intact stop/seal/final/reload/notes behavior. Report raw ASR errors separately from display errors. Compare p50/p95 publication/reconciliation latency, queue depth (current limit: four outstanding per source), memory and scroll responsiveness against the same baseline. Fix numeric performance budgets from baseline before the release comparison; these are benchmark gates, not invented current thresholds.
 
-- settled rows never move;
-- only the bottom draft revises;
-- no phrase appears twice simultaneously;
-- local interruptions survive;
-- remote echo appears once;
-- `Return to live` respects manual review;
-- stopping the meeting still produces the trusted final transcript.
+Default enablement follows passing gates; retain emergency disable for one release. Remove fallback later after observed use. Update #670 acceptance wording and `docs/decisions.md` during implementation to record stable-order corrections. This review edits only plan artifacts and makes no external issue updates.
 
-Record only pass/fail observations and content-free counters in `docs/qa/live-transcript-stable-conversation.md`.
+## GSTACK REVIEW REPORT
 
-- [ ] **Step 5: Remove the fallback only after acceptance**
+Verified findings: [P1, confidence 10/10] `eouRendererSession.ts:109` explicitly says `Acoustic corroboration can arrive after the final ASR revision`, contradicting frozen echo presentation. [P1, confidence 10/10] `AudioManager.tsx:814` calls `meetingContextIngestion.accept(segments)`, so display ranges must not replace that argument. [P2, confidence 9/10] `liveTranscriptReconciliation.ts:334` begins the single-result span path; multi-span behavior requires a new causal/conservation test, not a DOM-only assertion.
 
-After all five cases pass, make `stable_live_conversation_v1` the default, retain an emergency disable setting for one release, and close #670 with exact test commands and fresh real-meeting evidence. If any case fails, leave the flag default-off and keep #670 open.
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| Engineering | Explicit plan review | Architecture, code quality, tests, performance | 1 | DONE_WITH_CONCERNS | Corrected immutable-history contradiction; kept bounded multi-span scope; removed raw-sort/new-IPC expansion; added conservation, failure-isolation, lifecycle and finalization gates |
+| Outside voice | In-host Codex check | Avoid nested self-review | 0 | Skipped | No independent cross-model endorsement claimed |
+| Design | Not invoked here | Rendered UX acceptance remains required | 0 | Not run | Corrections and scroll anchoring need Electron QA |
 
-- [ ] **Step 6: Commit verification artifacts**
+**VERDICT:** Ready for staged implementation; shipping/default enablement remains gated on T7 evidence. All engineering sections reviewed under the user's full-quality scope authorization. Gstack startup/metadata tooling is degraded in this temporary worktree. No product code or full product tests ran in this docs-only review.
 
-```bash
-git add tests/manual/parakeetEouCausalReplay.test.ts docs/qa/live-transcript-stable-conversation.md
-git commit -m "test(transcript): verify stable conversation acceptance (#670)"
-```
-
----
-
-## Definition of done
-
-- The normal live view contains append-only history and no more than one mutable draft.
-- No fixture or real-meeting revision reorders an existing history DOM node.
-- Echo suppression can remove several disjoint remote spans from one mic EOU buffer without deleting protected local wording.
-- Raw dual-source evidence, final transcription, meeting-context ingestion, and notes inputs remain unchanged.
-- The five fresh rendered acceptance recordings pass before default enablement.
-- Live voice naming is not required for this outcome and remains isolated in #770.
+**UNRESOLVED DECISIONS:**
+- Fix numerical long-session performance budgets from baseline before release comparison; measured and private-corpus acceptance remain outstanding.
