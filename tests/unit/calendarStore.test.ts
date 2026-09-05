@@ -1,11 +1,13 @@
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  createCalendarStore,
-  ensureCalendarSchema,
-} from '../../electron/calendar/store';
+import { createCalendarStore } from '../../electron/calendar/store';
 import type { CalendarEvent } from '../../electron/calendar/types';
+import {
+  type DatabaseRuntime,
+  createDatabaseRuntime,
+} from '../../electron/database/runtime';
 
 const calendar = {
   identifier: 'calendar-a',
@@ -55,12 +57,15 @@ const calendarEventB: CalendarEvent = {
 
 describe('calendar store', () => {
   let sql: Database.Database;
+  let runtime: DatabaseRuntime;
   beforeEach(() => {
-    sql = new Database(':memory:');
-    sql.exec('CREATE TABLE meetings (id TEXT PRIMARY KEY)');
-    ensureCalendarSchema(sql);
+    runtime = createDatabaseRuntime({
+      databasePath: ':memory:',
+      migrationsFolder: path.join(process.cwd(), 'drizzle'),
+    });
+    sql = runtime.initialize();
   });
-  afterEach(() => sql.close());
+  afterEach(() => runtime.close());
 
   it('persists one selected calendar and transactionally replaces its window', () => {
     const store = createCalendarStore(sql);
@@ -118,7 +123,9 @@ describe('calendar store', () => {
       readAt: '2026-08-30T16:00:00.000Z',
       events: [calendarEvent],
     });
-    sql.prepare('INSERT INTO meetings (id) VALUES (?)').run('meeting-a');
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-a', 'Meeting');
     expect(
       store.associateMeeting(
         'meeting-a',
@@ -148,7 +155,9 @@ describe('calendar store', () => {
       readAt: '2026-08-30T16:00:00.000Z',
       events: [calendarEvent],
     });
-    sql.prepare('INSERT INTO meetings (id) VALUES (?)').run('meeting-a');
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-a', 'Meeting');
     store.setMeetingContext('meeting-a', calendarEvent.occurrenceKey, 'user');
 
     store.disconnect();
@@ -169,6 +178,7 @@ describe('calendar store', () => {
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
         enabled INTEGER NOT NULL DEFAULT 0,
         selected_calendar_json TEXT,
+        selected_calendars_json TEXT,
         cache_revision INTEGER NOT NULL DEFAULT 0,
         last_attempt_at TEXT,
         last_read_at TEXT,
@@ -180,7 +190,6 @@ describe('calendar store', () => {
       VALUES (1, 1, '${JSON.stringify(calendar)}');
     `);
 
-    ensureCalendarSchema(rawDb);
     const store = createCalendarStore(rawDb);
     const state = store.getState();
     expect(state.enabled).toBe(true);
@@ -258,7 +267,9 @@ describe('calendar store', () => {
       events: [calendarEvent, calendarEventB],
     });
 
-    sql.prepare('INSERT INTO meetings (id) VALUES (?)').run('meeting-b');
+    sql
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-b', 'Meeting B');
     const matched = store.associateMeeting(
       'meeting-b',
       '2026-08-30T19:01:00.000Z',
@@ -288,8 +299,8 @@ describe('calendar store', () => {
     expect(activeResult.event?.attendees).toHaveLength(1);
 
     sql
-      .prepare('INSERT INTO meetings (id) VALUES (?)')
-      .run('meeting-proactive-1');
+      .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
+      .run('meeting-proactive-1', 'Proactive Meeting');
     const association = store.associateMeetingAtStart(
       'meeting-proactive-1',
       '2026-08-30T17:31:00.000Z',

@@ -162,6 +162,12 @@ vi.mock('better-sqlite3', () => {
   };
 });
 
+vi.mock('../../electron/database/applicationDatabase', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const connection = new Database(':memory:');
+  return { getApplicationDatabase: () => connection };
+});
+
 import {
   appendMeetingContextEvent,
   getLatestMeetingContextSnapshot,
@@ -241,21 +247,8 @@ describe('embedded meeting context persistence', () => {
     storeState.snapshots = [];
   });
 
-  it('initializes append-only event and versioned snapshot tables', () => {
-    const schema = storeState.schemaSql.join('\n');
-
-    expect(schema).toContain(
-      'CREATE TABLE IF NOT EXISTS meeting_context_events',
-    );
-    expect(schema).toContain('UNIQUE(meeting_id, event_key)');
-    expect(schema).toContain(
-      'CREATE TABLE IF NOT EXISTS meeting_context_snapshots',
-    );
-    expect(schema).toContain('UNIQUE(meeting_id, revision)');
-    expect(schema).toContain('idx_meeting_context_events_timeline');
-    expect(schema).toContain('idx_meeting_context_snapshots_revision');
-    expect(schema).toContain('DELETE FROM meeting_context_events');
-    expect(schema).toContain('DELETE FROM meeting_context_snapshots');
+  it('leaves schema initialization to the database lifecycle', () => {
+    expect(storeState.schemaSql).toEqual([]);
   });
 
   it('appends a source-linked event and returns the original event on retry', () => {

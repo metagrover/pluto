@@ -58,6 +58,8 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import { closeApplicationDatabase } from './database/applicationDatabase';
+import { createBeforeQuitHandler } from './database/shutdown';
 import {
   type IncrementalMeetingNotesOffer,
   createIncrementalMeetingNotesCoordinator,
@@ -802,48 +804,42 @@ function abortMeetingTasks(meetingId: string) {
 }
 
 let stopIdentityReconciliation: (() => void) | undefined;
-let shutdownStarted = false;
-let shutdownComplete = false;
-// Cleanup on quit
-app.on('before-quit', (event) => {
-  if (shutdownComplete) return;
-  event.preventDefault();
-  if (shutdownStarted) return;
-  shutdownStarted = true;
-  void (async () => {
-    for (const controller of activeMeetingTasks.values()) controller.abort();
-    activeMeetingTasks.clear();
-    for (const task of activeAnalysisGenerations.values())
-      task.controller.abort();
-    for (const task of activeAskPlutoQueries.values()) task.controller.abort();
-    for (const task of activeMeetingAskPlutoQueries.values())
-      task.controller.abort();
-    backgroundKnowledgeRefresh?.close();
-    backgroundKnowledgeRefresh = null;
-    await idleDreamingCoordinator?.close();
-    idleDreamingCoordinator = null;
-    scheduleDreamingRun = null;
-    dreamingEntityQueue = null;
-    stopIdentityReconciliation?.();
-    calendarService.stop();
-    plutoLog.info('Shutting down...');
-    parakeetFinalClient?.close();
-    parakeetFinalClient = null;
-    await parakeetEouCoordinator?.fail('parakeet_app_quit');
-    parakeetEouCoordinator = null;
-    parakeetEouOwner = null;
-    parakeetEouGeneration = null;
-    parakeetRuntimeHost?.shutdown();
-    parakeetRuntimeHost = null;
-  })()
-    .catch((error) => {
-      plutoLog.error('Shutdown cleanup failed:', error);
-    })
-    .finally(() => {
-      shutdownComplete = true;
-      app.quit();
-    });
-});
+const shutdownMainProcessConsumers = async () => {
+  for (const controller of activeMeetingTasks.values()) controller.abort();
+  activeMeetingTasks.clear();
+  for (const task of activeAnalysisGenerations.values())
+    task.controller.abort();
+  for (const task of activeAskPlutoQueries.values()) task.controller.abort();
+  for (const task of activeMeetingAskPlutoQueries.values())
+    task.controller.abort();
+  backgroundKnowledgeRefresh?.close();
+  backgroundKnowledgeRefresh = null;
+  await idleDreamingCoordinator?.close();
+  idleDreamingCoordinator = null;
+  scheduleDreamingRun = null;
+  dreamingEntityQueue = null;
+  stopIdentityReconciliation?.();
+  calendarService.stop();
+  plutoLog.info('Shutting down...');
+  parakeetFinalClient?.close();
+  parakeetFinalClient = null;
+  await parakeetEouCoordinator?.fail('parakeet_app_quit');
+  parakeetEouCoordinator = null;
+  parakeetEouOwner = null;
+  parakeetEouGeneration = null;
+  parakeetRuntimeHost?.shutdown();
+  parakeetRuntimeHost = null;
+};
+
+app.on(
+  'before-quit',
+  createBeforeQuitHandler({
+    shutdownConsumers: shutdownMainProcessConsumers,
+    closeDatabase: closeApplicationDatabase,
+    quit: () => app.quit(),
+    onError: (error) => plutoLog.error('Shutdown failed:', error),
+  }),
+);
 
 app.whenReady().then(async () => {
   db.recoverInterruptedMeetingAnalysisRuns();

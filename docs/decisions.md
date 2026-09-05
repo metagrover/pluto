@@ -87,6 +87,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Rationale:** Users commonly maintain multiple work and personal calendars configured via Apple Calendar accounts (such as iCloud, Google CalDAV, Exchange). Sticking to local read-only EventKit preserves Pluto's zero-cloud-service, private, free distribution model while supporting multiple accounts and dynamic inventory discovery without app restarts.
 - **Consequences:** The integration remains strictly local and read-only; no Google OAuth or hosted service is added; selected calendars that disappear from macOS are flagged as `selected_calendar_missing` and require explicit user resolution; cross-calendar event ties remain ambiguous in meeting matching; disconnect atomically purges selections, cached events, and associations.
 
+## 2026-09-01 - Use a verified Drizzle lifecycle with development-phase replacement
+
+- **Status:** Accepted
+- **Source:** [Issue #722](https://github.com/metagrover/pluto/issues/722), [ADR](./adr/2026-09-01-drizzle-database-lifecycle.md), owner approval on 2026-09-01
+- **Decision:** Drizzle owns Pluto's SQLite schema and migration history over one shared `better-sqlite3` connection. During the current development phase, a pre-Drizzle or integrity-failed database may be replaced: Pluto stages only its exact SQLite artifact set and deletes that recovery directory only after the fresh baseline and health checks succeed.
+- **Rationale:** One checked-in baseline removes split import-time schema mutation without forcing a query-layer rewrite. Verified staging makes the explicitly accepted data reset fail-safe rather than deleting the source before a replacement is known good.
+- **Consequences:** Migration files are packaged runtime assets; divergent or future histories fail closed; established migration failures roll back without reset; cleanup failure is a startup failure; and preservation/import must be redesigned and approved before local database contents become durable user data.
+
 ## 2026-09-01 - Make meeting finalization converge before downstream work
 
 - **Status:** Accepted

@@ -1,19 +1,27 @@
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  type DatabaseRuntime,
+  createDatabaseRuntime,
+} from '../../electron/database/runtime';
 import { createIdentityStore } from '../../electron/identityStore';
 
-const connections: Database.Database[] = [];
+const runtimes: DatabaseRuntime[] = [];
 function fixture() {
-  const sql = new Database(':memory:');
-  connections.push(sql);
-  sql.exec(`CREATE TABLE entities (id TEXT PRIMARY KEY, type TEXT, name TEXT);
-    CREATE TABLE meetings (id TEXT PRIMARY KEY);
-    INSERT INTO entities VALUES ('p1','person','Alex'),('p2','person','Alex'),('project','project','Launch');
-    INSERT INTO meetings VALUES ('m1'),('m2');`);
+  const runtime = createDatabaseRuntime({
+    databasePath: ':memory:',
+    migrationsFolder: path.join(process.cwd(), 'drizzle'),
+  });
+  runtimes.push(runtime);
+  const sql = runtime.initialize();
+  sql.exec(`INSERT INTO entities (id, type, name) VALUES
+      ('p1','person','Alex'),('p2','person','Alex'),('project','project','Launch');
+    INSERT INTO meetings (id, title) VALUES ('m1', 'One'),('m2', 'Two');`);
   return { sql, store: createIdentityStore(sql) };
 }
 afterEach(() => {
-  for (const sql of connections.splice(0)) sql.close();
+  for (const runtime of runtimes.splice(0)) runtime.close();
 });
 
 describe('workspace-local identity persistence', () => {

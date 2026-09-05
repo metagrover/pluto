@@ -1,10 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 const directory = vi.hoisted(() =>
   require('node:fs').mkdtempSync('/tmp/pluto-identity-deletion-'),
 );
 vi.mock('electron', () => ({ app: { getPath: () => directory } }));
+import { createDatabaseRuntime } from '../../electron/database/runtime';
 import * as db from '../../electron/db';
 import { createIdentityStore } from '../../electron/identityStore';
 
@@ -138,28 +140,38 @@ it('clears derived identity evidence and pre-meeting capture snapshots on knowle
 });
 
 it.each([false, true])(
-  'invalidates legacy unscoped history, including interrupted migration: %s',
+  'replaces pre-Drizzle identity history, including an interrupted legacy shape: %s',
   (interrupted) => {
-    const sql = new Database(':memory:');
+    const databasePath = path.join(directory, `legacy-${interrupted}.db`);
+    const legacy = new Database(databasePath);
     try {
-      sql.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,type TEXT,name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY);
+      legacy.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,type TEXT,name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY);
       CREATE TABLE identity_resolution_history(action_id TEXT, fingerprint TEXT, payload TEXT, PRIMARY KEY(action_id,fingerprint));`);
-      sql
+      legacy
         .prepare('INSERT INTO identity_resolution_history VALUES(?,?,?)')
         .run('old', 'fp', JSON.stringify(resolution));
       if (interrupted)
-        sql.exec(
+        legacy.exec(
           'ALTER TABLE identity_resolution_history ADD COLUMN meeting_id TEXT',
         );
+      legacy.close();
+      const runtime = createDatabaseRuntime({
+        databasePath,
+        migrationsFolder: path.join(process.cwd(), 'drizzle'),
+      });
+      const sql = runtime.initialize();
       const store = createIdentityStore(sql);
       expect(store.getResolution('old', 'fp')).toBeNull();
-      sql.exec("INSERT INTO meetings VALUES ('persisted-source')");
+      sql.exec(
+        "INSERT INTO meetings (id, title) VALUES ('persisted-source', 'Source')",
+      );
       store.saveResolution('scoped', 'fp', resolution, 'persisted-source');
       expect(createIdentityStore(sql).getResolution('scoped', 'fp')).toEqual(
         resolution,
       );
+      runtime.close();
     } finally {
-      sql.close();
+      if (legacy.open) legacy.close();
     }
   },
 );

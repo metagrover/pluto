@@ -161,122 +161,6 @@ export interface DreamingDecisionInput {
   ) => string | null;
 }
 
-export function ensureDreamingProposalSchema(sql: Database.Database): void {
-  // V0 is append-only: the store exposes no run deletion or proposal cleanup.
-  // The FK is defense in depth when the connection enables foreign keys; no
-  // lifecycle correctness depends on cascade behavior or changing that pragma.
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS entity_dreaming_runs (
-      id TEXT PRIMARY KEY,
-      entity_id TEXT NOT NULL,
-      entity_type TEXT NOT NULL CHECK(entity_type IN ('project', 'person')),
-      source_revision TEXT NOT NULL,
-      decision_revision TEXT,
-      status TEXT NOT NULL CHECK(status IN ('running', 'no_change', 'proposed', 'failed', 'cancelled')),
-      model TEXT NOT NULL,
-      prompt_version TEXT NOT NULL,
-      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
-      failure_count INTEGER NOT NULL DEFAULT 0 CHECK(failure_count >= 0 AND failure_count <= attempt_count),
-      start_mode TEXT NOT NULL CHECK(start_mode IN ('automatic', 'manual')),
-      error_code TEXT CHECK(error_code IS NULL OR error_code IN (
-        'provider_unavailable', 'generation_failed', 'validation_failed',
-        'persistence_failed', 'lease_expired'
-      )),
-      lease_token TEXT,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      next_retry_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      CHECK(
-        (status = 'running' AND lease_token IS NOT NULL AND completed_at IS NULL) OR
-        (status <> 'running' AND lease_token IS NULL AND completed_at IS NOT NULL)
-      ),
-      CHECK(
-        (status = 'failed' AND error_code IS NOT NULL) OR
-        (status <> 'failed' AND error_code IS NULL)
-      ),
-      CHECK(next_retry_at IS NULL OR status = 'failed'),
-      UNIQUE(entity_id, source_revision)
-    );
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_runs_status_retry
-      ON entity_dreaming_runs(status, next_retry_at);
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_runs_entity_created
-      ON entity_dreaming_runs(entity_id, created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS entity_dreaming_proposals (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL REFERENCES entity_dreaming_runs(id) ON DELETE CASCADE,
-      entity_id TEXT NOT NULL,
-      entity_type TEXT NOT NULL CHECK(entity_type IN ('project', 'person')),
-      kind TEXT NOT NULL CHECK(kind IN (
-        'project_summary', 'project_milestone', 'project_commitment',
-        'project_alias', 'person_headline', 'person_focus',
-        'person_collaborator', 'person_alias'
-      )),
-      payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
-      evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
-      fingerprint TEXT NOT NULL CHECK(length(fingerprint) > 0),
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected', 'stale')),
-      decided_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      CHECK(
-        (status = 'pending' AND decided_at IS NULL) OR
-        (status <> 'pending' AND decided_at IS NOT NULL)
-      ),
-      UNIQUE(run_id, fingerprint)
-    );
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_proposals_entity_status
-      ON entity_dreaming_proposals(entity_id, status, created_at);
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_proposals_run
-      ON entity_dreaming_proposals(run_id);
-
-    CREATE TABLE IF NOT EXISTS entity_dreaming_aliases (
-      id TEXT PRIMARY KEY,
-      proposal_id TEXT NOT NULL UNIQUE REFERENCES entity_dreaming_proposals(id),
-      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-      entity_type TEXT NOT NULL CHECK(entity_type IN ('project', 'person')),
-      normalized_name TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      source TEXT NOT NULL CHECK(source = 'dreaming'),
-      evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
-      active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      removed_at TEXT,
-      CHECK((active = 1 AND removed_at IS NULL) OR (active = 0 AND removed_at IS NOT NULL))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_dreaming_aliases_active_name
-      ON entity_dreaming_aliases(entity_type, normalized_name) WHERE active = 1;
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_aliases_entity
-      ON entity_dreaming_aliases(entity_id, entity_type, active);
-
-    CREATE TABLE IF NOT EXISTS entity_dreaming_person_claims (
-      id TEXT PRIMARY KEY,
-      proposal_id TEXT NOT NULL UNIQUE REFERENCES entity_dreaming_proposals(id),
-      entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-      kind TEXT NOT NULL CHECK(kind IN (
-        'person_headline', 'person_focus', 'person_collaborator'
-      )),
-      value TEXT NOT NULL,
-      evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_entity_dreaming_person_claims_entity
-      ON entity_dreaming_person_claims(entity_id, kind, created_at);
-  `);
-  const runColumns = sql
-    .prepare('PRAGMA table_info(entity_dreaming_runs)')
-    .all() as Array<{ name: string }>;
-  if (!runColumns.some((column) => column.name === 'decision_revision')) {
-    sql.exec(
-      'ALTER TABLE entity_dreaming_runs ADD COLUMN decision_revision TEXT',
-    );
-  }
-}
-
 const toRunRecord = (row: DreamingRunRow): DreamingRunRecord => ({
   id: row.id,
   entityId: row.entity_id,
@@ -364,7 +248,6 @@ export function createDreamingProposalStore(
   sql: Database.Database,
   dependencies: DreamingProposalStoreDependencies = {},
 ) {
-  ensureDreamingProposalSchema(sql);
   const now = dependencies.now ?? (() => new Date().toISOString());
   const resolveCanonicalEntityId =
     dependencies.resolveCanonicalEntityId ?? ((entityId: string) => entityId);

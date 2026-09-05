@@ -3,10 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  createDreamingProposalStore,
-  ensureDreamingProposalSchema,
-} from '../../electron/dreaming/proposalStore';
+import { createDatabaseRuntime } from '../../electron/database/runtime';
+import { createDreamingProposalStore } from '../../electron/dreaming/proposalStore';
 import {
   MAX_DREAMING_PROPOSALS,
   type ValidatedDreamingProposal,
@@ -28,41 +26,16 @@ function fixture(options?: {
   now?: string;
   resolveCanonicalEntityId?: (entityId: string) => string;
 }) {
-  const sql = new Database(':memory:');
+  const sql = createDatabaseRuntime({
+    databasePath: ':memory:',
+    migrationsFolder: join(process.cwd(), 'drizzle'),
+  }).initialize();
   connections.push(sql);
-  sql.exec(`
-    CREATE TABLE entities (
-      id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL, status TEXT, due_date TEXT,
-      assigned_to TEXT, metadata TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE entity_links (
-      id TEXT PRIMARY KEY, source_entity_id TEXT NOT NULL,
-      target_entity_id TEXT NOT NULL, relationship TEXT NOT NULL,
-      meeting_id TEXT, state TEXT NOT NULL, evidence_meeting_id TEXT,
-      evidence_quote TEXT, source TEXT NOT NULL, confidence REAL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE entity_corrections (
-      id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, item_type TEXT NOT NULL,
-      fingerprint TEXT NOT NULL, reason TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(entity_id, item_type, fingerprint)
-    );
-    CREATE TABLE person_name_aliases (
-      person_id TEXT NOT NULL, normalized_name TEXT NOT NULL,
-      display_name TEXT NOT NULL, source TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(person_id, normalized_name)
-    );
-    CREATE TABLE knowledge_docs (
-      id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, scope_key TEXT NOT NULL,
-      title TEXT NOT NULL, structured_json TEXT, status TEXT,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(scope_type, scope_key)
-    );
-  `);
-  ensureDreamingProposalSchema(sql);
+  sql
+    .prepare(
+      "INSERT INTO meetings (id, title) VALUES ('meeting-1', 'Meeting 1')",
+    )
+    .run();
   let currentTime = options?.now ?? '2026-08-10T10:00:00.000Z';
   const store = createDreamingProposalStore(sql, {
     now: () => currentTime,
@@ -516,7 +489,10 @@ describe('dreaming proposal persistence', () => {
     const directory = mkdtempSync(join(tmpdir(), 'pluto-dreaming-'));
     temporaryDirectories.push(directory);
     const path = join(directory, 'pluto.db');
-    const firstSql = new Database(path);
+    const firstSql = createDatabaseRuntime({
+      databasePath: path,
+      migrationsFolder: join(process.cwd(), 'drizzle'),
+    }).initialize();
     const secondSql = new Database(path);
     connections.push(firstSql, secondSql);
     firstSql.pragma('busy_timeout = 0');

@@ -24,6 +24,12 @@ vi.mock('better-sqlite3', () => {
   };
 });
 
+vi.mock('../../electron/database/applicationDatabase', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const connection = new Database(':memory:');
+  return { getApplicationDatabase: () => connection };
+});
+
 import {
   parseDueDate,
   shouldEnrichEntity,

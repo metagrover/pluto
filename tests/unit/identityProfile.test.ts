@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import Database from 'better-sqlite3';
+import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const directory = vi.hoisted(() => {
@@ -8,6 +8,7 @@ const directory = vi.hoisted(() => {
 });
 vi.mock('electron', () => ({ app: { getPath: () => directory } }));
 import { getMeetingIdentityContext } from '../../electron/commitmentIdentity';
+import { createDatabaseRuntime } from '../../electron/database/runtime';
 import * as db from '../../electron/db';
 import { handleIdentityRequest } from '../../electron/identityHandlers';
 import { createIdentityStore } from '../../electron/identityStore';
@@ -195,11 +196,17 @@ describe('workspace About you profile', () => {
   });
 
   it('isolates profile context and aliases across two independent workspace databases', () => {
-    const connections = [new Database(':memory:'), new Database(':memory:')];
+    const runtimes = [0, 1].map(() =>
+      createDatabaseRuntime({
+        databasePath: ':memory:',
+        migrationsFolder: path.join(process.cwd(), 'drizzle'),
+      }),
+    );
     try {
-      const stores = connections.map((sql) => {
+      const stores = runtimes.map((runtime) => {
+        const sql = runtime.initialize();
         sql.exec(
-          "CREATE TABLE entities(id TEXT PRIMARY KEY, type TEXT, name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY); INSERT INTO entities VALUES ('person','person','Morgan');",
+          "INSERT INTO entities (id, type, name) VALUES ('person','person','Morgan')",
         );
         return createIdentityStore(sql);
       });
@@ -218,7 +225,7 @@ describe('workspace About you profile', () => {
       });
       expect(stores[1].getPersonAliases('person')).toEqual([]);
     } finally {
-      connections.forEach((sql) => sql.close());
+      runtimes.forEach((runtime) => runtime.close());
     }
   });
 });
