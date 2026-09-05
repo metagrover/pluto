@@ -3,6 +3,7 @@ import {
   configureGlobalLogger,
   createLogger,
   getEffectiveLogLevel,
+  initializeElectronLogging,
   resetLoggerState,
 } from '../../electron/logger';
 
@@ -224,5 +225,52 @@ describe('electron/logger file transport', () => {
     expect(() => {
       log.info('this should not crash');
     }).not.toThrow();
+  });
+});
+
+describe('initializeElectronLogging', () => {
+  it('configures dev vs prod logging policies accurately', () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-env-log-test-'),
+    );
+    try {
+      // Dev mode
+      initializeElectronLogging({
+        isPackaged: false,
+        logsDirectory: tempDir,
+        minLevel: 'debug',
+      });
+      const stdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true);
+      const devLog = createLogger('DevScope');
+      devLog.debug('dev debug message');
+      expect(stdoutSpy).toHaveBeenCalledTimes(1);
+      stdoutSpy.mockRestore();
+
+      // Packaged mode: console suppressed for debug/info, file written
+      initializeElectronLogging({
+        isPackaged: true,
+        logsDirectory: tempDir,
+        minLevel: 'info',
+      });
+      const prodStdoutSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true);
+      const prodLog = createLogger('ProdScope');
+      prodLog.info('prod info message');
+      // In production, console is only allowed for error
+      expect(prodStdoutSpy).not.toHaveBeenCalled();
+
+      // But file was written
+      const prodLogFile = path.join(tempDir, 'main.log');
+      expect(fs.existsSync(prodLogFile)).toBe(true);
+      const content = fs.readFileSync(prodLogFile, 'utf8');
+      expect(content).toContain('[INFO ] [ProdScope] prod info message');
+
+      prodStdoutSpy.mockRestore();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

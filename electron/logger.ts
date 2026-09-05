@@ -72,6 +72,38 @@ export function getEffectiveLogLevel(): LogLevel {
   return currentConfig.minLevel;
 }
 
+export function initializeElectronLogging(options?: {
+  isPackaged?: boolean;
+  logsDirectory?: string;
+  minLevel?: LogLevel;
+}): void {
+  const isPackaged = options?.isPackaged ?? false;
+  let logDir = options?.logsDirectory;
+
+  if (!logDir) {
+    try {
+      // Lazy load Electron if available in the runtime environment
+      const electron = require('electron');
+      if (electron?.app?.getPath) {
+        logDir = electron.app.getPath('logs');
+      }
+    } catch {
+      // Ignored if outside Electron runtime
+    }
+  }
+
+  const logFilePath = logDir ? path.join(logDir, 'main.log') : '';
+
+  configureGlobalLogger({
+    minLevel: options?.minLevel ?? 'info',
+    useColors: !isPackaged,
+    writeToFile: isPackaged || process.env.PLUTO_FILE_LOGS === '1',
+    logFilePath,
+    errorConsoleOnlyInProduction: isPackaged,
+    consoleEnabled: true,
+  });
+}
+
 function shouldLog(level: LogLevel): boolean {
   const effectiveMin = getEffectiveLogLevel();
   if (effectiveMin === 'silent') return false;

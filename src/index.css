@@ -303,7 +303,7 @@
     @apply mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-pro-text-muted;
   }
   .person-dossier__read-meta span + span::before {
-    content: '·';
+    content: "·";
     @apply mr-3 text-pro-text-muted/60;
   }
   .person-dossier__read-sources {
