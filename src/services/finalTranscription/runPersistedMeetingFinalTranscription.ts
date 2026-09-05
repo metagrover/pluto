@@ -39,6 +39,7 @@ const rebuildSealedAudioForRetry = async (
     schemaVersion?: unknown;
     lifecycleState?: unknown;
     generation?: unknown;
+    intervals?: Array<{ sources?: { system?: { disposition?: unknown } } }>;
   } | null;
   if (
     journal?.schemaVersion !== 3 ||
@@ -46,6 +47,18 @@ const rebuildSealedAudioForRetry = async (
     journal.generation !== meeting.capture_journal_generation
   ) {
     throw new Error('sealed_capture_generation_unavailable');
+  }
+  const intervals = journal.intervals;
+  if (
+    !Array.isArray(intervals) ||
+    intervals.length === 0 ||
+    !intervals.every((interval) =>
+      ['captured', 'verified_silence'].includes(
+        String(interval.sources?.system?.disposition),
+      ),
+    )
+  ) {
+    throw new Error('sealed_capture_system_incomplete');
   }
   if (!meeting.audio_path) throw new Error('sealed_capture_mic_unavailable');
 
@@ -213,10 +226,12 @@ export const runPersistedMeetingFinalTranscription = async (
   let committedSegments: AttributionSegment[] = [];
   let systemCaptureComplete = false;
   try {
-    systemCaptureComplete = hasCompleteSystemCapture(
-      await invoke('AUDIO_CAPTURE_JOURNAL_READ', { meetingId }),
-      captureGeneration,
-    );
+    systemCaptureComplete =
+      options.rebuildSealedAudio === true ||
+      hasCompleteSystemCapture(
+        await invoke('AUDIO_CAPTURE_JOURNAL_READ', { meetingId }),
+        captureGeneration,
+      );
   } catch {
     // A missing journal cannot establish that a quiet System WAV is complete.
   }

@@ -350,7 +350,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
           schemaVersion: 3,
           lifecycleState: 'sealed',
           generation: 'generation-1',
-          sourceAvailability: { system: 'available' },
+          sourceAvailability: { system: 'unavailable_at_start' },
           intervals: [{ sources: { system: { disposition: 'captured' } } }],
         };
       }
@@ -382,6 +382,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
     });
     mocks.runFinal.mockImplementation(async (input) => {
       expect(input).toMatchObject({
+        captureEvidence: { systemCaptureIncomplete: false },
         micAudioPath: '/approved/mic.wav',
         systemAudioPath: '/repaired/system.wav',
         mixedAudioPath: '/repaired/mix.wav',
@@ -414,6 +415,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
           schemaVersion: 3,
           lifecycleState: 'sealed',
           generation: 'generation-1',
+          intervals: [{ sources: { system: { disposition: 'captured' } } }],
         };
       }
       if (channel === 'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE') {
