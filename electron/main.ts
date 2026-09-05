@@ -85,6 +85,7 @@ import {
   buildSaveMeetingFailureDiagnostic,
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
+import { loadSpeakerSample } from './speakerSample';
 import { planTimedWavStitch } from './timedWavStitchPlan';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
@@ -2156,6 +2157,32 @@ app.whenReady().then(async () => {
 
       return outputPaths;
     },
+  );
+
+  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE', async (_event, request) =>
+    loadSpeakerSample(request, {
+      getMeeting: (meetingId) =>
+        (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
+      fileExists: (inputPath) => fs.existsSync(inputPath),
+      createTemporaryPath: () =>
+        path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+      sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+        await new Promise<boolean>((resolve) => {
+          ffmpeg(inputPath)
+            .setStartTime(startSec)
+            .setDuration(durationSec)
+            .audioChannels(1)
+            .audioFrequency(16000)
+            .toFormat('wav')
+            .on('end', () => resolve(true))
+            .on('error', () => resolve(false))
+            .save(outputPath);
+        }),
+      readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+      removeFile: async (outputPath) => {
+        await fs.promises.unlink(outputPath);
+      },
+    }),
   );
 
   const mixWavSources = async ({

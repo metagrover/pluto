@@ -78,7 +78,7 @@ git commit -m "feat: project anonymous speaker review labels"
 - Modify: `src/api/identity.ts`
 - Modify: `src/components/features/MeetingView.tsx`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Inject meeting lookup, file existence, WAV slicing, reading, and cleanup. Prove that the service accepts only `{ meetingId, speaker, sampleIndex }`, resolves `system_audio_path` from the saved meeting, validates the canonical speaker against saved transcript segments, caps output bytes, and removes the temporary file on success and failure.
 
@@ -91,13 +91,13 @@ expect(result).toMatchObject({ mimeType: 'audio/wav', durationSeconds: 6 });
 expect(result?.bytes).toBeInstanceOf(Uint8Array);
 ```
 
-- [ ] **Step 2: Run the service test and verify RED**
+- [x] **Step 2: Run the service test and verify RED**
 
 Run: `pnpm exec vitest run tests/unit/speakerSample.test.ts`
 
 Expected: failure because the service is missing.
 
-- [ ] **Step 3: Implement and register the service**
+- [x] **Step 3: Implement and register the service**
 
 Create `loadSpeakerSample()` with a 10 MiB response cap, two-sample index bound, content-free errors, and `finally` cleanup. Register `GET_MEETING_SPEAKER_SAMPLE` in Electron using the existing FFmpeg configuration. Do not reuse the unrestricted `AUDIO_SLICE_WAV` renderer contract.
 
@@ -119,7 +119,7 @@ export const getMeetingSpeakerSample = (
 
 Pass only the meeting ID and whether the meeting has a System artifact into identity controls; never pass a local audio path.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the sample service and identity API tests, then commit the new service, registration, API, and prop wiring.
 
