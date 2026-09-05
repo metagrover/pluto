@@ -817,7 +817,7 @@ function App() {
 
   useEffect(
     () =>
-      window.ipcRenderer.on('MEETING_NOTES_UPDATED', (meetingId) => {
+      window.ipcRenderer.on('MEETING_NOTES_UPDATED', (_event, meetingId) => {
         if (meetingId == null) {
           void fetchMeetings();
           return;
@@ -1088,6 +1088,7 @@ function App() {
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
         {
           signal: controller.signal,
+          manualRetry: reason === 'manual',
           onTranscriptCommitted: refreshSelectedMeetingState,
         },
       );

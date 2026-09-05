@@ -1,0 +1,159 @@
+import type { LiveEchoEvidenceWindow } from './liveEchoEvidence';
+import { isProtectedEchoWord } from './liveEchoTokenAlignment';
+
+type TimedToken = { text: string; timestampMs: number; endTimestampMs: number };
+type EvidenceLookup = (start: number, end: number) => LiveEchoEvidenceWindow[];
+const MIN_ANCHOR_WORDS = 12;
+const MAX_CHAIN_MS = 30_000;
+
+const supportsOnset = (mic: TimedToken, system: TimedToken, lag: number) => {
+  const onset = mic.timestampMs - lag;
+  // EOU starts are independently quantized. A padded System word cannot lend
+  // its silent tail to an unrelated later repetition of the same word.
+  return (
+    onset >= system.timestampMs - 250 &&
+    onset <=
+      (system.endTimestampMs - system.timestampMs <= 750
+        ? system.endTimestampMs + 80
+        : system.timestampMs + 250)
+  );
+};
+
+const anchorLag = (
+  mic: TimedToken[],
+  system: TimedToken[],
+  evidence: EvidenceLookup,
+) => {
+  const first = mic[0];
+  const last = mic.at(-1)!;
+  const systemLast = system.at(-1)!;
+  const end =
+    last.timestampMs + Math.min(750, last.endTimestampMs - last.timestampMs);
+  const systemEnd =
+    systemLast.timestampMs +
+    Math.min(750, systemLast.endTimestampMs - systemLast.timestampMs);
+  let covered = 0;
+  let coveredEnd = Number.NEGATIVE_INFINITY;
+  let weightedLag = 0;
+  let minLag = Number.POSITIVE_INFINITY;
+  let maxLag = Number.NEGATIVE_INFINITY;
+  for (const window of evidence(first.timestampMs, end)) {
+    const lag = window.micStartMs - window.systemStartMs;
+    const start = Math.max(
+      first.timestampMs,
+      window.micStartMs,
+      system[0].timestampMs + lag,
+    );
+    const finish = Math.min(
+      end,
+      window.micEndMs,
+      window.systemEndMs + lag,
+      systemEnd + lag,
+    );
+    const duration = Math.max(0, finish - Math.max(start, coveredEnd));
+    if (!duration) continue;
+    minLag = Math.min(minLag, lag);
+    maxLag = Math.max(maxLag, lag);
+    covered += duration;
+    weightedLag += duration * lag;
+    coveredEnd = Math.max(coveredEnd, finish);
+  }
+  return covered >= 1_000 && maxLag - minLag <= 30
+    ? weightedLag / covered
+    : undefined;
+};
+
+/** Directional exact alignment: System words may be absent from microphone ASR.
+ * Every removed microphone word must still match its own System word and onset.
+ * Only the long anchor has PCM corroboration; short exact continuations use the
+ * measured lag and source word timing, not invented per-word acoustic proof. */
+export const findExactEchoSubsequence = (
+  mic: TimedToken[],
+  system: TimedToken[],
+  evidence: EvidenceLookup,
+): { startToken: number; tokenCount: number } | undefined => {
+  let best: { startToken: number; tokenCount: number } | undefined;
+  for (let start = 0; start <= mic.length - MIN_ANCHOR_WORDS; start++) {
+    for (let remote = 0; remote <= system.length - MIN_ANCHOR_WORDS; remote++) {
+      if (
+        mic[start].text !== system[remote].text ||
+        Math.abs(mic[start].timestampMs - system[remote].timestampMs) > 1_250
+      )
+        continue;
+      let anchor = 0;
+      while (
+        start + anchor < mic.length &&
+        remote + anchor < system.length &&
+        mic[start + anchor].text === system[remote + anchor].text
+      )
+        anchor++;
+      if (anchor < MIN_ANCHOR_WORDS) continue;
+      const lag = anchorLag(
+        mic.slice(start, start + anchor),
+        system.slice(remote, remote + anchor),
+        evidence,
+      );
+      if (
+        lag === undefined ||
+        !mic
+          .slice(start, start + anchor)
+          .every((word, index) =>
+            supportsOnset(word, system[remote + index], lag),
+          )
+      )
+        continue;
+      let count = anchor;
+      let nextSystem = remote + anchor;
+      let skipped =
+        remote > 0 &&
+        (start === 0 || mic[start - 1].text !== system[remote - 1].text)
+          ? remote
+          : 0;
+      let blocked = false;
+      while (start + count < mic.length && nextSystem < system.length) {
+        const word = mic[start + count];
+        if (word.timestampMs - mic[start].timestampMs > MAX_CHAIN_MS) break;
+        let matched = -1;
+        for (let index = nextSystem; index < system.length; index++) {
+          if (system[index].timestampMs > word.timestampMs - lag + 250) break;
+          if (
+            word.text === system[index].text &&
+            supportsOnset(word, system[index], lag)
+          ) {
+            matched = index;
+            break;
+          }
+          if (isProtectedEchoWord(system[index].text)) {
+            blocked = true;
+            break;
+          }
+        }
+        if (matched < 0 || blocked) break;
+        skipped += matched - nextSystem;
+        count++;
+        nextSystem = matched + 1;
+      }
+      const omittedSystemWords =
+        skipped > 0 ||
+        (start + count === mic.length && nextSystem < system.length);
+      if (
+        omittedSystemWords &&
+        !blocked &&
+        !system
+          .slice(0, remote)
+          .some((word) => isProtectedEchoWord(word.text)) &&
+        !(
+          start + count === mic.length &&
+          system
+            .slice(nextSystem)
+            .some((word) => isProtectedEchoWord(word.text))
+        ) &&
+        count > (best?.tokenCount ?? 0) &&
+        mic[start + count - 1].timestampMs - mic[start].timestampMs <=
+          MAX_CHAIN_MS
+      )
+        best = { startToken: start, tokenCount: count };
+    }
+  }
+  return best;
+};

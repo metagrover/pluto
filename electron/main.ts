@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import {
   BrowserWindow,
   Menu,
@@ -18,7 +19,6 @@ import {
   systemPreferences,
 } from 'electron';
 import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type {
@@ -43,6 +43,7 @@ import {
   authorizeCaptureJournalInterval,
   completeCaptureJournalCapturedChunk,
   deleteCaptureJournal,
+  markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
@@ -66,8 +67,9 @@ import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import {
   canReuseRunningCaptureForProbe,
-  waitForNativeAudioSpawn,
+  waitForNativeAudioPcm,
 } from './nativeAudioCapture';
+import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
   isProjectScopeReviewBusy,
@@ -86,7 +88,7 @@ import {
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
 import { loadSpeakerSample } from './speakerSample';
-import { planTimedWavStitch } from './timedWavStitchPlan';
+import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
@@ -98,12 +100,14 @@ import {
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic);
+  ffmpeg.setFfmpegPath(resolveUnpackedExecutablePath(ffmpegStatic));
 }
+const ffprobePath = resolveUnpackedExecutablePath(ffprobeStatic.path);
+ffmpeg.setFfprobePath(ffprobePath);
 
 const probeAudioDuration = async (inputPath: string) =>
   await new Promise<number | null>((resolve) => {
-    const probe = spawn(ffprobeStatic.path, [
+    const probe = spawn(ffprobePath, [
       '-v',
       'error',
       '-show_entries',
@@ -1180,6 +1184,7 @@ app.whenReady().then(async () => {
   let recorderProcess: ChildProcess | null = null;
   let nativeAudioProcess: ChildProcess | null = null;
   let nativeAudioOwner: WebContents | null = null;
+  let nativeAudioReadiness: Promise<boolean> | null = null;
   const captureSessionLease = createCaptureSessionLeaseRegistry();
   const watchedCaptureOwners = new Set<number>();
   type CaptureIncrementalNotesOffer = IncrementalMeetingNotesOffer & {
@@ -1219,6 +1224,7 @@ app.whenReady().then(async () => {
     const processToStop = nativeAudioProcess;
     nativeAudioProcess = null;
     nativeAudioOwner = null;
+    nativeAudioReadiness = null;
     processToStop?.kill('SIGINT');
   };
 
@@ -1606,6 +1612,21 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
+    async (event, request = {}) => {
+      const meetingId = String(request.meetingId || '');
+      captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      return await markCaptureJournalSourceFailed(
+        getMeetingArtifactsRootDir(),
+        {
+          ...request,
+          meetingId,
+        },
+      );
+    },
+  );
+
+  ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
     async (_event, { meetingId, expectedConfigKey, expectedConfigKeys } = {}) =>
       await verifySealedCaptureJournalTranscriptEvidence(
@@ -1795,7 +1816,11 @@ app.whenReady().then(async () => {
     if (
       canReuseRunningCaptureForProbe(Boolean(nativeAudioProcess), targetPids)
     ) {
-      return true;
+      const runningProcess = nativeAudioProcess;
+      return (
+        (await nativeAudioReadiness) === true &&
+        nativeAudioProcess === runningProcess
+      );
     }
 
     const execPath = getAudioCapExecPath();
@@ -1922,7 +1947,12 @@ app.whenReady().then(async () => {
       throw new Error('capture_session_not_owned');
     }
     if (nativeAudioProcess) {
-      return nativeAudioOwner?.id === event.sender.id;
+      const existingProcess = nativeAudioProcess;
+      return (
+        nativeAudioOwner?.id === event.sender.id &&
+        (await nativeAudioReadiness) === true &&
+        nativeAudioProcess === existingProcess
+      );
     }
 
     // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
@@ -1940,6 +1970,8 @@ app.whenReady().then(async () => {
       const captureOwner = event.sender;
       nativeAudioProcess = spawnedProcess;
       nativeAudioOwner = captureOwner;
+      const pcmReady = waitForNativeAudioPcm(spawnedProcess);
+      nativeAudioReadiness = pcmReady;
 
       spawnedProcess.stdout?.on('data', (chunk) => {
         // chunk is Buffer (PCM data)
@@ -1955,29 +1987,37 @@ app.whenReady().then(async () => {
         console.error('[Pluto-AudioCap]', data.toString());
       });
 
+      const captureFailed = () => {
+        if (nativeAudioProcess !== spawnedProcess) return;
+        if (!captureOwner.isDestroyed()) {
+          captureOwner.send('NATIVE_AUDIO_FAILURE');
+        }
+        nativeAudioProcess = null;
+        nativeAudioOwner = null;
+        nativeAudioReadiness = null;
+      };
+      spawnedProcess.on('error', captureFailed);
       spawnedProcess.on('close', (code) => {
         console.log('[Pluto] AudioCap exited with code', code);
-        if (nativeAudioProcess === spawnedProcess) {
-          nativeAudioProcess = null;
-          nativeAudioOwner = null;
-        }
+        captureFailed();
       });
 
-      const nativeStarted = await waitForNativeAudioSpawn(spawnedProcess);
+      const nativeStarted = await pcmReady;
       if (!nativeStarted) {
-        console.error('[Pluto] AudioCap failed to spawn');
+        console.error('[Pluto] AudioCap failed to produce PCM');
         if (nativeAudioProcess === spawnedProcess) {
-          nativeAudioProcess = null;
-          nativeAudioOwner = null;
+          captureFailed();
+          spawnedProcess.kill('SIGINT');
         }
         return false;
       }
 
-      return true;
+      return nativeAudioProcess === spawnedProcess;
     } catch (e) {
       console.error('[Pluto] Failed to spawn audiocap:', e);
       nativeAudioProcess = null;
       nativeAudioOwner = null;
+      nativeAudioReadiness = null;
       return false;
     }
   });
@@ -2266,146 +2306,14 @@ app.whenReady().then(async () => {
       chunkIndex?: number;
     }>;
     outputTag?: string;
-  }) => {
-    if (!Array.isArray(segments) || segments.length === 0) return null;
-
-    const validSegments = segments
-      .filter(
-        (
-          value,
-        ): value is {
-          path: string;
-          startSec: number;
-          endSec: number;
-          chunkIndex?: number;
-        } =>
-          value &&
-          typeof value === 'object' &&
-          typeof value.path === 'string' &&
-          value.path.length > 0 &&
-          fs.existsSync(value.path) &&
-          typeof value.startSec === 'number' &&
-          Number.isFinite(value.startSec) &&
-          value.startSec >= 0 &&
-          typeof value.endSec === 'number' &&
-          Number.isFinite(value.endSec) &&
-          value.endSec > value.startSec,
-      )
-      .sort((left, right) => left.startSec - right.startSec);
-
-    if (validSegments.length === 0) return null;
-
-    const tag =
-      (typeof outputTag === 'string' ? outputTag : 'stitched')
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, '')
-        .slice(0, 24) || 'stitched';
-    const outputDir = path.join(app.getPath('userData'), 'meetings');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-    const outputPath = path.join(
-      outputDir,
-      `${tag}_${Date.now()}_${randomUUID()}.wav`,
-    );
-
-    const firstAudioDuration = await probeAudioDuration(validSegments[0].path);
-    const plan = planTimedWavStitch(validSegments, firstAudioDuration ?? 0);
-    if (plan.mode === 'sequential') {
-      const concatPath = path.join(
-        app.getPath('temp'),
-        `pluto-audio-concat-${randomUUID()}.ffconcat`,
-      );
-      const escapeConcatPath = (value: string) =>
-        value.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
-      fs.writeFileSync(
-        concatPath,
-        [
-          'ffconcat version 1.0',
-          ...validSegments.map(
-            (segment) => `file '${escapeConcatPath(segment.path)}'`,
-          ),
-          '',
-        ].join('\n'),
-      );
-      return await new Promise<string | null>((resolve) => {
-        const cleanupConcat = () => {
-          if (fs.existsSync(concatPath)) fs.unlinkSync(concatPath);
-        };
-        const filters = [
-          ...(plan.initialDelayMs > 0
-            ? [`adelay=${plan.initialDelayMs}:all=1`]
-            : []),
-          'apad',
-          `atrim=0:${plan.targetDurationSeconds}`,
-        ];
-        ffmpeg()
-          .input(concatPath)
-          .inputOptions(['-f concat', '-safe 0'])
-          .audioFilters(filters)
-          .audioChannels(1)
-          .audioFrequency(16000)
-          .toFormat('wav')
-          .on('end', () => {
-            cleanupConcat();
-            console.log(
-              `[Pluto] Sequentially reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
-            );
-            resolve(outputPath);
-          })
-          .on('error', (err) => {
-            cleanupConcat();
-            console.warn(
-              '[Pluto] Sequential WAV reconstruction failed:',
-              err instanceof Error ? err.message : err,
-            );
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-            resolve(null);
-          })
-          .save(outputPath);
-      });
-    }
-
-    return await new Promise<string | null>((resolve) => {
-      const command = ffmpeg();
-      const filterParts: string[] = [];
-      const mixInputs: string[] = [];
-
-      for (let i = 0; i < validSegments.length; i++) {
-        const segment = validSegments[i];
-        command.input(segment.path);
-        const delayMs = Math.max(0, Math.round(segment.startSec * 1000));
-        filterParts.push(
-          `[${i}:a]adelay=${delayMs}|${delayMs},volume=1[a${i}]`,
-        );
-        mixInputs.push(`[a${i}]`);
-      }
-
-      command
-        .complexFilter([
-          ...filterParts,
-          `${mixInputs.join('')}amix=inputs=${validSegments.length}:duration=longest:normalize=0`,
-        ])
-        .audioChannels(1)
-        .audioFrequency(16000)
-        .toFormat('wav')
-        .on('end', () => {
-          console.log(
-            `[Pluto] Reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
-          );
-          resolve(outputPath);
-        })
-        .on('error', (err) => {
-          console.warn(
-            '[Pluto] Timed WAV reconstruction failed:',
-            err instanceof Error ? err.message : err,
-          );
-          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-          resolve(null);
-        })
-        .save(outputPath);
+  }) =>
+    await stitchTimedWavSegments({
+      segments,
+      outputTag,
+      outputDir: path.join(app.getPath('userData'), 'meetings'),
+      tempDir: app.getPath('temp'),
+      probeAudioDuration,
     });
-  };
 
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',
@@ -2699,8 +2607,12 @@ app.whenReady().then(async () => {
     (_event, meetingId, lease) =>
       db.claimMeetingTranscriptValidationRetry(meetingId, lease),
   );
-  ipcMain.handle('CLAIM_FINAL_TRANSCRIPTION', (_event, meetingId, lease) =>
-    db.claimMeetingFinalTranscription(meetingId, lease),
+  ipcMain.handle(
+    'CLAIM_FINAL_TRANSCRIPTION',
+    (_event, meetingId, lease, options) =>
+      db.claimMeetingFinalTranscription(meetingId, lease, {
+        manualRetry: options?.manualRetry === true,
+      }),
   );
   ipcMain.handle(
     'UPDATE_FINAL_TRANSCRIPTION_STAGE',

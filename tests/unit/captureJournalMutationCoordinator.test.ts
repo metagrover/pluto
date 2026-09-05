@@ -1,9 +1,50 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { createCaptureActivitySession } from '../../src/utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../../src/utils/captureJournalMutationCoordinator';
+import { sealCaptureJournalBeforeFinalization } from '../../src/utils/recordingFinalization';
 
 describe('capture journal mutation coordinator', () => {
+  it('blocks sealing when persisting System failure rejects, even after subsequent PCM recovery', async () => {
+    const coordinator = createCaptureJournalMutationCoordinator();
+    const session = createCaptureActivitySession({
+      producer: {
+        clock: { kind: 'meeting_relative_seconds', origin: 'recording_start' },
+        thresholds: {
+          rms: 0.01,
+          dominanceRatio: 1.5,
+          minimumSwitchIntervalMs: 250,
+        },
+        algorithmVersion: 'speaker_activity_v1',
+      },
+      persistSnapshot: async () => undefined,
+    });
+    const failedWrite = coordinator.run(async () => {
+      try {
+        await Promise.reject(new Error('failure evidence write rejected'));
+      } catch (error) {
+        session.markDurabilityFailure();
+        throw error;
+      }
+    });
+    const rejection = expect(failedWrite).rejects.toThrow(
+      'failure evidence write rejected',
+    );
+    await coordinator.run(async () => 'later recovered PCM persisted');
+    const seal = vi.fn(async () => ({}));
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: coordinator.drain,
+      hasWriteFailure: session.hasDurabilityFailure,
+      seal,
+    });
+    await rejection;
+    expect(seal).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    });
+  });
   it('keeps revision reads and writes atomic across independent producers', async () => {
     const coordinator = createCaptureJournalMutationCoordinator();
     const events: string[] = [];

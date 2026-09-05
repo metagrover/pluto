@@ -306,10 +306,46 @@ export const collapseCrossChannelWordBleed = (input: {
           length += 1;
         }
         if (length < minimumSequenceWords) continue;
+        const micTail = micWords[micStart + length];
+        const systemTail = systemWords[systemStart + length];
+        // A decoder may hold its final word open through silence. Extend only
+        // an already aligned phrase, using the shared onset and remote acoustic
+        // activity; a later repeat or any near-end activity keeps the mic word.
+        if (
+          micTail &&
+          systemTail &&
+          micTail.token === systemTail.token &&
+          systemTail.wordIndex ===
+            (systemSourceSegments[systemTail.segmentIndex].words?.length ?? 0) -
+              1 &&
+          systemTail.end - systemTail.start > 2 &&
+          Math.abs(systemTail.start - micTail.start - alignmentOffsetSeconds) <=
+            0.25 &&
+          activitySeconds(
+            input.activityWindows ?? [],
+            'Them',
+            micTail.start,
+            Math.min(micTail.end, micTail.start + 0.25),
+          ) >= 0.1 &&
+          activitySeconds(
+            input.activityWindows ?? [],
+            'Me',
+            micTail.start,
+            micTail.end,
+          ) === 0
+        ) {
+          length += 1;
+        }
         let added = false;
         for (let offset = 0; offset < length; offset += 1) {
           const micWord = micWords[micStart + offset];
           const systemWord = systemWords[systemStart + offset];
+          // A sequence can cross into a mic segment already removed by acoustic
+          // evidence. Its retained System counterpart must survive that decision.
+          if (
+            droppedMicWords.has(`${micWord.segmentIndex}:${micWord.wordIndex}`)
+          )
+            continue;
           const localActivity = activitySeconds(
             input.activityWindows ?? [],
             'Me',

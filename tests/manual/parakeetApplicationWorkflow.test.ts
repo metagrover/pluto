@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 
+import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import Database from 'better-sqlite3';
-import ffprobeStatic from 'ffprobe-static';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const workflow = vi.hoisted(() => ({

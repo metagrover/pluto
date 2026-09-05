@@ -18,9 +18,24 @@ export type LiveTranscriptSegment = {
   source?: 'mic' | 'system';
   timestampMs: number;
   endTimestampMs?: number;
+  wordTimings?: Array<{
+    text: string;
+    timestampMs: number;
+    endTimestampMs: number;
+  }>;
   confirmed: boolean;
-  presentation?: {
-    visibility: 'suppressed_echo';
+  presentation?: (
+    | {
+        visibility: 'suppressed_echo';
+      }
+    | {
+        visibility: 'echo_span_removed';
+        text: string;
+        /** Display bounds of retained words; raw source timing stays unchanged. */
+        timestampMs?: number;
+        endTimestampMs?: number;
+      }
+  ) & {
     matchedSegmentId: string;
     confidence: number;
     reason: 'cross_channel_echo';

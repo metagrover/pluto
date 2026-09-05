@@ -37,6 +37,62 @@ describe('live transcript presentation', () => {
     expect(echo.presentation.visibility).toBe('suppressed_echo');
   });
 
+  it('orders the retained local suffix by its presentation time without changing raw evidence', () => {
+    const raw = {
+      ...segment('mic', 'Me', 'remote words local answer', 31_920),
+      source: 'mic' as const,
+      endTimestampMs: 44_800,
+      presentation: {
+        visibility: 'echo_span_removed' as const,
+        text: 'local answer',
+        timestampMs: 43_520,
+        endTimestampMs: 44_800,
+        matchedSegmentId: 'system',
+        confidence: 1,
+        reason: 'cross_channel_echo' as const,
+      },
+    };
+    const call = {
+      ...segment('system', 'Them', 'remote words', 32_000),
+      source: 'system' as const,
+    };
+    const tail = {
+      ...segment('tail', 'Me', 'perfect', 44_800),
+      source: 'mic' as const,
+      confirmed: false,
+    };
+    const before = structuredClone(raw);
+    const turns = buildLiveTranscriptTurns([raw, call, tail]);
+    expect(turns.map((turn) => turn.source)).toEqual(['system', 'mic']);
+    expect(turns[1].timestampMs).toBe(43_520);
+    expect(turns[1].segments.map((row) => row.text)).toEqual([
+      'local answer',
+      'perfect',
+    ]);
+    expect(raw).toEqual(before);
+    const { presentation: _presentation, ...restored } = raw;
+    expect(
+      buildLiveTranscriptTurns([restored, call, tail])[0].timestampMs,
+    ).toBe(31_920);
+  });
+
+  it('keeps legacy partial-removal timing and stable order for equal start times', () => {
+    const first = {
+      ...segment('one', 'Me', 'raw first', 1000),
+      presentation: {
+        visibility: 'echo_span_removed' as const,
+        text: 'first',
+        matchedSegmentId: 'system',
+        confidence: 1,
+        reason: 'cross_channel_echo' as const,
+      },
+    };
+    const second = segment('two', 'Them', 'second', 1000);
+    const turns = buildLiveTranscriptTurns([first, second]);
+    expect(turns.map((turn) => turn.id)).toEqual(['one', 'two']);
+    expect(turns[0].timestampMs).toBe(1000);
+  });
+
   it('groups consecutive same-speaker segments without changing their evidence', () => {
     const first = segment('one', 'Me', 'This sentence', 1_000);
     const second = segment('two', 'Me', 'continues here.', 2_000);

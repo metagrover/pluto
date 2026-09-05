@@ -36,6 +36,10 @@ describe('EOU transcript projection', () => {
         source: 'mic',
         timestampMs: 0,
         endTimestampMs: 400,
+        wordTimings: [
+          { text: 'hello', timestampMs: 0, endTimestampMs: 200 },
+          { text: 'world', timestampMs: 210, endTimestampMs: 400 },
+        ],
         confirmed: true,
       },
       {
@@ -46,9 +50,57 @@ describe('EOU transcript projection', () => {
         source: 'mic',
         timestampMs: 500,
         endTimestampMs: 700,
+        wordTimings: [{ text: 'again', timestampMs: 500, endTimestampMs: 700 }],
         confirmed: false,
       },
     ]);
+  });
+
+  it('maps SentencePiece fragments to whole-word timing on the meeting clock', () => {
+    const [row] = createEouTranscriptProjection().apply(
+      update({
+        committedText: 'hello notebook',
+        tentativeText: '',
+        tokens: [
+          { text: '▁hello', startSeconds: 0, endSeconds: 0.2, committed: true },
+          {
+            text: '▁note',
+            startSeconds: 0.3,
+            endSeconds: 0.4,
+            committed: true,
+          },
+          { text: 'book', startSeconds: 0.4, endSeconds: 0.6, committed: true },
+        ],
+      }),
+      10,
+    );
+    expect(row.wordTimings).toEqual([
+      { text: 'hello', timestampMs: 10000, endTimestampMs: 10200 },
+      { text: 'notebook', timestampMs: 10300, endTimestampMs: 10600 },
+    ]);
+  });
+
+  it('omits unverified word timing when token text or ordering disagrees', () => {
+    for (const tokens of [
+      [
+        {
+          text: 'wrong words',
+          startSeconds: 0,
+          endSeconds: 0.5,
+          committed: true,
+        },
+      ],
+      [
+        { text: '▁hello', startSeconds: 0.3, endSeconds: 0.5, committed: true },
+        { text: '▁world', startSeconds: 0.1, endSeconds: 0.2, committed: true },
+      ],
+    ]) {
+      const [row] = createEouTranscriptProjection().apply(
+        update({ tentativeText: '', tokens }),
+      );
+      expect(row.rawText).toBe('hello world');
+      expect(row.wordTimings).toBeUndefined();
+    }
   });
 
   it('uses committed token pauses for word-preserving punctuation', () => {

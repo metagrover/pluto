@@ -40,6 +40,7 @@ import {
   buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
 } from '../../utils/transcript';
+import { SYSTEM_CAPTURE_INCOMPLETE_REASON } from '../../utils/transcriptIntegrity';
 import {
   buildTranscriptTrustCapabilities,
   canUseTranscriptTrustState,
@@ -61,6 +62,7 @@ import {
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
+  getMeetingRemoteSpeakerStatus,
 } from './meetingTranscriptPresentation';
 
 const SavedEditConflicts = ({
@@ -233,8 +235,10 @@ export const TranscriptIntegrityPanel = ({
   let canRetryFinalTranscription = false;
   let speakerAttributionFailure = false;
   let resourcePolicyDenied = false;
+  let systemCaptureIncomplete = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
+      reasons?: unknown;
       finalTranscription?: {
         policy?: unknown;
         state?: unknown;
@@ -248,6 +252,9 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
     resourcePolicyDenied =
       integrity.finalTranscription?.failure === 'resource_policy_denied';
+    systemCaptureIncomplete =
+      Array.isArray(integrity.reasons) &&
+      integrity.reasons.includes(SYSTEM_CAPTURE_INCOMPLETE_REASON);
     canRetryFinalTranscription ||= speakerAttributionFailure;
   } catch {
     canRetryFinalTranscription = false;
@@ -258,6 +265,7 @@ export const TranscriptIntegrityPanel = ({
   speakerAttributionFailure ||= speakerLabelsRequired;
   if (
     hasExistingAnalysis &&
+    !systemCaptureIncomplete &&
     trust.kind !== 'capture_gap' &&
     !speakerAttributionFailure &&
     !retryOperationKind
@@ -266,6 +274,8 @@ export const TranscriptIntegrityPanel = ({
 
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
+    systemCaptureIncomplete,
+    hasExistingTranscript: Boolean(transcriptJson),
     speakerAttributionFailure,
     resourcePolicyDenied,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
@@ -278,7 +288,8 @@ export const TranscriptIntegrityPanel = ({
   // committed, let the notes skeleton communicate that remaining work instead
   // of leaving the speaker-label repair banner spinning until analysis ends.
   const visibleRetryOperationKind =
-    retryOperationKind === 'speaker_labels' && !speakerAttributionFailure
+    systemCaptureIncomplete ||
+    (retryOperationKind === 'speaker_labels' && !speakerAttributionFailure)
       ? null
       : retryOperationKind;
   const progressCopy = visibleRetryOperationKind
@@ -829,6 +840,7 @@ export const MeetingView = ({
         .filter(Boolean)
     : [];
   const hasTranscriptContent = transcriptTurns.length > 0;
+  const remoteSpeakerStatus = getMeetingRemoteSpeakerStatus(selectedMeeting);
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
@@ -1438,6 +1450,17 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
+            {remoteSpeakerStatus ? (
+              <div
+                data-meeting-remote-speaker-status={remoteSpeakerStatus.state}
+                className="mb-5 border-b border-pro-border/60 pb-4 text-xs leading-5 text-pro-text-muted"
+              >
+                <p className="font-medium text-pro-text-main">
+                  {remoteSpeakerStatus.title}
+                </p>
+                <p>{remoteSpeakerStatus.detail}</p>
+              </div>
+            ) : null}
             <MeetingIdentityControls
               meetingId={String(selectedMeeting.id)}
               attendeeNames={calendarAttendeeNames}

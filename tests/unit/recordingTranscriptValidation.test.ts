@@ -22,6 +22,84 @@ const timedRawSegment = (start: number, text: string) => {
 };
 
 describe('runRecordingTranscriptValidation', () => {
+  it.each([false, true])(
+    'deduplicates exact source phrases with timed words: %s',
+    async (timed) => {
+      const result = await runRecordingTranscriptValidation({
+        meetingId: 'untimed-duplicate',
+        recordingDurationSeconds: 10,
+        micAudioPath: '/mic.wav',
+        mixAudioPath: '',
+        systemAudioPath: '/system.wav',
+        provisionalSegments: [],
+        canonicalMode: 'recovered_channels',
+        activityWindows: [{ speaker: 'Them', startTime: 1, endTime: 3 }],
+        transcribe: async () => ({
+          segments: [
+            timed
+              ? timedRawSegment(1, 'hello there')
+              : rawSegment(1, 3, 'hello there'),
+          ],
+          vad: { status: 'speech' },
+        }),
+        probeDuration: async () => 10,
+      });
+      expect(result.status).toBe('validated');
+      expect(result.segments).toEqual([
+        expect.objectContaining({ speaker: 'Them', text: 'hello there' }),
+      ]);
+    },
+  );
+
+  it('keeps recovered System speech remote when its final word spans a later local reply', async () => {
+    const remote = {
+      start: 42,
+      end: 53.28,
+      text: 'I will check the final transcript today.',
+      words: [
+        { word: 'I', start: 42, end: 42.24 },
+        { word: 'will', start: 42.24, end: 42.4 },
+        { word: 'check', start: 42.4, end: 42.72 },
+        { word: 'the', start: 42.72, end: 42.96 },
+        { word: 'final', start: 42.96, end: 43.28 },
+        { word: 'transcript', start: 43.28, end: 44.08 },
+        { word: 'today.', start: 44.08, end: 53.28 },
+      ],
+    };
+    const local = rawSegment(
+      46,
+      48.64,
+      'Can you make sure everything is perfect?',
+    );
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'padded-system-word',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      canonicalMode: 'recovered_channels',
+      activityWindows: [
+        { speaker: 'Them', startTime: 42, endTime: 44.4 },
+        { speaker: 'Me', startTime: 46, endTime: 48.64 },
+      ],
+      transcribe: async (_path, options) => ({
+        segments: [options.canonicalSource === 'system' ? remote : local],
+        vad: { status: 'speech' },
+      }),
+      probeDuration: async () => 60,
+    });
+    expect(result.status).toBe('validated');
+    expect(result.segments).toEqual([
+      expect.objectContaining({
+        speaker: 'Them',
+        text: remote.text,
+        words: remote.words,
+      }),
+      expect.objectContaining({ speaker: 'Me', text: local.text }),
+    ]);
+  });
+
   it('validates verified checkpoint segments without full-session transcription', async () => {
     const transcribe = vi.fn();
     const probeDuration = vi.fn();

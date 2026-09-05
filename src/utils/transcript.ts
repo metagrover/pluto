@@ -163,8 +163,21 @@ export const buildTranscriptSegmentsForPresentation = <
   try {
     const parsed = JSON.parse(transcriptJson || '{}') as {
       liveSegments?: unknown;
+      pipelineMode?: unknown;
+      canonicalSource?: unknown;
+      lifecycleStatus?: unknown;
+      speakerAttribution?: { source?: unknown };
     };
-    if (Array.isArray(parsed.liveSegments)) {
+    // Finalization has already reconciled sources and rejected unsafe evidence.
+    // Retain live rows on disk, but never resurrect their text or speaker labels
+    // in a completed canonical transcript (including a no-speech result).
+    const finalRecovered =
+      parsed.pipelineMode === 'parakeet_final_v1' &&
+      parsed.canonicalSource === 'recovered_channels' &&
+      (parsed.lifecycleStatus === 'validated' ||
+        parsed.speakerAttribution?.source === 'recovered_channel_acoustic_v1' ||
+        parsed.speakerAttribution?.source === 'recovered_channel_acoustic_v2');
+    if (!finalRecovered && Array.isArray(parsed.liveSegments)) {
       liveSegments = buildReadableTranscriptSegments(
         parsed.liveSegments as TranscriptReadingCandidate[],
       ).segments;

@@ -96,6 +96,18 @@ describe('handleAudioCaptureJournalStart', () => {
     );
     expect(captureJournal.createCaptureJournal).toHaveBeenCalled();
   });
+  it('uses fresh readiness rather than a stale renderer permission label for source availability', async () => {
+    await handleAudioCaptureJournalStart({
+      ...defaultOptions,
+      sourceAvailability: { system: 'unavailable_at_start' },
+    });
+    expect(captureJournal.createCaptureJournal).toHaveBeenCalledWith(
+      '/test',
+      expect.objectContaining({
+        sourceAvailability: { mic: 'available', system: 'available' },
+      }),
+    );
+  });
   it('freezes the self snapshot before readiness awaits and commits after journal creation', async () => {
     let self = 'person-before';
     const snapshots: string[] = [];

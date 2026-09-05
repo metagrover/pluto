@@ -69,3 +69,56 @@ export const buildMeetingTranscriptTurns = <T extends TranscriptSegment>(
 
   return turns;
 };
+
+/** Transcription completion and remote voice separation are distinct outcomes. */
+export const getMeetingRemoteSpeakerStatus = (meeting: {
+  transcript_status?: string;
+  transcript_json?: string;
+}): {
+  state: 'separated' | 'unresolved' | 'no_remote_speech';
+  title: string;
+  detail: string;
+} | null => {
+  if (meeting.transcript_status !== 'validated') return null;
+  try {
+    const transcript = JSON.parse(meeting.transcript_json || 'null');
+    const remote = transcript?.speakerAttribution?.remoteDiarization;
+    if (
+      !Array.isArray(transcript?.segments) ||
+      !transcript.segments.some(
+        (segment: { text?: unknown } | null) =>
+          typeof segment?.text === 'string' && segment.text.trim(),
+      ) ||
+      remote?.attempted !== true ||
+      remote.input !== 'system_audio'
+    )
+      return null;
+
+    if (remote.applied === true && remote.labeledSegmentCount > 0) {
+      return {
+        state: 'separated',
+        title: 'Transcript ready · Remote speaker labels applied',
+        detail:
+          'Labels identify distinct remote voices where supported. Uncertain speech keeps a general label.',
+      };
+    }
+    if (remote.fallbackReason === 'no_system_speech') {
+      return {
+        state: 'no_remote_speech',
+        title: 'Transcript ready · No remote speech detected',
+        detail:
+          'No participant speech was detected in the System recording, so there are no remote speaker labels.',
+      };
+    }
+    return {
+      state: 'unresolved',
+      title: 'Transcript ready · Remote speakers not separated',
+      detail:
+        remote.fallbackReason === 'low_coverage'
+          ? 'Remote speech could not be matched confidently to individual speakers. It keeps a general label.'
+          : 'Remote speech keeps a general label because distinct voices could not be confirmed.',
+    };
+  } catch {
+    return null;
+  }
+};

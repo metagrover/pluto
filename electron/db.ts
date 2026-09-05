@@ -2505,6 +2505,7 @@ const finalTranscriptionSourcePathsDigest = (
 export const claimMeetingFinalTranscription = (
   meetingId: string | number,
   lease: FinalTranscriptionLease,
+  options: { manualRetry?: boolean } = {},
 ): boolean =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
@@ -2516,8 +2517,9 @@ export const claimMeetingFinalTranscription = (
       ) &&
         !(
           current.transcript_status === 'validated' &&
-          (readStoredSpeakerAttribution(current.transcript_json)?.source ===
-            'recovered_channel_acoustic_v1' ||
+          (options.manualRetry === true ||
+            readStoredSpeakerAttribution(current.transcript_json)?.source ===
+              'recovered_channel_acoustic_v1' ||
             !hasVerifiedSpeakerAttribution(current.transcript_json))
         ))
     ) {

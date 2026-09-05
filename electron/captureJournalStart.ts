@@ -83,7 +83,10 @@ export async function handleAudioCaptureJournalStart(options: {
           : Date.now(),
       schemaVersion: 3,
       expectedSources: options.expectedSources,
-      sourceAvailability: options.sourceAvailability,
+      // Fresh main-process readiness admits both required capture permissions.
+      // A renderer permission snapshot can be stale after a successful prompt.
+      // Actual transport failures are persisted separately during capture.
+      sourceAvailability: { mic: 'available', system: 'available' },
     });
     if (newJournal) commitCaptureIdentity?.();
     await options
