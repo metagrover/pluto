@@ -111,6 +111,8 @@ export const SpeakerIdentificationModal = ({
   const [speakerCandidates, setSpeakerCandidates] = useState<
     Record<string, ClientCandidateMetadata>
   >({});
+  const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
+    useState<Record<string, boolean>>({});
   const [rememberVoice, setRememberVoice] = useState(false);
   const [refSampleLoading, setRefSampleLoading] = useState(false);
   const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
@@ -180,6 +182,7 @@ export const SpeakerIdentificationModal = ({
       );
       setVoiceSuggestions(res.suggestions);
       setSpeakerCandidates(res.candidates);
+      setVoiceEnrollmentAvailability(res.enrollmentAvailability);
     } catch {
       // non-fatal
     }
@@ -543,20 +546,19 @@ export const SpeakerIdentificationModal = ({
       const enrolledPersonId =
         next.bindings.find((binding) => binding.speaker === speaker)
           ?.personId ?? selection.personId;
-      if (
-        rememberVoice &&
-        enrolledPersonId &&
-        candidate &&
-        candidate.isEligibleForEnrollment
-      ) {
+      if (rememberVoice && enrolledPersonId) {
         try {
           await enrollSpeakerVoice({
             personId: enrolledPersonId,
             sourceMeetingId: meetingId,
-            sourceRevision: candidate.sourceRevision,
             speaker,
-            candidateDigest: candidate.candidateDigest,
             expectedRevision: next.revision,
+            ...(candidate?.isEligibleForEnrollment
+              ? {
+                  sourceRevision: candidate.sourceRevision,
+                  candidateDigest: candidate.candidateDigest,
+                }
+              : {}),
           });
         } catch {
           const enrolledPerson = next.people.find(
@@ -1230,7 +1232,8 @@ export const SpeakerIdentificationModal = ({
 
               {/* Opt-in voice profile enrollment choice */}
               {currentSpeaker &&
-              speakerCandidates[currentSpeaker]?.isEligibleForEnrollment ? (
+              (speakerCandidates[currentSpeaker]?.isEligibleForEnrollment ||
+                voiceEnrollmentAvailability[currentSpeaker]) ? (
                 <div className="pt-2">
                   <label className="flex items-center gap-2 text-xs text-pro-text-muted cursor-pointer select-none">
                     <input

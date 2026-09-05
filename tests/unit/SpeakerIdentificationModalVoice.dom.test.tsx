@@ -40,16 +40,25 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
   let root: ReturnType<typeof createRoot>;
   let invoke: ReturnType<typeof vi.fn>;
   let enrollmentShouldFail: boolean;
+  let candidatesAvailable: boolean;
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     enrollmentShouldFail = false;
+    candidatesAvailable = true;
     invoke = vi.fn(async (channel: string, payload: any) => {
       if (channel === 'GET_IDENTITY_STATE') return workspace;
       if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
       if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        if (!candidatesAvailable) {
+          return {
+            suggestions: {},
+            candidates: {},
+            enrollmentAvailability: { 'Remote Speaker 1': true },
+          };
+        }
         return {
           suggestions: {
             'Remote Speaker 1': {
@@ -238,6 +247,54 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       sourceRevision,
       speaker: 'Remote Speaker 1',
       candidateDigest: 'cand-digest-1',
+      expectedRevision: 10,
+    });
+  });
+
+  it('offers reviewed-sample enrollment without a precomputed candidate', async () => {
+    candidatesAvailable = false;
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const checkbox = document.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+
+    await act(async () => {
+      checkbox.click();
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm & Next'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith('SPEAKER_VOICE_ENROLL', {
+      personId: 'person-alex',
+      sourceMeetingId: 'meeting-voice',
+      speaker: 'Remote Speaker 1',
       expectedRevision: 10,
     });
   });

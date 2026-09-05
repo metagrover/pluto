@@ -62,6 +62,57 @@ function getDb(dbInstance?: Database.Database): Database.Database {
   return dbInstance ?? dbModule.db;
 }
 
+function writeMeetingSpeakerCandidate(
+  meetingId: string,
+  sourceRevision: string,
+  candidate: SpeakerCandidateEvidence,
+  d: Database.Database,
+): void {
+  d.prepare(
+    `INSERT INTO meeting_speaker_candidates (
+      meeting_id, speaker, source_revision, candidate_digest, embedding_json,
+      clean_duration_sec, clean_segment_count, clean_chunk_count,
+      minimum_chunk_similarity, mean_chunk_similarity,
+      reference_start_sec, reference_end_sec, reference_excerpt,
+      provenance_json, created_at
+    ) VALUES (
+      ?, ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?,
+      ?, ?, ?,
+      ?, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(meeting_id, speaker, source_revision) DO UPDATE SET
+      candidate_digest = excluded.candidate_digest,
+      embedding_json = excluded.embedding_json,
+      clean_duration_sec = excluded.clean_duration_sec,
+      clean_segment_count = excluded.clean_segment_count,
+      clean_chunk_count = excluded.clean_chunk_count,
+      minimum_chunk_similarity = excluded.minimum_chunk_similarity,
+      mean_chunk_similarity = excluded.mean_chunk_similarity,
+      reference_start_sec = excluded.reference_start_sec,
+      reference_end_sec = excluded.reference_end_sec,
+      reference_excerpt = excluded.reference_excerpt,
+      provenance_json = excluded.provenance_json,
+      created_at = CURRENT_TIMESTAMP`,
+  ).run(
+    meetingId,
+    candidate.speaker,
+    sourceRevision,
+    candidate.candidateDigest,
+    JSON.stringify(candidate.embedding),
+    candidate.cleanDurationSeconds,
+    candidate.cleanSegmentCount,
+    candidate.cleanChunkCount,
+    candidate.minimumChunkSimilarity,
+    candidate.meanChunkSimilarity,
+    candidate.referenceInterval.startTime,
+    candidate.referenceInterval.endTime,
+    candidate.referenceInterval.excerpt,
+    JSON.stringify(candidate.provenance),
+  );
+}
+
 export function resolvePersonId(
   personId: string,
   dbInstance?: Database.Database,
@@ -94,41 +145,24 @@ export function saveMeetingSpeakerCandidates(
       'DELETE FROM meeting_speaker_candidates WHERE meeting_id = ?',
     ).run(meetingId);
 
-    const stmt = d.prepare(`
-      INSERT INTO meeting_speaker_candidates (
-        meeting_id, speaker, source_revision, candidate_digest, embedding_json,
-        clean_duration_sec, clean_segment_count, clean_chunk_count,
-        minimum_chunk_similarity, mean_chunk_similarity,
-        reference_start_sec, reference_end_sec, reference_excerpt,
-        provenance_json, created_at
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, ?,
-        ?, ?, ?,
-        ?, CURRENT_TIMESTAMP
-      )
-    `);
-
     for (const cand of candidates) {
-      stmt.run(
-        meetingId,
-        cand.speaker,
-        sourceRevision,
-        cand.candidateDigest,
-        JSON.stringify(cand.embedding),
-        cand.cleanDurationSeconds,
-        cand.cleanSegmentCount,
-        cand.cleanChunkCount,
-        cand.minimumChunkSimilarity,
-        cand.meanChunkSimilarity,
-        cand.referenceInterval.startTime,
-        cand.referenceInterval.endTime,
-        cand.referenceInterval.excerpt,
-        JSON.stringify(cand.provenance),
-      );
+      writeMeetingSpeakerCandidate(meetingId, sourceRevision, cand, d);
     }
   })();
+}
+
+export function saveMeetingSpeakerCandidate(
+  meetingId: string,
+  sourceRevision: string,
+  candidate: SpeakerCandidateEvidence,
+  dbInstance?: Database.Database,
+): void {
+  writeMeetingSpeakerCandidate(
+    meetingId,
+    sourceRevision,
+    candidate,
+    getDb(dbInstance),
+  );
 }
 
 export function getMeetingSpeakerCandidates(

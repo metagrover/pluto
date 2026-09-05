@@ -199,6 +199,41 @@ describe('speakerVoiceStore & candidate database operations', () => {
     ]);
   });
 
+  it('upserts one reviewed candidate without removing another speaker', async () => {
+    const {
+      getMeetingSpeakerCandidates,
+      saveMeetingSpeakerCandidate,
+      saveMeetingSpeakerCandidates,
+    } = await import('../../electron/speakerVoiceStore');
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    const candidate2: SpeakerCandidateEvidence = {
+      ...dummyCandidate,
+      speaker: 'Remote Speaker 2',
+      nativeCluster: 'S2',
+      candidateDigest: 'd'.repeat(64),
+    };
+    saveMeetingSpeakerCandidates(
+      'm1',
+      'gen-1',
+      [dummyCandidate, candidate2],
+      db,
+    );
+
+    saveMeetingSpeakerCandidate(
+      'm1',
+      'gen-1',
+      { ...dummyCandidate, candidateDigest: 'e'.repeat(64) },
+      db,
+    );
+
+    const candidates = getMeetingSpeakerCandidates('m1', db);
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0].candidateDigest).toBe('e'.repeat(64));
+    expect(candidates[1].candidateDigest).toBe('d'.repeat(64));
+  });
+
   it('cascades deletion of meeting to wipe all candidate vectors permanently', async () => {
     const { saveMeetingSpeakerCandidates, getMeetingSpeakerCandidates } =
       await import('../../electron/speakerVoiceStore');

@@ -51,6 +51,14 @@ describe('speaker voice IPC handlers', () => {
       name: 'Robin',
       dedupe_by_name: false,
     });
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Remote Speaker 1',
+      personId,
+      individual: true,
+      source: 'user',
+      sourceRevision,
+      evidence: [],
+    });
   });
 
   const dummyCandidate: SpeakerCandidateEvidence = {
@@ -191,6 +199,39 @@ describe('speaker voice IPC handlers', () => {
     );
   });
 
+  it('advertises reviewed-sample enrollment without a stored candidate', async () => {
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        isFeatureFlagEnabled: () => false,
+        fileExists: () => true,
+        getMeeting: () => ({
+          id: meetingId,
+          system_audio_path: '/approved/system.wav',
+          transcript_json: JSON.stringify([
+            {
+              speaker: 'Remote Speaker 1',
+              text: 'First reviewed sample',
+              start: 1,
+              end: 6,
+            },
+            {
+              speaker: 'Remote Speaker 1',
+              text: 'Second reviewed sample',
+              start: 10,
+              end: 14,
+            },
+          ]),
+        }),
+      },
+    )) as { enrollmentAvailability: Record<string, boolean> };
+
+    expect(result.enrollmentAvailability).toEqual({
+      'Remote Speaker 1': true,
+    });
+  });
+
   it('enrolls with the exact candidate revision returned by discovery', async () => {
     saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
 
@@ -225,6 +266,76 @@ describe('speaker voice IPC handlers', () => {
     expect(profiles).toEqual([
       expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
     ]);
+  });
+
+  it('builds an enrollment candidate from reviewed samples when finalization has none', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
+      meetingId,
+      speaker: 'Remote Speaker 1',
+    });
+    expect(
+      db.db
+        .prepare(
+          'SELECT candidate_digest FROM meeting_speaker_candidates WHERE meeting_id = ?',
+        )
+        .get(meetingId),
+    ).toEqual({ candidate_digest: dummyCandidate.candidateDigest });
+    const profiles = (
+      (await handleSpeakerVoiceRequest('SPEAKER_VOICE_GET_PROFILES', {})) as {
+        profiles: Array<{ canonicalPersonId: string; sampleCount: number }>;
+      }
+    ).profiles;
+    expect(profiles).toEqual([
+      expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
+    ]);
+  });
+
+  it('requires the confirmed meeting binding to match the enrolled person', async () => {
+    const otherPersonId = `${personId}-other`;
+    db.upsertEntity({
+      id: otherPersonId,
+      type: 'person',
+      name: 'Other Person',
+      dedupe_by_name: false,
+    });
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Remote Speaker 1',
+      personId: otherPersonId,
+      individual: true,
+      source: 'user',
+      sourceRevision,
+      evidence: [],
+    });
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision,
+        speaker: 'Remote Speaker 1',
+        candidateDigest: dummyCandidate.candidateDigest,
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).rejects.toThrow('speaker_enrollment_unconfirmed');
   });
 
   it('returns profiles stripped of raw biometric embeddings', async () => {
