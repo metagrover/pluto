@@ -147,4 +147,66 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(encoded.contains("audioPath"))
         XCTAssertFalse(encoded.contains("embedding"))
     }
+
+    func testEncodesAndDecodesSpeakerClusterEvidence() throws {
+        let embedding = [Float](repeating: 0.1, count: 256)
+        let clusterEvidence = [
+            SpeakerClusterEvidence(
+                cluster: "S1",
+                embedding: embedding,
+                cleanChunkCount: 3,
+                cleanSegmentCount: 2,
+                cleanDurationSeconds: 4.5,
+                minimumChunkSimilarity: 0.82,
+                meanChunkSimilarity: 0.88
+            )
+        ]
+        let response = RuntimeResponse.speakerEvidence(
+            id: "speaker-2",
+            output: SpeakerEvidenceOutput(
+                turns: [
+                    SpeakerEvidenceTurn(startTime: 0, endTime: 2.0, cluster: "S1")
+                ],
+                energyWindows: [
+                    SpeakerEnergyWindow(
+                        startTime: 0,
+                        endTime: 0.1,
+                        micRms: 0.01,
+                        systemRms: 0.2
+                    )
+                ],
+                provenance: SpeakerEvidenceProvenance(
+                    modelIdentifier: "offline-diarizer",
+                    modelRevision: String(repeating: "a", count: 40),
+                    artifactDigest: String(repeating: "b", count: 64),
+                    runtimeVersion: "fluidaudio-0.15.5",
+                    profileAlgorithmVersion: "v1"
+                ),
+                timings: SpeakerEvidenceTimings(
+                    diarizationMs: 15,
+                    energyAnalysisMs: 3,
+                    totalMs: 18
+                ),
+                windowSeconds: 0.1,
+                clusterEvidence: clusterEvidence
+            )
+        )
+
+        let data = try JSONEncoder().encode(response)
+        let decoded = try JSONDecoder().decode(RuntimeResponse.self, from: data)
+        let evidence = try XCTUnwrap(decoded.result?.speakerEvidence?.clusterEvidence)
+
+        XCTAssertEqual(evidence.count, 1)
+        XCTAssertEqual(evidence[0].cluster, "S1")
+        XCTAssertEqual(evidence[0].embedding.count, 256)
+        XCTAssertEqual(evidence[0].cleanChunkCount, 3)
+        XCTAssertEqual(evidence[0].cleanSegmentCount, 2)
+        XCTAssertEqual(evidence[0].cleanDurationSeconds, 4.5, accuracy: 1e-4)
+        XCTAssertEqual(evidence[0].minimumChunkSimilarity, 0.82, accuracy: 1e-4)
+        XCTAssertEqual(evidence[0].meanChunkSimilarity, 0.88, accuracy: 1e-4)
+        XCTAssertEqual(
+            decoded.result?.speakerEvidence?.provenance.profileAlgorithmVersion,
+            "v1"
+        )
+    }
 }

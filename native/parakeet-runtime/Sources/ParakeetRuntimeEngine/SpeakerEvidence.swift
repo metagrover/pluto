@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 @preconcurrency import FluidAudio
 import Foundation
@@ -7,8 +8,18 @@ import ParakeetRuntimeCore
 // loaded Core ML models as read-only after initialization.
 extension OfflineDiarizerManager: @retroactive @unchecked Sendable {}
 
+public struct OfflineDiarizationResult: Sendable {
+    public let turns: [SpeakerEvidenceTurn]
+    public let chunkEmbeddings: [ChunkEmbedding]
+
+    public init(turns: [SpeakerEvidenceTurn], chunkEmbeddings: [ChunkEmbedding] = []) {
+        self.turns = turns
+        self.chunkEmbeddings = chunkEmbeddings
+    }
+}
+
 public protocol OfflineSpeakerDiarizing: Sendable {
-    func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn]
+    func diarize(audioURL: URL) async throws -> OfflineDiarizationResult
 }
 
 public protocol SpeakerEvidenceDriving: Sendable {
@@ -23,6 +34,169 @@ func isExpectedDiarizationSilence(_ error: Error) -> Bool {
     guard let error = error as? OfflineDiarizationError else { return false }
     if case .noSpeechDetected = error { return true }
     return false
+}
+
+struct SpeakerClusterEvidenceAggregator {
+    static let micActiveRmsThreshold = 0.012
+    static let minimumSegmentDuration = 1.0
+    static let embeddingDimension = 256
+    static let maxClusters = 64
+
+    static func buildClusterEvidence(
+        turns: [SpeakerEvidenceTurn],
+        windows: [SpeakerEnergyWindow],
+        rawChunks: [ChunkEmbedding]
+    ) -> [SpeakerClusterEvidence] {
+        let clusters = Array(Set(turns.map(\.cluster))).sorted()
+        var results: [SpeakerClusterEvidence] = []
+
+        for cluster in clusters {
+            let clusterTurns = turns.filter { $0.cluster == cluster }
+            guard !clusterTurns.isEmpty else { continue }
+
+            // Dirty intervals:
+            // 1. Cross-speaker overlap (turns from other clusters)
+            let otherTurns = turns.filter { $0.cluster != cluster }
+            var dirtyIntervals: [(start: Double, end: Double)] = otherTurns.map { ($0.startTime, $0.endTime) }
+
+            // 2. Active mic speech
+            for window in windows where window.micRms >= micActiveRmsThreshold {
+                dirtyIntervals.append((window.startTime, window.endTime))
+            }
+
+            // Merge dirty intervals
+            let mergedDirty = mergeIntervals(dirtyIntervals)
+
+            // Extract clean segments by subtracting mergedDirty from clusterTurns
+            var cleanSegments: [(start: Double, end: Double)] = []
+            for turn in clusterTurns {
+                let segments = subtractIntervals(interval: (turn.startTime, turn.endTime), excluding: mergedDirty)
+                cleanSegments.append(contentsOf: segments)
+            }
+
+            // Filter segments >= 1.0s
+            let acceptedSegments = cleanSegments.filter { ($0.end - $0.start) >= (minimumSegmentDuration - 1e-4) }
+            guard !acceptedSegments.isEmpty else { continue }
+
+            let cleanDurationSeconds = acceptedSegments.reduce(0.0) { $0 + ($1.end - $1.start) }
+            let cleanSegmentCount = acceptedSegments.count
+
+            // Filter chunks time-aligned to accepted segments
+            let clusterChunks = rawChunks.filter { $0.speakerId == cluster }
+            var acceptedUnitVectors: [[Float]] = []
+
+            for chunk in clusterChunks {
+                guard chunk.endTimeSeconds > chunk.startTimeSeconds else { continue }
+                let fallsInSegment = acceptedSegments.contains { segment in
+                    chunk.startTimeSeconds >= segment.start - 0.05 && chunk.endTimeSeconds <= segment.end + 0.05
+                }
+                guard fallsInSegment else { continue }
+
+                // Validate vector
+                guard chunk.embedding256.count == embeddingDimension else { continue }
+                guard chunk.embedding256.allSatisfy({ $0.isFinite }) else { continue }
+
+                var sumSquares: Float = 0
+                vDSP_svesq(chunk.embedding256, 1, &sumSquares, vDSP_Length(embeddingDimension))
+                let norm = sqrt(sumSquares)
+                guard norm.isFinite, norm > 1e-6 else { continue }
+
+                var normalized = [Float](repeating: 0, count: embeddingDimension)
+                var scale = 1.0 / norm
+                vDSP_vsmul(chunk.embedding256, 1, &scale, &normalized, 1, vDSP_Length(embeddingDimension))
+                acceptedUnitVectors.append(normalized)
+            }
+
+            guard !acceptedUnitVectors.isEmpty else { continue }
+            let cleanChunkCount = acceptedUnitVectors.count
+
+            // Compute centroid
+            var centroid = [Float](repeating: 0, count: embeddingDimension)
+            for vec in acceptedUnitVectors {
+                vDSP_vadd(centroid, 1, vec, 1, &centroid, 1, vDSP_Length(embeddingDimension))
+            }
+            var countScale = 1.0 / Float(cleanChunkCount)
+            vDSP_vsmul(centroid, 1, &countScale, &centroid, 1, vDSP_Length(embeddingDimension))
+
+            var centroidSumSquares: Float = 0
+            vDSP_svesq(centroid, 1, &centroidSumSquares, vDSP_Length(embeddingDimension))
+            let centroidNorm = sqrt(centroidSumSquares)
+            guard centroidNorm.isFinite, centroidNorm > 1e-6 else { continue }
+
+            var unitCentroid = [Float](repeating: 0, count: embeddingDimension)
+            var unitScale = 1.0 / centroidNorm
+            vDSP_vsmul(centroid, 1, &unitScale, &unitCentroid, 1, vDSP_Length(embeddingDimension))
+
+            // Compute similarities of each chunk to the unit centroid
+            var similarities: [Double] = []
+            for vec in acceptedUnitVectors {
+                var dot: Float = 0
+                vDSP_dotpr(vec, 1, unitCentroid, 1, &dot, vDSP_Length(embeddingDimension))
+                similarities.append(Double(dot))
+            }
+
+            let minSimilarity = similarities.min() ?? 1.0
+            let meanSimilarity = similarities.reduce(0.0, +) / Double(similarities.count)
+
+            results.append(
+                SpeakerClusterEvidence(
+                    cluster: cluster,
+                    embedding: unitCentroid,
+                    cleanChunkCount: cleanChunkCount,
+                    cleanSegmentCount: cleanSegmentCount,
+                    cleanDurationSeconds: cleanDurationSeconds,
+                    minimumChunkSimilarity: minSimilarity,
+                    meanChunkSimilarity: meanSimilarity
+                )
+            )
+
+            if results.count >= maxClusters { break }
+        }
+
+        return results
+    }
+
+    private static func mergeIntervals(_ intervals: [(start: Double, end: Double)]) -> [(start: Double, end: Double)] {
+        let valid = intervals.filter { $0.end > $0.start }.sorted { $0.start < $1.start }
+        guard let first = valid.first else { return [] }
+        var merged: [(start: Double, end: Double)] = [first]
+
+        for interval in valid.dropFirst() {
+            var last = merged.removeLast()
+            if interval.start <= last.end {
+                last.end = max(last.end, interval.end)
+                merged.append(last)
+            } else {
+                merged.append(last)
+                merged.append(interval)
+            }
+        }
+        return merged
+    }
+
+    private static func subtractIntervals(
+        interval: (start: Double, end: Double),
+        excluding: [(start: Double, end: Double)]
+    ) -> [(start: Double, end: Double)] {
+        guard interval.end > interval.start else { return [] }
+        var current = interval.start
+        var result: [(start: Double, end: Double)] = []
+
+        for dirty in excluding {
+            if dirty.end <= current { continue }
+            if dirty.start >= interval.end { break }
+            if dirty.start > current {
+                result.append((current, min(dirty.start, interval.end)))
+            }
+            current = max(current, dirty.end)
+            if current >= interval.end { break }
+        }
+
+        if current < interval.end {
+            result.append((current, interval.end))
+        }
+        return result
+    }
 }
 
 public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
@@ -63,9 +237,20 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
         // Only exact digital silence skips inference; even very quiet audio
         // still receives the normal model pass.
         let systemIsSilent = windows.allSatisfy { $0.systemRms == 0 }
-        let turns = systemIsSilent ? [] : try await diarizer.diarize(audioURL: systemURL)
+        let diarizationResult = systemIsSilent
+            ? OfflineDiarizationResult(turns: [], chunkEmbeddings: [])
+            : try await diarizer.diarize(audioURL: systemURL)
+        let turns = diarizationResult.turns
         let diarizationMs = systemIsSilent ? 0 : elapsedMilliseconds(since: diarizationStart)
         try Task.checkCancellation()
+
+        let clusterEvidence: [SpeakerClusterEvidence] = systemIsSilent
+            ? []
+            : SpeakerClusterEvidenceAggregator.buildClusterEvidence(
+                turns: turns,
+                windows: windows,
+                rawChunks: diarizationResult.chunkEmbeddings
+            )
 
         return SpeakerEvidenceOutput(
             turns: turns,
@@ -81,7 +266,8 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
                 energyAnalysisMs: energyMs,
                 totalMs: elapsedMilliseconds(since: totalStart)
             ),
-            windowSeconds: 0.1
+            windowSeconds: 0.1,
+            clusterEvidence: clusterEvidence
         )
     }
 
@@ -101,6 +287,7 @@ func makeProductionOfflineDiarizerConfig() -> OfflineDiarizerConfig {
     // a speaker count or change VBx refinement and overlap handling.
     let referenceEuclideanDistance = 0.6
     config.clustering.threshold = 1 - referenceEuclideanDistance * referenceEuclideanDistance / 2
+    config.exposeChunkEmbeddings = true
     return config
 }
 
@@ -120,7 +307,7 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
         self.manager = manager ?? OfflineDiarizerManager(config: makeProductionOfflineDiarizerConfig())
     }
 
-    public func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn] {
+    public func diarize(audioURL: URL) async throws -> OfflineDiarizationResult {
         do {
             if !prepared {
                 ModelRegistry.setPinnedRevision(manifest.revision, for: manifest.repository)
@@ -134,7 +321,7 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
             do {
                 result = try await manager.process(audioURL)
             } catch where isExpectedDiarizationSilence(error) {
-                return []
+                return OfflineDiarizationResult(turns: [], chunkEmbeddings: [])
             }
             try Task.checkCancellation()
             let turns = result.segments.compactMap { segment -> SpeakerEvidenceTurn? in
@@ -149,11 +336,15 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
                     cluster: segment.speakerId
                 )
             }
-            return turns.sorted { left, right in
+            let sortedTurns = turns.sorted { left, right in
                 left.startTime == right.startTime
                     ? left.endTime < right.endTime
                     : left.startTime < right.startTime
             }
+            return OfflineDiarizationResult(
+                turns: sortedTurns,
+                chunkEmbeddings: result.chunkEmbeddings ?? []
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch let failure as RuntimeFailure {
