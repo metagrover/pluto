@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import type Database from 'better-sqlite3';
 import type {
   SpeakerCandidateEvidence,
   SpeakerCandidateProvenance,
@@ -51,11 +51,10 @@ export interface SpeakerVoiceRejection {
   createdAt: string;
 }
 
+import * as dbModule from './db';
+
 function getDb(dbInstance?: Database.Database): Database.Database {
-  if (dbInstance) return dbInstance;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const dbModule = require('./db');
-  return dbModule.db;
+  return dbInstance ?? dbModule.db;
 }
 
 export function resolvePersonId(
@@ -86,9 +85,9 @@ export function saveMeetingSpeakerCandidates(
 ): void {
   const d = getDb(dbInstance);
   d.transaction(() => {
-    d.prepare('DELETE FROM meeting_speaker_candidates WHERE meeting_id = ?').run(
-      meetingId,
-    );
+    d.prepare(
+      'DELETE FROM meeting_speaker_candidates WHERE meeting_id = ?',
+    ).run(meetingId);
 
     const stmt = d.prepare(`
       INSERT INTO meeting_speaker_candidates (
@@ -157,7 +156,9 @@ export function getMeetingSpeakerCandidates(
   }>;
 
   return rows.map((r) => {
-    const provenance = JSON.parse(r.provenance_json) as SpeakerCandidateProvenance;
+    const provenance = JSON.parse(
+      r.provenance_json,
+    ) as SpeakerCandidateProvenance;
     return {
       speaker: r.speaker,
       nativeCluster: r.speaker,

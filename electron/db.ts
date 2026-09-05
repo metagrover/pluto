@@ -13,6 +13,7 @@ import {
   finishFinalTranscriptionLease,
   readFinalTranscriptionLease,
 } from '../src/services/finalTranscription/finalTranscriptionLease';
+import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import {
   type TranscriptValidationRetryFailure,
   type TranscriptValidationRetryLease,
@@ -135,7 +136,6 @@ import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
-import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 
 const dbLog = createLogger('DB');
@@ -146,7 +146,7 @@ const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
-const db = new Database(dbPath);
+export const db = new Database(dbPath);
 
 type TableInfoColumn = {
   name: string;
