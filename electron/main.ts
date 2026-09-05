@@ -65,6 +65,7 @@ import {
 } from './incrementalMeetingNotesCoordinator';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import { createLogger } from './logger';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
@@ -98,6 +99,12 @@ import {
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
+
+const plutoLog = createLogger('Pluto');
+const captureLog = createLogger('Capture');
+const audioCapLog = createLogger('AudioCap');
+const recorderLog = createLogger('Recorder');
+const llmLog = createLogger('LLM');
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(resolveUnpackedExecutablePath(ffmpegStatic));
@@ -293,7 +300,7 @@ function createWindow() {
     win?.webContents.send('main-process-message', new Date().toLocaleString());
   });
   win.webContents.on('will-prevent-unload', () => {
-    console.warn('[CaptureLease] navigation prevented: capture_active');
+    captureLog.warn('Navigation prevented: capture_active');
   });
   win.webContents.on('before-input-event', notifyRendererActivity);
   win.on('focus', notifyForegroundActivity);
@@ -734,8 +741,8 @@ function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
   knowledgeSynthesisPause.acquire('transcription');
   if (activeTranscriptionCount === 1) {
-    console.log(
-      '[Pluto] Pausing queued knowledge-doc synthesis during transcription',
+    plutoLog.info(
+      'Pausing queued knowledge-doc synthesis during transcription',
     );
   }
 }
@@ -747,8 +754,8 @@ function endTranscriptionWork() {
     knowledgeSynthesisPause.release('transcription');
   }
   if (activeTranscriptionCount === 0) {
-    console.log(
-      '[Pluto] Resuming queued knowledge-doc synthesis after transcription',
+    plutoLog.info(
+      'Resuming queued knowledge-doc synthesis after transcription',
     );
   }
 }
@@ -784,7 +791,7 @@ function clearAbortControllerForMeeting(meetingId: string) {
 function abortMeetingTasks(meetingId: string) {
   const controller = activeMeetingTasks.get(meetingId);
   if (controller) {
-    console.log(`[Pluto] Aborting background tasks for meeting: ${meetingId}`);
+    plutoLog.info(`Aborting background tasks for meeting: ${meetingId}`);
     controller.abort();
     activeMeetingTasks.delete(meetingId);
   }
@@ -815,7 +822,7 @@ app.on('before-quit', (event) => {
     dreamingEntityQueue = null;
     stopIdentityReconciliation?.();
     calendarService.stop();
-    console.log('[Pluto] Shutting down...');
+    plutoLog.info('Shutting down...');
     parakeetFinalClient?.close();
     parakeetFinalClient = null;
     await parakeetEouCoordinator?.fail('parakeet_app_quit');
@@ -826,7 +833,7 @@ app.on('before-quit', (event) => {
     parakeetRuntimeHost = null;
   })()
     .catch((error) => {
-      console.error('[Pluto] Shutdown cleanup failed:', error);
+      plutoLog.error('Shutdown cleanup failed:', error);
     })
     .finally(() => {
       shutdownComplete = true;
@@ -1245,7 +1252,7 @@ app.whenReady().then(async () => {
       if (released) {
         incrementalNotesCoordinator.cancel(released.meetingId);
         knowledgeSynthesisPause.release('capture');
-        console.warn('[CaptureLease] released: owner_destroyed');
+        captureLog.warn('Released: owner_destroyed');
       }
     });
   };
@@ -1455,10 +1462,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
-    console.log('[Pluto] Request to start native recorder...');
+    recorderLog.info('Request to start native recorder...');
 
     if (recorderProcess) {
-      console.log('[Pluto] Recorder already running, killing old instance.');
+      recorderLog.info('Recorder already running, killing old instance.');
       recorderProcess.kill();
       recorderProcess = null;
     }
@@ -1468,11 +1475,11 @@ app.whenReady().then(async () => {
       : path.join(__dirname, '..', 'resources', 'bin', 'recorder');
 
     if (!fs.existsSync(recorderPath)) {
-      console.error('[Pluto] Recorder binary not found at:', recorderPath);
+      recorderLog.error('Recorder binary not found at:', recorderPath);
       throw new Error('Recorder binary not found');
     }
 
-    console.log('[Pluto] Spawning recorder:', recorderPath);
+    recorderLog.info('Spawning recorder:', recorderPath);
 
     // Spawn without arguments to stream to stdout (default)
     // Pass exclude bundle ID to prevent echo
@@ -1485,9 +1492,9 @@ app.whenReady().then(async () => {
         try {
           const json = JSON.parse(text);
           if (json.status === 'started') {
-            console.log('[Pluto] Native recorder started successfully.');
+            recorderLog.info('Native recorder started successfully.');
           } else if (json.error) {
-            console.error('[Pluto] Native recorder error:', json.error);
+            recorderLog.error('Native recorder error:', json.error);
           }
           return; // Don't forward JSON as audio
         } catch (e) {
@@ -1503,11 +1510,11 @@ app.whenReady().then(async () => {
     });
 
     recorderProcess.stderr?.on('data', (data: Buffer | string) => {
-      console.error(`[Pluto] Recorder stderr: ${data}`);
+      recorderLog.warn(`Recorder stderr: ${data}`);
     });
 
     recorderProcess.on('close', (code: number | null) => {
-      console.log(`[Pluto] Recorder exited with code ${code}`);
+      recorderLog.info(`Recorder exited with code ${code}`);
       recorderProcess = null;
     });
 
@@ -1515,7 +1522,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('AUDIO_RECORDER_STOP', async () => {
-    console.log('[Pluto] Request to stop native recorder...');
+    recorderLog.info('Request to stop native recorder...');
     if (recorderProcess) {
       recorderProcess.kill();
       recorderProcess = null;
@@ -1595,7 +1602,7 @@ app.whenReady().then(async () => {
       } finally {
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
-          console.warn('[CaptureLease] released: capture_start_aborted');
+          captureLog.warn('Released: capture_start_aborted');
         }
       }
       return true;
@@ -1758,7 +1765,7 @@ app.whenReady().then(async () => {
     });
     await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
-    console.log('[CaptureLease] transitioned: capture_stopped');
+    captureLog.info('Transitioned: capture_stopped');
     return manifest;
   });
 
@@ -1780,13 +1787,13 @@ app.whenReady().then(async () => {
       } catch (error) {
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
-          console.warn('[CaptureLease] released: seal_failed_after_stop');
+          captureLog.warn('Released: seal_failed_after_stop');
         }
         throw error;
       }
       if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
         knowledgeSynthesisPause.release('capture');
-        console.log('[CaptureLease] released: capture_sealed');
+        captureLog.info('Released: capture_sealed');
       }
       return manifest;
     },
@@ -1825,7 +1832,7 @@ app.whenReady().then(async () => {
 
     const execPath = getAudioCapExecPath();
     if (!fs.existsSync(execPath)) {
-      console.error('[Pluto] AudioCap binary not found at:', execPath);
+      audioCapLog.error('AudioCap binary not found at:', execPath);
       return false;
     }
 
@@ -1943,7 +1950,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('NATIVE_AUDIO_START', async (event) => {
     if (!captureSessionLease.recordingForOwner(event.sender.id)) {
-      console.warn('[CaptureLease] native audio rejected: owner_missing');
+      captureLog.warn('Native audio rejected: owner_missing');
       throw new Error('capture_session_not_owned');
     }
     if (nativeAudioProcess) {
@@ -1958,7 +1965,7 @@ app.whenReady().then(async () => {
     // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
     const execPath = getAudioCapExecPath();
 
-    console.log('[Pluto] Spawning AudioCap:', execPath);
+    audioCapLog.info('Spawning AudioCap:', execPath);
 
     try {
       if (!fs.existsSync(execPath)) {
@@ -1984,7 +1991,8 @@ app.whenReady().then(async () => {
       });
 
       spawnedProcess.stderr?.on('data', (data) => {
-        console.error('[Pluto-AudioCap]', data.toString());
+        const line = data.toString().trim();
+        if (line) audioCapLog.debug(line);
       });
 
       const captureFailed = () => {
@@ -1998,13 +2006,13 @@ app.whenReady().then(async () => {
       };
       spawnedProcess.on('error', captureFailed);
       spawnedProcess.on('close', (code) => {
-        console.log('[Pluto] AudioCap exited with code', code);
+        audioCapLog.info('AudioCap exited with code', code);
         captureFailed();
       });
 
       const nativeStarted = await pcmReady;
       if (!nativeStarted) {
-        console.error('[Pluto] AudioCap failed to produce PCM');
+        audioCapLog.error('AudioCap failed to produce PCM');
         if (nativeAudioProcess === spawnedProcess) {
           captureFailed();
           spawnedProcess.kill('SIGINT');
@@ -2014,7 +2022,7 @@ app.whenReady().then(async () => {
 
       return nativeAudioProcess === spawnedProcess;
     } catch (e) {
-      console.error('[Pluto] Failed to spawn audiocap:', e);
+      audioCapLog.error('Failed to spawn audiocap:', e);
       nativeAudioProcess = null;
       nativeAudioOwner = null;
       nativeAudioReadiness = null;
@@ -2028,10 +2036,10 @@ app.whenReady().then(async () => {
       nativeAudioOwner &&
       nativeAudioOwner.id !== event.sender.id
     ) {
-      console.warn('[CaptureLease] native audio stop rejected: owner_mismatch');
+      captureLog.warn('Native audio stop rejected: owner_mismatch');
       return false;
     }
-    if (nativeAudioProcess) console.log('[Pluto] Stopping AudioCap...');
+    if (nativeAudioProcess) audioCapLog.info('Stopping AudioCap...');
     stopNativeAudioCapture();
     return true;
   });
@@ -3743,10 +3751,10 @@ app.whenReady().then(async () => {
       if (!transcript || !transcript.trim()) return null;
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      console.log(`[LLM] Using provider: ${provider.name}`);
+      llmLog.info(`Using provider: ${provider.name}`);
       return await provider.extractSpeakerIdentity(transcript);
     } catch (error) {
-      console.error('[LLM] Speaker extraction failed:', error);
+      llmLog.error('Speaker extraction failed:', error);
       return null; // Graceful fallback
     }
   });
@@ -3756,10 +3764,10 @@ app.whenReady().then(async () => {
       if (!transcript || !transcript.trim()) return 'New Meeting';
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      console.log(`[LLM] Generating title with provider: ${provider.name}`);
+      llmLog.info(`Generating title with provider: ${provider.name}`);
       return await provider.generateTitle(transcript);
     } catch (error) {
-      console.error('[LLM] Title generation failed:', error);
+      llmLog.error('Title generation failed:', error);
       return 'Meeting'; // Graceful fallback
     }
   });
@@ -3779,7 +3787,7 @@ app.whenReady().then(async () => {
         const signals = await provider.extractValueSignals(transcript, summary);
         return normalizeValueSignals(signals);
       } catch (error) {
-        console.error('[LLM] Value signal extraction failed:', error);
+        llmLog.error('Value signal extraction failed:', error);
         throw error;
       }
     },
@@ -3820,7 +3828,7 @@ app.whenReady().then(async () => {
           priorityHints: mergedPriorityHints,
         });
       } catch (error) {
-        console.error('[LLM] Entity extraction failed:', error);
+        llmLog.error('Entity extraction failed:', error);
         throw error;
       }
     },
@@ -3843,7 +3851,7 @@ app.whenReady().then(async () => {
     ) => {
       try {
         if (!transcript || !transcript.trim()) {
-          console.log('[LLM] Skipping entity extraction for empty transcript');
+          llmLog.debug('Skipping entity extraction for empty transcript');
           return { created: 0, linked: 0 };
         }
         const settings = await getAllSettings(db);
@@ -3990,7 +3998,7 @@ app.whenReady().then(async () => {
         clearAbortControllerForMeeting(String(meetingId));
         return result;
       } catch (error) {
-        console.error('[LLM] Entity extraction and processing failed:', error);
+        llmLog.error('Entity extraction and processing failed:', error);
         throw error;
       }
     },
@@ -5336,7 +5344,7 @@ app.whenReady().then(async () => {
       recovery.failedRecoveryCount > 0 ||
       recovery.skippedInvalidManifestCount > 0
     ) {
-      console.log('[Pluto] Capture-journal recovery summary:', recovery);
+      plutoLog.info('Capture-journal recovery summary:', recovery);
     }
   } catch (error) {
     console.warn(
