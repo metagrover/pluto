@@ -830,7 +830,8 @@ export const MeetingView = ({
     return summaries;
   }, {});
   const unidentifiedRemoteSpeakers = Object.keys(speakerSummaries).filter(
-    (speaker) => /^Remote Speaker \d+$/u.test(speaker) && !displayNames[speaker],
+    (speaker) =>
+      /^Remote Speaker \d+$/u.test(speaker) && !displayNames[speaker],
   );
   const unidentifiedSpeakerCount = unidentifiedRemoteSpeakers.length;
   const transcriptTurns = buildMeetingTranscriptTurns(
@@ -1520,9 +1521,8 @@ export const MeetingView = ({
                         onClick={
                           isAnonymousSpeaker
                             ? () => {
-                                const remoteMatch = speakerLabel.match(
-                                  /^Speaker (\d+)$/u,
-                                );
+                                const remoteMatch =
+                                  speakerLabel.match(/^Speaker (\d+)$/u);
                                 const canonical = remoteMatch
                                   ? `Remote Speaker ${remoteMatch[1]}`
                                   : null;

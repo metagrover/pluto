@@ -1340,7 +1340,9 @@ describe('MeetingView progressive reveal', () => {
     expect(trigger?.textContent).toContain('2 unidentified speakers');
 
     // Bulky accordion above transcript should be removed
-    expect(container.querySelector('#meeting-speaker-review-toggle')).toBeNull();
+    expect(
+      container.querySelector('#meeting-speaker-review-toggle'),
+    ).toBeNull();
 
     // Clicking header metadata trigger opens the modal
     await act(async () => (trigger as HTMLButtonElement)?.click());
