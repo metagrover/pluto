@@ -791,6 +791,27 @@ export const MeetingView = ({
     speakerDisplayNames.meetingId === String(selectedMeeting.id)
       ? speakerDisplayNames.names
       : {};
+  const rawTranscriptTurns = buildMeetingTranscriptTurns(
+    readableTranscriptSegments,
+  );
+  const speakerSummaries = rawTranscriptTurns.reduce<
+    Record<string, { turnCount: number; excerpt: string }>
+  >((summaries, turn) => {
+    const speaker = String(turn.speaker ?? '');
+    if (!speaker) return summaries;
+    const text = turn.segments
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(' ');
+    const current = summaries[speaker];
+    summaries[speaker] = {
+      turnCount: (current?.turnCount ?? 0) + 1,
+      excerpt:
+        current?.excerpt ??
+        (text.length > 180 ? `${text.slice(0, 179).trimEnd()}…` : text),
+    };
+    return summaries;
+  }, {});
   const transcriptTurns = buildMeetingTranscriptTurns(
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
@@ -1420,6 +1441,8 @@ export const MeetingView = ({
             <MeetingIdentityControls
               meetingId={String(selectedMeeting.id)}
               attendeeNames={calendarAttendeeNames}
+              hasSystemAudio={Boolean(selectedMeeting.system_audio_path)}
+              speakerSummaries={speakerSummaries}
               onDisplayNamesChange={updateSpeakerDisplayNames}
             />
             {hasTranscriptContent ? (

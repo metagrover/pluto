@@ -101,7 +101,7 @@ Expected: failure because the service is missing.
 
 Create `loadSpeakerSample()` with a 10 MiB response cap, two-sample index bound, content-free errors, and `finally` cleanup. Register `GET_MEETING_SPEAKER_SAMPLE` in Electron using the existing FFmpeg configuration. Do not reuse the unrestricted `AUDIO_SLICE_WAV` renderer contract.
 
-- [ ] **Step 4: Add the renderer API and meeting props**
+- [x] **Step 4: Add the renderer API and meeting props**
 
 Add:
 
@@ -193,23 +193,23 @@ Run the focused database and identity tests, then commit.
 - Modify: `src/index.css`
 - Modify: `tests/unit/IdentityControls.dom.test.tsx`
 
-- [ ] **Step 1: Write failing DOM tests**
+- [x] **Step 1: Write failing DOM tests**
 
 Cover `N unidentified speakers · Review`, `Speaker N` rows, excerpts, one-at-a-time playback, alternate sample, invited labels, selection confirmation copy, immediate name projection, object-URL cleanup, unavailable audio, stale revisions, and Undo/clear.
 
-- [ ] **Step 2: Run the DOM test and verify RED**
+- [x] **Step 2: Run the DOM test and verify RED**
 
 Run: `pnpm exec vitest run tests/unit/IdentityControls.dom.test.tsx`
 
-- [ ] **Step 3: Implement the compact review UI**
+- [x] **Step 3: Implement the compact review UI**
 
 Replace the current form-first anonymous-speaker treatment with a progressively disclosed review list. Keep existing correction capability for non-anonymous speakers behind the same section. Load audio only after a user presses Play, build a `Blob` from returned bytes, revoke prior URLs before switching, and stop playback on meeting change/unmount.
 
-- [ ] **Step 4: Implement explicit confirmation and Undo**
+- [x] **Step 4: Implement explicit confirmation and Undo**
 
 Selecting a candidate must stage the choice rather than save immediately. Show the projected display name, affected turn count, and People consequence; confirm through the existing revision-safe binding API. After success, publish display names immediately and expose a bounded Undo action that clears the exact saved binding revision.
 
-- [ ] **Step 5: Verify behavior and commit**
+- [x] **Step 5: Verify behavior and commit**
 
 Run the DOM and meeting presentation tests, inspect the rendered layout in Electron when available, and commit the UI changes.
 
