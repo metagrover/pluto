@@ -2,12 +2,24 @@ import { describe, expect, it } from 'vitest';
 
 import {
   KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+  buildTranscriptionParticipantHints,
   selectTranscriptionVocabulary,
 } from '../../src/utils/transcriptionVocabulary';
 
 const now = Date.parse('2026-08-11T12:00:00.000Z');
 
 describe('selectTranscriptionVocabulary', () => {
+  it('combines manual participants and calendar roster hints without changing either source', () => {
+    const participants = ['Jordan Lee'];
+    const roster = ['Alex Chen', 'jordan lee'];
+    expect(buildTranscriptionParticipantHints(participants, roster)).toEqual([
+      'Jordan Lee',
+      'Alex Chen',
+    ]);
+    expect(participants).toEqual(['Jordan Lee']);
+    expect(roster).toEqual(['Alex Chen', 'jordan lee']);
+  });
+
   it('uses only explicit participants and never global graph candidates', () => {
     const selected = selectTranscriptionVocabulary({
       participants: ['Mira Sol', 'Theo North'],

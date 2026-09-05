@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { CalendarEvent } from '../../electron/calendar/types';
 import { getEligibleCalendarPrompt } from '../../src/utils/calendarPromptDecision';
+import {
+  getCalendarRosterNames,
+  isMatchedActiveCalendarResult,
+} from '../../src/utils/calendarRoster';
 
 const makeEvent = (
   occurrenceKey: string,
@@ -166,5 +170,49 @@ describe('calendar prompt decision', () => {
     });
 
     expect(result?.occurrenceKey).toBe('zoom-call');
+  });
+});
+
+describe('calendar recording roster', () => {
+  it('provides unique named organizer and attendees as roster hints', () => {
+    const event = makeEvent(
+      'planning',
+      '2026-09-04T17:30:00.000Z',
+      '2026-09-04T18:00:00.000Z',
+      {
+        organizer: { name: 'Alex Chen', email: 'alex@example.com' },
+        attendees: [
+          { name: 'Jordan Lee', email: 'jordan@example.com' },
+          { name: 'alex chen', email: 'other@example.com' },
+          { name: null, email: 'unnamed@example.com' },
+        ],
+      },
+    );
+
+    expect(getCalendarRosterNames(event)).toEqual([
+      'Alex Chen',
+      'Jordan Lee',
+      'unnamed@example.com',
+    ]);
+  });
+
+  it('accepts only the matcher matched discriminator', () => {
+    const event = makeEvent(
+      'planning',
+      '2026-09-04T17:30:00.000Z',
+      '2026-09-04T18:00:00.000Z',
+    );
+    expect(
+      isMatchedActiveCalendarResult({
+        match: { kind: 'matched', occurrenceKey: 'planning' },
+        event,
+      }),
+    ).toBe(true);
+    expect(
+      isMatchedActiveCalendarResult({
+        match: { kind: 'match', occurrenceKey: 'planning' },
+        event,
+      }),
+    ).toBe(false);
   });
 });

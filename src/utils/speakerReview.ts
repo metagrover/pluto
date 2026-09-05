@@ -1,7 +1,9 @@
 const REMOTE_SPEAKER_PATTERN = /^Remote Speaker (\d+)$/u;
-const GENERIC_SPEAKER_PATTERN = /^(?:(?:remote|local)\s+)?speaker(?:\s+\d+)?$/iu;
+const GENERIC_SPEAKER_PATTERN =
+  /^(?:(?:remote|local)\s+)?speaker(?:\s+\d+)?$/iu;
 const GENERIC_PARTICIPANT_PATTERN = /^(?:participant|voice)(?:\s+\d+)?$/iu;
-const UNKNOWN_SPEAKER_PATTERN = /^(?:unknown|unidentified)\s+speaker(?:\s+\d+)?$/iu;
+const UNKNOWN_SPEAKER_PATTERN =
+  /^(?:unknown|unidentified)\s+speaker(?:\s+\d+)?$/iu;
 
 const SAMPLE_MIN_SECONDS = 2;
 const SAMPLE_PREFERRED_SECONDS = 5;

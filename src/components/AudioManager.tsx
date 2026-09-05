@@ -72,6 +72,7 @@ import {
 import {
   KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
   type TranscriptionVocabularySelection,
+  buildTranscriptionParticipantHints,
 } from '../utils/transcriptionVocabulary';
 import {
   type CaptureHealth,
@@ -101,6 +102,7 @@ interface AudioManagerProps {
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
+  transcriptionParticipantHints?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
   silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
@@ -208,6 +210,7 @@ export const AudioManager = ({
   userNotes = '',
   userTitle = '',
   participants = [],
+  transcriptionParticipantHints = [],
   transcriptionSettings,
   onStopSessionRef,
   onStartSessionRef,
@@ -694,7 +697,12 @@ export const AudioManager = ({
       try {
         const vocabulary = (await window.ipcRenderer.invoke(
           'GET_TRANSCRIPTION_VOCABULARY',
-          { participants },
+          {
+            participants: buildTranscriptionParticipantHints(
+              participants,
+              transcriptionParticipantHints,
+            ),
+          },
         )) as TranscriptionVocabularySelection;
         const initialPrompt =
           typeof vocabulary?.initialPrompt === 'string' &&

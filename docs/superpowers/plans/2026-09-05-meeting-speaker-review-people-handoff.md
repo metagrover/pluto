@@ -132,15 +132,15 @@ Run the sample service and identity API tests, then commit the new service, regi
 - Modify: `tests/unit/autoStopJournalSeal.test.ts`
 - Modify: `tests/unit/calendarApi.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Prove that calendar-start flows provide attendee names to transcription vocabulary while saved `participants` contain only user-entered participants. Add a regression assertion that the active matcher consumes `kind: 'matched'`, not `kind: 'match'`.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `pnpm exec vitest run tests/unit/calendarMeetingPrompt.test.ts tests/unit/autoStopJournalSeal.test.ts tests/unit/calendarApi.test.ts`
 
-- [ ] **Step 3: Add the roster-hint boundary**
+- [x] **Step 3: Add the roster-hint boundary**
 
 Introduce an `AudioManager` prop:
 
@@ -150,7 +150,7 @@ transcriptionParticipantHints?: string[];
 
 Use the deduplicated union of manual participants and calendar roster names only for `GET_TRANSCRIPTION_VOCABULARY`. Continue persisting only the manual `participants` prop. Stop copying attendees into `meetingParticipants` in `App.tsx`, and correct the matcher result discriminator to `matched`.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run the focused calendar/recording tests and commit the roster semantics change.
 

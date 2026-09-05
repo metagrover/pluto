@@ -85,6 +85,10 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import {
+  getCalendarRosterNames,
+  isMatchedActiveCalendarResult,
+} from './utils/calendarRoster';
 
 import {
   getEntity,
@@ -959,11 +963,7 @@ function App() {
     activeCalendarEventRef.current = event;
     setActiveCalendarEvent(event);
     setMeetingTitle(event.title || 'Meeting');
-    const attendees =
-      (event.attendees
-        ?.map((a) => a.name || a.email)
-        .filter(Boolean) as string[]) ?? [];
-    setMeetingParticipants(attendees);
+    setMeetingParticipants([]);
     setParticipantInput('');
     if (startSessionRef.current) {
       await startSessionRef.current();
@@ -997,11 +997,7 @@ function App() {
 
     if (activeCalendarEventRef.current) {
       setMeetingTitle(activeCalendarEventRef.current.title || 'Meeting');
-      const attendees =
-        (activeCalendarEventRef.current.attendees
-          ?.map((a) => a.name || a.email)
-          .filter(Boolean) as string[]) ?? [];
-      setMeetingParticipants(attendees);
+      setMeetingParticipants([]);
       setParticipantInput('');
       return;
     }
@@ -1009,16 +1005,12 @@ function App() {
     if (calendarAutoNameEnabled) {
       try {
         const result = await matchActiveCalendarEvent();
-        if (result?.match?.kind === 'match' && result.event) {
+        if (isMatchedActiveCalendarResult(result)) {
           const matchedEvent = result.event;
           activeCalendarEventRef.current = matchedEvent;
           setActiveCalendarEvent(matchedEvent);
           setMeetingTitle(matchedEvent.title || 'Meeting');
-          const attendees =
-            (matchedEvent.attendees
-              ?.map((a) => a.name || a.email)
-              .filter(Boolean) as string[]) ?? [];
-          setMeetingParticipants(attendees);
+          setMeetingParticipants([]);
           setParticipantInput('');
           return;
         }
@@ -1066,6 +1058,9 @@ function App() {
           );
         }) ?? null)
       : null);
+  const activeCalendarRosterNames = resolvedActiveCalendarEvent
+    ? getCalendarRosterNames(resolvedActiveCalendarEvent)
+    : [];
   const handleBackHomeFromZen = () => {
     setZenVisible(false);
     setSelectedMeetingId(null);
@@ -1413,6 +1408,7 @@ function App() {
           }}
           userTitle={meetingTitle}
           participants={meetingParticipants}
+          transcriptionParticipantHints={activeCalendarRosterNames}
         />
       </div>
 
