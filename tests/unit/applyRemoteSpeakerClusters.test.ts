@@ -250,4 +250,135 @@ describe('applyRemoteSpeakerClusters', () => {
     expect(result.metadata.fallbackReason).toBe('not_enough_speakers');
     expect(result.segments[0].speaker).toBe('Them');
   });
+  const paddedSpeech = () => ({
+    segments: [
+      {
+        startTime: 0,
+        endTime: 6,
+        speaker: 'Them',
+        text: 'First ending',
+        words: words([
+          ['First', 0, 1.2],
+          ['ending', 1.2, 6],
+        ]),
+      },
+      {
+        startTime: 6,
+        endTime: 10,
+        speaker: 'Them',
+        text: 'Second ending',
+        words: words([
+          ['Second', 6, 7.2],
+          ['ending', 7.2, 10],
+        ]),
+      },
+    ],
+    turns: [
+      { startTime: 0, endTime: 1.8, cluster: 'S1' },
+      { startTime: 6, endTime: 7.8, cluster: 'S2' },
+    ],
+    systemEnergyWindows: [
+      { startTime: 0, endTime: 1.8, systemRms: 0.1 },
+      { startTime: 1.8, endTime: 6, systemRms: 0 },
+      { startTime: 6, endTime: 7.8, systemRms: 0.1 },
+      { startTime: 7.8, endTime: 10, systemRms: 0 },
+    ],
+  });
+
+  it('excludes independently confirmed silence from padded word duration without changing raw timings', () => {
+    const input = paddedSpeech();
+    const before = structuredClone(input);
+    const result = applyRemoteSpeakerClusters(input);
+    expect(result.applied).toBe(true);
+    expect(result.metadata.confidence).toBe(1);
+    expect(result.segments.map((s) => s.speaker)).toEqual([
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+    expect(result.segments.flatMap((s) => s.words)).toEqual(
+      input.segments.flatMap((s) => s.words),
+    );
+    expect(input).toEqual(before);
+  });
+
+  it('counts audible unclustered speech even when it is quiet', () => {
+    const input = paddedSpeech();
+    input.systemEnergyWindows[1].systemRms = 0.000001;
+    input.systemEnergyWindows[3].systemRms = 0.000001;
+    expect(applyRemoteSpeakerClusters(input).metadata.fallbackReason).toBe(
+      'low_coverage',
+    );
+  });
+
+  it.each(['missing', 'gap', 'invalid', 'overlap'] as const)(
+    'does not infer silence from %s energy evidence',
+    (kind) => {
+      const input = paddedSpeech();
+      if (kind === 'missing') input.systemEnergyWindows = [];
+      if (kind === 'gap') input.systemEnergyWindows.splice(1, 1);
+      if (kind === 'invalid')
+        input.systemEnergyWindows[1].systemRms = Number.NaN;
+      if (kind === 'overlap') input.systemEnergyWindows[1].startTime = 0;
+      expect(applyRemoteSpeakerClusters(input).applied).toBe(false);
+    },
+  );
+
+  it('keeps a word spanning two remote speakers anonymous after silence trimming', () => {
+    const input = paddedSpeech();
+    input.segments = [
+      {
+        startTime: 0,
+        endTime: 10,
+        speaker: 'Them',
+        text: 'uncertain',
+        words: words([['uncertain', 0, 10]]),
+      },
+    ];
+    expect(applyRemoteSpeakerClusters(input).applied).toBe(false);
+  });
+
+  it('allows one frame of boundary disagreement only with independent non-silent support', () => {
+    const input = paddedSpeech();
+    input.segments[0].words = words([
+      ['A', 0, 0.12],
+      ['first', 0.12, 1.2],
+      ['ending', 1.2, 6],
+    ]);
+    input.segments[0].text = 'A first ending';
+    input.turns[0].startTime = 0.13;
+    const result = applyRemoteSpeakerClusters(input);
+    expect(result.applied).toBe(true);
+    expect(result.segments[0].text).toBe('A first ending');
+    expect(result.segments[0].speaker).toBe('Remote Speaker 1');
+  });
+  it('does not double count intersecting boundary padding from the same speaker', () => {
+    const result = applyRemoteSpeakerClusters({
+      segments: [
+        { startTime: 0, endTime: 0.7, speaker: 'Them', text: 'uncertain' },
+        { startTime: 1, endTime: 2, speaker: 'Them', text: 'first speaker' },
+        { startTime: 3, endTime: 4, speaker: 'Them', text: 'second speaker' },
+      ],
+      turns: [
+        { startTime: 0, endTime: 0.1, cluster: 'S1' },
+        { startTime: 0.11, endTime: 0.2, cluster: 'S1' },
+        { startTime: 1, endTime: 2, cluster: 'S1' },
+        { startTime: 3, endTime: 4, cluster: 'S2' },
+      ],
+      systemEnergyWindows: [{ startTime: 0, endTime: 4, systemRms: 0.1 }],
+    });
+    // Expanded S1 turns cover only 0.3 of the 0.7 second item, not 0.49.
+    expect(result.applied).toBe(false);
+    expect(result.metadata.fallbackReason).toBe('low_coverage');
+    expect(result.metadata.confidence).toBe(0.741);
+  });
+
+  it('does not assign a speaker to words contradicted by entirely silent measured audio', () => {
+    const input = paddedSpeech();
+    input.systemEnergyWindows.forEach((window) => {
+      window.systemRms = 0;
+    });
+    input.turns[0].endTime = 6;
+    input.turns[1].endTime = 10;
+    expect(applyRemoteSpeakerClusters(input).applied).toBe(false);
+  });
 });

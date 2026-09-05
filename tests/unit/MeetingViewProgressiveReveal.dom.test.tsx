@@ -153,6 +153,42 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
+  it('shows transcript readiness and unresolved remote labeling as separate outcomes', async () => {
+    const meeting = {
+      ...analyzedMeeting,
+      transcript_json: JSON.stringify({
+        ...JSON.parse(analyzedMeeting.transcript_json!),
+        speakerAttribution: {
+          remoteDiarization: {
+            attempted: true,
+            input: 'system_audio',
+            applied: false,
+            clusterCount: 1,
+            labeledSegmentCount: 0,
+            confidence: 0,
+            fallbackReason: 'not_enough_speakers',
+          },
+        },
+      }),
+    };
+    await act(async () => renderMeeting(meeting, true));
+    const status = container.querySelector(
+      '[data-meeting-remote-speaker-status]',
+    );
+    expect(status?.textContent).toContain('Transcript ready');
+    expect(status?.textContent).toContain('Remote speakers not separated');
+    expect(container.textContent).toContain('The transcript is ready first.');
+    expect(container.textContent).not.toContain(
+      'Participant audio could not be verified',
+    );
+    expect(status?.querySelector('button')).toBeNull();
+
+    await act(async () => renderMeeting(analyzedMeeting, true));
+    expect(
+      container.querySelector('[data-meeting-remote-speaker-status]'),
+    ).toBeNull();
+  });
+
   it('saves a title without sending a stale notes or edit snapshot', async () => {
     const fetchMeetings = vi.fn();
     await act(async () =>

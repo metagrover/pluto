@@ -1834,6 +1834,34 @@ export const updateCaptureJournalActivityEvidence = async (
     updateCaptureJournalActivityEvidenceUnlocked(rootDir, args, durability),
   );
 
+export const markCaptureJournalSourceFailed = async (
+  rootDir: string,
+  args: V3MutationIdentity & { source: CaptureJournalSource },
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifestV3> =>
+  serializeJournalMutation(rootDir, args.meetingId, async () => {
+    const manifest = requireV3Mutation(
+      await readCaptureJournalManifest(rootDir, args.meetingId),
+      args,
+    );
+    if (args.source !== 'mic' && args.source !== 'system') {
+      throw new Error('Invalid capture source');
+    }
+    if (manifest.sourceAvailability[args.source] === 'failed_during_capture') {
+      return manifest;
+    }
+    const next: CaptureJournalManifestV3 = {
+      ...manifest,
+      revision: manifest.revision + 1,
+      sourceAvailability: {
+        ...manifest.sourceAvailability,
+        [args.source]: 'failed_during_capture',
+      },
+    };
+    await writeManifest(rootDir, next, durability);
+    return next;
+  });
+
 export const stopCaptureJournal = async (
   rootDir: string,
   args: StopCaptureJournalArgs,

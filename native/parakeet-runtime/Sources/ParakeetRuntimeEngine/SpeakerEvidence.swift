@@ -92,6 +92,18 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
     }
 }
 
+func makeProductionOfflineDiarizerConfig() -> OfflineDiarizerConfig {
+    var config = OfflineDiarizerConfig.default
+    // Community-1 cuts centroid linkage at Euclidean distance 0.6 on unit
+    // vectors. This FluidAudio revision instead consumes cosine similarity
+    // despite its config documentation describing a Euclidean threshold.
+    // Translate the reference radius at the dependency boundary; do not force
+    // a speaker count or change VBx refinement and overlap handling.
+    let referenceEuclideanDistance = 0.6
+    config.clustering.threshold = 1 - referenceEuclideanDistance * referenceEuclideanDistance / 2
+    return config
+}
+
 public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
     private let modelsRoot: URL
     private let manifest: DiarizationModelManifest
@@ -101,11 +113,11 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
     public init(
         modelsRoot: URL,
         manifest: DiarizationModelManifest = ProductionDiarizationManifest.current,
-        manager: OfflineDiarizerManager = OfflineDiarizerManager()
+        manager: OfflineDiarizerManager? = nil
     ) {
         self.modelsRoot = modelsRoot.standardizedFileURL
         self.manifest = manifest
-        self.manager = manager
+        self.manager = manager ?? OfflineDiarizerManager(config: makeProductionOfflineDiarizerConfig())
     }
 
     public func diarize(audioURL: URL) async throws -> [SpeakerEvidenceTurn] {

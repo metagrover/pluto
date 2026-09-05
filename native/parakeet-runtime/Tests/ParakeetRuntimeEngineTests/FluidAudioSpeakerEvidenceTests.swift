@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@preconcurrency import FluidAudio
+@preconcurrency @testable import FluidAudio
 @testable import ParakeetRuntimeCore
 @testable import ParakeetRuntimeEngine
 
@@ -36,6 +36,31 @@ private struct CancellingDiarizer: OfflineSpeakerDiarizing {
 }
 
 final class FluidAudioSpeakerEvidenceTests: XCTestCase {
+    func testProductionClusteringPreservesReferenceEuclideanBoundary() {
+        // Unit vectors separated by distance 0.7 must remain separate under
+        // Community-1's 0.6 Euclidean AHC radius. FluidAudio consumes cosine
+        // similarity, so passing 0.6 directly accidentally admits this pair.
+        let cosine = 1.0 - 0.7 * 0.7 / 2.0
+        let clusters = AHCClustering().cluster(
+            embeddingFeatures: [[1, 0], [cosine, sqrt(1 - cosine * cosine)]],
+            threshold: makeProductionOfflineDiarizerConfig().clustering.threshold
+        )
+        XCTAssertNotEqual(clusters[0], clusters[1])
+    }
+
+    func testProductionClusteringKeepsNearbyObservationsTogetherWithoutSpeakerCountConstraints() {
+        let config = makeProductionOfflineDiarizerConfig()
+        let cosine = 1.0 - 0.5 * 0.5 / 2.0
+        let clusters = AHCClustering().cluster(
+            embeddingFeatures: [[1, 0], [cosine, sqrt(1 - cosine * cosine)]],
+            threshold: config.clustering.threshold
+        )
+        XCTAssertEqual(clusters[0], clusters[1])
+        XCTAssertNil(config.clustering.numSpeakers)
+        XCTAssertNil(config.clustering.minSpeakers)
+        XCTAssertNil(config.clustering.maxSpeakers)
+    }
+
     func testDigitalSystemSilenceSkipsDiarizerButQuietAudioDoesNot() async throws {
         for rms in [0.0, 0.0000001] {
             let diarizer = CapturingDiarizer()

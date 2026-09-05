@@ -51,8 +51,10 @@ describe('timed WAV stitch planning', () => {
     expect(planTimedWavStitch(segments, 5)).toEqual({ mode: 'sparse' });
   });
 
-  it('uses the sequential plan through one concat input in Electron', () => {
-    const source = readFileSync('electron/main.ts', 'utf8');
+  it('uses the tested stitch operation in Electron', () => {
+    const main = readFileSync('electron/main.ts', 'utf8');
+    expect(main).toContain('await stitchTimedWavSegments({');
+    const source = readFileSync('electron/timedWavStitch.ts', 'utf8');
     expect(source).toContain('planTimedWavStitch(');
     expect(source).toContain("'-f concat'");
     expect(source).toContain("plan.mode === 'sequential'");

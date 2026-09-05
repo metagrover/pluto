@@ -37,6 +37,7 @@ import {
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
 import { waitForMediaRecorderStop } from '../utils/mediaRecorderLifecycle';
+import { createPcmLivenessMonitor } from '../utils/pcmLiveness';
 import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
@@ -76,7 +77,6 @@ import {
   type LiveTranscriptSegment,
   type RecordingFinalizationPreview,
   resolveSystemCaptureHealth,
-  scheduleSystemCaptureTimeout,
   withCaptureDurabilityWarning,
 } from './features/recordingWorkspaceModel';
 
@@ -731,15 +731,12 @@ export const AudioManager = ({
           },
         },
         nowSeconds: getMeetingElapsedSeconds,
-        onSegments: (segments) => {
+        onSegments: (segments, echoEvidence, reason) => {
           if (
             currentMeetingIdRef.current !== meetingId ||
             eouGenerationRef.current !== eouGeneration
           )
             return;
-          processedMicSegmentsRef.current = segments.map(
-            toStoredLiveTranscriptCandidate,
-          );
           const activeWindow = activeSpeakerWindowRef.current;
           const activityWindows = activeWindow
             ? [
@@ -753,7 +750,15 @@ export const AudioManager = ({
           const readingSegments = reconcileLiveTranscriptSegments({
             segments,
             activityWindows,
+            echoEvidence,
           });
+          if (reason === 'echo_evidence') {
+            onLiveTranscript?.(readingSegments);
+            return;
+          }
+          processedMicSegmentsRef.current = segments.map(
+            toStoredLiveTranscriptCandidate,
+          );
           liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
             segments,
             () => {
@@ -956,37 +961,74 @@ export const AudioManager = ({
 
       // 4. System Audio: Native AudioCap
       console.log('[Pluto] Starting Native AudioCap...');
-      try {
-        const nativeStarted =
-          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
-        hasSystemRecorderRef.current = nativeStarted === true;
-        systemAudioChunkSeenRef.current = false;
-        systemAudioHealthRef.current = resolveSystemCaptureHealth({
-          nativeStarted: nativeStarted === true,
-          validPcmSeen: false,
-        });
+      const systemCaptureGeneration =
+        captureJournalStateRef.current?.generation;
+      let systemFailureRecorded = false;
+      const markSystemCaptureUnresponsive = () => {
+        if (
+          systemFailureRecorded ||
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'warning';
         publishCaptureHealth({
-          microphone: 'healthy',
-          systemAudio: systemAudioHealthRef.current,
-          captureDurability: captureHealthRef.current.captureDurability,
+          ...captureHealthRef.current,
+          systemAudio: 'warning',
         });
-        if (!nativeStarted) {
-          throw new Error('Native system audio capture did not start');
-        }
-        cancelSystemAudioHealthTimeoutRef.current =
-          scheduleSystemCaptureTimeout(() => {
-            systemAudioHealthRef.current = resolveSystemCaptureHealth({
-              nativeStarted: true,
-              validPcmSeen: false,
-              timedOut: true,
-            });
-            publishCaptureHealth({
-              microphone: 'healthy',
-              systemAudio: systemAudioHealthRef.current,
-              captureDurability: captureHealthRef.current.captureDurability,
-            });
-          }, 3_000);
-
+      };
+      const markSystemCaptureFailed = () => {
+        if (
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'unavailable';
+        publishCaptureHealth({
+          ...captureHealthRef.current,
+          systemAudio: 'unavailable',
+        });
+        if (systemFailureRecorded) return;
+        systemFailureRecorded = true;
+        void captureJournalMutationCoordinatorRef.current
+          .run(async () => {
+            try {
+              const manifest = await refreshCaptureJournalState(meetingId);
+              if (
+                !manifest ||
+                manifest.generation !== systemCaptureGeneration
+              ) {
+                throw new Error('system_capture_failure_generation_mismatch');
+              }
+              captureJournalStateRef.current = await window.ipcRenderer.invoke(
+                'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
+                {
+                  meetingId,
+                  generation: manifest.generation,
+                  expectedRevision: manifest.revision,
+                  source: 'system',
+                },
+              );
+            } catch (error) {
+              captureActivitySessionRef.current?.markDurabilityFailure();
+              throw error;
+            }
+          })
+          .catch((error) => {
+            warnCaptureDurability();
+            console.warn(
+              '[Pluto] Failed to persist System capture failure:',
+              error,
+            );
+          });
+      };
+      systemAudioChunkSeenRef.current = false;
+      systemAudioHealthRef.current = 'warning';
+      const systemLiveness = createPcmLivenessMonitor(
+        markSystemCaptureUnresponsive,
+      );
+      cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
+      try {
         // Setup Listener
         const handler = (_: unknown, chunk: NativeAudioChunk) => {
           if (chunk) {
@@ -1026,11 +1068,12 @@ export const AudioManager = ({
               systemPcmCarryoverBytesRef.current,
             );
             systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
-            if (decoded.samples.length === 0) return;
+            if (!systemLiveness.received(decoded.samples)) return;
             eouSessionRef.current?.append('system', decoded.samples);
-            if (systemAudioHealthRef.current !== 'healthy') {
-              cancelSystemAudioHealthTimeoutRef.current?.();
-              cancelSystemAudioHealthTimeoutRef.current = null;
+            if (
+              !systemFailureRecorded &&
+              systemAudioHealthRef.current !== 'healthy'
+            ) {
               systemAudioHealthRef.current = resolveSystemCaptureHealth({
                 nativeStarted: true,
                 validPcmSeen: true,
@@ -1047,19 +1090,31 @@ export const AudioManager = ({
             systemRmsUpdatedAtRef.current = performance.now();
           }
         };
-        nativeAudioUnsubscribeRef.current = window.ipcRenderer.on(
+        const unsubscribeChunks = window.ipcRenderer.on(
           'NATIVE_AUDIO_CHUNK',
           handler,
         );
+        const unsubscribeFailures = window.ipcRenderer.on(
+          'NATIVE_AUDIO_FAILURE',
+          markSystemCaptureFailed,
+        );
+        nativeAudioUnsubscribeRef.current = () => {
+          unsubscribeChunks();
+          unsubscribeFailures();
+        };
+        const nativeStarted =
+          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        hasSystemRecorderRef.current = nativeStarted === true;
+        if (!nativeStarted) {
+          throw new Error('Native system audio capture did not produce PCM');
+        }
         console.log('[Pluto] Native AudioCap started & listening.');
       } catch (sysErr) {
         hasSystemRecorderRef.current = false;
-        systemAudioHealthRef.current = 'unavailable';
-        publishCaptureHealth({
-          microphone: 'healthy',
-          systemAudio: systemAudioHealthRef.current,
-          captureDurability: captureHealthRef.current.captureDurability,
-        });
+        systemLiveness.stop();
+        nativeAudioUnsubscribeRef.current?.();
+        nativeAudioUnsubscribeRef.current = null;
+        markSystemCaptureFailed();
         console.warn('[Pluto] System audio failed:', sysErr);
       }
 
@@ -1283,6 +1338,10 @@ export const AudioManager = ({
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      cancelSystemAudioHealthTimeoutRef.current?.();
+      cancelSystemAudioHealthTimeoutRef.current = null;
+      nativeAudioUnsubscribeRef.current?.();
+      nativeAudioUnsubscribeRef.current = null;
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
       meetingContextIngestionRef.current?.close();
@@ -1982,11 +2041,11 @@ export const AudioManager = ({
       const sealedActivityHandoff = createSealedCaptureActivityHandoff(
         journalSealOutcome.activityEvidence,
       );
-      const capturedSegments = mergeConsecutiveSpeakerSegments(
-        [...processedMicSegmentsRef.current].sort(
-          (left, right) => left.startTime - right.startTime,
-        ),
+      const capturedLiveSegments = [...processedMicSegmentsRef.current].sort(
+        (left, right) => left.startTime - right.startTime,
       );
+      const capturedSegments =
+        mergeConsecutiveSpeakerSegments(capturedLiveSegments);
       const capturedVocabulary = {
         terms: [...transcriptionVocabularyRef.current.terms],
         provenance: { ...transcriptionVocabularyRef.current.provenance },
@@ -2006,6 +2065,7 @@ export const AudioManager = ({
       const buildProvisionalTranscriptJson = (canonicalSource: 'mic' | 'mix') =>
         JSON.stringify(
           buildTranscriptJsonPayload(capturedSegments, {
+            liveSegments: capturedLiveSegments,
             pipelineMode,
             canonicalSource,
             postHydrationBleedPass: false,
@@ -2327,6 +2387,8 @@ export const AudioManager = ({
         }
         cancelSystemAudioHealthTimeoutRef.current?.();
         cancelSystemAudioHealthTimeoutRef.current = null;
+        nativeAudioUnsubscribeRef.current?.();
+        nativeAudioUnsubscribeRef.current = null;
         window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
       }
     };
@@ -2357,6 +2419,8 @@ export const AudioManager = ({
       meetingContextIngestionRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
+      nativeAudioUnsubscribeRef.current?.();
+      nativeAudioUnsubscribeRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);
       window.removeEventListener('START_RECORDING', handleStartRecording);
       unsubscribeMeetingDeleted();

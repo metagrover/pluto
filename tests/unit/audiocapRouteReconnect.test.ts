@@ -87,6 +87,11 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     expect(mainSource).toContain(
       'self.restartTap(isExternalRouteChange: true)',
     );
+    const exhaustion = mainSource.slice(
+      mainSource.indexOf('Watchdog: exceeded'),
+      mainSource.indexOf('} else if', mainSource.indexOf('Watchdog: exceeded')),
+    );
+    expect(exhaustion).toContain('exit(1)');
   });
 
   it('detects stream stall where frames arrived previously but stopped flowing for 3.0s', () => {
@@ -100,8 +105,8 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
   });
 
   it('drops stale tap generations before writing PCM with a generation-local resampler', () => {
-    const callbackStart = mainSource.indexOf('try tap.start(on: queue)');
-    const callbackEnd = mainSource.indexOf('\n        }\n    }', callbackStart);
+    const callbackStart = mainSource.indexOf('private func startTapStreaming');
+    const callbackEnd = mainSource.indexOf('@discardableResult', callbackStart);
     const callbackBody = mainSource.slice(callbackStart, callbackEnd);
     const generationGuard = callbackBody.indexOf(
       'self.tapGeneration == currentGeneration',
@@ -113,6 +118,48 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     );
     expect(generationGuard).toBeGreaterThan(-1);
     expect(stdoutWrite).toBeGreaterThan(generationGuard);
+  });
+
+  it('prepares PCM from the started aggregate input format and invalidates changed formats', () => {
+    const start = processTapSource.indexOf('func start(\n');
+    const body = processTapSource.slice(
+      start,
+      processTapSource.indexOf('func stop()', start),
+    );
+    expect(body.indexOf('queue.suspend()')).toBeLessThan(
+      body.indexOf('AudioDeviceStart('),
+    );
+    expect(body.indexOf('let format = try readInputFormat()')).toBeGreaterThan(
+      body.indexOf('AudioDeviceStart('),
+    );
+    expect(body).toContain('callback.block = try prepare(format)');
+    expect(body).toContain('kAudioStreamPropertyVirtualFormat');
+    expect(
+      body.indexOf('let confirmedFormat = try? Self.readVirtualFormat(stream)'),
+    ).toBeGreaterThan(body.indexOf('AudioObjectAddPropertyListenerBlock'));
+    expect(body).toContain('Self.sameCaptureFormat(format, confirmedFormat)');
+    expect(body.indexOf('callback.block = nil')).toBeLessThan(
+      body.indexOf('onFormatChange()'),
+    );
+    expect(mainSource).toContain(
+      'downmixAudioBuffers(buffers, expectedChannels: desc.mChannelsPerFrame)',
+    );
+    const listener = mainSource.slice(
+      mainSource.indexOf('onFormatChange: {'),
+      mainSource.indexOf('}, prepare: {'),
+    );
+    expect(listener).toContain('self.tapGeneration == currentGeneration');
+  });
+
+  it('rolls back a partially started tap when format preparation fails', () => {
+    const start = processTapSource.indexOf('func start(\n');
+    const body = processTapSource.slice(
+      start,
+      processTapSource.indexOf('func stop()', start),
+    );
+    expect(body).toContain('catch {');
+    expect(body).toContain('stop()');
+    expect(body).toContain('throw error');
   });
 
   it('rejects out-of-band frequencies (executable stopband test) in native AudioStreamer', () => {
