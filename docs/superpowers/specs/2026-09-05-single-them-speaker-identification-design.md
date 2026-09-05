@@ -1,6 +1,6 @@
 # Single `Them` Speaker Identification
 
-**Issue:** [#761](https://github.com/metagrover/pluto/issues/761)  
+**Issue:** [#761](https://github.com/metagrover/pluto/issues/761)
 **Status:** Approved for implementation planning
 
 ## Problem
@@ -79,4 +79,3 @@ Focused tests must prove:
 - Meetings with `Remote Speaker N` retain the existing numbered-speaker flow and
   do not also expose aggregate `Them`.
 - `Unknown`, `Me`, and legacy local-speaker labels remain excluded.
-
