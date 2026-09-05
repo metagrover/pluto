@@ -23,6 +23,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Rationale:** Terminal logging was previously an uncoordinated mix of raw `console.log` calls that flooded developer terminals with dozens of column checks on every restart and lacked standard macOS file logs in production for troubleshooting.
 - **Consequences:** All Electron main process and native subprocess logging passes through scoped `createLogger(scope)` instances; log levels are configurable via `process.env.PLUTO_LOG_LEVEL`; file rotation prevents unbounded disk growth.
 
+## 2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop
+
+- **Status:** Accepted
+- **Source:** [Issue #747](https://github.com/metagrover/pluto/issues/747), owner direction on 2026-09-04
+- **Decision:** Pluto automatically detects active or scheduled calendar events during recording startup (±15 minute window) to immediately set meeting title and attendees without waiting for post-meeting finalization. When an upcoming or starting conference meeting (Zoom, Google Meet, Microsoft Teams, Webex, Slack) is detected while idle, Pluto surfaces a non-intrusive floating pill banner with 1-click start. Pluto monitors active audio capture via a silence watchdog, automatically stopping recording with an explicit `end_reason` (`auto:calendar_silence_timeout` or `auto:silence_timeout`) and pushing a desktop notification when meeting notes are ready if silence persists past the scheduled event end time or conference audio drops to zero. Users can configure these behaviors in Settings → Meetings (Auto-name toggle, Prompt toggle, Silence timeout selector: 3m, 5m [default], 10m, Disabled).
+- **Rationale:** Users previously had to manually type meeting titles and attendee lists or wait until finalization completed to see calendar context attached, frequently forgot to stop recording when meetings concluded (bloating transcripts with silence), and had to remember to start recordings manually even when on scheduled calls.
+- **Consequences:** Calendar integration remains strictly read-only and local (macOS EventKit); recording never auto-starts without explicit user action; silence auto-stop enforces a dual boundary check (continuous silence + calendar end time passed or conference audio dropped) to prevent premature cutoffs during natural meeting pauses.
+
 ## 2026-09-04 - Dynamic audio device reconnection with continuous 16kHz resampling
 
 - **Status:** Accepted
@@ -858,3 +866,12 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ### Recovered transcript source ownership (2026-09-05)
 
 Recovered mic/System transcripts retain their source speaker through canonical reconciliation. Duplicate selection, ambiguous-pass-through accounting and coverage checks still run; mixed-track activity arbitration cannot change a System-decoded row to Me because its final word spans silence and a subsequent local reply. Explicit full retranscription rebuilds machine text, while speaker-label repair preserves prior wording. Raw live evidence remains separate. Terminal echo cleanup may use a shared onset only after an independently aligned exact sequence with remote onset activity and no local activity over the mic word.
+
+## 2026-09-05 - Confirm meeting speakers before creating People evidence
+
+- **Status:** Accepted and implemented.
+- **Source:** [Issue #747](https://github.com/metagrover/pluto/issues/747), [PR #754](https://github.com/metagrover/pluto/pull/754), and `docs/superpowers/specs/2026-09-04-proactive-calendar-auto-naming-silence-auto-stop.md`.
+- **Decision:** Calendar organizers and attendees are meeting-roster hints, not confirmed participants. They may name an active session, improve that session's transcription vocabulary, and appear as `Invited` choices during speaker review, but they do not create People relationships or manual participant records by themselves. Only an explicit user confirmation that an anonymous speaker is one individual creates or links a person.
+- **Evidence boundary:** Canonical transcripts retain meeting-local `Remote Speaker N` labels. The UI projects those labels as `Speaker N` and projects a confirmed person's name without rewriting acoustic evidence. A confirmed binding is direct, derived People evidence for that meeting; undoing the binding removes the relationship without deleting transcript or calendar evidence.
+- **Voice sample boundary:** Speaker review may extract a short isolated-System-audio WAV on demand from conservative non-overlapping intervals. The temporary file is deleted after its bytes are returned, local paths never cross into the renderer, and no embedding or voiceprint is retained. Cross-meeting voice recognition remains deferred to [Issue #755](https://github.com/metagrover/pluto/issues/755).
+- **Consequences:** People summaries, dossiers, and meeting-scoped person processing include confirmed bindings even when entity extraction did not mention the person. Generic speaker placeholders are rejected as person names. Calendar-only invitees remain scheduled context and can be promoted only through the explicit confirmation flow.

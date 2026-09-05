@@ -23,6 +23,7 @@ import {
   getCalendarState,
   getMeetingCalendarContext,
   listCalendarDay,
+  matchActiveCalendarEvent,
   openCalendarSystemSettings,
   refreshCalendar,
   selectCalendar,
@@ -30,6 +31,7 @@ import {
 } from './api/calendar';
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
+import { CalendarStartPromptBanner } from './components/alerts/CalendarStartPromptBanner';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -59,6 +61,7 @@ import type {
   RecordingFinalizationPreview,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { useCalendarPromptMonitor } from './hooks/useCalendarPromptMonitor';
 import type {
   CaptureLifecycleSnapshot,
   CaptureStartResult,
@@ -82,6 +85,10 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import {
+  getCalendarRosterNames,
+  isMatchedActiveCalendarResult,
+} from './utils/calendarRoster';
 
 import {
   getEntity,
@@ -239,6 +246,14 @@ function App() {
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTabId>('personal');
+  const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
+  const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
+  const [silenceAutoStopDuration, setSilenceAutoStopDuration] = useState<
+    '3' | '5' | '10' | 'disabled'
+  >('5');
+  const [activeCalendarEvent, setActiveCalendarEvent] =
+    useState<CalendarEvent | null>(null);
+  const activeCalendarEventRef = useRef<CalendarEvent | null>(null);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
@@ -689,6 +704,23 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'calendar_auto_name_enabled')
+      .then((val) => {
+        if (val !== null) setCalendarAutoNameEnabled(val !== 'false');
+      });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'calendar_prompt_enabled')
+      .then((val) => {
+        if (val !== null) setCalendarPromptEnabled(val !== 'false');
+      });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'silence_auto_stop_duration')
+      .then((val) => {
+        if (val && ['3', '5', '10', 'disabled'].includes(val)) {
+          setSilenceAutoStopDuration(val as '3' | '5' | '10' | 'disabled');
+        }
+      });
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
         e.preventDefault();
@@ -891,28 +923,107 @@ function App() {
     }
   };
 
+  const handleCalendarAutoNameToggle = (enabled: boolean) => {
+    setCalendarAutoNameEnabled(enabled);
+    window.ipcRenderer.invoke(
+      'SET_SETTING',
+      'calendar_auto_name_enabled',
+      String(enabled),
+    );
+  };
+
+  const handleCalendarPromptToggle = (enabled: boolean) => {
+    setCalendarPromptEnabled(enabled);
+    window.ipcRenderer.invoke(
+      'SET_SETTING',
+      'calendar_prompt_enabled',
+      String(enabled),
+    );
+  };
+
+  const handleSilenceAutoStopDurationChange = (
+    duration: '3' | '5' | '10' | 'disabled',
+  ) => {
+    setSilenceAutoStopDuration(duration);
+    window.ipcRenderer.invoke(
+      'SET_SETTING',
+      'silence_auto_stop_duration',
+      duration,
+    );
+  };
+
+  const { activePromptEvent, dismissPrompt } = useCalendarPromptMonitor({
+    events: calendarEvents,
+    isRecording,
+    promptEnabled: calendarPromptEnabled,
+  });
+
+  const handleStartFromPrompt = async (event: CalendarEvent) => {
+    dismissPrompt(event.occurrenceKey);
+    activeCalendarEventRef.current = event;
+    setActiveCalendarEvent(event);
+    setMeetingTitle(event.title || 'Meeting');
+    setMeetingParticipants([]);
+    setParticipantInput('');
+    if (startSessionRef.current) {
+      await startSessionRef.current();
+    }
+  };
+
   const handleRecordingChange = (recording: boolean) => {
     const wasRecording = isRecording;
     setIsRecording(recording);
     if (recording && !wasRecording) {
       setZenVisible(true);
-      setMeetingTitle('');
-      setMeetingParticipants([]);
-      setParticipantInput('');
       setMeetingAskPlutoConversation([]);
       setSelectedMeetingId(null);
+      if (!meetingTitle && !activeCalendarEventRef.current) {
+        setMeetingTitle('');
+        setMeetingParticipants([]);
+        setParticipantInput('');
+      }
+    } else if (!recording && wasRecording) {
+      activeCalendarEventRef.current = null;
+      setActiveCalendarEvent(null);
     }
   };
 
-  const handleStartingChange = (starting: boolean) => {
+  const handleStartingChange = async (starting: boolean) => {
     setIsStartingRecording(starting);
     if (!starting) return;
     setZenVisible(true);
+    setSelectedMeetingId(null);
+    setFinalizingMeeting(null);
+
+    if (activeCalendarEventRef.current) {
+      setMeetingTitle(activeCalendarEventRef.current.title || 'Meeting');
+      setMeetingParticipants([]);
+      setParticipantInput('');
+      return;
+    }
+
+    if (calendarAutoNameEnabled) {
+      try {
+        const result = await matchActiveCalendarEvent();
+        if (isMatchedActiveCalendarResult(result)) {
+          const matchedEvent = result.event;
+          activeCalendarEventRef.current = matchedEvent;
+          setActiveCalendarEvent(matchedEvent);
+          setMeetingTitle(matchedEvent.title || 'Meeting');
+          setMeetingParticipants([]);
+          setParticipantInput('');
+          return;
+        }
+      } catch (err) {
+        console.warn('[Calendar] Auto-match failed:', err);
+      }
+    }
+
+    activeCalendarEventRef.current = null;
+    setActiveCalendarEvent(null);
     setMeetingTitle('');
     setMeetingParticipants([]);
     setParticipantInput('');
-    setSelectedMeetingId(null);
-    setFinalizingMeeting(null);
   };
 
   const handleFinalizationStarted = (meeting: RecordingFinalizationPreview) => {
@@ -935,16 +1046,21 @@ function App() {
       : undefined;
   const activeRecording = isStartingRecording || isRecording;
   const showZenMode = activeRecording && zenVisible;
-  const activeCalendarEvent = recordingStartedAtMs
-    ? (calendarEvents.find((event) => {
-        const start = new Date(event.start).getTime();
-        const end = new Date(event.end).getTime();
-        return (
-          start <= recordingStartedAtMs + 15 * 60_000 &&
-          end >= recordingStartedAtMs - 5 * 60_000
-        );
-      }) ?? null)
-    : null;
+  const resolvedActiveCalendarEvent =
+    activeCalendarEvent ||
+    (recordingStartedAtMs
+      ? (calendarEvents.find((event) => {
+          const start = new Date(event.start).getTime();
+          const end = new Date(event.end).getTime();
+          return (
+            start <= recordingStartedAtMs + 15 * 60_000 &&
+            end >= recordingStartedAtMs - 5 * 60_000
+          );
+        }) ?? null)
+      : null);
+  const activeCalendarRosterNames = resolvedActiveCalendarEvent
+    ? getCalendarRosterNames(resolvedActiveCalendarEvent)
+    : [];
   const handleBackHomeFromZen = () => {
     setZenVisible(false);
     setSelectedMeetingId(null);
@@ -1279,6 +1395,12 @@ function App() {
           onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
+          silenceAutoStopDuration={silenceAutoStopDuration}
+          calendarEndTimeMs={
+            resolvedActiveCalendarEvent
+              ? new Date(resolvedActiveCalendarEvent.end).getTime()
+              : null
+          }
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
@@ -1287,6 +1409,7 @@ function App() {
           }}
           userTitle={meetingTitle}
           participants={meetingParticipants}
+          transcriptionParticipantHints={activeCalendarRosterNames}
         />
       </div>
 
@@ -1361,7 +1484,7 @@ function App() {
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
-          calendarEvent={activeCalendarEvent}
+          calendarEvent={resolvedActiveCalendarEvent}
           askPlutoConversation={meetingAskPlutoConversation}
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
@@ -1538,6 +1661,12 @@ function App() {
                 }}
                 exportIncludeTranscript={exportIncludeTranscript}
                 setExportIncludeTranscript={setExportIncludeTranscript}
+                calendarAutoNameEnabled={calendarAutoNameEnabled}
+                setCalendarAutoNameEnabled={handleCalendarAutoNameToggle}
+                calendarPromptEnabled={calendarPromptEnabled}
+                setCalendarPromptEnabled={handleCalendarPromptToggle}
+                silenceAutoStopDuration={silenceAutoStopDuration}
+                setSilenceAutoStopDuration={handleSilenceAutoStopDurationChange}
               />
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
@@ -1635,6 +1764,14 @@ function App() {
             }
           }}
           onDismiss={dismissAutoEndToast}
+        />
+      )}
+
+      {activePromptEvent && !isRecording && (
+        <CalendarStartPromptBanner
+          event={activePromptEvent}
+          onStartRecording={handleStartFromPrompt}
+          onDismiss={dismissPrompt}
         />
       )}
     </div>

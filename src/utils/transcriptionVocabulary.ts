@@ -40,6 +40,25 @@ const normalizeName = (value: unknown): string | null => {
   return normalized;
 };
 
+export const buildTranscriptionParticipantHints = (
+  participants: string[],
+  calendarRoster: string[],
+): string[] => {
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of [...participants, ...calendarRoster]) {
+    const name = value.trim();
+    if (!name) continue;
+    const key = name.toLocaleLowerCase('en-US');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+
+  return names;
+};
+
 export const selectTranscriptionVocabulary = ({
   participants,
 }: {

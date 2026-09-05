@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 
-import { matchCalendarEvent } from './matcher';
+import {
+  type CalendarMatch,
+  matchActiveCalendarEvent,
+  matchCalendarEvent,
+} from './matcher';
 import type {
   CalendarCapabilityState,
   CalendarDescriptor,
@@ -374,6 +378,42 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       : existing;
   };
 
+  const matchActiveEvent = (
+    atTime: string,
+  ): { match: CalendarMatch; event: CalendarEvent | null } => {
+    const state = getState();
+    if (!state.enabled || !state.cacheStart || !state.cacheEnd) {
+      return { match: { kind: 'none' }, event: null };
+    }
+    const events = listEvents(state.cacheStart, state.cacheEnd);
+    const match = matchActiveCalendarEvent(atTime, events);
+    if (match.kind === 'matched') {
+      const found =
+        events.find((e) => e.occurrenceKey === match.occurrenceKey) ?? null;
+      return { match, event: found };
+    }
+    return { match, event: null };
+  };
+
+  const associateMeetingAtStart = (
+    meetingId: string,
+    atTime: string,
+  ): {
+    context: MeetingCalendarContext | null;
+    event: CalendarEvent | null;
+  } => {
+    const { match, event } = matchActiveEvent(atTime);
+    if (match.kind === 'matched' && event) {
+      const context = setMeetingContext(
+        meetingId,
+        match.occurrenceKey,
+        'automatic',
+      );
+      return { context, event };
+    }
+    return { context: null, event: null };
+  };
+
   const recordFailure = (errorCode: CalendarCapabilityState, at: string) => {
     sql
       .prepare(`
@@ -413,6 +453,8 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     replaceEvents,
     listEvents,
     associateMeeting,
+    associateMeetingAtStart,
+    matchActiveEvent,
     setMeetingContext,
     getMeetingContext,
     recordFailure,

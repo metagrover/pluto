@@ -38,3 +38,15 @@ export const getMeetingCalendarContext = (meetingId: string) =>
 export const openCalendarSystemSettings = (
   target: 'privacy' | 'accounts' = 'privacy',
 ) => invoke<boolean>('OPEN_CALENDAR_SYSTEM_SETTINGS', target);
+
+export const matchActiveCalendarEvent = (atTime?: string) =>
+  invoke<{
+    match: { kind: string; occurrenceKey?: string };
+    event: CalendarEvent | null;
+  }>('CALENDAR_MATCH_ACTIVE', { atTime });
+
+export const associateMeetingAtStart = (meetingId: string, atTime?: string) =>
+  invoke<{
+    context: MeetingCalendarContext | null;
+    event: CalendarEvent | null;
+  }>('CALENDAR_ASSOCIATE_START', { meetingId, atTime });
