@@ -247,7 +247,9 @@ describe('identity publication boundary', () => {
     });
     db.identityStore.recordCapture('null-capture-self-meeting', 'local', null);
 
-    const context = identity.getMeetingIdentityContext('null-capture-self-meeting');
+    const context = identity.getMeetingIdentityContext(
+      'null-capture-self-meeting',
+    );
     expect(context.bindings).toContainEqual(
       expect.objectContaining({
         speaker: 'Me',
@@ -274,9 +276,15 @@ describe('identity publication boundary', () => {
         },
       }),
     });
-    db.identityStore.recordCapture('low-confidence-meeting', 'local', person.id);
+    db.identityStore.recordCapture(
+      'low-confidence-meeting',
+      'local',
+      person.id,
+    );
 
-    const context = identity.getMeetingIdentityContext('low-confidence-meeting');
+    const context = identity.getMeetingIdentityContext(
+      'low-confidence-meeting',
+    );
     expect(context.bindings).toContainEqual(
       expect.objectContaining({
         speaker: 'Me',

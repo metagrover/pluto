@@ -1186,14 +1186,13 @@
     @apply py-1;
   }
   .meeting-speaker-review {
-    @apply border-b;
-    border-color: var(--notes-rule);
+    @apply py-2;
   }
   .speaker-review-panel {
-    @apply mt-3 max-w-[600px] space-y-3 pb-3;
+    @apply mt-2 max-w-[640px] space-y-3 pb-3 border-b border-pro-border/40;
   }
   .speaker-review-row {
-    @apply border-t py-5;
+    @apply border-t py-4;
     border-color: var(--notes-rule);
   }
   .speaker-review-row__heading {
@@ -1210,43 +1209,44 @@
     @apply text-[11px] font-medium;
     color: var(--notes-muted);
   }
-  .speaker-review-row > p,
-  .speaker-review-row blockquote {
+  .speaker-review-row > p {
     @apply mt-2 max-w-[64ch] text-[13px] leading-5;
     color: var(--notes-muted);
   }
   .speaker-review-row blockquote {
-    @apply font-serif text-[14px] italic;
+    @apply mt-2.5 max-w-[64ch] rounded-lg border border-pro-border/60 bg-pro-surface/40 px-3.5 py-2.5 text-[13px] italic leading-relaxed;
     color: var(--notes-ink);
   }
   .speaker-review-row button,
   .speaker-review-new-person button,
   .speaker-review-confirmation button {
-    @apply inline-flex min-h-10 items-center justify-center rounded-md px-2.5 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-not-allowed disabled:opacity-45;
+    @apply inline-flex min-h-8 items-center justify-center rounded-md px-2.5 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-not-allowed disabled:opacity-45;
     color: var(--notes-muted);
   }
   .speaker-review-sample {
-    @apply mt-2 flex flex-wrap items-center gap-1 text-[11px];
+    @apply mt-2 flex flex-wrap items-center gap-1.5 text-[11px];
     color: var(--notes-muted);
   }
+  .speaker-review-sample button {
+    @apply inline-flex min-h-7 items-center gap-1 rounded-full border border-pro-border/70 bg-pro-surface/50 px-2.5 py-1 text-xs font-medium text-pro-text-main transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-not-allowed disabled:opacity-45;
+  }
   .speaker-review-invitees {
-    @apply mt-4;
+    @apply mt-3.5;
   }
   .speaker-review-invitees > span,
   .speaker-review-field > span,
   .speaker-review-new-person label > span {
-    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em];
+    @apply mb-1.5 block text-xs font-medium;
     color: var(--notes-muted);
   }
   .speaker-review-invitees > div {
-    @apply flex flex-wrap gap-1;
+    @apply flex flex-wrap gap-1.5;
   }
   .speaker-review-invitees button {
-    @apply border;
-    border-color: var(--notes-rule);
+    @apply inline-flex min-h-7 items-center gap-1 rounded-md border border-pro-border/80 bg-pro-surface/40 px-2.5 py-1 text-xs font-medium text-pro-text-main transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .speaker-review-field {
-    @apply mt-4 block;
+    @apply mt-3.5 block;
   }
   .speaker-review-new-person {
     @apply mt-3 flex items-end gap-2;
@@ -1255,25 +1255,28 @@
     @apply min-w-0 flex-1;
   }
   .speaker-review-confirmation {
-    @apply mt-4 border-l-2 py-1 pl-4;
-    border-color: var(--pro-accent);
+    @apply mt-3.5 rounded-xl border border-pro-border/80 bg-pro-surface/40 p-3.5;
   }
   .speaker-review-confirmation > strong {
-    @apply text-[13px] font-semibold;
-    color: var(--notes-ink);
+    @apply block text-[13px] font-semibold text-pro-text-main;
   }
   .speaker-review-confirmation > p {
-    @apply mt-1 max-w-[62ch] text-xs leading-5;
-    color: var(--notes-muted);
+    @apply mt-1 max-w-[62ch] text-xs leading-relaxed text-pro-text-muted;
   }
   .speaker-review-confirmation > div {
-    @apply mt-2 flex flex-wrap gap-1;
+    @apply mt-3 flex flex-wrap gap-2;
   }
   .speaker-review-confirmation > div > button:first-child {
-    @apply bg-pro-accent text-white hover:bg-pro-accent/90;
+    @apply inline-flex min-h-8 items-center justify-center rounded-lg bg-pro-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-pro-accent/90;
+  }
+  .speaker-review-confirmation > div > button:last-child {
+    @apply inline-flex min-h-8 items-center justify-center rounded-lg border border-pro-border bg-pro-bg px-3 py-1.5 text-xs font-medium text-pro-text-main transition-colors hover:bg-pro-hover;
+  }
+  .speaker-review-row--confirmed {
+    @apply rounded-lg bg-pro-surface/30 p-3 border border-pro-border/40;
   }
   .speaker-review-row--confirmed > p {
-    @apply mt-1;
+    @apply mt-1 text-xs text-pro-text-muted;
   }
   .meeting-transcript-row {
     @apply grid gap-3 border-b py-6 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-5;

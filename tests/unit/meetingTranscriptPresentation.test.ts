@@ -76,6 +76,26 @@ describe('meeting transcript presentation', () => {
       'Remote Speaker 1',
     ]);
   });
+
+  it('projects Me as [Name] (You) when a display name is provided', () => {
+    const segments: TranscriptSegment[] = [
+      { speaker: 'Me', startTime: 0, endTime: 2, text: 'Hello everyone.' },
+    ];
+    const projected = applyMeetingSpeakerDisplayNames(segments, {
+      Me: 'Aditya Grover',
+    });
+    expect(projected[0].speaker).toBe('Aditya Grover (You)');
+  });
+
+  it('does not duplicate (You) if already present', () => {
+    const segments: TranscriptSegment[] = [
+      { speaker: 'Me', startTime: 0, endTime: 2, text: 'Hello everyone.' },
+    ];
+    const projected = applyMeetingSpeakerDisplayNames(segments, {
+      Me: 'Aditya Grover (You)',
+    });
+    expect(projected[0].speaker).toBe('Aditya Grover (You)');
+  });
 });
 
 describe('remote speaker completion status', () => {

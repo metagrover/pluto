@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Streamline speaker review UX and automatch workspace user profile for Me
+
+- **Status:** Accepted
+- **Source:** [Issue #758](https://github.com/metagrover/pluto/issues/758), owner direction on 2026-09-05
+- **Decision:** Pluto automatically binds local microphone speech (`Me`) to the active workspace user without requiring acoustic diarization confidence gating (>= 0.85). If capture-time metadata lacked a `selfPersonId`, commitment identity resolution falls back to the active workspace user identity (`db.identityStore.getSelfPersonId()`). In speaker review controls, the workspace user and all configured user aliases/nicknames (`profile.aliases`) are filtered out from external attendee suggestion rosters. The speaker review interface adopts a quiet, typography-driven Notion/Linear design language: removing heavy borders, eliminating uppercase tracked subheads, replacing left-accent bars with subtle rounded card surfaces, removing redundant remote speaker status strips when channels are separated, and rendering transcript turns with clean `(You)` indicators and direct turn-to-review focus navigation.
+- **Rationale:** Users who configured their name and nickname in Settings expected Pluto to always tag their own speech as them automatically, rather than leaving `Me` unassigned or gated behind high acoustic diarization thresholds. Furthermore, suggesting the user's own nickname as an unassigned external speaker choice created confusion and manual friction. The review UI previously had heavy stacked borders and disparate styling that did not match Pluto's calm, document-centered aesthetic.
+- **Consequences:** Microphone capture turns always project cleanly with the user's name and `(You)`; user names and nicknames never appear in attendee suggestion chips or dropdowns; direct clicks on unresolved speaker tags in the transcript seamlessly open and reveal the speaker review controls.
+
 ## 2026-09-05 - Structured application logging with environment-aware transports
 
 - **Status:** Accepted

@@ -22,7 +22,13 @@ export const applyMeetingSpeakerDisplayNames = <T extends TranscriptSegment>(
 ): T[] =>
   segments.map((segment) => {
     const speaker = String(segment.speaker ?? '');
-    const displayName = displayNames[speaker]?.trim();
+    const rawDisplayName = displayNames[speaker]?.trim();
+    const displayName =
+      speaker === 'Me' && rawDisplayName
+        ? rawDisplayName.endsWith(' (You)')
+          ? rawDisplayName
+          : `${rawDisplayName} (You)`
+        : rawDisplayName;
     const projectedSpeaker =
       displayName || getAnonymousSpeakerDisplayLabel(speaker);
     return projectedSpeaker !== speaker

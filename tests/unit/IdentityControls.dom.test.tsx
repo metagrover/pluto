@@ -340,6 +340,36 @@ describe('identity controls', () => {
     ).toBe(false);
   });
 
+  it('does not offer the workspace user or their nicknames as remote attendee choices', async () => {
+    invoke.mockResolvedValueOnce({
+      ...meeting(),
+      selfPersonId: 'person-aditya',
+      profile: {
+        ...emptyIdentityProfile(),
+        preferredName: 'Aditya Grover',
+        aliases: ['Grover', 'Meta'],
+      },
+      speakers: ['Remote Speaker 1'],
+      people: [
+        { id: 'person-aditya', name: 'Aditya Grover' },
+        { id: 'person-jordan', name: 'Jordan Doe' },
+      ],
+    });
+    await act(async () =>
+      root.render(
+        <MeetingIdentityControls
+          meetingId="meeting-a"
+          attendeeNames={['Aditya Grover', 'Grover', 'Jordan Doe']}
+        />,
+      ),
+    );
+    await click('1 unidentified speaker · Review');
+
+    expect(container.textContent).toContain('Jordan Doe · Invited');
+    expect(container.textContent).not.toContain('Aditya Grover · Invited');
+    expect(container.textContent).not.toContain('Grover · Invited');
+  });
+
   it('plays isolated samples one at a time, offers an alternate, and cleans up object URLs', async () => {
     const createObjectURL = vi.fn(() => `blob:sample-${Math.random()}`);
     const revokeObjectURL = vi.fn();

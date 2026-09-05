@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Play } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   type IdentitySelection,
@@ -151,6 +151,8 @@ const AnonymousSpeakerReview = ({
   speaker,
   binding,
   people,
+  selfPersonId,
+  userProfile,
   attendeeNames,
   summary,
   busy,
@@ -165,6 +167,8 @@ const AnonymousSpeakerReview = ({
   speaker: string;
   binding?: IdentityBinding;
   people: IdentityPerson[];
+  selfPersonId?: string | null;
+  userProfile?: { preferredName?: string; aliases?: string[] } | null;
   attendeeNames: string[];
   summary?: SpeakerReviewSummary;
   busy: boolean;
@@ -180,6 +184,25 @@ const AnonymousSpeakerReview = ({
   const [choice, setChoice] = useState('');
   const [name, setName] = useState('');
   const [staged, setStaged] = useState<StagedIdentity | null>(null);
+
+  const userNames = new Set<string>();
+  if (userProfile?.preferredName?.trim()) {
+    userNames.add(userProfile.preferredName.trim().toLocaleLowerCase('en-US'));
+  }
+  if (selfPersonId) {
+    const selfPerson = people.find((p) => p.id === selfPersonId);
+    if (selfPerson?.name?.trim()) {
+      userNames.add(selfPerson.name.trim().toLocaleLowerCase('en-US'));
+    }
+  }
+  if (Array.isArray(userProfile?.aliases)) {
+    for (const alias of userProfile.aliases) {
+      if (typeof alias === 'string' && alias.trim()) {
+        userNames.add(alias.trim().toLocaleLowerCase('en-US'));
+      }
+    }
+  }
+
   const peopleByName = people.reduce<Map<string, IdentityPerson[]>>(
     (index, person) => {
       const key = person.name.trim().toLocaleLowerCase('en-US');
@@ -202,6 +225,7 @@ const AnonymousSpeakerReview = ({
     return index;
   }, new Map());
   const attendeeChoices = [...attendeesByName].flatMap(([key, attendee]) => {
+    if (userNames.has(key)) return [];
     const matches = peopleByName.get(key) ?? [];
     if (attendee.count > 1 || matches.length > 1) return [];
     return [
@@ -268,6 +292,7 @@ const AnonymousSpeakerReview = ({
               disabled={busy || sampleLoading}
               onClick={() => onPlaySample(0)}
             >
+              <Play size={11} className="fill-current mr-1 shrink-0" aria-hidden="true" />
               {sampleLoading ? 'Loading sample…' : 'Play voice sample'}
             </button>
             {sample && sample.sampleIndex + 1 < sample.sampleCount ? (
@@ -606,6 +631,7 @@ const MeetingIdentityPanel = ({
   return (
     <div className="meeting-speaker-review text-left py-3">
       <button
+        id="meeting-speaker-review-toggle"
         type="button"
         aria-expanded={open}
         aria-controls={id}
@@ -694,6 +720,8 @@ const MeetingIdentityPanel = ({
                   speaker={speaker}
                   binding={binding}
                   people={state.people}
+                  selfPersonId={state.selfPersonId}
+                  userProfile={state.profile}
                   busy={busy || loading}
                   attendeeNames={attendeeNames}
                   summary={speakerSummaries[speaker]}

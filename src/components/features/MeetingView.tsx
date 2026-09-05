@@ -1450,10 +1450,10 @@ export const MeetingView = ({
             </button>
           </header>
           <div className="meeting-transcript-record">
-            {remoteSpeakerStatus ? (
+            {remoteSpeakerStatus && remoteSpeakerStatus.state !== 'separated' ? (
               <div
                 data-meeting-remote-speaker-status={remoteSpeakerStatus.state}
-                className="mb-5 border-b border-pro-border/60 pb-4 text-xs leading-5 text-pro-text-muted"
+                className="mb-4 text-xs leading-5 text-pro-text-muted"
               >
                 <p className="font-medium text-pro-text-main">
                   {remoteSpeakerStatus.title}
@@ -1479,10 +1479,54 @@ export const MeetingView = ({
                 )
                   .toString()
                   .padStart(2, '0')}`;
+                const speakerLabel = String(turn.speaker || 'Unknown speaker');
+                const isSelfSpeaker = speakerLabel.endsWith(' (You)');
+                const isAnonymousSpeaker = /^Speaker \d+$/u.test(speakerLabel);
                 return (
                   <div key={turn.id} className="meeting-transcript-row">
                     <div>
-                      <strong>{turn.speaker || 'Unknown speaker'}</strong>
+                      <strong
+                        className={
+                          isAnonymousSpeaker
+                            ? 'cursor-pointer transition-colors hover:text-pro-accent'
+                            : undefined
+                        }
+                        title={
+                          isAnonymousSpeaker
+                            ? 'Click to review and identify this speaker'
+                            : undefined
+                        }
+                        onClick={
+                          isAnonymousSpeaker
+                            ? () => {
+                                const btn = document.getElementById(
+                                  'meeting-speaker-review-toggle',
+                                );
+                                if (
+                                  btn &&
+                                  btn.getAttribute('aria-expanded') !== 'true'
+                                ) {
+                                  btn.click();
+                                }
+                                btn?.scrollIntoView({
+                                  behavior: 'smooth',
+                                  block: 'nearest',
+                                });
+                              }
+                            : undefined
+                        }
+                      >
+                        {isSelfSpeaker ? (
+                          <span>
+                            {speakerLabel.replace(/ \(You\)$/, '')}
+                            <span className="ml-1.5 text-[11px] font-normal text-pro-text-muted">
+                              (You)
+                            </span>
+                          </span>
+                        ) : (
+                          speakerLabel
+                        )}
+                      </strong>
                       <time>{timestamp}</time>
                     </div>
                     <p>{text}</p>

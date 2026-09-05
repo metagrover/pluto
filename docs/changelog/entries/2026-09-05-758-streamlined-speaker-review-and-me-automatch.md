@@ -1,0 +1,8 @@
+### Streamlined speaker review UX and Me identity automatching
+
+- **Issue:** [#758](https://github.com/metagrover/pluto/issues/758)
+- **PR:** Pending.
+- **Changed:** Automatically bound local microphone speech (`Me`) to the active workspace user without requiring acoustic diarization confidence gating, resolving from the active workspace profile (`getSelfPersonId()`) even if capture metadata lacked a self ID. Excluded the workspace user and all configured user aliases/nicknames from candidate attendee suggestion chips and dropdowns. Restyled the speaker review interface to align with Pluto's calm, typography-driven Notion/Linear design language: removed stacked border rules, eliminated screaming all-caps tracked subheaders, replaced heavy left-stripe accent bars with subtle rounded card surfaces, conditionally suppressed redundant remote speaker status strips when channels are separated, and added direct turn-to-review focus navigation from transcript speaker labels with clean `(You)` indicators.
+- **Why:** Ensures users who configured their profile and nicknames in Settings are always automatically identified in transcripts, eliminates confusing self-suggestions in external speaker assignment rosters, and replaces an awkward, visually cluttered review panel with a polished, document-native flow.
+- **Replaced:** Strict acoustic-confidence-gated Me binding, unfiltered attendee suggestion rosters that included the user's nickname, and awkward stacked-border speaker review styling.
+- **Notes:** Compatible with offline diarization and calendar attendee matching. Preserved all accessibility labels, keyboard controls, and test attributes.
