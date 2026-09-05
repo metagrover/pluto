@@ -1011,7 +1011,7 @@
     @apply mt-5 space-y-4;
   }
   .meeting-analysis-queue {
-    @apply mx-auto w-full px-6 pb-16 pt-8 md:px-8;
+    @apply mx-auto block w-full max-w-[760px] px-6 pb-16 pt-8 md:px-8;
   }
   .meeting-analysis-queue__detail {
     @apply mt-2 max-w-[68ch] text-sm leading-6;

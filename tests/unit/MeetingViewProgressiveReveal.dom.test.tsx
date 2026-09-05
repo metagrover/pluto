@@ -803,6 +803,8 @@ describe('MeetingView progressive reveal', () => {
       'Position 3 in the local notes queue',
     );
     expect(queuedStatus?.getAttribute('data-state')).toBe('queued');
+    expect(queuedStatus?.className).toContain('block');
+    expect(queuedStatus?.className).toContain('max-w-[760px]');
 
     await act(async () => renderMeeting(queuedMeeting));
     expect(container.querySelector('output[data-state="queued"]')).toBe(

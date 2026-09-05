@@ -382,7 +382,7 @@ export const MeetingAnalysisQueueStatus = ({
     aria-atomic="true"
     data-meeting-artifact="analysis"
     data-state="queued"
-    className="meeting-analysis-queue max-w-[760px]"
+    className="meeting-analysis-queue block max-w-[760px]"
   >
     <p className="meeting-analysis-queue__label">{title}</p>
     <p className="meeting-analysis-queue__detail">{detail}</p>
