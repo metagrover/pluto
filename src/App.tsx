@@ -69,6 +69,7 @@ import type {
 import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
 import {
   canRetryMeetingFinalTranscription,
+  canRetryMeetingSpeakerLabels,
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
@@ -140,7 +141,7 @@ export const resolveMeetingRetryRoute = (
     return isParakeetValidatedMeeting(meeting) ? 'analysis' : 'unavailable';
   }
   if (kind === 'speaker_labels') {
-    return canRetryMeetingFinalTranscription(meeting)
+    return canRetryMeetingSpeakerLabels(meeting)
       ? 'final_transcription'
       : 'unavailable';
   }

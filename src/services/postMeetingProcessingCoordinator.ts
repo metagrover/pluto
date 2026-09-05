@@ -70,14 +70,6 @@ export const canRetryMeetingFinalTranscription = (
   }
 };
 
-export const shouldStartMeetingFinalTranscription = (
-  meeting: Partial<Meeting> | null | undefined,
-  reason: 'automatic' | 'manual' | 'speaker_labels',
-): boolean =>
-  reason === 'automatic'
-    ? shouldRunMeetingFinalTranscription(meeting)
-    : canRetryMeetingFinalTranscription(meeting);
-
 export function canImproveHistoricalSpeakerLabels(
   meeting: Partial<Meeting> | null | undefined,
 ): boolean {
@@ -146,6 +138,29 @@ export const isParakeetValidatedMeeting = (
     return false;
   }
 };
+
+export const canRetryMeetingSpeakerLabels = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean =>
+  canRetryMeetingFinalTranscription(meeting) ||
+  Boolean(
+    meeting?.capture_journal_generation &&
+      meeting.audio_path &&
+      meeting.system_audio_path &&
+      meeting.mixed_audio_path &&
+      meeting.transcript_json &&
+      isParakeetValidatedMeeting(meeting),
+  );
+
+export const shouldStartMeetingFinalTranscription = (
+  meeting: Partial<Meeting> | null | undefined,
+  reason: 'automatic' | 'manual' | 'speaker_labels',
+): boolean =>
+  reason === 'automatic'
+    ? shouldRunMeetingFinalTranscription(meeting)
+    : reason === 'speaker_labels'
+      ? canRetryMeetingSpeakerLabels(meeting)
+      : canRetryMeetingFinalTranscription(meeting);
 
 export const selectNextMeetingForFinalTranscription = (
   meetings: Array<Partial<Meeting>>,

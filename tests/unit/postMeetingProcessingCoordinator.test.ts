@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingFinalTranscription,
+  canRetryMeetingSpeakerLabels,
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
@@ -282,6 +283,10 @@ describe('post-meeting processing coordinator', () => {
 
     expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
     expect(canRetryMeetingFinalTranscription(meeting)).toBe(false);
+    expect(canRetryMeetingSpeakerLabels(meeting)).toBe(true);
+    expect(
+      shouldStartMeetingFinalTranscription(meeting, 'speaker_labels'),
+    ).toBe(true);
     expect(isParakeetValidatedMeeting(meeting)).toBe(true);
   });
 

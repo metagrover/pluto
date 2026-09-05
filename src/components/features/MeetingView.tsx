@@ -20,7 +20,10 @@ import {
 } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
-import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
+import {
+  canImproveHistoricalSpeakerLabels,
+  canRetryMeetingSpeakerLabels,
+} from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   parseAnalysisEditConflictsJson,
@@ -866,7 +869,9 @@ export const MeetingView = ({
   const transcriptValidationRetrying = Boolean(selectedMeetingRetryOperation);
   const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
   const canImproveHistoricalSpeakerLabelsForMeeting =
-    canImproveHistoricalSpeakerLabels(selectedMeeting);
+    canImproveHistoricalSpeakerLabels(selectedMeeting) ||
+    (unidentifiedSpeakerCount > 0 &&
+      canRetryMeetingSpeakerLabels(selectedMeeting));
 
   const notesDocument = buildMeetingNotesDocument({
     v2,
