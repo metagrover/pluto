@@ -1,17 +1,23 @@
 import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import { deriveReviewedSpeakerCandidate } from '../src/services/speakerCandidateEvidence';
 import type { SpeakerSampleInterval } from '../src/utils/speakerReview';
-import { selectSpeakerSampleIntervals } from '../src/utils/speakerReview';
+import {
+  selectReviewableAnonymousSpeakers,
+  selectSpeakerSampleIntervals,
+} from '../src/utils/speakerReview';
 import { parseTranscriptSegments } from '../src/utils/transcript';
+import {
+  type TranscriptTrustMeetingFields,
+  canUseTranscriptTrustState,
+  resolveTranscriptTrustState,
+} from '../src/utils/transcriptTrustState';
 import type {
   SpeakerEvidenceRequest,
   SpeakerEvidenceResult,
 } from './transcription/parakeetFinalClient';
 
-type EnrollmentMeeting = {
+export type EnrollmentMeeting = TranscriptTrustMeetingFields & {
   id: string | number;
-  transcript_json?: string | null;
-  transcript_status?: string | null;
   capture_journal_generation?: string | null;
   system_audio_path?: string | null;
 };
@@ -35,6 +41,137 @@ export interface SpeakerEnrollmentCandidateDependencies {
   ) => Promise<SpeakerEvidenceResult>;
 }
 
+type SpeakerEnrollmentSourceDependencies = Pick<
+  SpeakerEnrollmentCandidateDependencies,
+  'getMeeting' | 'fileExists'
+>;
+
+type SpeakerEnrollmentBaseSource = {
+  sourcePath: string;
+  sourceRevision: string;
+  transcriptSegments: ReturnType<typeof parseTranscriptSegments>;
+};
+
+type SpeakerEnrollmentSource = SpeakerEnrollmentBaseSource & {
+  transcriptFingerprint: string;
+};
+
+const validateSpeakerEnrollmentBaseSource = (
+  meetingId: string,
+  meeting: EnrollmentMeeting | null | undefined,
+  transcriptSegments: ReturnType<typeof parseTranscriptSegments>,
+  fileExists: (inputPath: string) => boolean,
+): SpeakerEnrollmentBaseSource | null => {
+  const sourcePath = meeting?.system_audio_path;
+  const sourceRevision = meeting?.capture_journal_generation;
+  if (
+    !meeting ||
+    String(meeting.id) !== meetingId ||
+    typeof sourcePath !== 'string' ||
+    !sourcePath ||
+    !fileExists(sourcePath) ||
+    typeof sourceRevision !== 'string' ||
+    !sourceRevision
+  ) {
+    return null;
+  }
+
+  const trustState = resolveTranscriptTrustState(meeting, {
+    hasUsableMicArtifact: false,
+    hasUsableSystemArtifact: true,
+    hasUsableMixArtifact: false,
+    hasSupportedActivityEvidence: false,
+    micActivitySeconds: 0,
+    systemActivitySeconds: 0,
+    recoverySource: null,
+    hasCaptureRecoveryHandler: false,
+    canRestoreCaptureGap: false,
+    hasExistingTranscript: transcriptSegments.length > 0,
+    hasExistingDerivedArtifacts: false,
+    validationMode: 'unavailable',
+    canRunValidation: false,
+  });
+  if (!canUseTranscriptTrustState(trustState, 'generate_new')) return null;
+
+  return {
+    sourcePath,
+    sourceRevision,
+    transcriptSegments,
+  };
+};
+
+const getSpeakerEnrollmentBaseSource = (
+  meetingId: string,
+  dependencies: SpeakerEnrollmentSourceDependencies,
+): SpeakerEnrollmentSource | null => {
+  const meeting = dependencies.getMeeting(meetingId);
+  const source = validateSpeakerEnrollmentBaseSource(
+    meetingId,
+    meeting,
+    parseTranscriptSegments(meeting?.transcript_json),
+    dependencies.fileExists,
+  );
+  if (!source || !meeting) return null;
+  return {
+    ...source,
+    transcriptFingerprint: JSON.stringify([
+      meeting.transcript_json ?? null,
+      meeting.transcript_integrity_json ?? null,
+      meeting.transcript_validated_at ?? null,
+      source.sourcePath,
+      source.sourceRevision,
+    ]),
+  };
+};
+
+export const getSpeakerEnrollmentSource = (
+  input: { meetingId: string; speaker: string },
+  dependencies: SpeakerEnrollmentSourceDependencies,
+): {
+  sourcePath: string;
+  sourceRevision: string;
+  transcriptFingerprint: string;
+  intervals: SpeakerSampleInterval[];
+} | null => {
+  const source = getSpeakerEnrollmentBaseSource(input.meetingId, dependencies);
+  if (!source) return null;
+
+  const intervals = selectSpeakerSampleIntervals(
+    source.transcriptSegments,
+    input.speaker,
+  );
+  return intervals.length === 2 ? { ...source, intervals } : null;
+};
+
+export const getSpeakerEnrollmentAvailability = (
+  meetingId: string,
+  dependencies: SpeakerEnrollmentSourceDependencies,
+): Record<string, boolean> => {
+  const meeting = dependencies.getMeeting(meetingId);
+  const transcriptSegments = parseTranscriptSegments(meeting?.transcript_json);
+  const source = validateSpeakerEnrollmentBaseSource(
+    meetingId,
+    meeting,
+    transcriptSegments,
+    dependencies.fileExists,
+  );
+  const speakers = selectReviewableAnonymousSpeakers(
+    transcriptSegments.flatMap((segment) =>
+      typeof segment.speaker === 'string' ? [segment.speaker] : [],
+    ),
+  );
+  return Object.fromEntries(
+    speakers.map((speaker) => [
+      speaker,
+      Boolean(
+        source &&
+          selectSpeakerSampleIntervals(source.transcriptSegments, speaker)
+            .length === 2,
+      ),
+    ]),
+  );
+};
+
 export const buildSpeakerEnrollmentCandidate = async (
   input: { meetingId: string; speaker: string },
   dependencies: SpeakerEnrollmentCandidateDependencies,
@@ -42,27 +179,10 @@ export const buildSpeakerEnrollmentCandidate = async (
   candidate: SpeakerCandidateEvidence;
   sourceRevision: string;
 } | null> => {
-  const meeting = dependencies.getMeeting(input.meetingId);
-  const sourcePath = meeting?.system_audio_path;
-  const sourceRevision = meeting?.capture_journal_generation;
-  if (
-    !meeting ||
-    String(meeting.id) !== input.meetingId ||
-    meeting.transcript_status !== 'validated' ||
-    typeof sourcePath !== 'string' ||
-    !sourcePath ||
-    !dependencies.fileExists(sourcePath) ||
-    typeof sourceRevision !== 'string' ||
-    !sourceRevision
-  ) {
-    return null;
-  }
-
-  const intervals = selectSpeakerSampleIntervals(
-    parseTranscriptSegments(meeting.transcript_json),
-    input.speaker,
-  );
-  if (intervals.length !== 2) return null;
+  const source = getSpeakerEnrollmentSource(input, dependencies);
+  if (!source) return null;
+  const { intervals, sourcePath, sourceRevision, transcriptFingerprint } =
+    source;
 
   const workDir = dependencies.createWorkDir();
   try {
@@ -83,6 +203,13 @@ export const buildSpeakerEnrollmentCandidate = async (
       provenance: evidence.provenance,
       reviewedIntervals: intervals,
     });
+    const currentSource = getSpeakerEnrollmentSource(input, dependencies);
+    if (
+      !currentSource ||
+      currentSource.transcriptFingerprint !== transcriptFingerprint
+    ) {
+      return null;
+    }
     return candidate ? { candidate, sourceRevision } : null;
   } finally {
     await dependencies.removeWorkDir(workDir);

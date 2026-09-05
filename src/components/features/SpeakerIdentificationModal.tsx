@@ -303,6 +303,11 @@ export const SpeakerIdentificationModal = ({
 
   // Reset or initialize combobox inputs whenever active speaker changes
   useEffect(() => {
+    setRememberVoice(false);
+    setRefSampleUnavailable(false);
+    releaseSample();
+    setSampleState(null);
+    setSampleLoading(null);
     if (!currentSpeaker || !state) {
       setSearchQuery('');
       setSelectedSelection(null);
@@ -319,12 +324,7 @@ export const SpeakerIdentificationModal = ({
     }
     setSearchQuery('');
     setSelectedSelection(null);
-    setRememberVoice(false);
-    setRefSampleUnavailable(false);
-    releaseSample();
-    setSampleState(null);
-    setSampleLoading(null);
-  }, [stepIndex, currentSpeaker, releaseSample]);
+  }, [isOpen, stepIndex, currentSpeaker, releaseSample]);
 
   const eligiblePeople = useMemo(() => {
     return (state?.people ?? []).filter((p) => {

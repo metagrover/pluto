@@ -41,6 +41,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
   let invoke: ReturnType<typeof vi.fn>;
   let enrollmentShouldFail: boolean;
   let candidatesAvailable: boolean;
+  let enrollmentAvailable: boolean;
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -48,6 +49,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     root = createRoot(container);
     enrollmentShouldFail = false;
     candidatesAvailable = true;
+    enrollmentAvailable = true;
     invoke = vi.fn(async (channel: string, payload: any) => {
       if (channel === 'GET_IDENTITY_STATE') return workspace;
       if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
@@ -56,7 +58,9 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
           return {
             suggestions: {},
             candidates: {},
-            enrollmentAvailability: { 'Remote Speaker 1': true },
+            enrollmentAvailability: {
+              'Remote Speaker 1': enrollmentAvailable,
+            },
           };
         }
         return {
@@ -299,6 +303,25 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     });
   });
 
+  it('hides voice enrollment when reviewed evidence is unavailable', async () => {
+    candidatesAvailable = false;
+    enrollmentAvailable = false;
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      'Remember this voice for future meetings',
+    );
+  });
+
   it('keeps the speaker in place and surfaces a failed voice enrollment', async () => {
     enrollmentShouldFail = true;
     await act(async () => {
@@ -325,6 +348,48 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       'This person was identified, but Pluto could not remember their voice. Try again.',
     );
     expect(document.body.textContent).toContain('Speaker 1');
+  });
+
+  it('requires fresh voice-profile consent after the modal is reopened', async () => {
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const checkbox = document.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    await act(async () => checkbox.click());
+    expect(checkbox.checked).toBe(true);
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={false}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const reopenedCheckbox = document.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(reopenedCheckbox.checked).toBe(false);
   });
 
   it('rejects suggestion when Not Alex Chen is clicked and clears suggestion banner', async () => {

@@ -124,6 +124,7 @@ struct SpeakerClusterEvidenceAggregator {
 
             guard !acceptedUnitVectors.isEmpty else { continue }
             let consensusUnitVectors = stableConsensus(from: acceptedUnitVectors)
+            guard !consensusUnitVectors.isEmpty else { continue }
             let cleanChunkCount = consensusUnitVectors.count
 
             // Compute centroid
@@ -178,18 +179,37 @@ struct SpeakerClusterEvidenceAggregator {
             minimumConsensusChunkCount,
             Int(ceil(Double(vectors.count) * minimumConsensusRetentionRatio))
         )
-        var consensus = vectors
+        let maximumSeedCount = 32
+        let seedStride = max(1, Int(ceil(Double(vectors.count) / Double(maximumSeedCount))))
+        let orderedVectors = vectors.sorted { lhs, rhs in
+            for index in lhs.indices {
+                if lhs[index] != rhs[index] { return lhs[index] < rhs[index] }
+            }
+            return false
+        }
+        let seedVectors = stride(from: 0, to: orderedVectors.count, by: seedStride)
+            .map { orderedVectors[$0] }
+        let seededConsensus = seedVectors
+            .map { seed in
+                vectors.filter { vector in
+                    cosineSimilarity(vector, seed) >= minimumConsensusSimilarity - 1e-4
+                }
+            }
+            .max { $0.count < $1.count } ?? []
+        guard seededConsensus.count >= minimumRetained else { return [] }
+        var consensus = seededConsensus
 
-        while let centroid = normalizedCentroid(consensus) {
+        for _ in 0..<3 {
+            guard let centroid = normalizedCentroid(consensus) else { return [] }
             let next = consensus.filter { vector in
                 cosineSimilarity(vector, centroid) >= minimumConsensusSimilarity - 1e-4
             }
             if next.count == consensus.count { return consensus }
-            if next.count < minimumRetained { return vectors }
+            if next.count < minimumRetained { return [] }
             consensus = next
         }
 
-        return vectors
+        return []
     }
 
     private static func normalizedCentroid(_ vectors: [[Float]]) -> [Float]? {

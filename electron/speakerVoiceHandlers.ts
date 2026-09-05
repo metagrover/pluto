@@ -1,12 +1,8 @@
 import type Database from 'better-sqlite3';
 import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
 import { matchSpeakerVoice } from '../src/services/speakerVoiceMatcher';
-import {
-  selectReviewableAnonymousSpeakers,
-  selectSpeakerSampleIntervals,
-} from '../src/utils/speakerReview';
-import { parseTranscriptSegments } from '../src/utils/transcript';
 import * as db from './db';
+import { getSpeakerEnrollmentAvailability } from './speakerEnrollmentCandidate';
 import {
   deleteVoiceProfile,
   enrollSpeakerVoice,
@@ -89,21 +85,12 @@ export async function handleSpeakerVoiceRequest(
           (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null);
       const meeting = getMeeting(meetingId);
       const fileExists = deps?.fileExists ?? require('node:fs').existsSync;
-      const transcriptSegments = parseTranscriptSegments(
-        meeting?.transcript_json,
-      );
-      const enrollmentAvailability = Object.fromEntries(
-        selectReviewableAnonymousSpeakers(
-          transcriptSegments.flatMap((segment) =>
-            typeof segment.speaker === 'string' ? [segment.speaker] : [],
-          ),
-        ).map((speaker) => [
-          speaker,
-          typeof meeting?.system_audio_path === 'string' &&
-            fileExists(meeting.system_audio_path) &&
-            selectSpeakerSampleIntervals(transcriptSegments, speaker).length ===
-              2,
-        ]),
+      const enrollmentAvailability = getSpeakerEnrollmentAvailability(
+        meetingId,
+        {
+          getMeeting: () => meeting,
+          fileExists,
+        },
       );
 
       const profiles = getCanonicalVoiceProfiles({

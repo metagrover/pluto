@@ -203,6 +203,14 @@ describe('speakerCandidateEvidence', () => {
     });
     expect(candidate?.candidateDigest).toHaveLength(64);
 
+    const durationCapped = deriveReviewedSpeakerCandidate({
+      speaker: 'Them',
+      clusterEvidence: [{ ...strongEvidence, cleanDurationSeconds: 100 }],
+      provenance: dummyProvenance,
+      reviewedIntervals: intervals,
+    });
+    expect(durationCapped?.cleanDurationSeconds).toBe(10);
+
     expect(
       deriveReviewedSpeakerCandidate({
         speaker: 'Them',
@@ -215,6 +223,22 @@ describe('speakerCandidateEvidence', () => {
       deriveReviewedSpeakerCandidate({
         speaker: 'Them',
         clusterEvidence: [strongEvidence, { ...strongEvidence, cluster: 'S2' }],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals,
+      }),
+    ).toBeNull();
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [{ ...strongEvidence, minimumChunkSimilarity: 0.2 }],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals,
+      }),
+    ).toBeNull();
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [{ ...strongEvidence, cleanSegmentCount: 1 }],
         provenance: dummyProvenance,
         reviewedIntervals: intervals,
       }),

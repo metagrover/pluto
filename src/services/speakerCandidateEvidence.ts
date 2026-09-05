@@ -267,7 +267,10 @@ export function deriveReviewedSpeakerCandidate(input: {
         evidence.cleanDurationSeconds,
         reviewedDurationSeconds,
       ),
-      cleanSegmentCount: reviewedIntervals.length,
+      cleanSegmentCount: Math.min(
+        evidence.cleanSegmentCount,
+        reviewedIntervals.length,
+      ),
     };
     return isCandidateEligibleForEnrollment(boundedEvidence)
       ? [boundedEvidence]

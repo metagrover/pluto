@@ -58,6 +58,33 @@ export interface StoredSpeakerCandidateEvidence
 
 import * as dbModule from './db';
 
+const UPSERT_MEETING_SPEAKER_CANDIDATE = `INSERT INTO meeting_speaker_candidates (
+  meeting_id, speaker, source_revision, candidate_digest, embedding_json,
+  clean_duration_sec, clean_segment_count, clean_chunk_count,
+  minimum_chunk_similarity, mean_chunk_similarity,
+  reference_start_sec, reference_end_sec, reference_excerpt,
+  provenance_json, created_at
+) VALUES (
+  ?, ?, ?, ?, ?,
+  ?, ?, ?,
+  ?, ?,
+  ?, ?, ?,
+  ?, CURRENT_TIMESTAMP
+)
+ON CONFLICT(meeting_id, speaker, source_revision) DO UPDATE SET
+  candidate_digest = excluded.candidate_digest,
+  embedding_json = excluded.embedding_json,
+  clean_duration_sec = excluded.clean_duration_sec,
+  clean_segment_count = excluded.clean_segment_count,
+  clean_chunk_count = excluded.clean_chunk_count,
+  minimum_chunk_similarity = excluded.minimum_chunk_similarity,
+  mean_chunk_similarity = excluded.mean_chunk_similarity,
+  reference_start_sec = excluded.reference_start_sec,
+  reference_end_sec = excluded.reference_end_sec,
+  reference_excerpt = excluded.reference_excerpt,
+  provenance_json = excluded.provenance_json,
+  created_at = CURRENT_TIMESTAMP`;
+
 function getDb(dbInstance?: Database.Database): Database.Database {
   return dbInstance ?? dbModule.db;
 }
@@ -67,35 +94,9 @@ function writeMeetingSpeakerCandidate(
   sourceRevision: string,
   candidate: SpeakerCandidateEvidence,
   d: Database.Database,
+  statement?: Database.Statement,
 ): void {
-  d.prepare(
-    `INSERT INTO meeting_speaker_candidates (
-      meeting_id, speaker, source_revision, candidate_digest, embedding_json,
-      clean_duration_sec, clean_segment_count, clean_chunk_count,
-      minimum_chunk_similarity, mean_chunk_similarity,
-      reference_start_sec, reference_end_sec, reference_excerpt,
-      provenance_json, created_at
-    ) VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?,
-      ?, ?, ?,
-      ?, CURRENT_TIMESTAMP
-    )
-    ON CONFLICT(meeting_id, speaker, source_revision) DO UPDATE SET
-      candidate_digest = excluded.candidate_digest,
-      embedding_json = excluded.embedding_json,
-      clean_duration_sec = excluded.clean_duration_sec,
-      clean_segment_count = excluded.clean_segment_count,
-      clean_chunk_count = excluded.clean_chunk_count,
-      minimum_chunk_similarity = excluded.minimum_chunk_similarity,
-      mean_chunk_similarity = excluded.mean_chunk_similarity,
-      reference_start_sec = excluded.reference_start_sec,
-      reference_end_sec = excluded.reference_end_sec,
-      reference_excerpt = excluded.reference_excerpt,
-      provenance_json = excluded.provenance_json,
-      created_at = CURRENT_TIMESTAMP`,
-  ).run(
+  (statement ?? d.prepare(UPSERT_MEETING_SPEAKER_CANDIDATE)).run(
     meetingId,
     candidate.speaker,
     sourceRevision,
@@ -145,8 +146,15 @@ export function saveMeetingSpeakerCandidates(
       'DELETE FROM meeting_speaker_candidates WHERE meeting_id = ?',
     ).run(meetingId);
 
+    const statement = d.prepare(UPSERT_MEETING_SPEAKER_CANDIDATE);
     for (const cand of candidates) {
-      writeMeetingSpeakerCandidate(meetingId, sourceRevision, cand, d);
+      writeMeetingSpeakerCandidate(
+        meetingId,
+        sourceRevision,
+        cand,
+        d,
+        statement,
+      );
     }
   })();
 }
@@ -265,42 +273,60 @@ export function enrollSpeakerVoice(
     throw new Error('speaker_candidate_not_found');
   }
 
-  const id = randomUUID();
-  d.prepare(
-    `INSERT INTO speaker_voice_enrollments (
-      id, person_id, source_meeting_id, source_revision, speaker,
-      embedding_json, chunk_count, clean_duration_sec,
-      minimum_chunk_similarity, mean_chunk_similarity,
-      reference_start_sec, reference_end_sec, reference_excerpt,
-      provenance_json, candidate_digest, created_at
-    ) VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?,
-      ?, ?, ?,
-      ?, ?, CURRENT_TIMESTAMP
-    )`,
-  ).run(
-    id,
-    params.personId,
-    params.sourceMeetingId,
-    params.sourceRevision,
-    params.speaker,
-    candidate.embedding_json,
-    candidate.clean_chunk_count,
-    candidate.clean_duration_sec,
-    candidate.minimum_chunk_similarity,
-    candidate.mean_chunk_similarity,
-    candidate.reference_start_sec,
-    candidate.reference_end_sec,
-    candidate.reference_excerpt,
-    candidate.provenance_json,
-    params.candidateDigest,
-  );
+  const existing = d
+    .prepare(
+      `SELECT id, created_at FROM speaker_voice_enrollments
+       WHERE person_id = ? AND source_meeting_id = ? AND source_revision = ?
+         AND speaker = ? AND candidate_digest = ?
+       LIMIT 1`,
+    )
+    .get(
+      params.personId,
+      params.sourceMeetingId,
+      params.sourceRevision,
+      params.speaker,
+      params.candidateDigest,
+    ) as { id: string; created_at: string } | undefined;
+  const id = existing?.id ?? randomUUID();
+  if (!existing) {
+    d.prepare(
+      `INSERT INTO speaker_voice_enrollments (
+        id, person_id, source_meeting_id, source_revision, speaker,
+        embedding_json, chunk_count, clean_duration_sec,
+        minimum_chunk_similarity, mean_chunk_similarity,
+        reference_start_sec, reference_end_sec, reference_excerpt,
+        provenance_json, candidate_digest, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?,
+        ?, ?, CURRENT_TIMESTAMP
+      )`,
+    ).run(
+      id,
+      params.personId,
+      params.sourceMeetingId,
+      params.sourceRevision,
+      params.speaker,
+      candidate.embedding_json,
+      candidate.clean_chunk_count,
+      candidate.clean_duration_sec,
+      candidate.minimum_chunk_similarity,
+      candidate.mean_chunk_similarity,
+      candidate.reference_start_sec,
+      candidate.reference_end_sec,
+      candidate.reference_excerpt,
+      candidate.provenance_json,
+      params.candidateDigest,
+    );
+  }
 
-  const row = d
-    .prepare('SELECT created_at FROM speaker_voice_enrollments WHERE id = ?')
-    .get(id) as { created_at: string };
+  const row =
+    existing ??
+    (d
+      .prepare('SELECT created_at FROM speaker_voice_enrollments WHERE id = ?')
+      .get(id) as { created_at: string });
 
   return {
     id,

@@ -9,7 +9,11 @@ const SAMPLE_GAP_SECONDS = 1;
 
 export const planSpeakerEnrollmentAudio = (
   intervals: SpeakerSampleInterval[],
-): { filter: string; totalDurationSeconds: number } | null => {
+): {
+  filter: string;
+  inputSeeks: [number, number];
+  totalDurationSeconds: number;
+} | null => {
   if (
     intervals.length !== SAMPLE_COUNT ||
     intervals.some(
@@ -23,17 +27,17 @@ export const planSpeakerEnrollmentAudio = (
     return null;
   }
   const [first, second] = intervals;
-  const filter = `[0:a]atrim=start=${first.startSec}:end=${first.endSec},asetpts=PTS-STARTPTS[s0];[0:a]atrim=start=0:end=${SAMPLE_GAP_SECONDS},volume=0,asetpts=PTS-STARTPTS[gap];[0:a]atrim=start=${second.startSec}:end=${second.endSec},asetpts=PTS-STARTPTS[s1];[s0][gap][s1]concat=n=3:v=0:a=1[out]`;
+  const firstDuration = Number((first.endSec - first.startSec).toFixed(3));
+  const secondDuration = Number((second.endSec - second.startSec).toFixed(3));
+  const filter = `[0:a]atrim=start=0:duration=${firstDuration},asetpts=PTS-STARTPTS[s0];[2:a]atrim=start=0:duration=${SAMPLE_GAP_SECONDS},volume=0,asetpts=PTS-STARTPTS[gap];[1:a]atrim=start=0:duration=${secondDuration},asetpts=PTS-STARTPTS[s1];[s0][gap][s1]concat=n=3:v=0:a=1[out]`;
   const totalDurationSeconds = Number(
-    (
-      first.endSec -
-      first.startSec +
-      SAMPLE_GAP_SECONDS +
-      second.endSec -
-      second.startSec
-    ).toFixed(3),
+    (firstDuration + SAMPLE_GAP_SECONDS + secondDuration).toFixed(3),
   );
-  return { filter, totalDurationSeconds };
+  return {
+    filter,
+    inputSeeks: [first.startSec, second.startSec],
+    totalDurationSeconds,
+  };
 };
 
 const saveWav = (command: ffmpeg.FfmpegCommand, outputPath: string) =>
@@ -65,16 +69,21 @@ export const createSpeakerEnrollmentAudio = async (input: {
   const systemPath = path.join(input.outputDir, `system-${token}.wav`);
   const micPath = path.join(input.outputDir, `mic-${token}.wav`);
   try {
-    const systemCommand = ffmpeg(input.sourcePath)
+    const systemCommand = ffmpeg()
+      .input(input.sourcePath)
+      .inputOptions([`-ss ${plan.inputSeeks[0]}`])
+      .input(input.sourcePath)
+      .inputOptions([`-ss ${plan.inputSeeks[1]}`])
+      .input(input.sourcePath)
+      .inputOptions(['-ss 0'])
       .complexFilter(plan.filter)
       .outputOptions(['-map [out]']);
     await saveWav(systemCommand, systemPath);
     await saveWav(
-      ffmpeg(input.sourcePath).audioFilters([
-        `atrim=start=0:end=${plan.totalDurationSeconds}`,
-        'volume=0',
-        'asetpts=PTS-STARTPTS',
-      ]),
+      ffmpeg(input.sourcePath)
+        .setStartTime(0)
+        .duration(plan.totalDurationSeconds)
+        .audioFilters(['volume=0']),
       micPath,
     );
     return {

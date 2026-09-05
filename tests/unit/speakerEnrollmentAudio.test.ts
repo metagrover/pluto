@@ -10,10 +10,11 @@ describe('speakerEnrollmentAudio', () => {
 
     expect(plan).toEqual({
       filter:
-        '[0:a]atrim=start=71.76:end=79.76,asetpts=PTS-STARTPTS[s0];' +
-        '[0:a]atrim=start=0:end=1,volume=0,asetpts=PTS-STARTPTS[gap];' +
-        '[0:a]atrim=start=1090:end=1093.04,asetpts=PTS-STARTPTS[s1];' +
+        '[0:a]atrim=start=0:duration=8,asetpts=PTS-STARTPTS[s0];' +
+        '[2:a]atrim=start=0:duration=1,volume=0,asetpts=PTS-STARTPTS[gap];' +
+        '[1:a]atrim=start=0:duration=3.04,asetpts=PTS-STARTPTS[s1];' +
         '[s0][gap][s1]concat=n=3:v=0:a=1[out]',
+      inputSeeks: [71.76, 1090],
       totalDurationSeconds: 12.04,
     });
   });

@@ -166,6 +166,35 @@ describe('speakerVoiceStore & candidate database operations', () => {
     );
   });
 
+  it('replays the same enrollment without duplicating biometric evidence', async () => {
+    const { enrollSpeakerVoice, saveMeetingSpeakerCandidates } = await import(
+      '../../electron/speakerVoiceStore'
+    );
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    db.prepare(
+      "INSERT INTO entities (id, name, type) VALUES ('person-1', 'Test Person', 'person')",
+    ).run();
+    saveMeetingSpeakerCandidates('m1', 'gen-1', [dummyCandidate], db);
+
+    const input = {
+      personId: 'person-1',
+      sourceMeetingId: 'm1',
+      sourceRevision: 'gen-1',
+      speaker: dummyCandidate.speaker,
+      candidateDigest: dummyCandidate.candidateDigest,
+    };
+    const first = enrollSpeakerVoice(input, db);
+    const replay = enrollSpeakerVoice(input, db);
+    const count = db
+      .prepare('SELECT COUNT(*) AS count FROM speaker_voice_enrollments')
+      .get() as { count: number };
+
+    expect(replay.id).toBe(first.id);
+    expect(count.count).toBe(1);
+  });
+
   it('overwrites prior candidate generations on new commit for the same meeting', async () => {
     const { saveMeetingSpeakerCandidates, getMeetingSpeakerCandidates } =
       await import('../../electron/speakerVoiceStore');
