@@ -140,12 +140,12 @@ it('clears derived identity evidence and pre-meeting capture snapshots on knowle
 });
 
 it.each([false, true])(
-  'replaces pre-Drizzle identity history, including an interrupted legacy shape: %s',
+  'preserves pre-Drizzle identity history, including an interrupted legacy shape: %s',
   (interrupted) => {
     const databasePath = path.join(directory, `legacy-${interrupted}.db`);
     const legacy = new Database(databasePath);
     try {
-      legacy.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,type TEXT,name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY);
+      legacy.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,type TEXT,name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT);
       CREATE TABLE identity_resolution_history(action_id TEXT, fingerprint TEXT, payload TEXT, PRIMARY KEY(action_id,fingerprint));`);
       legacy
         .prepare('INSERT INTO identity_resolution_history VALUES(?,?,?)')
@@ -161,7 +161,7 @@ it.each([false, true])(
       });
       const sql = runtime.initialize();
       const store = createIdentityStore(sql);
-      expect(store.getResolution('old', 'fp')).toBeNull();
+      expect(store.getResolution('old', 'fp')).toEqual(resolution);
       sql.exec(
         "INSERT INTO meetings (id, title) VALUES ('persisted-source', 'Source')",
       );

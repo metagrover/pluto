@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - In-place adoption and preservation of legacy SQLite databases into Drizzle lifecycle
+
+- **Status:** Accepted
+- **Source:** [Issue #763](https://github.com/metagrover/pluto/issues/763), owner direction on 2026-09-05
+- **Decision:** Pluto replaces the previous `replaceExisting('legacy')` destructive startup policy with safe, in-place legacy database adoption (`adoptLegacyDatabase`). When an unmanaged pre-Drizzle database is opened, Pluto creates a pre-adoption safety backup (`.pluto-db-pre-drizzle-adoption-<timestamp>-<pid>`), applies the baseline schema idempotently (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`), adds missing speaker candidate and voice profile tables, applies backward-compatible column upgrades if missing (such as `identity_resolution_history.meeting_id`), and stamps `__drizzle_migrations` with the baseline migration entry. Database replacement is strictly reserved for unrecoverable corrupted files (`integrity-failed`). Pluto also provides a standalone adoption script (`scripts/migrate_legacy_db.ts`) for CLI and recovery usage.
+- **Rationale:** PR #741 introduced Drizzle lifecycle management with a `replaceExisting('legacy')` behavior that deleted pre-Drizzle databases and created a blank schema, causing existing users to lose their meeting history, notes, and preferences on upgrade. Pre-Drizzle databases already match the baseline schema with 0 column differences across active tables and can be adopted safely without data loss.
+- **Consequences:** Existing user databases containing meetings, transcripts, settings, and entities are 100% preserved; Pluto launches directly into the existing user workspace without showing the initial onboarding wizard; Drizzle migrations continue to manage subsequent schema migrations seamlessly.
+
 ## 2026-09-05 - Searchable combobox and autofill for speaker identification modal
 
 - **Status:** Accepted

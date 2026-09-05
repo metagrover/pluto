@@ -23,32 +23,6 @@ afterEach(() => {
 });
 
 describe('database replacement', () => {
-  it('replaces a legacy database and deletes staging only after verification', () => {
-    const root = makeRoot();
-    const databasePath = path.join(root, 'pluto.db');
-    const legacy = new Database(databasePath);
-    legacy.exec(
-      "CREATE TABLE meetings (id TEXT); INSERT INTO meetings VALUES ('legacy')",
-    );
-    legacy.close();
-
-    const runtime = createDatabaseRuntime({
-      databasePath,
-      migrationsFolder: baselineFolder,
-    });
-    const sqlite = runtime.initialize();
-    expect(sqlite.prepare('PRAGMA table_info(meetings)').all()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: 'title', notnull: 1 }),
-      ]),
-    );
-    expect(
-      sqlite.prepare("SELECT 1 FROM meetings WHERE id = 'legacy'").get(),
-    ).toBeUndefined();
-    expect(recoveryDirectories(root)).toEqual([]);
-    runtime.close();
-  });
-
   it('replaces an invalid SQLite file after staging it', () => {
     const root = makeRoot();
     const databasePath = path.join(root, 'pluto.db');
@@ -63,14 +37,10 @@ describe('database replacement', () => {
     runtime.close();
   });
 
-  it('retains staged legacy data when the fresh migration fails', () => {
+  it('retains staged corrupt data when the fresh migration fails', () => {
     const root = makeRoot();
     const databasePath = path.join(root, 'pluto.db');
-    const legacy = new Database(databasePath);
-    legacy.exec(
-      "CREATE TABLE legacy_content (value TEXT); INSERT INTO legacy_content VALUES ('keep me')",
-    );
-    legacy.close();
+    fs.writeFileSync(databasePath, 'not a sqlite database: corrupted content');
     const migrationsFolder = path.join(root, 'failing-drizzle');
     fs.mkdirSync(path.join(migrationsFolder, 'meta'), { recursive: true });
     fs.writeFileSync(
@@ -92,23 +62,17 @@ describe('database replacement', () => {
     );
     const [recovery] = recoveryDirectories(root);
     expect(recovery).toBeDefined();
-    const recovered = new Database(path.join(root, recovery!, 'pluto.db'), {
-      readonly: true,
-    });
-    expect(recovered.prepare('SELECT value FROM legacy_content').get()).toEqual(
-      {
-        value: 'keep me',
-      },
+    const recovered = fs.readFileSync(
+      path.join(root, recovery!, 'pluto.db'),
+      'utf8',
     );
-    recovered.close();
+    expect(recovered).toBe('not a sqlite database: corrupted content');
   });
 
   it('surfaces cleanup failure and retains the staged database', () => {
     const root = makeRoot();
     const databasePath = path.join(root, 'pluto.db');
-    const legacy = new Database(databasePath);
-    legacy.exec('CREATE TABLE legacy_content (value TEXT)');
-    legacy.close();
+    fs.writeFileSync(databasePath, 'corrupted bytes to stage');
     const runtime = createDatabaseRuntime({
       databasePath,
       migrationsFolder: baselineFolder,
@@ -125,11 +89,7 @@ describe('database replacement', () => {
   it('retains staged data when post-migration foreign-key verification fails', () => {
     const root = makeRoot();
     const databasePath = path.join(root, 'pluto.db');
-    const legacy = new Database(databasePath);
-    legacy.exec(
-      "CREATE TABLE legacy_content (value TEXT); INSERT INTO legacy_content VALUES ('keep me')",
-    );
-    legacy.close();
+    fs.writeFileSync(databasePath, 'corrupted file before fk failure');
     const migrationsFolder = path.join(root, 'invalid-drizzle');
     fs.mkdirSync(path.join(migrationsFolder, 'meta'), { recursive: true });
     fs.writeFileSync(
@@ -152,14 +112,10 @@ describe('database replacement', () => {
     );
     const [recovery] = recoveryDirectories(root);
     expect(recovery).toBeDefined();
-    const recovered = new Database(path.join(root, recovery!, 'pluto.db'), {
-      readonly: true,
-    });
-    expect(recovered.prepare('SELECT value FROM legacy_content').get()).toEqual(
-      {
-        value: 'keep me',
-      },
+    const recovered = fs.readFileSync(
+      path.join(root, recovery!, 'pluto.db'),
+      'utf8',
     );
-    recovered.close();
+    expect(recovered).toBe('corrupted file before fk failure');
   });
 });

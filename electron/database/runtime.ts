@@ -15,6 +15,7 @@ import {
   readAppliedMigrationHistory,
   readPackagedMigrationHistory,
 } from './migrationHistory';
+import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 
 export interface DatabaseRuntime {
   initialize(): Database.Database;
@@ -213,7 +214,7 @@ export const createDatabaseRuntime = (
     return connection;
   };
 
-  const replaceExisting = (reason: 'legacy' | 'integrity-failed') => {
+  const replaceExisting = (reason: 'integrity-failed') => {
     closeConnection();
     const staged = stageDatabaseArtifacts(options.databasePath, reason);
     try {
@@ -278,18 +279,21 @@ export const createDatabaseRuntime = (
 
         const kind = classifyDatabase(connection);
         if (kind === 'legacy') {
-          connection = replaceExisting('legacy');
-        } else {
-          if (kind === 'managed') {
-            assertSupportedMigrationHistory(
-              readAppliedMigrationHistory(connection),
-              packaged(),
-            );
-          }
-          configureConnection(connection, inMemory);
-          applyPendingMigrations(connection);
-          verifyHealth(connection);
+          backupLegacyDatabase(options.databasePath);
+          adoptLegacyDatabase({
+            sqlite: connection,
+            migrationsFolder: options.migrationsFolder,
+            packagedHistory: packaged(),
+          });
+        } else if (kind === 'managed') {
+          assertSupportedMigrationHistory(
+            readAppliedMigrationHistory(connection),
+            packaged(),
+          );
         }
+        configureConnection(connection, inMemory);
+        applyPendingMigrations(connection);
+        verifyHealth(connection);
         currentState = 'open';
         return connection;
       } catch (error) {
