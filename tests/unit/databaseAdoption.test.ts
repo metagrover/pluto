@@ -94,7 +94,9 @@ describe('legacy database adoption', () => {
     });
     const reSqlite = reRuntime.initialize();
     expect(
-      reSqlite.prepare("SELECT title FROM meetings WHERE id = 'meeting-123'").get(),
+      reSqlite
+        .prepare("SELECT title FROM meetings WHERE id = 'meeting-123'")
+        .get(),
     ).toEqual({ title: 'Important Planning Meeting' });
     reRuntime.close();
   });

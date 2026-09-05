@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 import {
   type StagedDatabase,
   cleanupStagedDatabase,
@@ -15,7 +16,6 @@ import {
   readAppliedMigrationHistory,
   readPackagedMigrationHistory,
 } from './migrationHistory';
-import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 
 export interface DatabaseRuntime {
   initialize(): Database.Database;

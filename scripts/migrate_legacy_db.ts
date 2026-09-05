@@ -49,10 +49,14 @@ try {
   const qc = sqlite.pragma('quick_check', { simple: true });
   const fk = sqlite.pragma('foreign_key_check') as unknown[];
   if (qc !== 'ok' || fk.length > 0) {
-    throw new Error(`Health verification failed: quick_check=${qc}, fk_errors=${fk.length}`);
+    throw new Error(
+      `Health verification failed: quick_check=${qc}, fk_errors=${fk.length}`,
+    );
   }
   console.log('Successfully adopted legacy database into Drizzle lifecycle!');
-  const meetingCount = sqlite.prepare('SELECT count(*) as count FROM meetings').get() as { count: number };
+  const meetingCount = sqlite
+    .prepare('SELECT count(*) as count FROM meetings')
+    .get() as { count: number };
   console.log(`Preserved ${meetingCount.count} meetings.`);
 } finally {
   sqlite.close();
