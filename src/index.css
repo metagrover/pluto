@@ -32,6 +32,7 @@
 
   .people-briefing {
     @apply w-full;
+    container: people-briefing / inline-size;
   }
   .people-search {
     @apply flex h-8 w-[160px] items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-3 text-pro-text-muted transition-all duration-300 hover:border-pro-text-muted/60 focus-within:w-[230px] focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-pro-bg;
@@ -40,10 +41,10 @@
     @apply min-w-0 flex-1 bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted/80;
   }
   .people-list {
-    @apply mt-7 space-y-8;
+    @apply mt-8 grid gap-9;
   }
   .people-list__heading {
-    @apply mb-2.5 flex items-center justify-between gap-3 px-3;
+    @apply mb-3 flex items-center justify-between gap-3 px-3;
   }
   .people-list__heading h2 {
     @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/80;
@@ -64,7 +65,8 @@
     @apply rounded-xl bg-pro-accent/5;
   }
   .person-row__meeting {
-    @apply flex w-full items-center gap-4 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
+    @apply grid w-full items-center gap-x-4 gap-y-2 rounded-xl px-3 py-3.5 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
+    grid-template-columns: 2rem minmax(0, 1fr) 10rem 0.8125rem;
   }
   .person-avatar {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted/70 transition-colors duration-150;
@@ -79,30 +81,30 @@
     @apply flex min-w-0 items-baseline gap-2;
   }
   .person-identity strong {
-    @apply text-[13.5px] font-medium leading-tight text-pro-text-main transition-colors duration-150;
+    @apply break-words text-[13.5px] font-medium leading-snug text-pro-text-main transition-colors duration-150;
+    overflow-wrap: anywhere;
   }
   .person-row__meeting:hover .person-identity strong {
     @apply text-pro-accent;
   }
   .person-context {
-    @apply flex min-w-0 items-baseline gap-2 text-[12px] leading-tight text-pro-text-muted/75;
+    @apply flex min-w-0 flex-col gap-1 text-[12px] leading-snug text-pro-text-muted/75;
   }
   .person-context > span:last-child {
-    @apply truncate;
+    @apply max-w-full truncate;
   }
   .person-role {
-    @apply shrink-0 text-[11px] text-pro-text-muted/70;
-  }
-  .person-role::after {
-    content: "·";
-    @apply ml-2 text-pro-text-muted/40;
+    @apply max-w-full truncate text-[11px] text-pro-text-muted/70;
   }
   .person-meta {
-    @apply flex shrink-0 items-center gap-3 text-[11px] text-pro-text-muted/70;
+    @apply flex min-w-0 flex-col items-end gap-1.5 text-right text-[11px] tabular-nums text-pro-text-muted/70;
   }
   .person-meeting-count,
   .person-date {
-    @apply flex shrink-0 items-center gap-1.5 tabular-nums;
+    @apply flex items-center justify-end gap-1.5 tabular-nums;
+  }
+  .person-meta svg {
+    @apply shrink-0;
   }
   .person-possible-duplicate {
     @apply rounded-md bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
@@ -114,7 +116,10 @@
     @apply text-pro-accent/50;
   }
   .people-unlinked {
-    @apply mt-8 border-t border-pro-border/60 pt-3;
+    @apply border-t border-pro-border/60 pt-4;
+  }
+  .people-unlinked[open] > summary {
+    @apply mb-3;
   }
   .people-unlinked > summary {
     @apply flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-lg px-3 text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
@@ -493,14 +498,26 @@
     @apply flex shrink-0 items-center gap-2 text-xs tabular-nums text-pro-text-muted;
   }
 
-  @media (max-width: 640px) {
-    .person-context,
-    .person-meeting-count {
-      @apply hidden;
+  @container people-briefing (min-width: 900px) {
+    .person-copy {
+      @apply grid items-center gap-x-6;
+      grid-template-columns: 11rem minmax(0, 1fr);
+    }
+  }
+
+  @container people-briefing (max-width: 560px) {
+    .person-row__meeting {
+      grid-template-columns: 2rem minmax(0, 1fr) 0.8125rem;
     }
     .person-meta {
-      @apply ml-auto max-w-[45%] flex-wrap justify-end pl-1;
+      @apply col-start-2 row-start-2 flex-row flex-wrap items-center justify-start gap-x-3 text-left;
     }
+    .person-row__chevron {
+      @apply col-start-3 row-start-1;
+    }
+  }
+
+  @media (max-width: 640px) {
     .person-dossier__activity {
       @apply block divide-x-0 divide-y divide-pro-border/60;
     }
@@ -509,9 +526,6 @@
     }
     .person-dossier__section--candidate {
       @apply px-4;
-    }
-    .person-date {
-      @apply hidden;
     }
   }
 
