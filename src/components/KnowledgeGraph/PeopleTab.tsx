@@ -53,6 +53,7 @@ import type {
 import { parsePersonRole } from '../../utils/personBriefing';
 import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
+import { SearchSelect } from '../ui/SearchSelect';
 import { compileKnowledgeBrief } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
@@ -159,13 +160,16 @@ export const PeopleBriefing = ({
   );
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
-    const cue =
+    const rawCue =
       person.briefHeadline ??
       (person.context && !person.context.startsWith('Role:')
         ? person.context
         : null) ??
       person.latestMeetingTitle ??
       'No linked conversation yet';
+    const cue = rawCue.startsWith(`${person.name}: `)
+      ? rawCue.slice(person.name.length + 2).trim() || rawCue
+      : rawCue;
     const showRole = person.role !== 'Known from conversations';
     return (
       <article
@@ -182,11 +186,17 @@ export const PeopleBriefing = ({
           <span className="person-avatar" aria-hidden="true">
             {person.name.slice(0, 1).toUpperCase()}
           </span>
-          <span className="person-identity">
-            <strong>{person.name}</strong>
-            {showRole ? <span>{person.role}</span> : null}
+          <span className="person-copy">
+            <span className="person-identity">
+              <strong>{person.name}</strong>
+            </span>
+            <span className="person-context">
+              {showRole ? (
+                <span className="person-role">{person.role}</span>
+              ) : null}
+              <span>{cue}</span>
+            </span>
           </span>
-          <span className="person-context">{cue}</span>
           <span className="person-meta">
             {person.possibleDuplicateCount > 0 ? (
               <span className="person-possible-duplicate">
@@ -544,6 +554,7 @@ export const PersonDossier = ({
       setVoiceProfile(match);
     } catch {
       setVoiceProfile(null);
+      setVoiceError('Voice profile could not be loaded.');
     } finally {
       setVoiceLoading(false);
     }
@@ -1024,21 +1035,21 @@ export const PersonDossier = ({
             under one person, and the original evidence will remain intact.
           </p>
           <label htmlFor="merge-person-source">Duplicate record</label>
-          <select
+          <SearchSelect
             id="merge-person-source"
             value={mergeSourceId}
-            onChange={(event) => {
-              setMergeSourceId(event.target.value);
+            ariaLabel="Duplicate record"
+            placeholder="Choose a person"
+            searchPlaceholder="Search people…"
+            options={eligibleMergeCandidates.map((candidate) => ({
+              value: candidate.id,
+              label: candidate.name,
+            }))}
+            onValueChange={(value) => {
+              setMergeSourceId(value);
               setMergeState('idle');
             }}
-          >
-            <option value="">Choose a person</option>
-            {eligibleMergeCandidates.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
+          />
           {selectedMergeSource ? (
             <div className="person-dossier__merge-preview">
               <div>
@@ -1216,6 +1227,10 @@ export const PersonDossier = ({
               </p>
             ) : null}
           </div>
+        ) : voiceError ? (
+          <p role="alert" className="mt-4 text-sm text-pro-urgent">
+            {voiceError}
+          </p>
         ) : (
           <p className="mt-4 text-sm text-pro-text-muted">
             No voice profile enrolled for this person.

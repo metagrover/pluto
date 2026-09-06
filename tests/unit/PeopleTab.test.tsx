@@ -37,7 +37,28 @@ describe('PeopleBriefing', () => {
     expect(markup).toContain('2 open loops');
     expect(markup).toContain('1 to confirm');
     expect(markup).toContain('person-row__meeting');
+    expect(markup).toContain(
+      '<span class="person-copy"><span class="person-identity"><strong>Avery Chen</strong></span><span class="person-context"><span class="person-role">Design lead</span><span>Avery is preparing the launch handoff.</span></span></span>',
+    );
     expect(markup).not.toContain('>Open <');
+  });
+
+  it('strips redundant person name prefix from the row cue', () => {
+    const rowWithPrefix: PersonBriefingRow = {
+      ...rows[0],
+      name: 'Sarah Chen',
+      briefHeadline:
+        'Sarah Chen: The conversation centered around design principles.',
+    };
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing rows={[rowWithPrefix]} onSelectPerson={() => {}} />,
+    );
+    expect(markup).toContain(
+      'The conversation centered around design principles.',
+    );
+    expect(markup).not.toContain(
+      'Sarah Chen: The conversation centered around design principles.',
+    );
   });
 
   it('renders every linked person in ranked order without a loader', () => {

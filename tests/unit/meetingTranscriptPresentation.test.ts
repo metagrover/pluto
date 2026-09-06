@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
+  extractSpeakerDisplayNames,
   getMeetingRemoteSpeakerStatus,
 } from '../../src/components/features/meetingTranscriptPresentation';
 import type { TranscriptSegment } from '../../src/types';
@@ -95,6 +96,40 @@ describe('meeting transcript presentation', () => {
       Me: 'Aditya Grover (You)',
     });
     expect(projected[0].speaker).toBe('Aditya Grover (You)');
+  });
+
+  it('resolves Me from identity.profile.preferredName when no explicit Me binding exists', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'person-1', name: 'Deepak Grover' }],
+      bindings: [
+        {
+          speaker: 'Remote Speaker 1',
+          personId: 'person-1',
+        },
+      ],
+      profile: { preferredName: 'Deepak' },
+      selfPersonId: 'person-1',
+    });
+    expect(names.Me).toBe('Deepak');
+  });
+
+  it('resolves Me from identity.selfPersonId person name when no explicit Me binding or profile exists', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'self-id', name: 'Deepak Grover' }],
+      bindings: [],
+      selfPersonId: 'self-id',
+    });
+    expect(names.Me).toBe('Deepak Grover');
+  });
+
+  it('respects explicit Me binding over profile.preferredName fallback', () => {
+    const names = extractSpeakerDisplayNames({
+      people: [{ id: 'self-id', name: 'Deepak Grover' }],
+      bindings: [{ speaker: 'Me', personId: 'self-id' }],
+      profile: { preferredName: 'D' },
+      selfPersonId: 'self-id',
+    });
+    expect(names.Me).toBe('Deepak Grover');
   });
 });
 
@@ -210,5 +245,54 @@ describe('remote speaker completion status', () => {
         }),
       }),
     ).toBeNull();
+  });
+
+  describe('extractSpeakerDisplayNames', () => {
+    it('returns empty object when identity is null, undefined, or malformed', () => {
+      expect(extractSpeakerDisplayNames(null)).toEqual({});
+      expect(extractSpeakerDisplayNames(undefined)).toEqual({});
+      expect(extractSpeakerDisplayNames({} as any)).toEqual({});
+      expect(
+        extractSpeakerDisplayNames({ people: [], bindings: undefined as any }),
+      ).toEqual({});
+    });
+
+    it('maps bound speakers to their trimmed person names', () => {
+      const identity = {
+        people: [
+          { id: 'person-1', name: ' Alice Smith ' },
+          { id: 'person-2', name: 'Bob Jones' },
+        ],
+        bindings: [
+          { speaker: 'Remote Speaker 1', personId: 'person-1' },
+          { speaker: 'Remote Speaker 2', personId: 'person-2' },
+        ],
+      };
+
+      expect(extractSpeakerDisplayNames(identity)).toEqual({
+        'Remote Speaker 1': 'Alice Smith',
+        'Remote Speaker 2': 'Bob Jones',
+      });
+    });
+
+    it('ignores bindings with missing personId, unbound persons, or whitespace-only names', () => {
+      const identity = {
+        people: [
+          { id: 'person-1', name: 'Alice' },
+          { id: 'person-empty', name: '   ' },
+        ],
+        bindings: [
+          { speaker: 'Remote Speaker 1', personId: 'person-1' },
+          { speaker: 'Remote Speaker 2', personId: null },
+          { speaker: 'Remote Speaker 3', personId: 'person-unknown' },
+          { speaker: 'Remote Speaker 4', personId: 'person-empty' },
+          { speaker: 'Remote Speaker 5' },
+        ],
+      };
+
+      expect(extractSpeakerDisplayNames(identity)).toEqual({
+        'Remote Speaker 1': 'Alice',
+      });
+    });
   });
 });

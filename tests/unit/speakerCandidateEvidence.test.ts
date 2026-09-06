@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SpeakerClusterEvidence } from '../../electron/transcription/parakeetFinalClient';
 import {
   computeCandidateDigest,
+  deriveReviewedSpeakerCandidate,
   deriveSpeakerCandidates,
 } from '../../src/services/speakerCandidateEvidence';
 
@@ -165,5 +166,82 @@ describe('speakerCandidateEvidence', () => {
       'Remote Speaker 1',
       'Remote Speaker 2',
     ]);
+  });
+
+  it('derives one fail-closed enrollment candidate from two reviewed samples', () => {
+    const strongEvidence: SpeakerClusterEvidence = {
+      cluster: 'S1',
+      embedding: validEmbedding,
+      cleanChunkCount: 3,
+      cleanSegmentCount: 2,
+      cleanDurationSeconds: 8,
+      minimumChunkSimilarity: 0.82,
+      meanChunkSimilarity: 0.9,
+    };
+    const intervals = [
+      { startSec: 10, endSec: 16, excerpt: 'First reviewed sample' },
+      { startSec: 30, endSec: 34, excerpt: 'Second reviewed sample' },
+    ];
+
+    const candidate = deriveReviewedSpeakerCandidate({
+      speaker: 'Them',
+      clusterEvidence: [strongEvidence],
+      provenance: dummyProvenance,
+      reviewedIntervals: intervals,
+    });
+
+    expect(candidate).toMatchObject({
+      speaker: 'Them',
+      nativeCluster: 'S1',
+      cleanSegmentCount: 2,
+      isEligibleForEnrollment: true,
+      referenceInterval: {
+        startTime: intervals[0].startSec,
+        endTime: intervals[0].endSec,
+        excerpt: intervals[0].excerpt,
+      },
+    });
+    expect(candidate?.candidateDigest).toHaveLength(64);
+
+    const durationCapped = deriveReviewedSpeakerCandidate({
+      speaker: 'Them',
+      clusterEvidence: [{ ...strongEvidence, cleanDurationSeconds: 100 }],
+      provenance: dummyProvenance,
+      reviewedIntervals: intervals,
+    });
+    expect(durationCapped?.cleanDurationSeconds).toBe(10);
+
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [strongEvidence],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals.slice(0, 1),
+      }),
+    ).toBeNull();
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [strongEvidence, { ...strongEvidence, cluster: 'S2' }],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals,
+      }),
+    ).toBeNull();
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [{ ...strongEvidence, minimumChunkSimilarity: 0.2 }],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals,
+      }),
+    ).toBeNull();
+    expect(
+      deriveReviewedSpeakerCandidate({
+        speaker: 'Them',
+        clusterEvidence: [{ ...strongEvidence, cleanSegmentCount: 1 }],
+        provenance: dummyProvenance,
+        reviewedIntervals: intervals,
+      }),
+    ).toBeNull();
   });
 });

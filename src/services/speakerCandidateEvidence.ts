@@ -233,3 +233,74 @@ export function deriveSpeakerCandidates(input: {
 
   return candidates;
 }
+
+export function deriveReviewedSpeakerCandidate(input: {
+  speaker: string;
+  clusterEvidence: SpeakerClusterEvidence[];
+  provenance: SpeakerCandidateProvenance;
+  reviewedIntervals: Array<{
+    startSec: number;
+    endSec: number;
+    excerpt: string;
+  }>;
+}): SpeakerCandidateEvidence | null {
+  const reviewedIntervals = input.reviewedIntervals.filter(
+    (interval) =>
+      Number.isFinite(interval.startSec) &&
+      Number.isFinite(interval.endSec) &&
+      interval.startSec >= 0 &&
+      interval.endSec > interval.startSec &&
+      interval.excerpt.trim().length > 0,
+  );
+  if (reviewedIntervals.length < ENROLLMENT_PURITY_GATES.minSegmentCount) {
+    return null;
+  }
+
+  const reviewedDurationSeconds = reviewedIntervals.reduce(
+    (total, interval) => total + interval.endSec - interval.startSec,
+    0,
+  );
+  const eligible = input.clusterEvidence.flatMap((evidence) => {
+    const boundedEvidence = {
+      ...evidence,
+      cleanDurationSeconds: Math.min(
+        evidence.cleanDurationSeconds,
+        reviewedDurationSeconds,
+      ),
+      cleanSegmentCount: Math.min(
+        evidence.cleanSegmentCount,
+        reviewedIntervals.length,
+      ),
+    };
+    return isCandidateEligibleForEnrollment(boundedEvidence)
+      ? [boundedEvidence]
+      : [];
+  });
+  if (eligible.length !== 1) return null;
+
+  const evidence = eligible[0];
+  return {
+    speaker: input.speaker,
+    nativeCluster: evidence.cluster,
+    candidateDigest: computeCandidateDigest(
+      evidence.embedding,
+      input.provenance,
+    ),
+    embedding: evidence.embedding,
+    cleanDurationSeconds: evidence.cleanDurationSeconds,
+    cleanSegmentCount: evidence.cleanSegmentCount,
+    cleanChunkCount: evidence.cleanChunkCount,
+    minimumChunkSimilarity: evidence.minimumChunkSimilarity,
+    meanChunkSimilarity: evidence.meanChunkSimilarity,
+    referenceInterval: {
+      startTime: reviewedIntervals[0].startSec,
+      endTime: reviewedIntervals[0].endSec,
+      excerpt: reviewedIntervals[0].excerpt,
+    },
+    provenance: {
+      ...input.provenance,
+      profileAlgorithmVersion: input.provenance.profileAlgorithmVersion ?? 'v1',
+    },
+    isEligibleForEnrollment: true,
+  };
+}

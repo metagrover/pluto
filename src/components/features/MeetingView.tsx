@@ -20,6 +20,7 @@ import {
 } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
+import { getMeetingIdentity } from '../../api/identity';
 import {
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingSpeakerLabels,
@@ -51,6 +52,7 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
@@ -67,7 +69,10 @@ import {
 import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
+  extractSpeakerDisplayNames,
 } from './meetingTranscriptPresentation';
+
+const speakerDisplayNamesCache: Record<string, Record<string, string>> = {};
 
 const SavedEditConflicts = ({
   conflicts,
@@ -679,10 +684,10 @@ export const MeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
-  const [speakerDisplayNames, setSpeakerDisplayNames] = useState<{
-    meetingId: string;
-    names: Record<string, string>;
-  }>({ meetingId: '', names: {} });
+  const [speakerDisplayNamesByMeeting, setSpeakerDisplayNamesByMeeting] =
+    useState<Record<string, Record<string, string>>>(() => ({
+      ...speakerDisplayNamesCache,
+    }));
   const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
   const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
     string | null
@@ -808,9 +813,7 @@ export const MeetingView = ({
     transcriptSegments,
   );
   const displayNames =
-    speakerDisplayNames.meetingId === String(selectedMeeting.id)
-      ? speakerDisplayNames.names
-      : {};
+    speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ?? {};
   const rawTranscriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,
   );
@@ -842,13 +845,50 @@ export const MeetingView = ({
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
   const updateSpeakerDisplayNames = useCallback(
-    (names: Record<string, string>) =>
-      setSpeakerDisplayNames({
-        meetingId: String(selectedMeeting.id),
-        names,
-      }),
+    (names: Record<string, string>) => {
+      const meetingId = String(selectedMeeting.id);
+      speakerDisplayNamesCache[meetingId] = names;
+      setSpeakerDisplayNamesByMeeting((prev) => ({
+        ...prev,
+        [meetingId]: names,
+      }));
+    },
     [selectedMeeting.id],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const meetingId = String(selectedMeeting.id);
+    if (
+      !meetingId ||
+      reviewableSpeakers.length === 0 ||
+      !window?.ipcRenderer?.invoke
+    ) {
+      return;
+    }
+
+    void getMeetingIdentity(meetingId)
+      .then((identity) => {
+        if (cancelled) return;
+        const names = extractSpeakerDisplayNames(identity);
+        speakerDisplayNamesCache[meetingId] = names;
+        setSpeakerDisplayNamesByMeeting((prev) => ({
+          ...prev,
+          [meetingId]: names,
+        }));
+      })
+      .catch((error) => {
+        console.error('Failed to load speaker identity for meeting:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedMeeting.id,
+    selectedMeeting.transcript_validated_at,
+    reviewableSpeakers.length,
+  ]);
   const calendarAttendeeNames = calendarContext
     ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
         .map((person) => person?.name?.trim() || person?.email?.trim() || '')
@@ -1140,26 +1180,33 @@ export const MeetingView = ({
                 </summary>
                 <div className="meeting-document-menu__panel">
                   <div className="meeting-document-menu__section">
-                    <label className="meeting-template-picker">
+                    <label
+                      htmlFor="meeting-notes-template"
+                      className="meeting-template-picker"
+                    >
                       <span className="meeting-template-picker__label">
                         Notes template
                       </span>
-                      <select
+                      <SearchSelect
+                        id="meeting-notes-template"
                         value={notesTemplate}
-                        onChange={(event) =>
-                          setNotesTemplate(
-                            event.target.value as MeetingNotesTemplate,
-                          )
+                        onValueChange={(value) =>
+                          setNotesTemplate(value as MeetingNotesTemplate)
                         }
-                        aria-label="Notes template"
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="one_on_one">1:1</option>
-                        <option value="team_sync">Team sync</option>
-                        <option value="customer_call">Customer call</option>
-                        <option value="interview">Interview</option>
-                        <option value="project_kickoff">Project kickoff</option>
-                      </select>
+                        ariaLabel="Notes template"
+                        searchable={false}
+                        options={[
+                          { value: 'auto', label: 'Auto' },
+                          { value: 'one_on_one', label: '1:1' },
+                          { value: 'team_sync', label: 'Team sync' },
+                          { value: 'customer_call', label: 'Customer call' },
+                          { value: 'interview', label: 'Interview' },
+                          {
+                            value: 'project_kickoff',
+                            label: 'Project kickoff',
+                          },
+                        ]}
+                      />
                     </label>
                   </div>
                   <div className="meeting-document-menu__section">

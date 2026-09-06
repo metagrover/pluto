@@ -25,6 +25,14 @@ describe('Parakeet EOU causal replay', () => {
           thermalStates: [],
           cancellations: 0,
           failures: 1,
+          presentation: {
+            corrections: 0,
+            restorations: 0,
+            lateArrivals: 0,
+            degraded: 1,
+            rowPeak: 0,
+            draftPeak: 0,
+          },
         },
         10,
       ),
@@ -33,6 +41,7 @@ describe('Parakeet EOU causal replay', () => {
       'system_coverage',
       'system_tail',
       'native_failure',
+      'presentation_degraded',
     ]);
   });
 

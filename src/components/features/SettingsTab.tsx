@@ -17,7 +17,7 @@ import {
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../utils/ollamaModels';
 import { PageHeader } from '../ui/PageHeader';
-import { SettingsSelect } from '../ui/SettingsSelect';
+import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
 
@@ -460,20 +460,21 @@ export const SettingsTab = ({
               helper="Automatically stop recording after continuous silence once the scheduled meeting ends or conference audio goes quiet."
               actionControl={false}
             >
-              <SettingsSelect
-                label="Auto-stop on prolonged silence duration"
+              <SearchSelect
+                ariaLabel="Auto-stop on prolonged silence duration"
                 value={silenceAutoStopDuration || '5'}
-                onChange={(value) => {
-                  const val = value as '3' | '5' | '10' | 'disabled';
-                  setSilenceAutoStopDuration?.(val);
-                  persistSetting('silence_auto_stop_duration', val);
-                }}
+                searchable={false}
                 options={[
                   { value: '3', label: '3 minutes' },
                   { value: '5', label: '5 minutes (Default)' },
                   { value: '10', label: '10 minutes' },
                   { value: 'disabled', label: 'Disabled' },
                 ]}
+                onValueChange={(value) => {
+                  const val = value as '3' | '5' | '10' | 'disabled';
+                  setSilenceAutoStopDuration?.(val);
+                  persistSetting('silence_auto_stop_duration', val);
+                }}
               />
             </SettingsRow>
           </Section>

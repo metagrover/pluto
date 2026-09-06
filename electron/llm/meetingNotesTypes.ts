@@ -129,8 +129,18 @@ export type GenerateMeetingNotesInput = {
   cacheKey?: string;
 };
 
+export type NotesValidationCategory =
+  | 'schema'
+  | 'source_reference'
+  | 'guardrail'
+  | 'inherited_commitment'
+  | 'validation';
+
 export class MeetingNotesError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly validationCategory?: NotesValidationCategory,
+  ) {
     super(code);
     this.name = 'MeetingNotesError';
   }

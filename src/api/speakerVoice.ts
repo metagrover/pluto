@@ -33,10 +33,12 @@ export async function getSpeakerVoiceSuggestions(
 ): Promise<{
   suggestions: Record<string, VoiceMatchSuggestion>;
   candidates: Record<string, ClientCandidateMetadata>;
+  enrollmentAvailability: Record<string, boolean>;
 }> {
   const result = await invoke<{
     suggestions: Record<string, VoiceMatchSuggestion>;
     candidates?: Record<string, ClientCandidateMetadata>;
+    enrollmentAvailability?: Record<string, boolean>;
   }>('SPEAKER_VOICE_GET_SUGGESTIONS', {
     meetingId,
     calendarAttendeePersonIds,
@@ -44,15 +46,16 @@ export async function getSpeakerVoiceSuggestions(
   return {
     suggestions: result?.suggestions ?? {},
     candidates: result?.candidates ?? {},
+    enrollmentAvailability: result?.enrollmentAvailability ?? {},
   };
 }
 
 export function enrollSpeakerVoice(params: {
   personId: string;
   sourceMeetingId: string;
-  sourceRevision: string;
+  sourceRevision?: string;
   speaker: string;
-  candidateDigest: string;
+  candidateDigest?: string;
   expectedRevision: number;
 }): Promise<{ success: boolean; enrollmentId: string }> {
   return invoke('SPEAKER_VOICE_ENROLL', params);

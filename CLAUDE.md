@@ -9,15 +9,11 @@ Skills are located in `.agent/skills/`.
 - If your platform supports the `Skill` tool, use it to load skills.
 - Otherwise, read the `SKILL.md` files in `.agent/skills/` and follow them exactly.
 
-## 🧭 Issue-Driven Development
+## Workflow scope
 
-GitHub Issues are Pluto's source of truth for active product and implementation work.
+Follow **Scope the workflow to the work** in `AGENTS.md`. It overrides blanket skill triggers: trivial, clear, localized, low-risk fixes go directly to implementation, relevant checks, lint, and a PR without an issue search, new issue, brainstorming, design approval, spec, or plan. If the scope or risk grows, use the non-trivial workflow.
 
-- Use `.agent/skills/issue-driven-development/SKILL.md` before feature work, product changes, architecture/process changes, or meaningful bug fixes.
-- Find or create an outcome-sized GitHub Issue before writing a design, implementation plan, or code.
-- Update the issue when scope, acceptance criteria, constraints, or product direction change materially.
-- Record durable decisions in `docs/decisions.md`; use `docs/adr/` only for high-impact technical decisions.
-- Update `docs/CHANGELOG.md` when work ships or materially changes Pluto's direction.
+For non-trivial work, follow the issue and durable-memory guidance in `AGENTS.md`. Use changelog fragments under `docs/changelog/entries/` for issue-backed work; do not edit the archived `docs/CHANGELOG.md`.
 
 ## 🛠 Tool Mapping (for Codex)
 
@@ -26,6 +22,6 @@ If you are running on Codex, please refer to the tool mapping in:
 
 ## 🎯 Best Practices
 
-- **Brainstorming:** Perform design brainstorming before any code changes.
+- **Brainstorming:** Use for non-trivial work with unresolved requirements or substantial design choices, as scoped in `AGENTS.md`.
 - **TDD:** Write tests before implementation.
 - **Subagents:** Use subagents for complex, independent tasks if supported by your platform.

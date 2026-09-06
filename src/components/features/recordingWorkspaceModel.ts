@@ -1,3 +1,5 @@
+import type { LiveConversationSnapshot } from '../../services/liveTranscription/liveConversationProjection';
+
 export type CaptureHealth =
   | 'healthy'
   | 'warning'
@@ -53,6 +55,7 @@ export type RecordingWorkspaceInput = {
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   segments: LiveTranscriptSegment[];
   interimText: string;
+  liveConversation?: LiveConversationSnapshot | null;
 };
 
 export const resolveSystemCaptureHealth = ({
@@ -137,6 +140,7 @@ export const buildRecordingWorkspaceModel = (
                   : 'Capture is healthy',
     transcript: nonEmptyTranscript,
     interimText: input.interimText.trim(),
+    liveConversation: input.liveConversation ?? null,
   };
 };
 

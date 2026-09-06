@@ -15,6 +15,17 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-05 - Resolve Me speaker name from user profile and wire speaker candidate evidence in final transcription
+
+- **Status:** Accepted
+- **Source:** [Issue #765](https://github.com/metagrover/pluto/issues/765), owner direction on 2026-09-05
+- **Decision:** Two complementary fixes:
+  1. `getMeetingIdentityContext` (`electron/commitmentIdentity.ts`) now permits `capture.origin === 'unknown'` (historical recordings where no capture record was journaled) in addition to `'local'` when binding `Me` to the workspace self person. Acoustic capture evidence (`source: 'capture'`) still requires `origin === 'local'`; historical meetings fall back to `source: 'user'`.
+  2. `extractSpeakerDisplayNames` (`src/components/features/meetingTranscriptPresentation.ts`) now falls back to `identity.profile?.preferredName` then `peopleById.get(identity.selfPersonId)` to populate `names.Me` when no explicit meeting binding resolves a name for the local speaker. This drives `applyMeetingSpeakerDisplayNames` to render `Preferred Name (You)` without requiring a stored binding.
+  3. `FinalSpeakerEvidence` gains an optional `clusterEvidence` field, and `runFinalTranscription.ts` forwards it together with `provenance` into `applyRemoteSpeakerClusters` so `candidateEvidence` is computed and stored in `meeting_speaker_candidates` via `commitCanonical`.
+- **Rationale:** Historical meetings predating voice-enrollment recording had `capture.origin: 'unknown'`, causing `Me` to never bind to the user's workspace identity. The frontend had no secondary path to display the user's name when no explicit meeting binding existed. Speaker candidate embeddings were silently dropped because `clusterEvidence` was never forwarded, preventing cross-meeting voice recognition from improving.
+- **Consequences:** All historical meetings display the user's real name (`Deepak (You)` style) immediately without re-processing. Future meetings where FluidAudio returns `clusterEvidence` will persist speaker embeddings enabling automatic cross-meeting identification to improve over time.
+
 ## 2026-09-05 - In-place adoption and preservation of legacy SQLite databases into Drizzle lifecycle
 
 - **Status:** Accepted
@@ -934,6 +945,7 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Deterministic calibration:** Suggestions require passing calibrated global acoustic threshold ($\ge 0.72$), runner-up margin ($\ge 0.10$), and exact candidate digest rejection tracking. Calendar presence hints match confidence but never bypass acoustic margin requirements. Suggestions are default-off (`voice_profile_suggestions_v1`) until local calibration benchmarks prove zero false suggestions.
 - **Lossless identity integration:** Enrollments are permanently keyed by original person ID. Canonical profiles are aggregated dynamically via `resolvePersonId`. Merging two people combines their voice profiles reversibly; restoring unmerges them immediately. Permanent deletion is blocked on active merge families (`Restore this person merge before permanently deleting voice samples.`), while disabling remains available.
 - **UI control:** The SpeakerIdentificationModal offers high-confidence match suggestions with reference audio playback, one-click confirmation and rejection, and an explicit opt-in enrollment checkbox (`Remember this voice for future meetings`). The PeopleTab dossier displays a Voice Profile card showing speech duration evidence, reference audio playback, enable/disable toggle, and merge-protected deletion.
+- **Enrollment availability:** Final-transcription candidates are an optimization, not a prerequisite for explicit enrollment. When a reviewed speaker has no persisted candidate, the opt-in action builds a bounded local analysis clip from the same two isolated System-audio samples shown in Speaker Identification, separates them with silence, and requires exactly one candidate to pass the existing purity gates before candidate and enrollment persistence. The confirmed meeting binding must still match the selected canonical person, and identity-only bindings are never bulk-enrolled or treated as biometric consent.
 
 ## 2026-09-06 - Settings selection controls share the speaker picker language
 

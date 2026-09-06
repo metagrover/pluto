@@ -40,10 +40,10 @@
     @apply min-w-0 flex-1 bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted/80;
   }
   .people-list {
-    @apply mt-7;
+    @apply mt-7 space-y-8;
   }
   .people-list__heading {
-    @apply mb-2 flex items-center justify-between gap-3 px-3;
+    @apply mb-2.5 flex items-center justify-between gap-3 px-3;
   }
   .people-list__heading h2 {
     @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/80;
@@ -64,7 +64,7 @@
     @apply rounded-xl bg-pro-accent/5;
   }
   .person-row__meeting {
-    @apply flex w-full items-center gap-3.5 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
+    @apply flex w-full items-center gap-4 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
   }
   .person-avatar {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted/70 transition-colors duration-150;
@@ -72,27 +72,37 @@
   .person-row__meeting:hover .person-avatar {
     @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
   }
+  .person-copy {
+    @apply flex min-w-0 flex-1 flex-col gap-1;
+  }
   .person-identity {
-    @apply flex min-w-0 items-baseline gap-2.5;
+    @apply flex min-w-0 items-baseline gap-2;
   }
   .person-identity strong {
-    @apply truncate text-[13.5px] font-medium leading-none text-pro-text-main transition-colors duration-150;
-  }
-  .person-identity span {
-    @apply truncate text-[11px] leading-none text-pro-text-muted/70;
+    @apply text-[13.5px] font-medium leading-tight text-pro-text-main transition-colors duration-150;
   }
   .person-row__meeting:hover .person-identity strong {
     @apply text-pro-accent;
   }
   .person-context {
-    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/75;
+    @apply flex min-w-0 items-baseline gap-2 text-[12px] leading-tight text-pro-text-muted/75;
+  }
+  .person-context > span:last-child {
+    @apply truncate;
+  }
+  .person-role {
+    @apply shrink-0 text-[11px] text-pro-text-muted/70;
+  }
+  .person-role::after {
+    content: "·";
+    @apply ml-2 text-pro-text-muted/40;
   }
   .person-meta {
-    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/70;
+    @apply flex shrink-0 items-center gap-3 text-[11px] text-pro-text-muted/70;
   }
   .person-meeting-count,
   .person-date {
-    @apply flex items-center gap-1.5;
+    @apply flex shrink-0 items-center gap-1.5 tabular-nums;
   }
   .person-possible-duplicate {
     @apply rounded-md bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
@@ -489,7 +499,7 @@
       @apply hidden;
     }
     .person-meta {
-      @apply ml-auto pl-1;
+      @apply ml-auto max-w-[45%] flex-wrap justify-end pl-1;
     }
     .person-dossier__activity {
       @apply block divide-x-0 divide-y divide-pro-border/60;
@@ -961,7 +971,7 @@
     border-color: transparent;
   }
   .meeting-document-meta-row {
-    @apply flex w-full min-w-0 items-center justify-between gap-4;
+    @apply mt-2 flex w-full min-w-0 items-center justify-between gap-4;
   }
   .meeting-document-meta {
     @apply flex flex-wrap items-center gap-3 text-[0.8rem] leading-5;
@@ -1914,6 +1924,41 @@
   }
   .transcript-paragraph-part--tentative {
     @apply text-pro-text-main/70;
+  }
+  .live-conversation-row {
+    overflow-anchor: auto;
+  }
+  .live-conversation-row--duplicate {
+    @apply py-3;
+  }
+  .live-conversation-row__placeholder {
+    @apply italic text-pro-text-muted/70;
+  }
+  .live-conversation-row__qualifier {
+    @apply text-[10px] font-medium uppercase tracking-[0.08em] text-pro-text-muted/70;
+  }
+  .live-conversation-draft {
+    @apply mt-4 rounded-xl border border-pro-accent/20 bg-pro-surface/70 px-5 py-4;
+    overflow-anchor: auto;
+  }
+  .live-conversation-draft__heading {
+    @apply mb-3 flex items-center justify-between gap-3 text-xs text-pro-text-muted;
+  }
+  .live-conversation-draft__heading button {
+    @apply min-h-8 rounded-full px-3 font-medium text-pro-accent hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .live-conversation-draft__parts {
+    @apply flex flex-col gap-2;
+  }
+  .live-conversation-draft__parts p {
+    @apply text-[15px] leading-[1.7] text-pro-text-main/70;
+    overflow-wrap: anywhere;
+  }
+  .live-conversation-draft__parts span {
+    @apply mr-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-pro-text-muted;
+  }
+  .live-conversation-warning {
+    @apply mt-4 rounded-lg border border-pro-warning/25 bg-pro-warning/5 px-4 py-3 text-xs text-pro-text-muted;
   }
   .live-transcript-follow-control {
     @apply flex shrink-0 justify-center border-t border-pro-border/50 bg-pro-surface px-4 py-3;

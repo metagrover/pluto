@@ -6,12 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { liveEchoLongPauseFixture } from '../fixtures/liveEchoLongPause';
 import { liveEchoOmissionFixture } from '../fixtures/liveEchoOmission';
+import { liveTranscriptJumbledSourcesFixture } from '../fixtures/liveTranscriptJumbledSources';
 
 import { LiveTranscript } from '../../src/components/features/LiveTranscript';
 import { buildRecordingWorkspaceModel } from '../../src/components/features/recordingWorkspaceModel';
 import { createEouTranscriptProjection } from '../../src/services/liveTranscription/eouTranscriptProjection';
+import { createLiveConversationProjection } from '../../src/services/liveTranscription/liveConversationProjection';
 import { createLiveEchoEvidence } from '../../src/services/liveTranscription/liveEchoEvidence';
-import { reconcileLiveTranscriptSegments } from '../../src/services/liveTranscription/liveTranscriptReconciliation';
+import {
+  reconcileLiveTranscriptReading,
+  reconcileLiveTranscriptSegments,
+} from '../../src/services/liveTranscription/liveTranscriptReconciliation';
 
 const liveSegment = {
   id: 'new-turn',
@@ -1224,6 +1229,150 @@ describe('LiveTranscript reading experience', () => {
     );
     expect(scrollElement.scrollTop).toBe(600);
 
+    act(() => root.unmount());
+  });
+
+  it('keeps row order stable while supported spans are corrected and restored in place', () => {
+    const fixture = liveTranscriptJumbledSourcesFixture();
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const project = (echoEvidence: typeof fixture.echoEvidence) =>
+      projection.apply({
+        generation: 1,
+        reading: reconcileLiveTranscriptReading({
+          segments: fixture.segments,
+          activityWindows: [],
+          echoEvidence,
+        }),
+        reason: echoEvidence.length ? 'echo_evidence' : 'recognition',
+      });
+    const root = createRoot(container);
+    const initial = project([]);
+    act(() =>
+      root.render(
+        <LiveTranscript segments={[]} interimText="" conversation={initial} />,
+      ),
+    );
+    const initialOrder = [
+      ...container.querySelectorAll<HTMLElement>('[data-conversation-row]'),
+    ].map((element) => element.dataset.conversationRow);
+
+    const corrected = project(fixture.echoEvidence);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={corrected}
+        />,
+      ),
+    );
+    expect(
+      [
+        ...container.querySelectorAll<HTMLElement>('[data-conversation-row]'),
+      ].map((element) => element.dataset.conversationRow),
+    ).toEqual(initialOrder);
+    expect(
+      container.querySelector('[data-conversation-row="mic-long-hypothesis"]')
+        ?.textContent,
+    ).toContain(fixture.expectedLocalWords.join(' '));
+    expect(container.textContent).toContain('Updated');
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'Transcript updated',
+    );
+
+    const restored = project([]);
+    act(() =>
+      root.render(
+        <LiveTranscript segments={[]} interimText="" conversation={restored} />,
+      ),
+    );
+    expect(
+      container.querySelector('[data-conversation-row="mic-long-hypothesis"]')
+        ?.textContent,
+    ).toContain(fixture.mic.text);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'Transcript wording restored',
+    );
+    act(() => root.unmount());
+  });
+
+  it('shows both tentative sources in one keyboard-expandable draft', () => {
+    const tentative = [
+      {
+        id: 'mic-draft',
+        source: 'mic' as const,
+        speaker: 'Speaker' as const,
+        text: Array.from({ length: 18 }, (_, index) => `mic${index}`).join(' '),
+        timestampMs: 1_000,
+        confirmed: false,
+      },
+      {
+        id: 'system-draft',
+        source: 'system' as const,
+        speaker: 'Speaker' as const,
+        text: Array.from({ length: 18 }, (_, index) => `call${index}`).join(
+          ' ',
+        ),
+        timestampMs: 1_100,
+        confirmed: false,
+      },
+    ];
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const conversation = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: tentative,
+        activityWindows: [],
+      }),
+      reason: 'recognition',
+    });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={tentative}
+          interimText="legacy draft must stay hidden"
+          conversation={conversation}
+        />,
+      ),
+    );
+    expect(container.querySelectorAll('.live-conversation-draft')).toHaveLength(
+      1,
+    );
+    expect(container.textContent).toContain('You');
+    expect(container.textContent).toContain('Call');
+    expect(container.textContent).not.toContain(
+      'legacy draft must stay hidden',
+    );
+    const toggle = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Show all',
+    );
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    act(() => {
+      toggle?.focus();
+      toggle?.click();
+    });
+    expect(container.textContent).toContain('call17');
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    act(() => root.unmount());
+  });
+
+  it('shows a degraded warning even before the first live row arrives', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={projector.degraded(1)}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(
+      'Live wording may be incomplete. Recording continues safely.',
+    );
     act(() => root.unmount());
   });
 });

@@ -58,30 +58,16 @@ describe('identity controls', () => {
     await act(async () => button?.click());
   };
   const select = async (label: string, value: string) => {
-    if (label === 'Your person') {
-      const field = container.querySelector<HTMLInputElement>(
-        '[aria-label="Your person"]',
-      )!;
-      await act(async () => field.click());
-      const optionIndex =
-        value === '__new__'
-          ? workspace.people.length + 1
-          : workspace.people.findIndex((person) => person.id === value) + 1;
-      const option =
-        document.querySelectorAll<HTMLElement>('[role="option"]')[optionIndex];
-      expect(option).toBeTruthy();
-      await act(async () => option.click());
-      return;
-    }
-    const field = container.querySelector<HTMLSelectElement>(
-      `select[aria-label="${label}"]`,
+    const field = container.querySelector<HTMLElement>(
+      `[role="combobox"][aria-label="${label}"]`,
     );
     expect(field).toBeTruthy();
-    await act(async () => {
-      if (!field) return;
-      field.value = value;
-      field.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await act(async () => field?.click());
+    const option = document.body.querySelector<HTMLButtonElement>(
+      `[role="option"][data-value="${value}"]`,
+    );
+    expect(option).toBeTruthy();
+    await act(async () => option?.click());
   };
   const input = async (label: string, value: string) => {
     const field = container.querySelector<HTMLInputElement>(
@@ -115,12 +101,14 @@ describe('identity controls', () => {
     expect(container.textContent).toContain('future local recordings');
     await act(async () =>
       container
-        .querySelector<HTMLInputElement>('[aria-label="Your person"]')!
-        .click(),
+        .querySelector<HTMLElement>(
+          '[role="combobox"][aria-label="Your person"]',
+        )
+        ?.click(),
     );
-    const options = [...document.querySelectorAll('[role="option"]')].filter(
-      (o) => o.textContent?.includes('Alex'),
-    );
+    const options = [
+      ...document.body.querySelectorAll('[role="option"]'),
+    ].filter((o) => o.textContent?.includes('Alex'));
     expect(options[0].textContent).not.toBe(options[1].textContent);
     await select('Your person', 'person-b');
     invoke.mockResolvedValueOnce({
@@ -165,9 +153,8 @@ describe('identity controls', () => {
       expectedRevision: 5,
     });
     expect(
-      container.querySelector<HTMLInputElement>('[aria-label="Your person"]')
-        ?.value,
-    ).toBe('Not set');
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.value,
+    ).toBe('');
   });
 
   it('keeps a failed self save editable and reloads stale revisions', async () => {
@@ -180,8 +167,7 @@ describe('identity controls', () => {
       'changed',
     );
     expect(
-      container.querySelector<HTMLInputElement>('[aria-label="Your person"]')
-        ?.disabled,
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.disabled,
     ).toBe(false);
     await select('Your person', 'person-b');
     invoke.mockResolvedValueOnce({
@@ -201,7 +187,7 @@ describe('identity controls', () => {
     await act(async () => root.render(<IdentitySettings />));
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
     await click('Reload identity');
-    expect(container.querySelector('[aria-label="Your person"]')).toBeTruthy();
+    expect(container.querySelector('[role="combobox"]')).toBeTruthy();
   });
 
   it('requires explicit individual scope for channel labels and preserves imported provenance', async () => {
@@ -565,8 +551,12 @@ describe('identity controls', () => {
     invoke.mockRejectedValueOnce(new Error('storage unavailable'));
     await click('Save correction');
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
-    expect(container.querySelector('select')?.value).toBe('person-b');
-    expect(container.querySelector('select')?.disabled).toBe(false);
+    expect(
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.value,
+    ).toContain('Alex');
+    expect(
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.disabled,
+    ).toBe(false);
   });
 
   it('creates a meeting person and clears a correction using the returned revision', async () => {
@@ -713,7 +703,9 @@ describe('identity controls', () => {
     await click('Speaker identities');
     await act(async () => resolveSave({ ...meeting(), revision: 5 }));
     await click('Speaker identities');
-    expect(container.querySelector('select')?.disabled).toBe(false);
+    expect(
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.disabled,
+    ).toBe(false);
   });
 
   it('preserves an unsaved correction while background status refreshes', async () => {
@@ -730,7 +722,9 @@ describe('identity controls', () => {
       job: { state: 'running', attempts: 1, error: null },
     });
     await act(async () => vi.advanceTimersByTimeAsync(3000));
-    expect(container.querySelector('select')?.value).toBe('person-b');
+    expect(
+      container.querySelector<HTMLInputElement>('[role="combobox"]')?.value,
+    ).toContain('Alex');
     expect(
       container.querySelector<HTMLInputElement>('input[type="checkbox"]')
         ?.checked,

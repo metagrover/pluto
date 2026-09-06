@@ -488,6 +488,8 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import { createSpeakerEnrollmentAudio } from './speakerEnrollmentAudio';
+import { buildSpeakerEnrollmentCandidate } from './speakerEnrollmentCandidate';
 import {
   SPEAKER_VOICE_CHANNELS,
   handleSpeakerVoiceRequest,
@@ -1026,6 +1028,37 @@ app.whenReady().then(async () => {
         readFile: async (outputPath) => await fs.promises.readFile(outputPath),
         removeFile: async (outputPath) => {
           await fs.promises.unlink(outputPath);
+        },
+        buildEnrollmentCandidate: async (input) => {
+          if (!parakeetFinalClient) return null;
+          return await buildSpeakerEnrollmentCandidate(input, {
+            getMeeting: (meetingId) =>
+              (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ??
+              null,
+            fileExists: (inputPath) => fs.existsSync(inputPath),
+            createWorkDir: () =>
+              fs.mkdtempSync(
+                path.join(getMeetingArtifactsRootDir(), '.speaker-profile-'),
+              ),
+            removeWorkDir: async (workDir) => {
+              await fs.promises.rm(workDir, { recursive: true, force: true });
+            },
+            createAudio: createSpeakerEnrollmentAudio,
+            analyze: async (request) => {
+              const signal = getAbortSignalForMeeting(input.meetingId);
+              beginTranscriptionWork();
+              beginMeetingTranscription(input.meetingId);
+              try {
+                return await parakeetFinalClient!.speakerEvidence({
+                  ...request,
+                  signal,
+                });
+              } finally {
+                endMeetingTranscription(input.meetingId);
+                endTranscriptionWork();
+              }
+            },
+          });
         },
       });
     });

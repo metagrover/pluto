@@ -11,6 +11,7 @@ import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
 import { splitSegmentsAtDiarizationBoundaries } from '../../utils/speakerAttribution.ts';
 import type { StoredTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.ts';
 import { buildTranscriptSpeakerAttribution } from '../../utils/transcriptSchema.ts';
+import type { SpeakerClusterEvidence } from '../speakerCandidateEvidence.ts';
 
 export type FinalSpeakerEvidence = {
   turns: DiarizationTurn[];
@@ -27,6 +28,7 @@ export type FinalSpeakerEvidence = {
     totalMs: number;
   };
   windowSeconds: number;
+  clusterEvidence?: SpeakerClusterEvidence[];
 };
 
 export type SpeakerEvidenceRejectionReason =

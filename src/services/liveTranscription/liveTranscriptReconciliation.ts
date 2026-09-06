@@ -1,7 +1,10 @@
 import type { LiveTranscriptSegment } from '../../components/features/recordingWorkspaceModel';
 import type { SpeakerActivityWindow } from '../../utils/speakerAttribution';
 import type { LiveEchoEvidenceWindow } from './liveEchoEvidence';
-import { findExactEchoSubsequence } from './liveEchoSubsequenceAlignment';
+import {
+  findExactEchoSubsequence,
+  findSupportedExactEchoSpans,
+} from './liveEchoSubsequenceAlignment';
 import { alignEchoTokens } from './liveEchoTokenAlignment';
 
 const FILLERS = new Set(['uh', 'um', 'erm', 'hmm']);
@@ -21,6 +24,101 @@ const normalizedTokens = (text: string): string[] =>
 
 const endMs = (segment: LiveTranscriptSegment): number =>
   segment.endTimestampMs ?? segment.timestampMs;
+
+const createEchoEvidenceLookup = (rawEvidence: LiveEchoEvidenceWindow[]) => {
+  const echoEvidence = [...rawEvidence].sort(
+    (left, right) => left.micStartMs - right.micStartMs,
+  );
+  const latestEvidenceEnd: number[] = [];
+  for (const window of echoEvidence)
+    latestEvidenceEnd.push(
+      Math.max(
+        latestEvidenceEnd.at(-1) ?? Number.NEGATIVE_INFINITY,
+        window.micEndMs,
+      ),
+    );
+  const firstOverlappingEvidence = (start: number) => {
+    let low = 0;
+    let high = echoEvidence.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (latestEvidenceEnd[middle] <= start) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  const evidenceInRange = (start: number, end: number) => {
+    const windows: LiveEchoEvidenceWindow[] = [];
+    for (
+      let index = firstOverlappingEvidence(start);
+      index < echoEvidence.length;
+      index += 1
+    ) {
+      const window = echoEvidence[index];
+      if (window.micStartMs >= end) break;
+      if (window.micEndMs > start) windows.push(window);
+    }
+    return windows;
+  };
+  const acousticCoverage = (
+    micStart: number,
+    micEnd: number,
+    systemStart: number,
+    systemEnd: number,
+  ): boolean => {
+    if (micEnd <= micStart || systemEnd <= systemStart) return false;
+    const micRanges: Array<[number, number]> = [];
+    const systemRanges: Array<[number, number]> = [];
+    for (
+      let index = firstOverlappingEvidence(micStart);
+      index < echoEvidence.length;
+      index += 1
+    ) {
+      const window = echoEvidence[index];
+      if (window.micStartMs >= micEnd) break;
+      if (
+        window.micEndMs <= micStart ||
+        window.systemEndMs <= systemStart ||
+        window.systemStartMs >= systemEnd
+      )
+        continue;
+      const lag = window.micStartMs - window.systemStartMs;
+      // ASR word boundaries are quantized independently on each channel.
+      // Require the same paired PCM evidence and nearby mapped boundaries,
+      // rather than identical word durations. The acoustic proof is unchanged.
+      if (
+        Math.abs(micStart - systemStart - lag) > 250 ||
+        Math.abs(micEnd - systemEnd - lag) > 250 ||
+        Math.min(micEnd, systemEnd + lag) <=
+          Math.max(micStart, systemStart + lag)
+      )
+        continue;
+      micRanges.push([
+        Math.max(micStart, window.micStartMs),
+        Math.min(micEnd, window.micEndMs),
+      ]);
+      systemRanges.push([
+        Math.max(systemStart, window.systemStartMs),
+        Math.min(systemEnd, window.systemEndMs),
+      ]);
+    }
+    const covered = (ranges: Array<[number, number]>) => {
+      ranges.sort((left, right) => left[0] - right[0]);
+      let end = Number.NEGATIVE_INFINITY;
+      let duration = 0;
+      for (const [start, finish] of ranges) {
+        duration += Math.max(0, finish - Math.max(start, end));
+        end = Math.max(end, finish);
+      }
+      return duration;
+    };
+    return (
+      covered(micRanges) / (micEnd - micStart) >= 0.8 &&
+      covered(systemRanges) / (systemEnd - systemStart) >= 0.8
+    );
+  };
+  return { acousticCoverage, echoEvidence, evidenceInRange };
+};
 
 const textWithoutExactSpan = (
   text: string,
@@ -109,93 +207,8 @@ export const reconcileLiveTranscriptSegments = (input: {
 
   // The prefix maximum permits bounded interval lookup even after adjacent
   // acoustic windows merge. Historical evidence is indexed once per update.
-  const echoEvidence = [...(input.echoEvidence ?? [])].sort(
-    (left, right) => left.micStartMs - right.micStartMs,
-  );
-  const latestEvidenceEnd: number[] = [];
-  for (const window of echoEvidence)
-    latestEvidenceEnd.push(
-      Math.max(
-        latestEvidenceEnd.at(-1) ?? Number.NEGATIVE_INFINITY,
-        window.micEndMs,
-      ),
-    );
-  const evidenceInRange = (start: number, end: number) => {
-    let low = 0;
-    let high = echoEvidence.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (latestEvidenceEnd[middle] <= start) low = middle + 1;
-      else high = middle;
-    }
-    const windows: LiveEchoEvidenceWindow[] = [];
-    for (let index = low; index < echoEvidence.length; index++) {
-      const window = echoEvidence[index];
-      if (window.micStartMs >= end) break;
-      if (window.micEndMs > start) windows.push(window);
-    }
-    return windows;
-  };
-  const acousticCoverage = (
-    micStart: number,
-    micEnd: number,
-    systemStart: number,
-    systemEnd: number,
-  ): boolean => {
-    if (micEnd <= micStart || systemEnd <= systemStart) return false;
-    let low = 0;
-    let high = echoEvidence.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (latestEvidenceEnd[middle] <= micStart) low = middle + 1;
-      else high = middle;
-    }
-    const micRanges: Array<[number, number]> = [];
-    const systemRanges: Array<[number, number]> = [];
-    for (let index = low; index < echoEvidence.length; index += 1) {
-      const window = echoEvidence[index];
-      if (window.micStartMs >= micEnd) break;
-      if (
-        window.micEndMs <= micStart ||
-        window.systemEndMs <= systemStart ||
-        window.systemStartMs >= systemEnd
-      )
-        continue;
-      const lag = window.micStartMs - window.systemStartMs;
-      // ASR word boundaries are quantized independently on each channel.
-      // Require the same paired PCM evidence and nearby mapped boundaries,
-      // rather than identical word durations. The acoustic proof is unchanged.
-      if (
-        Math.abs(micStart - systemStart - lag) > 250 ||
-        Math.abs(micEnd - systemEnd - lag) > 250 ||
-        Math.min(micEnd, systemEnd + lag) <=
-          Math.max(micStart, systemStart + lag)
-      )
-        continue;
-      micRanges.push([
-        Math.max(micStart, window.micStartMs),
-        Math.min(micEnd, window.micEndMs),
-      ]);
-      systemRanges.push([
-        Math.max(systemStart, window.systemStartMs),
-        Math.min(systemEnd, window.systemEndMs),
-      ]);
-    }
-    const covered = (ranges: Array<[number, number]>) => {
-      ranges.sort((left, right) => left[0] - right[0]);
-      let end = Number.NEGATIVE_INFINITY;
-      let duration = 0;
-      for (const [start, finish] of ranges) {
-        duration += Math.max(0, finish - Math.max(start, end));
-        end = Math.max(end, finish);
-      }
-      return duration;
-    };
-    return (
-      covered(micRanges) / (micEnd - micStart) >= 0.8 &&
-      covered(systemRanges) / (systemEnd - systemStart) >= 0.8
-    );
-  };
+  const { acousticCoverage, echoEvidence, evidenceInRange } =
+    createEchoEvidenceLookup(input.echoEvidence ?? []);
 
   function* systemGroups(segment: LiveTranscriptSegment, contained = false) {
     let low = 0;
@@ -612,4 +625,267 @@ export const reconcileLiveTranscriptSegments = (input: {
     const presentation = presentations.get(segment);
     return presentation ? { ...segment, presentation } : segment;
   });
+};
+
+type OriginalWord = {
+  text: string;
+  start: number;
+  end: number;
+  normalized: string | null;
+};
+
+export type LiveTranscriptReadingRange = {
+  id: string;
+  sourceSegmentId: string;
+  source: 'mic' | 'system';
+  startWord: number;
+  endWord: number;
+  startCharacter: number;
+  endCharacter: number;
+  text: string;
+  timestampMs: number;
+  endTimestampMs: number;
+  visibility: 'visible' | 'suppressed_echo';
+  supportingSegmentIds: string[];
+  confidence?: number;
+};
+
+export type LiveTranscriptReading = {
+  /** Raw source rows with any earlier presentation annotation removed. */
+  segments: LiveTranscriptSegment[];
+  /** A lossless, ordered partition of every source row's original words. */
+  ranges: LiveTranscriptReadingRange[];
+};
+
+type SuppressionCandidate = {
+  sourceSegmentId: string;
+  startWord: number;
+  endWord: number;
+  supportingSegmentIds: string[];
+  confidence: number;
+};
+
+const originalWords = (text: string): OriginalWord[] =>
+  [...text.matchAll(/\S+/gu)].map((match) => {
+    const start = match.index ?? 0;
+    const normalized = normalizedTokens(match[0]);
+    return {
+      text: match[0],
+      start,
+      end: start + match[0].length,
+      normalized: normalized.length === 1 ? normalized[0] : null,
+    };
+  });
+
+const verifiedTimedWords = (
+  segment: LiveTranscriptSegment,
+  words: OriginalWord[],
+) => {
+  const timings = segment.wordTimings;
+  if (
+    !timings ||
+    timings.length !== words.length ||
+    !timings.every((timing, index) => {
+      const normalized = normalizedTokens(timing.text);
+      return (
+        normalized.length <= 1 &&
+        (normalized[0] ?? null) === words[index].normalized &&
+        Number.isFinite(timing.timestampMs) &&
+        Number.isFinite(timing.endTimestampMs) &&
+        timing.timestampMs >= 0 &&
+        timing.endTimestampMs >= timing.timestampMs &&
+        (index === 0 || timing.timestampMs >= timings[index - 1].timestampMs)
+      );
+    })
+  )
+    return undefined;
+  return timings;
+};
+
+const legacyPresentationCandidate = (
+  segment: LiveTranscriptSegment,
+  presentation: NonNullable<LiveTranscriptSegment['presentation']>,
+  words: OriginalWord[],
+): SuppressionCandidate | undefined => {
+  if (presentation.visibility === 'suppressed_echo')
+    return {
+      sourceSegmentId: segment.id,
+      startWord: 0,
+      endWord: words.length,
+      supportingSegmentIds: [presentation.matchedSegmentId],
+      confidence: presentation.confidence,
+    };
+  const retained = normalizedTokens(presentation.text);
+  const original = words.flatMap((word) =>
+    word.normalized ? [word.normalized] : [],
+  );
+  let result: SuppressionCandidate | undefined;
+  for (let startWord = 0; startWord < words.length; startWord += 1) {
+    for (let endWord = startWord + 1; endWord <= words.length; endWord += 1) {
+      const projected = words
+        .slice(0, startWord)
+        .concat(words.slice(endWord))
+        .flatMap((word) => (word.normalized ? [word.normalized] : []));
+      if (
+        projected.length !== retained.length ||
+        !projected.every((token, index) => token === retained[index])
+      )
+        continue;
+      if (!result || endWord - startWord > result.endWord - result.startWord)
+        result = {
+          sourceSegmentId: segment.id,
+          startWord,
+          endWord,
+          supportingSegmentIds: [presentation.matchedSegmentId],
+          confidence: presentation.confidence,
+        };
+    }
+  }
+  return original.length ? result : undefined;
+};
+
+/**
+ * Builds reversible display ranges from raw rows. Newly generalized interior
+ * suppression is exact, time-aligned and acoustically corroborated; uncertain
+ * wording therefore remains visible.
+ */
+export const reconcileLiveTranscriptReading = (input: {
+  segments: LiveTranscriptSegment[];
+  activityWindows: SpeakerActivityWindow[];
+  echoEvidence?: LiveEchoEvidenceWindow[];
+}): LiveTranscriptReading => {
+  const segments = input.segments.map((segment) => {
+    if (!segment.presentation) return segment;
+    const { presentation: _presentation, ...raw } = segment;
+    return raw;
+  });
+  const legacy = reconcileLiveTranscriptSegments({ ...input, segments });
+  const { evidenceInRange } = createEchoEvidenceLookup(
+    input.echoEvidence ?? [],
+  );
+  const systemRows = segments
+    .filter((segment) => segment.source === 'system')
+    .sort((left, right) => left.timestampMs - right.timestampMs);
+  const candidates: SuppressionCandidate[] = [];
+
+  for (const mic of segments.filter((segment) => segment.source === 'mic')) {
+    const micWords = originalWords(mic.text);
+    const micTimes = verifiedTimedWords(mic, micWords);
+    if (
+      micTimes &&
+      micWords.length <= MAX_ALIGNMENT_TOKENS &&
+      input.echoEvidence?.length
+    ) {
+      for (const system of systemRows) {
+        if (endMs(system) < mic.timestampMs - MAX_BOUNDARY_SKEW_MS) continue;
+        if (system.timestampMs > endMs(mic) + MAX_BOUNDARY_SKEW_MS) break;
+        const systemWords = originalWords(system.text);
+        if (systemWords.length > MAX_ALIGNMENT_TOKENS) continue;
+        const systemTimes = verifiedTimedWords(system, systemWords);
+        if (!systemTimes) continue;
+        const micTimedTokens = micWords.map((word, index) => ({
+          ...micTimes[index],
+          text: word.normalized ?? `__unmatchable_mic_${index}`,
+        }));
+        const systemTimedTokens = systemWords.map((word, index) => ({
+          ...systemTimes[index],
+          text: word.normalized ?? `__unmatchable_system_${index}`,
+        }));
+        for (const {
+          micStartToken: micStart,
+          tokenCount,
+        } of findSupportedExactEchoSpans(
+          micTimedTokens,
+          systemTimedTokens,
+          evidenceInRange,
+        )) {
+          const micEnd = micStart + tokenCount;
+          candidates.push({
+            sourceSegmentId: mic.id,
+            startWord: micStart,
+            endWord: micEnd,
+            supportingSegmentIds: [system.id],
+            confidence: 1,
+          });
+        }
+      }
+    }
+    const legacyRow = legacy.find((segment) => segment.id === mic.id);
+    if (legacyRow?.presentation) {
+      const candidate = legacyPresentationCandidate(
+        mic,
+        legacyRow.presentation,
+        micWords,
+      );
+      if (candidate) candidates.push(candidate);
+    }
+  }
+
+  const selected = new Map<string, SuppressionCandidate[]>();
+  for (const candidate of candidates.sort(
+    (left, right) =>
+      right.confidence - left.confidence ||
+      right.endWord - right.startWord - (left.endWord - left.startWord) ||
+      left.startWord - right.startWord ||
+      left.sourceSegmentId.localeCompare(right.sourceSegmentId) ||
+      left.supportingSegmentIds[0].localeCompare(right.supportingSegmentIds[0]),
+  )) {
+    const ranges = selected.get(candidate.sourceSegmentId) ?? [];
+    if (
+      ranges.some(
+        (range) =>
+          range.startWord < candidate.endWord &&
+          candidate.startWord < range.endWord,
+      )
+    )
+      continue;
+    ranges.push(candidate);
+    selected.set(candidate.sourceSegmentId, ranges);
+  }
+
+  const ranges: LiveTranscriptReadingRange[] = [];
+  for (const segment of segments) {
+    const source = segment.source;
+    if (source !== 'mic' && source !== 'system') continue;
+    const words = originalWords(segment.text);
+    if (!words.length) continue;
+    const timings = verifiedTimedWords(segment, words);
+    const suppressed = [...(selected.get(segment.id) ?? [])].sort(
+      (left, right) => left.startWord - right.startWord,
+    );
+    let cursor = 0;
+    const append = (
+      startWord: number,
+      endWord: number,
+      candidate?: SuppressionCandidate,
+    ) => {
+      if (startWord >= endWord) return;
+      const startCharacter = words[startWord].start;
+      const endCharacter = words[endWord - 1].end;
+      const visibility = candidate ? 'suppressed_echo' : 'visible';
+      ranges.push({
+        id: `${segment.id}:${startWord}:${endWord}:${visibility}`,
+        sourceSegmentId: segment.id,
+        source,
+        startWord,
+        endWord,
+        startCharacter,
+        endCharacter,
+        text: segment.text.slice(startCharacter, endCharacter),
+        timestampMs: timings?.[startWord]?.timestampMs ?? segment.timestampMs,
+        endTimestampMs:
+          timings?.[endWord - 1]?.endTimestampMs ?? endMs(segment),
+        visibility,
+        supportingSegmentIds: candidate?.supportingSegmentIds ?? [],
+        ...(candidate ? { confidence: candidate.confidence } : {}),
+      });
+    };
+    for (const candidate of suppressed) {
+      append(cursor, candidate.startWord);
+      append(candidate.startWord, candidate.endWord, candidate);
+      cursor = candidate.endWord;
+    }
+    append(cursor, words.length);
+  }
+  return { segments, ranges };
 };

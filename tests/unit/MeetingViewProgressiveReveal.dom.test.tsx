@@ -1063,26 +1063,23 @@ describe('MeetingView progressive reveal', () => {
   it('offers the approved notes templates', async () => {
     await act(async () => renderMeeting(analyzedMeeting));
 
-    const template = container.querySelector<HTMLSelectElement>(
-      'select[aria-label="Notes template"]',
+    const template = container.querySelector<HTMLElement>(
+      '[role="combobox"][aria-label="Notes template"]',
     );
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLSelectElement.prototype,
-      'value',
-    )?.set;
-
-    await act(async () => {
-      if (!template || !valueSetter) return;
-      valueSetter.call(template, 'project_kickoff');
-      template.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(template?.value).toBe('project_kickoff');
+    await act(async () => template?.click());
+    const options = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="option"]'),
+    ];
+    await act(async () =>
+      options
+        .find((option) => option.dataset.value === 'project_kickoff')
+        ?.click(),
+    );
+    expect(template?.textContent).toContain('Project kickoff');
     expect(container.textContent).toContain('Notes template');
     expect(container.textContent).toContain('Export meeting notes');
     expect(container.textContent).toContain('Delete meeting');
-    expect(
-      Array.from(template?.options || []).map((option) => option.text),
-    ).toEqual([
+    expect(options.map((option) => option.textContent)).toEqual([
       'Auto',
       '1:1',
       'Team sync',
@@ -1407,5 +1404,105 @@ describe('MeetingView progressive reveal', () => {
     expect(
       document.body.querySelector('input[aria-label="Person for Them"]'),
     ).not.toBeNull();
+  });
+
+  it('loads identified speakers on mount and preserves them across meeting switches', async () => {
+    const meetingA: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-identified-a',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello.', startTime: 0, endTime: 2 },
+        { speaker: 'Them', text: 'Hi from Sarah.', startTime: 2, endTime: 5 },
+      ]),
+    };
+    const meetingB: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-unidentified-b',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Checking in.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Them',
+          text: 'Unidentified voice.',
+          startTime: 2,
+          endTime: 5,
+        },
+      ]),
+    };
+
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke: vi.fn(
+          async (channel: string, payload?: { meetingId?: string }) => {
+            if (channel === 'GET_MEETING_IDENTITY') {
+              if (payload?.meetingId === meetingA.id) {
+                return {
+                  meetingId: meetingA.id,
+                  speakers: ['Me', 'Them'],
+                  bindings: [
+                    {
+                      speaker: 'Them',
+                      personId: 'person-sarah',
+                      source: 'user',
+                      individual: true,
+                    },
+                  ],
+                  capture: { origin: 'local', selfPersonId: null },
+                  people: [{ id: 'person-sarah', name: 'Sarah Connor' }],
+                  selfPersonId: null,
+                  revision: 2,
+                  profile: {},
+                  job: null,
+                };
+              }
+              return {
+                meetingId: meetingB.id,
+                speakers: ['Me', 'Them'],
+                bindings: [],
+                capture: { origin: 'local', selfPersonId: null },
+                people: [],
+                selfPersonId: null,
+                revision: 1,
+                profile: {},
+                job: null,
+              };
+            }
+            return null;
+          },
+        ),
+      },
+    });
+
+    // 1. Initial render of Meeting A (which already has an identified speaker)
+    await act(async () => renderMeeting(meetingA, true));
+
+    // Meeting A should load Sarah and have 0 unidentified speakers
+    expect(
+      container.querySelector('#meeting-header-speaker-review-trigger'),
+    ).toBeNull();
+    const sarahSpeaker = [...container.querySelectorAll('strong')].find(
+      (element) => element.textContent === 'Sarah Connor',
+    );
+    expect(sarahSpeaker).not.toBeUndefined();
+
+    // 2. Switch to Meeting B (which has no identified speakers)
+    await act(async () => renderMeeting(meetingB, true));
+
+    const triggerB = container.querySelector(
+      '#meeting-header-speaker-review-trigger',
+    );
+    expect(triggerB?.textContent).toContain('1 unidentified speaker');
+
+    // 3. Switch back to Meeting A
+    await act(async () => renderMeeting(meetingA, true));
+
+    // Meeting A must still have 0 unidentified speakers, not falsely show '1 unidentified speaker'
+    expect(
+      container.querySelector('#meeting-header-speaker-review-trigger'),
+    ).toBeNull();
+    const sarahSpeakerBack = [...container.querySelectorAll('strong')].find(
+      (element) => element.textContent === 'Sarah Connor',
+    );
+    expect(sarahSpeakerBack).not.toBeUndefined();
   });
 });

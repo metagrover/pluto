@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
+import type { LiveConversationSnapshot } from '../../services/liveTranscription/liveConversationProjection';
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
@@ -29,6 +30,7 @@ interface ZenModeProps {
   currentNotes: string;
   setCurrentNotes: (value: string) => void;
   liveTranscript: LiveTranscriptSegment[];
+  liveConversation?: LiveConversationSnapshot | null;
   interimText?: string;
   captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
@@ -56,6 +58,7 @@ export const ZenMode = ({
   currentNotes,
   setCurrentNotes,
   liveTranscript,
+  liveConversation = null,
   interimText = '',
   captureHealth,
   liveTranscriptIntegrity,
@@ -84,6 +87,7 @@ export const ZenMode = ({
         liveTranscriptIntegrity,
         segments: liveTranscript,
         interimText,
+        liveConversation,
       }),
     [
       captureHealth,
@@ -91,6 +95,7 @@ export const ZenMode = ({
       isStarting,
       isProcessing,
       liveTranscript,
+      liveConversation,
       liveTranscriptIntegrity,
       nowMs,
       recordingStartedAtMs,
@@ -135,6 +140,7 @@ export const ZenMode = ({
           segments={model.transcript}
           interimText={model.interimText}
           integrity={liveTranscriptIntegrity}
+          conversation={model.liveConversation}
         />
         <MeetingAskPlutoDock
           conversation={askPlutoConversation}

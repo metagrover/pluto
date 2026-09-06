@@ -11,7 +11,27 @@ import {
   type IdentityUseCase,
   emptyIdentityProfile,
 } from '../../types/identity';
-import { SettingsSelect } from '../ui/SettingsSelect';
+import { SearchSelect } from '../ui/SearchSelect';
+
+const roleOptions = [
+  'Engineering',
+  'Sales',
+  'Business',
+  'Design',
+  'Research',
+  'Teaching',
+  'Student',
+  'Operations',
+].map((value) => ({ value, label: value }));
+
+const industryOptions = [
+  'Technology',
+  'Education',
+  'Healthcare',
+  'Finance',
+  'Creative arts',
+  'Public service',
+].map((value) => ({ value, label: value }));
 
 const fieldClass =
   'w-full rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2 text-[14px] text-pro-text-main outline-none focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50 disabled:opacity-50';
@@ -278,62 +298,44 @@ export const IdentityProfileForm = ({
           </div>
         </fieldset>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label
-              htmlFor={`${id}-role`}
-              className="block text-[13px] font-medium text-pro-text-main"
-            >
-              Role or field
-            </label>
-            <SettingsSelect
+          <label
+            htmlFor={`${id}-role`}
+            className="block text-[13px] font-medium text-pro-text-main"
+          >
+            Role or field
+            <SearchSelect
               id={`${id}-role`}
-              label="Role or field"
-              searchable
-              allowCustom
-              disabled={busy}
-              maxLength={160}
+              ariaLabel="Role or field"
               value={draft.role}
-              onChange={(value) => update({ role: value })}
-              options={[
-                'Engineering',
-                'Sales',
-                'Business',
-                'Design',
-                'Research',
-                'Teaching',
-                'Student',
-                'Operations',
-              ].map((label) => ({ value: label, label }))}
-              className="mt-1.5"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor={`${id}-industry`}
-              className="block text-[13px] font-medium text-pro-text-main"
-            >
-              Industry
-            </label>
-            <SettingsSelect
-              id={`${id}-industry`}
-              label="Industry"
-              searchable
-              allowCustom
-              disabled={busy}
+              options={roleOptions}
+              allowCustomValue
               maxLength={160}
-              value={draft.industry}
-              onChange={(value) => update({ industry: value })}
-              options={[
-                'Technology',
-                'Education',
-                'Healthcare',
-                'Finance',
-                'Creative arts',
-                'Public service',
-              ].map((label) => ({ value: label, label }))}
+              onValueChange={(role) => update({ role: role.slice(0, 160) })}
+              placeholder="Choose or type your role"
+              searchPlaceholder="Search roles or type your own…"
               className="mt-1.5"
             />
-          </div>
+          </label>
+          <label
+            htmlFor={`${id}-industry`}
+            className="block text-[13px] font-medium text-pro-text-main"
+          >
+            Industry
+            <SearchSelect
+              id={`${id}-industry`}
+              ariaLabel="Industry"
+              value={draft.industry}
+              options={industryOptions}
+              allowCustomValue
+              maxLength={160}
+              onValueChange={(industry) =>
+                update({ industry: industry.slice(0, 160) })
+              }
+              placeholder="Choose or type your industry"
+              searchPlaceholder="Search industries or type your own…"
+              className="mt-1.5"
+            />
+          </label>
         </div>
       </fieldset>
       <p className="text-[12px] leading-relaxed text-pro-text-main/75">

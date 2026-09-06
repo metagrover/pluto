@@ -27,9 +27,9 @@ Skills are located in `.agent/skills/`. To use a skill:
 
 ## 🎯 Project Guidelines
 
-- **Issue-Driven Development:** GitHub Issues are the source of truth for active work. Use `.agent/skills/issue-driven-development/SKILL.md` before feature work, product changes, architecture/process changes, or meaningful bug fixes.
-- **Issue Currency:** Find or create an outcome-sized issue before writing a design, implementation plan, or code. Update the issue when scope, acceptance criteria, constraints, or product direction change materially.
-- **Durable Memory:** Record durable decisions in `docs/decisions.md`; use `docs/adr/` only for high-impact technical decisions; update `docs/CHANGELOG.md` when work ships or materially changes Pluto's direction.
+- **Workflow Scope:** Follow **Scope the workflow to the work** in `AGENTS.md`; it overrides blanket skill triggers. Trivial, clear, localized, low-risk fixes go directly to implementation, relevant checks, lint, and a PR without an issue search, new issue, brainstorming, design approval, spec, or plan. Escalate if scope or risk grows.
+- **Issue-Driven Development:** For non-trivial work, follow the issue and durable-memory guidance in `AGENTS.md`. Brainstorm when unresolved requirements or substantial design choices need agreement.
+- **Durable Memory:** Use `docs/decisions.md` for durable decisions and `docs/adr/` for high-impact technical choices. Issue-backed work uses fragments under `docs/changelog/entries/`; do not edit the archived `docs/CHANGELOG.md`.
 - **Design Doc Location:** Always save design specs to `docs/superpowers/specs/`.
 - **Implementation Plans:** Save to `docs/superpowers/plans/`.
 - **TDD:** Use `vitest` for running tests.

@@ -8,7 +8,7 @@ import {
   isIdentityRevisionError,
   setSelfIdentity,
 } from '../../api/identity';
-import { SettingsSelect } from '../ui/SettingsSelect';
+import { SearchSelect } from '../ui/SearchSelect';
 import { IdentityProfileForm } from './IdentityProfileForm';
 
 export const identityFieldClass =
@@ -122,16 +122,13 @@ export const IdentitySettings = () => {
                 >
                   Your person
                 </label>
-                <SettingsSelect
+                <SearchSelect
                   id="self-identity-person"
-                  label="Your person"
-                  searchable
+                  ariaLabel="Your person"
                   value={choice}
                   disabled={busy}
-                  onChange={(value) => {
-                    setChoice(value);
-                    setSaved(false);
-                  }}
+                  placeholder="Not set"
+                  searchPlaceholder="Search people…"
                   options={[
                     {
                       value: '',
@@ -145,9 +142,12 @@ export const IdentitySettings = () => {
                     {
                       value: '__new__',
                       label: 'Create a distinct person…',
-                      alwaysVisible: true,
                     },
                   ]}
+                  onValueChange={(value) => {
+                    setChoice(value);
+                    setSaved(false);
+                  }}
                 />
                 {choice === '__new__' && (
                   <label className="block text-[13px] text-pro-text-main">
