@@ -31,6 +31,49 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(source).not.toContain(
       'const stable = segments.filter((segment) => segment.confirmed)',
     );
+    expect(source).toContain('reconcileLiveTranscriptReading({');
+    expect(source).toContain('projector.apply({');
+    expect(source).toContain('meetingContextIngestion.accept(segments)');
+  });
+
+  it('contains presentation failure without returning before raw ingestion', () => {
+    const callbackStart = source.indexOf(
+      'onSegments: (segments, echoEvidence, reason) =>',
+    );
+    const callbackEnd = source.indexOf(
+      'onUnavailable: (code) =>',
+      callbackStart,
+    );
+    const callback = source.slice(callbackStart, callbackEnd);
+    const catchIndex = callback.indexOf('catch (error)');
+    const echoOnlyReturn = callback.indexOf("if (reason === 'echo_evidence')");
+    const rawAssignment = callback.indexOf(
+      'processedMicSegmentsRef.current = segments',
+    );
+    const rawIngestion = callback.indexOf(
+      'meetingContextIngestion.accept(segments)',
+    );
+    expect(catchIndex).toBeGreaterThan(-1);
+    expect(echoOnlyReturn).toBeGreaterThan(catchIndex);
+    expect(rawAssignment).toBeGreaterThan(echoOnlyReturn);
+    expect(rawIngestion).toBeGreaterThan(rawAssignment);
+  });
+
+  it('reads the stable-conversation rollout once before constructing the EOU session', () => {
+    const generationIndex = source.indexOf(
+      'const eouGeneration = eouGenerationRef.current',
+    );
+    const rolloutIndex = source.indexOf(
+      'await createLiveConversationRollout({',
+      generationIndex,
+    );
+    const sessionIndex = source.indexOf(
+      'createEouRendererSession({',
+      rolloutIndex,
+    );
+    expect(generationIndex).toBeGreaterThan(-1);
+    expect(rolloutIndex).toBeGreaterThan(generationIndex);
+    expect(sessionIndex).toBeGreaterThan(rolloutIndex);
   });
 
   it('publishes live text before non-blocking context ingestion', () => {

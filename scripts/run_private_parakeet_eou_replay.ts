@@ -11,10 +11,14 @@ import { ParakeetEouClient } from '../electron/transcription/parakeetEouClient.t
 import { ParakeetFinalClient } from '../electron/transcription/parakeetFinalClient.ts';
 import { makeRuntimeHost } from '../electron/transcription/parakeetRuntimeHost.ts';
 import type { LiveSource } from '../src/services/liveTranscription/contracts.ts';
+import { createEouTranscriptProjection } from '../src/services/liveTranscription/eouTranscriptProjection.ts';
 import {
   type EouRendererFrame,
   createEouPcmChunker,
 } from '../src/services/liveTranscription/eouPcmChunker.ts';
+import { createLiveConversationProjection } from '../src/services/liveTranscription/liveConversationProjection.ts';
+import { createLiveEchoEvidence } from '../src/services/liveTranscription/liveEchoEvidence.ts';
+import { reconcileLiveTranscriptReading } from '../src/services/liveTranscription/liveTranscriptReconciliation.ts';
 import {
   type PrivateParakeetEouManifest,
   readPrivateParakeetEouManifest,
@@ -38,6 +42,14 @@ type ReplayMetrics = {
   thermalStates: string[];
   cancellations: number;
   failures: number;
+  presentation: {
+    corrections: number;
+    restorations: number;
+    lateArrivals: number;
+    degraded: number;
+    rowPeak: number;
+    draftPeak: number;
+  };
 };
 
 export const replayAcceptanceFailures = (
@@ -55,6 +67,7 @@ export const replayAcceptanceFailures = (
     failures.push('system_tail');
   }
   if (metrics.failures > 0) failures.push('native_failure');
+  if (metrics.presentation.degraded > 0) failures.push('presentation_degraded');
   return failures;
 };
 
@@ -229,9 +242,52 @@ export const runPrivateParakeetEouReplay = async (
     thermalStates: [],
     cancellations: 0,
     failures: 0,
+    presentation: {
+      corrections: 0,
+      restorations: 0,
+      lateArrivals: 0,
+      degraded: 0,
+      rowPeak: 0,
+      draftPeak: 0,
+    },
   };
   const updateLatencies: number[] = [];
   const committedLengths: Record<LiveSource, number> = { mic: 0, system: 0 };
+  const rawProjection = createEouTranscriptProjection();
+  rawProjection.reset(1);
+  const echoEvidence = createLiveEchoEvidence();
+  const conversationProjection = createLiveConversationProjection({
+    generation: 1,
+  });
+  let latestSegments: ReturnType<typeof rawProjection.apply> = [];
+  const projectConversation = (reason: 'recognition' | 'echo_evidence') => {
+    if (!latestSegments.length) return;
+    try {
+      const snapshot = conversationProjection.apply({
+        generation: 1,
+        reading: reconcileLiveTranscriptReading({
+          segments: latestSegments,
+          activityWindows: [],
+          echoEvidence: echoEvidence.snapshot(),
+        }),
+        reason,
+      });
+      metrics.presentation = {
+        corrections: snapshot.metrics.corrections,
+        restorations: snapshot.metrics.restorations,
+        lateArrivals: snapshot.metrics.lateArrivals,
+        degraded: snapshot.metrics.degradedReconciliations,
+        rowPeak: Math.max(metrics.presentation.rowPeak, snapshot.rows.length),
+        draftPeak: Math.max(
+          metrics.presentation.draftPeak,
+          snapshot.draft?.wordCount ?? 0,
+        ),
+      };
+    } catch {
+      const degraded = conversationProjection.degraded(1);
+      metrics.presentation.degraded = degraded.metrics.degradedReconciliations;
+    }
+  };
   const startedAtMs = realClock.nowMs();
   let client: ParakeetEouClient | null = null;
   const finalClient = new ParakeetFinalClient({
@@ -291,6 +347,8 @@ export const runPrivateParakeetEouReplay = async (
         metrics.firstEouMs = receivedAtMs - startedAtMs;
       }
       committedLengths[source] = event.committedText.length;
+      latestSegments = rawProjection.apply(event);
+      projectConversation('recognition');
       metrics.nativeRssPeakBytes = Math.max(
         metrics.nativeRssPeakBytes,
         sampleNativeRss(),
@@ -315,7 +373,15 @@ export const runPrivateParakeetEouReplay = async (
     const replay = await replayCausalFrames({
       frames,
       clock: realClock,
-      append: async (frame) =>
+      append: async (frame) => {
+        const evidenceChanged = echoEvidence.append({
+          source: frame.source,
+          sampleRate: frame.sampleRate,
+          samples: frame.samples,
+          startTimeMs: frame.audioStartSeconds * 1_000,
+          endTimeMs: frame.audioEndSeconds * 1_000,
+        });
+        if (evidenceChanged) projectConversation('echo_evidence');
         await client!.append({
           ...identities[frame.source],
           sequence: frame.sequence,
@@ -323,7 +389,8 @@ export const runPrivateParakeetEouReplay = async (
           samples: frame.samples,
           audioStartSeconds: frame.audioStartSeconds,
           audioEndSeconds: frame.audioEndSeconds,
-        }),
+        });
+      },
     });
     metrics.maximumQueueDepth = replay.maximumQueueDepth;
     metrics.thermalStates.push(sampleThermalState());

@@ -133,6 +133,38 @@ describe('buildRecordingWorkspaceModel', () => {
     ]);
   });
 
+  it('passes the stable conversation view beside raw transcript inputs', () => {
+    const liveConversation = {
+      generation: 1,
+      status: 'active' as const,
+      rows: [],
+      draft: null,
+      metrics: {
+        corrections: 0,
+        restorations: 0,
+        lateArrivals: 0,
+        degradedReconciliations: 0,
+        draftWordCount: 0,
+        lastProjectionDurationMs: 0,
+      },
+    };
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 2_000,
+      isStarting: false,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [],
+      interimText: '',
+      liveConversation,
+    });
+    expect(model.liveConversation).toBe(liveConversation);
+    expect(model.transcript).toEqual([]);
+  });
+
   it('names the input that needs attention', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,

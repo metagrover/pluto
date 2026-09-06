@@ -3,6 +3,7 @@ import './App.css';
 
 // Core
 import { AudioManager } from './components/AudioManager';
+import type { LiveConversationSnapshot } from './services/liveTranscription/liveConversationProjection';
 import { RuntimeReadinessGate } from './components/RuntimeReadinessGate';
 import { SetupWizard } from './components/Setup/SetupWizard';
 import { AutoEndToast } from './components/ui/AutoEndToast';
@@ -264,6 +265,8 @@ function App() {
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
+  const [liveConversation, setLiveConversation] =
+    useState<LiveConversationSnapshot | null>(null);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
     number | null
@@ -1397,6 +1400,7 @@ function App() {
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
           onLiveTranscript={setLiveTranscript}
+          onLiveConversation={setLiveConversation}
           onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
@@ -1409,6 +1413,7 @@ function App() {
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
+            setLiveConversation(null);
             setInterimTranscript('');
             setLiveTranscriptIntegrity('healthy');
           }}
@@ -1485,6 +1490,7 @@ function App() {
           currentNotes={currentNotes}
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
+          liveConversation={liveConversation}
           interimText={interimTranscript}
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}

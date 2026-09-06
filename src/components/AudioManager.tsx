@@ -14,7 +14,15 @@ import {
 import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
 import { shouldOfferIncrementalMeetingNotes } from '../services/incrementalMeetingNotesOffer';
 import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
-import { reconcileLiveTranscriptSegments } from '../services/liveTranscription/liveTranscriptReconciliation';
+import type { LiveConversationSnapshot } from '../services/liveTranscription/liveConversationProjection';
+import {
+  type LiveConversationProjector,
+  createLiveConversationRollout,
+} from '../services/liveTranscription/liveConversationRollout';
+import {
+  reconcileLiveTranscriptReading,
+  reconcileLiveTranscriptSegments,
+} from '../services/liveTranscription/liveTranscriptReconciliation';
 import {
   type ConfirmedSegmentIngestionSession,
   createConfirmedSegmentIngestionSession,
@@ -95,6 +103,7 @@ interface AudioManagerProps {
   onFinalizationStarted?: (meeting: RecordingFinalizationPreview) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
+  onLiveConversation?: (conversation: LiveConversationSnapshot | null) => void;
   onInterimTranscript?: (text: string) => void;
   onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
@@ -216,6 +225,7 @@ export const AudioManager = ({
   onStartSessionRef,
   onSpeakingChange,
   onLiveTranscript,
+  onLiveConversation,
   onInterimTranscript,
   onCaptureHealthChange,
   onLiveTranscriptIntegrityChange,
@@ -315,6 +325,9 @@ export const AudioManager = ({
   const systemRmsRef = useRef<number>(0);
   const systemRmsUpdatedAtRef = useRef<number>(0);
   const eouGenerationRef = useRef(0);
+  const liveConversationProjectorRef = useRef<LiveConversationProjector | null>(
+    null,
+  );
   const eouSessionRef = useRef<ReturnType<
     typeof createEouRendererSession
   > | null>(null);
@@ -600,6 +613,13 @@ export const AudioManager = ({
         },
       };
       eouGenerationRef.current += 1;
+      const eouGeneration = eouGenerationRef.current;
+      liveConversationProjectorRef.current =
+        await createLiveConversationRollout({
+          generation: eouGeneration,
+          getSetting: (key) => window.ipcRenderer.invoke('GET_SETTING', key),
+        });
+      onLiveConversation?.(null);
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
         createStopToValidatedLatencyAccumulator();
@@ -656,6 +676,7 @@ export const AudioManager = ({
             '[Pluto] Recording start rejected: capture already active',
           );
           currentMeetingIdRef.current = null;
+          liveConversationProjectorRef.current = null;
           liveTranscriptResponsivenessRef.current.abortStart();
           frozenLiveTranscriptResponsivenessRef.current = null;
           captureActivitySessionRef.current = null;
@@ -678,6 +699,7 @@ export const AudioManager = ({
           journalErr,
         );
         currentMeetingIdRef.current = null;
+        liveConversationProjectorRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         captureActivitySessionRef.current = null;
@@ -749,7 +771,6 @@ export const AudioManager = ({
       });
       meetingContextIngestionRef.current?.close();
       meetingContextIngestionRef.current = meetingContextIngestion;
-      const eouGeneration = eouGenerationRef.current;
       const eouSession = createEouRendererSession({
         meetingId,
         generation: eouGeneration,
@@ -791,11 +812,33 @@ export const AudioManager = ({
                 },
               ]
             : speakerTimelineRef.current;
-          const readingSegments = reconcileLiveTranscriptSegments({
-            segments,
-            activityWindows,
-            echoEvidence,
-          });
+          let readingSegments = segments;
+          try {
+            readingSegments = reconcileLiveTranscriptSegments({
+              segments,
+              activityWindows,
+              echoEvidence,
+            });
+            const projector = liveConversationProjectorRef.current;
+            if (projector) {
+              const reading = reconcileLiveTranscriptReading({
+                segments,
+                activityWindows,
+                echoEvidence,
+              });
+              onLiveConversation?.(
+                projector.apply({ generation: eouGeneration, reading, reason }),
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[Pluto] Live transcript presentation degraded',
+              error,
+            );
+            const projector = liveConversationProjectorRef.current;
+            if (projector)
+              onLiveConversation?.(projector.degraded(eouGeneration));
+          }
           if (reason === 'echo_evidence') {
             onLiveTranscript?.(readingSegments);
             return;
@@ -857,6 +900,9 @@ export const AudioManager = ({
             .invoke('MEETING_NOTES_CANCEL_INCREMENTAL', { meetingId })
             .catch(() => undefined);
           onLiveTranscriptIntegrityChange?.('lagging');
+          const projector = liveConversationProjectorRef.current;
+          if (projector)
+            onLiveConversation?.(projector.unavailable(eouGeneration));
         },
       });
       eouSessionRef.current = eouSession;
@@ -865,6 +911,7 @@ export const AudioManager = ({
       } catch {
         await abortUnstartedCapture(meetingId);
         currentMeetingIdRef.current = null;
+        liveConversationProjectorRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         startTimeRef.current = 0;
@@ -917,6 +964,7 @@ export const AudioManager = ({
         );
         await abortUnstartedCapture(meetingId);
         currentMeetingIdRef.current = null;
+        liveConversationProjectorRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         startTimeRef.current = 0;
@@ -2038,6 +2086,13 @@ export const AudioManager = ({
       } finally {
         meetingContextIngestionAtStop?.close();
       }
+      const liveConversationProjectorAtStop =
+        liveConversationProjectorRef.current;
+      liveConversationProjectorRef.current = null;
+      if (liveConversationProjectorAtStop)
+        onLiveConversation?.(
+          liveConversationProjectorAtStop.finish(eouGenerationRef.current),
+        );
       frozenLiveTranscriptResponsivenessRef.current =
         liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
       eouGenerationRef.current += 1;
@@ -2226,6 +2281,8 @@ export const AudioManager = ({
       // processing for this meeting continue in the background.
       if (currentMeetingIdRef.current === stopSnapshot.meetingId) {
         currentMeetingIdRef.current = null;
+        liveConversationProjectorRef.current = null;
+        onLiveConversation?.(null);
         stopInFlightRef.current = false;
         isProcessingRef.current = false;
         setIsProcessing(false);
@@ -2501,6 +2558,7 @@ export const AudioManager = ({
       }
       eouSessionRef.current?.cancel();
       eouSessionRef.current = null;
+      liveConversationProjectorRef.current = null;
       meetingContextIngestionRef.current?.close();
       meetingContextIngestionRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
