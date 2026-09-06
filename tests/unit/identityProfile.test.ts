@@ -192,7 +192,14 @@ describe('workspace About you profile', () => {
     ).toMatchObject({ aliases: ['Morgan', 'Mo'] });
     expect(JSON.stringify(context)).not.toContain('Engineering');
     expect(JSON.stringify(context)).not.toContain('Education');
-    expect(context.bindings).toEqual([]);
+    expect(context.bindings).toEqual([
+      expect.objectContaining({
+        speaker: 'Me',
+        personId: state.selfPersonId,
+        individual: true,
+        source: 'user',
+      }),
+    ]);
   });
 
   it('isolates profile context and aliases across two independent workspace databases', () => {

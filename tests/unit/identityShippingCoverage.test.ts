@@ -131,28 +131,55 @@ describe('identity shipping lifecycle coverage', () => {
     ]);
   });
 
-  it.each(['imported', 'unknown'] as const)(
-    'does not generate a self binding for %s capture even with acoustic metadata',
-    (origin) => {
-      db.identityStore.setSelfPersonId(personId);
-      db.identityStore.recordCapture(meetingId, origin);
-      db.saveMeeting({
-        id: meetingId,
-        title: 'Other source',
-        transcript_json: JSON.stringify({
-          segments: [
-            { speaker: 'Me', text: 'I will publish the release checklist.' },
-          ],
-          speakerAttribution: {
-            source: 'local_diarization_acoustic',
-            mappingApplied: true,
-            confidence: 0.95,
-          },
-        }),
-      });
-      expect(getMeetingIdentityContext(meetingId).bindings).toEqual([]);
-    },
-  );
+  it('does not generate a self binding for imported capture even with acoustic metadata', () => {
+    db.identityStore.setSelfPersonId(personId);
+    db.identityStore.recordCapture(meetingId, 'imported');
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Imported source',
+      transcript_json: JSON.stringify({
+        segments: [
+          { speaker: 'Me', text: 'I will publish the release checklist.' },
+        ],
+        speakerAttribution: {
+          source: 'local_diarization_acoustic',
+          mappingApplied: true,
+          confidence: 0.95,
+        },
+      }),
+    });
+    expect(getMeetingIdentityContext(meetingId).bindings).toEqual([]);
+  });
+
+  it('generates a user-backed self binding for historical capture with unknown origin', () => {
+    db.identityStore.setSelfPersonId(personId);
+    db.identityStore.recordCapture(meetingId, 'unknown');
+    db.saveMeeting({
+      id: meetingId,
+      title: 'Historical source',
+      transcript_json: JSON.stringify({
+        segments: [
+          { speaker: 'Me', text: 'I will publish the release checklist.' },
+        ],
+        speakerAttribution: {
+          source: 'local_diarization_acoustic',
+          mappingApplied: true,
+          confidence: 0.95,
+        },
+      }),
+    });
+
+    const context = getMeetingIdentityContext(meetingId);
+    expect(context.bindings).toEqual([
+      expect.objectContaining({
+        speaker: 'Me',
+        personId,
+        individual: true,
+        source: 'user',
+      }),
+    ]);
+    expect(context.bindings[0]).not.toHaveProperty('captureEvidence');
+  });
 
   it('lets a user correction override otherwise reliable capture attribution', () => {
     db.identityStore.setSelfPersonId(personId);
