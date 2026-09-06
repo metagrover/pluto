@@ -26,6 +26,15 @@ const personalCalendar = {
   colorHex: '#34A853',
 };
 
+const meetingTitles = [
+  'Product review',
+  'Go-to-market planning',
+  'Leadership check-in',
+  'Design critique',
+  'Customer interview',
+  'Weekly retrospective',
+];
+
 const snapshot = (
   overrides: Partial<CalendarIntegrationSnapshot> = {},
 ): CalendarIntegrationSnapshot => {
@@ -55,9 +64,7 @@ const meeting = (index: number): CalendarEvent => ({
   occurrenceKey: `event-${index}`,
   eventIdentifier: `event-${index}`,
   calendarIdentifier: 'calendar-a',
-  title: ['Product review', 'Go-to-market planning', 'Leadership check-in'][
-    index
-  ],
+  title: meetingTitles[index] ?? `Meeting ${index + 1}`,
   start: `2026-08-30T${String(17 + index).padStart(2, '0')}:30:00.000Z`,
   end: `2026-08-30T${String(18 + index).padStart(2, '0')}:30:00.000Z`,
   isAllDay: false,
@@ -67,6 +74,38 @@ const meeting = (index: number): CalendarEvent => ({
   attendees: [],
   lastModified: null,
 });
+
+const installMatchMedia = (initialMatches: boolean) => {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = '(min-width: 1024px)';
+  const query = {
+    get matches() {
+      return matches;
+    },
+    media,
+    onchange: null,
+    addEventListener: vi.fn(
+      (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+        listeners.add(listener),
+    ),
+    removeEventListener: vi.fn(
+      (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+        listeners.delete(listener),
+    ),
+  } as unknown as MediaQueryList;
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => query),
+  );
+  return {
+    setMatches(next: boolean) {
+      matches = next;
+      const event = { matches: next, media } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+};
 
 const render = (
   props: Partial<React.ComponentProps<typeof UpcomingMeetings>> = {},
@@ -94,27 +133,51 @@ const render = (
 afterEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('UpcomingMeetings', () => {
-  it('shows exactly two rows before an inline See more disclosure', async () => {
-    const { container, root } = render();
+  it('shows three compact rows and five large-layout rows before disclosure', async () => {
+    const media = installMatchMedia(false);
+    const { container, root } = render({
+      events: Array.from({ length: 6 }, (_, index) => meeting(index)),
+    });
     expect(
       container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
-    ).toHaveLength(2);
-    expect(container.textContent).not.toContain('Leadership check-in');
+    ).toHaveLength(3);
+    expect(container.textContent).toContain('Leadership check-in');
+    expect(container.textContent).not.toContain('Design critique');
+    expect(
+      container.querySelector('button[aria-label="Show 3 more meetings"]'),
+    ).not.toBeNull();
+
+    await act(async () => media.setMatches(true));
+    expect(
+      container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
+    ).toHaveLength(5);
+    expect(container.textContent).toContain('Customer interview');
+    expect(container.textContent).not.toContain('Weekly retrospective');
+
     const more = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Show 1 more meeting"]',
     );
-    expect(more?.textContent).toContain('See more');
+    expect(more?.textContent).toContain('More');
     expect(container.querySelector('.border-b')).toBeNull();
 
     await act(async () => more?.click());
     expect(
       container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
-    ).toHaveLength(3);
-    expect(container.textContent).toContain('Leadership check-in');
+    ).toHaveLength(6);
+    expect(container.textContent).toContain('Weekly retrospective');
     expect(container.textContent).toContain('Show less');
+
+    const less = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Show fewer meetings"]',
+    );
+    await act(async () => less?.click());
+    expect(
+      container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
+    ).toHaveLength(5);
     act(() => root.unmount());
   });
 
@@ -355,7 +418,7 @@ describe('UpcomingMeetings', () => {
 
   it('handles clear-day, loading, and stale-cache states truthfully', () => {
     const clear = render({ events: [] });
-    expect(clear.container.textContent).toContain('No more meetings today');
+    expect(clear.container.textContent).toContain('No meetings today');
     act(() => clear.root.unmount());
 
     const loading = render({ snapshot: null, events: [], loading: true });

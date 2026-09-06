@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `tests/unit/UpcomingMeetings.dom.test.tsx`
 
-- [ ] **Step 1: Extend the meeting fixture for overflow scenarios**
+- [x] **Step 1: Extend the meeting fixture for overflow scenarios**
 
 Give `meeting(index)` stable titles for at least six meetings so the test can identify rows beyond both collapsed limits:
 
@@ -45,7 +45,7 @@ const meeting = (index: number): CalendarEvent => ({
 });
 ```
 
-- [ ] **Step 2: Add a controllable media-query fixture**
+- [x] **Step 2: Add a controllable media-query fixture**
 
 Install a `window.matchMedia` stub that starts below `1024px`, records `change` listeners, and exposes `setMatches(next)` to dispatch a `MediaQueryListEvent`-shaped object. Restore the stub after every test through Vitest:
 
@@ -82,7 +82,7 @@ const installMatchMedia = (initialMatches: boolean) => {
 
 Add `vi.unstubAllGlobals()` to `afterEach` after unmounting tests.
 
-- [ ] **Step 3: Write the failing responsive disclosure test**
+- [x] **Step 3: Write the failing responsive disclosure test**
 
 Render six meetings below the large-layout breakpoint and assert that three rows render with `aria-label="Show 3 more meetings"`. Toggle the media query to large and assert five rows plus `aria-label="Show 1 more meeting"`; click the control and assert all six rows and `Show less`, then collapse and assert five rows again:
 
@@ -107,11 +107,11 @@ it('shows three compact rows and five large-layout rows before disclosure', asyn
 });
 ```
 
-- [ ] **Step 4: Update the empty-day expectation**
+- [x] **Step 4: Update the empty-day expectation**
 
 Change the clear-day assertion to require the concise copy `No meetings today` while retaining the existing coverage for loading and stale cached events.
 
-- [ ] **Step 5: Run the focused test and verify RED**
+- [x] **Step 5: Run the focused test and verify RED**
 
 Run:
 
@@ -126,29 +126,43 @@ Expected: the responsive test fails because the component still renders two coll
 **Files:**
 - Modify: `src/components/features/UpcomingMeetings.tsx`
 
-- [ ] **Step 1: Observe Pluto's large dashboard breakpoint**
+- [x] **Step 1: Observe Pluto's large dashboard breakpoint**
 
 Add a local `'(min-width: 1024px)'` media query, initialize its match state safely, subscribe to `change` in an effect, and remove the listener during cleanup:
 
 ```ts
 const LARGE_DASHBOARD_QUERY = '(min-width: 1024px)';
 
-const [usesLargeLayout, setUsesLargeLayout] = useState(
-  () => window.matchMedia?.(LARGE_DASHBOARD_QUERY).matches ?? false,
-);
+const matchesLargeDashboard = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(LARGE_DASHBOARD_QUERY).matches
+    : false;
+
+const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
 
 useEffect(() => {
-  if (!window.matchMedia) return;
+  if (
+    typeof window === 'undefined' ||
+    typeof window.matchMedia !== 'function'
+  ) {
+    return;
+  }
   const query = window.matchMedia(LARGE_DASHBOARD_QUERY);
   const updateLayout = (event: MediaQueryListEvent) =>
     setUsesLargeLayout(event.matches);
   setUsesLargeLayout(query.matches);
-  query.addEventListener('change', updateLayout);
-  return () => query.removeEventListener('change', updateLayout);
+  if (typeof query.addEventListener === 'function') {
+    query.addEventListener('change', updateLayout);
+    return () => query.removeEventListener('change', updateLayout);
+  }
+  if (typeof query.addListener === 'function') {
+    query.addListener(updateLayout);
+    return () => query.removeListener(updateLayout);
+  }
 }, []);
 ```
 
-- [ ] **Step 2: Replace the fixed two-row limit**
+- [x] **Step 2: Replace the fixed two-row limit**
 
 Derive `collapsedLimit` as five for the large layout and three otherwise. Slice the collapsed rows and calculate the hidden count from the same value so visible rows, copy, and accessible labels remain consistent:
 
@@ -158,11 +172,11 @@ const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
 const hiddenCount = Math.max(0, events.length - collapsedLimit);
 ```
 
-- [ ] **Step 3: Refine disclosure and empty-state copy**
+- [x] **Step 3: Refine disclosure and empty-state copy**
 
 Keep the existing Pluto button styling and chevron behavior, change its collapsed visible label from `See more` to `More`, retain the count-specific `aria-label`, and change the fresh empty state to `No meetings today`.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run:
 
@@ -178,15 +192,15 @@ Expected: all `UpcomingMeetings` tests pass.
 - Modify: `docs/decisions.md`
 - Create: `docs/changelog/entries/2026-09-07-778-responsive-upcoming-meetings.md`
 
-- [ ] **Step 1: Record the durable dashboard-density decision**
+- [x] **Step 1: Record the durable dashboard-density decision**
 
 Append a dated decision linked to issue #778: the collapsed agenda shows three rows below the dashboard's `lg` breakpoint and five at or above it, overflow remains user-expandable, and an empty day is stated explicitly without copying Granola's visual treatment.
 
-- [ ] **Step 2: Add the changelog fragment**
+- [x] **Step 2: Add the changelog fragment**
 
 Create the issue-linked fragment with `PR: Pending.`, describing the responsive 3/5-row agenda, the `More` disclosure, and the clear-day copy. State that it replaces the fixed two-row collapsed limit.
 
-- [ ] **Step 3: Run verification**
+- [x] **Step 3: Run verification**
 
 Run:
 
@@ -198,7 +212,7 @@ pnpm run lint
 
 Expected: all commands pass without new warnings or errors.
 
-- [ ] **Step 4: Review the final diff**
+- [x] **Step 4: Review the final diff**
 
 Run:
 

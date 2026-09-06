@@ -18,6 +18,13 @@ interface UpcomingMeetingsProps {
   onOpenSettings: () => void;
 }
 
+const LARGE_DASHBOARD_QUERY = '(min-width: 1024px)';
+
+const matchesLargeDashboard = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(LARGE_DASHBOARD_QUERY).matches
+    : false;
+
 const formatTime = (value: string) =>
   new Date(value).toLocaleTimeString([], {
     hour: 'numeric',
@@ -77,6 +84,7 @@ export const UpcomingMeetings = ({
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
@@ -92,8 +100,9 @@ export const UpcomingMeetings = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const visibleEvents = expanded ? events : events.slice(0, 2);
-  const hiddenCount = Math.max(0, events.length - 2);
+  const collapsedLimit = usesLargeLayout ? 5 : 3;
+  const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
+  const hiddenCount = Math.max(0, events.length - collapsedLimit);
   const selectedList =
     snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
       ? snapshot.selectedCalendars
@@ -103,6 +112,27 @@ export const UpcomingMeetings = ({
   const hasConnectedCalendar =
     selectedList.length > 0 &&
     (snapshot?.state === 'ready' || events.length > 0);
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      typeof window.matchMedia !== 'function'
+    ) {
+      return;
+    }
+    const query = window.matchMedia(LARGE_DASHBOARD_QUERY);
+    const updateLayout = (event: MediaQueryListEvent) =>
+      setUsesLargeLayout(event.matches);
+    setUsesLargeLayout(query.matches);
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', updateLayout);
+      return () => query.removeEventListener('change', updateLayout);
+    }
+    if (typeof query.addListener === 'function') {
+      query.addListener(updateLayout);
+      return () => query.removeListener(updateLayout);
+    }
+  }, []);
 
   useEffect(() => {
     if (snapshot?.selectedCalendars?.length) {
@@ -363,7 +393,7 @@ export const UpcomingMeetings = ({
                 onClick={() => setExpanded((value) => !value)}
                 className="mt-2 inline-flex min-h-9 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
               >
-                {expanded ? 'Show less' : 'See more'}
+                {expanded ? 'Show less' : 'More'}
                 {expanded ? (
                   <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
@@ -390,7 +420,7 @@ export const UpcomingMeetings = ({
           />
         ) : (
           <p className="pb-5 text-[12px] font-medium text-pro-text-muted">
-            No more meetings today
+            No meetings today
           </p>
         )}
       </div>

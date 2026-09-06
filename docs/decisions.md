@@ -953,3 +953,10 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Settings selection controls use a shared themed combobox derived from the Identify speakers visual language: rounded fields, a floating menu, highlighted options, a chevron, and a selected checkmark.
 - **Behavior boundary:** Role or field and Industry remain free-text fields with suggestions. Your person searches existing identities and retains its explicit create-person flow. Silence duration remains a fixed list whose setting persistence stays in `SettingsTab`.
 - **Accessibility:** The shared control keeps visible labels, combobox/listbox semantics, keyboard navigation, IME-safe input, disabled options, viewport-aware placement, and inherited theme tokens for portaled menus.
+
+## 2026-09-07 - Scale the upcoming-meetings agenda with the dashboard layout
+
+- **Status:** Accepted and implemented under [Issue #778](https://github.com/metagrover/pluto/issues/778).
+- **Decision:** The collapsed Upcoming meetings agenda shows up to three rows below Pluto's `lg` dashboard breakpoint and up to five rows at or above it. Additional meetings remain available through one inline, reversible disclosure.
+- **Behavior boundary:** The responsive limit changes presentation only. Calendar reads, event ordering, stale-cache handling, recovery states, and calendar source controls remain unchanged. A fresh empty day is stated explicitly as `No meetings today`.
+- **Design boundary:** The Granola reference established the desired information density and empty-day clarity, while Pluto's existing typography, spacing, color, hierarchy, and control styling remain authoritative.
