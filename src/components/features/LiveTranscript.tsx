@@ -208,7 +208,7 @@ export const LiveTranscript = ({
             <h1 id="live-transcript-title">Live transcript</h1>
           </div>
           <span>
-            {visibleCount === 0
+            {visibleCount === 0 && !conversation?.draft
               ? 'Listening'
               : !isFollowingLive
                 ? 'Reviewing earlier'
@@ -221,15 +221,16 @@ export const LiveTranscript = ({
           </span>
         </div>
         <div className="live-transcript-body">
-          {visibleCount === 0 && !interimText && !conversation?.draft ? (
-            <div className="transcript-waiting">
-              <p>Pluto is listening.</p>
-              <span>
-                The conversation will appear here as speech is recognized.
-              </span>
-            </div>
-          ) : showingConversation ? (
+          {showingConversation ? (
             <>
+              {conversation.rows.length === 0 && !conversation.draft && (
+                <div className="transcript-waiting">
+                  <p>Pluto is listening.</p>
+                  <span>
+                    The conversation will appear here as speech is recognized.
+                  </span>
+                </div>
+              )}
               {conversation.rows.map((row) => (
                 <ConversationRow key={row.id} row={row} />
               ))}
@@ -246,6 +247,13 @@ export const LiveTranscript = ({
                 </p>
               )}
             </>
+          ) : visibleSegments.length === 0 && !interimText ? (
+            <div className="transcript-waiting">
+              <p>Pluto is listening.</p>
+              <span>
+                The conversation will appear here as speech is recognized.
+              </span>
+            </div>
           ) : (
             turns.map((turn) => <TranscriptTurn key={turn.id} turn={turn} />)
           )}

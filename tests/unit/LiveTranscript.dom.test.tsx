@@ -1357,4 +1357,22 @@ describe('LiveTranscript reading experience', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     act(() => root.unmount());
   });
+
+  it('shows a degraded warning even before the first live row arrives', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={projector.degraded(1)}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(
+      'Live wording may be incomplete. Recording continues safely.',
+    );
+    act(() => root.unmount());
+  });
 });
