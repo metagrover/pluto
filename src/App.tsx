@@ -3,12 +3,12 @@ import './App.css';
 
 // Core
 import { AudioManager } from './components/AudioManager';
-import type { LiveConversationSnapshot } from './services/liveTranscription/liveConversationProjection';
 import { RuntimeReadinessGate } from './components/RuntimeReadinessGate';
 import { SetupWizard } from './components/Setup/SetupWizard';
 import { AutoEndToast } from './components/ui/AutoEndToast';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
 import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
+import type { LiveConversationSnapshot } from './services/liveTranscription/liveConversationProjection';
 
 // Layout
 import { Sidebar } from './components/layout/Sidebar';

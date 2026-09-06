@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveTranscriptSegment } from '../../src/components/features/recordingWorkspaceModel';
+import { createLiveConversationProjection } from '../../src/services/liveTranscription/liveConversationProjection';
 import type {
   LiveTranscriptReading,
   LiveTranscriptReadingRange,
 } from '../../src/services/liveTranscription/liveTranscriptReconciliation';
-import { createLiveConversationProjection } from '../../src/services/liveTranscription/liveConversationProjection';
 
 const row = (
   id: string,

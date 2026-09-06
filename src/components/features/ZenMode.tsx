@@ -1,8 +1,8 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
-import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import type { LiveConversationSnapshot } from '../../services/liveTranscription/liveConversationProjection';
+import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
 import { RecordingCaptureBar } from './RecordingCaptureBar';

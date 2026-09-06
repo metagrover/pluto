@@ -11,11 +11,11 @@ import { ParakeetEouClient } from '../electron/transcription/parakeetEouClient.t
 import { ParakeetFinalClient } from '../electron/transcription/parakeetFinalClient.ts';
 import { makeRuntimeHost } from '../electron/transcription/parakeetRuntimeHost.ts';
 import type { LiveSource } from '../src/services/liveTranscription/contracts.ts';
-import { createEouTranscriptProjection } from '../src/services/liveTranscription/eouTranscriptProjection.ts';
 import {
   type EouRendererFrame,
   createEouPcmChunker,
 } from '../src/services/liveTranscription/eouPcmChunker.ts';
+import { createEouTranscriptProjection } from '../src/services/liveTranscription/eouTranscriptProjection.ts';
 import { createLiveConversationProjection } from '../src/services/liveTranscription/liveConversationProjection.ts';
 import { createLiveEchoEvidence } from '../src/services/liveTranscription/liveEchoEvidence.ts';
 import { reconcileLiveTranscriptReading } from '../src/services/liveTranscription/liveTranscriptReconciliation.ts';
