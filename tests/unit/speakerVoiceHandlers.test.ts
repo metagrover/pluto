@@ -15,6 +15,7 @@ import {
 } from '../../electron/speakerVoiceHandlers';
 import { saveMeetingSpeakerCandidates } from '../../electron/speakerVoiceStore';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
+import { DEFAULT_CALIBRATION_POLICY_V1 } from '../../src/services/speakerVoiceMatcher';
 
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
 
@@ -98,14 +99,7 @@ describe('speaker voice IPC handlers', () => {
       endTime: 3.5,
       excerpt: 'Hello, this is Robin speaking.',
     },
-    provenance: {
-      modelIdentifier: 'speaker-diarization-offline-v1',
-      modelRevision: '27741ba0e8354c03b190f898327dcf61a3848148',
-      artifactDigest:
-        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      runtimeVersion: 'fluidaudio-v1',
-      profileAlgorithmVersion: 'v1',
-    },
+    provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
     isEligibleForEnrollment: true,
   };
 

@@ -26,10 +26,10 @@ export const DEFAULT_CALIBRATION_POLICY_V1: VoiceProfileCalibrationPolicy = {
   policyVersion: 'v1',
   compatibilityKey: {
     modelIdentifier: 'speaker-diarization-offline-v1',
-    modelRevision: '27741ba0e8354c03b190f898327dcf61a3848148',
+    modelRevision: '1ed7a662fdc7109e36d822db793ee6eebdaf8594',
     artifactDigest:
-      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    runtimeVersion: 'fluidaudio-v1',
+      'e0b6b63bdb2a12d087031067d61600f5e2b6b9a26f9c9e511118d2a6206349cd',
+    runtimeVersion: 'fluidaudio-0.15.5',
     profileAlgorithmVersion: 'v1',
   },
   minAbsoluteSimilarity: 0.72,

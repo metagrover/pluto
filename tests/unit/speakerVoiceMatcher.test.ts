@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type {
   CanonicalVoiceProfile,
@@ -11,6 +12,23 @@ import {
 } from '../../src/services/speakerVoiceMatcher';
 
 describe('speakerVoiceMatcher & global acoustic calibration', () => {
+  it('keeps the matching policy aligned with native speaker evidence provenance', () => {
+    const nativeRuntime = fs.readFileSync(
+      'native/parakeet-runtime/Sources/ParakeetRuntimeEngine/FluidAudioEngine.swift',
+      'utf8',
+    );
+    const nativeService = fs.readFileSync(
+      'native/parakeet-runtime/Sources/ParakeetRuntimeEngine/ParakeetService.swift',
+      'utf8',
+    );
+    const key = DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey;
+
+    expect(nativeRuntime).toContain(`identifier: "${key.modelIdentifier}"`);
+    expect(nativeRuntime).toContain(`revision: "${key.modelRevision}"`);
+    expect(nativeRuntime).toContain(`artifactSHA256: "${key.artifactDigest}"`);
+    expect(nativeService).toContain(`runtimeVersion: "${key.runtimeVersion}"`);
+  });
+
   const dummyPolicy: VoiceProfileCalibrationPolicy = {
     ...DEFAULT_CALIBRATION_POLICY_V1,
     compatibilityKey: {
