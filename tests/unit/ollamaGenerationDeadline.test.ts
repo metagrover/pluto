@@ -17,6 +17,23 @@ describe('Ollama progress-aware generation deadline', () => {
     expect(deadline.signal.aborted).toBe(false);
     vi.advanceTimersByTime(1);
     expect(deadline.signal.aborted).toBe(true);
+    expect(deadline.signal.reason).toMatchObject({ name: 'TimeoutError' });
+  });
+
+  it('preserves a caller cancellation as an abort rather than a timeout', () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const deadline = createOllamaGenerationDeadline({
+      capacityTimeoutMs: 500,
+      idleTimeoutMs: 200,
+      activeTimeoutMs: 1_000,
+      callerSignal: caller.signal,
+    });
+
+    caller.abort(new DOMException('cancelled', 'AbortError'));
+
+    expect(deadline.signal.aborted).toBe(true);
+    expect(deadline.signal.reason).toMatchObject({ name: 'AbortError' });
   });
 
   it('switches from capacity wait to idle and bounded active generation', () => {

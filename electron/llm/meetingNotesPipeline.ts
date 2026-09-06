@@ -53,7 +53,7 @@ import {
 import { createNotesWireRequest } from './meetingNotesWire';
 
 const WRITER_OUTPUT_TOKENS = 2048;
-const COMPACT_WRITER_OUTPUT_TOKENS = 1024;
+const COMPACT_WRITER_OUTPUT_TOKENS = 2048;
 const AUDIT_OUTPUT_TOKENS = 1536;
 const reviewPrompt = (
   input: GenerateMeetingNotesInput,
@@ -79,6 +79,8 @@ export const NOTES_HIERARCHY_LIMITS = {
 export const NOTES_BOUNDED_LIMITS = {
   maxLeaves: 3,
   maxModelCalls: 6,
+  maxRecoverySplits: 1,
+  maxSourceCharactersPerLeaf: 8_000,
 } as const;
 
 const uniqueSpans = (spans: SourceSpan[]): SourceSpan[] => {
@@ -90,6 +92,9 @@ const uniqueSpans = (spans: SourceSpan[]): SourceSpan[] => {
     return true;
   });
 };
+
+const sourceCharacterCount = (spans: SourceSpan[]): number =>
+  spans.reduce((total, span) => total + span.end - span.start, 0);
 
 const serializeSource = (
   input: GenerateMeetingNotesInput,
@@ -1313,6 +1318,12 @@ const runBoundedCompactNotes = async (
   knownTerms: NotesKnownTerm[],
 ): Promise<AnalysisDocumentV3> => {
   const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
+    if (
+      sourceCharacterCount(spans) >
+      NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf
+    ) {
+      return false;
+    }
     const sourceText = serializeSource(input, spans);
     const writerPrompt = buildCompactNotesWriterPrompt({
       sourceText,
@@ -1343,14 +1354,15 @@ const runBoundedCompactNotes = async (
     throw new MeetingNotesError('notes_bounded_plan_exceeded');
   }
 
-  const reviewedDrafts: NotesDraft[] = [];
-  const issues: string[] = [];
-  let changes = 0;
-  let processedLeaves = 0;
+  const writtenLeaves: Array<{
+    draft: NotesDraft;
+    evidenceSpans: SourceSpan[];
+    idPrefix: string;
+  }> = [];
+  let recoverySplits = 0;
   const processLeaf = async (
     evidenceSpans: SourceSpan[],
     idPrefix: string,
-    allowBisection: boolean,
   ): Promise<void> => {
     assertNotCancelled(input);
     const sourceText = serializeSource(input, evidenceSpans);
@@ -1363,34 +1375,40 @@ const runBoundedCompactNotes = async (
     let draft: NotesDraft;
     try {
       draft = remapDraftIds(
-        await withTruncationRetry(input, (retryInstruction) =>
-          writeDraft(
-            input,
-            'notesWriter',
-            retryInstruction
-              ? `${baseWriterPrompt}\n\n${retryInstruction}`
-              : baseWriterPrompt,
-            evidenceSpans,
-          ),
-        ),
+        await writeDraft(input, 'notesWriter', baseWriterPrompt, evidenceSpans),
         idPrefix,
       );
     } catch (error) {
       if (
-        allowBisection &&
+        recoverySplits < NOTES_BOUNDED_LIMITS.maxRecoverySplits &&
         error instanceof MeetingNotesError &&
         error.code === 'notes_output_truncated'
       ) {
         const split = bisectNotesSourceSpans(input.source, evidenceSpans);
         if (split?.length === 2) {
+          recoverySplits += 1;
           input.onRepartition?.();
-          await processLeaf(split[0]!, `${idPrefix}a`, false);
-          await processLeaf(split[1]!, `${idPrefix}b`, false);
+          await processLeaf(split[0]!, `${idPrefix}a`);
+          await processLeaf(split[1]!, `${idPrefix}b`);
           return;
         }
       }
       throw error;
     }
+    writtenLeaves.push({ draft, evidenceSpans, idPrefix });
+  };
+  for (const [index, leaf] of leaves.entries()) {
+    await processLeaf(leaf.primarySpans, `leaf${index}`);
+  }
+
+  // Complete every writer packet before spending the remaining bounded calls
+  // on model review. If a later writer overflows, this preserves enough of the
+  // six-call budget to replace it with two smaller packets; any review calls
+  // that no longer fit fall back to the same deterministic source checks.
+  const reviewedDrafts: NotesDraft[] = [];
+  const issues: string[] = [];
+  let changes = 0;
+  for (const { draft, evidenceSpans, idPrefix } of writtenLeaves) {
     let reviewed: Awaited<ReturnType<typeof auditDraft>>;
     try {
       reviewed = await auditDraft(
@@ -1419,10 +1437,6 @@ const runBoundedCompactNotes = async (
     reviewedDrafts.push(reviewed.draft);
     changes += reviewed.changeCount;
     issues.push(...(reviewed.audited.issues ?? []));
-    processedLeaves += 1;
-  };
-  for (const [index, leaf] of leaves.entries()) {
-    await processLeaf(leaf.primarySpans, `leaf${index}`, leaves.length === 1);
   }
 
   const meetingType =
@@ -1482,7 +1496,7 @@ const runBoundedCompactNotes = async (
     changes,
     {
       depth: 1,
-      nodes: processedLeaves * 2,
+      nodes: writtenLeaves.length * 2,
       max_depth: 1,
       max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
     },
