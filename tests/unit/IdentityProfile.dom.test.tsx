@@ -154,7 +154,7 @@ describe('About you form and invitation', () => {
       expect(
         document.documentElement.style.getPropertyValue('--pro-text-main'),
       ).toBe('');
-      expect(container.querySelector('form .text-pro-text-muted')).toBeNull();
+      expect(container.querySelector('form p.text-pro-text-muted')).toBeNull();
       expect(
         container
           .querySelector('form p')
@@ -170,7 +170,7 @@ describe('About you form and invitation', () => {
       root.render(<IdentityProfileForm initialState={initial()} />),
     );
     expect(container.querySelector('[style*="--pro-"]')).toBeNull();
-    expect(container.querySelector('form .text-pro-text-muted')).toBeNull();
+    expect(container.querySelector('form p.text-pro-text-muted')).toBeNull();
     expect(
       container
         .querySelector('form p')

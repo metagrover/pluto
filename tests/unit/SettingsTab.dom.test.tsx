@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsTab } from '../../src/components/features/SettingsTab';
 
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 vi.mock('../../src/components/features/IdentitySettings', () => ({
   IdentitySettings: () => <div>Identity settings content</div>,
 }));
@@ -64,6 +66,39 @@ afterEach(() => {
 });
 
 describe('SettingsTab', () => {
+  it('persists the silence duration selected from the themed menu', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const setDuration = vi.fn();
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          silenceAutoStopDuration="5"
+          setSilenceAutoStopDuration={setDuration}
+        />,
+      ),
+    );
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[aria-label="Auto-stop on prolonged silence duration"]',
+        )!
+        .click(),
+    );
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.textContent === '10 minutes')!;
+    await act(async () => option.click());
+    expect(setDuration).toHaveBeenCalledWith('10');
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'silence_auto_stop_duration',
+      value: '10',
+    });
+    act(() => root.unmount());
+  });
   it('shows one focused category at a time', () => {
     const { container, root } = renderSettings();
     const tablist = container.querySelector('[role="tablist"]');

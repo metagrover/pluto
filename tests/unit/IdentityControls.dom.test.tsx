@@ -58,6 +58,21 @@ describe('identity controls', () => {
     await act(async () => button?.click());
   };
   const select = async (label: string, value: string) => {
+    if (label === 'Your person') {
+      const field = container.querySelector<HTMLInputElement>(
+        '[aria-label="Your person"]',
+      )!;
+      await act(async () => field.click());
+      const optionIndex =
+        value === '__new__'
+          ? workspace.people.length + 1
+          : workspace.people.findIndex((person) => person.id === value) + 1;
+      const option =
+        document.querySelectorAll<HTMLElement>('[role="option"]')[optionIndex];
+      expect(option).toBeTruthy();
+      await act(async () => option.click());
+      return;
+    }
     const field = container.querySelector<HTMLSelectElement>(
       `select[aria-label="${label}"]`,
     );
@@ -98,8 +113,13 @@ describe('identity controls', () => {
   it('selects a stable self ID, distinguishes same names, and explains capture scope', async () => {
     await act(async () => root.render(<IdentitySettings />));
     expect(container.textContent).toContain('future local recordings');
-    const options = [...container.querySelectorAll('option')].filter((o) =>
-      o.textContent?.includes('Alex'),
+    await act(async () =>
+      container
+        .querySelector<HTMLInputElement>('[aria-label="Your person"]')!
+        .click(),
+    );
+    const options = [...document.querySelectorAll('[role="option"]')].filter(
+      (o) => o.textContent?.includes('Alex'),
     );
     expect(options[0].textContent).not.toBe(options[1].textContent);
     await select('Your person', 'person-b');
@@ -144,7 +164,10 @@ describe('identity controls', () => {
       personId: null,
       expectedRevision: 5,
     });
-    expect(container.querySelector('select')?.value).toBe('');
+    expect(
+      container.querySelector<HTMLInputElement>('[aria-label="Your person"]')
+        ?.value,
+    ).toBe('Not set');
   });
 
   it('keeps a failed self save editable and reloads stale revisions', async () => {
@@ -156,7 +179,10 @@ describe('identity controls', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'changed',
     );
-    expect(container.querySelector('select')?.disabled).toBe(false);
+    expect(
+      container.querySelector<HTMLInputElement>('[aria-label="Your person"]')
+        ?.disabled,
+    ).toBe(false);
     await select('Your person', 'person-b');
     invoke.mockResolvedValueOnce({
       ...workspace,
@@ -175,7 +201,7 @@ describe('identity controls', () => {
     await act(async () => root.render(<IdentitySettings />));
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
     await click('Reload identity');
-    expect(container.querySelector('select')).toBeTruthy();
+    expect(container.querySelector('[aria-label="Your person"]')).toBeTruthy();
   });
 
   it('requires explicit individual scope for channel labels and preserves imported provenance', async () => {
