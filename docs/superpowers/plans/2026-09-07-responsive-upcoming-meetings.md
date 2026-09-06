@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Show up to three upcoming meetings in Pluto's compact dashboard and five in its larger dashboard, with an accessible disclosure for overflow and a clear empty-day message.
+**Goal:** Show today's remaining meetings followed by the next future meetings—up to three in Pluto's compact dashboard and five in its larger dashboard—with an accessible disclosure for overflow and a clear empty-today message.
 
-**Architecture:** Keep calendar fetching, ordering, and state handling unchanged. `UpcomingMeetings` will observe the same `1024px` large-layout breakpoint already used by `Dashboard`, derive the collapsed limit from that media query, and continue to use its existing local expanded state and Pluto styling.
+**Architecture:** Read the dashboard agenda from today's local midnight through the bounded forward window already held in Pluto's calendar cache. `UpcomingMeetings` observes the same `1024px` large-layout breakpoint used by `Dashboard`, derives the collapsed limit from that media query, and renders a date cue for future rows while preserving existing event ordering, recovery states, and Pluto styling.
 
 **Tech Stack:** React 18, TypeScript, Tailwind CSS, Vitest, Happy DOM
 
@@ -222,3 +222,65 @@ git diff -- tests/unit/UpcomingMeetings.dom.test.tsx src/components/features/Upc
 ```
 
 Expected: no whitespace errors and only issue #778 changes.
+
+### Task 4: Continue the agenda into future dates
+
+**Files:**
+- Modify: `src/App.tsx`
+- Modify: `electron/calendar/service.ts`
+- Modify: `tests/unit/calendarService.test.ts`
+- Modify: `src/components/features/UpcomingMeetings.tsx`
+- Modify: `tests/unit/UpcomingMeetings.dom.test.tsx`
+- Modify: `docs/decisions.md`
+- Modify: `docs/changelog/entries/2026-09-07-778-responsive-upcoming-meetings.md`
+
+- [x] **Step 1: Specify the bounded agenda window**
+
+Add a service test proving that a 30-day agenda query reaches `store.listEvents` and a boundary test proving that ranges longer than 32 elapsed days remain rejected. The two-day tolerance covers local daylight-saving transitions without permitting an unbounded renderer query.
+
+- [x] **Step 2: Verify the range test fails**
+
+Run the existing calendar service test directly:
+
+```bash
+pnpm vitest run tests/unit/calendarService.test.ts
+```
+
+Expected: the 30-day query fails with `invalid_calendar_day` because the service still enforces a 48-hour maximum.
+
+- [x] **Step 3: Implement the bounded range query**
+
+Allow the existing calendar-list service boundary to accept at most 32 elapsed days. Make `App.loadCalendarAgenda` query from today's local midnight to 30 local days later, then retain only events whose end is after now.
+
+- [x] **Step 4: Specify the empty-today plus future-events presentation**
+
+Freeze the component test clock, render future-day meetings with no event today, and assert that `No meetings today` remains visible alongside the future titles and concise future date labels. Keep the existing responsive 3/5 item assertions.
+
+- [x] **Step 5: Verify the presentation test fails**
+
+Run:
+
+```bash
+pnpm vitest run tests/unit/UpcomingMeetings.dom.test.tsx
+```
+
+Expected: failure because a populated future agenda currently suppresses the empty-today message and provides no date cues.
+
+- [x] **Step 6: Render future date cues in Pluto's agenda**
+
+Determine whether each event starts on the current local day. When no displayed event starts today, place the existing subdued `No meetings today` copy above the list. For future rows, show a compact `Tomorrow` or localized short month/day label above the event time in the existing left metadata column.
+
+- [x] **Step 7: Correct durable records and verify the complete change**
+
+Update the issue-linked decision and changelog language from a today-only agenda to a bounded forward agenda, then run:
+
+```bash
+pnpm test -- --run
+pnpm run lint
+pnpm run check
+pnpm run changelog:check
+pnpm exec tsc --noEmit
+git diff --check
+```
+
+Expected: all checks pass.

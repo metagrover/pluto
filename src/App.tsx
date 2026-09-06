@@ -294,7 +294,7 @@ function App() {
         const start = new Date(now);
         start.setHours(0, 0, 0, 0);
         const end = new Date(start);
-        end.setDate(end.getDate() + 1);
+        end.setDate(end.getDate() + 30);
         const events = await listCalendarDay(
           start.toISOString(),
           end.toISOString(),

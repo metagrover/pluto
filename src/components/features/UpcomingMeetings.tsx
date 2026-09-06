@@ -44,6 +44,24 @@ const formatDuration = (event: CalendarEvent) => {
   return `${minutes} minutes`;
 };
 
+const isSameLocalDay = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const formatEventDay = (value: string, today: Date) => {
+  const eventDate = new Date(value);
+  if (isSameLocalDay(eventDate, today)) return null;
+  const tomorrow = new Date(today);
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (isSameLocalDay(eventDate, tomorrow)) return 'Tomorrow';
+  return eventDate.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
+};
+
 const RecoveryAction = ({
   title,
   detail,
@@ -103,6 +121,10 @@ export const UpcomingMeetings = ({
   const collapsedLimit = usesLargeLayout ? 5 : 3;
   const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
   const hiddenCount = Math.max(0, events.length - collapsedLimit);
+  const today = new Date();
+  const hasMeetingsToday = events.some((event) =>
+    isSameLocalDay(new Date(event.start), today),
+  );
   const selectedList =
     snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
       ? snapshot.selectedCalendars
@@ -347,39 +369,58 @@ export const UpcomingMeetings = ({
           </p>
         ) : events.length ? (
           <>
+            {!hasMeetingsToday ? (
+              <p className="mb-4 text-[12px] font-medium text-pro-text-muted">
+                No meetings today
+              </p>
+            ) : null}
             <div className="space-y-3">
-              {visibleEvents.map((event, index) => (
-                <article
-                  key={event.occurrenceKey}
-                  data-testid="upcoming-meeting-row"
-                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
-                >
-                  <div className="flex items-start gap-2 pt-0.5">
-                    {index === 0 ? (
-                      <span
-                        aria-label="Next meeting"
-                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent"
-                      />
-                    ) : (
-                      <span className="w-1.5 shrink-0" aria-hidden="true" />
-                    )}
-                    <time
-                      dateTime={event.start}
-                      className="text-[10px] font-semibold tabular-nums text-pro-text-muted"
-                    >
-                      {formatTime(event.start)}
-                    </time>
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
-                      {event.title || 'Untitled event'}
-                    </h3>
-                    <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
-                      {formatDuration(event)}
-                    </p>
-                  </div>
-                </article>
-              ))}
+              {visibleEvents.map((event, index) => {
+                const eventDay = formatEventDay(event.start, today);
+                return (
+                  <article
+                    key={event.occurrenceKey}
+                    data-testid="upcoming-meeting-row"
+                    className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
+                  >
+                    <div className="flex items-start gap-2 pt-0.5">
+                      {index === 0 ? (
+                        <span
+                          aria-label="Next meeting"
+                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent"
+                        />
+                      ) : (
+                        <span className="w-1.5 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="min-w-0">
+                        {eventDay ? (
+                          <time
+                            dateTime={event.start}
+                            data-testid="upcoming-meeting-date"
+                            className="block truncate text-[9px] font-semibold text-pro-text-muted/75"
+                          >
+                            {eventDay}
+                          </time>
+                        ) : null}
+                        <time
+                          dateTime={event.start}
+                          className="block text-[10px] font-semibold tabular-nums text-pro-text-muted"
+                        >
+                          {formatTime(event.start)}
+                        </time>
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
+                        {event.title || 'Untitled event'}
+                      </h3>
+                      <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
+                        {formatDuration(event)}
+                      </p>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             {hiddenCount > 0 || expanded ? (
               <button

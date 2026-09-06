@@ -134,6 +134,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('UpcomingMeetings', () => {
@@ -434,6 +435,38 @@ describe('UpcomingMeetings', () => {
     expect(stale.container.textContent).toContain('Last read');
     expect(stale.container.textContent).toContain('Product review');
     act(() => stale.root.unmount());
+  });
+
+  it('keeps the empty-today message above meetings on future dates', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-30T12:00:00.000Z'));
+    const agenda = render({
+      events: [
+        {
+          ...meeting(0),
+          title: 'Tomorrow planning',
+          start: '2026-08-31T09:00:00.000Z',
+          end: '2026-08-31T09:30:00.000Z',
+        },
+        {
+          ...meeting(1),
+          title: 'September review',
+          start: '2026-09-10T15:00:00.000Z',
+          end: '2026-09-10T15:30:00.000Z',
+        },
+      ],
+    });
+
+    expect(agenda.container.textContent).toContain('No meetings today');
+    expect(agenda.container.textContent).toContain('Tomorrow planning');
+    expect(agenda.container.textContent).toContain('September review');
+    const futureDates = agenda.container.querySelectorAll(
+      '[data-testid="upcoming-meeting-date"]',
+    );
+    expect(futureDates).toHaveLength(2);
+    expect(futureDates[0].textContent).toBe('Tomorrow');
+    expect(futureDates[1].textContent).toBeTruthy();
+    act(() => agenda.root.unmount());
   });
 
   it('names the selected calendar when a fresh read fails', () => {
