@@ -63,6 +63,77 @@ const anchorLag = (
     : undefined;
 };
 
+/** Enumerates independently supported exact spans without joining across a
+ * local microphone insertion. Candidate conflict resolution stays with the
+ * caller because ranges can be supported by several System rows. */
+export const findSupportedExactEchoSpans = (
+  mic: TimedToken[],
+  system: TimedToken[],
+  evidence: EvidenceLookup,
+): Array<{
+  micStartToken: number;
+  systemStartToken: number;
+  tokenCount: number;
+}> => {
+  const spans: Array<{
+    micStartToken: number;
+    systemStartToken: number;
+    tokenCount: number;
+  }> = [];
+  for (
+    let micStart = 0;
+    micStart <= mic.length - MIN_ANCHOR_WORDS;
+    micStart++
+  ) {
+    for (
+      let systemStart = 0;
+      systemStart <= system.length - MIN_ANCHOR_WORDS;
+      systemStart++
+    ) {
+      if (
+        mic[micStart].text !== system[systemStart].text ||
+        Math.abs(mic[micStart].timestampMs - system[systemStart].timestampMs) >
+          1_250 ||
+        (micStart > 0 &&
+          systemStart > 0 &&
+          mic[micStart - 1].text === system[systemStart - 1].text)
+      )
+        continue;
+      let tokenCount = 0;
+      while (
+        micStart + tokenCount < mic.length &&
+        systemStart + tokenCount < system.length &&
+        mic[micStart + tokenCount].text ===
+          system[systemStart + tokenCount].text &&
+        mic[micStart + tokenCount].timestampMs - mic[micStart].timestampMs <=
+          MAX_CHAIN_MS
+      )
+        tokenCount++;
+      if (tokenCount < MIN_ANCHOR_WORDS) continue;
+      const lag = anchorLag(
+        mic.slice(micStart, micStart + tokenCount),
+        system.slice(systemStart, systemStart + tokenCount),
+        evidence,
+      );
+      if (
+        lag === undefined ||
+        !mic
+          .slice(micStart, micStart + tokenCount)
+          .every((word, index) =>
+            supportsOnset(word, system[systemStart + index], lag),
+          )
+      )
+        continue;
+      spans.push({
+        micStartToken: micStart,
+        systemStartToken: systemStart,
+        tokenCount,
+      });
+    }
+  }
+  return spans;
+};
+
 /** Directional exact alignment: System words may be absent from microphone ASR.
  * Every removed microphone word must still match its own System word and onset.
  * Only the long anchor has PCM corroboration; short exact continuations use the

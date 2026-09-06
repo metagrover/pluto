@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { liveEchoLongPauseFixture } from '../fixtures/liveEchoLongPause';
 import { liveEchoOmissionFixture } from '../fixtures/liveEchoOmission';
+import { liveTranscriptJumbledSourcesFixture } from '../fixtures/liveTranscriptJumbledSources';
 
-import { reconcileLiveTranscriptSegments } from '../../src/services/liveTranscription/liveTranscriptReconciliation';
+import {
+  reconcileLiveTranscriptReading,
+  reconcileLiveTranscriptSegments,
+} from '../../src/services/liveTranscription/liveTranscriptReconciliation';
 
 const segment = (
   id: string,
@@ -22,6 +26,111 @@ const segment = (
 });
 
 describe('live transcript reconciliation', () => {
+  it('partitions six supported echo spans without losing interleaved local words', () => {
+    const fixture = liveTranscriptJumbledSourcesFixture();
+    const reading = reconcileLiveTranscriptReading({
+      segments: fixture.segments,
+      activityWindows: [],
+      echoEvidence: fixture.echoEvidence,
+    });
+    const micRanges = reading.ranges.filter(
+      (range) => range.sourceSegmentId === fixture.mic.id,
+    );
+    const suppressed = micRanges.filter(
+      (range) => range.visibility === 'suppressed_echo',
+    );
+    expect(
+      suppressed.map(({ startWord, endWord, supportingSegmentIds }) => ({
+        startWord,
+        endWord,
+        supportingSegmentId: supportingSegmentIds[0],
+      })),
+    ).toEqual(fixture.expectedSuppressedWordRanges);
+
+    const originalWords = fixture.mic.text.split(/\s+/u);
+    expect(
+      micRanges.flatMap((range) =>
+        originalWords.slice(range.startWord, range.endWord),
+      ),
+    ).toEqual(originalWords);
+    expect(
+      micRanges
+        .filter((range) => range.visibility === 'visible')
+        .flatMap((range) =>
+          originalWords.slice(range.startWord, range.endWord),
+        ),
+    ).toEqual(fixture.expectedLocalWords);
+    expect(reading.segments).toEqual(fixture.segments);
+  });
+
+  it('restores source-owned words when delayed echo support is withdrawn', () => {
+    const fixture = liveTranscriptJumbledSourcesFixture();
+    const reconcile = (echoEvidence: typeof fixture.echoEvidence) =>
+      reconcileLiveTranscriptReading({
+        segments: fixture.segments,
+        activityWindows: [],
+        echoEvidence,
+      }).ranges.filter((range) => range.sourceSegmentId === fixture.mic.id);
+
+    expect(reconcile([])).toMatchObject([
+      {
+        startWord: 0,
+        endWord: fixture.mic.wordTimings!.length,
+        visibility: 'visible',
+      },
+    ]);
+    expect(
+      reconcile(fixture.echoEvidence).filter(
+        (range) => range.visibility === 'suppressed_echo',
+      ),
+    ).toHaveLength(6);
+    expect(reconcile([])).toMatchObject([
+      {
+        startWord: 0,
+        endWord: fixture.mic.wordTimings!.length,
+        visibility: 'visible',
+      },
+    ]);
+  });
+
+  it('keeps an unsupported genuine repetition and fails open without word timing', () => {
+    const fixture = liveTranscriptJumbledSourcesFixture();
+    const repeatedText = fixture.systemSegments[0]
+      .wordTimings!.slice(0, 12)
+      .map((word) => word.text)
+      .join(' ');
+    const repetition = {
+      ...segment('mic-repetition', 'mic', repeatedText, 50_000, 54_000),
+      wordTimings: repeatedText.split(/\s+/u).map((text, index) => ({
+        text,
+        timestampMs: 50_000 + index * 300,
+        endTimestampMs: 50_300 + index * 300,
+      })),
+    };
+    const withoutTiming = { ...fixture.mic, wordTimings: undefined };
+    const reading = reconcileLiveTranscriptReading({
+      segments: [...fixture.segments, repetition],
+      activityWindows: [],
+      echoEvidence: fixture.echoEvidence,
+    });
+    expect(
+      reading.ranges.filter((range) => range.sourceSegmentId === repetition.id),
+    ).toMatchObject([{ startWord: 0, endWord: 12, visibility: 'visible' }]);
+    expect(
+      reconcileLiveTranscriptReading({
+        segments: [withoutTiming, ...fixture.systemSegments],
+        activityWindows: [],
+        echoEvidence: fixture.echoEvidence,
+      }).ranges.filter((range) => range.sourceSegmentId === withoutTiming.id),
+    ).toMatchObject([
+      {
+        startWord: 0,
+        endWord: withoutTiming.text.split(/\s+/u).length,
+        visibility: 'visible',
+      },
+    ]);
+  });
+
   it.each([
     'verified',
     'missing tail proof',
