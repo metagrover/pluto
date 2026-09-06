@@ -212,17 +212,17 @@ it('routes a highly segmented meeting from the encoded provider payload', async 
   });
   const encodedMinimum = Math.max(
     estimateNotesTokens(createNotesWireRequest(writerPrompt, spans).prompt) +
-      1024 +
+      2048 +
       512,
     estimateNotesTokens(
       createNotesWireRequest(emptyEditorPrompt, spans).prompt,
     ) +
-      1024 +
+      2048 +
       2048 +
       512,
   );
   expect(encodedMinimum).toBeLessThan(
-    estimateNotesTokens(emptyEditorPrompt) + 1024 + 2048 + 512,
+    estimateNotesTokens(emptyEditorPrompt) + 2048 + 2048 + 512,
   );
   const first = spans[0]!;
   const generate = vi.fn(async (request: NotesRequest) => {
@@ -501,14 +501,18 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
   expect(generate).toHaveBeenCalledTimes(2);
 });
 
-it('retries a truncated compact leaf writer with the concise contract', async () => {
+it('splits a truncated compact leaf instead of retrying the same packet', async () => {
   const source = makeSyntheticNotesSource([
     {
       speaker: 'Milo',
-      text: `Milo will send the outline. ${'Agenda update. '.repeat(3_000)}`,
+      text: `Milo will send the outline. ${'Agenda update. '.repeat(500)}`,
     },
   ]);
-  const span = { segment: 0, start: 0, end: 27 };
+  const span = {
+    segment: 0,
+    start: 0,
+    end: source.segments[0]!.text.length,
+  };
   const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
     {
       primarySpans: [span],
@@ -523,25 +527,14 @@ it('retries a truncated compact leaf writer with the concise contract', async ()
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
-      return JSON.stringify({
-        sections: [
-          {
-            title: 'Outline',
-            items: [
-              {
-                kind: 'action',
-                text: 'Milo will send the outline.',
-                owner: 'Milo',
-                due: null,
-                sources: [span],
-              },
-            ],
-          },
-        ],
-      });
+      return JSON.stringify({ sections: [] });
     }
-    return auditFor(request.prompt, span);
+    return auditFor(
+      request.prompt,
+      sourceDescriptors(request.prompt)[0]!.descriptor,
+    );
   });
+  const onRepartition = vi.fn();
 
   try {
     const result = await generateMeetingNotes({
@@ -553,21 +546,25 @@ it('retries a truncated compact leaf writer with the concise contract', async ()
       provider: 'ollama',
       model: 'gemma4:12b',
       contextTokens: 8_192,
+      onRepartition,
     });
 
     expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
       'notesWriter',
       'notesWriter',
+      'notesWriter',
+      'notesAudit',
       'notesAudit',
     ]);
-    expect(generate.mock.calls[1]![0].prompt).toContain('COMPACT RETRY');
-    expect(result.all_action_items).toHaveLength(1);
+    expect(generate.mock.calls[1]![0].prompt).not.toContain('COMPACT RETRY');
+    expect(onRepartition).toHaveBeenCalledOnce();
+    expect(result.generation_metadata.hierarchy?.nodes).toBe(5);
   } finally {
     plan.mockRestore();
   }
 });
 
-it('bisects one compact leaf after its concise retry is also truncated', async () => {
+it('allows only one compact-leaf recovery split per run', async () => {
   const source = makeSyntheticNotesSource([
     { speaker: 'Milo', text: 'Context '.repeat(2_500) },
     { speaker: 'Nira', text: 'Background '.repeat(2_500) },
@@ -601,6 +598,67 @@ it('bisects one compact leaf after its concise retry is also truncated', async (
   const onRepartition = vi.fn();
 
   try {
+    await expect(
+      generateMeetingNotes({
+        reviewProtocol: 'editor',
+        compactWriterContract: true,
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 16_384,
+        onRepartition,
+      }),
+    ).rejects.toThrow('notes_output_truncated');
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesWriter',
+    ]);
+    expect(onRepartition).toHaveBeenCalledOnce();
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('repartitions a truncated leaf when the original compact plan has two leaves', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'First topic context. '.repeat(600) },
+    { speaker: 'Nira', text: 'Second topic context. '.repeat(600) },
+  ]);
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    spans.map((span) => ({
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: source.segments[span.segment]!.text,
+      sourceText: source.segments[span.segment]!.text,
+      sourceRevision: source.revision,
+    })),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const descriptor = sourceDescriptors(request.prompt)[0]!.descriptor;
+    if (
+      request.task === 'notesWriter' &&
+      descriptor.segment === spans[0]!.segment &&
+      descriptor.start === spans[0]!.start &&
+      descriptor.end === spans[0]!.end
+    ) {
+      throw new MeetingNotesError('notes_output_truncated');
+    }
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({ sections: [] });
+    }
+    return auditFor(request.prompt, descriptor);
+  });
+  const onRepartition = vi.fn();
+
+  try {
     const result = await generateMeetingNotes({
       reviewProtocol: 'editor',
       compactWriterContract: true,
@@ -617,11 +675,15 @@ it('bisects one compact leaf after its concise retry is also truncated', async (
       'notesWriter',
       'notesWriter',
       'notesWriter',
-      'notesAudit',
       'notesWriter',
       'notesAudit',
+      'notesAudit',
     ]);
+    expect(generate.mock.calls[1]![0].prompt).not.toContain('COMPACT RETRY');
     expect(onRepartition).toHaveBeenCalledOnce();
+    expect(result.quality.issues).toContain(
+      'notes_leaf_audit_fallback:notes_model_call_limit',
+    );
     expect(result.generation_metadata.hierarchy?.nodes).toBe(6);
   } finally {
     plan.mockRestore();
@@ -695,6 +757,34 @@ it('reserves a full compact draft of extra editor planning headroom', async () =
   } finally {
     plan.mockRestore();
   }
+});
+
+it('plans compact leaves against source output capacity as well as input fit', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 443 }, (_, index) => ({
+      speaker: index % 2 ? 'Nira' : 'Milo',
+      text: `Dense meeting detail ${index}. Follow-up context.`,
+    })),
+  );
+  const onPlan = vi.fn();
+
+  await expect(
+    generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate: async () => {
+        throw new Error('stop-after-output-aware-planning');
+      },
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16_384,
+      onPlan,
+    }),
+  ).rejects.toThrow('stop-after-output-aware-planning');
+
+  expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 3 });
 });
 
 it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
@@ -826,7 +916,7 @@ it('keeps the compact writer contract when the direct pair does not fit', async 
         },
         provider: 'ollama',
         model: 'qwen3.5:9b',
-        contextTokens: 4_096,
+        contextTokens: 8_192,
       }),
     ).rejects.toThrow('stop-after-first-hierarchy-request');
     expect(firstRequest?.responseContract).toBe('compact_draft');
@@ -898,8 +988,8 @@ it('reviews at most two calls per compact leaf and combines them without a model
 
     expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
       'notesWriter',
-      'notesAudit',
       'notesWriter',
+      'notesAudit',
       'notesAudit',
     ]);
     expect(result.topics.map((section) => section.title)).toEqual([
@@ -921,7 +1011,7 @@ it('reviews at most two calls per compact leaf and combines them without a model
   }
 });
 
-it('uses deterministic review rather than exceed six calls after a leaf retry', async () => {
+it('preserves writer capacity when the final planned compact leaf splits', async () => {
   const source = makeSyntheticNotesSource(
     Array.from({ length: 6 }, (_, index) => ({
       speaker: index % 2 ? 'Nira' : 'Milo',
@@ -943,7 +1033,13 @@ it('uses deterministic review rather than exceed six calls after a leaf retry', 
     })),
   );
   const generate = vi.fn(async (request: NotesRequest) => {
-    if (generate.mock.calls.length === 1) {
+    const descriptor = sourceDescriptors(request.prompt)[0]!.descriptor;
+    if (
+      request.task === 'notesWriter' &&
+      descriptor.segment === spans[2]!.segment &&
+      descriptor.start === spans[2]!.start &&
+      descriptor.end === spans[2]!.end
+    ) {
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
@@ -954,6 +1050,7 @@ it('uses deterministic review rather than exceed six calls after a leaf retry', 
       sourceDescriptors(request.prompt)[0]!.descriptor,
     );
   });
+  const onRepartition = vi.fn();
 
   try {
     const result = await generateMeetingNotes({
@@ -965,16 +1062,18 @@ it('uses deterministic review rather than exceed six calls after a leaf retry', 
       provider: 'ollama',
       model: 'gemma4:12b',
       contextTokens: 8_192,
+      onRepartition,
     });
 
     expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
       'notesWriter',
       'notesWriter',
-      'notesAudit',
+      'notesWriter',
+      'notesWriter',
       'notesWriter',
       'notesAudit',
-      'notesWriter',
     ]);
+    expect(onRepartition).toHaveBeenCalledOnce();
     expect(result.quality.issues).toContain(
       'notes_leaf_audit_fallback:notes_model_call_limit',
     );
@@ -1084,7 +1183,7 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
   expect(generate.mock.calls[0]![0]).toMatchObject({
     task: 'notesWriter',
     responseContract: 'compact_draft',
-    outputTokens: 1024,
+    outputTokens: 2048,
   });
   expect(generate.mock.calls[0]![0].prompt).toContain('owner: string | null');
   expect(result.all_action_items).toEqual([

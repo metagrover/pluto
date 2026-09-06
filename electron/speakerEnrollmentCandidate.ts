@@ -56,6 +56,47 @@ type SpeakerEnrollmentSource = SpeakerEnrollmentBaseSource & {
   transcriptFingerprint: string;
 };
 
+const hasUsableEnrollmentTranscript = (
+  meeting: EnrollmentMeeting,
+  transcriptSegments: ReturnType<typeof parseTranscriptSegments>,
+): boolean => {
+  const trustState = resolveTranscriptTrustState(meeting, {
+    hasUsableMicArtifact: false,
+    hasUsableSystemArtifact: true,
+    hasUsableMixArtifact: false,
+    hasSupportedActivityEvidence: false,
+    micActivitySeconds: 0,
+    systemActivitySeconds: 0,
+    recoverySource: null,
+    hasCaptureRecoveryHandler: false,
+    canRestoreCaptureGap: false,
+    hasExistingTranscript: transcriptSegments.length > 0,
+    hasExistingDerivedArtifacts: false,
+    validationMode: 'unavailable',
+    canRunValidation: false,
+  });
+  return canUseTranscriptTrustState(trustState, 'generate_new');
+};
+
+export const isSpeakerEnrollmentSourceCurrent = (
+  meetingId: string,
+  sourceRevision: string,
+  dependencies: Pick<SpeakerEnrollmentSourceDependencies, 'getMeeting'>,
+): boolean => {
+  const meeting = dependencies.getMeeting(meetingId);
+  if (
+    !meeting ||
+    String(meeting.id) !== meetingId ||
+    meeting.capture_journal_generation !== sourceRevision
+  ) {
+    return false;
+  }
+  return hasUsableEnrollmentTranscript(
+    meeting,
+    parseTranscriptSegments(meeting.transcript_json),
+  );
+};
+
 const validateSpeakerEnrollmentBaseSource = (
   meetingId: string,
   meeting: EnrollmentMeeting | null | undefined,
@@ -76,22 +117,7 @@ const validateSpeakerEnrollmentBaseSource = (
     return null;
   }
 
-  const trustState = resolveTranscriptTrustState(meeting, {
-    hasUsableMicArtifact: false,
-    hasUsableSystemArtifact: true,
-    hasUsableMixArtifact: false,
-    hasSupportedActivityEvidence: false,
-    micActivitySeconds: 0,
-    systemActivitySeconds: 0,
-    recoverySource: null,
-    hasCaptureRecoveryHandler: false,
-    canRestoreCaptureGap: false,
-    hasExistingTranscript: transcriptSegments.length > 0,
-    hasExistingDerivedArtifacts: false,
-    validationMode: 'unavailable',
-    canRunValidation: false,
-  });
-  if (!canUseTranscriptTrustState(trustState, 'generate_new')) return null;
+  if (!hasUsableEnrollmentTranscript(meeting, transcriptSegments)) return null;
 
   return {
     sourcePath,

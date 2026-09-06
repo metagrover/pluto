@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
 }));
 
 const voiceApi = vi.hoisted(() => ({
+  getSpeakerVoiceProfileOverview: vi.fn(),
   getSpeakerVoiceProfiles: vi.fn(),
   setSpeakerVoiceProfileStatus: vi.fn(),
   deleteSpeakerVoiceProfile: vi.fn(),
@@ -115,6 +116,10 @@ describe('PeopleTab Voice Profile integration', () => {
         },
       },
     ]);
+    voiceApi.getSpeakerVoiceProfileOverview.mockImplementation(async () => ({
+      profiles: await voiceApi.getSpeakerVoiceProfiles(),
+      optedOutPersonIds: [],
+    }));
     voiceApi.setSpeakerVoiceProfileStatus.mockResolvedValue({ success: true });
     voiceApi.deleteSpeakerVoiceProfile.mockResolvedValue({ success: true });
     voiceApi.getVoiceReferenceSample.mockResolvedValue({
@@ -237,19 +242,60 @@ describe('PeopleTab Voice Profile integration', () => {
     });
 
     expect(voiceApi.deleteSpeakerVoiceProfile).toHaveBeenCalledWith('person-1');
-    expect(host.textContent).toContain(
-      'No voice profile enrolled for this person.',
-    );
+    expect(host.textContent).toContain('Voice profile deleted');
   });
 
   it('does not misreport a profile-loading failure as no enrollment', async () => {
-    voiceApi.getSpeakerVoiceProfiles.mockRejectedValueOnce(
+    voiceApi.getSpeakerVoiceProfileOverview.mockRejectedValueOnce(
       new Error('profile read failed'),
     );
 
     await renderTab();
 
     expect(host.textContent).toContain('Voice profile could not be loaded.');
+    expect(host.textContent).not.toContain(
+      'No voice profile enrolled for this person.',
+    );
+  });
+
+  it('lets a person explicitly allow future voice enrollment after deletion', async () => {
+    voiceApi.getSpeakerVoiceProfileOverview.mockResolvedValueOnce({
+      profiles: [],
+      optedOutPersonIds: ['person-1'],
+    });
+
+    await renderTab();
+    expect(host.textContent).toContain('Voice profile deleted');
+    const allowButton = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Allow voice enrollment',
+    );
+    expect(allowButton).toBeDefined();
+
+    await act(async () => {
+      allowButton?.click();
+    });
+
+    expect(voiceApi.setSpeakerVoiceProfileStatus).toHaveBeenCalledWith(
+      'person-1',
+      true,
+    );
+    expect(host.textContent).toContain(
+      'No voice profile enrolled for this person.',
+    );
+  });
+
+  it('explains when retained evidence cannot create a reliable profile', async () => {
+    voiceApi.getSpeakerVoiceProfileOverview.mockResolvedValueOnce({
+      profiles: [],
+      optedOutPersonIds: [],
+      reconciliationStatus: 'evidence_unavailable',
+    });
+
+    await renderTab();
+
+    expect(host.textContent).toContain(
+      'No eligible voice profile could be created from retained meeting evidence.',
+    );
     expect(host.textContent).not.toContain(
       'No voice profile enrolled for this person.',
     );

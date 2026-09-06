@@ -493,6 +493,32 @@ export function setVoiceProfileStatus(
   ).run(canonicalId, isActive ? 1 : 0);
 }
 
+export function isVoiceProfileOptedOut(
+  personId: string,
+  dbInstance?: Database.Database,
+): boolean {
+  const d = getDb(dbInstance);
+  const canonicalId = resolvePersonId(personId, d);
+  const row = d
+    .prepare(
+      'SELECT is_active FROM speaker_voice_profile_settings WHERE person_id = ?',
+    )
+    .get(canonicalId) as { is_active: number } | undefined;
+  return row?.is_active === 0;
+}
+
+export function getVoiceProfileOptOuts(
+  dbInstance?: Database.Database,
+): string[] {
+  const d = getDb(dbInstance);
+  const rows = d
+    .prepare(
+      'SELECT person_id FROM speaker_voice_profile_settings WHERE is_active = 0',
+    )
+    .all() as Array<{ person_id: string }>;
+  return [...new Set(rows.map((row) => resolvePersonId(row.person_id, d)))];
+}
+
 export function deleteVoiceProfile(
   personId: string,
   dbInstance?: Database.Database,
@@ -517,7 +543,11 @@ export function deleteVoiceProfile(
       personId,
     );
     d.prepare(
-      'DELETE FROM speaker_voice_profile_settings WHERE person_id = ?',
+      `INSERT INTO speaker_voice_profile_settings (person_id, is_active, updated_at)
+       VALUES (?, 0, CURRENT_TIMESTAMP)
+       ON CONFLICT(person_id) DO UPDATE SET
+         is_active = 0,
+         updated_at = CURRENT_TIMESTAMP`,
     ).run(personId);
   })();
 }

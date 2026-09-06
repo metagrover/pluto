@@ -149,10 +149,13 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(bodyText).toContain('Play reference sample');
     expect(bodyText).toContain('Confirm Alex Chen');
     expect(bodyText).toContain('Not Alex Chen');
-    expect(bodyText).toContain('Remember this voice for future meetings');
+    expect(bodyText).not.toContain('Remember this voice for future meetings');
+    expect(bodyText).toContain(
+      'Confirming saves a local voice profile for future meetings.',
+    );
   });
 
-  it('confirms suggestion and enrolls voice profile if checkbox is checked', async () => {
+  it('confirms suggestion and enrolls the voice profile automatically', async () => {
     await act(async () => {
       root.render(
         <SpeakerIdentificationModal
@@ -162,18 +165,6 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
         />,
       );
     });
-
-    // Check "Remember this voice for future meetings"
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
-    expect(checkbox).not.toBeNull();
-    expect(checkbox.checked).toBe(false);
-
-    await act(async () => {
-      checkbox.click();
-    });
-    expect(checkbox.checked).toBe(true);
 
     // Click "Confirm Alex Chen"
     const confirmButton = Array.from(document.querySelectorAll('button')).find(
@@ -216,15 +207,11 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
     const input = document.querySelector(
       'input[placeholder="Search people or type a new name…"]',
     ) as HTMLInputElement;
 
     await act(async () => {
-      checkbox.click();
       Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,
         'value',
@@ -267,16 +254,11 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
     const input = document.querySelector(
       'input[placeholder="Search people or type a new name…"]',
     ) as HTMLInputElement;
-    expect(checkbox).not.toBeNull();
 
     await act(async () => {
-      checkbox.click();
       Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype,
         'value',
@@ -303,7 +285,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     });
   });
 
-  it('hides voice enrollment when reviewed evidence is unavailable', async () => {
+  it('does not attempt voice enrollment when reviewed evidence is unavailable', async () => {
     candidatesAvailable = false;
     enrollmentAvailable = false;
     await act(async () => {
@@ -316,9 +298,15 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
     expect(document.body.textContent).not.toContain(
       'Remember this voice for future meetings',
+    );
+    expect(document.body.textContent).not.toContain(
+      'Confirming saves a local voice profile for future meetings.',
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.anything(),
     );
   });
 
@@ -334,11 +322,6 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
-    await act(async () => checkbox.click());
-
     const confirmButton = Array.from(document.querySelectorAll('button')).find(
       (button) => button.textContent?.includes('Confirm Alex Chen'),
     );
@@ -350,7 +333,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(document.body.textContent).toContain('Speaker 1');
   });
 
-  it('requires fresh voice-profile consent after the modal is reopened', async () => {
+  it('does not require a separate per-person voice checkbox after reopening', async () => {
     await act(async () => {
       root.render(
         <SpeakerIdentificationModal
@@ -361,11 +344,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    const checkbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
-    await act(async () => checkbox.click());
-    expect(checkbox.checked).toBe(true);
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
 
     await act(async () => {
       root.render(
@@ -386,10 +365,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       );
     });
 
-    const reopenedCheckbox = document.querySelector(
-      'input[type="checkbox"]',
-    ) as HTMLInputElement;
-    expect(reopenedCheckbox.checked).toBe(false);
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
   it('rejects suggestion when Not Alex Chen is clicked and clears suggestion banner', async () => {

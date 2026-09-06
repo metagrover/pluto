@@ -6,8 +6,8 @@ export type OllamaGenerationDeadline = {
 
 const timeoutReason = (phase: 'capacity' | 'idle' | 'active') =>
   new DOMException(
-    `Ollama generation aborted after ${phase} timeout`,
-    'AbortError',
+    `Ollama generation timed out during ${phase} phase`,
+    'TimeoutError',
   );
 
 export const createOllamaGenerationDeadline = ({
