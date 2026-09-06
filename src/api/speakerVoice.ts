@@ -72,11 +72,26 @@ export function rejectSpeakerVoiceSuggestion(params: {
 }
 
 export async function getSpeakerVoiceProfiles(): Promise<ClientVoiceProfile[]> {
-  const result = await invoke<{ profiles: ClientVoiceProfile[] }>(
-    'SPEAKER_VOICE_GET_PROFILES',
-    {},
-  );
-  return result?.profiles ?? [];
+  return (await getSpeakerVoiceProfileOverview()).profiles;
+}
+
+export async function getSpeakerVoiceProfileOverview(): Promise<{
+  profiles: ClientVoiceProfile[];
+  optedOutPersonIds: string[];
+}> {
+  const result = await invoke<{
+    profiles: ClientVoiceProfile[];
+    optedOutPersonIds?: unknown;
+  }>('SPEAKER_VOICE_GET_PROFILES', {});
+  return {
+    profiles: result?.profiles ?? [],
+    optedOutPersonIds:
+      result && Array.isArray(result.optedOutPersonIds)
+        ? result.optedOutPersonIds.filter(
+            (personId): personId is string => typeof personId === 'string',
+          )
+        : [],
+  };
 }
 
 export function setSpeakerVoiceProfileStatus(

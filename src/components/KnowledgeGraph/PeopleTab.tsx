@@ -35,7 +35,7 @@ import {
 import {
   type ClientVoiceProfile,
   deleteSpeakerVoiceProfile,
-  getSpeakerVoiceProfiles,
+  getSpeakerVoiceProfileOverview,
   getVoiceReferenceSample,
   setSpeakerVoiceProfileStatus,
 } from '../../api/speakerVoice';
@@ -522,6 +522,7 @@ export const PersonDossier = ({
   const [voiceProfile, setVoiceProfile] = useState<ClientVoiceProfile | null>(
     null,
   );
+  const [voiceOptedOut, setVoiceOptedOut] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [samplePlaying, setSamplePlaying] = useState(false);
@@ -547,13 +548,18 @@ export const PersonDossier = ({
     setVoiceLoading(true);
     setVoiceError('');
     try {
-      const profiles = await getSpeakerVoiceProfiles();
+      const { profiles, optedOutPersonIds } =
+        await getSpeakerVoiceProfileOverview();
       const match =
         profiles.find((p) => p.canonicalPersonId === currentDetail.person.id) ??
         null;
       setVoiceProfile(match);
+      setVoiceOptedOut(
+        !match && optedOutPersonIds.includes(currentDetail.person.id),
+      );
     } catch {
       setVoiceProfile(null);
+      setVoiceOptedOut(false);
       setVoiceError('Voice profile could not be loaded.');
     } finally {
       setVoiceLoading(false);
@@ -763,10 +769,30 @@ export const PersonDossier = ({
     try {
       await deleteSpeakerVoiceProfile(currentDetail.person.id);
       setVoiceProfile(null);
+      setVoiceOptedOut(true);
       await onIdentityChanged();
     } catch (err) {
       setVoiceError(
         err instanceof Error ? err.message : 'Could not delete voice profile.',
+      );
+    } finally {
+      setVoiceLoading(false);
+    }
+  };
+
+  const handleAllowVoiceEnrollment = async () => {
+    if (!voiceOptedOut || voiceLoading) return;
+    setVoiceLoading(true);
+    setVoiceError('');
+    try {
+      await setSpeakerVoiceProfileStatus(currentDetail.person.id, true);
+      setVoiceOptedOut(false);
+      await onIdentityChanged();
+    } catch (err) {
+      setVoiceError(
+        err instanceof Error
+          ? err.message
+          : 'Could not allow voice enrollment.',
       );
     } finally {
       setVoiceLoading(false);
@@ -1231,6 +1257,20 @@ export const PersonDossier = ({
           <p role="alert" className="mt-4 text-sm text-pro-urgent">
             {voiceError}
           </p>
+        ) : voiceOptedOut ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-sm text-pro-text-muted">
+              Voice profile deleted. Pluto will not automatically recreate it.
+            </p>
+            <button
+              type="button"
+              disabled={voiceLoading}
+              onClick={() => void handleAllowVoiceEnrollment()}
+              className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors disabled:opacity-50"
+            >
+              Allow voice enrollment
+            </button>
+          </div>
         ) : (
           <p className="mt-4 text-sm text-pro-text-muted">
             No voice profile enrolled for this person.

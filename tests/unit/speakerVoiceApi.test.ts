@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteSpeakerVoiceProfile,
   enrollSpeakerVoice,
+  getSpeakerVoiceProfileOverview,
   getSpeakerVoiceProfiles,
   getSpeakerVoiceSuggestions,
   getVoiceReferenceSample,
@@ -110,6 +111,19 @@ describe('speakerVoice API client', () => {
     expect(invokeMock).toHaveBeenCalledWith('SPEAKER_VOICE_GET_PROFILES', {});
     expect(profiles).toHaveLength(1);
     expect(profiles[0].personName).toBe('Robin');
+  });
+
+  it('returns profile opt-outs for People management', async () => {
+    invokeMock.mockResolvedValueOnce({
+      profiles: [],
+      optedOutPersonIds: ['person-1'],
+    });
+
+    await expect(getSpeakerVoiceProfileOverview()).resolves.toEqual({
+      profiles: [],
+      optedOutPersonIds: ['person-1'],
+    });
+    expect(invokeMock).toHaveBeenCalledWith('SPEAKER_VOICE_GET_PROFILES', {});
   });
 
   it('calls SPEAKER_VOICE_SET_STATUS', async () => {
