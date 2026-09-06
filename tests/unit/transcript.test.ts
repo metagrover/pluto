@@ -96,6 +96,49 @@ describe('buildAnalysisTranscriptFromJson', () => {
     );
   });
 
+  it('uses only resolved speaker display names in the analysis transcript', () => {
+    const transcriptJson = JSON.stringify([
+      { speaker: 'Me', text: 'Shared the rollout status.' },
+      { speaker: 'Speaker 1', text: 'Asked for timing confirmation.' },
+      { speaker: 'Speaker 2', text: 'Raised an unresolved risk.' },
+    ]);
+
+    expect(
+      buildAnalysisTranscriptFromJson(transcriptJson, {
+        speakerDisplayNames: {
+          Me: 'Punit Grover',
+          'Speaker 1': 'Alice',
+        },
+      }),
+    ).toBe(
+      'Punit Grover: Shared the rollout status.\nAlice: Asked for timing confirmation.\nSpeaker 2: Raised an unresolved risk.',
+    );
+  });
+
+  it('keeps a resolved self name when channel fallback would anonymize Me', () => {
+    const transcriptJson = JSON.stringify({
+      speakerAttribution: {
+        source: 'channel_fallback',
+        confidence: 0,
+        diarizationAttempted: false,
+        mappingApplied: false,
+        fallbackReason: 'missing_diarization_audio',
+      },
+      segments: [
+        { speaker: 'Me', text: 'Preparing my daily update.' },
+        { speaker: 'Speaker 1', text: 'An unidentified participant replied.' },
+      ],
+    });
+
+    expect(
+      buildAnalysisTranscriptFromJson(transcriptJson, {
+        speakerDisplayNames: { Me: 'Punit Grover' },
+      }),
+    ).toBe(
+      'Punit Grover: Preparing my daily update.\nSpeaker: An unidentified participant replied.',
+    );
+  });
+
   it('supports transcript objects that store segments', () => {
     const transcriptJson = JSON.stringify({
       segments: [

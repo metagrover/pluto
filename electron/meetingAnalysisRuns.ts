@@ -334,6 +334,9 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   db: MeetingAnalysisRunCoordinatorDb;
   getSettings(): Promise<SettingsRecord>;
   getProvider(settings: SettingsRecord): Promise<NotesProvider>;
+  getSpeakerDisplayNames?: (
+    meetingId: string,
+  ) => Readonly<Record<string, string>>;
   createRunId?: () => string;
   /** Test seam; production runs use the fixed absolute deadline. */
   notesDeadlineMs?: number;
@@ -342,6 +345,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     release(reason: string): void;
   };
   onUpdated?: (meetingId: string) => void;
+  onPublished?: (meetingId: string, runId: string) => void;
   runSecondary?: (input: {
     meetingId: string;
     runId: string;
@@ -368,6 +372,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       dependencies.onUpdated?.(meetingId);
     } catch {
       /* A closing renderer cannot change durable publication/run state. */
+    }
+  };
+  const announcePublication = (meetingId: string, runId: string) => {
+    try {
+      dependencies.onPublished?.(meetingId, runId);
+    } catch {
+      /* Native notification failure cannot change durable publication state. */
     }
   };
   const scheduledRuns = new Map<string, { meetingId: string; runId: string }>();
@@ -585,6 +596,12 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     }
     revisions = dependencies.db.getMeetingAnalysisPublicationRevisions(meeting);
     if (!revisions) throw new Error('meeting_notes_source_ineligible');
+    const speakerDisplayNames = Object.fromEntries(
+      Object.entries(dependencies.getSpeakerDisplayNames?.(meetingId) ?? {})
+        .map(([speaker, name]) => [speaker.trim(), name.trim()] as const)
+        .filter(([speaker, name]) => speaker && name)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+    );
     if (input.reason === 'secondary') {
       const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
       if (persisted?.notes_status !== 'published' || !meeting.analysis_json)
@@ -609,6 +626,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             ...identity,
             transcript: buildAnalysisTranscriptFromJson(
               meeting.transcript_json,
+              { speakerDisplayNames },
             ),
             analysis: JSON.parse(meeting.analysis_json) as AnalysisDocumentV3,
             provider,
@@ -634,6 +652,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     const generationIdentity = {
       userNotesHash: revisions.userNotesHash,
       terms,
+      speakerDisplayNames,
       template: input.template,
       provider: provider.name,
       model: configuredModel(settings),
@@ -692,6 +711,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             ...identity,
             transcript: buildAnalysisTranscriptFromJson(
               meeting.transcript_json,
+              { speakerDisplayNames },
             ),
             analysis,
             provider,
@@ -733,16 +753,21 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       if (metricFinalized) return;
       metricFinalized = true;
       const completedAtMs = Date.now();
-      dependencies.db.upsertMeetingAnalysisRunMetric?.({
-        meetingId,
-        runId,
-        reason: primaryReason,
-        status,
-        errorCode: terminalErrorCode ?? null,
-        metrics: runMetrics.snapshot(status, completedAtMs),
-        startedAt: metricsStartedAt,
-        completedAt: new Date(completedAtMs).toISOString(),
-      });
+      try {
+        dependencies.db.upsertMeetingAnalysisRunMetric?.({
+          meetingId,
+          runId,
+          reason: primaryReason,
+          status,
+          errorCode: terminalErrorCode ?? null,
+          metrics: runMetrics.snapshot(status, completedAtMs),
+          startedAt: metricsStartedAt,
+          completedAt: new Date(completedAtMs).toISOString(),
+        });
+      } catch {
+        // Metrics are observational: a deleted parent row or telemetry failure
+        // must not replace the run's publication or cancellation outcome.
+      }
     };
     dependencies.db.beginMeetingAnalysisRun({
       meetingId,
@@ -826,6 +851,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                 provider.generateStructuredAnalysis(
                   buildAnalysisTranscriptFromJson(
                     admittedMeeting.transcript_json!,
+                    { speakerDisplayNames },
                   ),
                   admittedMeeting.user_notes ?? '',
                   input.template,
@@ -884,6 +910,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           if (!published) throw new Error('meeting_notes_superseded');
           finalizeMetric('published');
           notify(meetingId);
+          announcePublication(meetingId, runId);
           if (dependencies.runSecondary) {
             const secondaryInput = {
               meetingId,
@@ -896,6 +923,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                 ...secondaryInput,
                 transcript: buildAnalysisTranscriptFromJson(
                   admittedMeeting.transcript_json,
+                  { speakerDisplayNames },
                 ),
                 analysis,
                 provider,

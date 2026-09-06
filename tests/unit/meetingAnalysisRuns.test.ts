@@ -203,6 +203,238 @@ describe('meeting analysis run coordinator', () => {
     ).toBeGreaterThanOrEqual(25);
   });
 
+  it('does not let terminal metric persistence failure replace a deletion cancellation', async () => {
+    let deleted = false;
+    let finishGeneration!: (analysis: Record<string, unknown>) => void;
+    const foreignKeyError = Object.assign(
+      new Error('FOREIGN KEY constraint failed'),
+      { code: 'SQLITE_CONSTRAINT_FOREIGNKEY' },
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () =>
+          deleted
+            ? null
+            : {
+                id: 'deleted-during-generation',
+                transcript_json: JSON.stringify({
+                  segments: [{ speaker: 1, text: 'Delete this meeting.' }],
+                }),
+                transcript_status: 'validated',
+                transcript_integrity_json: JSON.stringify({ verified: true }),
+                user_notes: '',
+              },
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'deleted-source',
+          eligibilityRevision: 'deleted-eligibility',
+          userNotesHash: 'deleted-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn(),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+        upsertMeetingAnalysisRunMetric: vi.fn(() => {
+          throw foreignKeyError;
+        }),
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: () =>
+          new Promise((resolve) => {
+            finishGeneration = resolve;
+          }),
+      }),
+      createRunId: () => 'deleted-run',
+    });
+    const generation = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'deleted-during-generation',
+      requestId: 'deleted-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    await vi.waitFor(() => expect(finishGeneration).toBeTypeOf('function'));
+    expect(coordinator.supersedeMeetingNotes('deleted-during-generation')).toBe(
+      true,
+    );
+    deleted = true;
+    finishGeneration({
+      analysis_schema_version: 3,
+      overview: 'Stale notes.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    });
+
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('publishes and announces notes even when terminal metric persistence fails', async () => {
+    const onPublished = vi.fn();
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'metric-write-failure',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'Publish these notes.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'metric-failure-source',
+          eligibilityRevision: 'metric-failure-eligibility',
+          userNotesHash: 'metric-failure-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn(),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+        upsertMeetingAnalysisRunMetric: vi.fn(() => {
+          throw new Error('metrics unavailable');
+        }),
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: vi.fn().mockResolvedValue({
+          analysis_schema_version: 3,
+          overview: 'Published notes.',
+          topics: [],
+          all_action_items: [],
+          all_decisions: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        }),
+      }),
+      createRunId: () => 'metric-write-failure-run',
+      onPublished,
+    });
+
+    await expect(
+      coordinator.generateAndPublishMeetingNotes({
+        meetingId: 'metric-write-failure',
+        requestId: 'metric-write-failure-request',
+        template: 'auto',
+        reason: 'manual',
+      }),
+    ).resolves.toMatchObject({ status: 'published' });
+    expect(onPublished).toHaveBeenCalledWith(
+      'metric-write-failure',
+      'metric-write-failure-run',
+    );
+  });
+
+  it('announces publication only after notes are durably published', async () => {
+    const onUpdated = vi.fn();
+    const onPublished = vi.fn();
+    let finishGeneration!: (analysis: {
+      analysis_schema_version: number;
+      overview: string;
+      topics: never[];
+      all_action_items: never[];
+      all_decisions: never[];
+      meeting_type: string;
+      quality: {
+        format_pass: boolean;
+        retry_count: number;
+        fallback_used: boolean;
+        issues: never[];
+      };
+    }) => void;
+    const generateStructuredAnalysis = vi.fn(
+      () =>
+        new Promise<Parameters<typeof finishGeneration>[0]>((resolve) => {
+          finishGeneration = resolve;
+        }),
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'publish-boundary',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'publish-source',
+          eligibilityRevision: 'publish-eligibility',
+          userNotesHash: 'publish-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn().mockReturnValue(true),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis,
+      }),
+      createRunId: () => 'publish-run',
+      onUpdated,
+      onPublished,
+    });
+
+    const publication = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'publish-boundary',
+      requestId: 'publish-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+    await vi.waitFor(() =>
+      expect(generateStructuredAnalysis).toHaveBeenCalled(),
+    );
+
+    expect(onUpdated).toHaveBeenCalled();
+    expect(onPublished).not.toHaveBeenCalled();
+
+    finishGeneration({
+      analysis_schema_version: 3,
+      overview: 'Reviewed notes.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    });
+    await publication;
+
+    expect(onPublished).toHaveBeenCalledTimes(1);
+    expect(onPublished).toHaveBeenCalledWith('publish-boundary', 'publish-run');
+  });
+
   it('aborts an admitted notes run at the absolute deadline with an exact failure code', async () => {
     const updateMeetingAnalysisRunStatus = vi.fn().mockReturnValue(true);
     const generateStructuredAnalysis = vi.fn(
@@ -280,6 +512,7 @@ describe('meeting analysis run coordinator', () => {
         JSON.stringify({
           ...revisions,
           terms: [],
+          speakerDisplayNames: {},
           template: 'auto',
           provider: 'ollama',
           model: 'gemma4:12b',
@@ -438,7 +671,7 @@ describe('meeting analysis run coordinator', () => {
           getMeeting: () => ({
             id: 'terms',
             transcript_json: JSON.stringify({
-              segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+              segments: [{ speaker: 'Me', text: 'We agreed to ship.' }],
             }),
             transcript_status: 'validated',
             transcript_integrity_json: JSON.stringify({ verified: true }),
@@ -462,6 +695,7 @@ describe('meeting analysis run coordinator', () => {
           name: 'ollama',
           generateStructuredAnalysis,
         }),
+        getSpeakerDisplayNames: () => ({ Me: 'Punit Grover' }),
         createRunId: () => 'run-terms',
         onUpdated: () => {
           if (notificationFails) throw new Error('renderer_closed');
@@ -476,7 +710,7 @@ describe('meeting analysis run coordinator', () => {
       });
 
       expect(generateStructuredAnalysis).toHaveBeenCalledWith(
-        expect.any(String),
+        'Punit Grover: We agreed to ship.',
         'Please use the spelling Ogletree.',
         'auto',
         expect.objectContaining({
@@ -495,6 +729,7 @@ describe('meeting analysis run coordinator', () => {
             eligibilityRevision: 'eligible-terms',
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
+            speakerDisplayNames: { Me: 'Punit Grover' },
             template: 'auto',
             provider: 'ollama',
             model: 'gemma4:12b',
@@ -514,6 +749,7 @@ describe('meeting analysis run coordinator', () => {
           JSON.stringify({
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
+            speakerDisplayNames: { Me: 'Punit Grover' },
             template: 'auto',
             provider: 'ollama',
             model: 'gemma4:12b',
