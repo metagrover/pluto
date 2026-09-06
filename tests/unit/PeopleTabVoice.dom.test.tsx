@@ -283,4 +283,21 @@ describe('PeopleTab Voice Profile integration', () => {
       'No voice profile enrolled for this person.',
     );
   });
+
+  it('explains when retained evidence cannot create a reliable profile', async () => {
+    voiceApi.getSpeakerVoiceProfileOverview.mockResolvedValueOnce({
+      profiles: [],
+      optedOutPersonIds: [],
+      reconciliationStatus: 'evidence_unavailable',
+    });
+
+    await renderTab();
+
+    expect(host.textContent).toContain(
+      'No eligible voice profile could be created from retained meeting evidence.',
+    );
+    expect(host.textContent).not.toContain(
+      'No voice profile enrolled for this person.',
+    );
+  });
 });

@@ -34,6 +34,7 @@ import {
 } from '../../api/knowledgeGraph';
 import {
   type ClientVoiceProfile,
+  type VoiceProfileReconciliationStatus,
   deleteSpeakerVoiceProfile,
   getSpeakerVoiceProfileOverview,
   getVoiceReferenceSample,
@@ -523,6 +524,9 @@ export const PersonDossier = ({
     null,
   );
   const [voiceOptedOut, setVoiceOptedOut] = useState(false);
+  const [voiceReconciliationStatus, setVoiceReconciliationStatus] = useState<
+    VoiceProfileReconciliationStatus | undefined
+  >();
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [samplePlaying, setSamplePlaying] = useState(false);
@@ -548,8 +552,8 @@ export const PersonDossier = ({
     setVoiceLoading(true);
     setVoiceError('');
     try {
-      const { profiles, optedOutPersonIds } =
-        await getSpeakerVoiceProfileOverview();
+      const { profiles, optedOutPersonIds, reconciliationStatus } =
+        await getSpeakerVoiceProfileOverview(currentDetail.person.id);
       const match =
         profiles.find((p) => p.canonicalPersonId === currentDetail.person.id) ??
         null;
@@ -557,9 +561,11 @@ export const PersonDossier = ({
       setVoiceOptedOut(
         !match && optedOutPersonIds.includes(currentDetail.person.id),
       );
+      setVoiceReconciliationStatus(reconciliationStatus);
     } catch {
       setVoiceProfile(null);
       setVoiceOptedOut(false);
+      setVoiceReconciliationStatus(undefined);
       setVoiceError('Voice profile could not be loaded.');
     } finally {
       setVoiceLoading(false);
@@ -770,6 +776,7 @@ export const PersonDossier = ({
       await deleteSpeakerVoiceProfile(currentDetail.person.id);
       setVoiceProfile(null);
       setVoiceOptedOut(true);
+      setVoiceReconciliationStatus('opted_out');
       await onIdentityChanged();
     } catch (err) {
       setVoiceError(
@@ -787,6 +794,7 @@ export const PersonDossier = ({
     try {
       await setSpeakerVoiceProfileStatus(currentDetail.person.id, true);
       setVoiceOptedOut(false);
+      setVoiceReconciliationStatus(undefined);
       await onIdentityChanged();
     } catch (err) {
       setVoiceError(
@@ -1271,6 +1279,15 @@ export const PersonDossier = ({
               Allow voice enrollment
             </button>
           </div>
+        ) : voiceReconciliationStatus === 'evidence_unavailable' ? (
+          <p className="mt-4 text-sm text-pro-text-muted">
+            No eligible voice profile could be created from retained meeting
+            evidence.
+          </p>
+        ) : voiceReconciliationStatus === 'failed' ? (
+          <p role="alert" className="mt-4 text-sm text-pro-urgent">
+            Voice profile enrollment could not be completed.
+          </p>
         ) : (
           <p className="mt-4 text-sm text-pro-text-muted">
             No voice profile enrolled for this person.

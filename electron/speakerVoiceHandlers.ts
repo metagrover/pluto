@@ -67,7 +67,18 @@ type ConfirmedSpeakerBinding = {
   speaker: string;
 };
 
-const reconciliationRuns = new WeakMap<Database.Database, Promise<void>>();
+type ReconciliationOutcome =
+  | 'enrolled'
+  | 'already_enrolled'
+  | 'evidence_unavailable'
+  | 'failed'
+  | 'opted_out'
+  | 'self';
+
+const reconciliationRuns = new WeakMap<
+  Database.Database,
+  Map<string, Promise<Map<string, ReconciliationOutcome>>>
+>();
 
 const getMeetingDependency = (
   deps: SpeakerVoiceDependencies | undefined,
@@ -145,14 +156,22 @@ const isWorkspaceOwner = (
 async function reconcileConfirmedSpeakerVoiceProfiles(
   deps: SpeakerVoiceDependencies | undefined,
   d: Database.Database,
-): Promise<void> {
+  targetPersonId?: string,
+): Promise<Map<string, ReconciliationOutcome>> {
   const buildEnrollmentCandidate = deps?.buildEnrollmentCandidate;
-  if (!buildEnrollmentCandidate) return;
+  if (!buildEnrollmentCandidate) return new Map();
 
-  const existingRun = reconciliationRuns.get(d);
+  const runKey = targetPersonId ? resolvePersonId(targetPersonId, d) : '*';
+  let runs = reconciliationRuns.get(d);
+  if (!runs) {
+    runs = new Map();
+    reconciliationRuns.set(d, runs);
+  }
+  const existingRun = runs.get(runKey);
   if (existingRun) return await existingRun;
 
   const run = (async () => {
+    const outcomes = new Map<string, ReconciliationOutcome>();
     const profiledPeople = new Set(
       getCanonicalVoiceProfiles({ dbInstance: d }).map(
         (profile) => profile.canonicalPersonId,
@@ -195,11 +214,17 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
       const payload = JSON.parse(row.payload) as { personId?: unknown };
       if (typeof payload.personId !== 'string') continue;
       const personId = resolvePersonId(payload.personId, d);
-      if (
-        personId === selfPersonId ||
-        profiledPeople.has(personId) ||
-        disabledPeople.has(personId)
-      ) {
+      if (runKey !== '*' && personId !== runKey) continue;
+      if (personId === selfPersonId) {
+        outcomes.set(personId, 'self');
+        continue;
+      }
+      if (profiledPeople.has(personId)) {
+        outcomes.set(personId, 'already_enrolled');
+        continue;
+      }
+      if (disabledPeople.has(personId)) {
+        outcomes.set(personId, 'opted_out');
         continue;
       }
       const bindings = bindingsByPerson.get(personId) ?? [];
@@ -211,6 +236,7 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
     }
 
     for (const [personId, bindings] of bindingsByPerson) {
+      let sawFailure = false;
       for (const binding of bindings) {
         try {
           const storedCandidate = getMeetingSpeakerCandidates(
@@ -293,19 +319,32 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
             );
           })();
           profiledPeople.add(personId);
+          outcomes.set(personId, 'enrolled');
           break;
         } catch {
-          // One unavailable or stale source must not block other confirmed peers.
+          sawFailure = true;
         }
       }
+      if (!outcomes.has(personId)) {
+        outcomes.set(
+          personId,
+          isVoiceProfileOptedOut(personId, d)
+            ? 'opted_out'
+            : sawFailure
+              ? 'failed'
+              : 'evidence_unavailable',
+        );
+      }
     }
+    return outcomes;
   })();
 
-  reconciliationRuns.set(d, run);
+  runs.set(runKey, run);
   try {
-    await run;
+    return await run;
   } finally {
-    if (reconciliationRuns.get(d) === run) reconciliationRuns.delete(d);
+    if (runs.get(runKey) === run) runs.delete(runKey);
+    if (runs.size === 0) reconciliationRuns.delete(d);
   }
 }
 
@@ -593,7 +632,15 @@ export async function handleSpeakerVoiceRequest(
     }
 
     case 'SPEAKER_VOICE_GET_PROFILES': {
-      await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
+      const requestedPersonId =
+        typeof payload?.personId === 'string' && payload.personId
+          ? payload.personId
+          : undefined;
+      const reconciliation = await reconcileConfirmedSpeakerVoiceProfiles(
+        deps,
+        d,
+        requestedPersonId,
+      );
       const profiles = getCanonicalVoiceProfiles({ dbInstance: d });
       // Strip raw embeddings so biometric data never enters renderer IPC
       const sanitized = profiles.map((p) => ({
@@ -607,6 +654,7 @@ export async function handleSpeakerVoiceRequest(
       return {
         profiles: sanitized,
         optedOutPersonIds: getVoiceProfileOptOuts(d),
+        reconciliation: Object.fromEntries(reconciliation),
       };
     }
 

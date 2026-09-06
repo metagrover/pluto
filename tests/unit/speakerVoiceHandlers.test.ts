@@ -123,9 +123,13 @@ describe('speaker voice IPC handlers', () => {
       'SPEAKER_VOICE_GET_PROFILES',
       {},
       { buildEnrollmentCandidate: async () => null },
-    )) as { profiles: unknown[] };
+    )) as {
+      profiles: unknown[];
+      reconciliation: Record<string, string>;
+    };
 
     expect(result.profiles).toEqual([]);
+    expect(result.reconciliation[personId]).toBe('evidence_unavailable');
     expect(
       db.db
         .prepare(

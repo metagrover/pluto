@@ -75,14 +75,31 @@ export async function getSpeakerVoiceProfiles(): Promise<ClientVoiceProfile[]> {
   return (await getSpeakerVoiceProfileOverview()).profiles;
 }
 
-export async function getSpeakerVoiceProfileOverview(): Promise<{
+export type VoiceProfileReconciliationStatus =
+  | 'enrolled'
+  | 'already_enrolled'
+  | 'evidence_unavailable'
+  | 'failed'
+  | 'opted_out'
+  | 'self';
+
+export async function getSpeakerVoiceProfileOverview(
+  personId?: string,
+): Promise<{
   profiles: ClientVoiceProfile[];
   optedOutPersonIds: string[];
+  reconciliationStatus?: VoiceProfileReconciliationStatus;
 }> {
   const result = await invoke<{
     profiles: ClientVoiceProfile[];
     optedOutPersonIds?: unknown;
-  }>('SPEAKER_VOICE_GET_PROFILES', {});
+    reconciliation?: unknown;
+  }>('SPEAKER_VOICE_GET_PROFILES', personId ? { personId } : {});
+  const reconciliation =
+    result?.reconciliation && typeof result.reconciliation === 'object'
+      ? (result.reconciliation as Record<string, unknown>)
+      : {};
+  const status = personId ? reconciliation[personId] : undefined;
   return {
     profiles: result?.profiles ?? [],
     optedOutPersonIds:
@@ -91,6 +108,15 @@ export async function getSpeakerVoiceProfileOverview(): Promise<{
             (personId): personId is string => typeof personId === 'string',
           )
         : [],
+    reconciliationStatus:
+      status === 'enrolled' ||
+      status === 'already_enrolled' ||
+      status === 'evidence_unavailable' ||
+      status === 'failed' ||
+      status === 'opted_out' ||
+      status === 'self'
+        ? status
+        : undefined,
   };
 }
 
