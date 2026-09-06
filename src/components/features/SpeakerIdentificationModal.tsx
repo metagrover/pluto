@@ -94,7 +94,6 @@ export const SpeakerIdentificationModal = ({
   >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
-  const [rememberVoice, setRememberVoice] = useState(false);
   const [refSampleLoading, setRefSampleLoading] = useState(false);
   const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
 
@@ -303,7 +302,6 @@ export const SpeakerIdentificationModal = ({
 
   // Reset or initialize combobox inputs whenever active speaker changes
   useEffect(() => {
-    setRememberVoice(false);
     setRefSampleUnavailable(false);
     releaseSample();
     setSampleState(null);
@@ -434,12 +432,16 @@ export const SpeakerIdentificationModal = ({
       );
       setState(next);
 
-      // Opt-in voice profile enrollment
+      // A confirmed peer identity should become reusable voice evidence whenever
+      // this reviewed meeting has a clean, eligible system-audio source.
       const candidate = speakerCandidates[speaker];
       const enrolledPersonId =
         next.bindings.find((binding) => binding.speaker === speaker)
           ?.personId ?? selection.personId;
-      if (rememberVoice && enrolledPersonId) {
+      const canEnrollVoice =
+        candidate?.isEligibleForEnrollment ||
+        voiceEnrollmentAvailability[speaker];
+      if (canEnrollVoice && enrolledPersonId) {
         try {
           await enrollSpeakerVoice({
             personId: enrolledPersonId,
@@ -938,22 +940,12 @@ export const SpeakerIdentificationModal = ({
                   clearLabel="Clear person input"
                 />
               </div>
-
-              {/* Opt-in voice profile enrollment choice */}
               {currentSpeaker &&
               (speakerCandidates[currentSpeaker]?.isEligibleForEnrollment ||
                 voiceEnrollmentAvailability[currentSpeaker]) ? (
-                <div className="pt-2">
-                  <label className="flex items-center gap-2 text-xs text-pro-text-muted cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={rememberVoice}
-                      onChange={(e) => setRememberVoice(e.target.checked)}
-                      className="rounded border-pro-border text-pro-accent focus:ring-pro-accent"
-                    />
-                    <span>Remember this voice for future meetings</span>
-                  </label>
-                </div>
+                <p className="pt-2 text-xs text-pro-text-muted">
+                  Confirming saves a local voice profile for future meetings.
+                </p>
               ) : null}
             </div>
           )}

@@ -49,6 +49,12 @@ describe('speaker voice IPC handlers', () => {
     db.db.prepare('DELETE FROM speaker_voice_profile_settings').run();
     db.db.prepare('DELETE FROM speaker_voice_enrollments').run();
     db.db.prepare('DELETE FROM meeting_speaker_candidates').run();
+    db.db.prepare('DELETE FROM identity_bindings').run();
+    db.db
+      .prepare(
+        'UPDATE identity_workspace SET self_person_id = NULL WHERE singleton = 1',
+      )
+      .run();
 
     db.saveMeeting({
       id: meetingId,
@@ -391,6 +397,113 @@ describe('speaker voice IPC handlers', () => {
     expect(profiles).toEqual([
       expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
     ]);
+  });
+
+  it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    const first = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    )) as {
+      profiles: Array<{ canonicalPersonId: string; sampleCount: number }>;
+    };
+
+    expect(first.profiles).toEqual([
+      expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
+    ]);
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles confirmed speakers before matching a future meeting', async () => {
+    const historicalMeetingId = meetingId;
+    const futureMeetingId = `${meetingId}-future`;
+    db.saveMeeting({
+      id: futureMeetingId,
+      title: 'Future Voice Test Meeting',
+      capture_journal_generation: sourceRevision,
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'A future reviewed sample.' },
+      ]),
+    });
+    saveMeetingSpeakerCandidates(futureMeetingId, sourceRevision, [
+      { ...dummyCandidate, speaker: 'Remote Speaker 2' },
+    ]);
+    const buildEnrollmentCandidate = vi.fn(async (input) =>
+      input.meetingId === historicalMeetingId
+        ? { candidate: dummyCandidate, sourceRevision }
+        : null,
+    );
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId: futureMeetingId },
+      { buildEnrollmentCandidate, isFeatureFlagEnabled: () => false },
+    )) as { suggestions: Record<string, { suggestedPersonId: string }> };
+
+    expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
+      personId,
+    );
+  });
+
+  it('does not recreate a voice profile after explicit deletion', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_DELETE', { personId });
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    )) as { profiles: unknown[] };
+
+    expect(result.profiles).toEqual([]);
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reconciles the workspace owner as a remote voice profile', async () => {
+    db.db
+      .prepare(
+        'UPDATE identity_workspace SET self_person_id = ? WHERE singleton = 1',
+      )
+      .run(personId);
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    )) as { profiles: unknown[] };
+
+    expect(result.profiles).toEqual([]);
+    expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
+    db.db
+      .prepare(
+        'UPDATE identity_workspace SET self_person_id = NULL WHERE singleton = 1',
+      )
+      .run();
   });
 
   it('rejects partially supplied candidate identity', async () => {

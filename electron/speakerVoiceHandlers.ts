@@ -50,6 +50,167 @@ export interface SpeakerVoiceDependencies {
   } | null>;
 }
 
+type ConfirmedSpeakerBinding = {
+  meetingId: string;
+  speaker: string;
+  personId: string;
+};
+
+const reconciliationRuns = new WeakMap<Database.Database, Promise<void>>();
+
+async function reconcileConfirmedSpeakerVoiceProfiles(
+  deps: SpeakerVoiceDependencies | undefined,
+  d: Database.Database,
+): Promise<void> {
+  const buildEnrollmentCandidate = deps?.buildEnrollmentCandidate;
+  if (!buildEnrollmentCandidate) return;
+
+  const existingRun = reconciliationRuns.get(d);
+  if (existingRun) return await existingRun;
+
+  const run = (async () => {
+    const profiledPeople = new Set(
+      getCanonicalVoiceProfiles({ dbInstance: d }).map(
+        (profile) => profile.canonicalPersonId,
+      ),
+    );
+    const disabledPeople = new Set(
+      (
+        d
+          .prepare(
+            'SELECT person_id FROM speaker_voice_profile_settings WHERE is_active = 0',
+          )
+          .all() as Array<{ person_id: string }>
+      ).map((row) => resolvePersonId(row.person_id, d)),
+    );
+    const selfRow = d
+      .prepare(
+        'SELECT self_person_id FROM identity_workspace WHERE singleton = 1',
+      )
+      .get() as { self_person_id: string | null } | undefined;
+    const selfPersonId = selfRow?.self_person_id
+      ? resolvePersonId(selfRow.self_person_id, d)
+      : null;
+
+    const rows = d
+      .prepare(
+        `SELECT binding.meeting_id, binding.speaker, binding.payload
+         FROM identity_bindings binding
+         LEFT JOIN meetings meeting ON meeting.id = binding.meeting_id
+         WHERE json_valid(binding.payload)
+           AND json_extract(binding.payload, '$.source') = 'user'
+           AND json_extract(binding.payload, '$.individual') = 1
+           AND json_type(binding.payload, '$.personId') = 'text'
+         ORDER BY datetime(COALESCE(meeting.started_at, meeting.created_at)) DESC,
+                  binding.meeting_id DESC`,
+      )
+      .all() as Array<{ meeting_id: string; speaker: string; payload: string }>;
+
+    const bindingsByPerson = new Map<string, ConfirmedSpeakerBinding[]>();
+    for (const row of rows) {
+      const payload = JSON.parse(row.payload) as { personId?: unknown };
+      if (typeof payload.personId !== 'string') continue;
+      const personId = resolvePersonId(payload.personId, d);
+      if (
+        personId === selfPersonId ||
+        profiledPeople.has(personId) ||
+        disabledPeople.has(personId)
+      ) {
+        continue;
+      }
+      const bindings = bindingsByPerson.get(personId) ?? [];
+      bindings.push({
+        meetingId: row.meeting_id,
+        speaker: row.speaker,
+        personId,
+      });
+      bindingsByPerson.set(personId, bindings);
+    }
+
+    for (const [personId, bindings] of bindingsByPerson) {
+      for (const binding of bindings) {
+        try {
+          const storedCandidate = getMeetingSpeakerCandidates(
+            binding.meetingId,
+            d,
+          ).find((candidate) => candidate.speaker === binding.speaker);
+          const built = storedCandidate
+            ? {
+                candidate: storedCandidate,
+                sourceRevision: storedCandidate.sourceRevision,
+              }
+            : await buildEnrollmentCandidate({
+                meetingId: binding.meetingId,
+                speaker: binding.speaker,
+              });
+          if (
+            !built?.candidate.isEligibleForEnrollment ||
+            built.candidate.speaker !== binding.speaker ||
+            !built.sourceRevision
+          ) {
+            continue;
+          }
+
+          const currentRow = d
+            .prepare(
+              'SELECT payload FROM identity_bindings WHERE meeting_id = ? AND speaker = ?',
+            )
+            .get(binding.meetingId, binding.speaker) as
+            | { payload: string }
+            | undefined;
+          const currentPayload = currentRow
+            ? (JSON.parse(currentRow.payload) as {
+                source?: unknown;
+                individual?: unknown;
+                personId?: unknown;
+              })
+            : null;
+          if (
+            currentPayload?.source !== 'user' ||
+            currentPayload.individual !== true ||
+            typeof currentPayload.personId !== 'string' ||
+            resolvePersonId(currentPayload.personId, d) !== personId
+          ) {
+            continue;
+          }
+
+          d.transaction(() => {
+            if (!storedCandidate) {
+              saveMeetingSpeakerCandidate(
+                binding.meetingId,
+                built.sourceRevision,
+                built.candidate,
+                d,
+              );
+            }
+            enrollSpeakerVoice(
+              {
+                personId,
+                sourceMeetingId: binding.meetingId,
+                sourceRevision: built.sourceRevision,
+                speaker: binding.speaker,
+                candidateDigest: built.candidate.candidateDigest,
+              },
+              d,
+            );
+          })();
+          profiledPeople.add(personId);
+          break;
+        } catch {
+          // One unavailable or stale source must not block other confirmed peers.
+        }
+      }
+    }
+  })();
+
+  reconciliationRuns.set(d, run);
+  try {
+    await run;
+  } finally {
+    if (reconciliationRuns.get(d) === run) reconciliationRuns.delete(d);
+  }
+}
+
 export async function handleSpeakerVoiceRequest(
   channel: SpeakerVoiceChannel,
   payload: any,
@@ -67,6 +228,8 @@ export async function handleSpeakerVoiceRequest(
           enrollmentAvailability: {},
         };
       }
+
+      await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
 
       const candidates = getMeetingSpeakerCandidates(meetingId, d);
       const clientCandidates: Record<string, unknown> = {};
@@ -280,6 +443,7 @@ export async function handleSpeakerVoiceRequest(
     }
 
     case 'SPEAKER_VOICE_GET_PROFILES': {
+      await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
       const profiles = getCanonicalVoiceProfiles({ dbInstance: d });
       // Strip raw embeddings so biometric data never enters renderer IPC
       const sanitized = profiles.map((p) => ({
@@ -302,6 +466,8 @@ export async function handleSpeakerVoiceRequest(
     case 'SPEAKER_VOICE_DELETE': {
       const { personId } = payload ?? {};
       deleteVoiceProfile(personId, d);
+      // Preserve an explicit deletion as an opt-out from automatic backfill.
+      setVoiceProfileStatus(personId, false, d);
       return { success: true };
     }
 
