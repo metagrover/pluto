@@ -564,6 +564,15 @@ export const AudioManager = ({
     eouSessionRef.current = null;
     meetingContextIngestionRef.current?.close();
     meetingContextIngestionRef.current = null;
+    cancelSystemAudioHealthTimeoutRef.current?.();
+    cancelSystemAudioHealthTimeoutRef.current = null;
+    nativeAudioUnsubscribeRef.current?.();
+    nativeAudioUnsubscribeRef.current = null;
+    try {
+      await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
+    } catch {
+      console.warn('[Pluto] Failed to stop unstarted native capture');
+    }
     try {
       await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
         meetingId,
@@ -715,6 +724,154 @@ export const AudioManager = ({
           reason: 'capture_journal_start_failed',
         };
       }
+
+      // Start the native tap as soon as the durable journal owns the session.
+      // Its PCM proof can overlap vocabulary, EOU, and microphone setup, while
+      // the synchronized recording boundary below still waits for the result.
+      console.log('[Pluto] Starting Native AudioCap...');
+      const systemCaptureGeneration =
+        captureJournalStateRef.current?.generation;
+      let systemFailureRecorded = false;
+      const markSystemCaptureUnresponsive = () => {
+        if (
+          systemFailureRecorded ||
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'warning';
+        publishCaptureHealth({
+          ...captureHealthRef.current,
+          systemAudio: 'warning',
+        });
+      };
+      const markSystemCaptureFailed = () => {
+        if (
+          stopInFlightRef.current ||
+          currentMeetingIdRef.current !== meetingId
+        )
+          return;
+        systemAudioHealthRef.current = 'unavailable';
+        publishCaptureHealth({
+          ...captureHealthRef.current,
+          systemAudio: 'unavailable',
+        });
+        if (systemFailureRecorded) return;
+        systemFailureRecorded = true;
+        void captureJournalMutationCoordinatorRef.current
+          .run(async () => {
+            try {
+              const manifest = await refreshCaptureJournalState(meetingId);
+              if (
+                !manifest ||
+                manifest.generation !== systemCaptureGeneration
+              ) {
+                throw new Error('system_capture_failure_generation_mismatch');
+              }
+              captureJournalStateRef.current = await window.ipcRenderer.invoke(
+                'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
+                {
+                  meetingId,
+                  generation: manifest.generation,
+                  expectedRevision: manifest.revision,
+                  source: 'system',
+                },
+              );
+            } catch (error) {
+              captureActivitySessionRef.current?.markDurabilityFailure();
+              throw error;
+            }
+          })
+          .catch((error) => {
+            warnCaptureDurability();
+            console.warn(
+              '[Pluto] Failed to persist System capture failure:',
+              error,
+            );
+          });
+      };
+      systemAudioChunkSeenRef.current = false;
+      systemAudioHealthRef.current = 'warning';
+      systemPcmCarryoverBytesRef.current = new Uint8Array(0);
+      systemChunkDecodeDropCountRef.current = 0;
+      const systemLiveness = createPcmLivenessMonitor(
+        markSystemCaptureUnresponsive,
+      );
+      cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
+      const handler = (_: unknown, chunk: NativeAudioChunk) => {
+        if (!chunk) return;
+        systemAudioChunkSeenRef.current = true;
+        let chunkBytes: Uint8Array | null = null;
+        if (chunk instanceof Uint8Array) {
+          chunkBytes = new Uint8Array(
+            chunk.buffer,
+            chunk.byteOffset,
+            chunk.byteLength,
+          );
+        } else if (chunk instanceof ArrayBuffer) {
+          chunkBytes = new Uint8Array(chunk);
+        } else if (ArrayBuffer.isView(chunk)) {
+          chunkBytes = new Uint8Array(
+            chunk.buffer,
+            chunk.byteOffset,
+            chunk.byteLength,
+          );
+        } else if (isBufferJson(chunk)) {
+          chunkBytes = Uint8Array.from(chunk.data);
+        }
+        if (!chunkBytes || chunkBytes.length === 0) {
+          systemChunkDecodeDropCountRef.current += 1;
+          if (
+            systemChunkDecodeDropCountRef.current <= 3 ||
+            systemChunkDecodeDropCountRef.current % 50 === 0
+          ) {
+            console.warn(
+              `[Pluto] Dropped system chunk bytes: decodeMisses=${systemChunkDecodeDropCountRef.current}, type=${typeof chunk}`,
+            );
+          }
+          return;
+        }
+        const decoded = decodeFloat32PcmChunk(
+          chunkBytes,
+          systemPcmCarryoverBytesRef.current,
+        );
+        systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
+        if (!systemLiveness.received(decoded.samples)) return;
+        eouSessionRef.current?.append('system', decoded.samples);
+        if (
+          !systemFailureRecorded &&
+          systemAudioHealthRef.current !== 'healthy'
+        ) {
+          systemAudioHealthRef.current = resolveSystemCaptureHealth({
+            nativeStarted: true,
+            validPcmSeen: true,
+          });
+          publishCaptureHealth({
+            microphone: 'healthy',
+            systemAudio: systemAudioHealthRef.current,
+            captureDurability: captureHealthRef.current.captureDurability,
+          });
+        }
+        systemPcmChunksRef.current.push(decoded.samples);
+        const rms = computeRms(decoded.samples);
+        systemRmsRef.current = rms;
+        systemRmsUpdatedAtRef.current = performance.now();
+      };
+      const unsubscribeChunks = window.ipcRenderer.on(
+        'NATIVE_AUDIO_CHUNK',
+        handler,
+      );
+      const unsubscribeFailures = window.ipcRenderer.on(
+        'NATIVE_AUDIO_FAILURE',
+        markSystemCaptureFailed,
+      );
+      nativeAudioUnsubscribeRef.current = () => {
+        unsubscribeChunks();
+        unsubscribeFailures();
+      };
+      const nativeAudioStartPromise =
+        window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+      void nativeAudioStartPromise.catch(() => undefined);
 
       try {
         const vocabulary = (await window.ipcRenderer.invoke(
@@ -1051,151 +1208,9 @@ export const AudioManager = ({
 
       startSpeakingMonitor(audioContext, micStream);
 
-      // 4. System Audio: Native AudioCap
-      console.log('[Pluto] Starting Native AudioCap...');
-      const systemCaptureGeneration =
-        captureJournalStateRef.current?.generation;
-      let systemFailureRecorded = false;
-      const markSystemCaptureUnresponsive = () => {
-        if (
-          systemFailureRecorded ||
-          stopInFlightRef.current ||
-          currentMeetingIdRef.current !== meetingId
-        )
-          return;
-        systemAudioHealthRef.current = 'warning';
-        publishCaptureHealth({
-          ...captureHealthRef.current,
-          systemAudio: 'warning',
-        });
-      };
-      const markSystemCaptureFailed = () => {
-        if (
-          stopInFlightRef.current ||
-          currentMeetingIdRef.current !== meetingId
-        )
-          return;
-        systemAudioHealthRef.current = 'unavailable';
-        publishCaptureHealth({
-          ...captureHealthRef.current,
-          systemAudio: 'unavailable',
-        });
-        if (systemFailureRecorded) return;
-        systemFailureRecorded = true;
-        void captureJournalMutationCoordinatorRef.current
-          .run(async () => {
-            try {
-              const manifest = await refreshCaptureJournalState(meetingId);
-              if (
-                !manifest ||
-                manifest.generation !== systemCaptureGeneration
-              ) {
-                throw new Error('system_capture_failure_generation_mismatch');
-              }
-              captureJournalStateRef.current = await window.ipcRenderer.invoke(
-                'AUDIO_CAPTURE_JOURNAL_SOURCE_FAILED',
-                {
-                  meetingId,
-                  generation: manifest.generation,
-                  expectedRevision: manifest.revision,
-                  source: 'system',
-                },
-              );
-            } catch (error) {
-              captureActivitySessionRef.current?.markDurabilityFailure();
-              throw error;
-            }
-          })
-          .catch((error) => {
-            warnCaptureDurability();
-            console.warn(
-              '[Pluto] Failed to persist System capture failure:',
-              error,
-            );
-          });
-      };
-      systemAudioChunkSeenRef.current = false;
-      systemAudioHealthRef.current = 'warning';
-      const systemLiveness = createPcmLivenessMonitor(
-        markSystemCaptureUnresponsive,
-      );
-      cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
+      // System Audio: settle the PCM proof before synchronized recording starts.
       try {
-        // Setup Listener
-        const handler = (_: unknown, chunk: NativeAudioChunk) => {
-          if (chunk) {
-            systemAudioChunkSeenRef.current = true;
-            let chunkBytes: Uint8Array | null = null;
-            if (chunk instanceof Uint8Array) {
-              chunkBytes = new Uint8Array(
-                chunk.buffer,
-                chunk.byteOffset,
-                chunk.byteLength,
-              );
-            } else if (chunk instanceof ArrayBuffer) {
-              chunkBytes = new Uint8Array(chunk);
-            } else if (ArrayBuffer.isView(chunk)) {
-              chunkBytes = new Uint8Array(
-                chunk.buffer,
-                chunk.byteOffset,
-                chunk.byteLength,
-              );
-            } else if (isBufferJson(chunk)) {
-              chunkBytes = Uint8Array.from(chunk.data);
-            }
-            if (!chunkBytes || chunkBytes.length === 0) {
-              systemChunkDecodeDropCountRef.current += 1;
-              if (
-                systemChunkDecodeDropCountRef.current <= 3 ||
-                systemChunkDecodeDropCountRef.current % 50 === 0
-              ) {
-                console.warn(
-                  `[Pluto] Dropped system chunk bytes: decodeMisses=${systemChunkDecodeDropCountRef.current}, type=${typeof chunk}`,
-                );
-              }
-              return;
-            }
-            const decoded = decodeFloat32PcmChunk(
-              chunkBytes,
-              systemPcmCarryoverBytesRef.current,
-            );
-            systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
-            if (!systemLiveness.received(decoded.samples)) return;
-            eouSessionRef.current?.append('system', decoded.samples);
-            if (
-              !systemFailureRecorded &&
-              systemAudioHealthRef.current !== 'healthy'
-            ) {
-              systemAudioHealthRef.current = resolveSystemCaptureHealth({
-                nativeStarted: true,
-                validPcmSeen: true,
-              });
-              publishCaptureHealth({
-                microphone: 'healthy',
-                systemAudio: systemAudioHealthRef.current,
-                captureDurability: captureHealthRef.current.captureDurability,
-              });
-            }
-            systemPcmChunksRef.current.push(decoded.samples);
-            const rms = computeRms(decoded.samples);
-            systemRmsRef.current = rms;
-            systemRmsUpdatedAtRef.current = performance.now();
-          }
-        };
-        const unsubscribeChunks = window.ipcRenderer.on(
-          'NATIVE_AUDIO_CHUNK',
-          handler,
-        );
-        const unsubscribeFailures = window.ipcRenderer.on(
-          'NATIVE_AUDIO_FAILURE',
-          markSystemCaptureFailed,
-        );
-        nativeAudioUnsubscribeRef.current = () => {
-          unsubscribeChunks();
-          unsubscribeFailures();
-        };
-        const nativeStarted =
-          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        const nativeStarted = await nativeAudioStartPromise;
         hasSystemRecorderRef.current = nativeStarted === true;
         if (!nativeStarted) {
           throw new Error('Native system audio capture did not produce PCM');
