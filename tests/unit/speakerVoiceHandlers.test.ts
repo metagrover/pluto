@@ -50,6 +50,7 @@ describe('speaker voice IPC handlers', () => {
     db.db.prepare('DELETE FROM speaker_voice_enrollments').run();
     db.db.prepare('DELETE FROM meeting_speaker_candidates').run();
     db.db.prepare('DELETE FROM identity_bindings').run();
+    db.db.prepare('DELETE FROM person_aliases').run();
     db.db
       .prepare(
         'UPDATE identity_workspace SET self_person_id = NULL WHERE singleton = 1',
@@ -60,7 +61,7 @@ describe('speaker voice IPC handlers', () => {
       id: meetingId,
       title: 'Voice Test Meeting',
       capture_journal_generation: sourceRevision,
-      transcript_status: 'validated',
+      ...validatedTranscriptTrust,
       transcript_json: JSON.stringify([
         { speaker: 'Remote Speaker 1', text: 'Hello, this is Robin speaking.' },
       ]),
@@ -107,6 +108,197 @@ describe('speaker voice IPC handlers', () => {
     },
     isEligibleForEnrollment: true,
   };
+
+  it('does not enroll cached evidence after its source becomes stale', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+    db.db
+      .prepare(
+        `UPDATE meetings
+         SET capture_journal_generation = ?, transcript_status = ?
+         WHERE id = ?`,
+      )
+      .run(`${sourceRevision}-new`, 'pending', meetingId);
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate: async () => null },
+    )) as { profiles: unknown[] };
+
+    expect(result.profiles).toEqual([]);
+    expect(
+      db.db
+        .prepare(
+          'SELECT count(*) AS count FROM speaker_voice_enrollments WHERE person_id = ?',
+        )
+        .get(personId),
+    ).toEqual({ count: 0 });
+  });
+
+  it('lets deletion win over an in-flight automatic enrollment', async () => {
+    let releaseBuilder!: () => void;
+    let markBuilderStarted!: () => void;
+    const builderStarted = new Promise<void>((resolve) => {
+      markBuilderStarted = resolve;
+    });
+    const builderGate = new Promise<void>((resolve) => {
+      releaseBuilder = resolve;
+    });
+    const pendingReconciliation = handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      {
+        buildEnrollmentCandidate: async () => {
+          markBuilderStarted();
+          await builderGate;
+          return { candidate: dummyCandidate, sourceRevision };
+        },
+      },
+    );
+    await builderStarted;
+
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+      personId,
+      sourceMeetingId: meetingId,
+      sourceRevision,
+      speaker: dummyCandidate.speaker,
+      candidateDigest: dummyCandidate.candidateDigest,
+      expectedRevision: db.identityStore.getRevision(),
+    });
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_DELETE', { personId });
+    releaseBuilder();
+    await pendingReconciliation;
+
+    expect(
+      db.db
+        .prepare(
+          'SELECT count(*) AS count FROM speaker_voice_enrollments WHERE person_id = ?',
+        )
+        .get(personId),
+    ).toEqual({ count: 0 });
+    expect(
+      db.db
+        .prepare(
+          'SELECT is_active FROM speaker_voice_profile_settings WHERE person_id = ?',
+        )
+        .get(personId),
+    ).toEqual({ is_active: 0 });
+  });
+
+  it('does not treat ordinary confirmation as explicit re-enrollment after deletion', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+    const enrollment = {
+      personId,
+      sourceMeetingId: meetingId,
+      sourceRevision,
+      speaker: dummyCandidate.speaker,
+      candidateDigest: dummyCandidate.candidateDigest,
+      expectedRevision: db.identityStore.getRevision(),
+    };
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', enrollment);
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_DELETE', { personId });
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', enrollment),
+    ).rejects.toThrow('speaker_voice_profile_opted_out');
+    expect(
+      db.db
+        .prepare(
+          'SELECT count(*) AS count FROM speaker_voice_enrollments WHERE person_id = ?',
+        )
+        .get(personId),
+    ).toEqual({ count: 0 });
+  });
+
+  it.each([
+    {
+      label: 'withdrawn transcript trust',
+      update: "transcript_status = 'pending'",
+    },
+    {
+      label: 'changed capture generation',
+      update: "capture_journal_generation = 'different-generation'",
+    },
+  ])('rejects direct enrollment for $label', async ({ update }) => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+    db.db.prepare(`UPDATE meetings SET ${update} WHERE id = ?`).run(meetingId);
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision,
+        speaker: dummyCandidate.speaker,
+        candidateDigest: dummyCandidate.candidateDigest,
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).rejects.toThrow('speaker_enrollment_evidence_unavailable');
+  });
+
+  it('rejects direct enrollment for incompatible candidate provenance', async () => {
+    const incompatible = {
+      ...dummyCandidate,
+      provenance: {
+        ...dummyCandidate.provenance,
+        runtimeVersion: 'other-runtime',
+      },
+    };
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [incompatible]);
+
+    await expect(
+      handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+        personId,
+        sourceMeetingId: meetingId,
+        sourceRevision,
+        speaker: incompatible.speaker,
+        candidateDigest: incompatible.candidateDigest,
+        expectedRevision: db.identityStore.getRevision(),
+      }),
+    ).rejects.toThrow('speaker_enrollment_evidence_unavailable');
+  });
+
+  it('keeps enrollment evidence owned by the binding person across merge and restore', async () => {
+    const survivorId = `${personId}-survivor`;
+    db.upsertEntity({
+      id: survivorId,
+      type: 'person',
+      name: 'Taylor',
+      dedupe_by_name: false,
+    });
+    db.db
+      .prepare(
+        'INSERT INTO person_aliases (person_id, canonical_id, active) VALUES (?, ?, 1)',
+      )
+      .run(personId, survivorId);
+
+    const merged = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      {
+        buildEnrollmentCandidate: async () => ({
+          candidate: dummyCandidate,
+          sourceRevision,
+        }),
+      },
+    )) as { profiles: Array<{ canonicalPersonId: string }> };
+
+    expect(merged.profiles[0]?.canonicalPersonId).toBe(survivorId);
+    expect(
+      db.db.prepare('SELECT person_id FROM speaker_voice_enrollments').get(),
+    ).toEqual({ person_id: personId });
+
+    db.db
+      .prepare(
+        'UPDATE person_aliases SET active = 0 WHERE person_id = ? AND canonical_id = ?',
+      )
+      .run(personId, survivorId);
+    const restored = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+    )) as { profiles: Array<{ canonicalPersonId: string }> };
+    expect(restored.profiles[0]?.canonicalPersonId).toBe(personId);
+  });
 
   it('exposes exactly the seven supported voice channels', () => {
     expect(SPEAKER_VOICE_CHANNELS).toEqual([

@@ -1,14 +1,26 @@
 import type Database from 'better-sqlite3';
-import type { SpeakerCandidateEvidence } from '../src/services/speakerCandidateEvidence';
-import { matchSpeakerVoice } from '../src/services/speakerVoiceMatcher';
+import {
+  type SpeakerCandidateEvidence,
+  isCandidateEligibleForEnrollment,
+} from '../src/services/speakerCandidateEvidence';
+import {
+  DEFAULT_CALIBRATION_POLICY_V1,
+  isProvenanceCompatible,
+  matchSpeakerVoice,
+} from '../src/services/speakerVoiceMatcher';
 import * as db from './db';
-import { getSpeakerEnrollmentAvailability } from './speakerEnrollmentCandidate';
+import {
+  getSpeakerEnrollmentAvailability,
+  isSpeakerEnrollmentSourceCurrent,
+} from './speakerEnrollmentCandidate';
 import {
   deleteVoiceProfile,
   enrollSpeakerVoice,
   getCanonicalVoiceProfiles,
   getMeetingSpeakerCandidates,
+  getVoiceProfileOptOuts,
   getVoiceRejections,
+  isVoiceProfileOptedOut,
   recordVoiceRejection,
   resolvePersonId,
   saveMeetingSpeakerCandidate,
@@ -53,10 +65,82 @@ export interface SpeakerVoiceDependencies {
 type ConfirmedSpeakerBinding = {
   meetingId: string;
   speaker: string;
-  personId: string;
 };
 
 const reconciliationRuns = new WeakMap<Database.Database, Promise<void>>();
+
+const getMeetingDependency = (
+  deps: SpeakerVoiceDependencies | undefined,
+  d: Database.Database,
+  meetingId: string,
+): db.PersistedMeeting | null => {
+  if (deps?.getMeeting) return deps.getMeeting(meetingId);
+  return (
+    (d.prepare('SELECT * FROM meetings WHERE id = ?').get(meetingId) as
+      | db.PersistedMeeting
+      | undefined) ?? null
+  );
+};
+
+const isCurrentEligibleCandidate = (
+  meetingId: string,
+  sourceRevision: string,
+  candidate: SpeakerCandidateEvidence,
+  deps: SpeakerVoiceDependencies | undefined,
+  d: Database.Database,
+): boolean =>
+  candidate.isEligibleForEnrollment &&
+  isCandidateEligibleForEnrollment(candidate) &&
+  isProvenanceCompatible(
+    candidate.provenance,
+    DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey,
+  ) &&
+  isSpeakerEnrollmentSourceCurrent(meetingId, sourceRevision, {
+    getMeeting: (id) => getMeetingDependency(deps, d, id),
+  });
+
+const getCurrentConfirmedBinding = (
+  meetingId: string,
+  speaker: string,
+  canonicalPersonId: string,
+  d: Database.Database,
+): { enrollmentPersonId: string } | null => {
+  const row = d
+    .prepare(
+      'SELECT payload FROM identity_bindings WHERE meeting_id = ? AND speaker = ?',
+    )
+    .get(meetingId, speaker) as { payload: string } | undefined;
+  if (!row) return null;
+  const payload = JSON.parse(row.payload) as {
+    source?: unknown;
+    individual?: unknown;
+    personId?: unknown;
+  };
+  if (
+    payload.source !== 'user' ||
+    payload.individual !== true ||
+    typeof payload.personId !== 'string' ||
+    resolvePersonId(payload.personId, d) !== canonicalPersonId
+  ) {
+    return null;
+  }
+  return { enrollmentPersonId: payload.personId };
+};
+
+const isWorkspaceOwner = (
+  canonicalPersonId: string,
+  d: Database.Database,
+): boolean => {
+  const row = d
+    .prepare(
+      'SELECT self_person_id FROM identity_workspace WHERE singleton = 1',
+    )
+    .get() as { self_person_id: string | null } | undefined;
+  return Boolean(
+    row?.self_person_id &&
+      resolvePersonId(row.self_person_id, d) === canonicalPersonId,
+  );
+};
 
 async function reconcileConfirmedSpeakerVoiceProfiles(
   deps: SpeakerVoiceDependencies | undefined,
@@ -122,7 +206,6 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
       bindings.push({
         meetingId: row.meeting_id,
         speaker: row.speaker,
-        personId,
       });
       bindingsByPerson.set(personId, bindings);
     }
@@ -134,48 +217,63 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
             binding.meetingId,
             d,
           ).find((candidate) => candidate.speaker === binding.speaker);
-          const built = storedCandidate
-            ? {
-                candidate: storedCandidate,
-                sourceRevision: storedCandidate.sourceRevision,
-              }
-            : await buildEnrollmentCandidate({
-                meetingId: binding.meetingId,
-                speaker: binding.speaker,
-              });
+          const usesStoredCandidate = Boolean(
+            storedCandidate &&
+              isCurrentEligibleCandidate(
+                binding.meetingId,
+                storedCandidate.sourceRevision,
+                storedCandidate,
+                deps,
+                d,
+              ),
+          );
+          const built =
+            storedCandidate && usesStoredCandidate
+              ? {
+                  candidate: storedCandidate,
+                  sourceRevision: storedCandidate.sourceRevision,
+                }
+              : await buildEnrollmentCandidate({
+                  meetingId: binding.meetingId,
+                  speaker: binding.speaker,
+                });
           if (
-            !built?.candidate.isEligibleForEnrollment ||
+            !built ||
+            !isCurrentEligibleCandidate(
+              binding.meetingId,
+              built.sourceRevision,
+              built.candidate,
+              deps,
+              d,
+            ) ||
             built.candidate.speaker !== binding.speaker ||
             !built.sourceRevision
           ) {
             continue;
           }
 
-          const currentRow = d
-            .prepare(
-              'SELECT payload FROM identity_bindings WHERE meeting_id = ? AND speaker = ?',
-            )
-            .get(binding.meetingId, binding.speaker) as
-            | { payload: string }
-            | undefined;
-          const currentPayload = currentRow
-            ? (JSON.parse(currentRow.payload) as {
-                source?: unknown;
-                individual?: unknown;
-                personId?: unknown;
-              })
-            : null;
-          if (
-            currentPayload?.source !== 'user' ||
-            currentPayload.individual !== true ||
-            typeof currentPayload.personId !== 'string' ||
-            resolvePersonId(currentPayload.personId, d) !== personId
-          ) {
-            continue;
-          }
-
           d.transaction(() => {
-            if (!storedCandidate) {
+            const currentBinding = getCurrentConfirmedBinding(
+              binding.meetingId,
+              binding.speaker,
+              personId,
+              d,
+            );
+            if (
+              !currentBinding ||
+              isWorkspaceOwner(personId, d) ||
+              isVoiceProfileOptedOut(personId, d) ||
+              !isCurrentEligibleCandidate(
+                binding.meetingId,
+                built.sourceRevision,
+                built.candidate,
+                deps,
+                d,
+              )
+            ) {
+              throw new Error('speaker_enrollment_no_longer_allowed');
+            }
+            if (!usesStoredCandidate) {
               saveMeetingSpeakerCandidate(
                 binding.meetingId,
                 built.sourceRevision,
@@ -185,7 +283,7 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
             }
             enrollSpeakerVoice(
               {
-                personId,
+                personId: currentBinding.enrollmentPersonId,
                 sourceMeetingId: binding.meetingId,
                 sourceRevision: built.sourceRevision,
                 speaker: binding.speaker,
@@ -331,17 +429,20 @@ export async function handleSpeakerVoiceRequest(
       }
 
       const canonicalPersonId = resolvePersonId(String(personId ?? ''), d);
-      const bindingMatches = () => {
-        const binding = db.identityStore
-          .getBindings(String(sourceMeetingId ?? ''))
-          .find((entry) => entry.speaker === speaker);
-        return (
-          binding?.source === 'user' &&
-          typeof binding.personId === 'string' &&
-          resolvePersonId(binding.personId, d) === canonicalPersonId
+      const bindingMatches = () =>
+        getCurrentConfirmedBinding(
+          String(sourceMeetingId ?? ''),
+          String(speaker ?? ''),
+          canonicalPersonId,
+          d,
         );
-      };
       if (!bindingMatches()) throw new Error('speaker_enrollment_unconfirmed');
+      if (isWorkspaceOwner(canonicalPersonId, d)) {
+        throw new Error('speaker_enrollment_self_disallowed');
+      }
+      if (isVoiceProfileOptedOut(canonicalPersonId, d)) {
+        throw new Error('speaker_voice_profile_opted_out');
+      }
 
       const suppliedCandidateIdentity =
         typeof sourceRevision === 'string' &&
@@ -360,20 +461,29 @@ export async function handleSpeakerVoiceRequest(
       let builtCandidate: SpeakerCandidateEvidence | null = null;
 
       if (suppliedCandidateIdentity) {
-        const candidateRow = d
-          .prepare(
-            `SELECT candidate_digest FROM meeting_speaker_candidates
-             WHERE meeting_id = ? AND speaker = ? AND source_revision = ?`,
-          )
-          .get(sourceMeetingId, speaker, sourceRevision) as
-          | { candidate_digest: string }
-          | undefined;
+        const candidate = getMeetingSpeakerCandidates(
+          String(sourceMeetingId),
+          d,
+        ).find(
+          (entry) =>
+            entry.speaker === speaker &&
+            entry.sourceRevision === sourceRevision &&
+            entry.candidateDigest === candidateDigest,
+        );
 
-        if (
-          !candidateRow ||
-          candidateRow.candidate_digest !== candidateDigest
-        ) {
+        if (!candidate) {
           throw new Error('speaker_candidate_stale');
+        }
+        if (
+          !isCurrentEligibleCandidate(
+            String(sourceMeetingId),
+            sourceRevision,
+            candidate,
+            deps,
+            d,
+          )
+        ) {
+          throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
         const built = await deps?.buildEnrollmentCandidate?.({
@@ -381,7 +491,14 @@ export async function handleSpeakerVoiceRequest(
           speaker: String(speaker ?? ''),
         });
         if (
-          !built?.candidate.isEligibleForEnrollment ||
+          !built ||
+          !isCurrentEligibleCandidate(
+            String(sourceMeetingId),
+            built.sourceRevision,
+            built.candidate,
+            deps,
+            d,
+          ) ||
           built.candidate.speaker !== speaker ||
           !built.sourceRevision
         ) {
@@ -403,6 +520,39 @@ export async function handleSpeakerVoiceRequest(
       }
 
       const enrollment = d.transaction(() => {
+        const currentBinding = bindingMatches();
+        if (
+          db.identityStore.getRevision() !== expectedRevision ||
+          !currentBinding
+        ) {
+          throw new Error('identity_revision_stale');
+        }
+        if (isWorkspaceOwner(canonicalPersonId, d)) {
+          throw new Error('speaker_enrollment_self_disallowed');
+        }
+        if (isVoiceProfileOptedOut(canonicalPersonId, d)) {
+          throw new Error('speaker_voice_profile_opted_out');
+        }
+        const currentCandidate =
+          builtCandidate ??
+          getMeetingSpeakerCandidates(String(sourceMeetingId), d).find(
+            (entry) =>
+              entry.speaker === speaker &&
+              entry.sourceRevision === enrollmentSourceRevision &&
+              entry.candidateDigest === enrollmentCandidateDigest,
+          );
+        if (
+          !currentCandidate ||
+          !isCurrentEligibleCandidate(
+            String(sourceMeetingId),
+            enrollmentSourceRevision,
+            currentCandidate,
+            deps,
+            d,
+          )
+        ) {
+          throw new Error('speaker_enrollment_evidence_unavailable');
+        }
         if (builtCandidate) {
           saveMeetingSpeakerCandidate(
             String(sourceMeetingId),
@@ -413,7 +563,7 @@ export async function handleSpeakerVoiceRequest(
         }
         return enrollSpeakerVoice(
           {
-            personId: canonicalPersonId,
+            personId: currentBinding.enrollmentPersonId,
             sourceMeetingId,
             sourceRevision: enrollmentSourceRevision,
             speaker,
@@ -454,7 +604,10 @@ export async function handleSpeakerVoiceRequest(
         isActive: p.isActive,
         referenceInterval: p.referenceInterval,
       }));
-      return { profiles: sanitized };
+      return {
+        profiles: sanitized,
+        optedOutPersonIds: getVoiceProfileOptOuts(d),
+      };
     }
 
     case 'SPEAKER_VOICE_SET_STATUS': {
@@ -466,8 +619,6 @@ export async function handleSpeakerVoiceRequest(
     case 'SPEAKER_VOICE_DELETE': {
       const { personId } = payload ?? {};
       deleteVoiceProfile(personId, d);
-      // Preserve an explicit deletion as an opt-out from automatic backfill.
-      setVoiceProfileStatus(personId, false, d);
       return { success: true };
     }
 
