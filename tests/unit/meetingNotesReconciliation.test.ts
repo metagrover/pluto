@@ -54,6 +54,49 @@ const fixture = () => {
 const empty = () => ({ facts: [], actions: [], decisions: [], questions: [] });
 
 describe('source reconciliation contract', () => {
+  it('scopes omission guards to a canonical leaf and rejects cross-leaf citations', () => {
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: [
+          { speaker: 'Mira', text: 'I will send the report by Friday.' },
+          { speaker: 'Tao', text: 'The launch color is blue.' },
+        ],
+      }),
+    );
+    const spans = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const action = {
+      text: source.segments[0]!.text,
+      sources: [spans[0]!],
+      owner: 'Mira',
+      due: 'Friday',
+    };
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...empty(), actions: [action] }),
+        source,
+        [spans[0]!],
+        'leaf:0',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      parseReconciledSource(JSON.stringify(empty()), source, [spans[0]!]),
+    ).toThrow('missing_action');
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({
+          ...empty(),
+          facts: [{ text: 'The launch color is blue.', sources: [spans[1]!] }],
+        }),
+        source,
+        [spans[0]!],
+      ),
+    ).toThrow('notes_reconciliation_source_out_of_scope');
+  });
+
   it('preserves each category, original content, explicit metadata and exact spans', () => {
     const { source, raw } = fixture();
     const result = parseReconciledSource(JSON.stringify(raw), source);

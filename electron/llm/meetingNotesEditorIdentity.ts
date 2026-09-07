@@ -10,6 +10,7 @@ export const identifyEditedNotes = (
   inherited: NotesItem[],
   rawDraft: unknown,
   prefix: string,
+  preserveAllItems = false,
 ): NotesDraft => {
   const next = structuredClone(draft);
   const raw = rawDraft as {
@@ -26,7 +27,12 @@ export const identifyEditedNotes = (
     section.title.id = `${section.id}:title`;
     section.items.forEach((item, itemIndex) => {
       item.id = `${section.id}:item:${itemIndex}`;
-      if (item.kind !== 'action' && item.kind !== 'decision') return;
+      if (
+        !preserveAllItems &&
+        item.kind !== 'action' &&
+        item.kind !== 'decision'
+      )
+        return;
       const candidates = inherited.filter(
         (candidate) =>
           !used.has(candidate.id) &&

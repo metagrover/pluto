@@ -2,6 +2,7 @@ import { acceptEditedNotes, parseNotesDraft } from './meetingNotesAudit';
 import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 import {
   notesContentGuidance,
+  notesSourceFirstGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import {
@@ -30,10 +31,14 @@ export type ReconciledSource = {
   readonly questions: readonly ReconciledText[];
 };
 
-export const buildSourceReconciliationPrompt = (sourceText: string): string =>
+export const buildSourceReconciliationPrompt = (
+  sourceText: string,
+  sourceFirstReconciliation = false,
+): string =>
   [
     'Reconcile original source, not meeting notes. Attribute facts where relevant; put discussion in facts. Do not invent ids, headings, overview or filler.',
     notesContentGuidance,
+    ...(sourceFirstReconciliation ? [notesSourceFirstGuidance] : []),
     notesSourceGuidance,
     'Return compact JSON with exactly four arrays: {facts: Text[], actions: Action[], decisions: Decision[], questions: Text[]}. Empty shape: {"facts":[],"actions":[],"decisions":[],"questions":[]}.',
     'Field definitions, not content: Text = {text: nonempty string, sources: copied source descriptor[]}; Action = {text: nonempty string, sources: copied source descriptor[], owner: string | null, due: string | null}; Decision = {text: nonempty string, sources: copied source descriptor[], owner: string | null}. Use null for unknown metadata.',
@@ -54,6 +59,7 @@ const invalid = (): never => {
 const parseEntries = (
   values: unknown[],
   category: (typeof categories)[number],
+  applicationIdPrefix: string,
 ) =>
   values.map((value, index) => {
     if (!isRecord(value)) return invalid();
@@ -85,7 +91,7 @@ const parseEntries = (
     // The shared draft parser checks text and descriptor structure below;
     // acceptEditedNotes then resolves every descriptor against the original.
     return {
-      id: `reconciled:${category}:${index}`,
+      id: `${applicationIdPrefix}:${category}:${index}`,
       text: value.text,
       sources: value.sources as SourceSpan[],
       ...(category === 'actions' || category === 'decisions'
@@ -98,6 +104,8 @@ const parseEntries = (
 export const parseReconciledSource = (
   raw: string,
   source: NotesSource,
+  allowedSpans?: readonly SourceSpan[],
+  applicationIdPrefix = 'reconciled',
 ): ReconciledSource => {
   let parsed: unknown;
   try {
@@ -114,9 +122,32 @@ export const parseReconciledSource = (
   const result = Object.fromEntries(
     categories.map((category) => [
       category,
-      parseEntries(parsed[category] as unknown[], category),
+      parseEntries(
+        parsed[category] as unknown[],
+        category,
+        applicationIdPrefix,
+      ),
     ]),
   ) as unknown as ReconciledSource;
+
+  if (
+    allowedSpans &&
+    Object.values(result).some((entries) =>
+      entries.some((entry) =>
+        entry.sources.some(
+          (span) =>
+            !allowedSpans.some(
+              (allowed) =>
+                allowed.segment === span.segment &&
+                allowed.start <= span.start &&
+                allowed.end >= span.end,
+            ),
+        ),
+      ),
+    )
+  ) {
+    throw new MeetingNotesError('notes_reconciliation_source_out_of_scope');
+  }
 
   // Validate the mechanical draft, not the normalized/owner-filled review copy.
   // Source checks are narrow commitment safeguards, not general semantic truth.
@@ -126,7 +157,7 @@ export const parseReconciledSource = (
     source,
     draft: parseNotesDraft(JSON.stringify(draft)),
   });
-  const issues = findNotesGuardrailIssues(source, draft);
+  const issues = findNotesGuardrailIssues(source, draft, allowedSpans);
   if (issues.length) {
     throw new MeetingNotesError(`notes_guardrail:${JSON.stringify(issues)}`);
   }

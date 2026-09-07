@@ -28,7 +28,12 @@ import type {
 } from './meetingNotesRunMetrics';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
-import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
+import {
+  NOTES_OLLAMA_MODEL,
+  NOTES_PROMPT_VERSION,
+  PHI_NOTES_EXPERIMENT_DIGEST,
+  PHI_NOTES_EXPERIMENT_MODEL,
+} from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
@@ -525,6 +530,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         | 'deterministic_only';
       /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
       compactWriterContract?: boolean;
+      sourceFirstReconciliation?: boolean;
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
@@ -541,8 +547,20 @@ export class UnifiedLLMProvider implements LLMProvider {
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
-    const model =
-      this.providerType === 'ollama'
+    if (
+      options.sourceFirstReconciliation &&
+      (this.providerType !== 'ollama' ||
+        !options.compactWriterContract ||
+        options.hierarchyAuditStrategy === 'deterministic_only')
+    ) {
+      throw new MeetingNotesError('notes_source_first_configuration_invalid');
+    }
+    const sourceFirstIdentity = options.sourceFirstReconciliation
+      ? await this.resolveSourceFirstNotesIdentity(options.signal)
+      : null;
+    const model = sourceFirstIdentity
+      ? sourceFirstIdentity.model
+      : this.providerType === 'ollama'
         ? await this.resolveOllamaModel('notesWriter')
         : this.getConfiguredAnalysisModel();
     return generateMeetingNotes({
@@ -557,11 +575,12 @@ export class UnifiedLLMProvider implements LLMProvider {
       cacheKey: options.cacheKey,
       hierarchyAuditStrategy: options.hierarchyAuditStrategy,
       reviewProtocol:
-        options.compactWriterContract &&
+        (options.sourceFirstReconciliation || options.compactWriterContract) &&
         options.hierarchyAuditStrategy !== 'deterministic_only'
           ? 'editor'
           : undefined,
       compactWriterContract: options.compactWriterContract,
+      sourceFirstReconciliation: options.sourceFirstReconciliation,
       optionalReviewDeadlineAtMs: options.optionalReviewDeadlineAtMs,
       optionalReviewMinStartMs: options.optionalReviewMinStartMs,
       onStage: options.onStage,
@@ -600,9 +619,42 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       provider: this.providerType,
       model,
+      ...(sourceFirstIdentity
+        ? { modelDigest: sourceFirstIdentity.digest }
+        : {}),
       contextTokens: options.contextTokens ?? 16_384,
       ...(options.signal ? { signal: options.signal } : {}),
     });
+  }
+
+  private async resolveSourceFirstNotesIdentity(
+    signal?: AbortSignal,
+  ): Promise<{ model: string; digest: string }> {
+    const response = await this.ollamaFetch(
+      '/api/tags',
+      undefined,
+      OLLAMA_RESIDENCY_TIMEOUT_MS,
+      signal,
+    );
+    if (!response.ok) {
+      throw new MeetingNotesError('notes_source_first_model_unavailable');
+    }
+    const body = (await response.json()) as {
+      models?: Array<{ name?: unknown; digest?: unknown }>;
+    };
+    const installed = body.models?.find(
+      (candidate) => candidate.name === PHI_NOTES_EXPERIMENT_MODEL,
+    );
+    if (!installed) {
+      throw new MeetingNotesError('notes_source_first_model_unavailable');
+    }
+    if (installed.digest !== PHI_NOTES_EXPERIMENT_DIGEST) {
+      throw new MeetingNotesError('notes_source_first_model_digest_mismatch');
+    }
+    return {
+      model: PHI_NOTES_EXPERIMENT_MODEL,
+      digest: PHI_NOTES_EXPERIMENT_DIGEST,
+    };
   }
 
   async precomputeStructuredAnalysisLeaf(

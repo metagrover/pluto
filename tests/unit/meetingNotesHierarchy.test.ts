@@ -67,6 +67,80 @@ it('rejects a parent merge that silently drops an inherited commitment', () => {
   ).toThrow('notes_merge_dropped_commitment');
 });
 
+it('protects every source-first inventory kind and rejects invented dispositions', () => {
+  const source = [{ segment: 0, start: 0, end: 20 }];
+  const fact = {
+    id: 'fact-1',
+    text: 'The limit is twenty.',
+    kind: 'point' as const,
+    owner: null,
+    due: null,
+    sources: source,
+  };
+  const question = {
+    ...fact,
+    id: 'question-1',
+    text: 'Who verifies the limit?',
+    kind: 'question' as const,
+  };
+  expect(() =>
+    validateInheritedItems([fact, question], [fact], [], true),
+  ).toThrow('notes_merge_dropped_commitment');
+  expect(() =>
+    validateInheritedItems(
+      [fact],
+      [fact],
+      [
+        {
+          target: 'invented',
+          kind: 'cancelled',
+          replacementId: null,
+          sources: source,
+        },
+      ],
+      true,
+    ),
+  ).toThrow('notes_merge_unsafe_disposition');
+});
+
+it('requires a visible source-backed explanation for source-first cancellation', () => {
+  const sources = [{ segment: 0, start: 0, end: 40 }];
+  const action = {
+    id: 'action-1',
+    text: 'Send the outline',
+    kind: 'action' as const,
+    owner: 'Milo',
+    due: null,
+    sources,
+  };
+  const disposition = {
+    target: action.id,
+    kind: 'cancelled' as const,
+    replacementId: null,
+    sources,
+  };
+  expect(() =>
+    validateInheritedItems([action], [], [disposition], true),
+  ).toThrow('notes_merge_unsafe_disposition');
+  expect(() =>
+    validateInheritedItems(
+      [action],
+      [
+        {
+          id: 'point-1',
+          text: 'The outline task was cancelled.',
+          kind: 'point',
+          owner: null,
+          due: null,
+          sources,
+        },
+      ],
+      [disposition],
+      true,
+    ),
+  ).not.toThrow();
+});
+
 it('cannot deduplicate commitments with different deadlines', () => {
   const base = {
     text: 'Send the outline',

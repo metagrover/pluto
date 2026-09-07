@@ -143,6 +143,8 @@ export interface LLMProvider {
         | 'deterministic_only';
       /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
       compactWriterContract?: boolean;
+      /** Explicit, disabled-by-default Phi source-first experiment. */
+      sourceFirstReconciliation?: boolean;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;

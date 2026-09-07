@@ -44,7 +44,7 @@ export type InheritedCommitment = {
   id: string;
   text: string;
   sources: SourceSpan[];
-  kind?: 'action' | 'decision';
+  kind?: 'point' | 'action' | 'decision' | 'question';
   owner?: string | null;
   due?: string | null;
 };
@@ -69,8 +69,18 @@ export const validateInheritedItems = (
   inherited: InheritedCommitment[],
   parent: InheritedCommitment[],
   dispositions: CommitmentDisposition[],
+  requireExplanations = false,
 ) => {
   const parentById = new Map(parent.map((item) => [item.id, item]));
+  if (
+    requireExplanations &&
+    dispositions.some(
+      (disposition) =>
+        !inherited.some((item) => item.id === disposition.target),
+    )
+  ) {
+    throw new MeetingNotesError('notes_merge_unsafe_disposition');
+  }
   for (const item of inherited) {
     const retained = parentById.get(item.id);
     if (
@@ -87,7 +97,11 @@ export const validateInheritedItems = (
         candidate.target === item.id &&
         ['deduplicated', 'cancelled', 'superseded'].includes(candidate.kind),
     );
-    if (!disposition || !(disposition.sources?.length ?? 0)) {
+    if (
+      !disposition ||
+      !(disposition.sources?.length ?? 0) ||
+      (retained && requireExplanations)
+    ) {
       throw new MeetingNotesError('notes_merge_dropped_commitment');
     }
     const replacement = disposition.replacementId
@@ -103,6 +117,27 @@ export const validateInheritedItems = (
         JSON.stringify(replacement.sources) !== JSON.stringify(item.sources))
     ) {
       throw new MeetingNotesError('notes_merge_dropped_commitment');
+    }
+    if (
+      requireExplanations &&
+      disposition.kind !== 'deduplicated' &&
+      !parent.some(
+        (candidate) =>
+          candidate.kind === 'point' &&
+          /\b(?:withdraw|retract|cancel|replac|supersed)\w*\b/i.test(
+            candidate.text,
+          ) &&
+          candidate.sources.some((source) =>
+            disposition.sources?.some(
+              (evidence) =>
+                evidence.segment === source.segment &&
+                evidence.start < source.end &&
+                source.start < evidence.end,
+            ),
+          ),
+      )
+    ) {
+      throw new MeetingNotesError('notes_merge_unsafe_disposition');
     }
   }
 };

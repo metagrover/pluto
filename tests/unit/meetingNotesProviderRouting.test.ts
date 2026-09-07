@@ -3,6 +3,10 @@ import { buildNotesResponseSchema } from '../../electron/llm/meetingNotesSchema'
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { NotesStageCache } from '../../electron/llm/meetingNotesStageCache';
 import {
+  PHI_NOTES_EXPERIMENT_DIGEST,
+  PHI_NOTES_EXPERIMENT_MODEL,
+} from '../../electron/llm/meetingNotesTypes';
+import {
   UnifiedLLMProvider,
   getOllamaTimeoutMs,
 } from '../../electron/llm/unifiedProvider';
@@ -253,6 +257,145 @@ it('routes the compact product writer through the complete-document editor', asy
   ).toEqual([false, true]);
   expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
   expect(result.generation_metadata?.prompt_version).toBe('notes-v29');
+});
+
+it.each([
+  ['openai provider', new UnifiedLLMProvider('openai', {}), true, undefined],
+  ['missing compact contract', new UnifiedLLMProvider('ollama', {}), false, undefined],
+  [
+    'deterministic-only review',
+    new UnifiedLLMProvider('ollama', {}),
+    true,
+    'deterministic_only' as const,
+  ],
+])('rejects source-first notes with an incompatible %s', async (_label, provider, compact, strategy) => {
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', {
+      source: makeDirectNotesFixture().source,
+      sourceFirstReconciliation: true,
+      compactWriterContract: compact,
+      hierarchyAuditStrategy: strategy,
+    }),
+  ).rejects.toThrow('notes_source_first_configuration_invalid');
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['missing', [{ name: 'gemma4:12b', digest: 'other' }], 'notes_source_first_model_unavailable'],
+  [
+    'wrong digest',
+    [{ name: PHI_NOTES_EXPERIMENT_MODEL, digest: 'wrong' }],
+    'notes_source_first_model_digest_mismatch',
+  ],
+])('fails closed when the exact Phi model is %s', async (_label, models, error) => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url) => {
+      if (String(url).endsWith('/api/tags'))
+        return { ok: true, json: async () => ({ models }) };
+      throw new Error('unexpected_live_transport');
+    }),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {});
+  const generate = vi.spyOn(provider as never, 'generateText');
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', {
+      source: makeDirectNotesFixture().source,
+      sourceFirstReconciliation: true,
+      compactWriterContract: true,
+    }),
+  ).rejects.toThrow(error);
+  expect(generate).not.toHaveBeenCalled();
+});
+
+it('pins the exact Phi identity and selects reconciliation then editor schemas', async () => {
+  const fixture = makeDirectNotesFixture();
+  const evidence = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url) => {
+      if (String(url).endsWith('/api/tags'))
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                name: PHI_NOTES_EXPERIMENT_MODEL,
+                digest: PHI_NOTES_EXPERIMENT_DIGEST,
+              },
+            ],
+          }),
+        };
+      throw new Error('unexpected_live_transport');
+    }),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    llm_model: 'configured-control:12b',
+  });
+  const generate = vi
+    .spyOn(provider as never, 'generateText')
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        facts: [],
+        actions: [
+          {
+            text: 'Send the outline',
+            owner: 'Milo',
+            due: null,
+            sources: ['R0'],
+          },
+        ],
+        decisions: [],
+        questions: [],
+      }),
+    )
+    .mockImplementationOnce(async (request: { prompt: string }) => {
+      const inventory = JSON.parse(
+        request.prompt.match(
+          /BEGIN SOURCE INVENTORY\n([\s\S]*?)\nEND SOURCE INVENTORY/,
+        )?.[1] ?? '[]',
+      ) as Array<Record<string, unknown>>;
+      return JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources: ['R0'] },
+            items: inventory,
+          },
+        ],
+        dispositions: [],
+        terminology: [],
+      });
+    });
+
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source: fixture.source,
+    sourceFirstReconciliation: true,
+    compactWriterContract: true,
+  });
+
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(
+    generate.mock.calls.map(
+      ([request]) => (request as { notesModel: string }).notesModel,
+    ),
+  ).toEqual([PHI_NOTES_EXPERIMENT_MODEL, PHI_NOTES_EXPERIMENT_MODEL]);
+  const schemas = generate.mock.calls.map(
+    ([request]) =>
+      (request as { notesResponseSchema: { properties: object } })
+        .notesResponseSchema.properties,
+  );
+  expect(schemas[0]).toHaveProperty('facts');
+  expect(schemas[1]).toHaveProperty('meetingType');
+  expect(result.generation_metadata).toMatchObject({
+    model: PHI_NOTES_EXPERIMENT_MODEL,
+    pipeline_version: 'notes-v30-source-first',
+  });
+  expect(result.all_action_items[0]).toMatchObject({
+    text: 'Send the outline',
+    evidence: fixture.source.segments[evidence.segment]!.text,
+  });
 });
 
 it('repairs malformed writer output once and still requires an independent legacy audit', async () => {

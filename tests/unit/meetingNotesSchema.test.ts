@@ -43,11 +43,30 @@ const audit = {
   })),
 };
 const validate = (
-  contract: 'draft' | 'compact_draft' | 'audit' | 'editor',
+  contract: 'draft' | 'compact_draft' | 'reconciliation' | 'audit' | 'editor',
   value: unknown,
 ) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
+  it('requires exactly the four flat reconciliation inventories', () => {
+    const value = {
+      facts: [{ text: 'A fact', sources: ['R0'] }],
+      actions: [{ text: 'Send it', sources: ['R0'], owner: 'Milo', due: null }],
+      decisions: [{ text: 'Use blue', sources: ['R0'], owner: null }],
+      questions: [{ text: 'When?', sources: ['R0'] }],
+    };
+    expect(validate('reconciliation', value)).toBe(true);
+    expect(validate('reconciliation', { ...value, overview: 'extra' })).toBe(
+      false,
+    );
+    expect(
+      validate('reconciliation', {
+        ...value,
+        actions: [{ text: 'Send it', sources: ['R0'], owner: 'Milo' }],
+      }),
+    ).toBe(false);
+  });
+
   it('expands a compact writer draft with derived title evidence and empty metadata', () => {
     const value = {
       sections: [
