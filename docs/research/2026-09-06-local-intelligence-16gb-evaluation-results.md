@@ -2,9 +2,29 @@
 
 **Date:** September 6, 2026  
 **Tracking:** [#695](https://github.com/metagrover/pluto/issues/695)  
-**Verdict:** No candidate passes the frozen protocol. Keep production defaults unchanged. Phi is the only notes candidate worth a larger, human-reviewed follow-up, but it is not approved for promotion by this evaluation.
+**Frozen September 6 verdict:** No candidate passes the frozen protocol. Keep production defaults unchanged. Phi is the only notes candidate worth a larger, human-reviewed follow-up, but it is not approved for promotion by this evaluation.
 
-## Decision
+## September 7 post-#777 notes addendum
+
+[PR #777](https://github.com/metagrover/pluto/pull/777) changed the production notes system after the frozen evaluation: a compact Ollama run may publish a deterministically acceptable writer draft with `complete_with_warnings` provenance when its editor truncates or returns an allowed schema/guardrail failure. The original tables remain the result for source `c592a997fb0103aec96756ea1086a817eec8bb5d`; this addendum reports the same two notes cases on merged source `03967af69923802d035043b7f89732a51fb80b35`.
+
+Both exact model digests, corpus hash `21d36d3cfa1630aecff7b39c50fd6af3e3ec69f1786d9277326804907ee9ddd0`, production prompt builders, schemas, deterministic validators, and compact writer/editor path were unchanged. The merged harness set structured thinking disabled; every one of the 24 physical starts recorded seed 41, `num_ctx: 16384`, `num_predict: 2048`, temperature 0.1, and eight threads. Each model ran the two diagnostic cases three times. Runs were grouped by model rather than counterbalanced, and raw artifacts remain owner-only under `.private/local-intelligence-evaluation-post-777/`.
+
+| Case | Phi after #777 | Gemma after #777 | Frozen baseline |
+| --- | ---: | ---: | ---: |
+| Middle commitment followed by withdrawal | 3/3 accepted; median 13.84s; clean audits | 3/3 accepted; median 43.99s; all deterministic fallbacks with warnings | Phi 3/3 at 18.52s; Gemma 0/3 at 54.37s |
+| Conditional ownership | 3/3 accepted; median 8.41s; clean audits | 3/3 accepted; median 35.16s; clean audits | Phi 3/3 at 8.42s; Gemma 3/3 at 35.05s |
+| Both cases combined | **6/6 accepted; median 11.12s** | **6/6 accepted; median 39.61s** | Phi 6/6 at 13.86s; Gemma 3/6 at 47.81s |
+
+Every post-#777 result passed its required gold items and critical checks with two physical model starts. Gemma's three withdrawal outputs were recovered through `notes_direct_audit_fallback:guardrail` and recorded `audit_status: complete_with_warnings`; its conditional-ownership outputs and all Phi outputs recorded complete audits without fallback. The changed Gemma outcome is therefore a **pipeline-plus-model system result**, not evidence that Gemma weights improved.
+
+Phi is 3.2 times faster on the withdrawal median, 4.2 times faster on conditional ownership, and 3.6 times faster across the six accepted outputs. This removes Gemma's diagnostic acceptance deficit but strengthens—not weakens—the case for Phi as the next notes finalist when latency matters. It still does not authorize a production default change: these are two concise synthetic cases with automated scoring, no blinded human usefulness review, no 12-case held-out notes corpus, and no integrated recording/mixed-workload acceptance.
+
+Resource samples remain observational. The first cold Gemma pair moved memory free from 80% to 12% and increased swap occupancy by about 2.2 GiB; later Gemma per-case swap changes ranged from about 29 MiB to 906 MiB. The first Phi pair followed the Gemma-to-Phi switch and coincided with a roughly 2.3 GiB swap-occupancy decrease, so it cannot be treated as Phi freeing that memory. Settled Phi cases showed changes between -16 MiB and 0 MiB. All samples reported nominal thermal state, but before/after snapshots are not peak telemetry or causal attribution.
+
+**Updated decision:** keep #780 as the frozen baseline, treat #777 as a successful notes-reliability correction, and keep production model defaults unchanged. Advance Phi and Gemma to the planned 12-case blinded notes review only after the Ollama residency/switch path is bounded; quick-chat switching remains the integrated blocker and was not retested by this addendum.
+
+## September 6 frozen decision
 
 | Workload | Decision | Why |
 | --- | --- | --- |
