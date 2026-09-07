@@ -261,52 +261,67 @@ it('routes the compact product writer through the complete-document editor', asy
 
 it.each([
   ['openai provider', new UnifiedLLMProvider('openai', {}), true, undefined],
-  ['missing compact contract', new UnifiedLLMProvider('ollama', {}), false, undefined],
+  [
+    'missing compact contract',
+    new UnifiedLLMProvider('ollama', {}),
+    false,
+    undefined,
+  ],
   [
     'deterministic-only review',
     new UnifiedLLMProvider('ollama', {}),
     true,
     'deterministic_only' as const,
   ],
-])('rejects source-first notes with an incompatible %s', async (_label, provider, compact, strategy) => {
-  await expect(
-    provider.generateStructuredAnalysis('', '', 'auto', {
-      source: makeDirectNotesFixture().source,
-      sourceFirstReconciliation: true,
-      compactWriterContract: compact,
-      hierarchyAuditStrategy: strategy,
-    }),
-  ).rejects.toThrow('notes_source_first_configuration_invalid');
-  expect(fetch).not.toHaveBeenCalled();
-});
+])(
+  'rejects source-first notes with an incompatible %s',
+  async (_label, provider, compact, strategy) => {
+    await expect(
+      provider.generateStructuredAnalysis('', '', 'auto', {
+        source: makeDirectNotesFixture().source,
+        sourceFirstReconciliation: true,
+        compactWriterContract: compact,
+        hierarchyAuditStrategy: strategy,
+      }),
+    ).rejects.toThrow('notes_source_first_configuration_invalid');
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
 
 it.each([
-  ['missing', [{ name: 'gemma4:12b', digest: 'other' }], 'notes_source_first_model_unavailable'],
+  [
+    'missing',
+    [{ name: 'gemma4:12b', digest: 'other' }],
+    'notes_source_first_model_unavailable',
+  ],
   [
     'wrong digest',
     [{ name: PHI_NOTES_EXPERIMENT_MODEL, digest: 'wrong' }],
     'notes_source_first_model_digest_mismatch',
   ],
-])('fails closed when the exact Phi model is %s', async (_label, models, error) => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url) => {
-      if (String(url).endsWith('/api/tags'))
-        return { ok: true, json: async () => ({ models }) };
-      throw new Error('unexpected_live_transport');
-    }),
-  );
-  const provider = new UnifiedLLMProvider('ollama', {});
-  const generate = vi.spyOn(provider as never, 'generateText');
-  await expect(
-    provider.generateStructuredAnalysis('', '', 'auto', {
-      source: makeDirectNotesFixture().source,
-      sourceFirstReconciliation: true,
-      compactWriterContract: true,
-    }),
-  ).rejects.toThrow(error);
-  expect(generate).not.toHaveBeenCalled();
-});
+])(
+  'fails closed when the exact Phi model is %s',
+  async (_label, models, error) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url) => {
+        if (String(url).endsWith('/api/tags'))
+          return { ok: true, json: async () => ({ models }) };
+        throw new Error('unexpected_live_transport');
+      }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {});
+    const generate = vi.spyOn(provider as never, 'generateText');
+    await expect(
+      provider.generateStructuredAnalysis('', '', 'auto', {
+        source: makeDirectNotesFixture().source,
+        sourceFirstReconciliation: true,
+        compactWriterContract: true,
+      }),
+    ).rejects.toThrow(error);
+    expect(generate).not.toHaveBeenCalled();
+  },
+);
 
 it('pins the exact Phi identity and selects reconciliation then editor schemas', async () => {
   const fixture = makeDirectNotesFixture();

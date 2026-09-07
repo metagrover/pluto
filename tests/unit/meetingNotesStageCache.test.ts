@@ -16,6 +16,33 @@ it('expires and bounds completed parsed drafts and never exposes mutable cached 
   expect(cache.get('next63')).toBeUndefined();
 });
 
+it('bounds, expires and clones completed reconciliations independently', () => {
+  let now = 0;
+  const cache = new NotesStageCache(() => now);
+  const reconciliation = {
+    facts: [
+      {
+        id: 'inventory:0:facts:0',
+        text: 'A source fact',
+        sources: [{ segment: 0, start: 0, end: 4 }],
+      },
+    ],
+    actions: [],
+    decisions: [],
+    questions: [],
+  };
+  cache.setReconciliation('first', reconciliation);
+  cache.getReconciliation('first')!.facts[0]!.sources[0]!.start = 2;
+  expect(cache.getReconciliation('first')!.facts[0]!.sources[0]!.start).toBe(0);
+  for (let index = 0; index < 64; index++) {
+    cache.setReconciliation(`next${index}`, reconciliation);
+  }
+  expect(cache.getReconciliation('first')).toBeUndefined();
+  expect(cache.getReconciliation('next0')).toBeDefined();
+  now = 15 * 60 * 1000;
+  expect(cache.getReconciliation('next63')).toBeUndefined();
+});
+
 it('supports a bounded meeting-length lifetime for incremental leaf reuse', () => {
   let now = 0;
   const cache = new NotesStageCache(() => now, 60 * 60 * 1000);

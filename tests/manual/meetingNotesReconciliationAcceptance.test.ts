@@ -1,14 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 import {
-  buildSourceReconciliationPrompt,
-  parseReconciledSource,
-  reconciliationDraft,
-} from '../../electron/llm/meetingNotesReconciliation';
+  PHI_NOTES_EXPERIMENT_DIGEST,
+  PHI_NOTES_EXPERIMENT_MODEL,
+} from '../../electron/llm/meetingNotesTypes';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
-import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
-import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import { meetingNotesEditorCases } from './fixtures/meetingNotesEditorCases';
 
 const suite =
@@ -18,7 +14,7 @@ const suite =
 const seeds = process.env.MEETING_NOTES_ACCEPTANCE_SEED
   ? [Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED)]
   : [41, 42, 43];
-const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
+const model = PHI_NOTES_EXPERIMENT_MODEL;
 // Opt-in diagnostic profile only; production settings and the baseline stay fixed.
 const thinking = process.env.MEETING_NOTES_RECONCILIATION_THINKING === '1';
 const outputTokens = thinking ? 8192 : 2048;
@@ -29,39 +25,18 @@ const run = async (
   seed: number,
 ) => {
   const source = createNotesSource(JSON.stringify({ segments }));
-  const spans = source.segments
-    .filter((row) => row.text.trim())
-    .map((row) => ({ segment: row.index, start: 0, end: row.text.length }));
-  const sourceText = spans
-    .map((descriptor) =>
-      JSON.stringify({
-        descriptor,
-        speaker: source.segments[descriptor.segment]!.speaker,
-        text: source.segments[descriptor.segment]!.text,
-      }),
-    )
-    .join('\n');
-  const wire = createNotesWireRequest(
-    buildSourceReconciliationPrompt(sourceText),
-    spans,
-  );
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: model,
     ollama_seed: seed,
     ollama_structured_thinking: thinking,
-  }) as unknown as {
-    generateResumableAnalysisText(
-      request: Record<string, unknown>,
-    ): Promise<string>;
-  };
+  });
   const started = Date.now();
-  // One attempt: retries must not conceal semantic failure in this capability gate.
-  const raw = await provider.generateResumableAnalysisText({
-    prompt: wire.prompt,
-    task: 'notesWriter',
-    jsonMode: true,
+  const analysis = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+    sourceFirstReconciliation: true,
+    compactWriterContract: true,
+    contextTokens: 16_384,
     signal: AbortSignal.timeout(requestTimeoutMs),
-    notesBudget: { contextTokens: 16384, outputTokens },
   });
   console.log(
     JSON.stringify({
@@ -70,64 +45,10 @@ const run = async (
         thinking,
         seed,
         latencyMs: Date.now() - started,
-        raw,
+        pipelineVersion: analysis.generation_metadata?.pipeline_version,
       },
     }),
   );
-  const reconciled = parseReconciledSource(wire.decode(raw), source);
-  const draft = reconciliationDraft(reconciled);
-  for (const section of draft.sections) {
-    for (const item of section.items) {
-      for (const span of item.sources) expect(spans).toContainEqual(span);
-    }
-  }
-  // Stage-only adapter: the reconciler has no overview or presentation contract.
-  // Expose ALL returned claims to the existing independent semantic scorers,
-  // without adding facts, inferred classifications, evidence quotes, or wording.
-  // Final composition must pass the same scorers without this adapter.
-  // Do not use the audited projection: it can infer a missing owner, concealing
-  // a reconciliation error from this independent gate.
-  const topics = draft.sections.map((section) => ({
-    title: section.title.text,
-    summary: '',
-    key_points: section.items
-      .filter((item) => item.kind === 'point')
-      .map((item) => ({ text: item.text })),
-    action_items: section.items
-      .filter((item) => item.kind === 'action')
-      .map((item) => ({
-        text: item.text,
-        ...(item.owner === null ? {} : { assignee: item.owner }),
-        ...(item.due === null ? {} : { due: item.due }),
-      })),
-    decisions: section.items
-      .filter((item) => item.kind === 'decision')
-      .map((item) => ({
-        text: item.text,
-        ...(item.owner === null ? {} : { decided_by: item.owner }),
-      })),
-    open_questions: section.items
-      .filter((item) => item.kind === 'question')
-      .map((item) => item.text),
-  }));
-  const analysis: AnalysisDocumentV3 = {
-    analysis_schema_version: 3,
-    meeting_type: 'general',
-    overview: draft.sections
-      .flatMap((section) => section.items.map((item) => item.text))
-      .join('\n'),
-    topics,
-    all_action_items: topics.flatMap((topic) =>
-      topic.action_items.map((item) => ({ ...item, topic: topic.title })),
-    ),
-    all_decisions: topics.flatMap((topic) => topic.decisions),
-    quality: {
-      format_pass: true,
-      retry_count: 0,
-      fallback_used: false,
-      issues: [],
-    },
-  };
   return analysis;
 };
 
@@ -151,6 +72,8 @@ suite('source-only reconciliation real-provider acceptance', () => {
       (entry: { name: string }) => entry.name === model,
     );
     if (!installed) throw new Error('benchmark_model_not_installed');
+    if (installed.digest !== PHI_NOTES_EXPERIMENT_DIGEST)
+      throw new Error('benchmark_model_digest_mismatch');
     console.log(
       JSON.stringify({
         reconciliationBenchmark: {
