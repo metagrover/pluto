@@ -654,6 +654,94 @@ describe('meeting analysis run coordinator', () => {
     expect(onPublished).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'residency discovery',
+      new Error('ollama_residency_discovery_failed'),
+      'failed',
+      'ollama_residency_discovery_failed',
+    ],
+    [
+      'residency cleanup',
+      new Error('ollama_residency_cleanup_failed'),
+      'failed',
+      'ollama_residency_cleanup_failed',
+    ],
+    [
+      'unknown provider',
+      new Error('unrelated_provider_failure'),
+      'failed',
+      'notes_generation_failed',
+    ],
+    [
+      'caller cancellation',
+      new DOMException('cancelled', 'AbortError'),
+      'cancelled',
+      'notes_cancelled',
+    ],
+  ] as const)(
+    'persists the exact %s terminal code',
+    async (_case, providerError, expectedStatus, expectedCode) => {
+      const updateMeetingAnalysisRunStatus = vi.fn().mockReturnValue(true);
+      const upsertMeetingAnalysisRunMetric = vi.fn();
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => ({
+            id: 'provider-failure',
+            transcript_json: JSON.stringify({
+              segments: [{ speaker: 1, text: 'Stable transcript.' }],
+            }),
+            transcript_status: 'validated',
+            transcript_integrity_json: JSON.stringify({ verified: true }),
+            user_notes: '',
+          }),
+          getMeetingAnalysisPublicationRevisions: () => ({
+            sourceRevision: 'provider-failure-source',
+            eligibilityRevision: 'provider-failure-eligibility',
+            userNotesHash: 'provider-failure-notes',
+          }),
+          getMeetingAnalysisRun: () => null,
+          beginMeetingAnalysisRun: vi.fn(),
+          updateMeetingAnalysisRunStatus,
+          updateMeetingAnalysisRunStatusIfCurrent: vi
+            .fn()
+            .mockReturnValue(true),
+          isMeetingAnalysisRunCurrent: () => true,
+          publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+          getAllEntities: () => [],
+          upsertMeetingAnalysisRunMetric,
+        },
+        getSettings: async () => ({ llm_provider: 'ollama' }),
+        getProvider: async () => ({
+          name: 'ollama',
+          generateStructuredAnalysis: vi.fn().mockRejectedValue(providerError),
+        }),
+        createRunId: () => 'provider-failure-run',
+      });
+
+      await expect(
+        coordinator.generateAndPublishMeetingNotes({
+          meetingId: 'provider-failure',
+          requestId: 'provider-failure-request',
+          template: 'auto',
+          reason: 'manual',
+        }),
+      ).rejects.toBe(providerError);
+      expect(updateMeetingAnalysisRunStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notesStatus: expectedStatus,
+          errorCode: expectedCode,
+        }),
+      );
+      expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: expectedStatus,
+          errorCode: expectedCode,
+        }),
+      );
+    },
+  );
+
   it.each([false, true])(
     'keeps extracted entities untrusted and publication independent of renderer notification failure (%s)',
     async (notificationFails) => {

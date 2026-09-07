@@ -19,6 +19,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
       if (String(url).endsWith('/api/tags'))
         return {
           ok: true,
@@ -121,6 +122,7 @@ it('pins Gemma across writer and audit without model discovery', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
       if (String(url).endsWith('/api/tags')) {
         tags += 1;
         return tags === 1
@@ -436,6 +438,7 @@ it('preserves configured model, thinking, seed and request budgets on actual tra
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
       if (!outputs.length) throw new Error('unexpected_notes_request');
       urls.push(String(url));
       const body = JSON.parse(init.body);
@@ -530,7 +533,14 @@ it.each(['unknown source label', 'nested text', 'missing review target'])(
           `${JSON.stringify({ message: { role: 'assistant', content }, done: true, done_reason: 'stop' })}\n`,
       };
     });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, init) => {
+        if (String(url).endsWith('/api/ps'))
+          return Response.json({ models: [] });
+        return fetchMock(url, init);
+      }),
+    );
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'configured-model',
     });
@@ -559,7 +569,13 @@ it('fails a schema-rejecting local transport without retrying as unconstrained J
     statusText: 'schema unsupported',
     text: async () => '',
   }));
-  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
+      return fetchMock(url, init);
+    }),
+  );
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'configured-model',
   });
@@ -577,7 +593,13 @@ it('fails a missing explicitly configured notes model without falling back', asy
     statusText: 'Not Found',
     text: async () => JSON.stringify({ error: 'model not found' }),
   }));
-  vi.stubGlobal('fetch', fetcher);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
+      return fetcher(url, init);
+    }),
+  );
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'installed-old-model',
   });

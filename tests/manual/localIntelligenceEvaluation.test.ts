@@ -64,9 +64,112 @@ const selectedCases = (): LocalIntelligenceEvaluationCase[] => {
   return cases;
 };
 
+const pendingHumanReview = (automatedTriageAccepted: boolean) => ({
+  automatedTriageAccepted,
+  reviewStatus: 'pending_human_review' as const,
+});
+
 type CapturedWire = {
   endpoint: string;
   body: Record<string, unknown>;
+};
+
+type EvaluationWireRequest =
+  | { kind: 'ignored' }
+  | {
+      kind: 'inference';
+      endpoint: string;
+      body: Record<string, unknown>;
+      actualModel: string;
+    }
+  | {
+      kind: 'residency';
+      endpoint: string;
+      action: 'unload';
+      model: string;
+    };
+
+type EvaluationWireStart = {
+  at: string;
+  endpoint: string;
+  requestedModel: string;
+  actualModel: string;
+  bodySha256: string;
+  options: unknown;
+  formatSha256: string;
+};
+
+type EvaluationResidencyEvent = {
+  at: string;
+  endpoint: string;
+  action: 'unload';
+  model: string;
+};
+
+const classifyEvaluationWireRequest = (
+  endpoint: string,
+  bodyText: unknown,
+): EvaluationWireRequest => {
+  if (
+    !/\/api\/(?:chat|generate)$/.test(endpoint) ||
+    typeof bodyText !== 'string'
+  ) {
+    return { kind: 'ignored' };
+  }
+  const body = JSON.parse(bodyText) as Record<string, unknown>;
+  const contentFreeUnload =
+    endpoint === '/api/generate' &&
+    body.keep_alive === 0 &&
+    body.stream === false &&
+    !Object.hasOwn(body, 'prompt') &&
+    !Object.hasOwn(body, 'messages');
+  if (contentFreeUnload) {
+    return {
+      kind: 'residency',
+      endpoint,
+      action: 'unload',
+      model: String(body.model ?? ''),
+    };
+  }
+  return {
+    kind: 'inference',
+    endpoint,
+    body,
+    actualModel: String(body.model ?? ''),
+  };
+};
+
+const recordEvaluationWireRequest = (input: {
+  endpoint: string;
+  bodyText: unknown;
+  expectedModel: string;
+  at: string;
+  wireStarts: EvaluationWireStart[];
+  residencyEvents: EvaluationResidencyEvent[];
+}): void => {
+  const request = classifyEvaluationWireRequest(input.endpoint, input.bodyText);
+  if (request.kind === 'residency') {
+    input.residencyEvents.push({
+      at: input.at,
+      endpoint: request.endpoint,
+      action: request.action,
+      model: request.model,
+    });
+    return;
+  }
+  if (request.kind !== 'inference') return;
+  input.wireStarts.push({
+    at: input.at,
+    endpoint: request.endpoint,
+    requestedModel: input.expectedModel,
+    actualModel: request.actualModel,
+    bodySha256: sha(input.bodyText as string),
+    options: request.body.options,
+    formatSha256: sha(JSON.stringify(request.body.format ?? null)),
+  });
+  if (request.actualModel !== input.expectedModel) {
+    throw new Error('evaluation_wire_model_mismatch');
+  }
 };
 
 type ProviderTransport = {
@@ -77,7 +180,7 @@ type ProviderTransport = {
   ) => Promise<unknown>;
   ollamaFetch: (
     endpoint: string,
-    options: RequestInit,
+    options: RequestInit | undefined,
     timeoutMs: number,
     signal?: AbortSignal,
   ) => Promise<Response>;
@@ -101,8 +204,16 @@ const captureDryRunWire = async (
   };
   transport.ollamaStream = async (endpoint, options) =>
     capture(endpoint, options);
-  transport.ollamaFetch = async (endpoint, options) =>
-    capture(endpoint, options);
+  transport.ollamaFetch = async (endpoint, options) => {
+    if (endpoint === '/api/ps') {
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (!options) throw new Error('evaluation_dry_run_body_missing');
+    return capture(endpoint, options);
+  };
   try {
     await run();
   } catch {
@@ -225,6 +336,61 @@ describe('local intelligence replay acceptance boundary', () => {
   it('accepts only a complete response with the same source revision', () => {
     expect(evaluateReplayResponse(base)).toEqual({ accepted: true });
   });
+
+  it('audits content-free Ollama unloads separately from inference starts', () => {
+    const wireStarts: EvaluationWireStart[] = [];
+    const residencyEvents: EvaluationResidencyEvent[] = [];
+    expect(() =>
+      recordEvaluationWireRequest({
+        endpoint: '/api/generate',
+        bodyText: JSON.stringify({
+          model: 'resident-non-target:latest',
+          keep_alive: 0,
+          stream: false,
+        }),
+        expectedModel: 'selected-model:latest',
+        at: '2026-09-07T00:00:00.000Z',
+        wireStarts,
+        residencyEvents,
+      }),
+    ).not.toThrow();
+    expect(wireStarts).toEqual([]);
+    expect(residencyEvents).toEqual([
+      {
+        at: '2026-09-07T00:00:00.000Z',
+        endpoint: '/api/generate',
+        action: 'unload',
+        model: 'resident-non-target:latest',
+      },
+    ]);
+  });
+
+  it('still rejects a mismatched generation model', () => {
+    const wireStarts: EvaluationWireStart[] = [];
+    expect(() =>
+      recordEvaluationWireRequest({
+        endpoint: '/api/generate',
+        bodyText: JSON.stringify({
+          model: 'unexpected-model:latest',
+          keep_alive: 0,
+          stream: false,
+          prompt: 'content makes this an inference request',
+        }),
+        expectedModel: 'selected-model:latest',
+        at: '2026-09-07T00:00:00.000Z',
+        wireStarts,
+        residencyEvents: [],
+      }),
+    ).toThrow('evaluation_wire_model_mismatch');
+    expect(wireStarts).toHaveLength(1);
+  });
+
+  it('labels deterministic gold scoring as triage pending human review', () => {
+    expect(pendingHumanReview(true)).toEqual({
+      automatedTriageAccepted: true,
+      reviewStatus: 'pending_human_review',
+    });
+  });
 });
 
 realSuite('opt-in local intelligence production-path replay', () => {
@@ -332,36 +498,18 @@ realSuite('opt-in local intelligence production-path replay', () => {
         throw new Error('evaluation_output_absolute_path_required');
       }
       const originalFetch = globalThis.fetch;
-      const wireStarts: Array<{
-        at: string;
-        endpoint: string;
-        requestedModel: string;
-        actualModel: string;
-        bodySha256: string;
-        options: unknown;
-        formatSha256: string;
-      }> = [];
+      const wireStarts: EvaluationWireStart[] = [];
+      const residencyEvents: EvaluationResidencyEvent[] = [];
       globalThis.fetch = async (input, init) => {
         const endpoint = new URL(String(input)).pathname;
-        if (
-          /\/api\/(?:chat|generate)$/.test(endpoint) &&
-          typeof init?.body === 'string'
-        ) {
-          const body = JSON.parse(init.body) as Record<string, unknown>;
-          const actualModel = String(body.model ?? '');
-          wireStarts.push({
-            at: new Date().toISOString(),
-            endpoint,
-            requestedModel: model.tag,
-            actualModel,
-            bodySha256: sha(init.body),
-            options: body.options,
-            formatSha256: sha(JSON.stringify(body.format ?? null)),
-          });
-          if (actualModel !== model.tag) {
-            throw new Error('evaluation_wire_model_mismatch');
-          }
-        }
+        recordEvaluationWireRequest({
+          endpoint,
+          bodyText: init?.body,
+          expectedModel: model.tag,
+          at: new Date().toISOString(),
+          wireStarts,
+          residencyEvents,
+        });
         return originalFetch(input, init);
       };
 
@@ -400,8 +548,9 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 transcript,
                 analysis,
                 goldScore,
-                accepted:
+                ...pendingHumanReview(
                   analysis.analysis_schema_version === 3 && goldScore.passed,
+                ),
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
                 resourceBefore,
@@ -421,7 +570,9 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 prompt: candidate.prompt,
                 answer,
                 goldScore,
-                accepted: Boolean(answer.trim()) && goldScore.passed,
+                ...pendingHumanReview(
+                  Boolean(answer.trim()) && goldScore.passed,
+                ),
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
                 resourceBefore,
@@ -447,7 +598,7 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 raw,
                 validation,
                 goldScore,
-                accepted: validation.valid && goldScore.passed,
+                ...pendingHumanReview(validation.valid && goldScore.passed),
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
                 resourceBefore,
@@ -458,7 +609,7 @@ realSuite('opt-in local intelligence production-path replay', () => {
             results.push({
               caseId: candidate.id,
               lane: candidate.lane,
-              accepted: false,
+              ...pendingHumanReview(false),
               elapsedMs: Date.now() - startedAt,
               physicalStarts: wireStarts.length - wireStartIndex,
               resourceBefore,
@@ -483,6 +634,7 @@ realSuite('opt-in local intelligence production-path replay', () => {
             sourceRevision: manifest.sourceRevision,
             model,
             wireStarts,
+            residencyEvents,
             results,
           },
           null,
@@ -498,7 +650,9 @@ realSuite('opt-in local intelligence production-path replay', () => {
           localIntelligenceEvaluation: {
             configId: model.configId,
             caseCount: results.length,
-            acceptedCount: results.filter((result) => result.accepted).length,
+            automatedTriageAcceptedCount: results.filter(
+              (result) => result.automatedTriageAccepted,
+            ).length,
             physicalStarts: wireStarts.length,
             artifactPath,
           },

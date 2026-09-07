@@ -21,6 +21,55 @@ const requiredFailureIds = [
 ];
 
 describe('local intelligence evaluation corpus', () => {
+  it('freezes twelve held-out synthetic notes cases across the target profiles', () => {
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
+    );
+
+    expect(heldOutNotes).toHaveLength(12);
+    expect(
+      heldOutNotes.reduce<Record<string, number>>((counts, candidate) => {
+        counts[candidate.syntheticProfile] =
+          (counts[candidate.syntheticProfile] ?? 0) + 1;
+        return counts;
+      }, {}),
+    ).toEqual({
+      short: 3,
+      ordinary: 4,
+      long_dense: 3,
+      adversarial_sparse: 2,
+    });
+  });
+
+  it('covers every frozen notes evidence challenge explicitly', () => {
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
+    );
+    const covered = new Set(
+      heldOutNotes.flatMap((candidate) => candidate.coverageTags),
+    );
+
+    expect(
+      [
+        'beginning_evidence',
+        'middle_evidence',
+        'end_evidence',
+        'owner_handoff',
+        'date_correction',
+        'conditionality',
+        'withdrawal',
+        'explicit_no_decision',
+        'explicit_no_action',
+        'unrelated_topic_negative',
+        'dense_multi_claim',
+      ].filter((tag) => !covered.has(tag)),
+    ).toEqual([]);
+  });
+
   it('has unique case IDs and disjoint development/held-out membership', () => {
     const ids = localIntelligenceEvaluationCases.map(
       (candidate) => candidate.id,
@@ -106,6 +155,96 @@ describe('local intelligence evaluation corpus', () => {
       criticalPassed: false,
       passed: false,
     });
+  });
+
+  it('accepts truthful negated notes claims while rejecting affirmative forbidden claims', () => {
+    const examples = [
+      {
+        id: 'notes-ordinary-no-decision-no-action',
+        truthful: 'No pricing decision and no follow-up assigned.',
+        affirmative:
+          'No pricing decision was made, but a follow-up was assigned.',
+        forbidden: 'follow-up was assigned',
+      },
+      {
+        id: 'notes-long-dense-three-position-evidence',
+        truthful:
+          'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. No pricing was approved.',
+        affirmative:
+          'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. Pricing was approved.',
+        forbidden: 'pricing was approved',
+      },
+      {
+        id: 'notes-long-dense-decisions-and-boundaries',
+        truthful:
+          'Retain seven days of pilot telemetry. Ravi owns the deletion test results due January 9. Pilot access remains limited to the research team. No public dashboard approved and no action assigned.',
+        affirmative:
+          'Retain seven days of pilot telemetry. Ravi owns the deletion test results due January 9. Pilot access remains limited to the research team. The public dashboard was approved, though no action was assigned.',
+        forbidden: 'public dashboard was approved',
+      },
+    ];
+
+    for (const example of examples) {
+      const candidate = localIntelligenceEvaluationCases.find(
+        (item) => item.id === example.id,
+      );
+      if (!candidate) throw new Error(`${example.id} fixture missing`);
+
+      expect(
+        scoreGoldOutput(candidate, example.truthful),
+        `${example.id} truthful output`,
+      ).toMatchObject({ passed: true, forbiddenMatches: [] });
+      expect(
+        scoreGoldOutput(candidate, example.affirmative).forbiddenMatches,
+        `${example.id} affirmative output`,
+      ).toContain(example.forbidden);
+    }
+  });
+
+  it('distinguishes evidence negation from a post-claim exception', () => {
+    const candidate = localIntelligenceEvaluationCases.find(
+      (item) => item.id === 'notes-long-dense-three-position-evidence',
+    );
+    if (!candidate) throw new Error('dense pricing fixture missing');
+    const supportedContext =
+      'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review.';
+
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved except enterprise pricing.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing decision was made; there is no evidence that pricing was approved.`,
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
+        'Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. No pricing was approved, but the EU data-residency pilot was approved.',
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved initially, but it was approved later.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved, but it was noted that the Android expansion was not approved.`,
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved, but enterprise pricing was.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
   });
 
   it('rejects invented causation and accepts explicit no-change output', () => {
