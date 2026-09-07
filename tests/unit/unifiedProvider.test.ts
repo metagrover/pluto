@@ -99,6 +99,10 @@ const parseRequestBody = (init?: RequestInit): Record<string, unknown> => {
 
 const installFetchMock = (
   handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  residencyHandler: (
+    url: string,
+    init?: RequestInit,
+  ) => Response | Promise<Response> = () => jsonResponse({ models: [] }),
 ) => {
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -106,7 +110,15 @@ const installFetchMock = (
       return await handler(url, init);
     },
   );
-  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+  vi.stubGlobal('fetch', (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input.toString();
+    return url.endsWith('/api/ps')
+      ? await residencyHandler(url, init)
+      : await fetchMock(input, init);
+  }) as typeof fetch);
   return fetchMock;
 };
 
@@ -227,6 +239,135 @@ describe('UnifiedLLMProvider', () => {
     expect(summary).toBe(validAnalysisMarkdown);
     expect(selectedModel).toBe('kimike:latest');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('unloads deduplicated non-target Ollama residency before generation after restart', async () => {
+    const events: string[] = [];
+    installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        if (body.keep_alive === 0) {
+          events.push(`unload:${String(body.model)}`);
+          return jsonResponse({ done: true });
+        }
+        events.push(`generate:${String(body.model)}`);
+        return jsonResponse({ response: validAnalysisMarkdown });
+      },
+      () => {
+        events.push('discover');
+        return jsonResponse({
+          models: [{ name: ' gemma4:12b ' }, { model: 'GEMMA4:12B' }],
+        });
+      },
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
+
+    expect(events).toEqual([
+      'discover',
+      'unload:gemma4:12b',
+      'generate:phi4-mini:3.8b',
+    ]);
+  });
+
+  it('retains matching Ollama residency before generation', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        requestBodies.push(body);
+        return jsonResponse({ response: validAnalysisMarkdown });
+      },
+      () =>
+        jsonResponse({
+          models: [{ name: 'PHI4-MINI:3.8B' }],
+        }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await provider.generateUserAnalysisMarkdown('Speaker A: status update');
+
+    expect(requestBodies).toHaveLength(1);
+    expect(requestBodies[0]).toMatchObject({
+      model: 'phi4-mini:3.8b',
+      keep_alive: '1h',
+    });
+  });
+
+  it('fails closed when Ollama residency discovery fails', async () => {
+    const fetchMock = installFetchMock(
+      () => jsonResponse({ response: validAnalysisMarkdown }),
+      () => jsonResponse({ error: 'unavailable' }, false, 'Unavailable'),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).rejects.toThrow('ollama_residency_discovery_failed');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when required Ollama residency cleanup fails', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        requestBodies.push(body);
+        return jsonResponse({ error: 'busy' }, false, 'Conflict');
+      },
+      () => jsonResponse({ models: [{ name: 'gemma4:12b' }] }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).rejects.toThrow('ollama_residency_cleanup_failed');
+    expect(requestBodies).toEqual([
+      expect.objectContaining({ model: 'gemma4:12b', keep_alive: 0 }),
+    ]);
+  });
+
+  it('propagates cancellation during Ollama residency discovery without generating', async () => {
+    const fetchMock = installFetchMock(
+      () => jsonResponse({ response: validAnalysisMarkdown }),
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) {
+            reject(init.signal.reason);
+            return;
+          }
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    const controller = new AbortController();
+    const answer = provider.answerAskPluto('Who owns this?', {
+      signal: controller.signal,
+    });
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    await expect(answer).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'cancelled',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('reserves enough Ollama context for complete knowledge JSON output', async () => {
@@ -745,23 +886,26 @@ describe('UnifiedLLMProvider', () => {
 
   it('uses Gemma for saved chat and Phi for active meeting chat', async () => {
     const selectedModels: string[] = [];
-    installFetchMock((url, init) => {
-      if (url.endsWith('/api/tags')) {
-        return jsonResponse({
-          models: [
-            { name: 'phi4-mini:3.8b' },
-            { name: 'qwen3.5:9b' },
-            { name: 'gemma4:12b' },
-          ],
-        });
-      }
-      if (url.endsWith('/api/generate')) {
-        const body = parseRequestBody(init);
-        selectedModels.push(String(body.model));
-        return jsonResponse({ response: 'Grounded answer' });
-      }
-      throw new Error(`Unexpected URL: ${url}`);
-    });
+    installFetchMock(
+      (url, init) => {
+        if (url.endsWith('/api/tags')) {
+          return jsonResponse({
+            models: [
+              { name: 'phi4-mini:3.8b' },
+              { name: 'qwen3.5:9b' },
+              { name: 'gemma4:12b' },
+            ],
+          });
+        }
+        if (url.endsWith('/api/generate')) {
+          const body = parseRequestBody(init);
+          selectedModels.push(String(body.model));
+          return jsonResponse({ response: 'Grounded answer' });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      },
+      () => jsonResponse({ models: [{ name: 'gemma4:12b' }] }),
+    );
 
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
