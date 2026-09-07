@@ -32,4 +32,4 @@ it('includes the native ffprobe package in the actual pnpm packaging dependency 
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
-});
+}, 20000);

@@ -191,4 +191,109 @@ describe('SettingsTab', () => {
 
     act(() => root.unmount());
   });
+
+  it('persists audio retention policy when changed', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const setRetention = vi.fn();
+
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          audioRetentionPolicy="7_days"
+          setAudioRetentionPolicy={setRetention}
+        />,
+      ),
+    );
+
+    const selectButton = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Audio retention period"]',
+    )!;
+    expect(selectButton).toBeDefined();
+
+    await act(async () => selectButton.click());
+
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.textContent?.includes('30 days'))!;
+    expect(option).toBeDefined();
+
+    await act(async () => option.click());
+
+    expect(setRetention).toHaveBeenCalledWith('30_days');
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'SET_AUDIO_RETENTION_POLICY',
+      '30_days',
+    );
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'audio_retention_policy',
+      value: '30_days',
+    });
+
+    act(() => root.unmount());
+  });
+
+  it('shows warning dialog when selecting after_finalization and applies on confirm', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const setRetention = vi.fn();
+
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          audioRetentionPolicy="7_days"
+          setAudioRetentionPolicy={setRetention}
+        />,
+      ),
+    );
+
+    const selectButton = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Audio retention period"]',
+    )!;
+    await act(async () => selectButton.click());
+
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) =>
+      item.textContent?.includes('Delete immediately after finalization'),
+    )!;
+    expect(option).toBeDefined();
+
+    await act(async () => option.click());
+
+    // Modal dialog should be visible explaining capability loss
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain('Delete audio after finalization?');
+    expect(dialog?.textContent).toContain(
+      'Re-transcription and model upgrades',
+    );
+    expect(dialog?.textContent).toContain('Speaker audio sample playback');
+
+    // Not yet applied before confirmation
+    expect(setRetention).not.toHaveBeenCalled();
+
+    // Click confirm
+    const confirmButton = [
+      ...dialog!.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((btn) => btn.textContent?.includes('Confirm Deletion Policy'))!;
+    await act(async () => confirmButton.click());
+
+    expect(setRetention).toHaveBeenCalledWith('after_finalization');
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'SET_AUDIO_RETENTION_POLICY',
+      'after_finalization',
+    );
+
+    // Dialog should now be closed
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    act(() => root.unmount());
+  });
 });

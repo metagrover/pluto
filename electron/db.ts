@@ -249,6 +249,9 @@ export interface PersistedMeeting {
   downstream_processing_json?: string | null;
   capture_journal_generation?: string | null;
   created_at?: string | null;
+  audio_retention_status?: 'retained' | 'deleted' | null;
+  audio_deleted_at?: string | null;
+  audio_retention_error?: string | null;
 }
 
 export interface MeetingSummary {
@@ -268,6 +271,7 @@ export interface MeetingSummary {
   finalization_error_category: string | null;
   downstream_processing_json: string | null;
   capture_journal_generation: string | null;
+  audio_retention_status?: 'retained' | 'deleted' | null;
   has_transcript: boolean;
   has_transcript_text: boolean;
   has_audio: boolean;
@@ -2113,13 +2117,15 @@ export const getMeetingSummaries = (
          m.finalization_error_category,
          m.downstream_processing_json,
          m.capture_journal_generation,
+         m.audio_retention_status,
          CASE WHEN m.transcript_json IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          CASE
            WHEN m.transcript_json IS NOT NULL THEN 1
            ELSE 0
          END AS has_transcript_text,
          CASE
-           WHEN COALESCE(m.audio_path, '') != '' OR COALESCE(m.system_audio_path, '') != '' OR COALESCE(m.mixed_audio_path, '') != '' THEN 1
+           WHEN (m.audio_retention_status IS NULL OR m.audio_retention_status != 'deleted')
+             AND (COALESCE(m.audio_path, '') != '' OR COALESCE(m.system_audio_path, '') != '' OR COALESCE(m.mixed_audio_path, '') != '') THEN 1
            ELSE 0
          END AS has_audio,
          CASE WHEN m.analysis_json IS NOT NULL OR m.enhanced_notes IS NOT NULL THEN 1 ELSE 0 END AS has_analysis,

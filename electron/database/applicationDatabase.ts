@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { app } from 'electron';
+import { ApplicationKeyStore } from '../crypto/applicationKeyStore';
 import {
   type DatabaseRuntime,
   type DatabaseRuntimeOptions,
@@ -66,15 +67,19 @@ const getOwner = () => {
   if (!applicationDatabase) {
     const appRoot =
       typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd();
+    const userDataPath = app.getPath('userData');
+    const keyStore = new ApplicationKeyStore({ storageDir: userDataPath });
     applicationDatabase = createApplicationDatabase({
       databasePath: resolveApplicationDatabasePath({
-        userDataPath: app.getPath('userData'),
+        userDataPath,
       }),
       migrationsFolder: resolveMigrationsFolder({
         isPackaged: app.isPackaged ?? false,
         appRoot,
         resourcesPath: process.resourcesPath ?? appRoot,
       }),
+      keyStore,
+      enableEncryption: true,
     });
   }
   return applicationDatabase;

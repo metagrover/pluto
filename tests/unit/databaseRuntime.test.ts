@@ -330,4 +330,141 @@ describe('database runtime', () => {
       expect.objectContaining({ code: 'database_integrity_failed' }),
     );
   });
+
+  it('fails closed when wrong encryption key is provided and never wipes database', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const correctKey =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const wrongKey =
+      'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+    const migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_init',
+        when: 100,
+        sql: "CREATE TABLE secret (val TEXT);--> statement-breakpoint\nINSERT INTO secret VALUES ('classified');",
+      },
+    ]);
+
+    // 1. Create an encrypted database with correctKey
+    const runtime1 = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      encryptionKeyHex: correctKey,
+      enableEncryption: true,
+    });
+    const db1 = runtime1.initialize();
+    expect(db1.prepare('SELECT val FROM secret').all()).toEqual([
+      { val: 'classified' },
+    ]);
+    runtime1.close();
+
+    // 2. Open with wrongKey: MUST fail with database_key_rejected and NOT call replaceExisting
+    const runtime2 = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      encryptionKeyHex: wrongKey,
+      enableEncryption: true,
+    });
+    expect(() => runtime2.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_rejected' }),
+    );
+
+    // Verify database file was not replaced or wiped
+    const stagedDirs = fs
+      .readdirSync(root)
+      .filter((n) => n.startsWith('.pluto-db-replacement-'));
+    expect(stagedDirs).toHaveLength(0);
+
+    // Reopen with correctKey: data is intact!
+    const runtime3 = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      encryptionKeyHex: correctKey,
+      enableEncryption: true,
+    });
+    const db3 = runtime3.initialize();
+    expect(db3.prepare('SELECT val FROM secret').all()).toEqual([
+      { val: 'classified' },
+    ]);
+    runtime3.close();
+  });
+
+  it('fails closed when key is missing beside existing encrypted database', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const correctKey =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const migrationsFolder = writeMigrations(root, [
+      { tag: '0000_init', when: 100, sql: 'CREATE TABLE secret (val TEXT);' },
+    ]);
+
+    // 1. Create encrypted DB
+    const runtime1 = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      encryptionKeyHex: correctKey,
+      enableEncryption: true,
+    });
+    runtime1.initialize();
+    runtime1.close();
+
+    // 2. Open with enableEncryption=true but no key
+    const runtime2 = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      enableEncryption: true,
+    });
+    expect(() => runtime2.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_unavailable' }),
+    );
+
+    // Ensure no replacement happened
+    const stagedDirs = fs
+      .readdirSync(root)
+      .filter((n) => n.startsWith('.pluto-db-replacement-'));
+    expect(stagedDirs).toHaveLength(0);
+  });
+
+  it('transparently migrates a plaintext database when encryption is enabled', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const key =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_init',
+        when: 100,
+        sql: "CREATE TABLE notes (id INT, text TEXT);--> statement-breakpoint\nINSERT INTO notes VALUES (1, 'hello');",
+      },
+    ]);
+
+    // 1. Create plaintext DB
+    const runtimePlain = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+    });
+    runtimePlain.initialize();
+    runtimePlain.close();
+
+    // 2. Open with encryption enabled
+    const runtimeEnc = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder,
+      encryptionKeyHex: key,
+      enableEncryption: true,
+    });
+    const dbEnc = runtimeEnc.initialize();
+    expect(dbEnc.prepare('SELECT * FROM notes').all()).toEqual([
+      { id: 1, text: 'hello' },
+    ]);
+    runtimeEnc.close();
+
+    // 3. Verify plain open without key fails
+    const unkeyed = new Database(databasePath);
+    expect(() => unkeyed.prepare('SELECT * FROM notes').all()).toThrow(
+      /file is not a database/,
+    );
+    unkeyed.close();
+  });
 });

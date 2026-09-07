@@ -62,10 +62,13 @@ describe('database migration history', () => {
     const history = readPackagedMigrationHistory(
       path.join(process.cwd(), 'drizzle'),
     );
-    expect(history).toHaveLength(1);
+    expect(history).toHaveLength(2);
     expect(history[0]).toMatchObject({ tag: '0000_pluto_baseline' });
     expect(history[0]?.when).toEqual(expect.any(Number));
     expect(history[0]?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(history[1]).toMatchObject({ tag: '0001_audio_retention' });
+    expect(history[1]?.when).toEqual(expect.any(Number));
+    expect(history[1]?.hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it('classifies unreadable packaged migration metadata', () => {

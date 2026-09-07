@@ -246,7 +246,16 @@ export interface Meeting {
   recent_win_why?: string | null;
   recent_win_evidence?: string | null;
   recent_win_source?: string | null;
+  audio_retention_status?: 'retained' | 'deleted' | null;
+  audio_deleted_at?: string | null;
+  audio_retention_error?: string | null;
 }
+
+export type AudioRetentionPolicy =
+  | 'after_finalization'
+  | '7_days'
+  | '30_days'
+  | 'keep_indefinitely';
 
 export interface MeetingSummary
   extends Pick<
@@ -274,6 +283,7 @@ export interface MeetingSummary
     | 'final_transcription_engine'
     | 'speaker_attribution_verified'
     | 'automatic_attempts_exhausted'
+    | 'audio_retention_status'
   > {
   ended_at?: string | null;
   folder_id?: string | null;

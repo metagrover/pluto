@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Check,
   ChevronRight,
   ChevronUp,
@@ -7,6 +8,7 @@ import {
   Loader2,
   MoreHorizontal,
   Sparkles,
+  Trash2,
   Undo2,
   Users,
   X,
@@ -692,6 +694,31 @@ export const MeetingView = ({
   const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
     string | null
   >(null);
+  const [showDeleteAudioConfirm, setShowDeleteAudioConfirm] = useState(false);
+  const [isDeletingAudio, setIsDeletingAudio] = useState(false);
+  const [deleteAudioError, setDeleteAudioError] = useState<string | null>(null);
+
+  const handleConfirmDeleteAudio = async () => {
+    if (!selectedMeeting) return;
+    setIsDeletingAudio(true);
+    setDeleteAudioError(null);
+    try {
+      const res = (await window.ipcRenderer.invoke(
+        'DELETE_MEETING_AUDIO',
+        String(selectedMeeting.id),
+      )) as { success: boolean; error?: string } | undefined;
+      if (res?.success) {
+        setShowDeleteAudioConfirm(false);
+        await fetchMeetings();
+      } else {
+        setDeleteAudioError(res?.error || 'Failed to delete audio');
+      }
+    } catch (err) {
+      setDeleteAudioError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDeletingAudio(false);
+    }
+  };
 
   const titleEdit = useRef({
     meetingId: selectedMeeting.id,
@@ -1127,6 +1154,20 @@ export const MeetingView = ({
                   </span>
                 </button>
               ) : null}
+              {selectedMeeting.finalization_status === 'finalized' ? (
+                <span
+                  className="inline-flex items-center text-xs text-pro-text-muted/80"
+                  title={
+                    selectedMeeting.audio_retention_status === 'deleted'
+                      ? 'Audio recordings permanently deleted under retention policy'
+                      : 'Audio encrypted and retained'
+                  }
+                >
+                  {selectedMeeting.audio_retention_status === 'deleted'
+                    ? 'Audio deleted'
+                    : 'Audio retained'}
+                </span>
+              ) : null}
             </div>
             <div className="meeting-document-actions">
               {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
@@ -1295,6 +1336,23 @@ export const MeetingView = ({
                   {selectedMeeting.finalization_status !==
                   'recovery_required' ? (
                     <div className="meeting-document-menu__section meeting-document-menu__section--danger">
+                      {selectedMeeting.finalization_status === 'finalized' &&
+                      selectedMeeting.audio_retention_status !== 'deleted' ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowDeleteAudioConfirm(true)}
+                          disabled={isDeletingAudio}
+                          className="meeting-toolbar-button meeting-toolbar-button--danger"
+                          aria-label="Delete audio now"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>
+                            {isDeletingAudio
+                              ? 'Deleting audio…'
+                              : 'Delete audio now'}
+                          </span>
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => handleDeleteMeeting(selectedMeeting.id)}
@@ -1609,6 +1667,66 @@ export const MeetingView = ({
         speakerSummaries={speakerSummaries}
         onDisplayNamesChange={updateSpeakerDisplayNames}
       />
+
+      {showDeleteAudioConfirm ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-audio-title"
+          className="fixed inset-0 z-[1200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+        >
+          <div className="relative w-full max-w-md rounded-2xl border border-pro-border bg-pro-surface p-6 shadow-2xl text-pro-text-main">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h3 id="delete-audio-title" className="text-base font-semibold">
+                Delete audio recordings?
+              </h3>
+            </div>
+            <p className="text-sm text-pro-text-muted leading-relaxed mb-3">
+              Transcripts, notes, summaries, and voice profiles are preserved
+              safely.
+            </p>
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 mb-4">
+              <strong>Permanent capability loss:</strong> You will no longer be
+              able to re-transcribe, repair audio gaps, or play back audio clips
+              for this meeting.
+            </div>
+            {deleteAudioError ? (
+              <p className="text-xs text-red-500 mb-4 font-mono">
+                {deleteAudioError}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteAudioConfirm(false);
+                  setDeleteAudioError(null);
+                }}
+                disabled={isDeletingAudio}
+                className="rounded-lg border border-pro-border px-4 py-2 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDeleteAudio()}
+                disabled={isDeletingAudio}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700 transition-colors flex items-center gap-1.5"
+              >
+                {isDeletingAudio ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : null}
+                <span>
+                  {isDeletingAudio ? 'Deleting…' : 'Delete audio permanently'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

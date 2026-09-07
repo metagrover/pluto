@@ -13,7 +13,7 @@ const probeElectronBinding = () =>
       'exec',
       'electron',
       '-e',
-      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close()",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();try{const McDatabase=require('better-sqlite3-multiple-ciphers');const mcdb=new McDatabase(':memory:');mcdb.close();}catch(e){process.exit(1);}",
     ],
     {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -24,7 +24,7 @@ const probeElectronBinding = () =>
 const rebuildElectronBinding = () =>
   commandSucceeded(
     pnpmCommand,
-    ['exec', 'electron-rebuild', '-f', '-w', 'better-sqlite3'],
+    ['exec', 'electron-rebuild', '-f', '-w', 'better-sqlite3,better-sqlite3-multiple-ciphers'],
     { stdio: 'inherit' },
   );
 

@@ -8,7 +8,12 @@ export type DatabaseErrorCode =
   | 'database_integrity_failed'
   | 'database_replacement_failed'
   | 'database_cleanup_failed'
-  | 'database_closed';
+  | 'database_closed'
+  | 'database_key_unavailable'
+  | 'database_key_rejected'
+  | 'database_cipher_unsupported'
+  | 'database_encryption_migration_failed'
+  | 'database_encryption_recovery_required';
 
 export interface DatabaseErrorDetails {
   migrationId?: string;
@@ -61,5 +66,15 @@ export const describeDatabaseStartupError = (error: unknown): string => {
       return 'Database replacement cleanup failed.';
     case 'database_closed':
       return 'Database is closed.';
+    case 'database_key_unavailable':
+      return 'Database encryption key is unavailable or locked in macOS Keychain.';
+    case 'database_key_rejected':
+      return 'Database encryption key was rejected.';
+    case 'database_cipher_unsupported':
+      return 'Database cipher configuration is unsupported.';
+    case 'database_encryption_migration_failed':
+      return 'Database encryption migration failed.';
+    case 'database_encryption_recovery_required':
+      return 'Database requires encryption recovery. Existing data has been preserved.';
   }
 };

@@ -82,5 +82,9 @@ export const createCaptureSessionLeaseRegistry = () => {
       active = null;
       return released;
     },
+
+    isMeetingActive(meetingId: string): boolean {
+      return active?.meetingId === meetingId;
+    },
   };
 };

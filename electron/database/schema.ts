@@ -62,6 +62,9 @@ export const meetings = sqliteTable('meetings', {
   createdAt: datetime('created_at').default(now),
   endReason: text('end_reason'),
   midJson: text('mid_json'),
+  audioRetentionStatus: text('audio_retention_status').default('retained'),
+  audioDeletedAt: datetime('audio_deleted_at'),
+  audioRetentionError: text('audio_retention_error'),
 });
 
 export const meetingAnalysisRuns = sqliteTable('meeting_analysis_runs', {

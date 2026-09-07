@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   appendCaptureJournalChunk,
   appendCaptureTranscriptAcceptanceFrame,
@@ -23,10 +23,13 @@ import {
   markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
+  readCaptureJournalChunk,
   readCaptureJournalManifest,
   readCaptureJournalSidecar,
+  recordCaptureJournalStickyFailure,
   replaceCaptureTranscriptCheckpoint,
   sealCaptureJournal,
+  setCaptureJournalAudioKeyProvider,
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
@@ -1301,5 +1304,242 @@ describe('capture journal', () => {
     );
 
     expect(manifestJson).toEqual(manifest);
+  });
+
+  describe('schema v4 encrypted capture journal', () => {
+    it('requires an encryption key to create a v4 journal', async () => {
+      const root = await makeRoot();
+      setCaptureJournalAudioKeyProvider(null);
+      await expect(
+        createCaptureJournal(root, {
+          meetingId: 'meeting-v4-nokey',
+          startedAtMs: 1_000,
+          schemaVersion: 4,
+        }),
+      ).rejects.toThrow('audio_key_unavailable');
+    });
+
+    it('creates a v4 journal with plaintext locator and encrypted manifest.enc', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const manifest = await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-basic',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      expect(manifest.schemaVersion).toBe(4);
+      expect(manifest.lifecycleState).toBe('recording');
+
+      // Check on disk: manifest.json is a locator
+      const locatorRaw = await readFile(
+        join(root, manifest.artifactRootRelativePath, 'manifest.json'),
+        'utf8',
+      );
+      const locator = JSON.parse(locatorRaw);
+      expect(locator.schemaVersion).toBe(4);
+      expect(locator.envelopeVersion).toBe(1);
+      expect(locator.encryptedManifestRelativePath).toBe(
+        'meeting-v4-basic/capture-journal/manifest.enc',
+      );
+      expect(locator.ciphertextSha256).toBeDefined();
+
+      // manifest.enc exists
+      const encStat = await stat(
+        join(root, locator.encryptedManifestRelativePath),
+      );
+      expect(encStat.size).toBeGreaterThan(0);
+
+      // Reading without key fails
+      setCaptureJournalAudioKeyProvider(null);
+      await expect(
+        readCaptureJournalManifest(root, 'meeting-v4-basic'),
+      ).rejects.toThrow('audio_key_unavailable');
+
+      // Reading with wrong key fails (decryption error)
+      const wrongKey = randomBytes(32);
+      await expect(
+        readCaptureJournalManifest(root, 'meeting-v4-basic', {
+          meetingKey: wrongKey,
+        }),
+      ).rejects.toThrow();
+
+      // Reading with correct key succeeds
+      const readManifest = await readCaptureJournalManifest(
+        root,
+        'meeting-v4-basic',
+        { meetingKey },
+      );
+      expect(readManifest.meetingId).toBe('meeting-v4-basic');
+      expect(readManifest.schemaVersion).toBe(4);
+    });
+
+    it('appends and reads encrypted chunks with opaque filenames', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-chunks',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      const audioData = Buffer.from('v4-secret-audio-payload-12345');
+      const updated = await appendCaptureJournalChunk(root, {
+        meetingId: 'meeting-v4-chunks',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        format: 'wav',
+        data: audioData,
+        meetingKey,
+      });
+
+      expect(updated.entries).toHaveLength(1);
+      const entry = updated.entries[0];
+      expect(entry.relativePath).toMatch(
+        /meeting-v4-chunks\/capture-journal\/chunks\/[a-f0-9-]+\.enc$/,
+      );
+      expect(entry.ciphertextSha256).toBeDefined();
+
+      // Ensure ciphertext on disk does not contain plaintext string
+      const rawDiskBytes = await readFile(join(root, entry.relativePath));
+      expect(rawDiskBytes.includes(audioData)).toBe(false);
+
+      // Read chunk decrypted
+      const decrypted = await readCaptureJournalChunk(
+        root,
+        'meeting-v4-chunks',
+        entry.relativePath,
+        { meetingKey },
+      );
+      expect(decrypted.equals(audioData)).toBe(true);
+
+      // Read chunk with wrong key throws
+      await expect(
+        readCaptureJournalChunk(root, 'meeting-v4-chunks', entry.relativePath, {
+          meetingKey: randomBytes(32),
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects plaintext repairPath in v4 and requires in-memory repairData', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const manifest = (await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-repair',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      })) as any;
+
+      await authorizeCaptureJournalInterval(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 0,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        meetingKey,
+      });
+
+      const rawData = Buffer.from('raw-audio-stream-data');
+      await persistCaptureJournalRawChunk(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 1,
+        source: 'mic',
+        sequence: 0,
+        format: 'wav',
+        data: rawData,
+        meetingKey,
+      });
+
+      const rawChecksum = createHash('sha256').update(rawData).digest('hex');
+
+      // Attempting to complete with repairPath must throw
+      await expect(
+        completeCaptureJournalCapturedChunk(root, {
+          meetingId: 'meeting-v4-repair',
+          generation: manifest.generation,
+          expectedRevision: 2,
+          source: 'mic',
+          sequence: 0,
+          rawChecksumSha256: rawChecksum,
+          repairPath: join(root, 'some-plaintext-file.wav'),
+          meetingKey,
+        }),
+      ).rejects.toThrow(
+        'Capture journal v4 does not permit plaintext repairPath',
+      );
+
+      // Completing with in-memory repairData succeeds
+      const repairData = Buffer.from('repaired-flac-or-wav-audio');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 2,
+        source: 'mic',
+        sequence: 0,
+        rawChecksumSha256: rawChecksum,
+        repairData,
+        meetingKey,
+      });
+
+      const completedInterval = completed.manifest.intervals.find(
+        (i) => i.sequence === 0,
+      );
+      const micSource = completedInterval?.sources.mic;
+      expect(micSource?.disposition).toBe('captured');
+      if (micSource && micSource.disposition === 'captured') {
+        expect(micSource.repairRelativePath).toMatch(
+          /repair\/[a-f0-9-]+\.enc$/,
+        );
+
+        // Read decrypted repair chunk
+        const decryptedRepair = await readCaptureJournalChunk(
+          root,
+          'meeting-v4-repair',
+          micSource.repairRelativePath,
+          { meetingKey },
+        );
+        expect(decryptedRepair.equals(repairData)).toBe(true);
+      }
+    });
+
+    it('records sticky failure on manifest and prevents sealing', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-sticky',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      const failedManifest = await recordCaptureJournalStickyFailure(root, {
+        meetingId: 'meeting-v4-sticky',
+        code: 'authentication_failed',
+        reason: 'Decryption authentication tag verification failed',
+        meetingKey,
+      });
+
+      expect(failedManifest.stickyFailure).toBeDefined();
+      expect(failedManifest.stickyFailure?.message).toBe(
+        'Decryption authentication tag verification failed',
+      );
+      expect(failedManifest.stickyFailure?.code).toBe('authentication_failed');
+
+      // Attempting to seal must fail
+      await expect(
+        sealCaptureJournal(root, {
+          meetingId: 'meeting-v4-sticky',
+          endedAtMs: 5_000,
+          meetingKey,
+        }),
+      ).rejects.toThrow('Cannot seal capture journal: sticky failure recorded');
+    });
   });
 });

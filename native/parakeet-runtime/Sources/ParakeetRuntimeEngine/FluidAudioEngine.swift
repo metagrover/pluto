@@ -354,59 +354,134 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         audioURL: URL,
         language: String?,
         vocabulary: [String],
+        decoderIdentifier decoderId: UUID
+    ) async throws -> TranscriptionOutput {
+        try await transcribe(
+            audioInput: .fileURL(audioURL),
+            language: language,
+            vocabulary: vocabulary,
+            decoderIdentifier: decoderId
+        )
+    }
+
+    public func transcribe(
+        audioInput: AudioInput,
+        language: String?,
+        vocabulary: [String],
         decoderIdentifier _: UUID
     ) async throws -> TranscriptionOutput {
         guard let manager else { throw RuntimeFailure.transcriptionFailed }
         let languageHint = language.flatMap(Language.init(rawValue:))
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-        var result = try await manager.transcribe(
-            audioURL,
-            decoderState: &decoderState,
-            language: languageHint
-        )
 
-        var replacements: [VocabularyReplacement] = []
-        if !vocabulary.isEmpty {
-            (result, replacements) = try await rescore(
-                result,
-                audioURL: audioURL,
-                vocabulary: vocabulary
+        switch audioInput {
+        case .fileURL(let audioURL):
+            var result = try await manager.transcribe(
+                audioURL,
+                decoderState: &decoderState,
+                language: languageHint
+            )
+
+            var replacements: [VocabularyReplacement] = []
+            if !vocabulary.isEmpty {
+                (result, replacements) = try await rescore(
+                    result,
+                    audioURL: audioURL,
+                    vocabulary: vocabulary
+                )
+            }
+
+            let recognizedWords = buildWordTimings(from: result.tokenTimings ?? []).map {
+                TranscriptionWord(
+                    text: $0.word,
+                    startSeconds: $0.startTime,
+                    endSeconds: $0.endTime
+                )
+            }
+            let reconciledWords = reconcileVocabularyTimings(
+                words: recognizedWords,
+                replacements: replacements
+            )
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let audioFile = try AVAudioFile(forReading: audioURL)
+            let fileDuration = audioFile.processingFormat.sampleRate > 0
+                ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
+                : 0
+            let durationSeconds = max(Double(result.duration), fileDuration)
+            let words = try normalizeWordTimings(
+                reconciledWords,
+                durationSeconds: durationSeconds
+            )
+            return TranscriptionOutput(
+                text: text,
+                confidence: Double(result.confidence),
+                durationSeconds: durationSeconds,
+                words: words,
+                noSpeech: text.isEmpty
+            )
+
+        case .pcmSamples(let samples, let sampleRate):
+            let samples16k: [Float]
+            if sampleRate != 16000 {
+                samples16k = try AudioConverter().resample(samples, from: sampleRate)
+            } else {
+                samples16k = samples
+            }
+
+            var result = try await manager.transcribe(
+                samples16k,
+                decoderState: &decoderState,
+                language: languageHint
+            )
+
+            var replacements: [VocabularyReplacement] = []
+            if !vocabulary.isEmpty {
+                (result, replacements) = try await rescoreSamples(
+                    result,
+                    samples: samples16k,
+                    vocabulary: vocabulary
+                )
+            }
+
+            let recognizedWords = buildWordTimings(from: result.tokenTimings ?? []).map {
+                TranscriptionWord(
+                    text: $0.word,
+                    startSeconds: $0.startTime,
+                    endSeconds: $0.endTime
+                )
+            }
+            let reconciledWords = reconcileVocabularyTimings(
+                words: recognizedWords,
+                replacements: replacements
+            )
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let durationSeconds = max(Double(result.duration), Double(samples16k.count) / 16000.0)
+            let words = try normalizeWordTimings(
+                reconciledWords,
+                durationSeconds: durationSeconds
+            )
+            return TranscriptionOutput(
+                text: text,
+                confidence: Double(result.confidence),
+                durationSeconds: durationSeconds,
+                words: words,
+                noSpeech: text.isEmpty
             )
         }
-
-        let recognizedWords = buildWordTimings(from: result.tokenTimings ?? []).map {
-            TranscriptionWord(
-                text: $0.word,
-                startSeconds: $0.startTime,
-                endSeconds: $0.endTime
-            )
-        }
-        let reconciledWords = reconcileVocabularyTimings(
-            words: recognizedWords,
-            replacements: replacements
-        )
-        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let audioFile = try AVAudioFile(forReading: audioURL)
-        let fileDuration = audioFile.processingFormat.sampleRate > 0
-            ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
-            : 0
-        let durationSeconds = max(Double(result.duration), fileDuration)
-        let words = try normalizeWordTimings(
-            reconciledWords,
-            durationSeconds: durationSeconds
-        )
-        return TranscriptionOutput(
-            text: text,
-            confidence: Double(result.confidence),
-            durationSeconds: durationSeconds,
-            words: words,
-            noSpeech: text.isEmpty
-        )
     }
 
     private func rescore(
         _ result: ASRResult,
         audioURL: URL,
+        vocabulary: [String]
+    ) async throws -> (ASRResult, [VocabularyReplacement]) {
+        let samples = try AudioConverter().resampleAudioFile(audioURL)
+        return try await rescoreSamples(result, samples: samples, vocabulary: vocabulary)
+    }
+
+    private func rescoreSamples(
+        _ result: ASRResult,
+        samples: [Float],
         vocabulary: [String]
     ) async throws -> (ASRResult, [VocabularyReplacement]) {
         guard
@@ -426,7 +501,6 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
 
         let context = CustomVocabularyContext(terms: terms)
         let spotter = CtcKeywordSpotter(models: ctcModels, blankId: ctcModels.vocabulary.count)
-        let samples = try AudioConverter().resampleAudioFile(audioURL)
         let spotted = try await spotter.spotKeywordsWithLogProbs(
             audioSamples: samples,
             customVocabulary: context

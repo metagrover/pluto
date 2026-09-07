@@ -23,6 +23,7 @@ import type {
   CaptureJournalEntry,
   CaptureJournalManifest,
   CaptureJournalManifestV3,
+  CaptureJournalManifestV4,
   CaptureJournalSource,
 } from './captureJournal.ts';
 import {
@@ -425,11 +426,12 @@ export const stitchSealedCaptureJournalSource = async (
 
 const repairV3TranscriptGaps = async (
   rootDir: string,
-  initialManifest: CaptureJournalManifestV3,
+  initialManifest: CaptureJournalManifestV3 | CaptureJournalManifestV4,
   transcribeChunk: NonNullable<RecoveryDependencies['transcribeChunk']>,
   fallbackConfig?: RecoveryDependencies['transcriptionConfig'],
-): Promise<CaptureJournalManifestV3> => {
-  let manifest = initialManifest;
+): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> => {
+  let manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4 =
+    initialManifest;
   const templateRef = manifest.transcriptCheckpoints[0];
   const templateSidecar = templateRef
     ? (JSON.parse(
@@ -467,7 +469,10 @@ const repairV3TranscriptGaps = async (
       CaptureJournalSource,
       {
         existing:
-          | CaptureJournalManifestV3['transcriptCheckpoints'][number]
+          | (
+              | CaptureJournalManifestV3
+              | CaptureJournalManifestV4
+            )['transcriptCheckpoints'][number]
           | undefined;
         structurallyReusable: boolean;
         emptyWithActivity: boolean;
@@ -820,8 +825,11 @@ export const repairStoppingCaptureJournalTranscript = async (
 
 const acceptanceEvidenceMatchesSealedManifest = (
   activityInputs: unknown,
-  manifest: CaptureJournalManifestV3,
-  interval: CaptureJournalManifestV3['intervals'][number],
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4,
+  interval: (
+    | CaptureJournalManifestV3
+    | CaptureJournalManifestV4
+  )['intervals'][number],
 ) => {
   if (
     !manifest.activityEvidence ||
@@ -867,8 +875,11 @@ const acceptanceEvidenceMatchesSealedManifest = (
 
 async function readAcceptedSpeechSources(
   rootDir: string,
-  manifest: CaptureJournalManifestV3,
-  interval: CaptureJournalManifestV3['intervals'][number],
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4,
+  interval: (
+    | CaptureJournalManifestV3
+    | CaptureJournalManifestV4
+  )['intervals'][number],
 ): Promise<Set<CaptureJournalSource>> {
   const frame = manifest.acceptanceFrames.find(
     (candidate) => candidate.sequence === interval.sequence,
@@ -1611,11 +1622,12 @@ export const recoverInterruptedCaptureJournals = async (
         recovery: {
           source: 'capture_journal',
           journalSchemaVersion: manifest.schemaVersion,
-          checkpointEvidenceVerified: manifest.schemaVersion === 3,
+          checkpointEvidenceVerified:
+            manifest.schemaVersion === 3 || manifest.schemaVersion === 4,
           gapDetected,
           sourceScope,
           acknowledgedChunkCount:
-            manifest.schemaVersion === 3
+            manifest.schemaVersion === 3 || manifest.schemaVersion === 4
               ? manifest.intervals.length * manifest.expectedSources.length
               : micEntries.length + systemEntries.length,
           recoveredChunkCount:

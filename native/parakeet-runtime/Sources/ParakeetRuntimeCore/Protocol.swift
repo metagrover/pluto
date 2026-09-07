@@ -32,6 +32,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     public let targetId: String?
     public let live: LiveRequestMetadata?
     public let eou: EouRequestMetadata?
+    public let capability: ScopedMeetingCapability?
 
     public init(
         schemaVersion: Int = 1,
@@ -46,7 +47,8 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         vocabulary: [String]? = nil,
         targetId: String? = nil,
         live: LiveRequestMetadata? = nil,
-        eou: EouRequestMetadata? = nil
+        eou: EouRequestMetadata? = nil,
+        capability: ScopedMeetingCapability? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -61,6 +63,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         self.targetId = targetId
         self.live = live
         self.eou = eou
+        self.capability = capability
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
@@ -87,6 +90,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case audioStartSeconds
         case audioEndSeconds
         case pcmBase64
+        case capability
     }
 
     public init(from decoder: Decoder) throws {
@@ -106,6 +110,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         language = try container.decodeIfPresent(String.self, forKey: .language)
         vocabulary = try container.decodeIfPresent([String].self, forKey: .vocabulary)
         targetId = try container.decodeIfPresent(String.self, forKey: .targetId)
+        capability = try container.decodeIfPresent(ScopedMeetingCapability.self, forKey: .capability)
 
         switch method {
         case .prepare, .transcribe, .cancel, .shutdown:
@@ -328,6 +333,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(vocabulary, forKey: .vocabulary)
         try container.encodeIfPresent(targetId, forKey: .targetId)
+        try container.encodeIfPresent(capability, forKey: .capability)
         if let live {
             try container.encode(live.streamId, forKey: .streamId)
             try container.encode(live.source, forKey: .source)
@@ -397,9 +403,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case .prepare:
             return common.union([.modelRoot])
         case .transcribe:
-            return common.union([.audioPath, .language, .vocabulary])
+            return common.union([.audioPath, .language, .vocabulary, .capability])
         case .speakerEvidence:
-            return common.union([.mixedAudioPath, .micAudioPath, .systemAudioPath])
+            return common.union([.mixedAudioPath, .micAudioPath, .systemAudioPath, .capability])
         case .cancel:
             return common.union([.targetId])
         case .shutdown:

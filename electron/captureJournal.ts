@@ -14,6 +14,7 @@ import {
   parseCaptureActivityEvidence,
 } from '../src/utils/transcriptActivityEvidence.ts';
 import { canonicalizeTranscriptCheckpointConfig } from '../src/utils/transcriptCheckpointConfig.ts';
+import { EncryptedArtifactStore } from './crypto/encryptedArtifactStore.ts';
 
 export type CaptureJournalSource = 'mic' | 'system';
 export type CaptureJournalLifecycleState = 'recording' | 'sealed';
@@ -21,6 +22,18 @@ export type CaptureJournalLifecycleStateV3 =
   | 'recording'
   | 'stopping'
   | 'sealed';
+
+export type CaptureJournalStickyFailure = {
+  code:
+    | 'crypto_error'
+    | 'checksum_mismatch'
+    | 'authentication_failed'
+    | 'key_missing'
+    | 'envelope_truncated'
+    | 'tag_mismatch';
+  message: string;
+  occurredAtMs: number;
+};
 
 export type CaptureJournalEntry = {
   source: CaptureJournalSource;
@@ -30,6 +43,7 @@ export type CaptureJournalEntry = {
   format: string;
   byteCount: number;
   checksumSha256: string;
+  ciphertextSha256?: string;
   relativePath: string;
 };
 
@@ -58,6 +72,7 @@ export type CaptureIntervalSourceDisposition =
       disposition: 'raw_durable';
       rawChecksumSha256: string;
       rawRelativePath: string;
+      rawCiphertextSha256?: string;
       decodeDependency?: {
         anchorSequence: number;
         initializationChecksumSha256: string;
@@ -67,8 +82,10 @@ export type CaptureIntervalSourceDisposition =
       disposition: 'captured';
       rawChecksumSha256: string;
       rawRelativePath: string;
+      rawCiphertextSha256?: string;
       repairChecksumSha256: string;
       repairRelativePath: string;
+      repairCiphertextSha256?: string;
     }
   | {
       disposition: 'verified_silence' | 'source_unavailable' | 'missing';
@@ -143,15 +160,70 @@ export type CaptureJournalManifestV3 = CaptureJournalManifestBase & {
   activityEvidence?: CaptureActivityEvidence;
 };
 
+export type CaptureJournalManifestV4 = CaptureJournalManifestBase & {
+  schemaVersion: 4;
+  keyId: string;
+  envelopeVersion: number;
+  lifecycleState: CaptureJournalLifecycleStateV3;
+  generation: string;
+  revision: number;
+  expectedSources: CaptureJournalSource[];
+  sourceAvailability: Record<
+    CaptureJournalSource,
+    'available' | 'unavailable_at_start' | 'failed_during_capture'
+  >;
+  intervals: CaptureIntervalLedgerEntry[];
+  transcriptCheckpoints: CaptureTranscriptCheckpointRef[];
+  acceptanceFrames: CaptureTranscriptAcceptanceFrame[];
+  stoppingWatermarks?: Record<CaptureJournalSource, number>;
+  activityEvidence?: CaptureActivityEvidence;
+  stickyFailure?: CaptureJournalStickyFailure | null;
+};
+
+export type CaptureJournalLocator = {
+  schemaVersion: 4;
+  envelopeVersion: number;
+  meetingId: string;
+  keyId: string;
+  generation: string;
+  encryptedManifestRelativePath: string;
+  ciphertextSha256: string;
+  plaintextSha256: string;
+};
+
 export type CaptureJournalManifest =
   | CaptureJournalManifestV1
   | CaptureJournalManifestV2
-  | CaptureJournalManifestV3;
+  | CaptureJournalManifestV3
+  | CaptureJournalManifestV4;
 
-type CreateCaptureJournalArgs = {
+export type AudioKeyProvider = (
+  meetingId: string,
+) => Buffer | null | Promise<Buffer | null>;
+
+let registeredAudioKeyProvider: AudioKeyProvider | null = null;
+
+export const setCaptureJournalAudioKeyProvider = (
+  provider: AudioKeyProvider | null,
+) => {
+  registeredAudioKeyProvider = provider;
+};
+
+export const getCaptureJournalAudioKey = async (
+  meetingId: string,
+): Promise<Buffer | null> => {
+  if (registeredAudioKeyProvider) {
+    return await registeredAudioKeyProvider(meetingId);
+  }
+  return null;
+};
+
+export type CreateCaptureJournalArgs = {
   meetingId: string;
   startedAtMs: number;
-  schemaVersion?: 2 | 3;
+  schemaVersion?: 2 | 3 | 4;
+  keyId?: string;
+  meetingKey?: Buffer;
   expectedSources?: CaptureJournalSource[];
   sourceAvailability?: Partial<CaptureJournalManifestV3['sourceAvailability']>;
 };
@@ -164,18 +236,23 @@ type AppendCaptureJournalChunkArgs = {
   chunkEndSec: number;
   format: string;
   data: Buffer | Uint8Array;
+  meetingKey?: Buffer;
 };
 
 type SealCaptureJournalArgs = {
   meetingId: string;
   endedAtMs: number;
+  meetingKey?: Buffer;
 };
 
-export type StopCaptureJournalArgs = V3MutationIdentity;
+export type StopCaptureJournalArgs = V3MutationIdentity & {
+  meetingKey?: Buffer;
+};
 
 type UpdateCaptureJournalActivityEvidenceArgs = {
   meetingId: string;
   activityEvidence: CaptureActivityEvidence;
+  meetingKey?: Buffer;
 };
 
 type V3MutationIdentity = {
@@ -188,6 +265,7 @@ export type AuthorizeCaptureJournalIntervalArgs = V3MutationIdentity & {
   sequence: number;
   chunkStartSec: number;
   chunkEndSec: number;
+  meetingKey?: Buffer;
 };
 
 export type PersistCaptureJournalRawChunkArgs = V3MutationIdentity & {
@@ -195,6 +273,7 @@ export type PersistCaptureJournalRawChunkArgs = V3MutationIdentity & {
   sequence: number;
   format: string;
   data: Buffer | Uint8Array;
+  meetingKey?: Buffer;
   decodeDependency?: {
     anchorSequence: number;
     initializationChecksumSha256: string;
@@ -207,6 +286,7 @@ export type CompleteCaptureJournalCapturedChunkArgs = V3MutationIdentity & {
   rawChecksumSha256: string;
   repairData?: Buffer | Uint8Array;
   repairPath?: string;
+  meetingKey?: Buffer;
 };
 
 export type CaptureTranscriptCheckpointV1 = {
@@ -395,7 +475,8 @@ const validateCaptureJournalManifest = async (
   if (
     manifest.schemaVersion !== 1 &&
     manifest.schemaVersion !== 2 &&
-    manifest.schemaVersion !== 3
+    manifest.schemaVersion !== 3 &&
+    manifest.schemaVersion !== 4
   ) {
     throw new Error(
       `Unsupported capture journal schema version: ${String(manifest.schemaVersion)}`,
@@ -440,13 +521,39 @@ const validateCaptureJournalManifest = async (
     if (typeof entry.format !== 'string') {
       return invalidManifest('entry format');
     }
-    const expectedPath = `${artifactRootRelativePath}/chunks/${entry.source}-${padSequence(entry.sequence)}.${formatToExtension(entry.format)}`;
-    if (entry.relativePath !== expectedPath) {
-      return invalidManifest('entry path');
+    if (manifest.schemaVersion === 4) {
+      assertSafeRelativePath(
+        entry.relativePath,
+        artifactRootRelativePath,
+        'chunks',
+      );
+      if (entry.ciphertextSha256) {
+        assertChecksum(entry.ciphertextSha256, 'entry ciphertext checksum');
+      }
+    } else {
+      const expectedPath = `${artifactRootRelativePath}/chunks/${entry.source}-${padSequence(entry.sequence)}.${formatToExtension(entry.format)}`;
+      if (entry.relativePath !== expectedPath) {
+        return invalidManifest('entry path');
+      }
     }
   }
 
-  if (manifest.schemaVersion === 3) {
+  if (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) {
+    if (manifest.schemaVersion === 4) {
+      if (
+        typeof manifest.keyId !== 'string' ||
+        !manifest.keyId.trim() ||
+        manifest.envelopeVersion !== 1
+      ) {
+        return invalidManifest('v4 keyId or envelopeVersion');
+      }
+      if (manifest.stickyFailure) {
+        const failure = manifest.stickyFailure as CaptureJournalStickyFailure;
+        if (!failure.code || !failure.message) {
+          return invalidManifest('v4 sticky failure');
+        }
+      }
+    }
     if (
       typeof manifest.generation !== 'string' ||
       manifest.generation.length < 16 ||
@@ -457,7 +564,7 @@ const validateCaptureJournalManifest = async (
       !Array.isArray(manifest.transcriptCheckpoints) ||
       !Array.isArray(manifest.acceptanceFrames)
     ) {
-      return invalidManifest('v3 shape');
+      return invalidManifest('v3/v4 shape');
     }
     if (
       manifest.expectedSources.some(
@@ -529,6 +636,12 @@ const validateCaptureJournalManifest = async (
           disposition.disposition === 'captured'
         ) {
           assertChecksum(disposition.rawChecksumSha256, 'raw checksum');
+          if (disposition.rawCiphertextSha256) {
+            assertChecksum(
+              disposition.rawCiphertextSha256,
+              'raw ciphertext checksum',
+            );
+          }
           assertSafeRelativePath(
             disposition.rawRelativePath,
             artifactRootRelativePath,
@@ -537,6 +650,12 @@ const validateCaptureJournalManifest = async (
         }
         if (disposition.disposition === 'captured') {
           assertChecksum(disposition.repairChecksumSha256, 'repair checksum');
+          if (disposition.repairCiphertextSha256) {
+            assertChecksum(
+              disposition.repairCiphertextSha256,
+              'repair ciphertext checksum',
+            );
+          }
           assertSafeRelativePath(
             disposition.repairRelativePath,
             artifactRootRelativePath,
@@ -591,7 +710,11 @@ const validateCaptureJournalManifest = async (
     }
   }
 
-  if (manifest.schemaVersion === 2 || manifest.schemaVersion === 3) {
+  if (
+    manifest.schemaVersion === 2 ||
+    manifest.schemaVersion === 3 ||
+    manifest.schemaVersion === 4
+  ) {
     if (manifest.activityEvidence === undefined) {
       if (manifest.lifecycleState === 'sealed') {
         throw new Error('capture_activity_missing');
@@ -625,9 +748,58 @@ const writeManifest = async (
   rootDir: string,
   manifest: CaptureJournalManifest,
   durability: CaptureJournalDurability,
+  meetingKeyOverride?: Buffer,
 ) => {
   const artifactRootPath = getArtifactRootPath(rootDir, manifest.meetingId);
   await mkdir(artifactRootPath, { recursive: true });
+
+  if (manifest.schemaVersion === 4) {
+    const key =
+      meetingKeyOverride ??
+      (await getCaptureJournalAudioKey(manifest.meetingId));
+    if (!key) {
+      throw new Error(
+        `audio_key_unavailable: Meeting audio key is required to write encrypted capture journal for ${manifest.meetingId}`,
+      );
+    }
+    const manifestEncRelativePath = `${manifest.artifactRootRelativePath}/manifest.enc`;
+    const manifestEncPath = join(rootDir, manifestEncRelativePath);
+    const plaintext = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8');
+
+    const writeResult = await EncryptedArtifactStore.writeEncryptedFile(
+      manifestEncPath,
+      plaintext,
+      key,
+      {
+        keyId: manifest.keyId,
+        meetingId: manifest.meetingId,
+        generation: manifest.generation,
+        artifactKind: 'manifest',
+        source: 'none',
+        sequence: manifest.revision,
+      },
+    );
+
+    const locator: CaptureJournalLocator = {
+      schemaVersion: 4,
+      envelopeVersion: 1,
+      meetingId: manifest.meetingId,
+      keyId: manifest.keyId,
+      generation: manifest.generation,
+      encryptedManifestRelativePath: manifestEncRelativePath,
+      ciphertextSha256: writeResult.ciphertextSha256,
+      plaintextSha256: writeResult.plaintextSha256,
+    };
+
+    const manifestPath = getManifestPath(rootDir, manifest.meetingId);
+    const tempPath = `${manifestPath}.tmp`;
+    await writeFile(tempPath, JSON.stringify(locator, null, 2));
+    await durability.syncFile(tempPath);
+    await rename(tempPath, manifestPath);
+    await durability.syncDirectory(dirname(manifestPath));
+    return;
+  }
+
   const manifestPath = getManifestPath(rootDir, manifest.meetingId);
   const tempPath = `${manifestPath}.tmp`;
   await writeFile(tempPath, JSON.stringify(manifest, null, 2));
@@ -639,14 +811,41 @@ const writeManifest = async (
 export const readCaptureJournalManifest = async (
   rootDir: string,
   meetingId: string,
+  options?: { meetingKey?: Buffer },
 ): Promise<CaptureJournalManifest> => {
   const normalizedMeetingId = normalizeMeetingId(meetingId);
   const manifestPath = getManifestPath(rootDir, normalizedMeetingId);
   const raw = await readFile(manifestPath, 'utf8');
-  return await validateCaptureJournalManifest(
-    JSON.parse(raw),
-    normalizedMeetingId,
-  );
+  const parsed = JSON.parse(raw);
+
+  if (parsed && typeof parsed === 'object' && parsed.schemaVersion === 4) {
+    const key =
+      options?.meetingKey ??
+      (await getCaptureJournalAudioKey(normalizedMeetingId));
+    if (!key) {
+      throw new Error(
+        `audio_key_unavailable: Meeting audio key is required to decrypt capture journal for ${normalizedMeetingId}`,
+      );
+    }
+    const locator = parsed as CaptureJournalLocator;
+    const encPath = join(rootDir, locator.encryptedManifestRelativePath);
+    const decrypted = await EncryptedArtifactStore.readEncryptedFile(
+      encPath,
+      key,
+      {
+        keyId: locator.keyId,
+        meetingId: normalizedMeetingId,
+        artifactKind: 'manifest',
+      },
+    );
+    const manifestJson = JSON.parse(decrypted.plaintext.toString('utf8'));
+    return await validateCaptureJournalManifest(
+      manifestJson,
+      normalizedMeetingId,
+    );
+  }
+
+  return await validateCaptureJournalManifest(parsed, normalizedMeetingId);
 };
 
 export const createCaptureJournal = async (
@@ -661,7 +860,9 @@ export const createCaptureJournal = async (
   const artifactRootPath = getArtifactRootPath(rootDir, normalizedMeetingId);
 
   try {
-    return await readCaptureJournalManifest(rootDir, normalizedMeetingId);
+    return await readCaptureJournalManifest(rootDir, normalizedMeetingId, {
+      meetingKey: args.meetingKey,
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -672,6 +873,42 @@ export const createCaptureJournal = async (
         mkdir(join(artifactRootPath, directory), { recursive: true }),
     ),
   );
+
+  if (args.schemaVersion === 4) {
+    const key =
+      args.meetingKey ?? (await getCaptureJournalAudioKey(normalizedMeetingId));
+    if (!key) {
+      throw new Error(
+        `audio_key_unavailable: Meeting audio key is required to create capture journal v4 for ${normalizedMeetingId}`,
+      );
+    }
+    const keyId = args.keyId ?? randomUUID();
+    const expectedSources = args.expectedSources ?? ['mic', 'system'];
+    const manifest: CaptureJournalManifestV4 = {
+      schemaVersion: 4,
+      meetingId: normalizedMeetingId,
+      keyId,
+      envelopeVersion: 1,
+      artifactRootRelativePath,
+      manifestRelativePath: `${artifactRootRelativePath}/${MANIFEST_FILE}`,
+      lifecycleState: 'recording',
+      startedAtMs: normalizeTimestampMs(startedAtMs),
+      endedAtMs: null,
+      entries: [],
+      generation: randomUUID(),
+      revision: 0,
+      expectedSources,
+      sourceAvailability: {
+        mic: args.sourceAvailability?.mic ?? 'available',
+        system: args.sourceAvailability?.system ?? 'available',
+      },
+      intervals: [],
+      transcriptCheckpoints: [],
+      acceptanceFrames: [],
+    };
+    await writeManifest(rootDir, manifest, durability, key);
+    return manifest;
+  }
 
   if (args.schemaVersion !== 3) {
     const manifest: CaptureJournalManifestV2 = {
@@ -741,12 +978,14 @@ const serializeJournalMutation = async <T>(
   }
 };
 
-const requireV3Mutation = (
+export const requireV3OrV4Mutation = <
+  T extends CaptureJournalManifestV3 | CaptureJournalManifestV4,
+>(
   manifest: CaptureJournalManifest,
   identity: V3MutationIdentity,
-): CaptureJournalManifestV3 => {
-  if (manifest.schemaVersion !== 3) {
-    throw new Error('Capture journal v3 mutation requires schema version 3');
+): T => {
+  if (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) {
+    throw new Error('Capture journal mutation requires schema version 3 or 4');
   }
   if (manifest.generation !== identity.generation) {
     throw new Error('Capture journal generation mismatch');
@@ -759,7 +998,7 @@ const requireV3Mutation = (
       `Capture journal for ${manifest.meetingId} is already sealed`,
     );
   }
-  return manifest;
+  return manifest as T;
 };
 
 const writeSidecar = async (
@@ -783,10 +1022,14 @@ export const authorizeCaptureJournalInterval = async (
   rootDir: string,
   args: AuthorizeCaptureJournalIntervalArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV3> =>
+): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: args.meetingKey,
+      }),
       args,
     );
     if (manifest.lifecycleState !== 'recording') {
@@ -801,7 +1044,7 @@ export const authorizeCaptureJournalInterval = async (
     if (manifest.intervals.some((interval) => interval.sequence === sequence)) {
       throw new Error('Capture journal interval conflict');
     }
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       intervals: [
@@ -817,7 +1060,7 @@ export const authorizeCaptureJournalInterval = async (
         },
       ],
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, args.meetingKey);
     return next;
   });
 
@@ -825,10 +1068,14 @@ export const persistCaptureJournalRawChunk = async (
   rootDir: string,
   args: PersistCaptureJournalRawChunkArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV3> =>
+): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: args.meetingKey,
+      }),
       args,
     );
     const interval = manifest.intervals.find(
@@ -846,14 +1093,47 @@ export const persistCaptureJournalRawChunk = async (
     }
     const data = toBuffer(args.data);
     const rawChecksumSha256 = computeChecksum(data);
-    const extension = formatToExtension(args.format);
-    const rawRelativePath = `${manifest.artifactRootRelativePath}/chunks/${args.source}-${padSequence(args.sequence)}.${extension}`;
-    const rawPath = join(rootDir, rawRelativePath);
-    const tempPath = `${rawPath}.tmp`;
-    await writeFile(tempPath, data);
-    await durability.syncFile(tempPath);
-    await rename(tempPath, rawPath);
-    await durability.syncDirectory(dirname(rawPath));
+
+    let rawRelativePath: string;
+    let rawCiphertextSha256: string | undefined;
+
+    if (manifest.schemaVersion === 4) {
+      const key =
+        args.meetingKey ??
+        (await getCaptureJournalAudioKey(manifest.meetingId));
+      if (!key) {
+        throw new Error(
+          `audio_key_unavailable: Meeting audio key required for chunk persistence in ${manifest.meetingId}`,
+        );
+      }
+      const opaqueFilename = `${randomUUID()}.enc`;
+      rawRelativePath = `${manifest.artifactRootRelativePath}/chunks/${opaqueFilename}`;
+      const rawPath = join(rootDir, rawRelativePath);
+      const writeResult = await EncryptedArtifactStore.writeEncryptedFile(
+        rawPath,
+        data,
+        key,
+        {
+          keyId: manifest.keyId,
+          meetingId: manifest.meetingId,
+          generation: manifest.generation,
+          artifactKind: 'raw',
+          source: args.source,
+          sequence: args.sequence,
+        },
+      );
+      rawCiphertextSha256 = writeResult.ciphertextSha256;
+    } else {
+      const extension = formatToExtension(args.format);
+      rawRelativePath = `${manifest.artifactRootRelativePath}/chunks/${args.source}-${padSequence(args.sequence)}.${extension}`;
+      const rawPath = join(rootDir, rawRelativePath);
+      const tempPath = `${rawPath}.tmp`;
+      await writeFile(tempPath, data);
+      await durability.syncFile(tempPath);
+      await rename(tempPath, rawPath);
+      await durability.syncDirectory(dirname(rawPath));
+    }
+
     const nextInterval: CaptureIntervalLedgerEntry = {
       ...interval,
       sources: {
@@ -862,20 +1142,21 @@ export const persistCaptureJournalRawChunk = async (
           disposition: 'raw_durable',
           rawChecksumSha256,
           rawRelativePath,
+          ...(rawCiphertextSha256 ? { rawCiphertextSha256 } : {}),
           ...(args.decodeDependency
             ? { decodeDependency: args.decodeDependency }
             : {}),
         },
       },
     };
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       intervals: manifest.intervals.map((candidate) =>
         candidate.sequence === interval.sequence ? nextInterval : candidate,
       ),
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, args.meetingKey);
     return next;
   });
 
@@ -884,12 +1165,16 @@ export const completeCaptureJournalCapturedChunk = async (
   args: CompleteCaptureJournalCapturedChunkArgs,
   durability: CaptureJournalDurability = defaultDurability,
 ): Promise<{
-  manifest: CaptureJournalManifestV3;
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4;
   receipt: CaptureAudioReceipt;
 }> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: args.meetingKey,
+      }),
       args,
     );
     const interval = manifest.intervals.find(
@@ -903,6 +1188,13 @@ export const completeCaptureJournalCapturedChunk = async (
     ) {
       throw new Error('Capture journal captured transition conflict');
     }
+
+    if (manifest.schemaVersion === 4 && args.repairPath) {
+      throw new Error(
+        'Capture journal v4 does not permit plaintext repairPath; provide in-memory repairData',
+      );
+    }
+
     let repairData: Buffer;
     if (args.repairData) {
       repairData = toBuffer(args.repairData);
@@ -922,21 +1214,60 @@ export const completeCaptureJournalCapturedChunk = async (
       throw new Error('Capture journal repair artifact is required');
     }
     const repairChecksumSha256 = computeChecksum(repairData);
-    const repairRelativePath = `${manifest.artifactRootRelativePath}/repair/${args.source}-${padSequence(args.sequence)}.wav`;
-    const repairPath = join(rootDir, repairRelativePath);
-    const tempPath = `${repairPath}.tmp`;
-    await writeFile(tempPath, repairData);
-    await durability.syncFile(tempPath);
-    await rename(tempPath, repairPath);
-    await durability.syncDirectory(dirname(repairPath));
+
+    let repairRelativePath: string;
+    let repairCiphertextSha256: string | undefined;
+
+    if (manifest.schemaVersion === 4) {
+      const key =
+        args.meetingKey ??
+        (await getCaptureJournalAudioKey(manifest.meetingId));
+      if (!key) {
+        throw new Error(
+          `audio_key_unavailable: Meeting audio key required for chunk completion in ${manifest.meetingId}`,
+        );
+      }
+      const opaqueFilename = `${randomUUID()}.enc`;
+      repairRelativePath = `${manifest.artifactRootRelativePath}/repair/${opaqueFilename}`;
+      const repairPath = join(rootDir, repairRelativePath);
+      const writeResult = await EncryptedArtifactStore.writeEncryptedFile(
+        repairPath,
+        repairData,
+        key,
+        {
+          keyId: manifest.keyId,
+          meetingId: manifest.meetingId,
+          generation: manifest.generation,
+          artifactKind: 'repair',
+          source: args.source,
+          sequence: args.sequence,
+        },
+      );
+      repairCiphertextSha256 = writeResult.ciphertextSha256;
+    } else {
+      repairRelativePath = `${manifest.artifactRootRelativePath}/repair/${args.source}-${padSequence(args.sequence)}.wav`;
+      const repairPath = join(rootDir, repairRelativePath);
+      const tempPath = `${repairPath}.tmp`;
+      await writeFile(tempPath, repairData);
+      await durability.syncFile(tempPath);
+      await rename(tempPath, repairPath);
+      await durability.syncDirectory(dirname(repairPath));
+    }
+
     const captured: CaptureIntervalSourceDisposition = {
       disposition: 'captured',
       rawChecksumSha256: raw.rawChecksumSha256,
       rawRelativePath: raw.rawRelativePath,
+      ...(raw.rawCiphertextSha256
+        ? { rawCiphertextSha256: raw.rawCiphertextSha256 }
+        : {}),
       repairChecksumSha256,
       repairRelativePath,
+      ...(repairCiphertextSha256
+        ? { repairCiphertextSha256: repairCiphertextSha256 }
+        : {}),
     };
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       intervals: manifest.intervals.map((candidate) =>
@@ -948,7 +1279,7 @@ export const completeCaptureJournalCapturedChunk = async (
           : candidate,
       ),
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, args.meetingKey);
     return {
       manifest: next,
       receipt: {
@@ -1013,16 +1344,17 @@ export const appendCaptureTranscriptCheckpoint = async (
   args: AppendCaptureTranscriptCheckpointArgs,
   durability: CaptureJournalDurability = defaultDurability,
 ): Promise<{
-  manifest: CaptureJournalManifestV3;
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4;
   checkpoint: CaptureTranscriptCheckpointRef;
 }> =>
   serializeJournalMutation(rootDir, args.receipt.meetingId, async () => {
     const current = await readCaptureJournalManifest(
       rootDir,
       args.receipt.meetingId,
+      { meetingKey: (args as any).meetingKey },
     );
     if (
-      current.schemaVersion !== 3 ||
+      (current.schemaVersion !== 3 && current.schemaVersion !== 4) ||
       current.generation !== args.receipt.generation
     ) {
       throw new Error('Capture journal generation mismatch');
@@ -1094,12 +1426,12 @@ export const appendCaptureTranscriptCheckpoint = async (
       disposition: args.disposition ?? 'transcribed',
       relativePath,
     };
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       transcriptCheckpoints: [...manifest.transcriptCheckpoints, checkpoint],
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, (args as any).meetingKey);
     return { manifest: next, checkpoint };
   });
 
@@ -1108,16 +1440,17 @@ export const replaceCaptureTranscriptCheckpoint = async (
   args: ReplaceCaptureTranscriptCheckpointArgs,
   durability: CaptureJournalDurability = defaultDurability,
 ): Promise<{
-  manifest: CaptureJournalManifestV3;
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4;
   checkpoint: CaptureTranscriptCheckpointRef;
 }> =>
   serializeJournalMutation(rootDir, args.receipt.meetingId, async () => {
     const manifest = await readCaptureJournalManifest(
       rootDir,
       args.receipt.meetingId,
+      { meetingKey: (args as any).meetingKey },
     );
     if (
-      manifest.schemaVersion !== 3 ||
+      (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) ||
       manifest.generation !== args.receipt.generation ||
       manifest.lifecycleState === 'sealed'
     ) {
@@ -1156,6 +1489,7 @@ export const replaceCaptureTranscriptCheckpoint = async (
     );
     const captured = interval?.sources[args.receipt.source];
     if (
+      !interval ||
       captured?.disposition !== 'captured' ||
       captured.repairChecksumSha256 !== args.receipt.checksumSha256
     ) {
@@ -1177,12 +1511,12 @@ export const replaceCaptureTranscriptCheckpoint = async (
     };
     const transcriptCheckpoints = [...manifest.transcriptCheckpoints];
     transcriptCheckpoints[index] = checkpoint;
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       transcriptCheckpoints,
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, (args as any).meetingKey);
     return { manifest: next, checkpoint };
   });
 
@@ -1191,7 +1525,7 @@ export const promoteCaptureTranscriptCheckpoint = async (
   args: PromoteCaptureTranscriptCheckpointArgs,
   durability: CaptureJournalDurability = defaultDurability,
 ): Promise<{
-  manifest: CaptureJournalManifestV3;
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4;
   checkpoint: CaptureTranscriptCheckpointRef;
   frame: CaptureTranscriptAcceptanceFrame;
 }> =>
@@ -1199,9 +1533,10 @@ export const promoteCaptureTranscriptCheckpoint = async (
     const manifest = await readCaptureJournalManifest(
       rootDir,
       args.receipt.meetingId,
+      { meetingKey: (args as any).meetingKey },
     );
     if (
-      manifest.schemaVersion !== 3 ||
+      (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) ||
       manifest.generation !== args.receipt.generation ||
       manifest.lifecycleState === 'sealed'
     ) {
@@ -1292,6 +1627,7 @@ export const promoteCaptureTranscriptCheckpoint = async (
       manifest.meetingId,
       priorFrame.relativePath,
       priorFrame.acceptedChecksumSha256,
+      { meetingKey: (args as any).meetingKey },
     );
     const priorFrameSidecar = JSON.parse(
       priorFrameBytes.toString('utf8'),
@@ -1417,18 +1753,23 @@ export const promoteCaptureTranscriptCheckpoint = async (
         }
       }
     }
-    const frameRevision = (priorFrame.revision ?? 0) + 1;
-    const frameRelativePath = `${manifest.artifactRootRelativePath}/acceptance-frames/${padSequence(interval.sequence)}-r${frameRevision}.json`;
+    const frameIndexToUpdate = manifest.acceptanceFrames.findIndex(
+      (candidate) => candidate.sequence === interval.sequence,
+    );
+    const existing = manifest.acceptanceFrames[frameIndexToUpdate];
+    const replacementRevision = existing ? (existing.revision ?? 0) + 1 : 0;
+    const frameRelativePath = `${manifest.artifactRootRelativePath}/acceptance-frames/${padSequence(interval.sequence)}${replacementRevision > 0 ? `-r${replacementRevision}` : ''}.json`;
     const frameBytes = Buffer.from(JSON.stringify(acceptance.sidecar));
+    const frameChecksumSha256 = computeChecksum(frameBytes);
     const frame: CaptureTranscriptAcceptanceFrame = {
       sequence: interval.sequence,
       micCheckpointChecksumSha256: promotedDigests.mic,
       systemCheckpointChecksumSha256: promotedDigests.system,
       arbitrationVersion: 'chunk_arbitration_v1',
       activityEvidenceDigestSha256: acceptance.activityEvidenceDigestSha256,
-      acceptedChecksumSha256: computeChecksum(frameBytes),
+      acceptedChecksumSha256: frameChecksumSha256,
       relativePath: frameRelativePath,
-      revision: frameRevision,
+      revision: replacementRevision,
     };
 
     await writeSidecar(
@@ -1447,13 +1788,13 @@ export const promoteCaptureTranscriptCheckpoint = async (
     transcriptCheckpoints[checkpointIndex] = checkpoint;
     const acceptanceFrames = [...manifest.acceptanceFrames];
     acceptanceFrames[frameIndex] = frame;
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       transcriptCheckpoints,
       acceptanceFrames,
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, (args as any).meetingKey);
     return { manifest: next, checkpoint, frame };
   });
 
@@ -1462,12 +1803,16 @@ export const appendCaptureTranscriptAcceptanceFrame = async (
   args: AppendCaptureTranscriptAcceptanceFrameArgs,
   durability: CaptureJournalDurability = defaultDurability,
 ): Promise<{
-  manifest: CaptureJournalManifestV3;
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4;
   frame: CaptureTranscriptAcceptanceFrame;
 }> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: (args as any).meetingKey,
+      }),
       args,
     );
     assertChecksum(
@@ -1584,12 +1929,12 @@ export const appendCaptureTranscriptAcceptanceFrame = async (
           candidate.sequence === frame.sequence ? frame : candidate,
         )
       : [...manifest.acceptanceFrames, frame];
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       acceptanceFrames,
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, (args as any).meetingKey);
     return { manifest: next, frame };
   });
 
@@ -1598,11 +1943,16 @@ export const readCaptureJournalSidecar = async (
   meetingId: string,
   relativePath: string,
   checksumSha256: string,
+  options?: { meetingKey?: Buffer },
 ): Promise<Buffer> => {
-  const manifest = await readCaptureJournalManifest(rootDir, meetingId);
+  const manifest = await readCaptureJournalManifest(
+    rootDir,
+    meetingId,
+    options,
+  );
   assertChecksum(checksumSha256, 'sidecar checksum');
   const allowed =
-    manifest.schemaVersion === 3 &&
+    (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) &&
     [
       ...manifest.transcriptCheckpoints.map((entry) => ({
         path: entry.relativePath,
@@ -1648,6 +1998,7 @@ const appendCaptureJournalChunkUnlocked = async (
     {
       meetingId,
       startedAtMs: 0,
+      meetingKey: args.meetingKey,
     },
     durability,
   );
@@ -1669,6 +2020,85 @@ const appendCaptureJournalChunkUnlocked = async (
   const format = String(args.format || 'bin');
   const data = toBuffer(args.data);
   const checksumSha256 = computeChecksum(data);
+
+  if (manifest.schemaVersion === 4) {
+    const key = args.meetingKey ?? (await getCaptureJournalAudioKey(meetingId));
+    if (!key) {
+      throw new Error(
+        `audio_key_unavailable: Meeting audio key required for chunk persistence in ${meetingId}`,
+      );
+    }
+    const existing = manifest.entries.find(
+      (entry) => entry.source === args.source && entry.sequence === sequence,
+    );
+    if (existing) {
+      if (
+        existing.chunkStartSec !== chunkStartSec ||
+        existing.chunkEndSec !== chunkEndSec ||
+        existing.format !== format ||
+        existing.byteCount !== data.byteLength ||
+        existing.checksumSha256 !== checksumSha256
+      ) {
+        throw new Error(
+          `Capture journal conflict for ${meetingId} ${args.source}#${sequence}`,
+        );
+      }
+      const decrypted = await EncryptedArtifactStore.readEncryptedFile(
+        join(rootDir, existing.relativePath),
+        key,
+        {
+          keyId: manifest.keyId,
+          meetingId,
+          artifactKind: 'chunk',
+        },
+      );
+      if (computeChecksum(decrypted.plaintext) !== existing.checksumSha256) {
+        throw new Error(
+          `Capture journal artifact checksum mismatch for ${meetingId} ${args.source}#${sequence}`,
+        );
+      }
+      return manifest;
+    }
+
+    const opaqueFilename = `${randomUUID()}.enc`;
+    const relativePath = `${manifest.artifactRootRelativePath}/chunks/${opaqueFilename}`;
+    const chunkPath = join(rootDir, relativePath);
+    const writeResult = await EncryptedArtifactStore.writeEncryptedFile(
+      chunkPath,
+      data,
+      key,
+      {
+        keyId: manifest.keyId,
+        meetingId: manifest.meetingId,
+        generation: manifest.generation,
+        artifactKind: 'chunk',
+        source: args.source,
+        sequence,
+      },
+    );
+
+    const nextManifest: CaptureJournalManifestV4 = {
+      ...manifest,
+      revision: manifest.revision + 1,
+      entries: [
+        ...manifest.entries,
+        {
+          source: args.source,
+          sequence,
+          chunkStartSec,
+          chunkEndSec,
+          format,
+          byteCount: data.byteLength,
+          checksumSha256,
+          relativePath,
+          ciphertextSha256: writeResult.ciphertextSha256,
+        },
+      ],
+    };
+    await writeManifest(rootDir, nextManifest, durability, key);
+    return nextManifest;
+  }
+
   const relativePath = `${manifest.artifactRootRelativePath}/chunks/${args.source}-${padSequence(sequence)}.${formatToExtension(format)}`;
 
   const existing = manifest.entries.find(
@@ -1776,11 +2206,13 @@ const updateCaptureJournalActivityEvidenceUnlocked = async (
   rootDir: string,
   args: UpdateCaptureJournalActivityEvidenceArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV2 | CaptureJournalManifestV3> => {
+): Promise<
+  CaptureJournalManifestV2 | CaptureJournalManifestV3 | CaptureJournalManifestV4
+> => {
   const meetingId = normalizeMeetingId(args.meetingId);
   const manifest = await createCaptureJournal(
     rootDir,
-    { meetingId, startedAtMs: 0 },
+    { meetingId, startedAtMs: 0, meetingKey: args.meetingKey },
     durability,
   );
   if (manifest.schemaVersion === 1) {
@@ -1814,14 +2246,17 @@ const updateCaptureJournalActivityEvidenceUnlocked = async (
     }
   }
 
-  const nextManifest: CaptureJournalManifestV2 | CaptureJournalManifestV3 = {
+  const nextManifest:
+    | CaptureJournalManifestV2
+    | CaptureJournalManifestV3
+    | CaptureJournalManifestV4 = {
     ...manifest,
     activityEvidence,
-    ...(manifest.schemaVersion === 3
+    ...(manifest.schemaVersion === 3 || manifest.schemaVersion === 4
       ? { revision: manifest.revision + 1 }
       : {}),
   };
-  await writeManifest(rootDir, nextManifest, durability);
+  await writeManifest(rootDir, nextManifest, durability, args.meetingKey);
   return nextManifest;
 };
 
@@ -1829,19 +2264,28 @@ export const updateCaptureJournalActivityEvidence = async (
   rootDir: string,
   args: UpdateCaptureJournalActivityEvidenceArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV2 | CaptureJournalManifestV3> =>
+): Promise<
+  CaptureJournalManifestV2 | CaptureJournalManifestV3 | CaptureJournalManifestV4
+> =>
   serializeJournalMutation(rootDir, args.meetingId, () =>
     updateCaptureJournalActivityEvidenceUnlocked(rootDir, args, durability),
   );
 
 export const markCaptureJournalSourceFailed = async (
   rootDir: string,
-  args: V3MutationIdentity & { source: CaptureJournalSource },
+  args: V3MutationIdentity & {
+    source: CaptureJournalSource;
+    meetingKey?: Buffer;
+  },
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV3> =>
+): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: args.meetingKey,
+      }),
       args,
     );
     if (args.source !== 'mic' && args.source !== 'system') {
@@ -1850,7 +2294,7 @@ export const markCaptureJournalSourceFailed = async (
     if (manifest.sourceAvailability[args.source] === 'failed_during_capture') {
       return manifest;
     }
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       revision: manifest.revision + 1,
       sourceAvailability: {
@@ -1858,7 +2302,7 @@ export const markCaptureJournalSourceFailed = async (
         [args.source]: 'failed_during_capture',
       },
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, args.meetingKey);
     return next;
   });
 
@@ -1866,10 +2310,14 @@ export const stopCaptureJournal = async (
   rootDir: string,
   args: StopCaptureJournalArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV3> =>
+): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> =>
   serializeJournalMutation(rootDir, args.meetingId, async () => {
-    const manifest = requireV3Mutation(
-      await readCaptureJournalManifest(rootDir, args.meetingId),
+    const manifest = requireV3OrV4Mutation<
+      CaptureJournalManifestV3 | CaptureJournalManifestV4
+    >(
+      await readCaptureJournalManifest(rootDir, args.meetingId, {
+        meetingKey: args.meetingKey,
+      }),
       args,
     );
     if (manifest.lifecycleState !== 'recording') {
@@ -1908,27 +2356,193 @@ export const stopCaptureJournal = async (
         }),
       ) as CaptureIntervalLedgerEntry['sources'],
     }));
-    const next: CaptureJournalManifestV3 = {
+    const next: CaptureJournalManifestV3 | CaptureJournalManifestV4 = {
       ...manifest,
       lifecycleState: 'stopping',
       revision: manifest.revision + 1,
       stoppingWatermarks,
       intervals,
     };
-    await writeManifest(rootDir, next, durability);
+    await writeManifest(rootDir, next, durability, args.meetingKey);
     return next;
   });
 
+export const recordCaptureJournalStickyFailure = async (
+  rootDir: string,
+  args: {
+    meetingId: string;
+    reason: string;
+    code?: CaptureJournalStickyFailure['code'];
+    details?: unknown;
+    meetingKey?: Buffer;
+  },
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifestV4> =>
+  serializeJournalMutation(rootDir, args.meetingId, async () => {
+    const manifest = await readCaptureJournalManifest(rootDir, args.meetingId, {
+      meetingKey: args.meetingKey,
+    });
+    if (manifest.schemaVersion !== 4) {
+      throw new Error(
+        'Sticky failures are only supported on schema v4 capture journals',
+      );
+    }
+    const stickyFailure: CaptureJournalStickyFailure = {
+      code: args.code ?? 'authentication_failed',
+      message: args.reason,
+      occurredAtMs: Date.now(),
+      ...(args.details ? { details: args.details } : {}),
+    };
+    const next: CaptureJournalManifestV4 = {
+      ...manifest,
+      revision: manifest.revision + 1,
+      stickyFailure,
+    };
+    await writeManifest(rootDir, next, durability, args.meetingKey);
+    return next;
+  });
+
+export const readCaptureJournalChunk = async (
+  rootDir: string,
+  meetingId: string,
+  relativePath: string,
+  options?: { meetingKey?: Buffer },
+): Promise<Buffer> => {
+  const normalizedMeetingId = normalizeMeetingId(meetingId);
+  const manifest = await readCaptureJournalManifest(
+    rootDir,
+    normalizedMeetingId,
+    options,
+  );
+
+  let expectedChecksum: string | null = null;
+  let artifactKind: 'raw' | 'repair' | 'chunk' = 'raw';
+  let source: CaptureJournalSource = 'mic';
+  let sequence = 0;
+
+  if (
+    manifest.schemaVersion === 2 ||
+    manifest.schemaVersion === 3 ||
+    manifest.schemaVersion === 4
+  ) {
+    const entry = manifest.entries.find((e) => e.relativePath === relativePath);
+    if (entry) {
+      expectedChecksum = entry.checksumSha256;
+      artifactKind = 'chunk';
+      source = entry.source;
+      sequence = entry.sequence;
+    }
+  }
+
+  if (
+    !expectedChecksum &&
+    (manifest.schemaVersion === 3 || manifest.schemaVersion === 4)
+  ) {
+    for (const interval of manifest.intervals) {
+      for (const [src, disposition] of Object.entries(interval.sources) as [
+        CaptureJournalSource,
+        CaptureIntervalSourceDisposition,
+      ][]) {
+        if (
+          'rawRelativePath' in disposition &&
+          disposition.rawRelativePath === relativePath
+        ) {
+          expectedChecksum = disposition.rawChecksumSha256;
+          artifactKind = 'raw';
+          source = src;
+          sequence = interval.sequence;
+          break;
+        }
+        if (
+          'repairRelativePath' in disposition &&
+          disposition.repairRelativePath === relativePath
+        ) {
+          expectedChecksum = disposition.repairChecksumSha256;
+          artifactKind = 'repair';
+          source = src;
+          sequence = interval.sequence;
+          break;
+        }
+      }
+      if (expectedChecksum) break;
+    }
+  }
+
+  if (!expectedChecksum) {
+    throw new Error(
+      `Capture journal chunk is not referenced in manifest: ${relativePath}`,
+    );
+  }
+
+  const fullPath = join(rootDir, relativePath);
+
+  if (manifest.schemaVersion === 4) {
+    const key =
+      options?.meetingKey ??
+      (await getCaptureJournalAudioKey(normalizedMeetingId));
+    if (!key) {
+      throw new Error(
+        'audio_key_unavailable: Meeting audio key required to read encrypted chunk',
+      );
+    }
+
+    try {
+      const decrypted = await EncryptedArtifactStore.readEncryptedFile(
+        fullPath,
+        key,
+        {
+          keyId: manifest.keyId,
+          meetingId: normalizedMeetingId,
+          artifactKind,
+          source,
+          sequence,
+        },
+      );
+      const computedChecksum = computeChecksum(decrypted.plaintext);
+      if (computedChecksum !== expectedChecksum) {
+        throw new Error(
+          `Capture journal chunk checksum mismatch: expected ${expectedChecksum}, got ${computedChecksum}`,
+        );
+      }
+      return decrypted.plaintext;
+    } catch (err: any) {
+      try {
+        await recordCaptureJournalStickyFailure(rootDir, {
+          meetingId: normalizedMeetingId,
+          code: 'crypto_error',
+          reason: err.message || 'Chunk read/decrypt failure',
+          meetingKey: key,
+        });
+      } catch {
+        // preserve primary error
+      }
+      throw err;
+    }
+  }
+
+  const bytes = await readFile(fullPath);
+  const computedChecksum = computeChecksum(bytes);
+  if (computedChecksum !== expectedChecksum) {
+    throw new Error(
+      `Capture journal chunk checksum mismatch: expected ${expectedChecksum}, got ${computedChecksum}`,
+    );
+  }
+  return bytes;
+};
+
 const sealCaptureJournalUnlocked = async (
   rootDir: string,
-  { meetingId, endedAtMs }: SealCaptureJournalArgs,
+  { meetingId, endedAtMs, meetingKey }: SealCaptureJournalArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV2 | CaptureJournalManifestV3> => {
+): Promise<
+  CaptureJournalManifestV2 | CaptureJournalManifestV3 | CaptureJournalManifestV4
+> => {
   const manifest = await createCaptureJournal(
     rootDir,
     {
       meetingId,
       startedAtMs: 0,
+      meetingKey,
     },
     durability,
   );
@@ -1940,7 +2554,15 @@ const sealCaptureJournalUnlocked = async (
   if (manifest.schemaVersion === 1) {
     throw new Error('Cannot seal legacy capture journal');
   }
-  if (manifest.schemaVersion === 3) {
+  if (
+    manifest.schemaVersion === 4 &&
+    (manifest as CaptureJournalManifestV4).stickyFailure
+  ) {
+    throw new Error(
+      `Cannot seal capture journal: sticky failure recorded: ${(manifest as CaptureJournalManifestV4).stickyFailure?.message}`,
+    );
+  }
+  if (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) {
     if (manifest.lifecycleState !== 'stopping') {
       throw new Error('Capture journal must enter stopping before seal');
     }
@@ -1969,20 +2591,26 @@ const sealCaptureJournalUnlocked = async (
     return manifest;
   }
 
-  const nextManifest: CaptureJournalManifestV2 | CaptureJournalManifestV3 = {
+  const nextManifest:
+    | CaptureJournalManifestV2
+    | CaptureJournalManifestV3
+    | CaptureJournalManifestV4 = {
     ...manifest,
     activityEvidence: parsedEvidence.evidence,
     lifecycleState: 'sealed',
     endedAtMs: normalizedEndedAtMs,
-    ...(manifest.schemaVersion === 3
+    ...(manifest.schemaVersion === 3 || manifest.schemaVersion === 4
       ? { revision: manifest.revision + 1 }
       : {}),
   };
-  await writeManifest(rootDir, nextManifest, durability);
-  const durableManifest = await readCaptureJournalManifest(rootDir, meetingId);
+  await writeManifest(rootDir, nextManifest, durability, meetingKey);
+  const durableManifest = await readCaptureJournalManifest(rootDir, meetingId, {
+    meetingKey,
+  });
   if (
     durableManifest.schemaVersion !== 2 &&
-    durableManifest.schemaVersion !== 3
+    durableManifest.schemaVersion !== 3 &&
+    durableManifest.schemaVersion !== 4
   ) {
     throw new Error('Cannot seal legacy capture journal');
   }
@@ -1993,7 +2621,9 @@ export const sealCaptureJournal = async (
   rootDir: string,
   args: SealCaptureJournalArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifestV2 | CaptureJournalManifestV3> =>
+): Promise<
+  CaptureJournalManifestV2 | CaptureJournalManifestV3 | CaptureJournalManifestV4
+> =>
   serializeJournalMutation(rootDir, args.meetingId, () =>
     sealCaptureJournalUnlocked(rootDir, args, durability),
   );

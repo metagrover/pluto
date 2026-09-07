@@ -31,6 +31,16 @@ export type TranscriptionPolicy = {
   wholeSession: boolean;
 };
 
+export type ScopedMeetingCapability = {
+  version: 1;
+  meetingId: string;
+  keyId: string;
+  meetingKeyBase64: string;
+  generation?: string;
+  allowedOperations?: string[];
+  expiresAtMs?: number;
+};
+
 export type TranscriptionRequest = {
   meetingId: string;
   role: TranscriptionPolicyRole;
@@ -40,6 +50,7 @@ export type TranscriptionRequest = {
   vocabulary?: string[];
   vocabularyPolicyVersion?: string;
   signal?: AbortSignal;
+  capability?: ScopedMeetingCapability;
 };
 
 export type TranscriptionResultMetadata = {

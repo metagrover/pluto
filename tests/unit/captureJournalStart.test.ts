@@ -251,4 +251,59 @@ describe('handleAudioCaptureJournalStart', () => {
     expect(snapshots).toEqual([]);
     expect(captureJournal.createCaptureJournal).not.toHaveBeenCalled();
   });
+
+  it('creates schemaVersion 4 capture journal with meeting key when audioKeyStore is provided', async () => {
+    const fakeKey = Buffer.alloc(32, 7);
+    const audioKeyStore = {
+      getOrCreateMeetingAudioKey: vi.fn().mockReturnValue({
+        keyId: 'key-uuid-123',
+        meetingKey: fakeKey,
+      }),
+    };
+
+    vi.mocked(captureJournal.createCaptureJournal).mockResolvedValue({
+      schemaVersion: 4,
+      keyId: 'key-uuid-123',
+    } as any);
+
+    const manifest = await handleAudioCaptureJournalStart({
+      ...defaultOptions,
+      audioKeyStore,
+    });
+
+    expect(audioKeyStore.getOrCreateMeetingAudioKey).toHaveBeenCalledWith(
+      'test-meeting',
+    );
+    expect(captureJournal.createCaptureJournal).toHaveBeenCalledWith(
+      '/test',
+      expect.objectContaining({
+        meetingId: 'test-meeting',
+        schemaVersion: 4,
+        keyId: 'key-uuid-123',
+        meetingKey: fakeKey,
+      }),
+    );
+    expect(manifest).toEqual({ schemaVersion: 4, keyId: 'key-uuid-123' });
+  });
+
+  it('fails closed and releases lease if meeting key acquisition fails', async () => {
+    const audioKeyStore = {
+      getOrCreateMeetingAudioKey: vi.fn().mockImplementation(() => {
+        throw new Error('sqlite disk error');
+      }),
+    };
+
+    await expect(
+      handleAudioCaptureJournalStart({
+        ...defaultOptions,
+        audioKeyStore,
+      }),
+    ).rejects.toThrow('audio_key_failure');
+
+    expect(defaultOptions.captureSessionLease.release).toHaveBeenCalledWith(
+      'test-meeting',
+      1,
+    );
+    expect(captureJournal.createCaptureJournal).not.toHaveBeenCalled();
+  });
 });

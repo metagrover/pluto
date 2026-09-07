@@ -767,4 +767,66 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Regenerate Enhanced Notes');
     expect(markup).not.toMatch(/validat|needs attention|retry transcript/i);
   });
+
+  it('renders audio retained badge and Delete audio now button for finalized meeting with audio', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-retention-test',
+          title: 'Weekly Sync',
+          meeting_type: 'Recording',
+          created_at: '2026-08-01T10:00:00.000Z',
+          started_at: '2026-08-01T10:00:00.000Z',
+          finalization_status: 'finalized',
+          transcript_status: 'validated',
+          audio_retention_status: 'retained',
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Weekly Sync"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Audio retained');
+    expect(markup).toContain('Delete audio now');
+  });
+
+  it('renders audio deleted badge and hides Delete audio now button when audio is deleted', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-deleted-audio-test',
+          title: 'Weekly Sync',
+          meeting_type: 'Recording',
+          created_at: '2026-08-01T10:00:00.000Z',
+          started_at: '2026-08-01T10:00:00.000Z',
+          finalization_status: 'finalized',
+          transcript_status: 'validated',
+          audio_retention_status: 'deleted',
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Weekly Sync"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Audio deleted');
+    expect(markup).not.toContain('Delete audio now');
+  });
 });

@@ -32,6 +32,13 @@ import type {
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
+  type AudioRetentionPolicy,
+  deleteMeetingAudio,
+  getAudioRetentionPolicy,
+  runAudioRetentionSweep,
+  setAudioRetentionPolicy,
+} from './audioRetention';
+import {
   CalendarHelperClient,
   resolveCalendarHelperPath,
 } from './calendar/client';
@@ -58,6 +65,7 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import { getAudioKeyStore } from './crypto/audioKeyStore';
 import { closeApplicationDatabase } from './database/applicationDatabase';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
@@ -1188,10 +1196,30 @@ app.whenReady().then(async () => {
     if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
     const meetingId = String(request?.meetingId || '');
     const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    let capability = request?.capability;
+    if (!capability && meetingId) {
+      const audioKeyStore = getAudioKeyStore();
+      const keyResult = audioKeyStore?.getMeetingAudioKey(meetingId);
+      if (keyResult) {
+        capability = {
+          version: 1,
+          meetingId,
+          keyId: keyResult.keyId,
+          meetingKeyBase64: keyResult.meetingKey.toString('base64'),
+          generation: 'gen-1',
+          allowedOperations: ['transcribe', 'speakerEvidence'],
+          expiresAtMs: Date.now() + 5 * 60 * 1000,
+        };
+      }
+    }
     beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
     try {
-      return await parakeetFinalClient.transcribe({ ...request, signal });
+      return await parakeetFinalClient.transcribe({
+        ...request,
+        capability,
+        signal,
+      });
     } finally {
       endMeetingTranscription(meetingId || null);
       endTranscriptionWork();
@@ -1202,13 +1230,31 @@ app.whenReady().then(async () => {
     if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
     const meetingId = String(request?.meetingId || '');
     const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    let capability = request?.capability;
+    if (!capability && meetingId) {
+      const audioKeyStore = getAudioKeyStore();
+      const keyResult = audioKeyStore?.getMeetingAudioKey(meetingId);
+      if (keyResult) {
+        capability = {
+          version: 1,
+          meetingId,
+          keyId: keyResult.keyId,
+          meetingKeyBase64: keyResult.meetingKey.toString('base64'),
+          generation: 'gen-1',
+          allowedOperations: ['transcribe', 'speakerEvidence'],
+          expiresAtMs: Date.now() + 5 * 60 * 1000,
+        };
+      }
+    }
     beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
     try {
       return await parakeetFinalClient.speakerEvidence({
+        meetingId,
         mixedAudioPath: String(request?.mixedAudioPath || ''),
         micAudioPath: String(request?.micAudioPath || ''),
         systemAudioPath: String(request?.systemAudioPath || ''),
+        capability,
         signal,
       });
     } finally {
@@ -1642,6 +1688,7 @@ app.whenReady().then(async () => {
           const self = db.identityStore.getSelfPersonId();
           return () => db.identityStore.recordCapture(id, 'local', self);
         },
+        audioKeyStore: getAudioKeyStore(),
       });
     },
   );
@@ -2897,6 +2944,14 @@ app.whenReady().then(async () => {
           console.warn('[Pluto] Failed to delete capture journal:', error);
         },
       );
+      try {
+        getAudioKeyStore()?.deleteMeetingAudioKey(meetingId);
+      } catch (error) {
+        console.warn(
+          '[Pluto] Failed to delete audio key on meeting delete:',
+          error,
+        );
+      }
 
       // Broadcast to renderer that a meeting has been deleted
       if (win && !win.isDestroyed()) {
@@ -3559,6 +3614,48 @@ app.whenReady().then(async () => {
   ipcMain.handle('SET_SETTING', (_event, { key, value }) =>
     db.setSetting(key, value),
   );
+
+  // Audio retention handlers
+  ipcMain.handle('GET_AUDIO_RETENTION_POLICY', () =>
+    getAudioRetentionPolicy(db.db),
+  );
+  ipcMain.handle(
+    'SET_AUDIO_RETENTION_POLICY',
+    async (_event, policy: AudioRetentionPolicy) => {
+      setAudioRetentionPolicy(db.db, policy);
+      if (policy !== 'keep_indefinitely') {
+        void runAudioRetentionSweep({
+          sqlite: db.db,
+          audioKeyStore: getAudioKeyStore(),
+          artifactsRootDir: getMeetingArtifactsRootDir(),
+          isMeetingActive: (id) => captureSessionLease.isMeetingActive(id),
+        }).catch((err) => {
+          console.warn('[Pluto] Audio retention sweep error:', err);
+        });
+      }
+      return { success: true };
+    },
+  );
+  ipcMain.handle('DELETE_MEETING_AUDIO', async (_event, meetingId: string) => {
+    const result = await deleteMeetingAudio(meetingId, {
+      sqlite: db.db,
+      audioKeyStore: getAudioKeyStore(),
+      artifactsRootDir: getMeetingArtifactsRootDir(),
+      isMeetingActive: (id) => captureSessionLease.isMeetingActive(id),
+    });
+    if (result.success && win && !win.isDestroyed()) {
+      win.webContents.send('MEETING_AUDIO_DELETED', meetingId);
+    }
+    return result;
+  });
+  ipcMain.handle('RUN_AUDIO_RETENTION_SWEEP', async () => {
+    return await runAudioRetentionSweep({
+      sqlite: db.db,
+      audioKeyStore: getAudioKeyStore(),
+      artifactsRootDir: getMeetingArtifactsRootDir(),
+      isMeetingActive: (id) => captureSessionLease.isMeetingActive(id),
+    });
+  });
 
   // LLM handlers
   const emptyValueSignals = (): InternalSignalDocument => ({
@@ -5415,6 +5512,18 @@ app.whenReady().then(async () => {
       error,
     );
   }
+
+  // Run audio retention sweep shortly after startup
+  setTimeout(() => {
+    void runAudioRetentionSweep({
+      sqlite: db.db,
+      audioKeyStore: getAudioKeyStore(),
+      artifactsRootDir: getMeetingArtifactsRootDir(),
+      isMeetingActive: (id) => captureSessionLease.isMeetingActive(id),
+    }).catch((error) => {
+      console.warn('[Pluto] Audio retention sweep error:', error);
+    });
+  }, 10_000);
 
   // Create Tray Icon
   const dockIconPath = path.join(process.env.VITE_PUBLIC, 'dock-icon.png');

@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   CheckCircle2,
   Cloud,
   Cpu,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
+import type { AudioRetentionPolicy } from '../../types';
 import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
@@ -49,6 +51,8 @@ interface SettingsTabProps {
   setCalendarPromptEnabled?: (val: boolean) => void;
   silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
   setSilenceAutoStopDuration?: (val: '3' | '5' | '10' | 'disabled') => void;
+  audioRetentionPolicy?: AudioRetentionPolicy;
+  setAudioRetentionPolicy?: (val: AudioRetentionPolicy) => void;
 }
 
 const providerOptions = [
@@ -179,6 +183,8 @@ export const SettingsTab = ({
   setCalendarPromptEnabled,
   silenceAutoStopDuration = '5',
   setSilenceAutoStopDuration,
+  audioRetentionPolicy: propAudioRetentionPolicy,
+  setAudioRetentionPolicy: setPropAudioRetentionPolicy,
 }: SettingsTabProps) => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
     initialTab ?? 'personal',
@@ -189,6 +195,67 @@ export const SettingsTab = ({
       setActiveSettingsTab(initialTab);
     }
   }, [initialTab]);
+
+  const [retentionPolicy, setRetentionPolicy] = useState<AudioRetentionPolicy>(
+    propAudioRetentionPolicy || '7_days',
+  );
+  const [showImmediateDeletionWarning, setShowImmediateDeletionWarning] =
+    useState(false);
+  const [pendingPolicy, setPendingPolicy] =
+    useState<AudioRetentionPolicy | null>(null);
+
+  useEffect(() => {
+    if (propAudioRetentionPolicy) {
+      setRetentionPolicy(propAudioRetentionPolicy);
+    }
+  }, [propAudioRetentionPolicy]);
+
+  useEffect(() => {
+    if (!propAudioRetentionPolicy) {
+      void window.ipcRenderer
+        ?.invoke('GET_AUDIO_RETENTION_POLICY')
+        ?.then((val: unknown) => {
+          if (
+            val === 'after_finalization' ||
+            val === '7_days' ||
+            val === '30_days' ||
+            val === 'keep_indefinitely'
+          ) {
+            setRetentionPolicy(val);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [propAudioRetentionPolicy]);
+
+  const applyRetentionPolicy = (val: AudioRetentionPolicy) => {
+    setRetentionPolicy(val);
+    setPropAudioRetentionPolicy?.(val);
+    void window.ipcRenderer?.invoke('SET_AUDIO_RETENTION_POLICY', val);
+    persistSetting('audio_retention_policy', val);
+  };
+
+  const handleRetentionChange = (val: AudioRetentionPolicy) => {
+    if (val === 'after_finalization') {
+      setPendingPolicy('after_finalization');
+      setShowImmediateDeletionWarning(true);
+      return;
+    }
+    applyRetentionPolicy(val);
+  };
+
+  const confirmImmediateDeletion = () => {
+    setShowImmediateDeletionWarning(false);
+    if (pendingPolicy) {
+      applyRetentionPolicy(pendingPolicy);
+      setPendingPolicy(null);
+    }
+  };
+
+  const cancelImmediateDeletion = () => {
+    setShowImmediateDeletionWarning(false);
+    setPendingPolicy(null);
+  };
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
@@ -479,6 +546,32 @@ export const SettingsTab = ({
             </SettingsRow>
           </Section>
 
+          <Section title="Audio Retention & Privacy">
+            <SettingsRow
+              label="Audio Retention Period"
+              helper="Controls how long meeting audio recordings are kept. Transcripts and notes are always preserved."
+              actionControl={false}
+            >
+              <SearchSelect
+                ariaLabel="Audio retention period"
+                value={retentionPolicy}
+                searchable={false}
+                options={[
+                  { value: '7_days', label: '7 days (Default)' },
+                  { value: '30_days', label: '30 days' },
+                  {
+                    value: 'after_finalization',
+                    label: 'Delete immediately after finalization',
+                  },
+                  { value: 'keep_indefinitely', label: 'Keep indefinitely' },
+                ]}
+                onValueChange={(value) => {
+                  handleRetentionChange(value as AudioRetentionPolicy);
+                }}
+              />
+            </SettingsRow>
+          </Section>
+
           <Section title="Export">
             <SettingsRow
               label="Include transcript in exports"
@@ -648,6 +741,58 @@ export const SettingsTab = ({
               </button>
             </SettingsRow>
           </Section>
+        </div>
+      ) : null}
+
+      {showImmediateDeletionWarning ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="retention-warning-title"
+          className="fixed inset-0 z-[1200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+        >
+          <div className="relative w-full max-w-md rounded-2xl border border-pro-border bg-pro-surface p-6 shadow-2xl text-pro-text-main">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h3
+                id="retention-warning-title"
+                className="text-base font-semibold"
+              >
+                Delete audio after finalization?
+              </h3>
+            </div>
+            <p className="text-sm text-pro-text-muted leading-relaxed mb-4">
+              Deleting audio immediately after finalization saves disk space and
+              minimizes data retention, but permanently disables:
+            </p>
+            <ul className="text-xs text-pro-text-muted list-disc list-inside space-y-1 mb-4">
+              <li>Re-transcription and model upgrades</li>
+              <li>Speaker audio sample playback and new enrollment evidence</li>
+              <li>Audio-based gap repair</li>
+            </ul>
+            <p className="text-xs text-pro-text-muted mb-6">
+              Transcripts, notes, summaries, and existing voice profiles remain
+              intact.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelImmediateDeletion}
+                className="rounded-lg border border-pro-border px-4 py-2 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmImmediateDeletion}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+              >
+                Confirm Deletion Policy
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
