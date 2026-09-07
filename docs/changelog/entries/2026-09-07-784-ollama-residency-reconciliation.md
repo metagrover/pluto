@@ -1,7 +1,7 @@
 ### Reconcile retained Ollama models before local generation
 
 - **Issue:** [#784](https://github.com/metagrover/pluto/issues/784)
-- **PR:** Pending.
+- **PR:** [#787](https://github.com/metagrover/pluto/pull/787)
 - **Changed:** Query Ollama's bounded process-residency endpoint inside serialized local-inference admission, retain an equivalent target model, and unload deduplicated non-target residents before generation.
 - **Why:** Ollama's one-hour keep-alive survives Pluto process restarts, while Pluto's previous active-model record existed only in process memory and could miss a stale resident model during a switch.
 - **Replaced:** Process-local active-model tracking as the authority for deciding whether a local model switch requires cleanup.
