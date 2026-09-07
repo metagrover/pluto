@@ -1,7 +1,10 @@
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CalendarEvent } from '../../../electron/calendar/types';
-import type { LiveConversationSnapshot } from '../../services/liveTranscription/liveConversationProjection';
+import {
+  type LiveConversationSnapshot,
+  liveConversationTranscriptSegments,
+} from '../../services/liveTranscription/liveConversationProjection';
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
@@ -107,6 +110,9 @@ export const ZenMode = ({
     setMeetingParticipants((previous) => [...previous, participant]);
     setParticipantInput('');
   };
+  const askPlutoTranscript = model.liveConversation
+    ? liveConversationTranscriptSegments(model.liveConversation)
+    : liveTranscript;
   return (
     <main className="recording-workspace">
       <RecordingCaptureBar
@@ -151,7 +157,7 @@ export const ZenMode = ({
             title: meetingTitle,
             participants: meetingParticipants,
             notes: currentNotes,
-            transcript: liveTranscript,
+            transcript: askPlutoTranscript,
             interimText,
           }}
         />
