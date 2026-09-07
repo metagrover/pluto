@@ -1711,11 +1711,11 @@ const runMeetingNotes = async (
           ? error.code
           : error.code === 'notes_review_budget_exhausted'
             ? 'deadline_budget'
-          : error.code === 'notes_audit_invalid' &&
-              (error.validationCategory === 'schema' ||
-                error.validationCategory === 'guardrail')
-            ? error.validationCategory
-            : null
+            : error.code === 'notes_audit_invalid' &&
+                (error.validationCategory === 'schema' ||
+                  error.validationCategory === 'guardrail')
+              ? error.validationCategory
+              : null
         : null;
     if (!fallbackReason) throw error;
     audited = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
