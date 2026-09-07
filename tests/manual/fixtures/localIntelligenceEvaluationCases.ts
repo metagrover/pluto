@@ -396,7 +396,7 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
             ],
             requiredTerms: [
               'no pricing decision|pricing remains undecided',
-              'no follow-up action|no action was assigned',
+              'no follow-up action|no follow-up assigned|no action was assigned',
             ],
             critical: true,
             modality: 'fact',
@@ -550,7 +550,9 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
                 excerpt: 'no pricing decision was made',
               },
             ],
-            requiredTerms: ['no pricing decision|pricing remains undecided'],
+            requiredTerms: [
+              'no pricing decision|pricing remains undecided|no pricing was approved',
+            ],
             critical: true,
             modality: 'fact',
           },
@@ -757,7 +759,7 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
             ],
             requiredTerms: [
               'dashboard',
-              'not approved|did not approve|unapproved',
+              'not approved|did not approve|unapproved|no public dashboard approved',
               'no action|unassigned',
             ],
             critical: true,
@@ -1176,6 +1178,15 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
 const normalized = (value: string): string =>
   value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim();
 
+const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
+  let index = text.indexOf(phrase);
+  while (index >= 0) {
+    if (!/\bno\s+$/.test(text.slice(0, index))) return true;
+    index = text.indexOf(phrase, index + phrase.length);
+  }
+  return false;
+};
+
 export const sourceTextForCase = (
   candidate: LocalIntelligenceEvaluationCase,
   sourceId: string,
@@ -1212,7 +1223,7 @@ export const scoreGoldOutput = (
     ),
   }));
   const forbiddenMatches = candidate.gold.forbiddenClaims.filter((claim) =>
-    text.includes(normalized(claim)),
+    containsUnnegatedPhrase(text, normalized(claim)),
   );
   return {
     requiredCount: claimResults.length,

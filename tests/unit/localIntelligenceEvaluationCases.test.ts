@@ -157,6 +157,50 @@ describe('local intelligence evaluation corpus', () => {
     });
   });
 
+  it('accepts truthful negated notes claims while rejecting affirmative forbidden claims', () => {
+    const examples = [
+      {
+        id: 'notes-ordinary-no-decision-no-action',
+        truthful: 'No pricing decision and no follow-up assigned.',
+        affirmative:
+          'No pricing decision was made, but a follow-up was assigned.',
+        forbidden: 'follow-up was assigned',
+      },
+      {
+        id: 'notes-long-dense-three-position-evidence',
+        truthful:
+          'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. No pricing was approved.',
+        affirmative:
+          'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. Pricing was approved.',
+        forbidden: 'pricing was approved',
+      },
+      {
+        id: 'notes-long-dense-decisions-and-boundaries',
+        truthful:
+          'Retain seven days of pilot telemetry. Ravi owns the deletion test results due January 9. Pilot access remains limited to the research team. No public dashboard approved and no action assigned.',
+        affirmative:
+          'Retain seven days of pilot telemetry. Ravi owns the deletion test results due January 9. Pilot access remains limited to the research team. The public dashboard was approved, though no action was assigned.',
+        forbidden: 'public dashboard was approved',
+      },
+    ];
+
+    for (const example of examples) {
+      const candidate = localIntelligenceEvaluationCases.find(
+        (item) => item.id === example.id,
+      );
+      if (!candidate) throw new Error(`${example.id} fixture missing`);
+
+      expect(
+        scoreGoldOutput(candidate, example.truthful),
+        `${example.id} truthful output`,
+      ).toMatchObject({ passed: true, forbiddenMatches: [] });
+      expect(
+        scoreGoldOutput(candidate, example.affirmative).forbiddenMatches,
+        `${example.id} affirmative output`,
+      ).toContain(example.forbidden);
+    }
+  });
+
   it('rejects invented causation and accepts explicit no-change output', () => {
     const association = localIntelligenceEvaluationCases.find(
       (item) => item.id === 'cross-meeting-association-no-causation',
