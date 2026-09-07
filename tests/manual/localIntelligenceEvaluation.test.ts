@@ -20,6 +20,7 @@ import {
   localIntelligenceEvaluationCases,
   scoreGoldOutput,
 } from './fixtures/localIntelligenceEvaluationCases';
+import { scoreNotesGoldOutput } from './fixtures/localIntelligenceNotesScoring';
 
 const enabled = process.env.RUN_LOCAL_INTELLIGENCE_EVALUATION === '1';
 const dryRun = process.env.LOCAL_INTELLIGENCE_EVALUATION_DRY_RUN === '1';
@@ -536,9 +537,10 @@ realSuite('opt-in local intelligence production-path replay', () => {
                   compactWriterContract: true,
                 },
               );
-              const goldScore = scoreGoldOutput(
+              const goldScore = scoreNotesGoldOutput(
                 candidate,
-                JSON.stringify(analysis),
+                analysis,
+                source,
               );
               results.push({
                 caseId: candidate.id,

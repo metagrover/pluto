@@ -120,6 +120,26 @@ describe('local intelligence evaluation corpus', () => {
     }
   });
 
+  it('requires an explicit visible-block projection for every notes claim', () => {
+    for (const candidate of localIntelligenceEvaluationCases) {
+      if (candidate.lane !== 'meeting_notes') continue;
+      for (const claim of candidate.gold.requiredClaims) {
+        expect(
+          claim.notesProjection,
+          `${candidate.id}/${claim.id}`,
+        ).toBeDefined();
+        expect(
+          claim.notesProjection?.requiredTextTerms.length,
+          `${candidate.id}/${claim.id}/text`,
+        ).toBeGreaterThan(0);
+        expect(
+          claim.notesProjection?.requiredEvidenceTerms.length,
+          `${candidate.id}/${claim.id}/evidence`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('maps every required failure mode to at least one explicit gold case', () => {
     const covered = new Set(
       localIntelligenceEvaluationCases.flatMap(

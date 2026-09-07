@@ -1,4 +1,5 @@
 import type { DreamingInputPackage } from '../../../electron/dreaming/types';
+import type { NotesProjectionExpectation } from './localIntelligenceNotesScoring';
 
 export type EvaluationPartition = 'development' | 'held_out';
 
@@ -10,18 +11,23 @@ export type GoldClaim = {
   modality: 'fact' | 'tentative' | 'conditional' | 'committed' | 'withdrawn';
   owner?: string;
   date?: string;
+  notesProjection?: NotesProjectionExpectation;
 };
 
-export type EvaluationGold = {
-  requiredClaims: GoldClaim[];
+export type NotesGoldClaim = GoldClaim & {
+  notesProjection: NotesProjectionExpectation;
+};
+
+export type EvaluationGold<TClaim extends GoldClaim = GoldClaim> = {
+  requiredClaims: TClaim[];
   forbiddenClaims: string[];
   expectedBehavior: 'supported_output' | 'abstain' | 'no_change';
 };
 
-type EvaluationCaseMetadata = {
+type EvaluationCaseMetadata<TClaim extends GoldClaim = GoldClaim> = {
   partition: EvaluationPartition;
   failureIds: string[];
-  gold: EvaluationGold;
+  gold: EvaluationGold<TClaim>;
 };
 
 export type LocalIntelligenceNotesCase = {
@@ -44,7 +50,7 @@ export type LocalIntelligenceNotesCase = {
     | 'dense_multi_claim'
   >;
   segments: Array<{ speaker: string; text: string }>;
-} & EvaluationCaseMetadata;
+} & EvaluationCaseMetadata<NotesGoldClaim>;
 
 export type LocalIntelligenceChatCase = {
   id: string;
@@ -65,7 +71,19 @@ export type LocalIntelligenceEvaluationCase =
   | LocalIntelligenceChatCase
   | LocalIntelligenceDreamingCase;
 
-export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
+type BaseLocalIntelligenceNotesCase = Omit<
+  LocalIntelligenceNotesCase,
+  'gold'
+> & {
+  gold: EvaluationGold;
+};
+
+type BaseLocalIntelligenceEvaluationCase =
+  | BaseLocalIntelligenceNotesCase
+  | LocalIntelligenceChatCase
+  | LocalIntelligenceDreamingCase;
+
+const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[] =
   [
     {
       id: 'notes-routing-smoke',
@@ -1174,6 +1192,68 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
       },
     },
   ];
+
+const notesProjectionKindByClaimId = {
+  'payment-verification-owner': 'action',
+  'launch-date-open': 'point',
+  'middle-only-commitment': 'action',
+  'withdrawn-launch': 'point',
+  'conditional-campaign-task': 'point',
+  'pilot-export-format': 'decision',
+  'corrected-invoice-date': 'action',
+  'access-audit-handoff': 'action',
+  'pricing-remains-unresolved': 'point',
+  'rollback-drill-commitment': 'action',
+  'eu-pilot-approved': 'decision',
+  'access-audit-commitment': 'action',
+  'sandbox-integration-condition': 'point',
+  'pricing-undecided': 'point',
+  'runbook-owner-and-date-revised': 'action',
+  'severity-labels-retained': 'decision',
+  'paging-experiment-withdrawn': 'point',
+  'telemetry-retention': 'decision',
+  'deletion-test-results': 'action',
+  'research-only-access': 'decision',
+  'dashboard-unapproved-unassigned': 'point',
+  'migration-checksum-owner': 'action',
+  'archive-import-condition-unmet': 'point',
+} as const satisfies Record<string, NotesProjectionExpectation['kind']>;
+
+const withNotesProjection = (claim: GoldClaim): NotesGoldClaim => {
+  const kind =
+    notesProjectionKindByClaimId[
+      claim.id as keyof typeof notesProjectionKindByClaimId
+    ];
+  if (!kind) throw new Error(`notes_projection_missing:${claim.id}`);
+  return {
+    ...claim,
+    notesProjection: {
+      kind,
+      requiredTextTerms: [...claim.requiredTerms],
+      requiredEvidenceTerms: claim.evidence.map((entry) => entry.excerpt),
+      ...(kind === 'point' || kind === 'question'
+        ? { owner: null, due: null }
+        : {
+            ...(claim.owner !== undefined ? { owner: claim.owner } : {}),
+            ...(claim.date !== undefined ? { due: claim.date } : {}),
+          }),
+    },
+  };
+};
+
+export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
+  baseLocalIntelligenceEvaluationCases.map((candidate) =>
+    candidate.lane === 'meeting_notes'
+      ? {
+          ...candidate,
+          gold: {
+            ...candidate.gold,
+            requiredClaims:
+              candidate.gold.requiredClaims.map(withNotesProjection),
+          },
+        }
+      : candidate,
+  );
 
 const normalized = (value: string): string =>
   value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim();
