@@ -55,6 +55,7 @@ import type {
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_RESIDENCY_TIMEOUT_MS = 10_000;
+const OLLAMA_RESIDENCY_TOTAL_TIMEOUT_MS = 40_000;
 const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20_000;
@@ -1601,73 +1602,90 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal?: AbortSignal,
   ): Promise<void> {
     signal?.throwIfAborted();
-    let response: Response;
+    const deadlineController = new AbortController();
+    const deadlineId = setTimeout(
+      () =>
+        deadlineController.abort(
+          new DOMException('ollama_residency_timeout', 'TimeoutError'),
+        ),
+      OLLAMA_RESIDENCY_TOTAL_TIMEOUT_MS,
+    );
+    const reconciliationSignal = signal
+      ? AbortSignal.any([signal, deadlineController.signal])
+      : deadlineController.signal;
     try {
-      response = await this.ollamaFetch(
-        '/api/ps',
-        undefined,
-        OLLAMA_RESIDENCY_TIMEOUT_MS,
-        signal,
-      );
-      signal?.throwIfAborted();
-    } catch (error) {
-      signal?.throwIfAborted();
-      throw new Error('ollama_residency_discovery_failed', { cause: error });
-    }
-    if (!response.ok) {
-      throw new Error('ollama_residency_discovery_failed');
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch (error) {
-      throw new Error('ollama_residency_discovery_failed', { cause: error });
-    }
-    const models =
-      payload && typeof payload === 'object' && 'models' in payload
-        ? (payload as { models?: unknown }).models
-        : undefined;
-    if (!Array.isArray(models)) {
-      throw new Error('ollama_residency_discovery_failed');
-    }
-
-    const targetKey = normalizeOllamaModelName(targetModel);
-    if (!targetKey) throw new Error('ollama_residency_discovery_failed');
-    const residents = new Map<string, string>();
-    for (const entry of models) {
-      if (!entry || typeof entry !== 'object') {
-        throw new Error('ollama_residency_discovery_failed');
-      }
-      const record = entry as { name?: unknown; model?: unknown };
-      const residentModel = [record.name, record.model].find(
-        (candidate) => normalizeOllamaModelName(candidate) !== null,
-      );
-      const residentKey = normalizeOllamaModelName(residentModel);
-      if (!residentKey || typeof residentModel !== 'string') {
-        throw new Error('ollama_residency_discovery_failed');
-      }
-      if (!residents.has(residentKey)) {
-        residents.set(residentKey, residentModel.trim());
-      }
-    }
-
-    for (const [residentKey, residentModel] of residents) {
-      if (residentKey === targetKey) continue;
-      signal?.throwIfAborted();
+      let response: Response;
       try {
-        await this.requestOllamaUnload(residentModel, signal);
+        response = await this.ollamaFetch(
+          '/api/ps',
+          undefined,
+          OLLAMA_RESIDENCY_TIMEOUT_MS,
+          reconciliationSignal,
+        );
         signal?.throwIfAborted();
       } catch (error) {
         signal?.throwIfAborted();
-        throw new Error('ollama_residency_cleanup_failed', { cause: error });
+        throw new Error('ollama_residency_discovery_failed', { cause: error });
       }
-      if (normalizeOllamaModelName(this.activeOllamaModel) === residentKey) {
-        this.activeOllamaModel = null;
+      if (!response.ok) {
+        throw new Error('ollama_residency_discovery_failed');
       }
-      if (normalizeOllamaModelName(electronActiveOllamaModel) === residentKey) {
-        electronActiveOllamaModel = null;
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error('ollama_residency_discovery_failed', { cause: error });
       }
+      const models =
+        payload && typeof payload === 'object' && 'models' in payload
+          ? (payload as { models?: unknown }).models
+          : undefined;
+      if (!Array.isArray(models)) {
+        throw new Error('ollama_residency_discovery_failed');
+      }
+
+      const targetKey = normalizeOllamaModelName(targetModel);
+      if (!targetKey) throw new Error('ollama_residency_discovery_failed');
+      const residents = new Map<string, string>();
+      for (const entry of models) {
+        if (!entry || typeof entry !== 'object') {
+          throw new Error('ollama_residency_discovery_failed');
+        }
+        const record = entry as { name?: unknown; model?: unknown };
+        const residentModel = [record.name, record.model].find(
+          (candidate) => normalizeOllamaModelName(candidate) !== null,
+        );
+        const residentKey = normalizeOllamaModelName(residentModel);
+        if (!residentKey || typeof residentModel !== 'string') {
+          throw new Error('ollama_residency_discovery_failed');
+        }
+        if (!residents.has(residentKey)) {
+          residents.set(residentKey, residentModel.trim());
+        }
+      }
+
+      for (const [residentKey, residentModel] of residents) {
+        if (residentKey === targetKey) continue;
+        signal?.throwIfAborted();
+        try {
+          await this.requestOllamaUnload(residentModel, reconciliationSignal);
+          signal?.throwIfAborted();
+        } catch (error) {
+          signal?.throwIfAborted();
+          throw new Error('ollama_residency_cleanup_failed', { cause: error });
+        }
+        if (normalizeOllamaModelName(this.activeOllamaModel) === residentKey) {
+          this.activeOllamaModel = null;
+        }
+        if (
+          normalizeOllamaModelName(electronActiveOllamaModel) === residentKey
+        ) {
+          electronActiveOllamaModel = null;
+        }
+      }
+    } finally {
+      clearTimeout(deadlineId);
     }
   }
 

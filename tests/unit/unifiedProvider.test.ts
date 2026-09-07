@@ -370,6 +370,86 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('bounds cleanup across multiple non-target Ollama residents', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let unloadCalls = 0;
+    let generationStarted = false;
+    const fetchMock = installFetchMock(
+      (_url, init) => {
+        const body = parseRequestBody(init);
+        if (body.keep_alive !== 0) {
+          generationStarted = true;
+          return jsonResponse({ response: validAnalysisMarkdown });
+        }
+        unloadCalls += 1;
+        if (unloadCalls === 1) {
+          return new Promise<Response>((resolve, reject) => {
+            const timeoutId = setTimeout(
+              () => resolve(jsonResponse({ done: true })),
+              25_000,
+            );
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timeoutId);
+                reject(init.signal?.reason);
+              },
+              { once: true },
+            );
+          });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+      () =>
+        jsonResponse({
+          models: [{ name: 'gemma4:12b' }, { name: 'qwen3.5:9b' }],
+        }),
+    );
+    let settled = false;
+    const outcome = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    })
+      .answerAskPluto('Who owns this?', { signal: controller.signal })
+      .then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      )
+      .finally(() => {
+        settled = true;
+      });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(unloadCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(unloadCalls).toBe(2);
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(settled).toBe(true);
+      await expect(outcome).resolves.toMatchObject({
+        error: expect.objectContaining({
+          message: 'ollama_residency_cleanup_failed',
+        }),
+      });
+      expect(generationStarted).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      controller.abort(new DOMException('test cleanup', 'AbortError'));
+      await vi.runAllTimersAsync();
+      await outcome;
+      vi.useRealTimers();
+    }
+  });
+
   it('reserves enough Ollama context for complete knowledge JSON output', async () => {
     let options: Record<string, unknown> = {};
     installFetchMock((_url, init) => {
