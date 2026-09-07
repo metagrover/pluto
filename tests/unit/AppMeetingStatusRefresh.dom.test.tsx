@@ -103,6 +103,9 @@ describe('App meeting status events', () => {
           root.render(<App />);
           await flush();
         });
+        expect(
+          invoke.mock.calls.some(([channel]) => channel === 'CALENDAR_REFRESH'),
+        ).toBe(true);
         const open = Array.from(container.querySelectorAll('button')).find(
           (button) => button.textContent === 'Open meeting',
         );

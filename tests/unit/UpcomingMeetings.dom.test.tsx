@@ -139,6 +139,8 @@ afterEach(() => {
 
 describe('UpcomingMeetings', () => {
   it('shows three compact rows and five large-layout rows before disclosure', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
     const media = installMatchMedia(false);
     const { container, root } = render({
       events: Array.from({ length: 6 }, (_, index) => meeting(index)),
@@ -180,6 +182,35 @@ describe('UpcomingMeetings', () => {
       container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
     ).toHaveLength(5);
     act(() => root.unmount());
+  });
+
+  it('shows every remaining meeting today before future meetings', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-30T12:00:00.000Z'));
+    installMatchMedia(false);
+    const todayEvents = Array.from({ length: 6 }, (_, index) => ({
+      ...meeting(index),
+      start: `2026-08-30T${String(13 + index).padStart(2, '0')}:00:00.000Z`,
+      end: `2026-08-30T${String(13 + index).padStart(2, '0')}:30:00.000Z`,
+    }));
+    const tomorrow = {
+      ...meeting(6),
+      title: 'Tomorrow planning',
+      start: '2026-08-31T09:00:00.000Z',
+      end: '2026-08-31T09:30:00.000Z',
+    };
+    const agenda = render({ events: [...todayEvents, tomorrow] });
+
+    expect(
+      agenda.container.querySelectorAll('[data-testid="upcoming-meeting-row"]'),
+    ).toHaveLength(6);
+    expect(agenda.container.textContent).not.toContain('Tomorrow planning');
+    expect(
+      agenda.container.querySelector(
+        'button[aria-label="Show 1 more meeting"]',
+      ),
+    ).not.toBeNull();
+    act(() => agenda.root.unmount());
   });
 
   it('uses one calm agenda hierarchy with subordinate calendar metadata', () => {

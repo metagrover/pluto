@@ -119,12 +119,16 @@ export const UpcomingMeetings = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const collapsedLimit = usesLargeLayout ? 5 : 3;
-  const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
-  const hiddenCount = Math.max(0, events.length - collapsedLimit);
   const today = new Date();
-  const hasMeetingsToday = events.some((event) =>
+  const todayEvents = events.filter((event) =>
     isSameLocalDay(new Date(event.start), today),
   );
+  const hasMeetingsToday = todayEvents.length > 0;
+  const collapsedEvents = hasMeetingsToday
+    ? todayEvents
+    : events.slice(0, collapsedLimit);
+  const visibleEvents = expanded ? events : collapsedEvents;
+  const hiddenCount = Math.max(0, events.length - collapsedEvents.length);
   const selectedList =
     snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
       ? snapshot.selectedCalendars

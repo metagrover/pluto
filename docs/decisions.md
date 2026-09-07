@@ -968,3 +968,10 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** The Upcoming meetings agenda reads from today's local midnight through a bounded 30-day forward window in Pluto's existing calendar cache. It shows up to three meeting rows below Pluto's `lg` dashboard breakpoint and up to five at or above it; additional meetings remain available through one inline, reversible disclosure.
 - **Behavior boundary:** When today has no remaining meeting, the agenda states `No meetings today` and continues with dated future rows. Calendar synchronization, event ordering, stale-cache handling, recovery states, and calendar source controls remain unchanged.
 - **Design boundary:** The Granola reference established the desired information density and empty-day clarity, while Pluto's existing typography, spacing, color, hierarchy, and control styling remain authoritative.
+
+## 2026-09-07 - Keep today complete and bound the future agenda
+
+- **Status:** Accepted and implemented under [Issue #785](https://github.com/metagrover/pluto/issues/785), refining the agenda introduced by [Issue #778](https://github.com/metagrover/pluto/issues/778).
+- **Decision:** The dashboard reads a 10-day forward agenda from the calendars explicitly selected under `Change`. If today has remaining meetings, the collapsed card shows every remaining meeting today and keeps future rows behind `More`. If today is empty, it states `No meetings today` and shows the next three future meetings in compact layout or five in large layout.
+- **Freshness boundary:** Initial dashboard loading requests a calendar refresh before reading the agenda, with the existing cached read retained as the failure fallback.
+- **Privacy boundary:** Pluto does not silently include calendars the user has not selected.

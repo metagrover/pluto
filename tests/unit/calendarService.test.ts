@@ -298,25 +298,25 @@ describe('calendar service', () => {
     );
   });
 
-  it('lists a bounded 30-day dashboard agenda from the cached events', () => {
+  it('lists a bounded 10-day dashboard agenda from the cached events', () => {
     const fixture = createFixture({
       authorization: 'full_access',
       events: [event, eventB],
     });
     const start = '2026-08-30T00:00:00.000Z';
-    const end = '2026-09-29T00:00:00.000Z';
+    const end = '2026-09-09T00:00:00.000Z';
 
     expect(fixture.service.listDay(start, end)).toEqual([event, eventB]);
     expect(fixture.store.listEvents).toHaveBeenCalledWith(start, end);
   });
 
-  it('rejects calendar agenda ranges longer than 32 days', () => {
+  it('rejects calendar agenda ranges longer than 12 days', () => {
     const fixture = createFixture({ authorization: 'full_access' });
 
     expect(() =>
       fixture.service.listDay(
         '2026-08-30T00:00:00.000Z',
-        '2026-10-02T00:00:01.000Z',
+        '2026-09-11T00:00:01.000Z',
       ),
     ).toThrow('invalid_calendar_day');
   });

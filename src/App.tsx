@@ -294,7 +294,7 @@ function App() {
         const start = new Date(now);
         start.setHours(0, 0, 0, 0);
         const end = new Date(start);
-        end.setDate(end.getDate() + 30);
+        end.setDate(end.getDate() + 10);
         const events = await listCalendarDay(
           start.toISOString(),
           end.toISOString(),
@@ -391,7 +391,17 @@ function App() {
   };
 
   useEffect(() => {
-    void loadCalendarAgenda();
+    let active = true;
+    void refreshCalendar()
+      .then((snapshot) => {
+        if (active) return loadCalendarAgenda(snapshot);
+      })
+      .catch(() => {
+        if (active) return loadCalendarAgenda();
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
