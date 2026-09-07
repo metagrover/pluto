@@ -55,12 +55,16 @@ describe('local intelligence evaluation corpus', () => {
         }
         if (claim.owner) {
           expect(
-            claim.requiredTerms.map((term) => term.toLowerCase()),
+            claim.requiredTerms.flatMap((term) =>
+              term.toLowerCase().split('|'),
+            ),
           ).toContain(claim.owner.toLowerCase());
         }
         if (claim.date) {
           expect(
-            claim.requiredTerms.map((term) => term.toLowerCase()),
+            claim.requiredTerms.flatMap((term) =>
+              term.toLowerCase().split('|'),
+            ),
           ).toContain(claim.date.toLowerCase());
         }
       }

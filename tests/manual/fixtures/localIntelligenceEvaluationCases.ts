@@ -187,7 +187,12 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
                 excerpt: 'Jordan has no committed scheduling task yet',
               },
             ],
-            requiredTerms: ['jordan', 'legal', 'october 3', 'conditional'],
+            requiredTerms: [
+              'jordan',
+              'legal',
+              'october 3',
+              'conditional|if legal|pending legal',
+            ],
             critical: true,
             modality: 'conditional',
             owner: 'Jordan',
@@ -271,7 +276,7 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
             ],
             requiredTerms: [
               'tuesday',
-              'not approved',
+              'not approved|unapproved',
               'friday',
               'alex',
               'sam',
@@ -326,7 +331,8 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
           },
         ],
         forbiddenClaims: [
-          'same project',
+          'are the same project',
+          'atlas is one project',
           'customer renewal caused the search migration',
         ],
         expectedBehavior: 'supported_output',
@@ -365,7 +371,12 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
                   'Aurora pricing review began on Tuesday. No cause for the timing was discussed.',
               },
             ],
-            requiredTerms: ['aurora', 'monday', 'tuesday', 'no cause'],
+            requiredTerms: [
+              'aurora',
+              'monday',
+              'tuesday',
+              'no cause|no causal|does not establish causation|cannot infer causation',
+            ],
             critical: true,
             modality: 'fact',
           },
@@ -489,7 +500,9 @@ export const scoreGoldOutput = (
     id: claim.id,
     critical: claim.critical,
     passed: claim.requiredTerms.every((term) =>
-      text.includes(normalized(term)),
+      term
+        .split('|')
+        .some((alternative) => text.includes(normalized(alternative))),
     ),
   }));
   const forbiddenMatches = candidate.gold.forbiddenClaims.filter((claim) =>

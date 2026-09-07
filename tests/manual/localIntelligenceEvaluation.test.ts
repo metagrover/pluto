@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,6 +18,7 @@ import {
   type LocalIntelligenceEvaluationCase,
   evaluateReplayResponse,
   localIntelligenceEvaluationCases,
+  scoreGoldOutput,
 } from './fixtures/localIntelligenceEvaluationCases';
 
 const enabled = process.env.RUN_LOCAL_INTELLIGENCE_EVALUATION === '1';
@@ -138,6 +140,44 @@ const transcriptFor = (
   candidate.segments
     .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join('\n');
+
+const resourceSnapshot = async () => {
+  const memoryOutput = execFileSync('/usr/bin/memory_pressure', ['-Q'], {
+    encoding: 'utf8',
+  });
+  const freePercent = Number(
+    /free percentage:\s*(\d+)%/i.exec(memoryOutput)?.[1] ?? -1,
+  );
+  const thermalOutput = execFileSync('/usr/bin/pmset', ['-g', 'therm'], {
+    encoding: 'utf8',
+  });
+  const swapOutput = execFileSync('/usr/sbin/sysctl', ['vm.swapusage'], {
+    encoding: 'utf8',
+  });
+  const swapUsedMiB = Number(/used = ([0-9.]+)M/i.exec(swapOutput)?.[1] ?? -1);
+  const psResponse = await fetch('http://127.0.0.1:11434/api/ps');
+  const ps = (await psResponse.json()) as {
+    models?: Array<{ name?: string; size_vram?: number; size?: number }>;
+  };
+  if (freePercent < 0 || swapUsedMiB < 0) {
+    throw new Error('evaluation_resource_telemetry_unavailable');
+  }
+  return {
+    memoryFreePercent: freePercent,
+    memoryPressure:
+      freePercent < 5 ? 'critical' : freePercent < 10 ? 'warning' : 'normal',
+    thermalState: /No thermal warning level has been recorded/i.test(
+      thermalOutput,
+    )
+      ? 'nominal'
+      : 'unknown',
+    swapUsedBytes: Math.round(swapUsedMiB * 1024 * 1024),
+    residentModels: (ps.models ?? []).map((resident) => ({
+      name: resident.name ?? 'unknown',
+      residentBytes: resident.size_vram ?? resident.size ?? 0,
+    })),
+  };
+};
 
 describe('local intelligence replay acceptance boundary', () => {
   const base = {
@@ -327,6 +367,7 @@ realSuite('opt-in local intelligence production-path replay', () => {
           const provider = providerFor(model);
           const startedAt = Date.now();
           const wireStartIndex = wireStarts.length;
+          const resourceBefore = await resourceSnapshot();
           try {
             if (candidate.lane === 'meeting_notes') {
               const transcript = transcriptFor(candidate);
@@ -343,6 +384,10 @@ realSuite('opt-in local intelligence production-path replay', () => {
                   compactWriterContract: true,
                 },
               );
+              const goldScore = scoreGoldOutput(
+                candidate,
+                JSON.stringify(analysis),
+              );
               results.push({
                 caseId: candidate.id,
                 lane: candidate.lane,
@@ -350,9 +395,13 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 sourceSegments: candidate.segments,
                 transcript,
                 analysis,
-                accepted: analysis.analysis_schema_version === 3,
+                goldScore,
+                accepted:
+                  analysis.analysis_schema_version === 3 && goldScore.passed,
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
+                resourceBefore,
+                resourceAfter: await resourceSnapshot(),
               });
             } else if (
               candidate.lane === 'quick_chat' ||
@@ -361,14 +410,18 @@ realSuite('opt-in local intelligence production-path replay', () => {
               const answer = await provider.answerAskPluto(candidate.prompt, {
                 mode: candidate.mode,
               });
+              const goldScore = scoreGoldOutput(candidate, answer);
               results.push({
                 caseId: candidate.id,
                 lane: candidate.lane,
                 prompt: candidate.prompt,
                 answer,
-                accepted: Boolean(answer.trim()),
+                goldScore,
+                accepted: Boolean(answer.trim()) && goldScore.passed,
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
+                resourceBefore,
+                resourceAfter: await resourceSnapshot(),
               });
             } else {
               const request = buildDreamingGenerationRequest(candidate.input);
@@ -382,15 +435,19 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 },
               );
               const validation = validateDreamingOutput(raw, candidate.input);
+              const goldScore = scoreGoldOutput(candidate, raw);
               results.push({
                 caseId: candidate.id,
                 lane: candidate.lane,
                 input: candidate.input,
                 raw,
                 validation,
-                accepted: validation.valid,
+                goldScore,
+                accepted: validation.valid && goldScore.passed,
                 elapsedMs: Date.now() - startedAt,
                 physicalStarts: wireStarts.length - wireStartIndex,
+                resourceBefore,
+                resourceAfter: await resourceSnapshot(),
               });
             }
           } catch (error) {
@@ -400,6 +457,8 @@ realSuite('opt-in local intelligence production-path replay', () => {
               accepted: false,
               elapsedMs: Date.now() - startedAt,
               physicalStarts: wireStarts.length - wireStartIndex,
+              resourceBefore,
+              resourceAfter: await resourceSnapshot(),
               error: String(error),
             });
           }
