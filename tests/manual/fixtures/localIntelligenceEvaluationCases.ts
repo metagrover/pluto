@@ -1188,8 +1188,19 @@ const subjectTokensForForbiddenPhrase = (phrase: string): string[] => {
     : tokens.slice(0, 1);
 };
 
+const predicateTokensForForbiddenPhrase = (phrase: string): string[] => {
+  const tokens = phrase.split(/[^a-z0-9-]+/).filter(Boolean);
+  const predicateStart = tokens.findIndex((token) =>
+    ['is', 'are', 'was', 'were', 'has', 'have', 'will'].includes(token),
+  );
+  return predicateStart >= 0
+    ? tokens.slice(predicateStart + 1)
+    : tokens.slice(-1);
+};
+
 const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
   const subjectTokens = subjectTokensForForbiddenPhrase(phrase);
+  const predicateTokens = predicateTokensForForbiddenPhrase(phrase);
   let index = text.indexOf(phrase);
   while (index >= 0) {
     const textBeforeClaim = text.slice(0, index);
@@ -1216,9 +1227,13 @@ const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
     const contrastTokens = new Set(
       contrastTail.split(/[^a-z0-9-]+/).filter(Boolean),
     );
+    const hasAnaphoricContrast =
+      ['it', 'that', 'this'].some((token) => contrastTokens.has(token)) &&
+      predicateTokens.some((token) => contrastTokens.has(token));
     const hasPostClaimContrast =
       /\bexcept\b/.test(sentenceTail) ||
-      subjectTokens.some((token) => contrastTokens.has(token));
+      subjectTokens.some((token) => contrastTokens.has(token)) ||
+      hasAnaphoricContrast;
     if (!hasNegativePolarity || hasPostClaimContrast) return true;
     index = text.indexOf(phrase, index + phrase.length);
   }

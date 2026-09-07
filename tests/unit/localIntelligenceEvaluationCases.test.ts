@@ -230,6 +230,12 @@ describe('local intelligence evaluation corpus', () => {
     expect(
       scoreGoldOutput(
         candidate,
+        `${supportedContext} No pricing was approved initially, but it was approved later.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
+    expect(
+      scoreGoldOutput(
+        candidate,
         `${supportedContext} No pricing was approved, but enterprise pricing was.`,
       ).forbiddenMatches,
     ).toContain('pricing was approved');
