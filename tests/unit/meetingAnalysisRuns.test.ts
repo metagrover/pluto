@@ -280,8 +280,11 @@ describe('meeting analysis run coordinator', () => {
     await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
   });
 
-  it('publishes and announces notes even when terminal metric persistence fails', async () => {
-    const onPublished = vi.fn();
+  it('keeps durable publication when metrics and publication notification fail', async () => {
+    const onPublished = vi.fn(() => {
+      throw new Error('notification unavailable');
+    });
+    const publishMeetingNotesIfCurrent = vi.fn().mockReturnValue(true);
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => ({
@@ -303,7 +306,7 @@ describe('meeting analysis run coordinator', () => {
         updateMeetingAnalysisRunStatus: vi.fn(),
         updateMeetingAnalysisRunStatusIfCurrent: vi.fn().mockReturnValue(true),
         isMeetingAnalysisRunCurrent: () => true,
-        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        publishMeetingNotesIfCurrent,
         getAllEntities: () => [],
         upsertMeetingAnalysisRunMetric: vi.fn(() => {
           throw new Error('metrics unavailable');
@@ -339,6 +342,7 @@ describe('meeting analysis run coordinator', () => {
         reason: 'manual',
       }),
     ).resolves.toMatchObject({ status: 'published' });
+    expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
     expect(onPublished).toHaveBeenCalledWith(
       'metric-write-failure',
       'metric-write-failure-run',
@@ -596,6 +600,7 @@ describe('meeting analysis run coordinator', () => {
 
   it('records the stable terminal failure code in content-free run metrics', async () => {
     const upsertMeetingAnalysisRunMetric = vi.fn();
+    const onPublished = vi.fn();
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => ({
@@ -629,6 +634,7 @@ describe('meeting analysis run coordinator', () => {
           .mockRejectedValue(new Error('notes_context_exhausted')),
       }),
       createRunId: () => 'failed-metric-run',
+      onPublished,
     });
 
     await expect(
@@ -645,6 +651,7 @@ describe('meeting analysis run coordinator', () => {
         errorCode: 'notes_context_exhausted',
       }),
     );
+    expect(onPublished).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(
@@ -879,6 +886,7 @@ describe('meeting analysis run coordinator', () => {
       },
     });
     const publishMeetingNotesIfCurrent = vi.fn().mockReturnValue(true);
+    const onPublished = vi.fn();
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => ({
@@ -915,6 +923,7 @@ describe('meeting analysis run coordinator', () => {
       }),
       createRunId: () => 'run-a',
       runSecondary,
+      onPublished,
     });
 
     const first = coordinator.generateAndPublishMeetingNotes({
@@ -936,6 +945,8 @@ describe('meeting analysis run coordinator', () => {
     ]);
     expect(generateStructuredAnalysis).toHaveBeenCalledTimes(1);
     expect(publishMeetingNotesIfCurrent).toHaveBeenCalledTimes(1);
+    expect(onPublished).toHaveBeenCalledTimes(1);
+    expect(onPublished).toHaveBeenCalledWith('meeting-a', 'run-a');
     expect(runSecondary).toHaveBeenCalledTimes(1);
     expect(updateSecondaryStatus).toHaveBeenCalledWith(
       expect.objectContaining({ secondaryStatus: 'running' }),
@@ -1026,10 +1037,82 @@ describe('meeting analysis run coordinator', () => {
     });
   });
 
+  it('does not announce publication after every subscriber cancels an in-flight run', async () => {
+    const onPublished = vi.fn();
+    const knowledgePause = { acquire: vi.fn(), release: vi.fn() };
+    const generateStructuredAnalysis = vi.fn(
+      (
+        _transcript: string,
+        _notes: string,
+        _template: string,
+        options?: { signal?: AbortSignal },
+      ) =>
+        new Promise<never>((_resolve, reject) => {
+          const signal = options?.signal;
+          signal?.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'cancelled-run',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'Do not publish these notes.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'cancelled-source',
+          eligibilityRevision: 'cancelled-eligibility',
+          userNotesHash: 'cancelled-notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn(),
+        updateMeetingAnalysisRunStatusIfCurrent: vi.fn(),
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn().mockReturnValue(true),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      createRunId: () => 'cancelled-run-id',
+      knowledgeSynthesisPause: knowledgePause,
+      onPublished,
+    });
+    const generation = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'cancelled-run',
+      requestId: 'cancelled-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+
+    await vi.waitFor(() =>
+      expect(generateStructuredAnalysis).toHaveBeenCalledTimes(1),
+    );
+    await expect(
+      coordinator.cancelMeetingNotes({
+        meetingId: 'cancelled-run',
+        requestId: 'cancelled-request',
+      }),
+    ).resolves.toEqual({ cancelled: true });
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() =>
+      expect(knowledgePause.release).toHaveBeenCalledWith('meeting_notes_run'),
+    );
+
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
   it('prevents an active run from publishing after notes restoration supersedes it', async () => {
     let resolveGeneration: ((value: Record<string, unknown>) => void) | null =
       null;
     const publishMeetingNotesIfCurrent = vi.fn().mockReturnValue(true);
+    const onPublished = vi.fn();
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => ({
@@ -1062,6 +1145,7 @@ describe('meeting analysis run coordinator', () => {
           }),
       }),
       createRunId: () => 'restore-run',
+      onPublished,
     });
     const generation = coordinator.generateAndPublishMeetingNotes({
       meetingId: 'restore-race',
@@ -1089,6 +1173,7 @@ describe('meeting analysis run coordinator', () => {
 
     await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
     expect(publishMeetingNotesIfCurrent).not.toHaveBeenCalled();
+    expect(onPublished).not.toHaveBeenCalled();
   });
 
   it('keeps published notes when secondary work fails', async () => {
