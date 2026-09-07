@@ -221,6 +221,18 @@ describe('local intelligence evaluation corpus', () => {
         `${supportedContext} No pricing decision was made; there is no evidence that pricing was approved.`,
       ),
     ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
+        'Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review. No pricing was approved, but the EU data-residency pilot was approved.',
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved, but enterprise pricing was.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
   });
 
   it('rejects invented causation and accepts explicit no-change output', () => {

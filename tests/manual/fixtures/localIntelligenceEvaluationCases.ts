@@ -1178,7 +1178,18 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
 const normalized = (value: string): string =>
   value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim();
 
+const subjectTokensForForbiddenPhrase = (phrase: string): string[] => {
+  const tokens = phrase.split(/[^a-z0-9-]+/).filter(Boolean);
+  const predicateStart = tokens.findIndex((token) =>
+    ['is', 'are', 'was', 'were', 'has', 'have', 'will'].includes(token),
+  );
+  return predicateStart > 0
+    ? tokens.slice(0, predicateStart)
+    : tokens.slice(0, 1);
+};
+
 const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
+  const subjectTokens = subjectTokensForForbiddenPhrase(phrase);
   let index = text.indexOf(phrase);
   while (index >= 0) {
     const textBeforeClaim = text.slice(0, index);
@@ -1199,9 +1210,15 @@ const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
         ? text.length
         : index + phrase.length + sentenceEndOffset;
     const sentenceTail = text.slice(index + phrase.length, sentenceEnd);
-    const hasPostClaimContrast = /\b(?:except|but|however|although)\b/.test(
-      sentenceTail,
+    const contrastTail =
+      /\b(?:but|however|although)\b(?<tail>.*)$/.exec(sentenceTail)?.groups
+        ?.tail ?? '';
+    const contrastTokens = new Set(
+      contrastTail.split(/[^a-z0-9-]+/).filter(Boolean),
     );
+    const hasPostClaimContrast =
+      /\bexcept\b/.test(sentenceTail) ||
+      subjectTokens.some((token) => contrastTokens.has(token));
     if (!hasNegativePolarity || hasPostClaimContrast) return true;
     index = text.indexOf(phrase, index + phrase.length);
   }
