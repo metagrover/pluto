@@ -1,7 +1,7 @@
 ### Reproducible 16 GB local-intelligence evaluation
 
 - **Issue:** [#695](https://github.com/metagrover/pluto/issues/695)
-- **PR:** [#780](https://github.com/metagrover/pluto/pull/780)
+- **PR:** [#780](https://github.com/metagrover/pluto/pull/780), [#783](https://github.com/metagrover/pluto/pull/783)
 - **Changed:** Added an opt-in, production-path local-model replay harness with pinned model digests, request-wire assertions, source-backed synthetic gold cases, physical-attempt accounting, and owner-only raw artifacts. Screened five installed Ollama models on an M1 Pro with 16 GiB memory across quick chat, meeting notes, cross-meeting synthesis, and dreaming safety cases. Added a dated post-#777 system comparison: Phi again accepted 6/6 notes outputs, while Gemma improved from 3/6 to 6/6 because its previously rejected withdrawal outputs were recovered with explicit warnings; Phi remained 3.6 times faster across accepted outputs.
 - **Why:** Establish reproducible local intelligence evaluation benchmarks on 16 GB Apple Silicon without writing to production tables or publishing synthetic proposals.
 - **Replaced:** Ad-hoc model comparisons and unverified performance assertions.
