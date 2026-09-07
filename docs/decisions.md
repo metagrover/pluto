@@ -961,3 +961,10 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Trust boundary:** Required writer failure, unknown sources, unsafe source conflicts, stale runs, cancellation, and publication failure remain terminal. Conservative fallback may reclassify source-evidenced conditional willingness from an action to a point only by replacing the claim with its cited source text and clearing owner and due date. Strict editor validation continues to reject the uncorrected commitment.
 - **Resource boundary:** Foreground meeting-note generation holds the knowledge-synthesis pause for the complete admitted run, not only individual model calls. Background knowledge work resumes after the primary notes run releases the pause.
 - **Evidence:** The affected private 31-minute source completed three writer calls plus one editor in 495,839 ms with no queue wait, truncation, repair, repartition, or database publication. Remaining editors used deterministic fallback, finishing 224,161 ms inside the hard deadline.
+
+## 2026-09-07 - Scale the upcoming-meetings agenda with the dashboard layout
+
+- **Status:** Accepted and implemented under [Issue #778](https://github.com/metagrover/pluto/issues/778).
+- **Decision:** The Upcoming meetings agenda reads from today's local midnight through a bounded 30-day forward window in Pluto's existing calendar cache. It shows up to three meeting rows below Pluto's `lg` dashboard breakpoint and up to five at or above it; additional meetings remain available through one inline, reversible disclosure.
+- **Behavior boundary:** When today has no remaining meeting, the agenda states `No meetings today` and continues with dated future rows. Calendar synchronization, event ordering, stale-cache handling, recovery states, and calendar source controls remain unchanged.
+- **Design boundary:** The Granola reference established the desired information density and empty-day clarity, while Pluto's existing typography, spacing, color, hierarchy, and control styling remain authoritative.

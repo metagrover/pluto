@@ -221,7 +221,7 @@ export const createCalendarService = (deps: {
       Number.isNaN(startDate.getTime()) ||
       Number.isNaN(endDate.getTime()) ||
       startDate >= endDate ||
-      endDate.getTime() - startDate.getTime() > 48 * 60 * 60 * 1000
+      endDate.getTime() - startDate.getTime() > 32 * 24 * 60 * 60 * 1000
     ) {
       throw new Error('invalid_calendar_day');
     }

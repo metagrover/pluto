@@ -18,6 +18,13 @@ interface UpcomingMeetingsProps {
   onOpenSettings: () => void;
 }
 
+const LARGE_DASHBOARD_QUERY = '(min-width: 1024px)';
+
+const matchesLargeDashboard = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(LARGE_DASHBOARD_QUERY).matches
+    : false;
+
 const formatTime = (value: string) =>
   new Date(value).toLocaleTimeString([], {
     hour: 'numeric',
@@ -35,6 +42,24 @@ const formatDuration = (event: CalendarEvent) => {
   if (minutes === 60) return '1 hour';
   if (minutes > 60 && minutes % 60 === 0) return `${minutes / 60} hours`;
   return `${minutes} minutes`;
+};
+
+const isSameLocalDay = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const formatEventDay = (value: string, today: Date) => {
+  const eventDate = new Date(value);
+  if (isSameLocalDay(eventDate, today)) return null;
+  const tomorrow = new Date(today);
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (isSameLocalDay(eventDate, tomorrow)) return 'Tomorrow';
+  return eventDate.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
 };
 
 const RecoveryAction = ({
@@ -77,6 +102,7 @@ export const UpcomingMeetings = ({
   onOpenSettings,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
+  const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
@@ -92,8 +118,13 @@ export const UpcomingMeetings = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const visibleEvents = expanded ? events : events.slice(0, 2);
-  const hiddenCount = Math.max(0, events.length - 2);
+  const collapsedLimit = usesLargeLayout ? 5 : 3;
+  const visibleEvents = expanded ? events : events.slice(0, collapsedLimit);
+  const hiddenCount = Math.max(0, events.length - collapsedLimit);
+  const today = new Date();
+  const hasMeetingsToday = events.some((event) =>
+    isSameLocalDay(new Date(event.start), today),
+  );
   const selectedList =
     snapshot?.selectedCalendars && snapshot.selectedCalendars.length > 0
       ? snapshot.selectedCalendars
@@ -103,6 +134,27 @@ export const UpcomingMeetings = ({
   const hasConnectedCalendar =
     selectedList.length > 0 &&
     (snapshot?.state === 'ready' || events.length > 0);
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      typeof window.matchMedia !== 'function'
+    ) {
+      return;
+    }
+    const query = window.matchMedia(LARGE_DASHBOARD_QUERY);
+    const updateLayout = (event: MediaQueryListEvent) =>
+      setUsesLargeLayout(event.matches);
+    setUsesLargeLayout(query.matches);
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', updateLayout);
+      return () => query.removeEventListener('change', updateLayout);
+    }
+    if (typeof query.addListener === 'function') {
+      query.addListener(updateLayout);
+      return () => query.removeListener(updateLayout);
+    }
+  }, []);
 
   useEffect(() => {
     if (snapshot?.selectedCalendars?.length) {
@@ -317,39 +369,58 @@ export const UpcomingMeetings = ({
           </p>
         ) : events.length ? (
           <>
+            {!hasMeetingsToday ? (
+              <p className="mb-4 text-[12px] font-medium text-pro-text-muted">
+                No meetings today
+              </p>
+            ) : null}
             <div className="space-y-3">
-              {visibleEvents.map((event, index) => (
-                <article
-                  key={event.occurrenceKey}
-                  data-testid="upcoming-meeting-row"
-                  className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
-                >
-                  <div className="flex items-start gap-2 pt-0.5">
-                    {index === 0 ? (
-                      <span
-                        aria-label="Next meeting"
-                        className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent"
-                      />
-                    ) : (
-                      <span className="w-1.5 shrink-0" aria-hidden="true" />
-                    )}
-                    <time
-                      dateTime={event.start}
-                      className="text-[10px] font-semibold tabular-nums text-pro-text-muted"
-                    >
-                      {formatTime(event.start)}
-                    </time>
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
-                      {event.title || 'Untitled event'}
-                    </h3>
-                    <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
-                      {formatDuration(event)}
-                    </p>
-                  </div>
-                </article>
-              ))}
+              {visibleEvents.map((event, index) => {
+                const eventDay = formatEventDay(event.start, today);
+                return (
+                  <article
+                    key={event.occurrenceKey}
+                    data-testid="upcoming-meeting-row"
+                    className="grid grid-cols-[70px_minmax(0,1fr)] gap-3"
+                  >
+                    <div className="flex items-start gap-2 pt-0.5">
+                      {index === 0 ? (
+                        <span
+                          aria-label="Next meeting"
+                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent"
+                        />
+                      ) : (
+                        <span className="w-1.5 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="min-w-0">
+                        {eventDay ? (
+                          <time
+                            dateTime={event.start}
+                            data-testid="upcoming-meeting-date"
+                            className="block truncate text-[9px] font-semibold text-pro-text-muted/75"
+                          >
+                            {eventDay}
+                          </time>
+                        ) : null}
+                        <time
+                          dateTime={event.start}
+                          className="block text-[10px] font-semibold tabular-nums text-pro-text-muted"
+                        >
+                          {formatTime(event.start)}
+                        </time>
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
+                        {event.title || 'Untitled event'}
+                      </h3>
+                      <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
+                        {formatDuration(event)}
+                      </p>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             {hiddenCount > 0 || expanded ? (
               <button
@@ -363,7 +434,7 @@ export const UpcomingMeetings = ({
                 onClick={() => setExpanded((value) => !value)}
                 className="mt-2 inline-flex min-h-9 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
               >
-                {expanded ? 'Show less' : 'See more'}
+                {expanded ? 'Show less' : 'More'}
                 {expanded ? (
                   <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
@@ -390,7 +461,7 @@ export const UpcomingMeetings = ({
           />
         ) : (
           <p className="pb-5 text-[12px] font-medium text-pro-text-muted">
-            No more meetings today
+            No meetings today
           </p>
         )}
       </div>
