@@ -201,6 +201,28 @@ describe('local intelligence evaluation corpus', () => {
     }
   });
 
+  it('distinguishes evidence negation from a post-claim exception', () => {
+    const candidate = localIntelligenceEvaluationCases.find(
+      (item) => item.id === 'notes-long-dense-three-position-evidence',
+    );
+    if (!candidate) throw new Error('dense pricing fixture missing');
+    const supportedContext =
+      'The EU data-residency pilot was approved. Nia owns the access audit due December 4. Luis owns the sandbox integration only if the vendor passes security review.';
+
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing was approved except enterprise pricing.`,
+      ).forbiddenMatches,
+    ).toContain('pricing was approved');
+    expect(
+      scoreGoldOutput(
+        candidate,
+        `${supportedContext} No pricing decision was made; there is no evidence that pricing was approved.`,
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+  });
+
   it('rejects invented causation and accepts explicit no-change output', () => {
     const association = localIntelligenceEvaluationCases.find(
       (item) => item.id === 'cross-meeting-association-no-causation',

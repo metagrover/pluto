@@ -1181,7 +1181,28 @@ const normalized = (value: string): string =>
 const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
   let index = text.indexOf(phrase);
   while (index >= 0) {
-    if (!/\bno\s+$/.test(text.slice(0, index))) return true;
+    const textBeforeClaim = text.slice(0, index);
+    const clauseStart =
+      Math.max(
+        textBeforeClaim.lastIndexOf('.'),
+        textBeforeClaim.lastIndexOf(';'),
+        textBeforeClaim.lastIndexOf('!'),
+        textBeforeClaim.lastIndexOf('?'),
+      ) + 1;
+    const clausePrefix = text.slice(clauseStart, index);
+    const hasNegativePolarity =
+      /\bno\s+$/.test(clausePrefix) ||
+      /\bno evidence that\s+$/.test(clausePrefix);
+    const sentenceEndOffset = text.slice(index + phrase.length).search(/[.!?]/);
+    const sentenceEnd =
+      sentenceEndOffset < 0
+        ? text.length
+        : index + phrase.length + sentenceEndOffset;
+    const sentenceTail = text.slice(index + phrase.length, sentenceEnd);
+    const hasPostClaimContrast = /\b(?:except|but|however|although)\b/.test(
+      sentenceTail,
+    );
+    if (!hasNegativePolarity || hasPostClaimContrast) return true;
     index = text.indexOf(phrase, index + phrase.length);
   }
   return false;
