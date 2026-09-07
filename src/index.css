@@ -1042,7 +1042,7 @@
     color: var(--notes-muted);
   }
   .meeting-document-actions {
-    @apply relative flex min-h-10 items-center justify-end gap-1 z-50;
+    @apply relative flex min-h-7 items-center justify-end gap-1.5 z-50;
     -webkit-app-region: no-drag;
     pointer-events: auto !important;
   }
@@ -1050,19 +1050,19 @@
     @apply relative;
   }
   .meeting-document-menu > summary {
-    @apply flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-document-menu > summary::-webkit-details-marker {
     @apply hidden;
   }
   .meeting-document-menu__panel {
-    @apply absolute right-0 top-12 z-50 flex min-w-56 flex-col rounded-xl border p-1.5 shadow-lg;
+    @apply absolute right-0 top-full mt-1.5 z-50 flex min-w-56 flex-col rounded-xl border p-1.5 shadow-lg;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
   }
   .meeting-document-menu__panel .meeting-toolbar-button {
-    @apply w-full justify-start;
+    @apply min-h-9 h-auto w-full justify-start rounded-lg px-2.5 py-1.5 text-xs;
   }
   .meeting-document-menu__section {
     @apply flex flex-col gap-1 p-1;
@@ -1090,7 +1090,7 @@
     @apply min-h-10 w-full rounded-md border border-pro-border bg-pro-surface px-2.5 text-sm font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .meeting-toolbar-button {
-    @apply inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+    @apply inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
     color: var(--notes-muted);
   }
   .meeting-toolbar-button:hover {
@@ -1104,11 +1104,12 @@
     @apply border;
     border-color: var(--notes-rule);
     background: transparent;
-    color: var(--notes-ink);
+    color: var(--notes-muted);
   }
   .meeting-toolbar-button--primary:hover {
-    background: var(--notes-paper-raised);
+    background: var(--notes-wash);
     border-color: var(--notes-muted);
+    color: var(--notes-ink);
   }
   .meeting-notes-surface {
     @apply pt-0;

@@ -1138,9 +1138,9 @@ export const MeetingView = ({
                   aria-label="Restore previous generated notes"
                 >
                   {isRestoringNotes ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
-                    <Undo2 className="h-4 w-4 opacity-70 mr-1.5" />
+                    <Undo2 className="w-3.5 h-3.5 opacity-70" />
                   )}
                   <span>
                     {isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}
@@ -1157,7 +1157,7 @@ export const MeetingView = ({
                     isRegeneratingNotes
                       ? 'opacity-50 cursor-not-allowed'
                       : 'meeting-toolbar-button--primary'
-                  } px-3 mr-1 h-9`}
+                  }`}
                   aria-label={
                     isRegeneratingNotes
                       ? 'Generating Enhanced Notes...'
@@ -1165,18 +1165,16 @@ export const MeetingView = ({
                   }
                 >
                   {isRegeneratingNotes ? (
-                    <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
-                    <Sparkles className="w-4 h-4 opacity-70 mr-1.5" />
+                    <Sparkles className="w-3.5 h-3.5 opacity-70" />
                   )}
-                  <span className="font-medium text-sm">
-                    {isRegeneratingNotes ? 'Writing…' : 'Regenerate'}
-                  </span>
+                  <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
                 </button>
               ) : null}
               <details className="meeting-document-menu">
                 <summary aria-label="Meeting note actions">
-                  <MoreHorizontal aria-hidden="true" size={18} />
+                  <MoreHorizontal aria-hidden="true" size={15} />
                 </summary>
                 <div className="meeting-document-menu__panel">
                   <div className="meeting-document-menu__section">
