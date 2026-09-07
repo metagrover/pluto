@@ -50,13 +50,17 @@ const selectedModel = (
 };
 
 const selectedCases = (): LocalIntelligenceEvaluationCase[] => {
-  const requested = process.env.LOCAL_INTELLIGENCE_EVALUATION_CASE;
-  const cases = requested
-    ? localIntelligenceEvaluationCases.filter(
-        (candidate) => candidate.id === requested,
+  const requested = process.env.LOCAL_INTELLIGENCE_EVALUATION_CASE?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const cases = requested?.length
+    ? localIntelligenceEvaluationCases.filter((candidate) =>
+        requested.includes(candidate.id),
       )
     : localIntelligenceEvaluationCases;
-  if (!cases.length) throw new Error('evaluation_case_unknown');
+  if (!cases.length || (requested && cases.length !== requested.length)) {
+    throw new Error('evaluation_case_unknown');
+  }
   return cases;
 };
 
