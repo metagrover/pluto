@@ -322,7 +322,7 @@ const errorCode = (error: unknown): string => {
   }
   if (
     error instanceof Error &&
-    /^(notes_|meeting_notes_|entity_extraction_|value_signals_|knowledge_)[a-z_]+$/.test(
+    /^(?:(?:notes_|meeting_notes_|entity_extraction_|value_signals_|knowledge_)[a-z_]+|ollama_residency_(?:discovery|cleanup)_failed)$/.test(
       error.message,
     )
   )
