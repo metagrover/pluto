@@ -4,6 +4,39 @@
 **Tracking:** [#695](https://github.com/metagrover/pluto/issues/695)  
 **Frozen September 6 verdict:** No candidate passes the frozen protocol. Keep production defaults unchanged. Phi is the only notes candidate worth a larger, human-reviewed follow-up, but it is not approved for promotion by this evaluation.
 
+## September 7 residency repair and 12-case notes evaluation
+
+[Issue #784](https://github.com/metagrover/pluto/issues/784) repairs the lifecycle blocker identified by the frozen evaluation. Before every serialized local generation, Pluto now asks Ollama which models are resident, retains an equivalent target, and unloads non-target residents before starting inference. Discovery and cleanup share a 40-second deadline and fail closed with explicit run failure codes. This changes lifecycle admission only; it does not change model selection or note acceptance policy.
+
+Real production-path smoke runs completed a fresh-process Gemma-to-Phi switch in 2.82 seconds and a fresh-process Phi-to-Gemma switch in 7.03 seconds. Each observed exactly one non-target unload followed by one target generation, with only the target resident afterward. All four counterbalanced transitions during the notes evaluation also completed without a timeout, model mismatch, or residency failure. This resolves the reproduced lifecycle mechanism, but it is not a sleep/wake or sustained mixed-workload acceptance test.
+
+The expanded comparison used 12 held-out synthetic semantic notes cases spanning short, ordinary, long/dense, and adversarial/sparse profiles. Each model ran every case three times in the counterbalanced sequence Phi, Gemma, Gemma, Phi, Phi, Gemma. The evaluated source was `4884ab0716dc94f9c6629caeac27f9102a9663db`; corpus hash `51dec66e5bfba96fd182fb92e676b362811d6c44fe2035f569631ffa25658ede`. Model digests and generation settings remained the same as the post-#777 addendum: seed 41, structured thinking disabled, `num_ctx: 16384`, `num_predict: 2048`, temperature 0.1, and eight threads. Raw artifacts remain owner-only under `.private/local-intelligence-evaluation-784/`.
+
+| Model | Independent evidence review | Automated triage | Median latency | Range | Audit provenance |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Phi `phi4-mini:3.8b` | **27/36 pass**; 9/12 unique outputs | 33/36 | **12.26s** | 5.63-22.58s | 24 complete; 12 warned |
+| Gemma `gemma4:12b` | **24/36 pass**; 9/14 unique outputs | 33/36 | **51.46s** | 31.96-81.14s | 12 complete; 24 warned |
+
+Phi was 4.2 times faster by overall median and about 4.0 times faster by summed case time. The independent evidence review was performed by separate review agents against the source fixtures, not by blinded human reviewers. It found that the automated triage overstated both models:
+
+- Phi failed three case families across all repetitions. It omitted Lena's committed action in one case, attached a decision to evidence from an unrelated boundary while weakening Ravi's commitment in another, and omitted the unmet-compliance fact in the adversarial conditional case.
+- Gemma failed four case families across all repetitions. It repeatedly dropped named owners Lena, Nia/Luis, or Ravi, and omitted the explicit conclusion that Noor had no archive-import action in the unmet-condition case.
+- Neither model invented a wholly unsupported positive action or date. The dominant risk was semantic completeness and evidence association, especially owner retention and explicit negative outcomes.
+- Repetition did not provide independent semantic confidence: Phi produced one semantic output per case across its three runs, and Gemma produced only 14 unique semantic outputs across 36 runs.
+
+Latency by profile reinforces the efficiency result without changing the quality gate:
+
+| Profile | Phi median | Gemma median | Phi evidence pass | Gemma evidence pass |
+| --- | ---: | ---: | ---: | ---: |
+| Short | 8.13s | 33.75s | 9/9 | 9/9 |
+| Ordinary | 9.54s | 43.57s | 9/12 | 9/12 |
+| Long/dense | 20.26s | 79.24s | 6/9 | 3/9 |
+| Adversarial/sparse | 19.85s | 71.11s | 3/6 | 3/6 |
+
+Resource snapshots are warnings, not peak or causal measurements. Phi's three passes ended with swap-occupancy changes of approximately -112 MiB, -112 MiB, and -176 MiB. Gemma's passes ended at approximately +1.44 GiB, +610 MiB, and +1.46 GiB, with observed free memory falling as low as 12%. Every snapshot reported nominal thermal state. The evaluation did not capture one-second peaks or a 30-minute recording workload.
+
+**Updated decision:** merge the residency repair, retain #780 as the frozen baseline, and do not change production model defaults. Phi is the clear candidate for a specialized notes route—it is much faster, uses materially less observed memory pressure, and passed one more case family—but its 27/36 evidence result is below the promotion bar. The next gate is targeted pipeline work for owner/action completeness and cross-boundary evidence association, followed by blinded human review and the integrated recording/mixed-workload suite. Gemma should remain the production control until that candidate clears those gates.
+
 ## September 7 post-#777 notes addendum
 
 [PR #777](https://github.com/metagrover/pluto/pull/777) changed the production notes system after the frozen evaluation: a compact Ollama run may publish a deterministically acceptable writer draft with `complete_with_warnings` provenance when its editor truncates or returns an allowed schema/guardrail failure. The original tables remain the result for source `c592a997fb0103aec96756ea1086a817eec8bb5d`; this addendum reports the same two notes cases on merged source `03967af69923802d035043b7f89732a51fb80b35`.
@@ -110,9 +143,10 @@ This report is a **provisional screening decision**, not full protocol acceptanc
 
 ## Follow-up boundary
 
-1. Fix or explicitly redesign model residency/switch admission so a bounded quick request cannot sit behind a resident runner until its 90-second timeout. Add F09 integration coverage with actual Ollama runner events.
-2. Expand Phi-versus-Gemma notes evaluation to the frozen 12-case held-out inventory, three repetitions, with blinded human review and full source coverage. Preserve the production audit; do not tune around the withdrawal fixture.
-3. Only if Phi passes that review, run candidate-notes downstream track B and the disposable recording/mixed-workload suite before considering specialized notes routing.
-4. Keep Gemma for dreaming and deeper synthesis until a challenger passes all forbidden-link, correction, no-change, and causation controls.
+1. Treat the completed #784 residency repair and real switch smoke as the lifecycle prerequisite, while retaining sleep/wake and sustained-load coverage for integrated acceptance.
+2. Improve owner/action retention and cross-boundary evidence association without weakening the production audit or tuning around individual fixtures. Add semantic checks that catch the observed automated false passes.
+3. Repeat the Phi-versus-Gemma notes comparison with blinded human usefulness review. The independent agent review in the September 7 addendum is evidence, but it does not satisfy that human gate.
+4. Only if Phi clears that review, run candidate-notes downstream track B and the disposable recording/mixed-workload suite before considering specialized notes routing.
+5. Keep Gemma for production notes, dreaming, and deeper synthesis until a challenger passes the applicable evidence, resource, and integration gates.
 
 Rollback is trivial because this evaluation changes no production model setting, runtime policy, database, or accepted intelligence. The private raw ledger remains owner-only under `.private/local-intelligence-evaluation/`; this committed report contains configuration and aggregate results only.
