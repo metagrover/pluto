@@ -146,12 +146,13 @@ describe('commitment semantic provider task', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            `${JSON.stringify({ response: answer, done: true, done_reason: 'stop' })}\n`,
-            { headers: { 'Content-Type': 'application/x-ndjson' } },
-          ),
+      vi.fn(async (input) =>
+        String(input).endsWith('/api/ps')
+          ? Response.json({ models: [] })
+          : new Response(
+              `${JSON.stringify({ response: answer, done: true, done_reason: 'stop' })}\n`,
+              { headers: { 'Content-Type': 'application/x-ndjson' } },
+            ),
       ),
     );
     const provider = new UnifiedLLMProvider('ollama', {
@@ -185,7 +186,14 @@ describe('commitment semantic provider task', () => {
           { headers: { 'Content-Type': 'application/x-ndjson' } },
         ),
     );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input, init) => {
+        if (String(input).endsWith('/api/ps'))
+          return Response.json({ models: [] });
+        return fetchMock(input, init);
+      }),
+    );
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'configured-local',
     });

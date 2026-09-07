@@ -11,6 +11,19 @@ vi.mock('@google/generative-ai', () => ({
   },
 }));
 
+type FetchHandler = (input: unknown, init?: RequestInit) => Promise<unknown>;
+
+function stubOllamaFetch(handler: FetchHandler): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/api/ps'))
+        return Response.json({ models: [] });
+      return handler(input, init);
+    }),
+  );
+}
+
 it('bounds Claude output and rejects max-token termination', async () => {
   vi.stubGlobal(
     'fetch',
@@ -68,6 +81,9 @@ it.each([
 ])(
   'classifies Electron HTTP errors without leaking their bodies: %s',
   async (body, code) => {
+    stubOllamaFetch(async () => {
+      throw new Error('unexpected_ollama_transport');
+    });
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
     });
@@ -113,7 +129,7 @@ it.each([true, false])(
           ].join('\n'),
       };
     });
-    vi.stubGlobal('fetch', fetcher);
+    stubOllamaFetch(fetcher);
     const provider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'qwen3.5:9b',
       ollama_structured_thinking: thinking,
@@ -145,10 +161,10 @@ it('classifies reported provider input overflow without exposing error bodies', 
 });
 
 it('rejects a stream that closes without a completion packet even if the JSON looks complete', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, text: async () => '{"response":"{}"}\n' })),
-  );
+  stubOllamaFetch(async () => ({
+    ok: true,
+    text: async () => '{"response":"{}"}\n',
+  }));
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'qwen3.5:9b',
   }) as unknown as Transport;
@@ -181,20 +197,16 @@ it('decodes chat packets split at every byte without leaking reasoning or duplic
       JSON.stringify({ done: true, done_reason: 'stop' }),
     ].join('\n'),
   );
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              for (const byte of payload)
-                controller.enqueue(Uint8Array.of(byte));
-              controller.close();
-            },
-          }),
-        ),
-    ),
+  stubOllamaFetch(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const byte of payload) controller.enqueue(Uint8Array.of(byte));
+            controller.close();
+          },
+        }),
+      ),
   );
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'qwen3.5:9b',
@@ -234,22 +246,16 @@ it('rejects an oversized notes request before cloud transport', async () => {
 });
 
 it('reads the final Ollama metrics-only packet and rejects a truncated stream', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url, init) => {
-      if (String(url).endsWith('/api/tags'))
-        return {
-          ok: true,
-          json: async () => ({ models: [{ name: 'qwen3.5:9b' }] }),
-        };
-      expect(JSON.parse(init.body).stream).toBe(true);
-      return {
-        ok: true,
-        text: async () =>
-          '{"response":"{}"}\n{"done":true,"done_reason":"length","eval_count":2048}\n',
-      };
-    }),
-  );
+  stubOllamaFetch(async (url, init) => {
+    if (String(url).endsWith('/api/tags'))
+      return Response.json({ models: [{ name: 'qwen3.5:9b' }] });
+    expect(JSON.parse(init.body).stream).toBe(true);
+    return {
+      ok: true,
+      text: async () =>
+        '{"response":"{}"}\n{"done":true,"done_reason":"length","eval_count":2048}\n',
+    };
+  });
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'qwen3.5:9b',
   }) as unknown as Transport;
@@ -259,24 +265,21 @@ it('reads the final Ollama metrics-only packet and rejects a truncated stream', 
 });
 
 it('reports Ollama queue, active time, and terminal token metrics without raw packets', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({
-      ok: true,
-      text: async () =>
-        [
-          JSON.stringify({ message: { content: '{}' } }),
-          JSON.stringify({
-            done: true,
-            done_reason: 'stop',
-            prompt_eval_count: 321,
-            eval_count: 45,
-            prompt_eval_duration: 20_000_000,
-            eval_duration: 30_000_000,
-          }),
-        ].join('\n'),
-    })),
-  );
+  stubOllamaFetch(async () => ({
+    ok: true,
+    text: async () =>
+      [
+        JSON.stringify({ message: { content: '{}' } }),
+        JSON.stringify({
+          done: true,
+          done_reason: 'stop',
+          prompt_eval_count: 321,
+          eval_count: 45,
+          prompt_eval_duration: 20_000_000,
+          eval_duration: 30_000_000,
+        }),
+      ].join('\n'),
+  }));
   const provider = new UnifiedLLMProvider('ollama', {
     ollama_model: 'qwen3.5:9b',
   }) as unknown as Transport;
