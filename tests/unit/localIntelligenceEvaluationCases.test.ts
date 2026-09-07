@@ -236,6 +236,12 @@ describe('local intelligence evaluation corpus', () => {
     expect(
       scoreGoldOutput(
         candidate,
+        `${supportedContext} No pricing was approved, but it was noted that the Android expansion was not approved.`,
+      ),
+    ).toMatchObject({ passed: true, forbiddenMatches: [] });
+    expect(
+      scoreGoldOutput(
+        candidate,
         `${supportedContext} No pricing was approved, but enterprise pricing was.`,
       ).forbiddenMatches,
     ).toContain('pricing was approved');

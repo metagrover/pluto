@@ -1224,12 +1224,21 @@ const containsUnnegatedPhrase = (text: string, phrase: string): boolean => {
     const contrastTail =
       /\b(?:but|however|although)\b(?<tail>.*)$/.exec(sentenceTail)?.groups
         ?.tail ?? '';
-    const contrastTokens = new Set(
-      contrastTail.split(/[^a-z0-9-]+/).filter(Boolean),
-    );
-    const hasAnaphoricContrast =
-      ['it', 'that', 'this'].some((token) => contrastTokens.has(token)) &&
-      predicateTokens.some((token) => contrastTokens.has(token));
+    const contrastWords = contrastTail.split(/[^a-z0-9-]+/).filter(Boolean);
+    const contrastTokens = new Set(contrastWords);
+    const hasAnaphoricContrast = contrastWords.some((token, tokenIndex) => {
+      if (!['it', 'that', 'this'].includes(token)) return false;
+      const nearbyWords = contrastWords.slice(tokenIndex + 1, tokenIndex + 5);
+      const predicateIndex = nearbyWords.findIndex((word) =>
+        predicateTokens.includes(word),
+      );
+      return (
+        predicateIndex >= 0 &&
+        !nearbyWords
+          .slice(0, predicateIndex)
+          .some((word) => ['no', 'not', 'never'].includes(word))
+      );
+    });
     const hasPostClaimContrast =
       /\bexcept\b/.test(sentenceTail) ||
       subjectTokens.some((token) => contrastTokens.has(token)) ||
