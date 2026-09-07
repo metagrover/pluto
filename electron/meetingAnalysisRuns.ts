@@ -148,6 +148,8 @@ type NotesProvider = {
       entityHints?: string[];
       contextTokens?: number;
       compactWriterContract?: boolean;
+      optionalReviewDeadlineAtMs?: number;
+      optionalReviewMinStartMs?: number;
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
@@ -218,7 +220,30 @@ type ActiveRun = {
 
 const NOTES_CONTEXT_TOKENS = 16_384;
 export const MEETING_NOTES_ABSOLUTE_DEADLINE_MS = 12 * 60_000;
+export const MEETING_NOTES_PUBLICATION_RESERVE_MS = 15_000;
+export const MEETING_NOTES_OPTIONAL_REVIEW_MIN_START_MS = 5 * 60_000;
 export const MAX_AUTOMATIC_MEETING_NOTES_ATTEMPTS = 2;
+
+export const createMeetingNotesOptionalReviewBudget = (
+  startedAtMs: number,
+  deadlineMs = MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
+) => {
+  const publicationReserveMs = Math.min(
+    MEETING_NOTES_PUBLICATION_RESERVE_MS,
+    Math.floor(deadlineMs / 4),
+  );
+  return {
+    optionalReviewDeadlineAtMs: startedAtMs + deadlineMs - publicationReserveMs,
+    optionalReviewMinStartMs: Math.min(
+      MEETING_NOTES_OPTIONAL_REVIEW_MIN_START_MS,
+      Math.max(0, deadlineMs - publicationReserveMs),
+    ),
+  };
+};
+
+export const shouldUseMeetingNotesOptionalReviewBudget = (
+  providerName: string,
+): boolean => providerName.toLowerCase().startsWith('ollama');
 
 const hashFingerprint = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -312,6 +337,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   createRunId?: () => string;
   /** Test seam; production runs use the fixed absolute deadline. */
   notesDeadlineMs?: number;
+  knowledgeSynthesisPause?: {
+    acquire(reason: string): void;
+    release(reason: string): void;
+  };
   onUpdated?: (meetingId: string) => void;
   runSecondary?: (input: {
     meetingId: string;
@@ -732,6 +761,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       key: scheduleKey,
       scheduleClass: primaryReason,
       run: async (): Promise<PublishedMeetingNotes> => {
+        dependencies.knowledgeSynthesisPause?.acquire('meeting_notes_run');
         try {
           runMetrics.setPrimaryQueueMs(Date.now() - metricsStartedAtMs);
           const admittedMeeting = dependencies.db.getMeeting(meetingId);
@@ -772,13 +802,24 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           let generatedNodeCount = 0;
           const analysis = await (async () => {
             let deadline: ReturnType<typeof setTimeout> | undefined;
+            const deadlineMs =
+              dependencies.notesDeadlineMs ??
+              MEETING_NOTES_ABSOLUTE_DEADLINE_MS;
+            const startedAtMs = Date.now();
+            const optionalReviewBudget = createMeetingNotesOptionalReviewBudget(
+              startedAtMs,
+              deadlineMs,
+            );
+            const optionalReviewBudgetOptions =
+              shouldUseMeetingNotesOptionalReviewBudget(provider.name)
+                ? optionalReviewBudget
+                : {};
             const deadlineExceeded = new Promise<never>((_resolve, reject) => {
               deadline = setTimeout(() => {
                 const error = new MeetingNotesError('notes_deadline_exceeded');
                 controller.abort(error);
                 reject(error);
-              }, dependencies.notesDeadlineMs ??
-                MEETING_NOTES_ABSOLUTE_DEADLINE_MS);
+              }, deadlineMs);
             });
             try {
               return await Promise.race([
@@ -796,6 +837,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     entityHints: terms,
                     contextTokens: NOTES_CONTEXT_TOKENS,
                     compactWriterContract: true,
+                    ...optionalReviewBudgetOptions,
                     stageCache,
                     cacheKey: stageCacheKey,
                     onStageEvent: runMetrics.observe,
@@ -890,6 +932,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           notify(meetingId);
           throw terminalError;
         } finally {
+          dependencies.knowledgeSynthesisPause?.release('meeting_notes_run');
           if (activeByMeeting.get(meetingId)?.runId === runId) {
             activeByMeeting.delete(meetingId);
           }

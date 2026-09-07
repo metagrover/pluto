@@ -736,6 +736,66 @@ const auditDraft = async (
   return result;
 };
 
+const auditDraftWithinOptionalBudget = async (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+  evidenceSpans: SourceSpan[],
+  knownTerms: NotesKnownTerm[],
+  inherited: NotesItem[] = [],
+  idPrefix = 'document',
+  fullSource = false,
+  retryInstruction?: string,
+): ReturnType<typeof auditDraft> => {
+  const deadlineAtMs = input.optionalReviewDeadlineAtMs;
+  if (deadlineAtMs === undefined) {
+    return auditDraft(
+      input,
+      draft,
+      evidenceSpans,
+      knownTerms,
+      inherited,
+      idPrefix,
+      fullSource,
+      retryInstruction,
+    );
+  }
+  const remainingMs = deadlineAtMs - Date.now();
+  if (remainingMs < (input.optionalReviewMinStartMs ?? 0)) {
+    throw new MeetingNotesError('notes_review_budget_exhausted');
+  }
+  const budgetController = new AbortController();
+  const timer = setTimeout(
+    () => {
+      budgetController.abort(
+        new MeetingNotesError('notes_review_budget_exhausted'),
+      );
+    },
+    Math.max(0, remainingMs),
+  );
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, budgetController.signal])
+    : budgetController.signal;
+  try {
+    return await auditDraft(
+      { ...input, signal },
+      draft,
+      evidenceSpans,
+      knownTerms,
+      inherited,
+      idPrefix,
+      fullSource,
+      retryInstruction,
+    );
+  } catch (error) {
+    if (budgetController.signal.aborted && !input.signal?.aborted) {
+      throw new MeetingNotesError('notes_review_budget_exhausted');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const metadataFor = (
   input: GenerateMeetingNotesInput,
   document: AnalysisDocumentV3,
@@ -1410,29 +1470,38 @@ const runBoundedCompactNotes = async (
   let changes = 0;
   for (const { draft, evidenceSpans, idPrefix } of writtenLeaves) {
     let reviewed: Awaited<ReturnType<typeof auditDraft>>;
-    try {
-      reviewed = await auditDraft(
-        input,
-        draft,
-        evidenceSpans,
-        knownTerms,
-        [],
-        idPrefix,
-      );
-    } catch (error) {
-      if (
-        !(error instanceof MeetingNotesError) ||
-        ![
-          'notes_context_exhausted',
-          'notes_audit_invalid',
-          'notes_model_call_limit',
-        ].includes(error.code)
-      ) {
-        throw error;
-      }
+    if (input.hierarchyAuditStrategy === 'deterministic_only') {
       reviewed = deterministicallyCheckedDraft(input, draft, evidenceSpans);
-      reviewed.audited.issues ??= [];
-      reviewed.audited.issues.push(`notes_leaf_audit_fallback:${error.code}`);
+    } else {
+      try {
+        reviewed = await auditDraftWithinOptionalBudget(
+          input,
+          draft,
+          evidenceSpans,
+          knownTerms,
+          [],
+          idPrefix,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof MeetingNotesError) ||
+          ![
+            'notes_context_exhausted',
+            'notes_audit_invalid',
+            'notes_model_call_limit',
+            'notes_review_budget_exhausted',
+          ].includes(error.code)
+        ) {
+          throw error;
+        }
+        reviewed = deterministicallyCheckedDraft(input, draft, evidenceSpans);
+        reviewed.audited.issues ??= [];
+        reviewed.audited.issues.push(
+          error.code === 'notes_review_budget_exhausted'
+            ? 'notes_leaf_audit_fallback:deadline_budget'
+            : `notes_leaf_audit_fallback:${error.code}`,
+        );
+      }
     }
     reviewedDrafts.push(reviewed.draft);
     changes += reviewed.changeCount;
@@ -1496,7 +1565,9 @@ const runBoundedCompactNotes = async (
     changes,
     {
       depth: 1,
-      nodes: writtenLeaves.length * 2,
+      nodes:
+        writtenLeaves.length *
+        (input.hierarchyAuditStrategy === 'deterministic_only' ? 1 : 2),
       max_depth: 1,
       max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
     },
@@ -1542,7 +1613,10 @@ const runMeetingNotes = async (
       : WRITER_OUTPUT_TOKENS;
     if (!fits(input, writerPrompt, writerOutputTokens)) {
       if (input.compactWriterContract) {
-        throw new MeetingNotesError('notes_context_exhausted');
+        return runBoundedCompactNotes(
+          { ...input, reviewProtocol: 'editor' },
+          knownTerms,
+        );
       }
       return runHierarchy(input, knownTerms);
     }
@@ -1614,20 +1688,28 @@ const runMeetingNotes = async (
   }
   let audited: Awaited<ReturnType<typeof auditDraft>>;
   try {
-    audited = await auditDraft(input, draft, evidenceSpans, knownTerms);
+    audited = await auditDraftWithinOptionalBudget(
+      input,
+      draft,
+      evidenceSpans,
+      knownTerms,
+    );
   } catch (error) {
     const canUseDeterministicFallback =
       input.provider === 'ollama' &&
       compactEditor &&
       error instanceof MeetingNotesError &&
-      error.code === 'notes_audit_invalid' &&
-      (error.validationCategory === 'schema' ||
-        error.validationCategory === 'guardrail');
+      ((error.code === 'notes_audit_invalid' &&
+        (error.validationCategory === 'schema' ||
+          error.validationCategory === 'guardrail')) ||
+        error.code === 'notes_review_budget_exhausted');
     if (!canUseDeterministicFallback) throw error;
     audited = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
     audited.audited.issues ??= [];
     audited.audited.issues.push(
-      `notes_direct_audit_fallback:${error.validationCategory}`,
+      error.code === 'notes_review_budget_exhausted'
+        ? 'notes_direct_audit_fallback:deadline_budget'
+        : `notes_direct_audit_fallback:${error.validationCategory}`,
     );
   }
   assertNotCancelled(input);

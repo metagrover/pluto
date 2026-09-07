@@ -3,9 +3,23 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
-import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
+import {
+  createMeetingAnalysisRunCoordinator,
+  shouldUseMeetingNotesOptionalReviewBudget,
+} from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  it('applies the optional review budget only to the local Ollama provider', () => {
+    expect(shouldUseMeetingNotesOptionalReviewBudget('Ollama (Local)')).toBe(
+      true,
+    );
+    expect(shouldUseMeetingNotesOptionalReviewBudget('ollama')).toBe(true);
+    expect(shouldUseMeetingNotesOptionalReviewBudget('OpenAI')).toBe(false);
+    expect(shouldUseMeetingNotesOptionalReviewBudget('Anthropic Claude')).toBe(
+      false,
+    );
+  });
+
   it('precomputes a live leaf with the same source-independent cache identity used at publication', async () => {
     const precomputeStructuredAnalysisLeaf = vi
       .fn()
@@ -64,6 +78,7 @@ describe('meeting analysis run coordinator', () => {
 
   it('persists one content-free terminal metric from provider stage events', async () => {
     const upsertMeetingAnalysisRunMetric = vi.fn();
+    const knowledgePause = { acquire: vi.fn(), release: vi.fn() };
     const generateStructuredAnalysis = vi.fn(
       async (
         _transcript: string,
@@ -134,6 +149,7 @@ describe('meeting analysis run coordinator', () => {
         name: 'ollama',
         generateStructuredAnalysis,
       }),
+      knowledgeSynthesisPause: knowledgePause,
       createRunId: () => 'metric-run-id',
     });
 
@@ -143,6 +159,18 @@ describe('meeting analysis run coordinator', () => {
       template: 'auto',
       reason: 'manual',
     });
+
+    expect(generateStructuredAnalysis).toHaveBeenCalledWith(
+      expect.any(String),
+      '',
+      'auto',
+      expect.objectContaining({
+        optionalReviewDeadlineAtMs: expect.any(Number),
+        optionalReviewMinStartMs: 5 * 60_000,
+      }),
+    );
+    expect(knowledgePause.acquire).toHaveBeenCalledWith('meeting_notes_run');
+    expect(knowledgePause.release).toHaveBeenCalledWith('meeting_notes_run');
 
     expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledTimes(1);
     expect(upsertMeetingAnalysisRunMetric).toHaveBeenCalledWith(
