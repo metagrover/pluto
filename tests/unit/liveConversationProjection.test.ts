@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveTranscriptSegment } from '../../src/components/features/recordingWorkspaceModel';
-import { createLiveConversationProjection } from '../../src/services/liveTranscription/liveConversationProjection';
+import {
+  createLiveConversationProjection,
+  liveConversationTranscriptSegments,
+} from '../../src/services/liveTranscription/liveConversationProjection';
 import type {
   LiveTranscriptReading,
   LiveTranscriptReadingRange,
@@ -63,7 +66,7 @@ const reading = (
 };
 
 describe('live conversation projection', () => {
-  it('allocates committed order once and appends older arrivals as earlier speech', () => {
+  it('inserts delayed committed speech at its event-time position', () => {
     const projection = createLiveConversationProjection({ generation: 4 });
     const newer = row('system-newer', 'system', 'newer remote words', 20_000);
     const first = projection.apply({
@@ -78,11 +81,44 @@ describe('live conversation projection', () => {
       reason: 'recognition',
     });
     expect(second.rows.map((item) => item.id)).toEqual([
-      'system-newer',
       'mic-older',
+      'system-newer',
     ]);
-    expect(second.rows[1].qualifier).toBe('earlier_speech');
-    expect(second.rows[0]).toBe(first.rows[0]);
+    expect(second.rows[0].qualifier).toBeUndefined();
+    expect(second.rows[1]).toBe(first.rows[0]);
+    expect(second.metrics.lateArrivals).toBe(1);
+  });
+
+  it('produces the same event-time order for every callback permutation', () => {
+    const segments = [
+      row('system-later', 'system', 'remote later', 20_000),
+      row('mic-first', 'mic', 'local first', 10_000),
+      row('system-same-time', 'system', 'remote overlap', 10_000),
+    ];
+    const applyOrder = (order: LiveTranscriptSegment[]) => {
+      const projection = createLiveConversationProjection({ generation: 1 });
+      const seen: LiveTranscriptSegment[] = [];
+      for (const segment of order) {
+        seen.push(segment);
+        projection.apply({
+          generation: 1,
+          reading: reading([...seen].reverse()),
+          reason: 'recognition',
+        });
+      }
+      return projection.snapshot().rows.map((item) => item.id);
+    };
+
+    expect(applyOrder(segments)).toEqual([
+      'mic-first',
+      'system-same-time',
+      'system-later',
+    ]);
+    expect(applyOrder([...segments].reverse())).toEqual([
+      'mic-first',
+      'system-same-time',
+      'system-later',
+    ]);
   });
 
   it('corrects and restores an owned row in the same keyed shell', () => {
@@ -167,7 +203,7 @@ describe('live conversation projection', () => {
           reason: 'echo_evidence',
         })
         .rows.map((item) => item.id),
-    ).toEqual(['system-1', 'mic-1']);
+    ).toEqual(['mic-1', 'system-1']);
   });
 
   it('keeps both tentative sources in one bounded expandable draft', () => {
@@ -224,5 +260,48 @@ describe('live conversation projection', () => {
     expect(unavailable.rows).toBe(accepted.rows);
     expect(unavailable.status).toBe('unavailable');
     expect(projection.finish(2).draft).toBeNull();
+  });
+
+  it('keeps detailed correction evidence bounded to the mutable tail', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const segments = Array.from({ length: 180 }, (_, index) =>
+      row(
+        `row-${index}`,
+        index % 2 ? 'system' : 'mic',
+        `words ${index}`,
+        index * 1_000,
+      ),
+    );
+    const snapshot = projection.apply({
+      generation: 1,
+      reading: reading(segments),
+      reason: 'recognition',
+    });
+
+    expect(snapshot.rows).toHaveLength(180);
+    expect(snapshot.metrics.mutableRows).toBeLessThanOrEqual(128);
+    expect(snapshot.metrics.retainedParts).toBeLessThanOrEqual(128);
+    expect(snapshot.rows[0].parts).toEqual([]);
+    expect(snapshot.rows.at(-1)?.parts).not.toEqual([]);
+  });
+
+  it('projects the same ordered visible history for active Ask Pluto', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const newer = row('system-newer', 'system', 'newer remote words', 20_000);
+    projection.apply({
+      generation: 1,
+      reading: reading([newer]),
+      reason: 'recognition',
+    });
+    const older = row('mic-older', 'mic', 'older local words', 10_000);
+    const snapshot = projection.apply({
+      generation: 1,
+      reading: reading([newer, older]),
+      reason: 'recognition',
+    });
+
+    expect(
+      liveConversationTranscriptSegments(snapshot).map((segment) => segment.id),
+    ).toEqual(['mic-older', 'system-newer']);
   });
 });

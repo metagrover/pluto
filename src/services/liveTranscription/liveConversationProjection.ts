@@ -22,7 +22,7 @@ export type LiveConversationRow = {
   text: string;
   parts: LiveConversationPart[];
   display: 'speech' | 'duplicate_removed';
-  qualifier?: 'updated' | 'earlier_speech';
+  qualifier?: 'updated';
 };
 
 export type LiveConversationDraft = {
@@ -40,6 +40,10 @@ export type LiveConversationMetrics = {
   degradedReconciliations: number;
   draftWordCount: number;
   lastProjectionDurationMs: number;
+  mutableRows: number;
+  retainedParts: number;
+  micWatermarkMs: number | null;
+  systemWatermarkMs: number | null;
 };
 
 export type LiveConversationSnapshot = {
@@ -57,28 +61,54 @@ type OwnedRow = {
 };
 
 const DRAFT_WORD_LIMIT = 24;
+const MUTABLE_TAIL_MS = 45_000;
+const MUTABLE_TAIL_ROW_LIMIT = 128;
+const MUTABLE_TAIL_PART_LIMIT = 512;
 const sourceRank = { mic: 0, system: 1 } as const;
 
-const visibleRanges = (
-  reading: LiveTranscriptReading,
-  segmentId: string,
-): LiveTranscriptReadingRange[] =>
-  reading.ranges.filter(
-    (range) =>
-      range.sourceSegmentId === segmentId && range.visibility === 'visible',
+type OrderedItem = Pick<LiveConversationRow, 'id' | 'source' | 'timestampMs'>;
+
+const compareEventTime = (left: OrderedItem, right: OrderedItem): number =>
+  left.timestampMs - right.timestampMs ||
+  sourceRank[left.source] - sourceRank[right.source] ||
+  left.id.localeCompare(right.id);
+
+const compareSegmentsByEventTime = (
+  left: LiveTranscriptSegment,
+  right: LiveTranscriptSegment,
+): number =>
+  compareEventTime(
+    {
+      id: left.id,
+      source: left.source as 'mic' | 'system',
+      timestampMs: left.timestampMs,
+    },
+    {
+      id: right.id,
+      source: right.source as 'mic' | 'system',
+      timestampMs: right.timestampMs,
+    },
   );
 
-const suppressedWordCount = (
-  reading: LiveTranscriptReading,
-  segmentId: string,
-): number =>
-  reading.ranges
-    .filter(
-      (range) =>
-        range.sourceSegmentId === segmentId &&
-        range.visibility === 'suppressed_echo',
-    )
-    .reduce((total, range) => total + range.endWord - range.startWord, 0);
+const indexRanges = (reading: LiveTranscriptReading) => {
+  const visible = new Map<string, LiveTranscriptReadingRange[]>();
+  const suppressedWords = new Map<string, number>();
+  for (const range of reading.ranges) {
+    if (range.visibility === 'visible') {
+      const ranges = visible.get(range.sourceSegmentId) ?? [];
+      ranges.push(range);
+      visible.set(range.sourceSegmentId, ranges);
+      continue;
+    }
+    suppressedWords.set(
+      range.sourceSegmentId,
+      (suppressedWords.get(range.sourceSegmentId) ?? 0) +
+        range.endWord -
+        range.startWord,
+    );
+  }
+  return { visible, suppressedWords };
+};
 
 const toPart = (range: LiveTranscriptReadingRange): LiveConversationPart => ({
   id: range.id,
@@ -127,7 +157,13 @@ export const createLiveConversationProjection = ({
     throw new Error('live_conversation_generation_invalid');
 
   const owned = new Map<string, OwnedRow>();
-  let order: string[] = [];
+  const sealed = new Set<string>();
+  const sourceWatermarks: Record<'mic' | 'system', number | null> = {
+    mic: null,
+    system: null,
+  };
+  const order: string[] = [];
+  let committedRowsDirty = false;
   let snapshot: LiveConversationSnapshot = {
     generation,
     status: 'active',
@@ -140,6 +176,10 @@ export const createLiveConversationProjection = ({
       degradedReconciliations: 0,
       draftWordCount: 0,
       lastProjectionDurationMs: 0,
+      mutableRows: 0,
+      retainedParts: 0,
+      micWatermarkMs: null,
+      systemWatermarkMs: null,
     },
   };
 
@@ -148,12 +188,10 @@ export const createLiveConversationProjection = ({
     draft: LiveConversationDraft | null,
     durationMs = 0,
   ) => {
-    const projectedRows = order.map((id) => owned.get(id)!.row);
-    const rows =
-      projectedRows.length === snapshot.rows.length &&
-      projectedRows.every((row, index) => row === snapshot.rows[index])
-        ? snapshot.rows
-        : projectedRows;
+    const rows = committedRowsDirty
+      ? order.map((id) => owned.get(id)!.row)
+      : snapshot.rows;
+    committedRowsDirty = false;
     snapshot = {
       generation,
       status,
@@ -166,6 +204,65 @@ export const createLiveConversationProjection = ({
       },
     };
     return snapshot;
+  };
+
+  const insertInEventTimeOrder = (row: LiveConversationRow) => {
+    let low = 0;
+    let high = order.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const middleRow = owned.get(order[middle])!.row;
+      if (compareEventTime(middleRow, row) <= 0) low = middle + 1;
+      else high = middle;
+    }
+    order.splice(low, 0, row.id);
+    committedRowsDirty = true;
+  };
+
+  const compactCommittedPrefix = () => {
+    const watermarks = Object.values(sourceWatermarks).filter(
+      (value): value is number => value !== null,
+    );
+    const safeWatermarkMs = watermarks.length
+      ? Math.min(...watermarks)
+      : Number.NEGATIVE_INFINITY;
+    const timeCutoffMs = safeWatermarkMs - MUTABLE_TAIL_MS;
+    const countCutoff = Math.max(0, order.length - MUTABLE_TAIL_ROW_LIMIT);
+    const sealRow = (id: string) => {
+      const current = owned.get(id)!;
+      const compactedRow = current.row.parts.length
+        ? { ...current.row, parts: [] }
+        : current.row;
+      owned.set(id, {
+        ...current,
+        row: compactedRow,
+        signature: rowSignature(compactedRow),
+      });
+      sealed.add(id);
+      committedRowsDirty = true;
+    };
+    for (let index = 0; index < order.length; index += 1) {
+      const id = order[index];
+      if (sealed.has(id)) continue;
+      const current = owned.get(id)!;
+      if (index >= countCutoff && current.row.timestampMs >= timeCutoffMs)
+        continue;
+      sealRow(id);
+    }
+    let retainedParts = order.reduce(
+      (total, id) => total + owned.get(id)!.row.parts.length,
+      0,
+    );
+    for (const id of order) {
+      if (retainedParts <= MUTABLE_TAIL_PART_LIMIT) break;
+      if (sealed.has(id)) continue;
+      retainedParts -= owned.get(id)!.row.parts.length;
+      sealRow(id);
+    }
+    snapshot.metrics.mutableRows = order.length - sealed.size;
+    snapshot.metrics.retainedParts = retainedParts;
+    snapshot.metrics.micWatermarkMs = sourceWatermarks.mic;
+    snapshot.metrics.systemWatermarkMs = sourceWatermarks.system;
   };
 
   return {
@@ -185,26 +282,37 @@ export const createLiveConversationProjection = ({
         metrics: { ...snapshot.metrics },
       };
       const startedAt = performance.now();
+      const rangesBySegment = indexRanges(reading);
       const committed = reading.segments.filter(
         (segment) =>
           segment.confirmed &&
           (segment.source === 'mic' || segment.source === 'system'),
       );
+      const previousWatermarkMs = Math.max(
+        sourceWatermarks.mic ?? Number.NEGATIVE_INFINITY,
+        sourceWatermarks.system ?? Number.NEGATIVE_INFINITY,
+      );
+      for (const segment of committed) {
+        const source = segment.source as 'mic' | 'system';
+        sourceWatermarks[source] = Math.max(
+          sourceWatermarks[source] ?? Number.NEGATIVE_INFINITY,
+          segment.endTimestampMs ?? segment.timestampMs,
+        );
+      }
 
-      // unseen -> append once; visible -> correct in place; hidden -> wait
-      // corrected hidden -> keep shell; restored hidden -> append as late speech
+      // Unseen visible rows are inserted by event time. Mutable rows can be
+      // corrected in place; sealed history remains a stable lightweight prefix.
       const newVisible: LiveTranscriptSegment[] = [];
       for (const segment of committed) {
-        const ranges = visibleRanges(reading, segment.id);
         const previous = owned.get(segment.id);
+        if (previous && sealed.has(segment.id)) continue;
+        const ranges = rangesBySegment.visible.get(segment.id) ?? [];
         if (!previous) {
           if (ranges.length) newVisible.push(segment);
           continue;
         }
-        const nextSuppressedWordCount = suppressedWordCount(
-          reading,
-          segment.id,
-        );
+        const nextSuppressedWordCount =
+          rangesBySegment.suppressedWords.get(segment.id) ?? 0;
         const parts = ranges.map(toPart);
         const text = parts.map((part) => part.text).join(' ');
         const next: LiveConversationRow = {
@@ -230,20 +338,16 @@ export const createLiveConversationProjection = ({
             suppressedWordCount: nextSuppressedWordCount,
             signature,
           });
+          committedRowsDirty = true;
         }
       }
 
-      newVisible.sort(
-        (left, right) =>
-          left.timestampMs - right.timestampMs ||
-          sourceRank[left.source as 'mic' | 'system'] -
-            sourceRank[right.source as 'mic' | 'system'] ||
-          left.id.localeCompare(right.id),
-      );
+      newVisible.sort(compareSegmentsByEventTime);
       for (const segment of newVisible) {
-        const parts = visibleRanges(reading, segment.id).map(toPart);
-        const last = order.length ? owned.get(order.at(-1)!)?.row : undefined;
-        const isLate = Boolean(last && segment.timestampMs < last.timestampMs);
+        const parts = (rangesBySegment.visible.get(segment.id) ?? []).map(
+          toPart,
+        );
+        const isLate = segment.timestampMs < previousWatermarkMs;
         const row: LiveConversationRow = {
           id: segment.id,
           source: segment.source as 'mic' | 'system',
@@ -253,16 +357,18 @@ export const createLiveConversationProjection = ({
           text: parts.map((part) => part.text).join(' '),
           parts,
           display: 'speech',
-          ...(isLate ? { qualifier: 'earlier_speech' as const } : {}),
         };
         if (isLate) snapshot.metrics.lateArrivals += 1;
         owned.set(segment.id, {
           row,
-          suppressedWordCount: suppressedWordCount(reading, segment.id),
+          suppressedWordCount:
+            rangesBySegment.suppressedWords.get(segment.id) ?? 0,
           signature: rowSignature(row),
         });
-        order = [...order, segment.id];
+        insertInEventTimeOrder(row);
       }
+
+      compactCommittedPrefix();
 
       const tentative = reading.segments
         .filter(
@@ -270,15 +376,9 @@ export const createLiveConversationProjection = ({
             !segment.confirmed &&
             (segment.source === 'mic' || segment.source === 'system'),
         )
-        .sort(
-          (left, right) =>
-            left.timestampMs - right.timestampMs ||
-            sourceRank[left.source as 'mic' | 'system'] -
-              sourceRank[right.source as 'mic' | 'system'] ||
-            left.id.localeCompare(right.id),
-        );
+        .sort(compareSegmentsByEventTime);
       const draftParts = tentative.flatMap((segment) =>
-        visibleRanges(reading, segment.id).map(toPart),
+        (rangesBySegment.visible.get(segment.id) ?? []).map(toPart),
       );
       const wordCount = draftParts.reduce(
         (total, part) => total + (part.text.match(/\S+/gu)?.length ?? 0),
@@ -329,3 +429,23 @@ export const createLiveConversationProjection = ({
     },
   };
 };
+
+export const liveConversationTranscriptSegments = (
+  snapshot: LiveConversationSnapshot,
+): LiveTranscriptSegment[] =>
+  snapshot.rows.flatMap((row) =>
+    row.display === 'speech' && row.text.trim()
+      ? [
+          {
+            id: row.id,
+            source: row.source,
+            speaker: row.speaker,
+            text: row.text,
+            rawText: row.text,
+            timestampMs: row.timestampMs,
+            endTimestampMs: row.endTimestampMs,
+            confirmed: true,
+          },
+        ]
+      : [],
+  );
