@@ -13,3 +13,13 @@ export const notesContentGuidance = [
 
 export const notesSourceGuidance =
   'Every text block needs sources: copied source descriptor[]. Copy each descriptor exactly from SOURCE DATA. Never calculate offsets, invent references or use object paths. Source labels belong only in sources arrays, never visible text.';
+
+export const notesSourceFirstGuidance = [
+  'BEGIN SOURCE-FIRST NOTES GUIDANCE',
+  'Every accepted future commitment needs a visible action with its accepted owner and explicit deadline in both prose and structured fields. Discussion or an evidence quote does not replace an action.',
+  'Cite only source turns about the same operation or claim. Shared names, dates, project words, or negative phrases do not establish support.',
+  'Distinguish a pending conditional commitment from an unmet prerequisite that the source explicitly concludes creates no action. Preserve the condition and final state without inventing a no-action conclusion.',
+  'Preserve material facts, quantities, definitions, reasons, withdrawals, corrections, and unresolved questions as well as commitments. User notes and terminology hints are not factual authority.',
+  'The final editor must retain every inventory item or supply a source-backed disposition. Read the chronological original source to settle changes across parts.',
+  'END SOURCE-FIRST NOTES GUIDANCE',
+].join('\n');

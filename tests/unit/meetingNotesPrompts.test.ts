@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import {
@@ -27,6 +28,52 @@ const stagePrompts = () => [
   buildNotesMergePrompt(input),
   buildSourceReconciliationPrompt(''),
 ];
+
+it('keeps default reconciliation and editor prompts byte-stable', () => {
+  const digest = (prompt: string) =>
+    createHash('sha256').update(prompt).digest('hex');
+  expect(digest(buildNotesEditorPrompt(input))).toBe(
+    '6b0ec652dae8c5bc20ff63cafcef84ecf1f44ebe49df4c7bb2f6875eda53fbc4',
+  );
+  expect(digest(buildSourceReconciliationPrompt(''))).toBe(
+    'e9510fc99c927b93229d57e0c3aac8cab352f8d01d60a3ae9d7440d7a1affa65',
+  );
+});
+
+it('isolates source-first semantic guidance and encodes its inventory once', () => {
+  const reconciliation = buildSourceReconciliationPrompt('', true);
+  const editor = buildNotesEditorPrompt({
+    ...input,
+    sourceFirstReconciliation: true,
+    inherited: [
+      {
+        id: 'inventory:0:facts:0',
+        kind: 'point',
+        text: 'A retained fact',
+        owner: null,
+        due: null,
+        sources: [{ segment: 0, start: 0, end: 1 }],
+      },
+    ],
+  });
+  for (const prompt of [reconciliation, editor]) {
+    expect(prompt.match(/BEGIN SOURCE-FIRST NOTES GUIDANCE/g)).toHaveLength(1);
+    expect(prompt).toContain('accepted future commitment needs a visible action');
+    expect(prompt).toContain('same operation or claim');
+    expect(prompt).toContain('unmet prerequisite');
+    expect(prompt).toContain('facts, quantities, definitions, reasons');
+    expect(prompt).toContain('User notes and terminology hints are not factual authority');
+  }
+  expect(editor.match(/BEGIN SOURCE INVENTORY/g)).toHaveLength(1);
+  expect(editor.match(/inventory:0:facts:0/g)).toHaveLength(1);
+  expect(editor).not.toContain('BEGIN DRAFT DATA');
+  expect(buildNotesEditorPrompt(input)).not.toContain(
+    'BEGIN SOURCE-FIRST NOTES GUIDANCE',
+  );
+  expect(buildSourceReconciliationPrompt('')).not.toContain(
+    'BEGIN SOURCE-FIRST NOTES GUIDANCE',
+  );
+});
 
 it('asks the compact writer for complete items and bounded evidence', () => {
   const prompt = buildCompactNotesWriterPrompt(input);
