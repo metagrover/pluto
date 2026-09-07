@@ -530,6 +530,7 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
   getSettings: () => getAllSettings(db),
   getProvider,
+  knowledgeSynthesisPause,
   onUpdated: (meetingId) => {
     invalidateDreamingCatalog();
     for (const win of BrowserWindow.getAllWindows()) {

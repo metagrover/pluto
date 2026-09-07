@@ -14,6 +14,7 @@ import {
   NOTES_PROMPT_VERSION,
 } from '../electron/llm/meetingNotesTypes.ts';
 import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
+import { createMeetingNotesOptionalReviewBudget } from '../electron/meetingAnalysisRuns.ts';
 import {
   type MeetingNotesLatencySample,
   type PrivateMeetingNotesLatencyCase,
@@ -165,11 +166,17 @@ const runCase = async (
   let generatedNodeCount = 0;
   let deterministicWriterRecoveryCount = 0;
   try {
+    const optionalReviewBudget =
+      createMeetingNotesOptionalReviewBudget(startedAtMs);
     const analysis = await provider.generateStructuredAnalysis('', '', 'auto', {
       source,
       contextTokens,
       hierarchyAuditStrategy,
       compactWriterContract,
+      ...(compactWriterContract &&
+      hierarchyAuditStrategy !== 'deterministic_only'
+        ? optionalReviewBudget
+        : {}),
       onStageEvent: metrics.observe,
       onPlan: ({ plannedLeafCount }) =>
         metrics.setPlannedLeafCount(plannedLeafCount),
@@ -252,6 +259,9 @@ const main = async () => {
       hierarchyAuditStrategy,
       compactWriterContract,
       deterministicWriterRecovery,
+      optionalReviewBudget:
+        compactWriterContract &&
+        hierarchyAuditStrategy !== 'deterministic_only',
       fixtureOrderSha256: createHash('sha256')
         .update(cases.map(({ definition }) => definition.caseKey).join('\n'))
         .digest('hex'),

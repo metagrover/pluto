@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
-import { projectAuditedNotes } from '../../electron/llm/meetingNotesAudit';
+import {
+  acceptEditedNotes,
+  projectAuditedNotes,
+} from '../../electron/llm/meetingNotesAudit';
 import {
   buildNotesEditorPrompt,
   countEditedBlocks,
@@ -118,6 +121,48 @@ it('rejects an uncorrected commitment instead of silently removing its discussio
   expect(() =>
     parseEditedNotes({ raw: JSON.stringify(draft), source }),
   ).toThrow(/conditional_willingness.*point/);
+});
+
+it('conservatively preserves conditional willingness as source text instead of a commitment', () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Ben',
+      text: 'If legal approves, I can draft the announcement.',
+    },
+  ]);
+  const { draft } = makeDirectNotesFixture();
+  const sources = [
+    { segment: 0, start: 0, end: source.segments[0]!.text.length },
+  ];
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'action',
+      text: 'Ben will draft the announcement if legal approves.',
+      sources,
+      owner: 'Ben',
+      due: null,
+    },
+  ];
+
+  const reviewed = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+
+  expect(reviewed.draft.sections[0]!.items).toEqual([
+    expect.objectContaining({
+      kind: 'point',
+      text: 'If legal approves, I can draft the announcement.',
+      owner: null,
+      due: null,
+    }),
+  ]);
+  expect(reviewed.issues).toContain(
+    'deterministic_reclassified_conditional_willingness:s0:item:0',
+  );
 });
 
 it('rejects fabricated source references', () => {

@@ -125,6 +125,10 @@ export type GenerateMeetingNotesInput = {
   onStage?: (task: NotesTask) => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;
+  /** Product deadline for optional model review; writers remain fail-closed. */
+  optionalReviewDeadlineAtMs?: number;
+  /** Minimum remaining wall time required before starting optional review. */
+  optionalReviewMinStartMs?: number;
   stageCache?: import('./meetingNotesStageCache').NotesStageCache;
   cacheKey?: string;
 };

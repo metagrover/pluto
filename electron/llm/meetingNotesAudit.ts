@@ -1056,6 +1056,20 @@ export const acceptEditedNotes = ({
         item.kind === 'action' &&
         isUnacceptedConditionalWillingness(evidence)
       ) {
+        if (acceptancePolicy === 'conservative') {
+          issues.push(
+            `deterministic_reclassified_conditional_willingness:${item.id}`,
+          );
+          return [
+            {
+              ...item,
+              kind: 'point' as const,
+              text: evidence.trim(),
+              owner: null,
+              due: null,
+            },
+          ];
+        }
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
         );

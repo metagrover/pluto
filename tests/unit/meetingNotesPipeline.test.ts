@@ -1011,6 +1011,134 @@ it('reviews at most two calls per compact leaf and combines them without a model
   }
 });
 
+it('uses deterministic leaf checks when the optional review start budget is exhausted', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: `First fact. ${'Context '.repeat(500)}` },
+    { speaker: 'Nira', text: `Second fact. ${'Context '.repeat(500)}` },
+  ]);
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: 11,
+  }));
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    spans.map((span) => ({
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: source.segments[span.segment]!.text.slice(0, span.end),
+      sourceText: source.segments[span.segment]!.text.slice(0, span.end),
+      sourceRevision: source.revision,
+    })),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesAudit') throw new Error('unexpected-audit');
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    return JSON.stringify({
+      sections: [
+        {
+          title: `Leaf ${span.segment + 1}`,
+          items: [
+            {
+              kind: 'point',
+              text: `Supported fact ${span.segment + 1}`,
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 8_192,
+      optionalReviewDeadlineAtMs: Date.now() + 100,
+      optionalReviewMinStartMs: 1_000,
+    });
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesWriter',
+    ]);
+    expect(result.quality.issues).toContain(
+      'notes_leaf_audit_fallback:deadline_budget',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('falls back from an in-flight optional review before the publication reserve expires', async () => {
+  vi.useFakeTimers();
+  const fixture = makeDirectNotesFixture();
+  const sourceSpan = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [sourceSpan],
+              },
+            ],
+          },
+        ],
+      });
+    }
+    if (!request.signal) throw new Error('missing-review-deadline-signal');
+    return new Promise<string>((_resolve, reject) => {
+      request.signal!.addEventListener(
+        'abort',
+        () => reject(request.signal!.reason),
+        { once: true },
+      );
+    });
+  });
+
+  try {
+    const pending = generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source: fixture.source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16_384,
+      optionalReviewDeadlineAtMs: Date.now() + 100,
+      optionalReviewMinStartMs: 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await pending;
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesAudit',
+    ]);
+    expect(result.quality.issues).toContain(
+      'notes_direct_audit_fallback:deadline_budget',
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('preserves writer capacity when the final planned compact leaf splits', async () => {
   const source = makeSyntheticNotesSource(
     Array.from({ length: 6 }, (_, index) => ({
@@ -1143,6 +1271,79 @@ it('can benchmark a direct draft with deterministic checks and no model audit', 
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata.mode).toBe('direct');
+});
+
+it('can benchmark oversized compact leaves with deterministic checks and no model audits', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'First product fact. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'Second product fact. '.repeat(2_000) },
+  ]);
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: 20,
+  }));
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    spans.map((span) => ({
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: source.segments[span.segment]!.text.slice(0, span.end),
+      sourceText: source.segments[span.segment]!.text.slice(0, span.end),
+      sourceRevision: source.revision,
+    })),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    return JSON.stringify({
+      sections: [
+        {
+          title: `Leaf ${span.segment + 1}`,
+          items: [
+            {
+              kind: 'point',
+              text: `Supported fact ${span.segment + 1}`,
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      hierarchyAuditStrategy: 'deterministic_only',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 8_192,
+    });
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesWriter',
+    ]);
+    expect(result.topics.map((section) => section.title)).toEqual([
+      'Leaf 1',
+      'Leaf 2',
+    ]);
+    expect(result.generation_metadata.hierarchy).toEqual({
+      depth: 1,
+      nodes: 2,
+      max_depth: 1,
+      max_nodes: 6,
+    });
+    expect(result.generation_metadata.pipeline_version).toBe(
+      'writer-editor-bounded-v1',
+    );
+  } finally {
+    plan.mockRestore();
+  }
 });
 
 it('can benchmark the compact writer contract in one bounded call', async () => {
