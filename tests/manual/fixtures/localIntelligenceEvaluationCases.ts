@@ -1,4 +1,9 @@
 import type { DreamingInputPackage } from '../../../electron/dreaming/types';
+import {
+  phiNotesExpectedRejectionCases,
+  phiNotesHeldOutCases,
+  phiNotesOrdinaryCapacityCases,
+} from './localIntelligencePhiNotesHeldOut';
 import type { NotesProjectionExpectation } from './localIntelligenceNotesScoring';
 
 export type EvaluationPartition = 'development' | 'held_out';
@@ -140,7 +145,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-middle-withdrawal',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F01', 'F02', 'F04', 'F13', 'F19', 'F21'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -201,7 +206,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-conditional-ownership',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F05', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -258,7 +263,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-opening-decision',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F01', 'F13'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -295,7 +300,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-date-correction',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F04', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -334,7 +339,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-owner-handoff',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F05', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -378,7 +383,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-ordinary-no-decision-no-action',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F06', 'F21'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -431,7 +436,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-ordinary-end-commitment',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F02', 'F18', 'F19'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -474,7 +479,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-three-position-evidence',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F01', 'F02', 'F04', 'F13', 'F18', 'F19'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -586,7 +591,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-owner-date-revision',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F04', 'F05', 'F18', 'F21'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -684,7 +689,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-decisions-and-boundaries',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F01', 'F02', 'F06', 'F13', 'F19'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -794,7 +799,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-adversarial-sparse-unrelated-beacons',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F05', 'F06', 'F13'],
       durationClass: 'long',
       syntheticProfile: 'adversarial_sparse',
@@ -855,7 +860,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-adversarial-sparse-unmet-condition',
       lane: 'meeting_notes',
-      partition: 'held_out',
+      partition: 'development',
       failureIds: ['F02', 'F06', 'F18', 'F21'],
       durationClass: 'long',
       syntheticProfile: 'adversarial_sparse',
@@ -1241,7 +1246,7 @@ const withNotesProjection = (claim: GoldClaim): NotesGoldClaim => {
   };
 };
 
-export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
+const historicalLocalIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
   baseLocalIntelligenceEvaluationCases.map((candidate) =>
     candidate.lane === 'meeting_notes'
       ? {
@@ -1254,6 +1259,14 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
         }
       : candidate,
   );
+
+export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
+  [
+    ...historicalLocalIntelligenceEvaluationCases,
+    ...phiNotesHeldOutCases,
+    ...phiNotesOrdinaryCapacityCases,
+    ...phiNotesExpectedRejectionCases,
+  ];
 
 const normalized = (value: string): string =>
   value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim();
