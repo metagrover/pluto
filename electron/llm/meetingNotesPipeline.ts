@@ -172,7 +172,9 @@ const validationCategoryFor = (error: unknown): NotesValidationCategory => {
   }
   if (
     error.code.startsWith('notes_guardrail:') ||
-    error.code.startsWith('notes_audit_invalid_commitment:')
+    error.code.startsWith('notes_audit_invalid_commitment:') ||
+    error.code.startsWith('notes_editor_source_label:') ||
+    error.code.startsWith('notes_editor_invalid_commitment:')
   ) {
     return 'guardrail';
   }
@@ -1660,12 +1662,18 @@ const runMeetingNotes = async (
     return runBoundedCompactNotes(input, knownTerms);
   }
 
-  const draft = await writeDraft(
-    input,
-    'notesWriter',
-    writerPrompt,
-    evidenceSpans,
-  );
+  const draft = compactEditor
+    ? await withTruncationRetry(input, (retryInstruction) =>
+        writeDraft(
+          input,
+          'notesWriter',
+          retryInstruction
+            ? `${writerPrompt}\n\n${retryInstruction}`
+            : writerPrompt,
+          evidenceSpans,
+        ),
+      )
+    : await writeDraft(input, 'notesWriter', writerPrompt, evidenceSpans);
   assertNotCancelled(input);
   const auditPrompt = reviewPrompt(input, {
     sourceText,
@@ -1695,21 +1703,25 @@ const runMeetingNotes = async (
       knownTerms,
     );
   } catch (error) {
-    const canUseDeterministicFallback =
+    const fallbackReason =
       input.provider === 'ollama' &&
       compactEditor &&
-      error instanceof MeetingNotesError &&
-      ((error.code === 'notes_audit_invalid' &&
-        (error.validationCategory === 'schema' ||
-          error.validationCategory === 'guardrail')) ||
-        error.code === 'notes_review_budget_exhausted');
-    if (!canUseDeterministicFallback) throw error;
+      error instanceof MeetingNotesError
+        ? error.code === 'notes_output_truncated'
+          ? error.code
+          : error.code === 'notes_review_budget_exhausted'
+            ? 'deadline_budget'
+            : error.code === 'notes_audit_invalid' &&
+                (error.validationCategory === 'schema' ||
+                  error.validationCategory === 'guardrail')
+              ? error.validationCategory
+              : null
+        : null;
+    if (!fallbackReason) throw error;
     audited = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
     audited.audited.issues ??= [];
     audited.audited.issues.push(
-      error.code === 'notes_review_budget_exhausted'
-        ? 'notes_direct_audit_fallback:deadline_budget'
-        : `notes_direct_audit_fallback:${error.validationCategory}`,
+      `notes_direct_audit_fallback:${fallbackReason}`,
     );
   }
   assertNotCancelled(input);

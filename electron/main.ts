@@ -537,6 +537,8 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
       if (!win.isDestroyed())
         win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
     }
+  },
+  onPublished: (meetingId) => {
     try {
       if (Notification.isSupported()) {
         const meeting = db.getMeeting(meetingId) as { title?: string } | null;

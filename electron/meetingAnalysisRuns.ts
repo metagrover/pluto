@@ -342,6 +342,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     release(reason: string): void;
   };
   onUpdated?: (meetingId: string) => void;
+  onPublished?: (meetingId: string, runId: string) => void;
   runSecondary?: (input: {
     meetingId: string;
     runId: string;
@@ -368,6 +369,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       dependencies.onUpdated?.(meetingId);
     } catch {
       /* A closing renderer cannot change durable publication/run state. */
+    }
+  };
+  const announcePublication = (meetingId: string, runId: string) => {
+    try {
+      dependencies.onPublished?.(meetingId, runId);
+    } catch {
+      /* Native notification failure cannot change durable publication state. */
     }
   };
   const scheduledRuns = new Map<string, { meetingId: string; runId: string }>();
@@ -733,16 +741,21 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       if (metricFinalized) return;
       metricFinalized = true;
       const completedAtMs = Date.now();
-      dependencies.db.upsertMeetingAnalysisRunMetric?.({
-        meetingId,
-        runId,
-        reason: primaryReason,
-        status,
-        errorCode: terminalErrorCode ?? null,
-        metrics: runMetrics.snapshot(status, completedAtMs),
-        startedAt: metricsStartedAt,
-        completedAt: new Date(completedAtMs).toISOString(),
-      });
+      try {
+        dependencies.db.upsertMeetingAnalysisRunMetric?.({
+          meetingId,
+          runId,
+          reason: primaryReason,
+          status,
+          errorCode: terminalErrorCode ?? null,
+          metrics: runMetrics.snapshot(status, completedAtMs),
+          startedAt: metricsStartedAt,
+          completedAt: new Date(completedAtMs).toISOString(),
+        });
+      } catch {
+        // Metrics are observational: a deleted parent row or telemetry failure
+        // must not replace the run's publication or cancellation outcome.
+      }
     };
     dependencies.db.beginMeetingAnalysisRun({
       meetingId,
@@ -884,6 +897,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           if (!published) throw new Error('meeting_notes_superseded');
           finalizeMetric('published');
           notify(meetingId);
+          announcePublication(meetingId, runId);
           if (dependencies.runSecondary) {
             const secondaryInput = {
               meetingId,

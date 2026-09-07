@@ -389,6 +389,163 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
   expect(generate).toHaveBeenCalledTimes(2);
 });
 
+it('publishes a deterministically accepted direct draft after an editor semantic validation failure', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: {
+              text: 'R999 Outline',
+              sources: [source],
+            },
+            items: [],
+          },
+        ],
+        recentWin: null,
+        dispositions: [],
+        terminology: [],
+      }),
+    );
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16_384,
+  });
+
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline' }),
+  ]);
+  expect(result.quality.issues).toContain(
+    'notes_direct_audit_fallback:guardrail',
+  );
+  expect(generate).toHaveBeenCalledTimes(2);
+});
+
+it('retries a truncated direct compact writer once with the concise contract', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockRejectedValueOnce(new MeetingNotesError('notes_output_truncated'))
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockImplementationOnce((request: NotesRequest) =>
+      Promise.resolve(auditFor(request.prompt, source)),
+    );
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16_384,
+  });
+
+  expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+    'notesWriter',
+    'notesWriter',
+    'notesAudit',
+  ]);
+  expect(generate.mock.calls[1]![0].prompt).toContain('COMPACT RETRY');
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline' }),
+  ]);
+});
+
+it('publishes a deterministically accepted direct draft when the editor output truncates', async () => {
+  const fixture = makeDirectNotesFixture();
+  const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
+  const generate = vi
+    .fn()
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: 'Milo',
+                due: null,
+                sources: [source],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    .mockRejectedValueOnce(new MeetingNotesError('notes_output_truncated'));
+
+  const result = await generateMeetingNotes({
+    reviewProtocol: 'editor',
+    compactWriterContract: true,
+    source: fixture.source,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16_384,
+  });
+
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({ text: 'Send the outline' }),
+  ]);
+  expect(result.quality.issues).toContain(
+    'notes_direct_audit_fallback:notes_output_truncated',
+  );
+  expect(generate).toHaveBeenCalledTimes(2);
+});
+
 it('keeps malformed direct cloud editors fail-closed with a sanitized category', async () => {
   const fixture = makeDirectNotesFixture();
   const source = fixture.draft.sections[0]!.items[0]!.sources[0]!;
