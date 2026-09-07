@@ -1,49 +1,29 @@
 name: Bug or regression
-description: Report broken behavior, regressions, or reliability issues.
-title: "[Bug] "
+description: Report broken behavior.
 labels:
   - bug
 body:
   - type: textarea
     id: behavior
     attributes:
-      label: Broken behavior
-      description: What is happening, and why is it wrong?
-      placeholder: Meeting titles over-focus on the opening personal check-in instead of the sustained work discussion.
+      label: What happened?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
-      description: What should happen instead?
-      placeholder: Titles should reflect the dominant meeting substance while preserving personal context in notes.
+      label: What did you expect?
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: Reproduction or evidence
-      description: Steps, logs, screenshots, database rows, or source meetings that demonstrate the issue.
-      placeholder: |
-        1. Open the affected meeting.
-        2. Compare the title with the later transcript sections.
-        3. Notice the title reflects only the opener.
+      description: Include steps or relevant logs and screenshots. Omit private meeting data.
     validations:
       required: true
   - type: textarea
     id: impact
     attributes:
       label: Impact
-      description: Who is affected, how often, and how severe is it?
-      placeholder: Users lose trust in meeting intelligence when summaries emphasize incidental context.
-    validations:
-      required: true
-  - type: textarea
-    id: fix_notes
-    attributes:
-      label: Fix notes
-      description: Constraints, suspected files, or acceptance checks for agents.
-      placeholder: Add a neutral fixture and test the title-context sampling helper before changing prompts.
-    validations:
-      required: false
+      description: Add severity, frequency, or affected workflows if useful.

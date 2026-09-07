@@ -1,6 +1,6 @@
-# Onboarding Issues and Fixes
+# Development troubleshooting
 
-This doc captures setup issues we hit on macOS during initial onboarding and the fixes that worked. Use it as a checklist when someone new sets up the project.
+Start with the installation steps in [README.md](../README.md). Use the sections below for specific runtime or verification problems.
 
 ## 1) Parakeet transcription is unavailable
 
@@ -71,41 +71,27 @@ The source database and audio are read-only. All provisional, validation, canoni
 
 - Native modules were compiled against a different Node/Electron ABI than the runtime (Electron 40 expects ABI 143).
 
-**Fix (recommended)**
+**Fix**
+
+For Electron, verify the binding and rebuild only if necessary:
 
 ```bash
-rm -rf node_modules
-pnpm install
-npx electron-rebuild -f -w better-sqlite3
+pnpm run ensure:sqlite-abi
 ```
 
-**Alternative**
-
-```bash
-pnpm exec electron-rebuild -f -w better-sqlite3
-```
-
-**Node test / script fallback**
-
-If a plain Node-based command still reports `Could not locate the bindings file`, rebuild `better-sqlite3` for the current Node runtime:
+For Node/Vitest tests that report a binding or ABI error:
 
 ```bash
 pnpm rebuild better-sqlite3
 ```
 
-Default contributor verification uses `pnpm run lint` and `pnpm test -- --run`. Local database / provider probe tests now live behind `pnpm run test:manual` so contributors do not need a warmed personal database to get a green baseline.
+Run `pnpm run ensure:sqlite-abi` before returning to Electron. Development startup
+also runs this check automatically.
 
-## 3) Swift build error: duplicate method redeclaration
+Use `pnpm run lint` and `pnpm exec vitest run` for contributor verification.
+Local database/provider probes are opt-in through `pnpm run test:manual`.
 
-**Symptoms**
-
-- `invalid redeclaration of 'stream(_:didStopWithError:)'` in `resources/swift/AudioRecorder.swift`
-
-**Fix**
-
-- Remove the duplicate `stream(_:didStopWithError:)` implementation so it appears only once.
-
-## 4) Xcode Command Line Tools
+## 3) Xcode Command Line Tools
 
 **Check if installed**
 
@@ -119,18 +105,6 @@ xcodebuild -version
 ```bash
 xcode-select --install
 ```
-
-## Suggested setup order (macOS)
-
-1. Install Xcode Command Line Tools (if missing)
-2. `pnpm install`
-3. `pnpm run setup-python`
-4. `pnpm run dev` (builds missing or stale Parakeet and audio-capture executables)
-5. Complete the in-app model download and permission checks
-6. `pnpm run lint`
-7. `pnpm test -- --run`
-8. If Parakeet is unavailable: verify Apple Silicon and run `pnpm run build:parakeet`
-9. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
 
 ## Code Formatting with Biome
 
@@ -154,9 +128,7 @@ pnpm run fix
 
 **Pre-commit Hook**
 
-When you commit, Lefthook automatically:
-1. Runs `biome check` on staged JavaScript, TypeScript, and JSON files
-2. Auto-fixes formatting issues with the `--write` flag
-3. Re-stages the fixed files
-
-If Biome finds issues during commit, they will be automatically fixed. You may need to re-stage and commit again if files were modified.
+When you commit, Lefthook runs the dependency security audit and Biome checks on
+staged JavaScript, TypeScript, and JSON files. Biome may write formatting fixes;
+review and stage those changes before retrying the commit. See `lefthook.yml`
+for the current hook configuration.

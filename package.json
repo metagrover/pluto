@@ -57,8 +57,7 @@
     "changelog:build": "node scripts/changelog.mjs build",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "drizzle-kit check",
-    "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs",
-    "pm:github-preflight": "node scripts/pm_housekeeping_github_preflight.mjs"
+    "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.pnpm-store/
 dist
 dist-ssr
 *.local
@@ -71,7 +72,8 @@ tmp/private-speaker-attribution-*.json
 .worktrees/
 worktrees/
 
-# Agent brainstorming scratch space
+# Local agent installations and scratch artifacts
+.agent/
 .agents/
 .claude/
 .superpowers/

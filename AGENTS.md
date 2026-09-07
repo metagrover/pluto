@@ -1,56 +1,49 @@
-# AGENTS.md — Pluto
+# Pluto
 
-Intelligent meeting assistant and "second brain" application.
+Local-first Electron meeting assistant. React/TypeScript lives in `src/` (main
+process code in `electron/`); native Swift runtimes live in `native/` and
+`resources/swift/`. Python is optional benchmark tooling, not app transcription.
 
-## 🚀 Development Workflow
+## Working here
 
-- **Install:** `pnpm install`
-- **Build native:** `pnpm run build-native`
-- **Run dev:** `pnpm run dev`
-- **Test:** `pnpm run test`
-- **Lint:** `pnpm run lint`
+- Use native agent capabilities. No bundled skills, mandatory issue workflow,
+  planning ceremony, review-agent chain, or automatic PR creation is required.
+- Make reasonable implementation choices and proceed within the user's scope.
+  Ask when an unresolved decision materially changes the intended outcome.
+- Preserve unrelated work. Keep changes focused; use a worktree when isolation
+  helps. Commit, push, or publish when requested.
+- Use issues, plans, and decision records when they help coordination or explain
+  a lasting choice. They are not prerequisites for making a change.
+- Historical plans and workflow entries in `docs/` provide context; their old
+  skill requirements and approval procedures do not override this guide.
+- Verify with fresh checks appropriate to the change and read their results
+  before claiming success. Behavioral changes to capture, persistence,
+  migrations, identity, attribution, or provenance require focused regression
+  coverage unless it is infeasible; explain any omission. Report what was tested
+  and any remaining limitations.
+- When a change supersedes an accepted entry in `docs/decisions.md`, add a new
+  entry that names the prior decision and records the replacement.
 
-## 🛠 Project Structure
+## Commands
 
-- `src/` - React/Electron source code
-- `python/` - Python server (WhisperX) and requirements
-- `scripts/` - Build and setup automation scripts
-- `electron/` - Electron main process code
-- `.agent/skills/` - Superpowers skills for agentic workflows
+- Install: `pnpm install`
+- Run: `pnpm run dev` (prepares native runtimes automatically)
+- Types: `pnpm exec tsc --noEmit`
+- Tests: `pnpm exec vitest run` (append paths for focused tests)
+- Lint: `pnpm run lint`
+- Build native: `pnpm run build-native`
+- Package: `pnpm run build`
 
-## ⚡️ Superpowers Skills
+For Node tests that use SQLite, run `pnpm rebuild better-sqlite3` if its ABI is
+wrong. Run `pnpm run ensure:sqlite-abi` before returning to Electron; `pnpm run dev`
+also does this. Manual/provider benchmarks are opt-in. See `docs/dev.md`.
 
-This repository is equipped with **Superpowers** skills. These skills provide a disciplined, multi-step workflow for complex tasks.
+## Product constraints
 
-## Scope the workflow to the work
-
-Assess scope, uncertainty, and risk before selecting process skills. Use judgment; do not invoke brainstorming or issue-driven development merely because the user raises a point or requests a change.
-
-- **Trivial work:** A small, localized, low-risk change with a clear intended result and straightforward verification, such as a typo, copy/style adjustment, lint cleanup, or an obvious bounded bug fix. Implement directly, run relevant checks and `pnpm run lint`, fix lint failures caused by the change, and open a PR. Keep TDD for non-UI logic. Do not require an issue, brainstorming, design approval, a spec, an implementation plan, or process-only artifacts.
-- **Non-trivial work:** Meaningful features, broad or uncertain bug fixes, architecture changes, migrations, or work with significant behavioral or data risk. Use `.agent/skills/issue-driven-development/SKILL.md` and find or create an outcome-sized issue before design, planning, or implementation. Use brainstorming and design approval when substantial design choices or unresolved requirements need agreement; an already agreed design need not be approved again.
-- **Escalate when evidence warrants it:** If a seemingly trivial fix reveals broader scope, uncertainty, or risk, move to the non-trivial workflow. A small diff alone does not make a change trivial. Do not ask the user to classify routine work when the available context is sufficient.
-- **Precedence:** This scope rule overrides blanket skill triggers and gates, including those in `using-superpowers`, `brainstorming`, and `issue-driven-development`. Read and apply only skills relevant to the assessed work.
-
-## 🧭 Issue-Driven Development
-
-GitHub Issues are Pluto's source of truth for non-trivial active product and implementation work. PRDs and Markdown specs are supporting artifacts, not the live backlog. Trivial work is tracked by its PR and does not need a new issue or an issue search.
-
-- Keep the issue current when scope, acceptance criteria, constraints, or product direction change materially.
-- Record durable decisions in `docs/decisions.md`; create ADRs in `docs/adr/` only for high-impact technical choices.
-- For issue-backed work, add a uniquely named fragment under `docs/changelog/entries/` when work ships or materially changes Pluto's product/development direction. Trivial PRs can describe the change and verification in the PR itself; do not create an issue solely to satisfy the fragment format. Do not edit the archived `docs/CHANGELOG.md` from ordinary pull requests.
-
-### How to use:
-1.  **Search:** Check the `.agent/skills` directory for a skill that matches your current task.
-2.  **Activate:** If using a platform with a `Skill` or `activate_skill` tool, use it. Otherwise, read the `SKILL.md` file and follow its instructions exactly.
-3.  **Conflict Resolution:** User instructions in `CLAUDE.md`, `GEMINI.md`, or `AGENTS.md` always take precedence over skill instructions.
-
-### Platform Compatibility:
-- **Codex:** See `.agent/skills/using-superpowers/references/codex-tools.md` for tool mappings.
-- **Gemini / Antigravity:** See `GEMINI.md` for tool mappings.
-
-## 🎯 Constraints
-
-- **TDD:** Always follow Test-Driven Development for non-UI logic.
-- **Design First:** For non-trivial work with unresolved requirements or substantial design choices, brainstorm and get design approval before implementation. Apply the scope rule above; trivial fixes proceed directly.
-- **No Placeholders:** Never use placeholders. If an image is needed, use your image generation tool.
-- **Aesthetics First:** Web components must be visually stunning and premium.
+- Preserve source recordings, transcripts, provenance, and reversible user data.
+- Ground notes and identities in evidence. Calendar attendees are hints; they do
+  not prove speaker identity. Respect explicit confirmations and deletions.
+- Diagnose the actual UI, IPC, runtime, and persistence path. Passing tests alone
+  does not establish recording quality or real-world model accuracy.
+- Keep private meeting data and credentials out of Git and shared output.
+- Follow the existing UI patterns and keep interactions clear and calm.

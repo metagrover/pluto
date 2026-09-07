@@ -9,9 +9,6 @@ Intelligent meeting assistant and "second brain" application.
 - **Node.js** (v24.11)
 - **pnpm** (enable via `corepack enable` or install directly)
 - **Apple Silicon Mac** (Intel macOS, Windows, and Linux are not currently supported)
-- **Python** (v3.10+ recommended, via `pyenv`)
-    - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
-- **FFmpeg** (`brew install ffmpeg` on macOS)
 - **macOS only:** Xcode Command Line Tools (`xcode-select --install`) for Swift builds
 
 ### Installation (for Contributors)
@@ -28,13 +25,7 @@ Intelligent meeting assistant and "second brain" application.
     ```
     This installs JavaScript dependencies only. Python and native capture tooling stay explicit so setup is easier to reason about.
 
-3.  **Set up Python Environment**
-    This installs optional local speaker-attribution benchmark dependencies into a local virtual environment. The app transcription runtime is native Parakeet and does not depend on Python.
-    ```bash
-    pnpm run setup-python
-    ```
-
-4.  **Run the App**
+3.  **Run the App**
     ```bash
     pnpm run dev
     ```
@@ -42,13 +33,20 @@ Intelligent meeting assistant and "second brain" application.
     audio-capture executables before launching Pluto. On first use, Pluto then
     downloads and verifies its local transcription models in the setup screen.
 
+Python is needed only for optional speaker-attribution benchmarks. For those,
+install Python 3.10+ and run `pnpm run setup-python`. FFmpeg and ffprobe for the
+app are supplied by the project dependencies.
+
+Agent project guidance lives in [AGENTS.md](AGENTS.md); no skill installation is
+needed.
+
 ### Contributor Verification
 
 Run the default contributor checks from a plain local checkout:
 
 ```bash
 pnpm run lint
-pnpm test -- --run
+pnpm exec vitest run
 ```
 
 If you want to run the local database / LLM probe tests as well, use:
@@ -62,16 +60,20 @@ Those manual probes expect a populated local Pluto database plus any provider cr
 ### 🛠 Troubleshooting
 
 #### Electron ABI Mismatch (`better-sqlite3`)
-If you see an error like `NODE_MODULE_VERSION mismatch` or tests fail because of `better-sqlite3`, run:
+For Electron, verify and repair the binding with:
+
 ```bash
-pnpm run fix-sqlite-abi
+pnpm run ensure:sqlite-abi
 ```
 
-If a manual test or ad hoc Node script still cannot find the local `better-sqlite3` binding afterward, rebuild it for the current Node runtime:
+For Node/Vitest tests that report a binding or ABI error:
 
 ```bash
 pnpm rebuild better-sqlite3
 ```
+
+Before returning to Electron, run `pnpm run ensure:sqlite-abi` again (also run
+automatically by `pnpm run dev`).
 
 For more detailed troubleshooting, see [docs/dev.md](docs/dev.md).
 
@@ -95,7 +97,9 @@ The output DMG will be in `release/`.
 
 ## 🛠 Project Structure
 
-- `src/` - React/Electron source code
+- `src/` - React UI and shared TypeScript
+- `electron/` - Electron main process
+- `native/` - Native transcription and calendar runtimes
 - `python/` - Optional local speaker-attribution and benchmark tooling
 - `scripts/` - Build and setup automation scripts
 - `resources/` - Assets and bundled binaries (built by `pnpm run build-native`)
