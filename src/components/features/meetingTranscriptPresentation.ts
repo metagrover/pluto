@@ -1,8 +1,6 @@
 import type { TranscriptSegment } from '../../types';
 import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
 
-export { extractSpeakerDisplayNames } from '../../utils/meetingSpeakerNames';
-
 export type MeetingTranscriptTurn<T extends TranscriptSegment> = {
   id: string;
   speaker: TranscriptSegment['speaker'];
@@ -16,6 +14,51 @@ const MAX_TURN_DURATION_SECONDS = 45;
 const startSeconds = (segment: TranscriptSegment): number => {
   const value = segment.startTime ?? segment.start ?? 0;
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+};
+
+export const extractSpeakerDisplayNames = (
+  identity:
+    | {
+        people?: Array<{ id: string; name: string }>;
+        bindings?: Array<{ speaker: string; personId?: string | null }>;
+        profile?: { preferredName?: string | null } | null;
+        selfPersonId?: string | null;
+      }
+    | null
+    | undefined,
+): Record<string, string> => {
+  if (
+    !identity ||
+    !Array.isArray(identity.people) ||
+    !Array.isArray(identity.bindings)
+  ) {
+    return {};
+  }
+  const peopleById = new Map(
+    identity.people.map((person) => [person.id, person.name]),
+  );
+  const names: Record<string, string> = Object.fromEntries(
+    identity.bindings.flatMap((binding) => {
+      const name = binding.personId
+        ? peopleById.get(binding.personId)?.trim()
+        : '';
+      return name ? [[binding.speaker, name]] : [];
+    }),
+  );
+  // If no explicit binding resolved a name for 'Me', fall back to the user's
+  // profile preferredName, then to the name of the workspace self person.
+  if (!names.Me) {
+    const preferredName = identity.profile?.preferredName?.trim();
+    if (preferredName) {
+      names.Me = preferredName;
+    } else if (identity.selfPersonId) {
+      const selfName = peopleById.get(identity.selfPersonId)?.trim();
+      if (selfName) {
+        names.Me = selfName;
+      }
+    }
+  }
+  return names;
 };
 
 export const applyMeetingSpeakerDisplayNames = <T extends TranscriptSegment>(

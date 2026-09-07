@@ -512,7 +512,6 @@ describe('meeting analysis run coordinator', () => {
         JSON.stringify({
           ...revisions,
           terms: [],
-          speakerDisplayNames: {},
           template: 'auto',
           provider: 'ollama',
           model: 'gemma4:12b',
@@ -671,7 +670,7 @@ describe('meeting analysis run coordinator', () => {
           getMeeting: () => ({
             id: 'terms',
             transcript_json: JSON.stringify({
-              segments: [{ speaker: 'Me', text: 'We agreed to ship.' }],
+              segments: [{ speaker: 1, text: 'We agreed to ship.' }],
             }),
             transcript_status: 'validated',
             transcript_integrity_json: JSON.stringify({ verified: true }),
@@ -695,7 +694,6 @@ describe('meeting analysis run coordinator', () => {
           name: 'ollama',
           generateStructuredAnalysis,
         }),
-        getSpeakerDisplayNames: () => ({ Me: 'Punit Grover' }),
         createRunId: () => 'run-terms',
         onUpdated: () => {
           if (notificationFails) throw new Error('renderer_closed');
@@ -710,7 +708,7 @@ describe('meeting analysis run coordinator', () => {
       });
 
       expect(generateStructuredAnalysis).toHaveBeenCalledWith(
-        'Punit Grover: We agreed to ship.',
+        expect.any(String),
         'Please use the spelling Ogletree.',
         'auto',
         expect.objectContaining({
@@ -729,7 +727,6 @@ describe('meeting analysis run coordinator', () => {
             eligibilityRevision: 'eligible-terms',
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
-            speakerDisplayNames: { Me: 'Punit Grover' },
             template: 'auto',
             provider: 'ollama',
             model: 'gemma4:12b',
@@ -749,7 +746,6 @@ describe('meeting analysis run coordinator', () => {
           JSON.stringify({
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
-            speakerDisplayNames: { Me: 'Punit Grover' },
             template: 'auto',
             provider: 'ollama',
             model: 'gemma4:12b',

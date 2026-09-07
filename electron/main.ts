@@ -29,7 +29,6 @@ import type {
   AskPlutoRetrievalSummary,
   ResolvedAskPlutoScope,
 } from '../src/types/askPlutoQuery';
-import { extractSpeakerDisplayNames } from '../src/utils/meetingSpeakerNames';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
@@ -58,7 +57,6 @@ import {
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
-import { getMeetingIdentityContext } from './commitmentIdentity';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { closeApplicationDatabase } from './database/applicationDatabase';
 import { createBeforeQuitHandler } from './database/shutdown';
@@ -533,14 +531,6 @@ const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   getSettings: () => getAllSettings(db),
   getProvider,
   knowledgeSynthesisPause,
-  getSpeakerDisplayNames: (meetingId) => {
-    const identity = getMeetingIdentityContext(meetingId);
-    return extractSpeakerDisplayNames({
-      ...identity,
-      profile: db.identityStore.getProfile(),
-      selfPersonId: db.identityStore.getSelfPersonId(),
-    });
-  },
   onUpdated: (meetingId) => {
     invalidateDreamingCatalog();
     for (const win of BrowserWindow.getAllWindows()) {

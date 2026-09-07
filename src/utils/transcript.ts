@@ -116,9 +116,6 @@ export const applyTranscriptSpeakerPresentation = <
 >(
   transcriptJson: string | null | undefined,
   segments: T[],
-  options?: {
-    speakerDisplayNames?: Readonly<Record<string, string>>;
-  },
 ): T[] => {
   if (!transcriptJson?.trim()) return segments;
   try {
@@ -131,17 +128,15 @@ export const applyTranscriptSpeakerPresentation = <
       .map(toTimedInterval)
       .filter((interval): interval is TimedInterval => interval !== null)
       .sort((left, right) => left.start - right.start);
-    const resolvedSelfName = options?.speakerDisplayNames?.Me?.trim();
-    const anonymousOrResolvedSelf = resolvedSelfName || 'Speaker';
     return segments.map((segment) => {
       if (segment.speaker === 'Them') return segment;
       if (segment.speaker === 'Me') {
         if (!hasValidTimeRange(segment)) {
-          return { ...segment, speaker: anonymousOrResolvedSelf } as T;
+          return { ...segment, speaker: 'Speaker' } as T;
         }
         const remoteOverlap = coveredOverlapRatio(segment, remoteIntervals);
         if (remoteOverlap >= MINIMUM_REMOTE_DOMINANT_OVERLAP) {
-          return { ...segment, speaker: anonymousOrResolvedSelf } as T;
+          return { ...segment, speaker: 'Speaker' } as T;
         }
         if (
           wordCount(segment.text) >= MINIMUM_CONFIDENT_MIC_WORDS &&
@@ -150,10 +145,7 @@ export const applyTranscriptSpeakerPresentation = <
           return segment;
         }
       }
-      return {
-        ...segment,
-        speaker: segment.speaker === 'Me' ? anonymousOrResolvedSelf : 'Speaker',
-      } as T;
+      return { ...segment, speaker: 'Speaker' } as T;
     });
   } catch {
     return segments;
@@ -165,9 +157,6 @@ export const buildTranscriptSegmentsForPresentation = <
 >(
   transcriptJson: string | null | undefined,
   segments: T[],
-  options?: {
-    speakerDisplayNames?: Readonly<Record<string, string>>;
-  },
 ): Array<T & { text: string }> => {
   const recoveredSegments = buildReadableTranscriptSegments(segments).segments;
   let liveSegments: TranscriptReadingCandidate[] = [];
@@ -205,7 +194,6 @@ export const buildTranscriptSegmentsForPresentation = <
   const attributed = applyTranscriptSpeakerPresentation(
     transcriptJson,
     reading,
-    options,
   );
   return assembleReadableTranscriptSentences(attributed) as unknown as Array<
     T & { text: string }
@@ -220,24 +208,17 @@ export const isTranscriptJsonEffectivelyEmpty = (
 
 export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
-  options?: {
-    speakerDisplayNames?: Readonly<Record<string, string>>;
-  },
 ): string => {
   return buildTranscriptSegmentsForPresentation(
     transcriptJson,
     parseTranscriptSegments(transcriptJson),
-    options,
   )
     .map((segment) => {
-      const sourceSpeaker =
+      const speaker =
         typeof segment.speaker === 'string' ||
         typeof segment.speaker === 'number'
           ? String(segment.speaker).trim()
           : '';
-      const speaker = sourceSpeaker
-        ? options?.speakerDisplayNames?.[sourceSpeaker]?.trim() || sourceSpeaker
-        : '';
       return speaker ? `${speaker}: ${segment.text}` : segment.text;
     })
     .join('\n');
