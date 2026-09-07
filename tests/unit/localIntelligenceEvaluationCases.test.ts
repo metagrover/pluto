@@ -21,6 +21,55 @@ const requiredFailureIds = [
 ];
 
 describe('local intelligence evaluation corpus', () => {
+  it('freezes twelve held-out synthetic notes cases across the target profiles', () => {
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
+    );
+
+    expect(heldOutNotes).toHaveLength(12);
+    expect(
+      heldOutNotes.reduce<Record<string, number>>((counts, candidate) => {
+        counts[candidate.syntheticProfile] =
+          (counts[candidate.syntheticProfile] ?? 0) + 1;
+        return counts;
+      }, {}),
+    ).toEqual({
+      short: 3,
+      ordinary: 4,
+      long_dense: 3,
+      adversarial_sparse: 2,
+    });
+  });
+
+  it('covers every frozen notes evidence challenge explicitly', () => {
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
+    );
+    const covered = new Set(
+      heldOutNotes.flatMap((candidate) => candidate.coverageTags),
+    );
+
+    expect(
+      [
+        'beginning_evidence',
+        'middle_evidence',
+        'end_evidence',
+        'owner_handoff',
+        'date_correction',
+        'conditionality',
+        'withdrawal',
+        'explicit_no_decision',
+        'explicit_no_action',
+        'unrelated_topic_negative',
+        'dense_multi_claim',
+      ].filter((tag) => !covered.has(tag)),
+    ).toEqual([]);
+  });
+
   it('has unique case IDs and disjoint development/held-out membership', () => {
     const ids = localIntelligenceEvaluationCases.map(
       (candidate) => candidate.id,

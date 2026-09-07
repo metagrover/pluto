@@ -28,6 +28,21 @@ export type LocalIntelligenceNotesCase = {
   id: string;
   lane: 'meeting_notes';
   durationClass: 'ordinary' | 'long';
+  /** Semantic fixture shape only; it does not claim a wall-clock meeting length. */
+  syntheticProfile: 'short' | 'ordinary' | 'long_dense' | 'adversarial_sparse';
+  coverageTags: Array<
+    | 'beginning_evidence'
+    | 'middle_evidence'
+    | 'end_evidence'
+    | 'owner_handoff'
+    | 'date_correction'
+    | 'conditionality'
+    | 'withdrawal'
+    | 'explicit_no_decision'
+    | 'explicit_no_action'
+    | 'unrelated_topic_negative'
+    | 'dense_multi_claim'
+  >;
   segments: Array<{ speaker: string; text: string }>;
 } & EvaluationCaseMetadata;
 
@@ -58,6 +73,8 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
       partition: 'development',
       failureIds: ['F03', 'F17'],
       durationClass: 'ordinary',
+      syntheticProfile: 'short',
+      coverageTags: ['beginning_evidence', 'end_evidence'],
       segments: [
         { speaker: 'Speaker 1', text: 'We are considering a Friday launch.' },
         {
@@ -108,6 +125,13 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
       partition: 'held_out',
       failureIds: ['F01', 'F02', 'F04', 'F13', 'F19', 'F21'],
       durationClass: 'ordinary',
+      syntheticProfile: 'ordinary',
+      coverageTags: [
+        'middle_evidence',
+        'end_evidence',
+        'withdrawal',
+        'explicit_no_decision',
+      ],
       segments: [
         {
           speaker: 'Speaker 1',
@@ -162,6 +186,13 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
       partition: 'held_out',
       failureIds: ['F05', 'F18'],
       durationClass: 'ordinary',
+      syntheticProfile: 'ordinary',
+      coverageTags: [
+        'beginning_evidence',
+        'end_evidence',
+        'conditionality',
+        'explicit_no_action',
+      ],
       segments: [
         {
           speaker: 'Speaker 1',
@@ -202,6 +233,681 @@ export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[]
         forbiddenClaims: [
           'jordan committed to schedule',
           'campaign approved for october 3',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-short-opening-decision',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F01', 'F13'],
+      durationClass: 'ordinary',
+      syntheticProfile: 'short',
+      coverageTags: ['beginning_evidence', 'unrelated_topic_negative'],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'Decision: the export format will be CSV for the pilot.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Separately, the office plants are arriving next week.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'pilot-export-format',
+            evidence: [
+              {
+                sourceId: 'segment-0',
+                excerpt: 'the export format will be CSV for the pilot',
+              },
+            ],
+            requiredTerms: ['csv', 'pilot'],
+            critical: true,
+            modality: 'fact',
+          },
+        ],
+        forbiddenClaims: ['office plants affect the export format'],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-short-date-correction',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F04', 'F18'],
+      durationClass: 'ordinary',
+      syntheticProfile: 'short',
+      coverageTags: ['beginning_evidence', 'date_correction'],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'Correction: the invoice review is due September 18, not September 11.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Understood; September 18 is the current date.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'corrected-invoice-date',
+            evidence: [
+              {
+                sourceId: 'segment-0',
+                excerpt:
+                  'the invoice review is due September 18, not September 11',
+              },
+            ],
+            requiredTerms: ['invoice review', 'september 18'],
+            critical: true,
+            modality: 'committed',
+            date: 'September 18',
+          },
+        ],
+        forbiddenClaims: ['invoice review is due september 11'],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-short-owner-handoff',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F05', 'F18'],
+      durationClass: 'ordinary',
+      syntheticProfile: 'short',
+      coverageTags: ['owner_handoff', 'end_evidence'],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'Priya handed the access audit to Omar.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Omar accepted ownership and will finish the audit by Monday.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'access-audit-handoff',
+            evidence: [
+              {
+                sourceId: 'segment-0',
+                excerpt: 'Priya handed the access audit to Omar.',
+              },
+              {
+                sourceId: 'segment-1',
+                excerpt:
+                  'Omar accepted ownership and will finish the audit by Monday.',
+              },
+            ],
+            requiredTerms: ['omar', 'access audit', 'monday'],
+            critical: true,
+            modality: 'committed',
+            owner: 'Omar',
+            date: 'Monday',
+          },
+        ],
+        forbiddenClaims: ['priya remains the access audit owner'],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-ordinary-no-decision-no-action',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F06', 'F21'],
+      durationClass: 'ordinary',
+      syntheticProfile: 'ordinary',
+      coverageTags: [
+        'middle_evidence',
+        'explicit_no_decision',
+        'explicit_no_action',
+      ],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'The group compared monthly and annual billing options.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'No pricing decision was made, and no follow-up action was assigned.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'We will revisit the topic only if new customer evidence arrives.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'pricing-remains-unresolved',
+            evidence: [
+              {
+                sourceId: 'segment-1',
+                excerpt:
+                  'No pricing decision was made, and no follow-up action was assigned.',
+              },
+            ],
+            requiredTerms: [
+              'no pricing decision|pricing remains undecided',
+              'no follow-up action|no action was assigned',
+            ],
+            critical: true,
+            modality: 'fact',
+          },
+        ],
+        forbiddenClaims: [
+          'monthly billing was approved',
+          'annual billing was approved',
+          'follow-up was assigned',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-ordinary-end-commitment',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F02', 'F18', 'F19'],
+      durationClass: 'ordinary',
+      syntheticProfile: 'ordinary',
+      coverageTags: ['end_evidence'],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'A rollback drill was suggested while the team reviewed release risks.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'The group discussed staging capacity and alert coverage.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'Final decision: run the rollback drill. Lena owns it and will complete it by November 6.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'rollback-drill-commitment',
+            evidence: [
+              {
+                sourceId: 'segment-2',
+                excerpt: 'Lena owns it and will complete it by November 6.',
+              },
+            ],
+            requiredTerms: ['rollback drill', 'lena', 'november 6'],
+            critical: true,
+            modality: 'committed',
+            owner: 'Lena',
+            date: 'November 6',
+          },
+        ],
+        forbiddenClaims: ['rollback drill was only suggested'],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-long-dense-three-position-evidence',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F01', 'F02', 'F04', 'F13', 'F18', 'F19'],
+      durationClass: 'long',
+      syntheticProfile: 'long_dense',
+      coverageTags: [
+        'beginning_evidence',
+        'middle_evidence',
+        'end_evidence',
+        'conditionality',
+        'explicit_no_decision',
+        'dense_multi_claim',
+      ],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'The team approved the EU region for the first data-residency pilot.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Support volume and office-hours coverage were reviewed next.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Nia committed to deliver the access audit by December 4.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'If the vendor passes security review, Luis will enable the sandbox integration.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'The Android expansion was discussed but explicitly postponed.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'At close, no pricing decision was made.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'eu-pilot-approved',
+            evidence: [
+              {
+                sourceId: 'segment-0',
+                excerpt:
+                  'approved the EU region for the first data-residency pilot',
+              },
+            ],
+            requiredTerms: ['eu', 'data-residency pilot', 'approved'],
+            critical: true,
+            modality: 'fact',
+          },
+          {
+            id: 'access-audit-commitment',
+            evidence: [
+              {
+                sourceId: 'segment-2',
+                excerpt:
+                  'Nia committed to deliver the access audit by December 4.',
+              },
+            ],
+            requiredTerms: ['nia', 'access audit', 'december 4'],
+            critical: true,
+            modality: 'committed',
+            owner: 'Nia',
+            date: 'December 4',
+          },
+          {
+            id: 'sandbox-integration-condition',
+            evidence: [
+              {
+                sourceId: 'segment-3',
+                excerpt:
+                  'If the vendor passes security review, Luis will enable the sandbox integration.',
+              },
+            ],
+            requiredTerms: [
+              'luis',
+              'sandbox integration',
+              'if the vendor|conditional|pending security review',
+            ],
+            critical: true,
+            modality: 'conditional',
+            owner: 'Luis',
+          },
+          {
+            id: 'pricing-undecided',
+            evidence: [
+              {
+                sourceId: 'segment-5',
+                excerpt: 'no pricing decision was made',
+              },
+            ],
+            requiredTerms: ['no pricing decision|pricing remains undecided'],
+            critical: true,
+            modality: 'fact',
+          },
+        ],
+        forbiddenClaims: [
+          'android expansion was approved',
+          'pricing was approved',
+          'vendor passed security review',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-long-dense-owner-date-revision',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F04', 'F05', 'F18', 'F21'],
+      durationClass: 'long',
+      syntheticProfile: 'long_dense',
+      coverageTags: [
+        'beginning_evidence',
+        'middle_evidence',
+        'end_evidence',
+        'owner_handoff',
+        'date_correction',
+        'withdrawal',
+        'dense_multi_claim',
+      ],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'The draft plan listed Mei as the runbook owner with a December 1 target.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'The team approved retaining the existing incident severity labels.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Ownership changed: Arturo replaced Mei as the runbook owner.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'The proposed automatic paging experiment was withdrawn after the risk review.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Capacity planning will continue in a separate meeting.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Final correction: Arturo will deliver the runbook on December 8, not December 1.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'runbook-owner-and-date-revised',
+            evidence: [
+              {
+                sourceId: 'segment-2',
+                excerpt: 'Arturo replaced Mei as the runbook owner.',
+              },
+              {
+                sourceId: 'segment-5',
+                excerpt:
+                  'Arturo will deliver the runbook on December 8, not December 1.',
+              },
+            ],
+            requiredTerms: ['arturo', 'runbook', 'december 8'],
+            critical: true,
+            modality: 'committed',
+            owner: 'Arturo',
+            date: 'December 8',
+          },
+          {
+            id: 'severity-labels-retained',
+            evidence: [
+              {
+                sourceId: 'segment-1',
+                excerpt:
+                  'approved retaining the existing incident severity labels',
+              },
+            ],
+            requiredTerms: ['retain', 'incident severity labels'],
+            critical: true,
+            modality: 'fact',
+          },
+          {
+            id: 'paging-experiment-withdrawn',
+            evidence: [
+              {
+                sourceId: 'segment-3',
+                excerpt:
+                  'automatic paging experiment was withdrawn after the risk review',
+              },
+            ],
+            requiredTerms: ['automatic paging', 'withdrawn'],
+            critical: true,
+            modality: 'withdrawn',
+          },
+        ],
+        forbiddenClaims: [
+          'mei remains the runbook owner',
+          'runbook is due december 1',
+          'automatic paging experiment was approved',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-long-dense-decisions-and-boundaries',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F01', 'F02', 'F06', 'F13', 'F19'],
+      durationClass: 'long',
+      syntheticProfile: 'long_dense',
+      coverageTags: [
+        'beginning_evidence',
+        'middle_evidence',
+        'end_evidence',
+        'explicit_no_action',
+        'unrelated_topic_negative',
+        'dense_multi_claim',
+      ],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'Decision: retain seven days of pilot telemetry.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'The catering survey also closes Friday; it is unrelated to telemetry retention.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Ravi committed to publish the deletion test results by January 9.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'The group considered a public dashboard but did not approve one.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'No action was assigned for the dashboard.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Final decision: pilot access remains limited to the research team.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'telemetry-retention',
+            evidence: [
+              {
+                sourceId: 'segment-0',
+                excerpt: 'retain seven days of pilot telemetry',
+              },
+            ],
+            requiredTerms: ['seven days', 'pilot telemetry'],
+            critical: true,
+            modality: 'fact',
+          },
+          {
+            id: 'deletion-test-results',
+            evidence: [
+              {
+                sourceId: 'segment-2',
+                excerpt:
+                  'Ravi committed to publish the deletion test results by January 9.',
+              },
+            ],
+            requiredTerms: ['ravi', 'deletion test results', 'january 9'],
+            critical: true,
+            modality: 'committed',
+            owner: 'Ravi',
+            date: 'January 9',
+          },
+          {
+            id: 'research-only-access',
+            evidence: [
+              {
+                sourceId: 'segment-5',
+                excerpt: 'pilot access remains limited to the research team',
+              },
+            ],
+            requiredTerms: ['pilot access', 'research team'],
+            critical: true,
+            modality: 'fact',
+          },
+          {
+            id: 'dashboard-unapproved-unassigned',
+            evidence: [
+              {
+                sourceId: 'segment-3',
+                excerpt: 'public dashboard but did not approve one',
+              },
+              {
+                sourceId: 'segment-4',
+                excerpt: 'No action was assigned for the dashboard.',
+              },
+            ],
+            requiredTerms: [
+              'dashboard',
+              'not approved|did not approve|unapproved',
+              'no action|unassigned',
+            ],
+            critical: true,
+            modality: 'fact',
+          },
+        ],
+        forbiddenClaims: [
+          'public dashboard was approved',
+          'catering survey determines telemetry retention',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-adversarial-sparse-unrelated-beacons',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F05', 'F06', 'F13'],
+      durationClass: 'long',
+      syntheticProfile: 'adversarial_sparse',
+      coverageTags: ['middle_evidence', 'unrelated_topic_negative'],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'Beacon customer-event catering is over budget.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'The Beacon database migration is a separate engineering project.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'For the database migration only, Chen owns the checksum review due February 2.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'The customer-event team is choosing vegetarian lunch options.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'No relationship between catering cost and migration risk was discussed.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'migration-checksum-owner',
+            evidence: [
+              {
+                sourceId: 'segment-2',
+                excerpt:
+                  'For the database migration only, Chen owns the checksum review due February 2.',
+              },
+            ],
+            requiredTerms: [
+              'chen',
+              'checksum review',
+              'february 2',
+              'database migration',
+            ],
+            critical: true,
+            modality: 'committed',
+            owner: 'Chen',
+            date: 'February 2',
+          },
+        ],
+        forbiddenClaims: [
+          'catering caused migration risk',
+          'chen owns the catering review',
+          'beacon is one project',
+        ],
+        expectedBehavior: 'supported_output',
+      },
+    },
+    {
+      id: 'notes-adversarial-sparse-unmet-condition',
+      lane: 'meeting_notes',
+      partition: 'held_out',
+      failureIds: ['F02', 'F06', 'F18', 'F21'],
+      durationClass: 'long',
+      syntheticProfile: 'adversarial_sparse',
+      coverageTags: [
+        'middle_evidence',
+        'end_evidence',
+        'conditionality',
+        'explicit_no_action',
+        'unrelated_topic_negative',
+      ],
+      segments: [
+        {
+          speaker: 'Speaker 1',
+          text: 'The team reviewed six routine support metrics.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'If compliance signs the exception, Noor may run the archive import on March 3.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'The office move is scheduled for March 3 but is unrelated to the archive import.',
+        },
+        {
+          speaker: 'Speaker 1',
+          text: 'Several dashboard color options were discussed.',
+        },
+        {
+          speaker: 'Speaker 2',
+          text: 'Compliance did not sign the exception.',
+        },
+        {
+          speaker: 'Speaker 3',
+          text: 'Therefore Noor has no archive-import action.',
+        },
+      ],
+      gold: {
+        requiredClaims: [
+          {
+            id: 'archive-import-condition-unmet',
+            evidence: [
+              {
+                sourceId: 'segment-1',
+                excerpt:
+                  'If compliance signs the exception, Noor may run the archive import on March 3.',
+              },
+              {
+                sourceId: 'segment-4',
+                excerpt: 'Compliance did not sign the exception.',
+              },
+              {
+                sourceId: 'segment-5',
+                excerpt: 'Noor has no archive-import action.',
+              },
+            ],
+            requiredTerms: [
+              'noor',
+              'archive import|archive-import',
+              'compliance',
+              'march 3',
+              'no action|not assigned|unassigned',
+            ],
+            critical: true,
+            modality: 'conditional',
+            owner: 'Noor',
+            date: 'March 3',
+          },
+        ],
+        forbiddenClaims: [
+          'noor will run the archive import',
+          'compliance signed the exception',
+          'office move approved the archive import',
         ],
         expectedBehavior: 'supported_output',
       },
