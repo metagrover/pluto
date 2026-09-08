@@ -7,6 +7,7 @@
     "scripts/check_phi_notes_source_capacity.ts",
     "scripts/run_phi_notes_recent.ts",
     "scripts/run_notes_replay.ts",
+    "scripts/run_notes_cache_isolation.ts",
     "scripts/summarize_notes_replay.ts",
     "scripts/replay_notes_response_case.ts",
     "tests/manual/localIntelligenceEvaluation.test.ts",

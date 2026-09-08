@@ -41,8 +41,12 @@ The response replay command makes zero provider requests. It verifies pipeline
 hashes and exact prompt/schema/output-budget matches, then reproduces validation
 and compares the serialized result (ignoring only its generation timestamp).
 It refuses incomplete attempts, unknown model responses, changed prompts, and
-unused/missing attempts rather than silently making a new request. It is not a
-replay of wall-clock deadlines, scheduler preemption, or publication.
+unused/missing attempts rather than silently making a new request. It advances a
+discrete clock at recorded request boundaries so optional review admission
+accounts for time already spent. This is not an OS-timer, scheduler-preemption,
+or publication simulation. When recorded, full private error details must match
+as well as the normalized outcome label. Failed offline checks are appended to
+a private error journal.
 
 ## Review
 
@@ -79,3 +83,53 @@ Existing resident models, other
 applications, and instrumented disk I/O mean these timings are not clean isolated
 model benchmarks. The shared harness must improve the production notes experience,
 not become an open-ended model-selection project.
+
+## Isolated runtime-cache diagnosis (macOS)
+
+Sequential requests can still accumulate runtime memory: the installed Ollama
+0.33.3 llama-server retained historical prompts and their context checkpoints in
+a separate RAM cache. In the original development run its reported cache grew
+from zero to 5420 MiB, with an 8192 MiB limit. This is not the active KV cache,
+and the model size reported by `/api/ps` is not a complete process-memory budget.
+The safety stop is system-wide swap growth, not proof of a model memory leak.
+
+For an explicitly authorized diagnostic comparison, first ensure the shared
+runtime has no loaded models or active work. The launcher refuses loaded models;
+it never unloads them automatically. Then run:
+
+```sh
+pnpm exec tsx scripts/run_notes_cache_isolation.ts /absolute/private/sources.json --run
+```
+
+This starts the installed macOS Ollama binary on `127.0.0.1:11435` with
+`LLAMA_ARG_CACHE_RAM=0`, `LLAMA_ARG_CTX_CHECKPOINTS=0`, one parallel slot, one loaded model, cloud disabled and
+startup model pruning disabled. It reuses local model files without changing
+production configuration. The replay's fixed diagnostic transport also sends
+`use_mmap: true`, matching the original worker's memory-mapped load; a fresh
+daemon otherwise selected eager-copy loading on this machine. Model identity,
+context, prompts, generation budgets and resource guards remain unchanged.
+
+The launcher prints a private runtime-evidence directory containing its requested
+configuration and daemon log, separately from the replay directory. Verify the
+actual startup log says `prompt cache is disabled` and `load_mode = mmap`;
+requested environment variables alone are not configuration proof. Verify no
+context checkpoints are created. Active-slot checkpoints still existed with
+historical caching alone disabled; that intermediate comparison remains a
+separate, preserved attempt rather than being relabeled as this configuration.
+Only the launcher's own daemon process group is terminated on exit. Normal
+production replay still uses port 11434 and does not override memory mapping.
+
+Retain every failed loading attempt. Record startup versus steady-state samples,
+process RSS, dirty footprint, clean mapped memory and cache occupancy separately;
+do not add overlapping memory measurements or equate free percentage with an
+available model budget. An isolated endpoint alone does not establish a clean
+system benchmark. Compare repeated sequential requests before claiming stable
+memory, and keep performance findings separate from note-quality acceptance.
+
+Generation is explicitly serial: the transport rejects a second generation
+while the first stream remains outstanding. Summaries report the maximum number
+of outstanding physical requests. A missing terminal leaves a request outstanding;
+that ledger upper bound is not proof of simultaneous server execution.
+
+See [the measured runtime diagnosis](2026-09-08-gemma-runtime-memory.md) for the
+separate failed attempts, complete sequential run, and remaining quality limits.

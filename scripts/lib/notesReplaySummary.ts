@@ -1,4 +1,6 @@
 type ReplayEvent = Record<string, unknown>;
+/** Public outcome labels omit private diagnostic suffixes, not error classes. */
+export const notesReplayOutcomeLabel = (code: string) => code.split(':')[0];
 /** Rebuild denominators from durable starts/terminals, including killed runs. */
 export function summarizeNotesReplay(
   scheduled: Array<{ index: number; sourceIdSha256: string }>,
@@ -16,6 +18,8 @@ export function summarizeNotesReplay(
     number,
     { caseIndex: number; terminal: ReplayEvent | null }
   >();
+  let outstanding = 0;
+  let maxOutstandingPhysicalRequests = 0;
   for (const event of events) {
     if (
       event.event === 'meeting_started' ||
@@ -39,12 +43,18 @@ export function summarizeNotesReplay(
       if (!cases.get(caseIndex)?.started || attempts.has(id))
         throw new Error('invalid_physical_start');
       attempts.set(id, { caseIndex, terminal: null });
+      outstanding++;
+      maxOutstandingPhysicalRequests = Math.max(
+        maxOutstandingPhysicalRequests,
+        outstanding,
+      );
     }
     if (event.event === 'physical_terminal') {
       const attempt = attempts.get(Number(event.attempt));
       if (!attempt || attempt.terminal || attempt.caseIndex !== event.caseIndex)
         throw new Error('invalid_physical_terminal');
       attempt.terminal = event;
+      outstanding--;
     }
   }
   const rows = [...cases.values()].map((row) => ({
@@ -52,7 +62,7 @@ export function summarizeNotesReplay(
     sourceIdSha256: row.sourceIdSha256,
     outcome:
       typeof row.terminal?.outcome === 'string'
-        ? row.terminal.outcome.split(':')[0]
+        ? notesReplayOutcomeLabel(row.terminal.outcome)
         : row.started
           ? 'no_terminal_record'
           : 'not_started',
@@ -69,6 +79,9 @@ export function summarizeNotesReplay(
         ?.status ?? 'no_terminal_record',
     scheduled: scheduled.length,
     physicalRequests: attempts.size,
+    // Missing terminal records leave attempts outstanding; do not silently
+    // interpret this upper bound as measured server-side concurrency.
+    maxOutstandingPhysicalRequests,
     censoredRequests: [...attempts.values()].filter(
       (attempt) => !attempt.terminal,
     ).length,

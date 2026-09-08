@@ -34,6 +34,11 @@ import {
 const sha = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 async function main() {
+  const isolated = process.env.NOTES_REPLAY_ISOLATED === '1';
+  assert.ok(
+    process.env.NOTES_REPLAY_ISOLATED === undefined || isolated,
+    'invalid_isolated_opt_in',
+  );
   assert.equal(
     process.argv.length,
     4,
@@ -99,6 +104,7 @@ async function main() {
   const originalFetch = globalThis.fetch;
   let current = 0;
   const wire = createNotesReplayTransport({
+    isolated,
     root,
     model: NOTES_OLLAMA_MODEL,
     contextTokens: 16384,
@@ -166,6 +172,12 @@ async function main() {
     write('manifest.json', {
       schema: 'notes-production-replay-v1',
       partition: 'development_not_held_out',
+      runtimeEndpoint: isolated
+        ? 'http://127.0.0.1:11435'
+        : 'http://127.0.0.1:11434',
+      runtimeConfiguration:
+        'verify against daemon startup evidence; not inferred from endpoint',
+      useMmapOverride: isolated ? true : null,
       inputSha256: sha(bytes),
       sourceDatabaseSha256: input.databaseSha256,
       model: model.name,

@@ -1,5 +1,10 @@
 # Gemma notes development baseline: resource-stopped, not acceptance
 
+Historical attempt retained below. A later cache/checkpoint-disabled, mapped
+runtime completed the same ten-row schedule without a resource stop. See the
+[runtime diagnosis and complete denominator](2026-09-08-gemma-runtime-memory.md).
+The later run does not erase this interruption or establish quality acceptance.
+
 The owner redirected work from experimental Phi notes to the production Gemma
 provider and model-neutral harness. The same private latest-ten source export was
 used without re-querying, replacing, or writing production meetings. Existing

@@ -10,6 +10,8 @@ export function createNotesReplayTransport(input: {
   fetch: typeof fetch;
   record: (event: Record<string, unknown>) => void;
   currentCase: () => number;
+  /** Dedicated diagnostic daemon; never permit an arbitrary remote endpoint. */
+  isolated?: boolean;
 }) {
   let count = 0;
   const active = new Set<number>();
@@ -17,6 +19,9 @@ export function createNotesReplayTransport(input: {
     const url = new URL(String(urlInput));
     assert.equal(url.origin, 'http://127.0.0.1:11434', 'replay_local_only');
     assert.ok(!url.username && !url.password, 'replay_credentials_forbidden');
+    const destination = input.isolated
+      ? `http://127.0.0.1:11435${url.pathname}${url.search}`
+      : urlInput;
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
     const generation = Boolean(body?.messages || body?.prompt);
     if (!generation) {
@@ -31,7 +36,7 @@ export function createNotesReplayTransport(input: {
         endpoint: url.pathname,
         model: body?.model ?? null,
       });
-      return input.fetch(urlInput, { ...init, redirect: 'error' });
+      return input.fetch(destination, { ...init, redirect: 'error' });
     }
     assert.ok(
       ['/api/chat', '/api/generate'].includes(url.pathname),
@@ -44,6 +49,15 @@ export function createNotesReplayTransport(input: {
       'replay_wire_context_mismatch',
     );
     assert.equal(body.stream, true, 'replay_stream_required');
+    assert.equal(active.size, 0, 'replay_concurrent_generation_forbidden');
+    // Match the original worker's mapped loading; the daemon may otherwise
+    // choose an eager-copy load on Metal. Capture the actual modified wire body.
+    if (input.isolated) {
+      body.options.use_mmap = true;
+    }
+    const generationInit = input.isolated
+      ? { ...init, body: JSON.stringify(body) }
+      : init;
     const attempt = ++count;
     const caseIndex = input.currentCase();
     const prefix = `case-${caseIndex}-attempt-${attempt}`;
@@ -115,8 +129,8 @@ export function createNotesReplayTransport(input: {
       });
     };
     try {
-      const response = await input.fetch(urlInput, {
-        ...init,
+      const response = await input.fetch(destination, {
+        ...generationInit,
         redirect: 'error',
       });
       input.record({

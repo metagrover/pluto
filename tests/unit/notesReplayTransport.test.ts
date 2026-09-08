@@ -8,16 +8,17 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true });
 });
-function setup(response: () => Promise<Response>) {
+function setup(response: () => Promise<Response>, isolated = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-wire-test-'));
   roots.push(root);
   const events: Array<Record<string, unknown>> = [];
-  const request = vi.fn(response);
+  const request = vi.fn<typeof fetch>(response);
   return {
     root,
     events,
     request,
     wire: createNotesReplayTransport({
+      isolated,
       root,
       model: 'gemma4:12b',
       contextTokens: 16384,
@@ -37,6 +38,52 @@ const init = {
   }),
 };
 describe('private notes replay transport', () => {
+  it('refuses a second generation until the first stream has terminated', async () => {
+    const state = setup(
+      async () => new Response('{"model":"gemma4:12b","done":true}\n'),
+    );
+    const first = await state.wire.fetch(
+      'http://127.0.0.1:11434/api/chat',
+      init,
+    );
+    await expect(
+      state.wire.fetch('http://127.0.0.1:11434/api/chat', init),
+    ).rejects.toThrow('replay_concurrent_generation_forbidden');
+    expect(state.request).toHaveBeenCalledTimes(1);
+    await first.text();
+    await (
+      await state.wire.fetch('http://127.0.0.1:11434/api/chat', init)
+    ).text();
+    expect(state.request).toHaveBeenCalledTimes(2);
+  });
+  it('routes control and generation only to the fixed diagnostic loopback daemon', async () => {
+    const state = setup(
+      async () => new Response('{"model":"gemma4:12b","done":true}\n'),
+      true,
+    );
+    await state.wire.fetch('http://127.0.0.1:11434/api/ps');
+    const response = await state.wire.fetch(
+      'http://127.0.0.1:11434/api/chat',
+      init,
+    );
+    await response.text();
+    expect(state.request.mock.calls.map((call) => call[0])).toEqual([
+      'http://127.0.0.1:11435/api/ps',
+      'http://127.0.0.1:11435/api/chat',
+    ]);
+    await expect(
+      state.wire.fetch('https://example.com/api/chat', init),
+    ).rejects.toThrow('replay_local_only');
+    expect(state.request).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(state.root, 'case-3-attempt-1-request.json'),
+          'utf8',
+        ),
+      ).options.use_mmap,
+    ).toBe(true);
+  });
   it('preserves partial output and a failure terminal when the owned signal aborts', async () => {
     const abort = new AbortController();
     const state = setup(

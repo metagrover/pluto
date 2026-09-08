@@ -22,6 +22,16 @@ const run = (script: string, args: string[]) =>
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 },
   );
 describe('notes replay CLI safety and crash reporting', () => {
+  it('requires isolation opt-in and a private source before daemon access', () => {
+    expect(() =>
+      run('run_notes_cache_isolation', ['/nonexistent/source.json']),
+    ).toThrow();
+    const root = rootFor();
+    const source = path.join(root, 'public-source.json');
+    fs.writeFileSync(source, '{}', { mode: 0o644 });
+    expect(() => run('run_notes_cache_isolation', [source, '--run'])).toThrow();
+    expect(fs.readdirSync(root)).toEqual(['public-source.json']);
+  });
   it('does not write diagnostics into an unrelated private directory', () => {
     const root = rootFor();
     expect(() => run('replay_notes_response_case', [root, '3'])).toThrow();

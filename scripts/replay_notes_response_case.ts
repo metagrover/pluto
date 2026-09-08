@@ -10,7 +10,12 @@ import { createNotesSource } from '../electron/llm/meetingNotesSource';
 import { MeetingNotesError } from '../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../electron/llm/meetingNotesWire';
 import { createMeetingNotesOptionalReviewBudget } from '../electron/meetingAnalysisRuns';
-import { writeOwnerOnlyPrivateFile } from './lib/privateEvaluationFile';
+import { createNotesReplayClock } from './lib/notesReplayClock';
+import { notesReplayOutcomeLabel } from './lib/notesReplaySummary';
+import {
+  appendOwnerOnlyPrivateLine,
+  writeOwnerOnlyPrivateFile,
+} from './lib/privateEvaluationFile';
 
 let failureRoot: string | undefined;
 async function main() {
@@ -71,7 +76,15 @@ async function main() {
   );
   let consumed = 0;
   let outcome = 'accepted_in_replay';
+  let replayedError: string | undefined;
   let analysis: Awaited<ReturnType<typeof generateMeetingNotes>> | undefined;
+  const clock = createNotesReplayClock(
+    events.find(
+      (event) => event.event === 'meeting_started' && event.index === caseIndex,
+    )?.at,
+  );
+  const originalNow = Date.now;
+  Date.now = clock.now;
   try {
     analysis = await generateMeetingNotes({
       source,
@@ -96,6 +109,14 @@ async function main() {
           'unsafe_attempt_path',
         );
         const captured = JSON.parse(read(`${attempt.prefix}-request.json`));
+        const physicalTerminal = events.find(
+          (event) =>
+            event.event === 'physical_terminal' &&
+            event.attempt === attempt.attempt &&
+            event.caseIndex === caseIndex,
+        );
+        assert.ok(physicalTerminal, 'recorded_physical_terminal_missing');
+        clock.advance(physicalTerminal.at);
         const wire = createNotesWireRequest(
           request.prompt,
           request.sourceSpans ?? [],
@@ -149,13 +170,31 @@ async function main() {
     });
   } catch (error) {
     if (!(error instanceof MeetingNotesError)) throw error;
-    outcome = error.code;
+    outcome = notesReplayOutcomeLabel(error.code);
+    replayedError = String(error);
+  } finally {
+    Date.now = originalNow;
   }
   assert.equal(consumed, attempts.length, 'unconsumed_physical_attempts');
   const terminal = events.find(
     (event) => event.event === 'meeting_terminal' && event.index === caseIndex,
   );
-  assert.equal(outcome, terminal?.outcome, 'replayed_outcome_mismatch');
+  assert.equal(
+    outcome,
+    typeof terminal?.outcome === 'string'
+      ? notesReplayOutcomeLabel(terminal.outcome)
+      : undefined,
+    'replayed_outcome_mismatch',
+  );
+  const recordedError = events.find(
+    (event) => event.event === 'private_error' && event.caseIndex === caseIndex,
+  );
+  if (recordedError)
+    assert.equal(
+      replayedError,
+      recordedError.error,
+      'replayed_error_details_mismatch',
+    );
   if (analysis) {
     const expected = JSON.parse(read(`case-${caseIndex}-analysis.json`));
     if (analysis.generation_metadata)
@@ -173,8 +212,9 @@ async function main() {
     capturedAttemptsConsumed: consumed,
     outcome,
     exactResultReproduced: true,
+    clockSemantics: 'recorded_physical_boundaries',
     caveat:
-      'Validation replay only; no elapsed-time, scheduler, or publication replay.',
+      'Recorded-boundary validation replay only; no OS timer, scheduler, or publication replay.',
   };
   writeOwnerOnlyPrivateFile(
     path.join(root, `case-${caseIndex}-offline-replay.json`),
@@ -184,12 +224,14 @@ async function main() {
 }
 void main().catch((error) => {
   if (failureRoot)
-    writeOwnerOnlyPrivateFile(
-      path.join(failureRoot, 'offline-replay-error.json'),
-      JSON.stringify({
+    appendOwnerOnlyPrivateLine(
+      path.join(failureRoot, 'offline-replay-errors.jsonl'),
+      {
+        at: Date.now(),
+        caseIndex: Number(process.argv[3]),
         error: String(error),
         stack: error instanceof Error ? error.stack : null,
-      }),
+      },
     );
   console.error('private_response_replay_failed');
   process.exitCode = 1;
