@@ -1,3 +1,4 @@
+import { canonicalizeActionText } from '../../src/utils/actionCommitment';
 import type {
   ActionItemV3,
   AnalysisDocumentV3,
@@ -5,7 +6,6 @@ import type {
   DecisionV3,
   RecentWinV3,
 } from './analysisTypes';
-import { canonicalizeActionText } from '../../src/utils/actionCommitment';
 
 export const normalizeTranscriptEvidence = (value: string): string =>
   value
@@ -398,7 +398,6 @@ const FIRST_PERSON_ACTION_COMMITMENT =
 const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;
 const NAMED_ACTION_COMMITMENT =
   /\b([\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*){0,2})\s+(?:will|shall|can|owns?|is assigned|was assigned)\b/gu;
-
 
 const resolveActionAssignee = (
   claimedAssignee: string | undefined,

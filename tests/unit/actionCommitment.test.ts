@@ -77,11 +77,17 @@ describe('action commitment metadata', () => {
     );
 
     expect(
-      canonicalizeActionText('Them to collect data and share it with Me.', 'Them'),
+      canonicalizeActionText(
+        'Them to collect data and share it with Me.',
+        'Them',
+      ),
     ).toBe('Collect data and share it with Me');
 
     expect(
-      canonicalizeActionText('Them will collect the data and share it.', 'Them'),
+      canonicalizeActionText(
+        'Them will collect the data and share it.',
+        'Them',
+      ),
     ).toBe('Collect the data and share it');
 
     expect(
@@ -92,9 +98,9 @@ describe('action commitment metadata', () => {
       canonicalizeActionText('Nira will prepare the launch checklist', 'Nira'),
     ).toBe('Prepare the launch checklist');
 
-    expect(
-      canonicalizeActionText("I'll follow up on Monday."),
-    ).toBe('Follow up on Monday');
+    expect(canonicalizeActionText("I'll follow up on Monday.")).toBe(
+      'Follow up on Monday',
+    );
   });
 
   it('detects third-party assignees from name or text', () => {
@@ -106,10 +112,21 @@ describe('action commitment metadata', () => {
     expect(isThirdPartyAssignee(null)).toBe(false);
     expect(isThirdPartyAssignee(undefined)).toBe(false);
 
-    expect(isThirdPartyAssignee(undefined, 'Them to collect data and share it with Me.')).toBe(true);
-    expect(isThirdPartyAssignee(undefined, 'They will collect the data.')).toBe(true);
-    expect(isThirdPartyAssignee(undefined, 'Remote speaker to provide updates.')).toBe(true);
-    expect(isThirdPartyAssignee('Me', 'Me will circle back with Arnold.')).toBe(false);
+    expect(
+      isThirdPartyAssignee(
+        undefined,
+        'Them to collect data and share it with Me.',
+      ),
+    ).toBe(true);
+    expect(isThirdPartyAssignee(undefined, 'They will collect the data.')).toBe(
+      true,
+    );
+    expect(
+      isThirdPartyAssignee(undefined, 'Remote speaker to provide updates.'),
+    ).toBe(true);
+    expect(isThirdPartyAssignee('Me', 'Me will circle back with Arnold.')).toBe(
+      false,
+    );
   });
 
   it('recognizes equivalent action items from the same meeting', () => {
@@ -148,7 +165,8 @@ describe('action commitment metadata', () => {
       }),
     };
     const candidateItem = {
-      title: 'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+      title:
+        'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
       sourceMeetingId: 'meeting-1',
     };
 

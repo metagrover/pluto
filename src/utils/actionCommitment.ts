@@ -110,10 +110,7 @@ export const canonicalizeActionText = (
   return capitalizeActionText(canonical || trimmed);
 };
 
-export const normalizeActionText = (
-  value: string,
-  assignee?: string,
-): string =>
+export const normalizeActionText = (value: string, assignee?: string): string =>
   canonicalizeActionText(value, assignee)
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
@@ -121,14 +118,82 @@ export const normalizeActionText = (
 
 export const extractSignificantWords = (text: string): string[] => {
   const stopWords = new Set([
-    'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'so', 'to', 'for',
-    'with', 'at', 'by', 'from', 'in', 'on', 'of', 'about', 'as', 'into',
-    'like', 'through', 'after', 'over', 'between', 'out', 'against', 'during',
-    'without', 'before', 'under', 'around', 'among', 'is', 'am', 'are', 'was',
-    'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
-    'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must',
-    'it', 'its', 'this', 'that', 'these', 'those', 'his', 'her', 'their', 'our',
-    'my', 'your', 'we', 'me', 'us', 'them', 'him', 'up', 'down',
+    'a',
+    'an',
+    'the',
+    'and',
+    'or',
+    'but',
+    'if',
+    'then',
+    'so',
+    'to',
+    'for',
+    'with',
+    'at',
+    'by',
+    'from',
+    'in',
+    'on',
+    'of',
+    'about',
+    'as',
+    'into',
+    'like',
+    'through',
+    'after',
+    'over',
+    'between',
+    'out',
+    'against',
+    'during',
+    'without',
+    'before',
+    'under',
+    'around',
+    'among',
+    'is',
+    'am',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'have',
+    'has',
+    'had',
+    'do',
+    'does',
+    'did',
+    'will',
+    'would',
+    'shall',
+    'should',
+    'can',
+    'could',
+    'may',
+    'might',
+    'must',
+    'it',
+    'its',
+    'this',
+    'that',
+    'these',
+    'those',
+    'his',
+    'her',
+    'their',
+    'our',
+    'my',
+    'your',
+    'we',
+    'me',
+    'us',
+    'them',
+    'him',
+    'up',
+    'down',
   ]);
   return normalizeActionText(text)
     .split(/\s+/)
@@ -168,7 +233,9 @@ const extractActionFields = (
       : '');
   const assigneeName =
     action.assigneeName ??
-    (typeof metadata.assignee_name === 'string' ? metadata.assignee_name : null);
+    (typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name
+      : null);
   const sourceMeetingId =
     action.sourceMeetingId ??
     (typeof metadata.source_meeting_id === 'string'
