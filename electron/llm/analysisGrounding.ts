@@ -5,6 +5,7 @@ import type {
   DecisionV3,
   RecentWinV3,
 } from './analysisTypes';
+import { canonicalizeActionText } from '../../src/utils/actionCommitment';
 
 export const normalizeTranscriptEvidence = (value: string): string =>
   value
@@ -398,29 +399,6 @@ const GROUP_ACTION_COMMITMENT = /\b(?:we will|we['’]ll|we commit to)\b/i;
 const NAMED_ACTION_COMMITMENT =
   /\b([\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*){0,2})\s+(?:will|shall|can|owns?|is assigned|was assigned)\b/gu;
 
-const capitalizeActionText = (value: string): string =>
-  value.replace(/^\p{Ll}/u, (character) =>
-    character.toLocaleUpperCase('en-US'),
-  );
-
-const canonicalizeActionText = (text: string, assignee?: string): string => {
-  const subjectPatterns = [
-    '(?:the\\s+team|team|we|i)',
-    ...(assignee && !GENERIC_ACTION_ASSIGNEE.test(assignee.trim())
-      ? [assignee.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]
-      : []),
-  ];
-  const framing = new RegExp(
-    `^(?:${subjectPatterns.join('|')})\\s+(?:will|shall|can|(?:is|are|am)\\s+going\\s+to|(?:has|have)\\s+(?:agreed|committed)\\s+to)\\s+`,
-    'i',
-  );
-  const canonical = text
-    .trim()
-    .replace(/^(?:i|we)['’]ll\s+/i, '')
-    .replace(framing, '')
-    .trim();
-  return capitalizeActionText(canonical || text.trim());
-};
 
 const resolveActionAssignee = (
   claimedAssignee: string | undefined,
