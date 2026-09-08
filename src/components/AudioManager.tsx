@@ -873,44 +873,44 @@ export const AudioManager = ({
         window.ipcRenderer.invoke('NATIVE_AUDIO_START');
       void nativeAudioStartPromise.catch(() => undefined);
 
-      try {
-        const vocabulary = (await window.ipcRenderer.invoke(
-          'GET_TRANSCRIPTION_VOCABULARY',
-          {
-            participants: buildTranscriptionParticipantHints(
-              participants,
-              transcriptionParticipantHints,
-            ),
-          },
-        )) as TranscriptionVocabularySelection;
-        const initialPrompt =
-          typeof vocabulary?.initialPrompt === 'string' &&
-          vocabulary.initialPrompt.length <= 240
-            ? vocabulary.initialPrompt
-            : null;
-        const hintCount = Number.isInteger(vocabulary?.provenance?.hintCount)
-          ? Math.max(0, Math.min(12, vocabulary.provenance.hintCount))
-          : 0;
-        const terms = Array.isArray(vocabulary?.terms)
-          ? vocabulary.terms
-              .filter((term): term is string => typeof term === 'string')
-              .slice(0, 12)
-          : [];
-        transcriptionVocabularyRef.current = {
-          initialPrompt,
-          terms,
-          provenance: {
-            policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
-            hintCount: initialPrompt ? hintCount : 0,
-          },
-        };
-        console.log(
-          '[Pluto] Transcription vocabulary ready',
-          transcriptionVocabularyRef.current.provenance,
-        );
-      } catch {
-        console.warn('[Pluto] Transcription vocabulary unavailable');
-      }
+      void window.ipcRenderer
+        .invoke('GET_TRANSCRIPTION_VOCABULARY', {
+          participants: buildTranscriptionParticipantHints(
+            participants,
+            transcriptionParticipantHints,
+          ),
+        })
+        .then((vocabulary: unknown) => {
+          const vocab = vocabulary as TranscriptionVocabularySelection;
+          const initialPrompt =
+            typeof vocab?.initialPrompt === 'string' &&
+            vocab.initialPrompt.length <= 240
+              ? vocab.initialPrompt
+              : null;
+          const hintCount = Number.isInteger(vocab?.provenance?.hintCount)
+            ? Math.max(0, Math.min(12, vocab.provenance.hintCount))
+            : 0;
+          const terms = Array.isArray(vocab?.terms)
+            ? vocab.terms
+                .filter((term): term is string => typeof term === 'string')
+                .slice(0, 12)
+            : [];
+          transcriptionVocabularyRef.current = {
+            initialPrompt,
+            terms,
+            provenance: {
+              policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+              hintCount: initialPrompt ? hintCount : 0,
+            },
+          };
+          console.log(
+            '[Pluto] Transcription vocabulary ready',
+            transcriptionVocabularyRef.current.provenance,
+          );
+        })
+        .catch(() => {
+          console.warn('[Pluto] Transcription vocabulary unavailable');
+        });
 
       const meetingContextIngestion = createConfirmedSegmentIngestionSession({
         meetingId,
@@ -935,6 +935,7 @@ export const AudioManager = ({
           mic: () => micPcmSampleRateRef.current,
           system: () => systemPcmSampleRateRef.current,
         },
+        maxOutstanding: 48,
         transport: {
           invoke: (channel, payload) =>
             window.ipcRenderer.invoke(channel, payload),
@@ -1063,23 +1064,12 @@ export const AudioManager = ({
         },
       });
       eouSessionRef.current = eouSession;
-      try {
-        await eouSession.start();
-      } catch {
-        await abortUnstartedCapture(meetingId);
-        currentMeetingIdRef.current = null;
-        liveConversationProjectorRef.current = null;
-        liveTranscriptResponsivenessRef.current.abortStart();
-        frozenLiveTranscriptResponsivenessRef.current = null;
-        startTimeRef.current = 0;
-        captureActivitySessionRef.current = null;
-        alert('Live transcription could not start. Please try again.');
-        return {
-          admitted: false,
-          state: 'starting',
-          reason: 'live_transcription_start_failed',
-        };
-      }
+      void eouSession.start().catch((err) => {
+        console.warn(
+          '[Pluto] Live Parakeet EOU start deferred/unavailable:',
+          err,
+        );
+      });
 
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
@@ -1344,6 +1334,10 @@ export const AudioManager = ({
 
             // Package System Audio for this interval
             let systemBlob: Blob | undefined;
+            const chunkDurationSec = Math.max(0.2, chunkEndSec - chunkStartSec);
+            // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
+            // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
+            systemPcmSampleRateRef.current = 48000;
             // Flatten pending float chunks
             const floatChunks = systemPcmChunksRef.current;
             if (floatChunks.length > 0) {
@@ -1357,13 +1351,6 @@ export const AudioManager = ({
                 merged.set(c, offset);
                 offset += c.length;
               }
-              const chunkDurationSec = Math.max(
-                0.2,
-                chunkEndSec - chunkStartSec,
-              );
-              // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
-              // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
-              systemPcmSampleRateRef.current = 48000;
               const intervalPcm = trimPcmLeadingOverflow(
                 merged,
                 48000,
@@ -1372,6 +1359,14 @@ export const AudioManager = ({
               systemBlob = createWavBlob(intervalPcm, 48000, 1);
               // Clear for next chunk
               systemPcmChunksRef.current = [];
+            } else if (hasSystemRecorderRef.current && !systemFailureRecorded) {
+              // Synthesize silent 48kHz Float32 PCM for this interval so the journal record is complete and durable
+              const targetSampleCount = Math.max(
+                1,
+                Math.round(48000 * chunkDurationSec),
+              );
+              const silentPcm = new Float32Array(targetSampleCount);
+              systemBlob = createWavBlob(silentPcm, 48000, 1);
             }
 
             const meetingIdForChunk = currentMeetingIdRef.current;
@@ -1409,10 +1404,6 @@ export const AudioManager = ({
       startMicMediaRecorderRef.current = startMicMediaRecorder;
 
       if (micStream) {
-        // AudioCap starts before MediaRecorder so the native tap can become
-        // healthy. Discard that setup pre-roll at the synchronization point;
-        // otherwise system timestamps can extend beyond the journal interval.
-        systemPcmChunksRef.current = [];
         systemPcmCarryoverBytesRef.current = new Uint8Array(0);
         const recorderStarted = await startMicMediaRecorder(micStream, true);
         if (!recorderStarted) {
