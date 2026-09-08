@@ -35,14 +35,15 @@
  * unit tested in Node (tests/live-browser-ignores.test.mjs) without the full
  * overlay UI bundle.
  */
-(function (root) {
-  'use strict';
+((root) => {
   if (!root) return;
 
   // Keep in step with normalizeIgnoreRule / normalizeIgnoreValue in
   // cli/lib/impeccable-config.mjs.
   function normalizeIgnoreRule(rule) {
-    return String(rule || '').trim().toLowerCase();
+    return String(rule || '')
+      .trim()
+      .toLowerCase();
   }
 
   function normalizeIgnoreValue(value) {
@@ -75,8 +76,15 @@
         i += 1;
       } else if (c === '{') {
         const end = glob.indexOf('}', i);
-        if (end === -1) { re += '\\{'; i += 1; continue; }
-        const parts = glob.slice(i + 1, end).split(',').map((p) => p.replace(/[.+^$()|[\]\\]/g, '\\$&'));
+        if (end === -1) {
+          re += '\\{';
+          i += 1;
+          continue;
+        }
+        const parts = glob
+          .slice(i + 1, end)
+          .split(',')
+          .map((p) => p.replace(/[.+^$()|[\]\\]/g, '\\$&'));
         re += `(?:${parts.join('|')})`;
         i = end + 1;
       } else if (/[.+^$()|[\]\\]/.test(c)) {
@@ -146,7 +154,8 @@
     const knownPages = [];
     for (const entry of Array.isArray(pageFiles) ? pageFiles : []) {
       if (typeof entry !== 'string' || !entry) continue;
-      if (entry === pagePath || entry.endsWith('/' + pagePath)) knownPages.push(entry);
+      if (entry === pagePath || entry.endsWith('/' + pagePath))
+        knownPages.push(entry);
     }
     if (knownPages.length === 1) {
       addSuffixes(knownPages[0]);
@@ -161,7 +170,12 @@
     let common = prefixes.length > 0 ? prefixes[0] : [];
     for (const segments of prefixes.slice(1)) {
       let i = 0;
-      while (i < common.length && i < segments.length && common[i] === segments[i]) i += 1;
+      while (
+        i < common.length &&
+        i < segments.length &&
+        common[i] === segments[i]
+      )
+        i += 1;
       common = common.slice(0, i);
     }
 
@@ -200,9 +214,13 @@
     // detector.ignoreFiles waives whole files. When any glob names this
     // page, the scan itself is skipped; rule and value lists are returned
     // empty because nothing will run.
-    const ignoreFileGlobs = asArray(config.ignoreFiles)
-      .filter((glob) => typeof glob === 'string' && glob.trim());
-    if (ignoreFileGlobs.length > 0 && matchesScope(ignoreFileGlobs, candidates)) {
+    const ignoreFileGlobs = asArray(config.ignoreFiles).filter(
+      (glob) => typeof glob === 'string' && glob.trim(),
+    );
+    if (
+      ignoreFileGlobs.length > 0 &&
+      matchesScope(ignoreFileGlobs, candidates)
+    ) {
       return { disabledRules: [], disabledValues: [], skipScan: true };
     }
 
@@ -220,19 +238,28 @@
       const value = normalizeIgnoreValue(entry.value);
       if (!rule || !value) continue;
       const files = [
-        ...(typeof entry.file === 'string' && entry.file.trim() ? [entry.file.trim()] : []),
-        ...asArray(entry.files).filter((glob) => typeof glob === 'string' && glob.trim()),
+        ...(typeof entry.file === 'string' && entry.file.trim()
+          ? [entry.file.trim()]
+          : []),
+        ...asArray(entry.files).filter(
+          (glob) => typeof glob === 'string' && glob.trim(),
+        ),
       ];
       if (value === '*') {
         // Wildcards suppress their rule only inside the files they name.
-        if (files.length > 0 && matchesScope(files, candidates)) disabledRules.add(rule);
+        if (files.length > 0 && matchesScope(files, candidates))
+          disabledRules.add(rule);
         continue;
       }
       if (files.length > 0 && !matchesScope(files, candidates)) continue;
       disabledValues.push({ rule, value });
     }
 
-    return { disabledRules: [...disabledRules], disabledValues, skipScan: false };
+    return {
+      disabledRules: [...disabledRules],
+      disabledValues,
+      skipScan: false,
+    };
   }
 
   root.__IMPECCABLE_LIVE_IGNORES__ = {

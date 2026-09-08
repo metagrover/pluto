@@ -5,8 +5,7 @@
  * chrome mounting, lookup, focus, and picker helpers without depending on the
  * full overlay UI bundle.
  */
-(function (root) {
-  'use strict';
+((root) => {
   if (!root) return;
 
   function createLiveBrowserDomHelpers({
@@ -21,7 +20,10 @@
     const tagsToSkip = skipTags || new Set();
 
     function own(el) {
-      return el && (el.id?.startsWith(prefix) || el.closest?.('[id^="' + prefix + '"]'));
+      return (
+        el &&
+        (el.id?.startsWith(prefix) || el.closest?.('[id^="' + prefix + '"]'))
+      );
     }
 
     function pickable(el) {
@@ -36,7 +38,8 @@
       if (!el) return '';
       let s = el.tagName.toLowerCase();
       if (el.id) s += '#' + el.id;
-      else if (el.classList.length) s += '.' + [...el.classList].slice(0, 2).join('.');
+      else if (el.classList.length)
+        s += '.' + [...el.classList].slice(0, 2).join('.');
       return s;
     }
 
@@ -49,10 +52,14 @@
       const r = el.getBoundingClientRect();
       if (!rectIsUsableAnchor(r)) return null;
       const rect = {
-        x: r.x, y: r.y,
-        top: r.top, left: r.left,
-        right: r.right, bottom: r.bottom,
-        width: r.width, height: r.height,
+        x: r.x,
+        y: r.y,
+        top: r.top,
+        left: r.left,
+        right: r.right,
+        bottom: r.bottom,
+        width: r.width,
+        height: r.height,
       };
       return {
         __impeccableFrozenAnchor: true,
@@ -67,17 +74,22 @@
     function hasFrameworkHmrOwnership(el) {
       for (let node = el; node; node = node.parentElement) {
         let keys = [];
-        try { keys = Object.getOwnPropertyNames(node); } catch {}
-        if (keys.some((key) => (
-          key.startsWith('__reactFiber$')
-          || key.startsWith('__reactProps$')
-          || key.startsWith('__reactContainer$')
-          || key === '_reactRootContainer'
-          || key === '__vueParentComponent'
-          || key === '__vue_app__'
-          || key === '__vnode'
-          || key === '__svelte_meta'
-        ))) {
+        try {
+          keys = Object.getOwnPropertyNames(node);
+        } catch {}
+        if (
+          keys.some(
+            (key) =>
+              key.startsWith('__reactFiber$') ||
+              key.startsWith('__reactProps$') ||
+              key.startsWith('__reactContainer$') ||
+              key === '_reactRootContainer' ||
+              key === '__vueParentComponent' ||
+              key === '__vue_app__' ||
+              key === '__vnode' ||
+              key === '__svelte_meta',
+          )
+        ) {
           return true;
         }
       }
@@ -85,13 +97,19 @@
     }
 
     function id8() {
-      if (crypto?.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 8);
-      return (Math.random().toString(16).slice(2) + Date.now().toString(16)).slice(0, 8);
+      if (crypto?.randomUUID)
+        return crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+      return (
+        Math.random().toString(16).slice(2) + Date.now().toString(16)
+      ).slice(0, 8);
     }
 
     function cssId(id) {
       if (css?.escape) return css.escape(id);
-      return String(id).replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+      return String(id).replace(
+        /([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g,
+        '\\$1',
+      );
     }
 
     function liveUiRoot() {
@@ -127,7 +145,8 @@
 
     function activeElementDeep() {
       let active = doc.activeElement;
-      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      while (active?.shadowRoot?.activeElement)
+        active = active.shadowRoot.activeElement;
       return active;
     }
 
