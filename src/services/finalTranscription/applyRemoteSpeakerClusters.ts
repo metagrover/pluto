@@ -18,6 +18,7 @@ import {
 
 const MINIMUM_CLUSTER_SECONDS = 1;
 const MINIMUM_ALIGNMENT_COVERAGE = 0.8;
+const MINIMUM_PARTIAL_ALIGNMENT_COVERAGE = 0.5;
 const MINIMUM_ITEM_COVERAGE = 0.5;
 
 export type RemoteDiarizationFallbackReason =
@@ -33,6 +34,7 @@ export type RemoteDiarizationMetadata = {
   confidence: number;
   clusterCount: number;
   labeledSegmentCount: number;
+  coverage?: 'complete' | 'partial';
   fallbackReason?: RemoteDiarizationFallbackReason;
 };
 
@@ -318,7 +320,7 @@ export const applyRemoteSpeakerClusters = <
 
   const confidence =
     totalSpeechSeconds > 0 ? labeledSpeechSeconds / totalSpeechSeconds : 0;
-  if (confidence < MINIMUM_ALIGNMENT_COVERAGE) {
+  if (confidence < MINIMUM_PARTIAL_ALIGNMENT_COVERAGE) {
     return fallback('low_coverage', confidence, established.length);
   }
   const labeledSegmentCount = aligned.filter((segment) =>
@@ -346,6 +348,8 @@ export const applyRemoteSpeakerClusters = <
       confidence: roundConfidence(confidence),
       clusterCount: established.length,
       labeledSegmentCount,
+      coverage:
+        confidence >= MINIMUM_ALIGNMENT_COVERAGE ? 'complete' : 'partial',
     },
     candidateEvidence,
   };

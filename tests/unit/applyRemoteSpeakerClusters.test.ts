@@ -367,9 +367,10 @@ describe('applyRemoteSpeakerClusters', () => {
       systemEnergyWindows: [{ startTime: 0, endTime: 4, systemRms: 0.1 }],
     });
     // Expanded S1 turns cover only 0.3 of the 0.7 second item, not 0.49.
-    expect(result.applied).toBe(false);
-    expect(result.metadata.fallbackReason).toBe('low_coverage');
+    expect(result.applied).toBe(true);
+    expect(result.metadata.coverage).toBe('partial');
     expect(result.metadata.confidence).toBe(0.741);
+    expect(result.segments[0].speaker).toBe('Them');
   });
 
   it('does not assign a speaker to words contradicted by entirely silent measured audio', () => {
@@ -488,5 +489,71 @@ describe('applyRemoteSpeakerClusters', () => {
       'Remote Speaker 1',
       'Remote Speaker 2',
     ]);
+  });
+
+  it('retains eligible cluster candidates when supported labels cover only part of the meeting', () => {
+    const provenance = {
+      modelIdentifier: 'speaker-diarization-offline-v1',
+      modelRevision: 'a'.repeat(40),
+      artifactDigest: 'b'.repeat(64),
+      runtimeVersion: 'fluidaudio-test',
+      profileAlgorithmVersion: 'v1',
+    };
+    const embedding = new Array(256).fill(0.1);
+    const result = applyRemoteSpeakerClusters({
+      segments: [
+        {
+          startTime: 0,
+          endTime: 8,
+          speaker: 'Them',
+          text: 'first speaker unresolved words second speaker',
+          words: words([
+            ['first', 0, 1.5],
+            ['speaker', 1.5, 3],
+            ['unresolved', 3, 4],
+            ['words', 4, 5],
+            ['second', 5, 6.5],
+            ['speaker', 6.5, 8],
+          ]),
+        },
+      ],
+      turns: [
+        { startTime: 0, endTime: 3, cluster: 'S1' },
+        { startTime: 5, endTime: 8, cluster: 'S2' },
+      ],
+      clusterEvidence: [
+        {
+          cluster: 'S1',
+          embedding,
+          cleanChunkCount: 2,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 3,
+          minimumChunkSimilarity: 0.8,
+          meanChunkSimilarity: 0.9,
+        },
+        {
+          cluster: 'S2',
+          embedding,
+          cleanChunkCount: 2,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 3,
+          minimumChunkSimilarity: 0.8,
+          meanChunkSimilarity: 0.9,
+        },
+      ],
+      provenance,
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.metadata).toMatchObject({
+      coverage: 'partial',
+      confidence: 0.75,
+    });
+    expect(result.segments.map((segment) => segment.speaker)).toEqual([
+      'Remote Speaker 1',
+      'Them',
+      'Remote Speaker 2',
+    ]);
+    expect(result.candidateEvidence).toHaveLength(2);
   });
 });

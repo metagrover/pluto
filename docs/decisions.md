@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-07 - Preserve evidence-backed partial remote labels and echo-aware voice samples
+
+- **Status:** Accepted
+- **Source:** Diagnosis of a finalized multi-speaker meeting whose verified channel attribution retained only aggregate `Them` labels
+- **Decision:** Remote voice-sample purity uses the same source-dominance boundary as recovered-channel attribution: microphone energy contaminates a System-audio sample only when the microphone is active and System is inactive or the microphone dominates System by the configured ratio. System-correlated microphone echo does not discard remote evidence. Remote diarization still requires unique per-item cluster support of at least 50 percent. Complete separation retains the existing 80 percent meeting-wide coverage target; coverage from 50 percent to below 80 percent is published as partial separation, with unsupported speech left as `Them`. Coverage below 50 percent continues to fall back entirely.
+- **Rationale:** The prior absolute microphone-activity filter contradicted Pluto's dual-source echo model and could reduce hundreds of seconds of remote speech to a few seconds of candidate evidence. The prior all-or-nothing 80 percent publication rule then erased every supported cluster when a minority of System words had no diarization turn, preventing both honest partial labels and voice-profile matching.
+- **Consequences:** Meetings with loudspeaker echo can retain clean remote voice candidates, and partially covered multi-speaker meetings expose only their supported anonymous labels while preserving uncertainty. Named suggestions still require the existing purity, provenance, absolute-similarity, and runner-up-margin gates. This supersedes only the all-or-nothing 80 percent publication rule in the 2026-09-04 remote-participant diarization decision; its per-item ambiguity checks and identity boundaries remain in force.
+
 ## 2026-09-07 - Instant audio capture startup, live ASR queue resilience, and complete silent intervals
 
 - **Status:** Accepted

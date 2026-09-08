@@ -103,6 +103,7 @@ export type StoredTranscriptSpeakerAttribution = {
     confidence: number;
     clusterCount: number;
     labeledSegmentCount: number;
+    coverage?: 'complete' | 'partial';
     fallbackReason?:
       | 'no_system_speech'
       | 'no_diarization_segments'

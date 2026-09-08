@@ -38,6 +38,8 @@ func isExpectedDiarizationSilence(_ error: Error) -> Bool {
 
 struct SpeakerClusterEvidenceAggregator {
     static let micActiveRmsThreshold = 0.012
+    static let systemActiveRmsThreshold = 0.002
+    static let nearEndDominanceRatio = 2.5
     static let minimumSegmentDuration = 1.0
     static let minimumCleanChunkRatio = 0.2
     static let minimumConsensusSimilarity = 0.7
@@ -63,8 +65,11 @@ struct SpeakerClusterEvidenceAggregator {
             let otherTurns = turns.filter { $0.cluster != cluster }
             var dirtyIntervals: [(start: Double, end: Double)] = otherTurns.map { ($0.startTime, $0.endTime) }
 
-            // 2. Active mic speech
-            for window in windows where window.micRms >= micActiveRmsThreshold {
+            // 2. Microphone-exclusive speech. The microphone may contain
+            // loudspeaker echo, so activity alone cannot contaminate a remote
+            // System-audio voice sample. Apply the same source-dominance rule
+            // used by recovered-channel attribution.
+            for window in windows where isMicrophoneExclusive(window) {
                 dirtyIntervals.append((window.startTime, window.endTime))
             }
 
@@ -171,6 +176,14 @@ struct SpeakerClusterEvidenceAggregator {
         }
 
         return results
+    }
+
+    private static func isMicrophoneExclusive(_ window: SpeakerEnergyWindow) -> Bool {
+        let micRms = max(0, window.micRms)
+        let systemRms = max(0, window.systemRms)
+        guard micRms >= micActiveRmsThreshold else { return false }
+        guard systemRms >= systemActiveRmsThreshold else { return true }
+        return micRms / max(systemRms, 0.000_001) >= nearEndDominanceRatio
     }
 
     private static func stableConsensus(from vectors: [[Float]]) -> [[Float]] {

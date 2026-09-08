@@ -281,12 +281,12 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         ]
         let windows = (0..<80).map { index -> SpeakerEnergyWindow in
             let start = Double(index) * 0.1
-            let micActive = (start >= 2.0 && start < 3.0) || (start >= 5.0 && start < 6.0)
+            let micExclusive = (start >= 2.0 && start < 3.0) || (start >= 5.0 && start < 6.0)
             return SpeakerEnergyWindow(
                 startTime: start,
                 endTime: start + 0.1,
-                micRms: micActive ? 0.05 : 0.001,
-                systemRms: 0.05
+                micRms: micExclusive ? 0.05 : 0.001,
+                systemRms: micExclusive ? 0.005 : 0.05
             )
         }
         let coordinator = SpeakerEvidenceCoordinator(
@@ -307,6 +307,34 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         XCTAssertEqual(evidence.cleanChunkCount, 2)
         XCTAssertEqual(evidence.cleanSegmentCount, 3)
         XCTAssertEqual(evidence.cleanDurationSeconds, 6.0, accuracy: 1e-4)
+    }
+
+    func testAggregationKeepsSystemCorrelatedMicrophoneEcho() async throws {
+        let vector = [Float](repeating: 0.1, count: 256)
+        let coordinator = SpeakerEvidenceCoordinator(
+            diarizer: FixtureDiarizer(
+                turns: [SpeakerEvidenceTurn(startTime: 0.0, endTime: 4.0, cluster: "S1")],
+                chunkEmbeddings: [
+                    ChunkEmbedding(speakerId: "S1", chunkIndex: 0, speakerIndex: 0, startTimeSeconds: 0.0, endTimeSeconds: 2.0, embedding256: vector),
+                    ChunkEmbedding(speakerId: "S1", chunkIndex: 1, speakerIndex: 0, startTimeSeconds: 2.0, endTimeSeconds: 4.0, embedding256: vector),
+                ]
+            ),
+            energyAnalyzer: FixtureEnergyAnalyzer(windows: [
+                SpeakerEnergyWindow(startTime: 0.0, endTime: 4.0, micRms: 0.05, systemRms: 0.05)
+            ]),
+            manifest: ProductionDiarizationManifest.current,
+            runtimeVersion: "test"
+        )
+
+        let output = try await coordinator.analyze(
+            mixedURL: URL(fileURLWithPath: "/dummy/mixed.wav"),
+            micURL: URL(fileURLWithPath: "/dummy/mic.wav"),
+            systemURL: URL(fileURLWithPath: "/dummy/system.wav")
+        )
+
+        let evidence = try XCTUnwrap(output.clusterEvidence?.first)
+        XCTAssertEqual(evidence.cleanDurationSeconds, 4.0, accuracy: 1e-4)
+        XCTAssertEqual(evidence.cleanChunkCount, 2)
     }
 
     func testAggregationDropsADeviantEmbeddingWhenAStableConsensusRemains() async throws {
@@ -433,12 +461,12 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         let windows = (0..<50).map { i -> SpeakerEnergyWindow in
             let start = Double(i) * 0.1
             let end = Double(i + 1) * 0.1
-            let micRms = (start >= 4.0 && end <= 4.5) ? 0.05 : 0.001
+            let micExclusive = start >= 4.0 && end <= 4.5
             return SpeakerEnergyWindow(
                 startTime: start,
                 endTime: end,
-                micRms: micRms,
-                systemRms: 0.05
+                micRms: micExclusive ? 0.05 : 0.001,
+                systemRms: micExclusive ? 0.005 : 0.05
             )
         }
         let chunks = [
