@@ -382,7 +382,12 @@ export const runPersistedMeetingFinalTranscription = async (
         }
         return { committed: false };
       },
-      markNeedsAttention: async ({ failure, lease, reasons }) => {
+      markNeedsAttention: async ({
+        failure,
+        lease,
+        reasons,
+        attributionDiagnostics,
+      }) => {
         if (lease) {
           await invoke(
             'FAIL_FINAL_TRANSCRIPTION',
@@ -390,6 +395,7 @@ export const runPersistedMeetingFinalTranscription = async (
             lease.runId,
             failure,
             reasons ?? [],
+            attributionDiagnostics,
           );
         }
       },

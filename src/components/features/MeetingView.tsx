@@ -248,6 +248,7 @@ export const TranscriptIntegrityPanel = ({
   );
   let canRetryFinalTranscription = false;
   let speakerAttributionFailure = false;
+  let speakerAttributionAttempted = false;
   let resourcePolicyDenied = false;
   let systemCaptureIncomplete = false;
   try {
@@ -257,6 +258,7 @@ export const TranscriptIntegrityPanel = ({
         policy?: unknown;
         state?: unknown;
         failure?: unknown;
+        diagnostics?: unknown;
       };
     };
     canRetryFinalTranscription =
@@ -264,6 +266,9 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription.state === 'needs_attention';
     speakerAttributionFailure =
       integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
+    speakerAttributionAttempted = Boolean(
+      integrity.finalTranscription?.diagnostics,
+    );
     resourcePolicyDenied =
       integrity.finalTranscription?.failure === 'resource_policy_denied';
     systemCaptureIncomplete =
@@ -273,6 +278,7 @@ export const TranscriptIntegrityPanel = ({
   } catch {
     canRetryFinalTranscription = false;
     speakerAttributionFailure = false;
+    speakerAttributionAttempted = false;
     resourcePolicyDenied = false;
   }
   canRetryFinalTranscription ||= speakerLabelsRequired;
@@ -291,6 +297,7 @@ export const TranscriptIntegrityPanel = ({
     systemCaptureIncomplete,
     hasExistingTranscript: Boolean(transcriptJson),
     speakerAttributionFailure,
+    speakerAttributionAttempted,
     resourcePolicyDenied,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',

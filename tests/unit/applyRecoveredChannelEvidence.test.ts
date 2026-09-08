@@ -116,6 +116,15 @@ describe('applyRecoveredChannelEvidence', () => {
     expect(result.accepted).toBe(false);
     expect(result.reasons).toEqual(['low_attribution_confidence']);
     expect(result.attribution.mappingApplied).toBe(false);
+    expect(result.diagnostics).toEqual({
+      schemaVersion: 1,
+      pipelineVersion: 'recovered_channel_acoustic_v2',
+      confidence: 8 / 14,
+      minimumConfidence: 0.8,
+      attributedSeconds: 8,
+      unattributedSeconds: 6,
+      totalSeconds: 14,
+    });
   });
 
   it('does not treat a small System boundary overlap as concurrent speech', () => {
@@ -136,5 +145,33 @@ describe('applyRecoveredChannelEvidence', () => {
       speaker: 'Me',
       nearEndEvidence: true,
     });
+  });
+
+  it('measures sparse retained words instead of gaps inside their segment', () => {
+    const words = [
+      { word: 'local', start: 0, end: 0.4 },
+      { word: 'response', start: 9, end: 9.4 },
+    ];
+    const result = applyRecoveredChannelEvidence({
+      segments: [
+        { startTime: 0, endTime: 10, speaker: 'Them', text: 'remote' },
+        {
+          startTime: 0,
+          endTime: 9.4,
+          speaker: 'Me',
+          text: 'local response',
+          words,
+        },
+      ],
+      activityWindows: [
+        { startTime: 0, endTime: 0.4, speaker: 'Me' },
+        { startTime: 9, endTime: 9.4, speaker: 'Me' },
+      ],
+      provenance,
+    });
+
+    expect(result.segments[1].speaker).toBe('Me');
+    expect(result.diagnostics.totalSeconds).toBeCloseTo(10.8);
+    expect(result.diagnostics.unattributedSeconds).toBe(0);
   });
 });

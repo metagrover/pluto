@@ -63,6 +63,26 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it('explains a completed label attempt without presenting it as a fresh retry', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: true,
+        speakerAttributionFailure: true,
+        speakerAttributionAttempted: true,
+        resourcePolicyDenied: false,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: false,
+      }),
+    ).toEqual({
+      title: 'Speaker labels could not be improved',
+      detail:
+        'Pluto kept your previous transcript because this pass could not verify enough speaker labels.',
+      actionLabel: null,
+    });
+  });
+
   it('explains when a retry paused to protect system resources', () => {
     expect(
       resolveMeetingFailurePresentation({

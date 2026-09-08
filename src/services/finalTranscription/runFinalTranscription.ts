@@ -15,6 +15,7 @@ import type {
   TranscriptionResult,
 } from '../transcription/contracts.ts';
 import { applyRecoveredChannelEvidence } from './applyRecoveredChannelEvidence.ts';
+import type { SpeakerAttributionDiagnostics } from './applyRecoveredChannelEvidence.ts';
 import { applyRemoteSpeakerClusters } from './applyRemoteSpeakerClusters.ts';
 import type { FinalSpeakerEvidence } from './applySpeakerEvidence.ts';
 import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
@@ -117,6 +118,7 @@ export type FinalTranscriptionDependencies<TTranscript = unknown> = {
     lease?: FinalTranscriptionLease;
     reasons?: string[];
     metadata?: FinalTranscriptionMetadata;
+    attributionDiagnostics?: SpeakerAttributionDiagnostics;
   }) => Promise<void>;
   startAnalysis: (input: {
     meetingId: string;
@@ -361,6 +363,7 @@ export const runFinalTranscription = async <TTranscript>(
         lease,
         reasons: attribution.reasons,
         metadata,
+        attributionDiagnostics: attribution.diagnostics,
       });
       return { status: 'needs_attention', reasons: attribution.reasons };
     }

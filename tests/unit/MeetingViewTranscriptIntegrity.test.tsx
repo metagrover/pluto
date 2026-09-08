@@ -359,6 +359,37 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Retrying analysis');
   });
 
+  it('shows a completed failed label pass as an outcome instead of another CTA', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [
+            { code: 'processing_stage_failed', stage: 'source_transcription' },
+          ],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'speaker_attribution_rejected',
+            diagnostics: {
+              confidence: 0.778,
+            },
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Speaker labels could not be improved');
+    expect(markup).toContain('kept your previous transcript');
+    expect(markup).not.toContain('Improve labels');
+  });
+
   it('keeps historical speaker repair out of the inline notice', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

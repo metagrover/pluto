@@ -18,6 +18,8 @@ type WordLocation = {
   end: number;
 };
 
+const RETAINED_WORD_SILENCE_BOUNDARY_SECONDS = 0.8;
+
 const normalizeToken = (word: string) =>
   word
     .toLocaleLowerCase('en')
@@ -80,7 +82,12 @@ const rebuildWordSegments = (
     }> = [];
     for (const entry of retained) {
       const current = chunks.at(-1);
-      if (!current || current.speaker !== entry.speaker) {
+      if (
+        !current ||
+        current.speaker !== entry.speaker ||
+        entry.word.start - (current.words.at(-1)?.end ?? entry.word.start) >=
+          RETAINED_WORD_SILENCE_BOUNDARY_SECONDS
+      ) {
         chunks.push({ speaker: entry.speaker, words: [entry.word] });
       } else {
         current.words.push(entry.word);

@@ -2695,8 +2695,14 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'FAIL_FINAL_TRANSCRIPTION',
-    (_event, meetingId, runId, failure, reasons) =>
-      db.failMeetingFinalTranscription(meetingId, runId, failure, reasons),
+    (_event, meetingId, runId, failure, reasons, attributionDiagnostics) =>
+      db.failMeetingFinalTranscription(
+        meetingId,
+        runId,
+        failure,
+        reasons,
+        attributionDiagnostics,
+      ),
   );
   ipcMain.handle(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
