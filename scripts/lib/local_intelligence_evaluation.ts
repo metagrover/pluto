@@ -312,7 +312,7 @@ const hasExactKeys = (
 const isPositiveInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
-const invalidManifest = (): never => {
+const invalidManifest: () => never = () => {
   throw new Error('evaluation_manifest_invalid');
 };
 
@@ -483,7 +483,7 @@ export const parseLocalIntelligenceManifest = (
 
   const common = {
     suiteId: value.suiteId as string,
-    privacy: 'owner_only_private',
+    privacy: 'owner_only_private' as const,
     sourceRevision: value.sourceRevision as string,
     dirtyDiffSha256: value.dirtyDiffSha256 as string,
     corpusSha256: value.corpusSha256 as string,
@@ -687,7 +687,7 @@ const validTelemetry = (value: unknown): value is ResourceTelemetry =>
   Number.isFinite(value.swapUsedBytes) &&
   value.swapUsedBytes >= 0;
 
-const invalidEvent = (): never => {
+const invalidEvent: () => never = () => {
   throw new Error('evaluation_event_invalid');
 };
 

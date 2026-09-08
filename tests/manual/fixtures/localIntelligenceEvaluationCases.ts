@@ -1,10 +1,10 @@
 import type { DreamingInputPackage } from '../../../electron/dreaming/types';
+import type { NotesProjectionExpectation } from './localIntelligenceNotesScoring';
 import {
   phiNotesExpectedRejectionCases,
   phiNotesHeldOutCases,
   phiNotesOrdinaryCapacityCases,
 } from './localIntelligencePhiNotesHeldOut';
-import type { NotesProjectionExpectation } from './localIntelligenceNotesScoring';
 
 export type EvaluationPartition = 'development' | 'held_out';
 
@@ -1236,7 +1236,7 @@ const withNotesProjection = (claim: GoldClaim): NotesGoldClaim => {
       kind,
       requiredTextTerms: [...claim.requiredTerms],
       requiredEvidenceTerms: claim.evidence.map((entry) => entry.excerpt),
-      ...(kind === 'point' || kind === 'question'
+      ...(kind === 'point'
         ? { owner: null, due: null }
         : {
             ...(claim.owner !== undefined ? { owner: claim.owner } : {}),
@@ -1350,7 +1350,7 @@ export const sourceTextForCase = (
     const match = /^segment-(\d+)$/.exec(sourceId);
     return match ? (candidate.segments[Number(match[1])]?.text ?? null) : null;
   }
-  if (candidate.lane === 'quick_chat' || candidate.lane === 'cross_meeting') {
+  if (candidate.lane !== 'dreaming') {
     return (
       candidate.sources.find((source) => source.sourceId === sourceId)?.text ??
       null

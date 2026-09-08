@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "electron",
+    "scripts/create_phi_notes_evaluation_manifest.ts",
+    "tests/manual/localIntelligenceEvaluation.test.ts",
+    "tests/manual/localIntelligenceMixedWorkload.test.ts",
+    "tests/manual/phiNotesIntegration.test.ts"
+  ]
+}

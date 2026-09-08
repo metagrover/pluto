@@ -22,6 +22,13 @@ const dryRun = process.env.LOCAL_INTELLIGENCE_EVALUATION_DRY_RUN === '1';
 const drySuite = enabled && dryRun ? describe : describe.skip;
 const temporaryRoots: string[] = [];
 
+// A requested sustained run must not exit green with every test skipped.
+if (enabled && !dryRun) {
+  throw new Error(
+    'mixed_workload_acceptance_not_implemented: use RUN_PHI_NOTES_INTEGRATION for the provider/publication smoke suite',
+  );
+}
+
 afterAll(() => {
   for (const root of temporaryRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
