@@ -12,6 +12,8 @@ import {
   MeetingNotesError,
   NOTES_OLLAMA_MODEL,
   NOTES_PROMPT_VERSION,
+  PHI_NOTES_EXPERIMENT_DIGEST,
+  PHI_NOTES_EXPERIMENT_MODEL,
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 import type { LLMProvider } from './llm/provider';
@@ -148,6 +150,7 @@ type NotesProvider = {
       entityHints?: string[];
       contextTokens?: number;
       compactWriterContract?: boolean;
+      sourceFirstReconciliation?: boolean;
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: NotesStageCache;
@@ -201,6 +204,15 @@ export type GenerateMeetingNotesInput = {
   requestId: string;
   template: MeetingNotesTemplate;
   reason: 'automatic' | 'manual' | 'secondary';
+};
+
+export type DisposableNotesExperimentActivation = {
+  environment: 'disposable_integration';
+  configId: 'phi-notes-source-first';
+  sourceFirstReconciliation: true;
+  compactWriterContract: true;
+  model: typeof PHI_NOTES_EXPERIMENT_MODEL;
+  digest: typeof PHI_NOTES_EXPERIMENT_DIGEST;
 };
 
 export type PublishedMeetingNotes = {
@@ -258,6 +270,8 @@ export const createMeetingNotesStageCacheKey = (input: {
   seed: unknown;
   contextTokens: number;
   promptVersion: string;
+  experimentConfigId?: string;
+  sourceFirstReconciliation?: boolean;
 }): string => hashFingerprint(input);
 
 const hasAuthorizedPartialCaptureGap = (meeting: MeetingRecord): boolean => {
@@ -337,6 +351,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   createRunId?: () => string;
   /** Test seam; production runs use the fixed absolute deadline. */
   notesDeadlineMs?: number;
+  /** Explicit test-only route. Production construction does not provide it. */
+  notesExperiment?: DisposableNotesExperimentActivation;
   knowledgeSynthesisPause?: {
     acquire(reason: string): void;
     release(reason: string): void;
@@ -357,6 +373,18 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     canCommit(): boolean;
   }) => Promise<void>;
 }) => {
+  const notesExperiment = dependencies.notesExperiment;
+  if (
+    notesExperiment &&
+    (notesExperiment.environment !== 'disposable_integration' ||
+      notesExperiment.configId !== 'phi-notes-source-first' ||
+      notesExperiment.sourceFirstReconciliation !== true ||
+      notesExperiment.compactWriterContract !== true ||
+      notesExperiment.model !== PHI_NOTES_EXPERIMENT_MODEL ||
+      notesExperiment.digest !== PHI_NOTES_EXPERIMENT_DIGEST)
+  ) {
+    throw new Error('meeting_notes_experiment_activation_invalid');
+  }
   const activeByMeeting = new Map<string, ActiveRun>();
   const secondaryByMeeting = new Map<
     string,
@@ -513,6 +541,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     signal: AbortSignal;
   }): Promise<'generated' | 'reused' | 'discarded'> => {
     input.signal.throwIfAborted();
+    if (notesExperiment) return 'discarded';
     const settings = await dependencies.getSettings();
     const provider = await dependencies.getProvider(settings);
     if (!provider.precomputeStructuredAnalysisLeaf) return 'discarded';
@@ -644,11 +673,17 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       terms,
       template: input.template,
       provider: provider.name,
-      model: configuredModel(settings),
+      model: notesExperiment?.model ?? configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
       seed: settings.ollama_seed ?? null,
       contextTokens: NOTES_CONTEXT_TOKENS,
       promptVersion: NOTES_PROMPT_VERSION,
+      ...(notesExperiment
+        ? {
+            experimentConfigId: notesExperiment.configId,
+            sourceFirstReconciliation: true,
+          }
+        : {}),
     };
     const fingerprint = hashFingerprint({
       sourceRevision: revisions.sourceRevision,
@@ -850,6 +885,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     entityHints: terms,
                     contextTokens: NOTES_CONTEXT_TOKENS,
                     compactWriterContract: true,
+                    sourceFirstReconciliation:
+                      notesExperiment?.sourceFirstReconciliation,
                     ...optionalReviewBudgetOptions,
                     stageCache,
                     cacheKey: stageCacheKey,
@@ -887,6 +924,18 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             }
           })();
           if (controller.signal.aborted) throw controller.signal.reason;
+          if (notesExperiment) {
+            const metadata = analysis.generation_metadata;
+            if (
+              metadata?.model !== notesExperiment.model ||
+              metadata.pipeline_version !== 'notes-v30-source-first' ||
+              metadata.source_provenance?.source_revision !== source.revision
+            ) {
+              throw new MeetingNotesError(
+                'notes_source_first_publication_identity_mismatch',
+              );
+            }
+          }
           const published = dependencies.db.publishMeetingNotesIfCurrent({
             meetingId,
             runId,

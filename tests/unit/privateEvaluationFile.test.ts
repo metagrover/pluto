@@ -4,7 +4,10 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { writeOwnerOnlyPrivateFile } from '../../scripts/lib/privateEvaluationFile';
+import {
+  appendOwnerOnlyPrivateLine,
+  writeOwnerOnlyPrivateFile,
+} from '../../scripts/lib/privateEvaluationFile';
 
 const temporaryDirectories: string[] = [];
 
@@ -43,5 +46,26 @@ describe('writeOwnerOnlyPrivateFile', () => {
       'private_evaluation_path_unsafe',
     );
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('keep');
+  });
+});
+
+describe('appendOwnerOnlyPrivateLine', () => {
+  it('flushes append-only JSONL with owner-only permissions', () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-private-evaluation-ledger-'),
+    );
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'events.jsonl');
+    appendOwnerOnlyPrivateLine(filePath, { type: 'run_started', runId: 'one' });
+    appendOwnerOnlyPrivateLine(filePath, {
+      type: 'logical_terminal',
+      runId: 'one',
+    });
+
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(
+      '{"type":"run_started","runId":"one"}\n' +
+        '{"type":"logical_terminal","runId":"one"}\n',
+    );
+    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
   });
 });

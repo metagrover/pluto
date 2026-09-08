@@ -4,6 +4,14 @@
 **Tracking:** [#695](https://github.com/metagrover/pluto/issues/695)  
 **Frozen September 6 verdict:** No candidate passes the frozen protocol. Keep production defaults unchanged. Phi is the only notes candidate worth a larger, human-reviewed follow-up, but it is not approved for promotion by this evaluation.
 
+## September 7 source-first hardening implementation status
+
+Issue #788 now has an experiment-disabled implementation of the source-first Phi notes path and its acceptance harness. The implementation scores visible note blocks through canonical source provenance, freezes a fresh semantic and capacity corpus, reconciles bounded leaf inventories before one mandatory meeting-wide editor, and isolates the added semantic guidance behind the explicit `phi-notes-source-first` configuration. The application coordinator exposes a disposable-integration-only activation seam and refuses publication when the returned model, pipeline version, or source revision does not match that candidate identity. Production Gemma routing and default prompt behavior are unchanged.
+
+The version-2 owner-only manifest freezes both exact model digests, corpus and rubric hashes, settings, all 180 paired schedule rows, and cold/warm order. Its append-only JSONL ledger records a run before inference, records physical starts before send, and treats a crash-started run as interrupted rather than silently rerunning its ID. Protocol-valid dry transport reaches both the inventory writer and final editor without an Ollama request. A separate disposable mixed-workload dry entry verifies isolated profile/database/settings paths and freezes the downstream, sustained-load, and recovery scenario inventory without capture or inference.
+
+This is implementation evidence, not promotion evidence. The 168 supported paired attempts plus expected-rejection runs, blinded human review, downstream generated-notes track, 30-minute recording control/mixed comparison, one-second resource telemetry, and fault-injection acceptance remain unexecuted and therefore `incomplete`. No result below is superseded, and Phi remains disabled for production notes until every frozen gate passes.
+
 ## September 7 residency repair and 12-case notes evaluation
 
 [Issue #784](https://github.com/metagrover/pluto/issues/784) repairs the lifecycle blocker identified by the frozen evaluation. Before every serialized local generation, Pluto now asks Ollama which models are resident, retains an equivalent target, and unloads non-target residents before starting inference. Discovery and cleanup share a 40-second deadline and fail closed with explicit run failure codes. This changes lifecycle admission only; it does not change model selection or note acceptance policy.
