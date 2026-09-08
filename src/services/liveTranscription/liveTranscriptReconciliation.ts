@@ -3,8 +3,8 @@ import type { SpeakerActivityWindow } from '../../utils/speakerAttribution';
 import type { LiveEchoEvidenceWindow } from './liveEchoEvidence';
 import {
   findExactEchoSubsequence,
-  findSupportedExactEchoSpans,
   findSupportedEchoWordMatches,
+  findSupportedExactEchoSpans,
 } from './liveEchoSubsequenceAlignment';
 import { alignEchoTokens } from './liveEchoTokenAlignment';
 
