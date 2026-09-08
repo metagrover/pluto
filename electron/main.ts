@@ -68,6 +68,7 @@ import {
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { createLogger } from './logger';
+import { resolveNotesEvaluationActivation } from './notesEvaluationActivation';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
@@ -528,6 +529,11 @@ const invalidateDreamingCatalog = () => {
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
+  notesExperiment: resolveNotesEvaluationActivation({
+    isPackaged: app.isPackaged,
+    userDataPath: app.getPath('userData'),
+    argv: process.argv,
+  }),
   getSettings: () => getAllSettings(db),
   getProvider,
   knowledgeSynthesisPause,

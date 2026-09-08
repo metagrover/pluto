@@ -54,6 +54,37 @@ const fixture = () => {
 const empty = () => ({ facts: [], actions: [], decisions: [], questions: [] });
 
 describe('source reconciliation contract', () => {
+  it('rejects a reported state promoted to a decision by live Phi without rejecting the sourced fact', () => {
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: [
+          {
+            speaker: 7,
+            text: 'The synthetic project has been cancelled. No work is authorized.',
+          },
+        ],
+      }),
+    );
+    const item = {
+      text: source.segments[0]!.text,
+      sources: [{ segment: 0, start: 0, end: source.segments[0]!.text.length }],
+    };
+    const raw = {
+      ...empty(),
+      facts: [item],
+      decisions: [{ ...item, owner: 'unknown' }],
+    };
+    expect(() => parseReconciledSource(JSON.stringify(raw), source)).toThrow();
+    expect(() =>
+      parseReconciledSource(
+        JSON.stringify({ ...raw, decisions: [{ ...item, owner: null }] }),
+        source,
+      ),
+    ).toThrow('notes_editor_invalid_commitment');
+    expect(() =>
+      parseReconciledSource(JSON.stringify({ ...raw, decisions: [] }), source),
+    ).not.toThrow();
+  });
   it('scopes omission guards to a canonical leaf and rejects cross-leaf citations', () => {
     const source = createNotesSource(
       JSON.stringify({

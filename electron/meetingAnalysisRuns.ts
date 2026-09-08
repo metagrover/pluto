@@ -351,7 +351,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   createRunId?: () => string;
   /** Test seam; production runs use the fixed absolute deadline. */
   notesDeadlineMs?: number;
-  /** Explicit test-only route. Production construction does not provide it. */
+  /** Explicit disposable-test route. Ordinary production launches leave it absent. */
   notesExperiment?: DisposableNotesExperimentActivation;
   knowledgeSynthesisPause?: {
     acquire(reason: string): void;
