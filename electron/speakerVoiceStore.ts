@@ -62,9 +62,7 @@ import * as dbModule from './db';
 
 const MAX_PROFILE_REPRESENTATIVES = 12;
 
-const selectProfileRepresentatives = (
-  sources: number[][][],
-): number[][] => {
+const selectProfileRepresentatives = (sources: number[][][]): number[][] => {
   const selected: number[][] = [];
   const remaining = sources.map((embeddings) => [...embeddings]);
   while (selected.length < MAX_PROFILE_REPRESENTATIVES) {

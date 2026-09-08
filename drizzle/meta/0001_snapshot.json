@@ -142,30 +142,22 @@
       "indexes": {
         "attention_items_dedupe_key_unique": {
           "name": "attention_items_dedupe_key_unique",
-          "columns": [
-            "dedupe_key"
-          ],
+          "columns": ["dedupe_key"],
           "isUnique": true
         },
         "idx_attention_items_status": {
           "name": "idx_attention_items_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_attention_items_score": {
           "name": "idx_attention_items_score",
-          "columns": [
-            "\"score\" desc"
-          ],
+          "columns": ["\"score\" desc"],
           "isUnique": false
         },
         "idx_attention_items_updated_at": {
           "name": "idx_attention_items_updated_at",
-          "columns": [
-            "\"updated_at\" desc"
-          ],
+          "columns": ["\"updated_at\" desc"],
           "isUnique": false
         }
       },
@@ -224,9 +216,7 @@
       "indexes": {
         "idx_auto_end_log_meeting": {
           "name": "idx_auto_end_log_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
@@ -235,12 +225,8 @@
           "name": "auto_end_log_meeting_id_meetings_id_fk",
           "tableFrom": "auto_end_log",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -305,10 +291,7 @@
       "indexes": {
         "idx_calendar_events_window": {
           "name": "idx_calendar_events_window",
-          "columns": [
-            "starts_at",
-            "ends_at"
-          ],
+          "columns": ["starts_at", "ends_at"],
           "isUnique": false
         }
       },
@@ -487,12 +470,8 @@
           "name": "commitment_aliases_canonical_id_entities_id_fk",
           "tableFrom": "commitment_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "canonical_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canonical_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -500,12 +479,8 @@
           "name": "commitment_aliases_meeting_id_meetings_id_fk",
           "tableFrom": "commitment_aliases",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -609,23 +584,17 @@
       "indexes": {
         "idx_entities_type": {
           "name": "idx_entities_type",
-          "columns": [
-            "type"
-          ],
+          "columns": ["type"],
           "isUnique": false
         },
         "idx_entities_normalized_name": {
           "name": "idx_entities_normalized_name",
-          "columns": [
-            "normalized_name"
-          ],
+          "columns": ["normalized_name"],
           "isUnique": false
         },
         "idx_entities_status": {
           "name": "idx_entities_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -710,18 +679,12 @@
       "indexes": {
         "idx_entity_alias_suggestions_unique": {
           "name": "idx_entity_alias_suggestions_unique",
-          "columns": [
-            "entity_id",
-            "suggested_name"
-          ],
+          "columns": ["entity_id", "suggested_name"],
           "isUnique": true
         },
         "idx_entity_alias_suggestions_lookup": {
           "name": "idx_entity_alias_suggestions_lookup",
-          "columns": [
-            "entity_id",
-            "status"
-          ],
+          "columns": ["entity_id", "status"],
           "isUnique": false
         }
       },
@@ -785,19 +748,12 @@
       "indexes": {
         "idx_entity_corrections_unique": {
           "name": "idx_entity_corrections_unique",
-          "columns": [
-            "entity_id",
-            "item_type",
-            "fingerprint"
-          ],
+          "columns": ["entity_id", "item_type", "fingerprint"],
           "isUnique": true
         },
         "idx_entity_corrections_lookup": {
           "name": "idx_entity_corrections_lookup",
-          "columns": [
-            "entity_id",
-            "\"created_at\" desc"
-          ],
+          "columns": ["entity_id", "\"created_at\" desc"],
           "isUnique": false
         }
       },
@@ -900,27 +856,18 @@
       "indexes": {
         "entity_dreaming_aliases_proposal_id_unique": {
           "name": "entity_dreaming_aliases_proposal_id_unique",
-          "columns": [
-            "proposal_id"
-          ],
+          "columns": ["proposal_id"],
           "isUnique": true
         },
         "idx_entity_dreaming_aliases_active_name": {
           "name": "idx_entity_dreaming_aliases_active_name",
-          "columns": [
-            "entity_type",
-            "normalized_name"
-          ],
+          "columns": ["entity_type", "normalized_name"],
           "isUnique": true,
           "where": "\"entity_dreaming_aliases\".\"active\" = 1"
         },
         "idx_entity_dreaming_aliases_entity": {
           "name": "idx_entity_dreaming_aliases_entity",
-          "columns": [
-            "entity_id",
-            "entity_type",
-            "active"
-          ],
+          "columns": ["entity_id", "entity_type", "active"],
           "isUnique": false
         }
       },
@@ -929,12 +876,8 @@
           "name": "entity_dreaming_aliases_proposal_id_entity_dreaming_proposals_id_fk",
           "tableFrom": "entity_dreaming_aliases",
           "tableTo": "entity_dreaming_proposals",
-          "columnsFrom": [
-            "proposal_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["proposal_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -942,12 +885,8 @@
           "name": "entity_dreaming_aliases_entity_id_entities_id_fk",
           "tableFrom": "entity_dreaming_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1040,18 +979,12 @@
       "indexes": {
         "entity_dreaming_person_claims_proposal_id_unique": {
           "name": "entity_dreaming_person_claims_proposal_id_unique",
-          "columns": [
-            "proposal_id"
-          ],
+          "columns": ["proposal_id"],
           "isUnique": true
         },
         "idx_entity_dreaming_person_claims_entity": {
           "name": "idx_entity_dreaming_person_claims_entity",
-          "columns": [
-            "entity_id",
-            "kind",
-            "created_at"
-          ],
+          "columns": ["entity_id", "kind", "created_at"],
           "isUnique": false
         }
       },
@@ -1060,12 +993,8 @@
           "name": "entity_dreaming_person_claims_proposal_id_entity_dreaming_proposals_id_fk",
           "tableFrom": "entity_dreaming_person_claims",
           "tableTo": "entity_dreaming_proposals",
-          "columnsFrom": [
-            "proposal_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["proposal_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1073,12 +1002,8 @@
           "name": "entity_dreaming_person_claims_entity_id_entities_id_fk",
           "tableFrom": "entity_dreaming_person_claims",
           "tableTo": "entities",
-          "columnsFrom": [
-            "entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1188,26 +1113,17 @@
       "indexes": {
         "idx_entity_dreaming_proposals_entity_status": {
           "name": "idx_entity_dreaming_proposals_entity_status",
-          "columns": [
-            "entity_id",
-            "status",
-            "created_at"
-          ],
+          "columns": ["entity_id", "status", "created_at"],
           "isUnique": false
         },
         "idx_entity_dreaming_proposals_run": {
           "name": "idx_entity_dreaming_proposals_run",
-          "columns": [
-            "run_id"
-          ],
+          "columns": ["run_id"],
           "isUnique": false
         },
         "entity_dreaming_proposals_run_fingerprint_unique": {
           "name": "entity_dreaming_proposals_run_fingerprint_unique",
-          "columns": [
-            "run_id",
-            "fingerprint"
-          ],
+          "columns": ["run_id", "fingerprint"],
           "isUnique": true
         }
       },
@@ -1216,12 +1132,8 @@
           "name": "entity_dreaming_proposals_run_id_entity_dreaming_runs_id_fk",
           "tableFrom": "entity_dreaming_proposals",
           "tableTo": "entity_dreaming_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1394,26 +1306,17 @@
       "indexes": {
         "idx_entity_dreaming_runs_status_retry": {
           "name": "idx_entity_dreaming_runs_status_retry",
-          "columns": [
-            "status",
-            "next_retry_at"
-          ],
+          "columns": ["status", "next_retry_at"],
           "isUnique": false
         },
         "idx_entity_dreaming_runs_entity_created": {
           "name": "idx_entity_dreaming_runs_entity_created",
-          "columns": [
-            "entity_id",
-            "\"created_at\" desc"
-          ],
+          "columns": ["entity_id", "\"created_at\" desc"],
           "isUnique": false
         },
         "entity_dreaming_runs_entity_revision_unique": {
           "name": "entity_dreaming_runs_entity_revision_unique",
-          "columns": [
-            "entity_id",
-            "source_revision"
-          ],
+          "columns": ["entity_id", "source_revision"],
           "isUnique": true
         }
       },
@@ -1555,62 +1458,43 @@
       "indexes": {
         "idx_entity_links_source": {
           "name": "idx_entity_links_source",
-          "columns": [
-            "source_entity_id"
-          ],
+          "columns": ["source_entity_id"],
           "isUnique": false
         },
         "idx_entity_links_target": {
           "name": "idx_entity_links_target",
-          "columns": [
-            "target_entity_id"
-          ],
+          "columns": ["target_entity_id"],
           "isUnique": false
         },
         "idx_entity_links_meeting": {
           "name": "idx_entity_links_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         },
         "idx_entity_links_pair_rel": {
           "name": "idx_entity_links_pair_rel",
-          "columns": [
-            "source_entity_id",
-            "target_entity_id",
-            "relationship"
-          ],
+          "columns": ["source_entity_id", "target_entity_id", "relationship"],
           "isUnique": false
         },
         "idx_entity_links_state_relationship": {
           "name": "idx_entity_links_state_relationship",
-          "columns": [
-            "state",
-            "relationship"
-          ],
+          "columns": ["state", "relationship"],
           "isUnique": false
         },
         "idx_entity_links_evidence_meeting": {
           "name": "idx_entity_links_evidence_meeting",
-          "columns": [
-            "evidence_meeting_id"
-          ],
+          "columns": ["evidence_meeting_id"],
           "isUnique": false
         },
         "idx_entity_links_confirmed_source": {
           "name": "idx_entity_links_confirmed_source",
-          "columns": [
-            "source_entity_id"
-          ],
+          "columns": ["source_entity_id"],
           "isUnique": false,
           "where": "\"entity_links\".\"state\" = 'confirmed'"
         },
         "idx_entity_links_confirmed_target": {
           "name": "idx_entity_links_confirmed_target",
-          "columns": [
-            "target_entity_id"
-          ],
+          "columns": ["target_entity_id"],
           "isUnique": false,
           "where": "\"entity_links\".\"state\" = 'confirmed'"
         }
@@ -1620,12 +1504,8 @@
           "name": "entity_links_source_entity_id_entities_id_fk",
           "tableFrom": "entity_links",
           "tableTo": "entities",
-          "columnsFrom": [
-            "source_entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1633,12 +1513,8 @@
           "name": "entity_links_target_entity_id_entities_id_fk",
           "tableFrom": "entity_links",
           "tableTo": "entities",
-          "columnsFrom": [
-            "target_entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["target_entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1646,12 +1522,8 @@
           "name": "entity_links_meeting_id_meetings_id_fk",
           "tableFrom": "entity_links",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1659,12 +1531,8 @@
           "name": "entity_links_evidence_meeting_id_meetings_id_fk",
           "tableFrom": "entity_links",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "evidence_meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["evidence_meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1717,22 +1585,15 @@
           "name": "identity_bindings_meeting_id_meetings_id_fk",
           "tableFrom": "identity_bindings",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "identity_bindings_meeting_id_speaker_pk": {
-          "columns": [
-            "meeting_id",
-            "speaker"
-          ],
+          "columns": ["meeting_id", "speaker"],
           "name": "identity_bindings_meeting_id_speaker_pk"
         }
       },
@@ -1862,12 +1723,8 @@
           "name": "identity_jobs_meeting_id_meetings_id_fk",
           "tableFrom": "identity_jobs",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1900,12 +1757,8 @@
           "name": "identity_person_aliases_person_id_entities_id_fk",
           "tableFrom": "identity_person_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1978,19 +1831,14 @@
       "indexes": {
         "idx_identity_resolution_history_meeting": {
           "name": "idx_identity_resolution_history_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "identity_resolution_history_action_id_fingerprint_pk": {
-          "columns": [
-            "action_id",
-            "fingerprint"
-          ],
+          "columns": ["action_id", "fingerprint"],
           "name": "identity_resolution_history_action_id_fingerprint_pk"
         }
       },
@@ -2032,9 +1880,7 @@
       "indexes": {
         "idx_identity_resolutions_meeting": {
           "name": "idx_identity_resolutions_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
@@ -2137,17 +1983,12 @@
       "indexes": {
         "idx_knowledge_backlinks_source": {
           "name": "idx_knowledge_backlinks_source",
-          "columns": [
-            "source_doc_id"
-          ],
+          "columns": ["source_doc_id"],
           "isUnique": false
         },
         "idx_knowledge_backlinks_target": {
           "name": "idx_knowledge_backlinks_target",
-          "columns": [
-            "target_kind",
-            "target_id"
-          ],
+          "columns": ["target_kind", "target_id"],
           "isUnique": false
         }
       },
@@ -2156,12 +1997,8 @@
           "name": "knowledge_backlinks_source_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_backlinks",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "source_doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2232,19 +2069,12 @@
       "indexes": {
         "idx_knowledge_corrections_doc": {
           "name": "idx_knowledge_corrections_doc",
-          "columns": [
-            "doc_id",
-            "\"created_at\" desc"
-          ],
+          "columns": ["doc_id", "\"created_at\" desc"],
           "isUnique": false
         },
         "idx_knowledge_corrections_target": {
           "name": "idx_knowledge_corrections_target",
-          "columns": [
-            "doc_id",
-            "target_kind",
-            "target_id"
-          ],
+          "columns": ["doc_id", "target_kind", "target_id"],
           "isUnique": false
         }
       },
@@ -2253,12 +2083,8 @@
           "name": "knowledge_corrections_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_corrections",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2313,9 +2139,7 @@
       "indexes": {
         "idx_knowledge_doc_notes_updated_at": {
           "name": "idx_knowledge_doc_notes_updated_at",
-          "columns": [
-            "\"updated_at\" desc"
-          ],
+          "columns": ["\"updated_at\" desc"],
           "isUnique": false
         }
       },
@@ -2324,12 +2148,8 @@
           "name": "knowledge_doc_notes_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_doc_notes",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2367,17 +2187,12 @@
       "indexes": {
         "idx_knowledge_doc_sources_doc": {
           "name": "idx_knowledge_doc_sources_doc",
-          "columns": [
-            "doc_id",
-            "\"contributed_at\" desc"
-          ],
+          "columns": ["doc_id", "\"contributed_at\" desc"],
           "isUnique": false
         },
         "idx_knowledge_doc_sources_meeting": {
           "name": "idx_knowledge_doc_sources_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
@@ -2386,12 +2201,8 @@
           "name": "knowledge_doc_sources_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_doc_sources",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2399,22 +2210,15 @@
           "name": "knowledge_doc_sources_meeting_id_meetings_id_fk",
           "tableFrom": "knowledge_doc_sources",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "knowledge_doc_sources_doc_id_meeting_id_pk": {
-          "columns": [
-            "doc_id",
-            "meeting_id"
-          ],
+          "columns": ["doc_id", "meeting_id"],
           "name": "knowledge_doc_sources_doc_id_meeting_id_pk"
         }
       },
@@ -2465,10 +2269,7 @@
       "indexes": {
         "idx_knowledge_doc_user_edits_doc": {
           "name": "idx_knowledge_doc_user_edits_doc",
-          "columns": [
-            "doc_id",
-            "\"edited_at\" desc"
-          ],
+          "columns": ["doc_id", "\"edited_at\" desc"],
           "isUnique": false
         }
       },
@@ -2477,12 +2278,8 @@
           "name": "knowledge_doc_user_edits_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_doc_user_edits",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2549,10 +2346,7 @@
       "indexes": {
         "idx_knowledge_doc_versions_doc": {
           "name": "idx_knowledge_doc_versions_doc",
-          "columns": [
-            "doc_id",
-            "\"version_no\" desc"
-          ],
+          "columns": ["doc_id", "\"version_no\" desc"],
           "isUnique": false
         }
       },
@@ -2561,22 +2355,15 @@
           "name": "knowledge_doc_versions_doc_id_knowledge_docs_id_fk",
           "tableFrom": "knowledge_doc_versions",
           "tableTo": "knowledge_docs",
-          "columnsFrom": [
-            "doc_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["doc_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "knowledge_doc_versions_doc_id_version_no_pk": {
-          "columns": [
-            "doc_id",
-            "version_no"
-          ],
+          "columns": ["doc_id", "version_no"],
           "name": "knowledge_doc_versions_doc_id_version_no_pk"
         }
       },
@@ -2669,17 +2456,12 @@
       "indexes": {
         "idx_knowledge_docs_scope": {
           "name": "idx_knowledge_docs_scope",
-          "columns": [
-            "scope_type",
-            "scope_key"
-          ],
+          "columns": ["scope_type", "scope_key"],
           "isUnique": true
         },
         "idx_knowledge_docs_updated_at": {
           "name": "idx_knowledge_docs_updated_at",
-          "columns": [
-            "\"updated_at\" desc"
-          ],
+          "columns": ["\"updated_at\" desc"],
           "isUnique": false
         }
       },
@@ -2760,9 +2542,7 @@
       "indexes": {
         "idx_meeting_analysis_run_history_completed": {
           "name": "idx_meeting_analysis_run_history_completed",
-          "columns": [
-            "\"completed_at\" desc"
-          ],
+          "columns": ["\"completed_at\" desc"],
           "isUnique": false
         }
       },
@@ -2771,12 +2551,8 @@
           "name": "meeting_analysis_run_history_meeting_id_meetings_id_fk",
           "tableFrom": "meeting_analysis_run_history",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2969,12 +2745,8 @@
           "name": "meeting_calendar_context_meeting_id_meetings_id_fk",
           "tableFrom": "meeting_calendar_context",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3069,19 +2841,12 @@
       "indexes": {
         "idx_meeting_context_events_timeline": {
           "name": "idx_meeting_context_events_timeline",
-          "columns": [
-            "meeting_id",
-            "observed_at_ms",
-            "created_at"
-          ],
+          "columns": ["meeting_id", "observed_at_ms", "created_at"],
           "isUnique": false
         },
         "meeting_context_events_meeting_event_unique": {
           "name": "meeting_context_events_meeting_event_unique",
-          "columns": [
-            "meeting_id",
-            "event_key"
-          ],
+          "columns": ["meeting_id", "event_key"],
           "isUnique": true
         }
       },
@@ -3153,18 +2918,12 @@
       "indexes": {
         "idx_meeting_context_snapshots_revision": {
           "name": "idx_meeting_context_snapshots_revision",
-          "columns": [
-            "meeting_id",
-            "\"revision\" desc"
-          ],
+          "columns": ["meeting_id", "\"revision\" desc"],
           "isUnique": false
         },
         "meeting_context_snapshots_meeting_revision_unique": {
           "name": "meeting_context_snapshots_meeting_revision_unique",
-          "columns": [
-            "meeting_id",
-            "revision"
-          ],
+          "columns": ["meeting_id", "revision"],
           "isUnique": true
         }
       },
@@ -3224,10 +2983,7 @@
       "indexes": {
         "idx_meeting_entities_entity_meeting": {
           "name": "idx_meeting_entities_entity_meeting",
-          "columns": [
-            "entity_id",
-            "meeting_id"
-          ],
+          "columns": ["entity_id", "meeting_id"],
           "isUnique": false
         }
       },
@@ -3236,12 +2992,8 @@
           "name": "meeting_entities_meeting_id_meetings_id_fk",
           "tableFrom": "meeting_entities",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3249,22 +3001,15 @@
           "name": "meeting_entities_entity_id_entities_id_fk",
           "tableFrom": "meeting_entities",
           "tableTo": "entities",
-          "columnsFrom": [
-            "entity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "meeting_entities_meeting_id_entity_id_pk": {
-          "columns": [
-            "meeting_id",
-            "entity_id"
-          ],
+          "columns": ["meeting_id", "entity_id"],
           "name": "meeting_entities_meeting_id_entity_id_pk"
         }
       },
@@ -3392,9 +3137,7 @@
       "indexes": {
         "idx_meeting_speaker_candidates_meeting": {
           "name": "idx_meeting_speaker_candidates_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
@@ -3403,23 +3146,15 @@
           "name": "meeting_speaker_candidates_meeting_id_meetings_id_fk",
           "tableFrom": "meeting_speaker_candidates",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "meeting_speaker_candidates_meeting_id_speaker_source_revision_pk": {
-          "columns": [
-            "meeting_id",
-            "speaker",
-            "source_revision"
-          ],
+          "columns": ["meeting_id", "speaker", "source_revision"],
           "name": "meeting_speaker_candidates_meeting_id_speaker_source_revision_pk"
         }
       },
@@ -3766,10 +3501,7 @@
       "indexes": {
         "idx_person_aliases_canonical": {
           "name": "idx_person_aliases_canonical",
-          "columns": [
-            "canonical_id",
-            "active"
-          ],
+          "columns": ["canonical_id", "active"],
           "isUnique": false
         }
       },
@@ -3778,12 +3510,8 @@
           "name": "person_aliases_person_id_entities_id_fk",
           "tableFrom": "person_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3791,12 +3519,8 @@
           "name": "person_aliases_canonical_id_entities_id_fk",
           "tableFrom": "person_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "canonical_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canonical_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3848,9 +3572,7 @@
       "indexes": {
         "idx_person_name_aliases_name": {
           "name": "idx_person_name_aliases_name",
-          "columns": [
-            "normalized_name"
-          ],
+          "columns": ["normalized_name"],
           "isUnique": false
         }
       },
@@ -3859,22 +3581,15 @@
           "name": "person_name_aliases_person_id_entities_id_fk",
           "tableFrom": "person_name_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "person_name_aliases_person_id_normalized_name_pk": {
-          "columns": [
-            "person_id",
-            "normalized_name"
-          ],
+          "columns": ["person_id", "normalized_name"],
           "name": "person_name_aliases_person_id_normalized_name_pk"
         }
       },
@@ -3937,10 +3652,7 @@
       "indexes": {
         "idx_project_aliases_canonical": {
           "name": "idx_project_aliases_canonical",
-          "columns": [
-            "canonical_id",
-            "active"
-          ],
+          "columns": ["canonical_id", "active"],
           "isUnique": false
         }
       },
@@ -3949,12 +3661,8 @@
           "name": "project_aliases_project_id_entities_id_fk",
           "tableFrom": "project_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3962,12 +3670,8 @@
           "name": "project_aliases_canonical_id_entities_id_fk",
           "tableFrom": "project_aliases",
           "tableTo": "entities",
-          "columnsFrom": [
-            "canonical_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["canonical_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4128,16 +3832,12 @@
       "indexes": {
         "idx_speaker_voice_enrollments_person": {
           "name": "idx_speaker_voice_enrollments_person",
-          "columns": [
-            "person_id"
-          ],
+          "columns": ["person_id"],
           "isUnique": false
         },
         "idx_speaker_voice_enrollments_meeting": {
           "name": "idx_speaker_voice_enrollments_meeting",
-          "columns": [
-            "source_meeting_id"
-          ],
+          "columns": ["source_meeting_id"],
           "isUnique": false
         }
       },
@@ -4146,12 +3846,8 @@
           "name": "speaker_voice_enrollments_person_id_entities_id_fk",
           "tableFrom": "speaker_voice_enrollments",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4159,12 +3855,8 @@
           "name": "speaker_voice_enrollments_source_meeting_id_meetings_id_fk",
           "tableFrom": "speaker_voice_enrollments",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "source_meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4206,12 +3898,8 @@
           "name": "speaker_voice_profile_settings_person_id_entities_id_fk",
           "tableFrom": "speaker_voice_profile_settings",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4270,9 +3958,7 @@
       "indexes": {
         "idx_speaker_voice_rejections_meeting": {
           "name": "idx_speaker_voice_rejections_meeting",
-          "columns": [
-            "meeting_id"
-          ],
+          "columns": ["meeting_id"],
           "isUnique": false
         }
       },
@@ -4281,12 +3967,8 @@
           "name": "speaker_voice_rejections_meeting_id_meetings_id_fk",
           "tableFrom": "speaker_voice_rejections",
           "tableTo": "meetings",
-          "columnsFrom": [
-            "meeting_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["meeting_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4294,12 +3976,8 @@
           "name": "speaker_voice_rejections_person_id_entities_id_fk",
           "tableFrom": "speaker_voice_rejections",
           "tableTo": "entities",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4419,25 +4097,17 @@
       "indexes": {
         "idx_working_memory_snapshots_scope": {
           "name": "idx_working_memory_snapshots_scope",
-          "columns": [
-            "scope_type",
-            "scope_key"
-          ],
+          "columns": ["scope_type", "scope_key"],
           "isUnique": false
         },
         "idx_working_memory_snapshots_generated_at": {
           "name": "idx_working_memory_snapshots_generated_at",
-          "columns": [
-            "\"generated_at\" desc"
-          ],
+          "columns": ["\"generated_at\" desc"],
           "isUnique": false
         },
         "working_memory_snapshots_scope_unique": {
           "name": "working_memory_snapshots_scope_unique",
-          "columns": [
-            "scope_type",
-            "scope_key"
-          ],
+          "columns": ["scope_type", "scope_key"],
           "isUnique": true
         }
       },
