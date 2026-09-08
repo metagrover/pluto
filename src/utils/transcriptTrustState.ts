@@ -66,6 +66,17 @@ export type TranscriptTrustEnvelopeV2 = {
         policy: 'parakeet_final_v1';
         captureGeneration: string;
         failure?: string;
+        diagnostics?: {
+          schemaVersion: 1;
+          pipelineVersion: 'recovered_channel_acoustic_v2';
+          confidence: number;
+          minimumConfidence: number;
+          attributedSeconds: number;
+          unattributedSeconds: number;
+          totalSeconds: number;
+          attemptedAt: string;
+          completedAt: string;
+        };
       };
   finalTranscriptionResult?: {
     policy: 'parakeet_final_v1';
@@ -623,6 +634,41 @@ export const parseTranscriptTrustEnvelope = (
   const causes = raw.causes as TranscriptTrustCause[];
   const retry = raw.retry;
   const finalTranscription = raw.finalTranscription;
+  const validAttributionDiagnostics = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const diagnostics = value as Record<string, unknown>;
+    return (
+      exactKeys(diagnostics, [
+        'schemaVersion',
+        'pipelineVersion',
+        'confidence',
+        'minimumConfidence',
+        'attributedSeconds',
+        'unattributedSeconds',
+        'totalSeconds',
+        'attemptedAt',
+        'completedAt',
+      ]) &&
+      diagnostics.schemaVersion === 1 &&
+      diagnostics.pipelineVersion === 'recovered_channel_acoustic_v2' &&
+      [
+        diagnostics.confidence,
+        diagnostics.minimumConfidence,
+        diagnostics.attributedSeconds,
+        diagnostics.unattributedSeconds,
+        diagnostics.totalSeconds,
+      ].every(
+        (number) =>
+          typeof number === 'number' && Number.isFinite(number) && number >= 0,
+      ) &&
+      Number(diagnostics.confidence) <= 1 &&
+      Number(diagnostics.minimumConfidence) <= 1 &&
+      isoTimestamp(diagnostics.attemptedAt) &&
+      isoTimestamp(diagnostics.completedAt)
+    );
+  };
   const activeFinalTranscription =
     readFinalTranscriptionLease(finalTranscription);
   const completedFinalTranscription =
@@ -636,7 +682,12 @@ export const parseTranscriptTrustEnvelope = (
     (finalTranscription as { policy?: unknown }).policy ===
       'parakeet_final_v1' &&
     typeof (finalTranscription as { captureGeneration?: unknown })
-      .captureGeneration === 'string';
+      .captureGeneration === 'string' &&
+    ((finalTranscription as { diagnostics?: unknown }).diagnostics ===
+      undefined ||
+      validAttributionDiagnostics(
+        (finalTranscription as { diagnostics?: unknown }).diagnostics,
+      ));
   const proof = raw.validationProof;
   if (
     (state === 'provisional' &&

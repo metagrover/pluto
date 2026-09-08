@@ -15,6 +15,17 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-07 - Instant audio capture startup, live ASR queue resilience, and complete silent intervals
+
+- **Status:** Accepted
+- **Source:** Diagnosis of 2026-09-07 recording startup delay and transcription backpressure incident
+- **Decision:** Pluto decouples durable audio capture from live transcription readiness:
+  1. Audio capture starts immediately (<300ms): `startSession` initiates microphone acquisition and Native AudioCap concurrently with journal setup, rather than blocking the microphone behind sequential `GET_TRANSCRIPTION_VOCABULARY` SQLite queries and `eouSession.start()` Neural Engine model compilation.
+  2. Live transcription attaches asynchronously: `eouRendererSession` introduces a startup buffering queue that retains initial PCM frames while the streaming CoreML pipeline compiles on ANE, replaying them in sequence once ready without dropping speech. `maxOutstanding` per source is raised from 4 frames (1.28s) to 48 frames (~15.36s) across renderer and main process (`ParakeetEouClient`), eliminating fatal `parakeet_backpressure` aborts during startup inference bursts. If live transcription fails or is delayed, capture continues safely and meeting audio is never lost.
+  3. Pre-roll and silent interval durability: Pluto eliminates the destructive wipe of pre-roll system audio chunks at synchronization, and synthesizes 48kHz silent PCM for intervals where the system audio source was active but no remote audio was produced. This guarantees that all system audio intervals in the capture journal manifest are marked `captured`, preventing false `system_capture_incomplete` aborts during final batch transcription.
+- **Rationale:** Previously, Pluto showed the meeting screen immediately while blocking microphone recording for 18–20 seconds on cold CoreML model preparation, losing meeting intros. A hardcoded 4-frame (1.28s) backpressure threshold caused live transcription to crash during ANE warm-up, and empty system audio intervals caused final transcription to abort and mark meetings as `needs_attention`.
+- **Consequences:** Audio capture begins within ~250ms of user action; meeting intros are never lost; live transcription recovers from initial Neural Engine compilation bursts; all meetings complete post-recording finalization even when system audio is completely silent.
+
 ## 2026-09-05 - Resolve Me speaker name from user profile and wire speaker candidate evidence in final transcription
 
 - **Status:** Accepted
@@ -688,6 +699,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Rationale:** The previous one-tail policy hid call content. A one-way native EOU latch accumulated long mutable transcripts after the first utterance, while RMS dominance confused loudspeaker bleed with the user's voice. Re-arming fixed the latch but did not guarantee timely EOU boundaries in a long real meeting, so 23-minute provisional buffers still appeared above newer statements. Aggressive fuzzy suppression could also hide a real correction.
 - **Consequences:** Completeness takes priority over removing every duplicate. Raw evidence and finalization remain unchanged, and each source can retain one unfinished word at the live edge rather than committing a subword fragment. Repeated-utterance, word-safe bounded-no-EOU, callback-free silence, ordered-batch, intermediate-visibility, one-edge ordering, rendered live-label, and contradiction regressions supplement real-audio replay; a rendered long loudspeaker call remains a separate acceptance gate before #670 can close.
 - **2026-09-03 refinement:** Echo visibility is enforced once, where live segments become presentation turns, rather than in the surrounding recording workspace. Long time-aligned mic/System rows may tolerate ordinary ASR substitutions only when their bounded ordered-word coverage is at least 90 percent. Numeric, symbol, polarity, reordering, and unmatched-local-speech protections remain fail-closed, and raw segments remain unchanged.
+- **2026-09-07 refinement:** Confirmed rows are ordered by their shared meeting timestamp, with source and stable row ID as deterministic tie-breakers, instead of being frozen in callback-arrival order. Delayed callbacks insert at the correct chronological position and never create an `Earlier speech` row at the live edge. Only the latest 45 seconds, 128 rows, and 512 detailed display ranges remain correction-mutable; older rows retain lightweight visible text while detailed range evidence is released. Active Ask Pluto reads the same ordered, echo-reconciled projection as the live transcript. Raw source rows, recorded audio, persistence, and final transcription remain unchanged.
 
 ## 2026-08-28 - Qualify project scope before presenting a project
 
@@ -968,3 +980,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** The Upcoming meetings agenda reads from today's local midnight through a bounded 30-day forward window in Pluto's existing calendar cache. It shows up to three meeting rows below Pluto's `lg` dashboard breakpoint and up to five at or above it; additional meetings remain available through one inline, reversible disclosure.
 - **Behavior boundary:** When today has no remaining meeting, the agenda states `No meetings today` and continues with dated future rows. Calendar synchronization, event ordering, stale-cache handling, recovery states, and calendar source controls remain unchanged.
 - **Design boundary:** The Granola reference established the desired information density and empty-day clarity, while Pluto's existing typography, spacing, color, hierarchy, and control styling remain authoritative.
+
+## 2026-09-07 - Use concise project guidance and optional workflows
+
+- **Status:** Accepted.
+- **Source:** Direct owner review of Pluto's agent and development setup.
+- **Decision:** Pluto keeps one concise `AGENTS.md` with project commands, product trust boundaries, proportionate verification, and data-risk regression expectations. Native agent capabilities handle ordinary planning, debugging, implementation, review, and Git work. Issues, written plans, independent review, worktrees, decision records, and changelog fragments remain available when they improve coordination, risk control, or durable context; none is a universal prerequisite.
+- **Supersedes:** The 2026-05-01 issue-first development decision and the 2026-04-30 requirement that every meaningful change add a changelog fragment. Existing issues, decisions, changelog fragments, specs, and plans remain historical and product evidence, while their embedded workflow and skill mandates no longer govern new work.
+- **Automation:** The standalone PM GitHub preflight command and test are retired because the associated local PM and Builder automations are paused and do not invoke the command. If autonomous GitHub mutation is enabled again, that automation must establish reachability, authentication, repository permission, and redacted diagnostics before mutation; this preserves the safety intent of the 2026-05-01 PM preflight decision without retaining an unused project wrapper.
+- **Consequences:** The repository no longer bundles Superpowers or language-specific agent playbooks. Future agents should choose the smallest useful process for the task, preserve unrelated work and private evidence, and update this log whenever an accepted decision is intentionally replaced.

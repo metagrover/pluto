@@ -98,9 +98,7 @@ const ConversationRow = memo(({ row }: { row: LiveConversationRow }) => {
           <p>{row.text}</p>
         )}
         {row.qualifier && (
-          <span className="live-conversation-row__qualifier">
-            {row.qualifier === 'updated' ? 'Updated' : 'Earlier speech'}
-          </span>
+          <span className="live-conversation-row__qualifier">Updated</span>
         )}
       </div>
     </article>

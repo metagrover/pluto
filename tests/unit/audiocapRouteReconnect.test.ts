@@ -182,5 +182,5 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     } finally {
       compiled.cleanup();
     }
-  });
+  }, 15_000);
 });

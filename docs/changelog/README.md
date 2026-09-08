@@ -1,6 +1,6 @@
 # Pluto Changelog Fragments
 
-New Pluto product/development journal entries are stored as independently writable fragments. Ordinary pull requests add one unique file here instead of editing `docs/CHANGELOG.md`.
+Use fragments when an issue-backed change benefits from a durable journal entry. They are optional; a focused change can be documented in its commit or PR without creating an issue or fragment. When adding an entry, use a unique file here instead of editing the historical `docs/CHANGELOG.md`.
 
 ## Filename
 

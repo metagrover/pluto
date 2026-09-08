@@ -150,6 +150,7 @@ type MeetingFailurePresentationInput = {
   systemCaptureIncomplete?: boolean;
   hasExistingTranscript?: boolean;
   speakerAttributionFailure: boolean;
+  speakerAttributionAttempted?: boolean;
   resourcePolicyDenied: boolean;
   captureRecoveryRequired: boolean;
   captureGap: boolean;
@@ -174,6 +175,14 @@ export const resolveMeetingFailurePresentation = (
     };
   }
   if (input.retryableFinalTranscription && input.speakerAttributionFailure) {
+    if (input.speakerAttributionAttempted) {
+      return {
+        title: 'Speaker labels could not be improved',
+        detail:
+          'Pluto kept your previous transcript because this pass could not verify enough speaker labels.',
+        actionLabel: null,
+      };
+    }
     return {
       title: 'Improve speaker labels',
       detail: 'Pluto can take another pass using the saved recording.',

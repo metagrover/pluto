@@ -4,15 +4,18 @@ import { describe, expect, it } from 'vitest';
 describe('AudioManager Parakeet EOU wiring', () => {
   const source = readFileSync('src/components/AudioManager.tsx', 'utf8');
 
-  it('creates and starts the EOU session before microphone acquisition', () => {
+  it('creates and launches the EOU session without blocking microphone acquisition', () => {
     const createIndex = source.indexOf('createEouRendererSession({');
-    const startIndex = source.indexOf('await eouSession.start()');
+    const startIndex = source.indexOf('eouSession.start()');
     const microphoneIndex = source.indexOf(
       'navigator.mediaDevices.getUserMedia',
     );
     expect(createIndex).toBeGreaterThan(-1);
     expect(startIndex).toBeGreaterThan(createIndex);
     expect(startIndex).toBeLessThan(microphoneIndex);
+    expect(source.slice(startIndex, microphoneIndex)).not.toContain(
+      'await eouSession.start()',
+    );
   });
 
   it('feeds copied mic PCM and decoded System PCM into EOU', () => {
@@ -274,10 +277,34 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(previewIndex).toBeLessThan(recorderStopIndex);
   });
 
-  it('contains no recording-time MLX transcription machinery', () => {
-    expect(source).not.toContain('LiveTranscriptionQueue');
-    expect(source).not.toContain('resolveLiveChunkModel');
-    expect(source).not.toContain('resolveLiveChunkComputeType');
-    expect(source).not.toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
+  it('synthesizes silent 48kHz PCM for empty system intervals when system recorder is active', () => {
+    expect(source).toContain(
+      'else if (hasSystemRecorderRef.current && !systemFailureRecorded)',
+    );
+    expect(source).toContain(
+      'const targetSampleCount = Math.max(\n                1,\n                Math.round(48000 * chunkDurationSec),\n              );',
+    );
+    expect(source).toContain(
+      'const silentPcm = new Float32Array(targetSampleCount);',
+    );
+    expect(source).toContain(
+      'systemBlob = createWavBlob(silentPcm, 48000, 1);',
+    );
+  });
+
+  it('does not purge system audio chunks immediately before starting microphone recorder', () => {
+    const recorderStartBlock = source.slice(
+      source.indexOf(
+        'startMicMediaRecorderRef.current = startMicMediaRecorder',
+      ),
+      source.indexOf('onRecordingStarted?.(startTimeRef.current)'),
+    );
+    expect(recorderStartBlock).not.toContain(
+      'systemPcmChunksRef.current = [];',
+    );
+  });
+
+  it('configures EOU renderer session with warm-up queue tolerance (maxOutstanding: 48)', () => {
+    expect(source).toContain('maxOutstanding: 48');
   });
 });

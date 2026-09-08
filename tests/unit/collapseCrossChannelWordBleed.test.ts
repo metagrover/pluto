@@ -235,6 +235,48 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.droppedMicWordCount).toBe(3);
   });
 
+  it('does not turn gaps left by removed echo words into microphone speech', () => {
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [
+        segment('Me', [
+          { word: 'local', start: 0, end: 0.3 },
+          { word: 'remove', start: 1, end: 1.2 },
+          { word: 'this', start: 1.3, end: 1.5 },
+          { word: 'echo', start: 1.6, end: 1.9 },
+          { word: 'response', start: 3, end: 3.4 },
+        ]),
+      ],
+      systemSegments: [
+        segment('Them', [
+          { word: 'remove', start: 1, end: 1.2 },
+          { word: 'this', start: 1.3, end: 1.5 },
+          { word: 'echo', start: 1.6, end: 1.9 },
+        ]),
+      ],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 0.3 },
+        { speaker: 'Them', startTime: 1, endTime: 1.9 },
+        { speaker: 'Me', startTime: 3, endTime: 3.4 },
+      ],
+    });
+
+    expect(result.micSegments).toEqual([
+      expect.objectContaining({
+        text: 'local',
+        startTime: 0,
+        endTime: 0.3,
+      }),
+      expect.objectContaining({
+        text: 'response',
+        startTime: 3,
+        endTime: 3.4,
+      }),
+    ]);
+    expect(result.micSegments).not.toContainEqual(
+      expect.objectContaining({ startTime: 0, endTime: 3.4 }),
+    );
+  });
+
   it('preserves short coincidental overlap', () => {
     const words = [
       { word: 'yeah', start: 1, end: 1.2 },

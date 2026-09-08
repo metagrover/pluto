@@ -8,7 +8,37 @@ const MINIMUM_LOCAL_COVERAGE = 0.5;
 const MINIMUM_CONCURRENT_SYSTEM_COVERAGE = 0.5;
 const MINIMUM_ATTRIBUTION_CONFIDENCE = 0.8;
 
+export type SpeakerAttributionDiagnostics = {
+  schemaVersion: 1;
+  pipelineVersion: 'recovered_channel_acoustic_v2';
+  confidence: number;
+  minimumConfidence: number;
+  attributedSeconds: number;
+  unattributedSeconds: number;
+  totalSeconds: number;
+};
+
 type Interval = { startTime: number; endTime: number };
+
+const evidenceIntervals = (segment: AttributionSegment): Interval[] => {
+  const words = segment.words?.flatMap((word) =>
+    Number.isFinite(word.start) &&
+    Number.isFinite(word.end) &&
+    word.end > word.start
+      ? [{ startTime: word.start, endTime: word.end }]
+      : [],
+  );
+  return words?.length
+    ? words
+    : [{ startTime: segment.startTime, endTime: segment.endTime }];
+};
+
+const intervalSeconds = (intervals: Interval[]): number =>
+  intervals.reduce(
+    (total, interval) =>
+      total + Math.max(0, interval.endTime - interval.startTime),
+    0,
+  );
 
 // Merge once, then visit only intervals overlapping each query. Duplicate
 // observations are evidence of the same time, not additional speech duration.
@@ -67,10 +97,13 @@ export const applyRecoveredChannelEvidence = <
   accepted: boolean;
   segments: T[];
   attribution: StoredTranscriptSpeakerAttribution;
+  diagnostics: SpeakerAttributionDiagnostics;
   reasons: ['low_attribution_confidence'] | [];
 } => {
   const systemCoverage = coverageReader(
-    input.segments.filter((segment) => segment.speaker === 'Them'),
+    input.segments
+      .filter((segment) => segment.speaker === 'Them')
+      .flatMap(evidenceIntervals),
   );
   let localCoverage: ReturnType<typeof coverageReader> | undefined;
   const segments = input.segments.map((segment) => {
@@ -81,8 +114,12 @@ export const applyRecoveredChannelEvidence = <
     // could not resolve. Its name does not establish microphone ownership.
     if (segment.speaker !== 'Me')
       return { ...segment, speaker: 'Unknown' } as T;
-    const duration = Math.max(0.01, segment.endTime - segment.startTime);
-    const concurrentSystemSeconds = systemCoverage(segment);
+    const intervals = evidenceIntervals(segment);
+    const duration = Math.max(0.01, intervalSeconds(intervals));
+    const concurrentSystemSeconds = intervals.reduce(
+      (total, interval) => total + systemCoverage(interval),
+      0,
+    );
     if (
       concurrentSystemSeconds / duration <
       MINIMUM_CONCURRENT_SYSTEM_COVERAGE
@@ -92,14 +129,17 @@ export const applyRecoveredChannelEvidence = <
     localCoverage ??= coverageReader(
       input.activityWindows.filter((window) => window.speaker === 'Me'),
     );
-    if (localCoverage(segment) / duration >= MINIMUM_LOCAL_COVERAGE) {
+    const localSeconds = intervals.reduce(
+      (total, interval) => total + (localCoverage?.(interval) ?? 0),
+      0,
+    );
+    if (localSeconds / duration >= MINIMUM_LOCAL_COVERAGE) {
       return { ...segment, speaker: 'Me', nearEndEvidence: true } as T;
     }
     return { ...segment, speaker: 'Unknown' } as T;
   });
   const totalSeconds = segments.reduce(
-    (total, segment) =>
-      total + Math.max(0, segment.endTime - segment.startTime),
+    (total, segment) => total + intervalSeconds(evidenceIntervals(segment)),
     0,
   );
   const attributedSeconds = segments.reduce(
@@ -107,7 +147,7 @@ export const applyRecoveredChannelEvidence = <
       total +
       (segment.speaker === 'Unknown'
         ? 0
-        : Math.max(0, segment.endTime - segment.startTime)),
+        : intervalSeconds(evidenceIntervals(segment))),
     0,
   );
   const confidence =
@@ -126,6 +166,15 @@ export const applyRecoveredChannelEvidence = <
       nearEndEvidenceAttempted: true,
       engineVersion: `${input.provenance.runtimeVersion}@${input.provenance.modelRevision}`,
       modelChecksums: [input.provenance.artifactDigest],
+    },
+    diagnostics: {
+      schemaVersion: 1,
+      pipelineVersion: 'recovered_channel_acoustic_v2',
+      confidence,
+      minimumConfidence: MINIMUM_ATTRIBUTION_CONFIDENCE,
+      attributedSeconds,
+      unattributedSeconds: Math.max(0, totalSeconds - attributedSeconds),
+      totalSeconds,
     },
   };
 };

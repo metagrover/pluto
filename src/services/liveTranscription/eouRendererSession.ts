@@ -22,6 +22,7 @@ export type EouRendererTransport = {
 
 type SessionStatus =
   | 'idle'
+  | 'starting'
   | 'ready'
   | 'finishing'
   | 'finished'
@@ -33,7 +34,8 @@ type SourceDispatch = {
 };
 
 const SOURCES: readonly LiveSource[] = ['mic', 'system'];
-const MAX_OUTSTANDING = 4;
+const DEFAULT_MAX_OUTSTANDING = 48;
+const MAX_STARTUP_FRAMES = 120;
 const MEETING_ID_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 
@@ -43,6 +45,7 @@ export function createEouRendererSession(options: {
   sampleRates: Record<LiveSource, number | (() => number)>;
   transport: EouRendererTransport;
   nowSeconds?: () => number;
+  maxOutstanding?: number;
   onSegments(
     segments: LiveTranscriptSegment[],
     echoEvidence: LiveEchoEvidenceWindow[],
@@ -58,12 +61,16 @@ export function createEouRendererSession(options: {
   ) {
     throw new Error('parakeet_request_invalid');
   }
+  const maxOutstanding = options.maxOutstanding ?? DEFAULT_MAX_OUTSTANDING;
   const projection = createEouTranscriptProjection();
   projection.reset(options.generation);
   const echoEvidence = createLiveEchoEvidence();
   let lastProjectedSegments: LiveTranscriptSegment[] = [];
   let currentStatus: SessionStatus = 'idle';
   let accepting = false;
+  let startPromise: Promise<void> | null = null;
+  const startupBuffer: Array<{ source: LiveSource; samples: Float32Array }> =
+    [];
   let detachListeners: () => void = () => undefined;
   const dispatch: Record<LiveSource, SourceDispatch> = {
     mic: { outstanding: 0, tail: Promise.resolve() },
@@ -78,6 +85,7 @@ export function createEouRendererSession(options: {
     if (currentStatus === 'unavailable' || currentStatus === 'finished') return;
     currentStatus = 'unavailable';
     accepting = false;
+    startupBuffer.length = 0;
     echoEvidence.reset();
     lastProjectedSegments = [];
     detachListeners();
@@ -93,7 +101,7 @@ export function createEouRendererSession(options: {
   const sendFrame = (frame: EouRendererFrame): void => {
     if (currentStatus !== 'ready' && currentStatus !== 'finishing') return;
     const source = dispatch[frame.source];
-    if (source.outstanding >= MAX_OUTSTANDING) {
+    if (source.outstanding >= maxOutstanding) {
       fail('parakeet_backpressure');
       return;
     }
@@ -184,44 +192,67 @@ export function createEouRendererSession(options: {
   };
   const isUnavailable = (): boolean => currentStatus === 'unavailable';
 
+  const ensureSourceOffset = (
+    source: LiveSource,
+    samplesLength: number,
+  ): void => {
+    if (sourceOffsetsSeconds[source] === null) {
+      const nowSeconds = options.nowSeconds?.() ?? 0;
+      const configuredSampleRate = options.sampleRates[source];
+      const sampleRate =
+        typeof configuredSampleRate === 'function'
+          ? configuredSampleRate()
+          : configuredSampleRate;
+      const offset = Math.max(0, nowSeconds - samplesLength / sampleRate);
+      if (
+        !Number.isFinite(nowSeconds) ||
+        nowSeconds < 0 ||
+        !Number.isFinite(offset)
+      ) {
+        throw new Error('parakeet_request_invalid');
+      }
+      sourceOffsetsSeconds[source] = offset;
+    }
+  };
+
   return {
-    async start(): Promise<void> {
+    start(): Promise<void> {
       if (currentStatus !== 'idle') throw new Error('parakeet_session_invalid');
-      try {
-        await options.transport.invoke('PARAKEET_EOU_START', {
-          meetingId: options.meetingId,
-          generation: options.generation,
-        });
-      } catch {
-        fail('parakeet_live_unavailable');
-        throw new Error('parakeet_live_unavailable');
-      }
-      if (isUnavailable()) {
-        throw new Error('parakeet_live_unavailable');
-      }
-      currentStatus = 'ready';
-      accepting = true;
+      currentStatus = 'starting';
+      startPromise = (async () => {
+        try {
+          await options.transport.invoke('PARAKEET_EOU_START', {
+            meetingId: options.meetingId,
+            generation: options.generation,
+          });
+        } catch {
+          startupBuffer.length = 0;
+          fail('parakeet_live_unavailable');
+          throw new Error('parakeet_live_unavailable');
+        }
+        if (isUnavailable()) {
+          startupBuffer.length = 0;
+          throw new Error('parakeet_live_unavailable');
+        }
+        currentStatus = 'ready';
+        accepting = true;
+        const buffered = startupBuffer.splice(0, startupBuffer.length);
+        for (const item of buffered) {
+          chunkerFor(item.source).append(item.samples);
+        }
+      })();
+      return startPromise;
     },
     append(source: LiveSource, samples: Float32Array): void {
-      if (!accepting || currentStatus !== 'ready') return;
       try {
-        if (sourceOffsetsSeconds[source] === null) {
-          const nowSeconds = options.nowSeconds?.() ?? 0;
-          const configuredSampleRate = options.sampleRates[source];
-          const sampleRate =
-            typeof configuredSampleRate === 'function'
-              ? configuredSampleRate()
-              : configuredSampleRate;
-          const offset = Math.max(0, nowSeconds - samples.length / sampleRate);
-          if (
-            !Number.isFinite(nowSeconds) ||
-            nowSeconds < 0 ||
-            !Number.isFinite(offset)
-          ) {
-            throw new Error('parakeet_request_invalid');
+        ensureSourceOffset(source, samples.length);
+        if (currentStatus === 'starting') {
+          if (startupBuffer.length < MAX_STARTUP_FRAMES) {
+            startupBuffer.push({ source, samples: new Float32Array(samples) });
           }
-          sourceOffsetsSeconds[source] = offset;
+          return;
         }
+        if (!accepting || currentStatus !== 'ready') return;
         chunkerFor(source).append(samples);
       } catch {
         fail('parakeet_request_invalid');
@@ -231,6 +262,14 @@ export function createEouRendererSession(options: {
       await Promise.all(SOURCES.map((source) => dispatch[source].tail));
     },
     async finish(): Promise<void> {
+      if (currentStatus === 'starting' && startPromise) {
+        try {
+          await startPromise;
+        } catch {
+          if (isUnavailable()) return;
+          throw new Error('parakeet_session_invalid');
+        }
+      }
       if (currentStatus !== 'ready') {
         if (currentStatus === 'unavailable') return;
         throw new Error('parakeet_session_invalid');

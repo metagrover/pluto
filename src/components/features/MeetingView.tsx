@@ -15,12 +15,17 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
 import { getMeetingIdentity } from '../../api/identity';
+import {
+  type VoiceMatchSuggestion,
+  getSpeakerVoiceSuggestions,
+} from '../../api/speakerVoice';
 import {
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingSpeakerLabels,
@@ -243,6 +248,7 @@ export const TranscriptIntegrityPanel = ({
   );
   let canRetryFinalTranscription = false;
   let speakerAttributionFailure = false;
+  let speakerAttributionAttempted = false;
   let resourcePolicyDenied = false;
   let systemCaptureIncomplete = false;
   try {
@@ -252,6 +258,7 @@ export const TranscriptIntegrityPanel = ({
         policy?: unknown;
         state?: unknown;
         failure?: unknown;
+        diagnostics?: unknown;
       };
     };
     canRetryFinalTranscription =
@@ -259,6 +266,9 @@ export const TranscriptIntegrityPanel = ({
       integrity.finalTranscription.state === 'needs_attention';
     speakerAttributionFailure =
       integrity.finalTranscription?.failure === 'speaker_attribution_rejected';
+    speakerAttributionAttempted = Boolean(
+      integrity.finalTranscription?.diagnostics,
+    );
     resourcePolicyDenied =
       integrity.finalTranscription?.failure === 'resource_policy_denied';
     systemCaptureIncomplete =
@@ -268,6 +278,7 @@ export const TranscriptIntegrityPanel = ({
   } catch {
     canRetryFinalTranscription = false;
     speakerAttributionFailure = false;
+    speakerAttributionAttempted = false;
     resourcePolicyDenied = false;
   }
   canRetryFinalTranscription ||= speakerLabelsRequired;
@@ -286,6 +297,7 @@ export const TranscriptIntegrityPanel = ({
     systemCaptureIncomplete,
     hasExistingTranscript: Boolean(transcriptJson),
     speakerAttributionFailure,
+    speakerAttributionAttempted,
     resourcePolicyDenied,
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
@@ -692,6 +704,22 @@ export const MeetingView = ({
   const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
     string | null
   >(null);
+  const [speakerVoicePreview, setSpeakerVoicePreview] = useState<{
+    meetingId: string;
+    suggestions: Record<string, VoiceMatchSuggestion>;
+  } | null>(null);
+
+  const calendarAttendeeNames = useMemo(
+    () =>
+      calendarContext
+        ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
+            .map(
+              (person) => person?.name?.trim() || person?.email?.trim() || '',
+            )
+            .filter(Boolean)
+        : [],
+    [calendarContext],
+  );
 
   const titleEdit = useRef({
     meetingId: selectedMeeting.id,
@@ -838,9 +866,21 @@ export const MeetingView = ({
   const reviewableSpeakers = selectReviewableAnonymousSpeakers(
     Object.keys(speakerSummaries),
   );
+  const reviewableSpeakerKey = reviewableSpeakers.join('\u0000');
   const unidentifiedSpeakerCount = reviewableSpeakers.filter(
     (speaker) => !displayNames[speaker],
   ).length;
+  const currentVoiceSuggestions =
+    speakerVoicePreview?.meetingId === String(selectedMeeting.id)
+      ? speakerVoicePreview.suggestions
+      : {};
+  const tentativeVoiceMatches = reviewableSpeakers.flatMap((speaker) => {
+    if (displayNames[speaker]) return [];
+    const suggestion = currentVoiceSuggestions[speaker];
+    return suggestion ? [{ speaker, suggestion }] : [];
+  });
+  const unidentifiedWithoutSuggestionCount =
+    unidentifiedSpeakerCount - tentativeVoiceMatches.length;
   const transcriptTurns = buildMeetingTranscriptTurns(
     applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
   );
@@ -889,11 +929,38 @@ export const MeetingView = ({
     selectedMeeting.transcript_validated_at,
     reviewableSpeakers.length,
   ]);
-  const calendarAttendeeNames = calendarContext
-    ? [calendarContext.event.organizer, ...calendarContext.event.attendees]
-        .map((person) => person?.name?.trim() || person?.email?.trim() || '')
-        .filter(Boolean)
-    : [];
+
+  useEffect(() => {
+    let cancelled = false;
+    const meetingId = String(selectedMeeting.id);
+    if (
+      !meetingId ||
+      reviewableSpeakers.length === 0 ||
+      !window?.ipcRenderer?.invoke
+    ) {
+      return;
+    }
+
+    setSpeakerVoicePreview({ meetingId, suggestions: {} });
+    void getSpeakerVoiceSuggestions(meetingId, calendarAttendeeNames)
+      .then(({ suggestions }) => {
+        if (cancelled) return;
+        setSpeakerVoicePreview({ meetingId, suggestions });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSpeakerVoicePreview({ meetingId, suggestions: {} });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    calendarAttendeeNames,
+    reviewableSpeakerKey,
+    selectedMeeting.id,
+    selectedMeeting.transcript_validated_at,
+  ]);
   const hasTranscriptContent = transcriptTurns.length > 0;
   const participantCount = new Set(
     transcriptSegments
@@ -1110,7 +1177,23 @@ export const MeetingView = ({
                     : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
               ) : null}
-              {unidentifiedSpeakerCount > 0 ? (
+              {tentativeVoiceMatches.map(({ speaker, suggestion }) => (
+                <button
+                  key={`${speaker}:${suggestion.candidateDigest}`}
+                  type="button"
+                  data-tentative-speaker-match={speaker}
+                  aria-label={`Review tentative speaker match: maybe ${suggestion.suggestedPersonName}`}
+                  onClick={() => {
+                    setSelectedSpeakerForModal(speaker);
+                    setIsSpeakerModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded border border-pro-accent/25 bg-pro-accent/[0.06] px-1.5 py-0.5 text-xs text-pro-text-main transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                >
+                  <Sparkles size={11} className="text-pro-accent" />
+                  <span>Maybe {suggestion.suggestedPersonName}</span>
+                </button>
+              ))}
+              {unidentifiedWithoutSuggestionCount > 0 ? (
                 <button
                   type="button"
                   id="meeting-header-speaker-review-trigger"
@@ -1122,8 +1205,17 @@ export const MeetingView = ({
                 >
                   <Users size={12} className="opacity-70" />
                   <span>
-                    {unidentifiedSpeakerCount} unidentified{' '}
-                    {unidentifiedSpeakerCount === 1 ? 'speaker' : 'speakers'}
+                    {tentativeVoiceMatches.length > 0
+                      ? `${unidentifiedWithoutSuggestionCount} more ${
+                          unidentifiedWithoutSuggestionCount === 1
+                            ? 'speaker'
+                            : 'speakers'
+                        } to identify`
+                      : `${unidentifiedWithoutSuggestionCount} unidentified ${
+                          unidentifiedWithoutSuggestionCount === 1
+                            ? 'speaker'
+                            : 'speakers'
+                        }`}
                   </span>
                 </button>
               ) : null}

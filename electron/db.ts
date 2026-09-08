@@ -5,6 +5,7 @@ import {
   buildDownstreamProcessingLease,
   readDownstreamProcessingLease,
 } from '../src/services/downstreamProcessingLease';
+import type { SpeakerAttributionDiagnostics } from '../src/services/finalTranscription/applyRecoveredChannelEvidence';
 import {
   type FinalTranscriptionLease,
   finishFinalTranscriptionLease,
@@ -1346,6 +1347,7 @@ export const failMeetingFinalTranscription = (
   runId: string,
   failure: Parameters<typeof finishFinalTranscriptionLease>[1],
   reasons: string[] = [],
+  attributionDiagnostics?: SpeakerAttributionDiagnostics,
 ): boolean =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
@@ -1360,6 +1362,42 @@ export const failMeetingFinalTranscription = (
           .map((reason) => reason.slice(0, 128)),
       ),
     ].slice(0, 16);
+    const boundedAttributionDiagnostics = (() => {
+      if (
+        failure !== 'speaker_attribution_rejected' ||
+        !attributionDiagnostics ||
+        attributionDiagnostics.schemaVersion !== 1 ||
+        attributionDiagnostics.pipelineVersion !==
+          'recovered_channel_acoustic_v2'
+      ) {
+        return undefined;
+      }
+      const values = [
+        attributionDiagnostics.confidence,
+        attributionDiagnostics.minimumConfidence,
+        attributionDiagnostics.attributedSeconds,
+        attributionDiagnostics.unattributedSeconds,
+        attributionDiagnostics.totalSeconds,
+      ];
+      if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+        return undefined;
+      }
+      if (
+        attributionDiagnostics.confidence > 1 ||
+        attributionDiagnostics.minimumConfidence > 1 ||
+        attributionDiagnostics.attributedSeconds >
+          attributionDiagnostics.totalSeconds ||
+        attributionDiagnostics.unattributedSeconds >
+          attributionDiagnostics.totalSeconds
+      ) {
+        return undefined;
+      }
+      return {
+        ...attributionDiagnostics,
+        attemptedAt: lease.startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    })();
     return (
       db
         .prepare(
@@ -1390,7 +1428,12 @@ export const failMeetingFinalTranscription = (
             validationProof: undefined,
             retry: undefined,
             reasons: boundedReasons,
-            finalTranscription: finishFinalTranscriptionLease(lease, failure),
+            finalTranscription: {
+              ...finishFinalTranscriptionLease(lease, failure),
+              ...(boundedAttributionDiagnostics
+                ? { diagnostics: boundedAttributionDiagnostics }
+                : {}),
+            },
           }),
           String(meetingId),
           current.transcript_integrity_json,

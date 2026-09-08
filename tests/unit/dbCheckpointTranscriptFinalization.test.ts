@@ -35,7 +35,10 @@ import {
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { buildPartialCaptureGapProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { buildFinalTranscriptionLease } from '../../src/services/finalTranscription/finalTranscriptionLease';
-import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
+import {
+  parseMeetingDownstreamProcessing,
+  parseTranscriptTrustEnvelope,
+} from '../../src/utils/transcriptTrustState';
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
@@ -354,6 +357,82 @@ it('persists bounded final-transcription rejection reasons', () => {
       failure: 'integrity_rejected',
     },
   });
+});
+
+it('persists aggregate attribution diagnostics for a rejected label pass', () => {
+  const id = 'parakeet-attribution-diagnostics';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'provisional',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'provisional',
+      segments: [{ speaker: 'Unknown', text: 'preserved' }],
+    }),
+    transcript_integrity_json: JSON.stringify({
+      schemaVersion: 2,
+      state: 'provisional',
+      causes: [],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    }),
+    capture_journal_generation: journalGeneration,
+    finalization_status: 'processing',
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'attribution-diagnostics-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: Date.parse('2026-09-07T20:00:00.000Z'),
+  });
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+
+  expect(
+    failMeetingFinalTranscription(
+      id,
+      lease.runId,
+      'speaker_attribution_rejected',
+      ['low_attribution_confidence'],
+      {
+        schemaVersion: 1,
+        pipelineVersion: 'recovered_channel_acoustic_v2',
+        confidence: 0.778,
+        minimumConfidence: 0.8,
+        attributedSeconds: 1810,
+        unattributedSeconds: 516,
+        totalSeconds: 2326,
+      },
+    ),
+  ).toBe(true);
+
+  const finalTranscription = JSON.parse(
+    String(getMeeting(id)?.transcript_integrity_json),
+  ).finalTranscription;
+  expect(finalTranscription).toMatchObject({
+    state: 'needs_attention',
+    failure: 'speaker_attribution_rejected',
+    diagnostics: {
+      schemaVersion: 1,
+      pipelineVersion: 'recovered_channel_acoustic_v2',
+      confidence: 0.778,
+      minimumConfidence: 0.8,
+      attributedSeconds: 1810,
+      unattributedSeconds: 516,
+      totalSeconds: 2326,
+      attemptedAt: '2026-09-07T20:00:00.000Z',
+    },
+  });
+  expect(finalTranscription.diagnostics.completedAt).toEqual(
+    expect.any(String),
+  );
+  const failedMeeting = getMeeting(id);
+  expect(
+    parseTranscriptTrustEnvelope(failedMeeting?.transcript_integrity_json, {
+      transcriptStatus: failedMeeting?.transcript_status,
+      transcriptValidatedAt: failedMeeting?.transcript_validated_at,
+      payloadLifecycleStatus: JSON.parse(String(failedMeeting?.transcript_json))
+        .lifecycleStatus,
+    }).ok,
+  ).toBe(true);
 });
 
 const validatedAt = '2026-07-31T08:00:00.000Z';

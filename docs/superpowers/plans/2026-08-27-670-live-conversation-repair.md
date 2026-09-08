@@ -43,6 +43,17 @@ Files: `src/services/liveTranscription/liveTranscriptReconciliation.ts`, `src/co
 - [x] Record the durable decision and a changelog fragment. Update #670 with evidence and remaining real-call gates.
 - [x] Integrate only owned changes into `/Users/metagrover/Desktop/pluto`, preserving the unrelated `AutoEndToast.tsx` edit. Verify again there and rebuild the active native binary.
 
+## Task 4 — Order confirmed speech by event time and bound live state
+
+Files: `src/services/liveTranscription/liveConversationProjection.ts`, `src/components/features/LiveTranscript.tsx`, `src/components/features/ZenMode.tsx`, and their unit/DOM tests.
+
+- [x] Reproduce the reported callback-order failure: a later-timestamped Call row arrives first and an earlier-timestamped You row arrives later.
+- [x] Replace append-only presentation order with deterministic timestamp, source, and row-ID ordering. Preserve keyed row identity and count delayed callbacks without displaying them out of order.
+- [x] Keep detailed correction ranges only in a 45-second, 128-row, 512-part mutable tail; retain older visible text as lightweight committed history.
+- [x] Index display ranges once per projection update so reconciliation metadata is not repeatedly rescanned for every row.
+- [x] Feed active Ask Pluto from the same ordered, echo-reconciled visible rows shown in the live transcript.
+- [ ] Run the full repository gates and perform a rendered real-meeting acceptance pass before closing #670.
+
 ## Risks and acceptance boundary
 
 Text matching cannot establish speaker identity. Short repetitions, unique local speech, and uncertain matches stay visible. A repeated native callback or timestamp regression can corrupt the committed prefix, so replay must exercise multiple utterances. A real loudspeaker call remains a separate acceptance gate; do not close #670 based solely on unit tests or renderer fixtures.
