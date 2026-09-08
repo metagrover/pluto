@@ -24,6 +24,7 @@ const argument = (key) =>
 const allowReadinessProbes = process.argv.includes('--allow-readiness-probes');
 const captureSeconds = Number(argument('capture-seconds') ?? 0);
 const captureWorkload = argument('capture-workload') ?? 'control';
+const sleepWake = process.argv.includes('--sleep-wake');
 const writePrivate = (file, value) =>
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, {
     mode: 0o600,
@@ -42,6 +43,7 @@ async function launch() {
       .every(
         (value) =>
           value === '--allow-readiness-probes' ||
+          value === '--sleep-wake' ||
           /^--(capture-seconds|capture-workload|native-bin|model-root|audio-fixture|microphone-fixture)=/.test(
             value,
           ),
@@ -49,6 +51,7 @@ async function launch() {
     'unsupported argument; external profile arguments are forbidden',
   );
   if (captureSeconds) {
+    assert.ok(!sleepWake, 'sleep_wake_is_a_separate_non_recording_trial');
     assert.ok(
       allowReadinessProbes &&
         Number.isInteger(captureSeconds) &&
@@ -190,6 +193,7 @@ async function launch() {
       [
         'scripts/run_phi_notes_application.mjs',
         'scripts/lib/phi_notes_capture.mjs',
+        'scripts/lib/phi_notes_sleep_wake.mjs',
         'native/parakeet-runtime/Sources/ParakeetRuntimeEngine/ParakeetService.swift',
         'electron/bootstrap.ts',
         'electron/main.ts',
@@ -206,9 +210,11 @@ async function launch() {
   const phases = [];
   console.log(`Private application evidence: ${root}`);
   try {
-    for (const phase of captureSeconds
-      ? ['capture']
-      : ['publish', 'crash', 'recover', 'interruptions', 'renderer']) {
+    for (const phase of sleepWake
+      ? ['publish', 'sleep-wake']
+      : captureSeconds
+        ? ['capture']
+        : ['publish', 'crash', 'recover', 'interruptions', 'renderer']) {
       const code = await new Promise((resolve, reject) => {
         const log = fs.openSync(path.join(root, `${phase}.log`), 'wx', 0o600);
         const child = spawn(
@@ -294,7 +300,7 @@ async function launch() {
         ...(captureSeconds
           ? ['paired_capture_acceptance_unscored']
           : ['recording', '30_minute_mixed_workload']),
-        'sleep_wake',
+        ...(sleepWake ? [] : ['sleep_wake']),
         'human_quality',
       ],
     });
@@ -326,6 +332,7 @@ async function application() {
       'interruptions',
       'renderer',
       'capture',
+      'sleep-wake',
     ].includes(phase),
   );
   assert.equal(fs.realpathSync(root), root);
@@ -462,8 +469,21 @@ async function application() {
     firstSampleReady = resolve;
   });
   let seriousSince = null;
+  let telemetryPaused = false;
+  let telemetryActive = false;
+  const pauseTelemetry = async (paused) => {
+    telemetryPaused = paused;
+    // A known OS-sleep gap is not continuous observed thermal evidence.
+    if (paused) seriousSince = null;
+    while (paused && telemetryActive) await wait(25);
+  };
   const sampler = (async () => {
     while (!stopping) {
+      if (telemetryPaused) {
+        await wait(100);
+        continue;
+      }
+      telemetryActive = true;
       const started = Date.now();
       try {
         const [pressure, swap, paging, resident, processTable] =
@@ -596,6 +616,7 @@ async function application() {
         // journal for recovery and stop admitting work even if the UI is blocked.
         app.exit(2);
       }
+      telemetryActive = false;
       if (!stopping) await wait(Math.max(0, 1000 - (Date.now() - started)));
     }
   })();
@@ -819,6 +840,16 @@ async function application() {
         outcomes.every((result) => result.retry.completed),
         'model rejected a post-interruption retry; see recorded outcomes',
       );
+    } else if (phase === 'sleep-wake') {
+      const { runSleepWake } = await import('./lib/phi_notes_sleep_wake.mjs');
+      await runSleepWake({
+        root,
+        invoke,
+        get,
+        generate,
+        powerMonitor,
+        pauseTelemetry,
+      });
     } else if (phase === 'capture') {
       const { runControlledCapture } = await import(
         './lib/phi_notes_capture.mjs'

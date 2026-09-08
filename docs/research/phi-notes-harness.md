@@ -159,6 +159,22 @@ entry and remain explicitly unscored. Eight Ask requests with missing first-usef
 content do not form a passing p95. Do not substitute successful lifecycle completion
 for sustained acceptance or model-quality evidence.
 
+### Opt-in OS sleep/wake
+
+```sh
+node scripts/run_phi_notes_application.mjs --sleep-wake
+```
+
+This is a separate non-recording trial. It first publishes valid synthetic notes,
+then waits for a `sleep-cue` file in the printed private profile. Create that cue
+only once an operator has explicitly agreed to wake the Mac manually. The driver
+observes a persisted running notes attempt before calling `pmset sleepnow`, requires
+actual Electron suspend/resume events, records their measured interval, and checks
+publication identity plus an explicit retry. Resource sampling is explicitly paused
+and recorded for the sleep interval; it is not zero-filled or a sustained-resource
+pass. A failed command, absent event pair, stale publication, or failed retry fails
+the trial. No automatic wake is scheduled. Do not combine this mode with capture.
+
 ### Explicitly authorized read-only production sources
 
 ```sh
@@ -190,9 +206,10 @@ renderer/IPC and process-restart path.
 
 Model-generated downstream proposal/commitment adjudication, a fixed human-reviewed
 notes control, 30-minute recording comparisons, sustained resource acceptance,
-sleep/wake, and repeated scheduler preemption still require implementation and
+and complete repeated-preemption recovery still require implementation and
 execution. Running mic/system capture and OS sleep on an active user desktop
-requires a controlled session; the smoke driver deliberately does not perform them.
+requires a controlled session; neither happens in default smoke mode. The separate
+opt-in sleep/wake trial above has been executed for one brief OS event pair.
 The paired
 held-out model evaluation and blinded human review remain separate subsequent
 work, governed by the frozen plan in issue #788.

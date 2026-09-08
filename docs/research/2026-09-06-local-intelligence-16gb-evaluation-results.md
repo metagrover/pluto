@@ -55,10 +55,18 @@ does not satisfy the minimum twenty comparable samples for the frozen p95 gate.
 The native/app/model paths are real, but these short instrumented development runs
 are not matched 30-minute controls or accepted recording-quality benchmarks.
 
+An additional operator-assisted, non-recording sleep/wake trial observed actual
+Electron OS suspend/resume events after a persisted notes start. The measured sleep
+interval was **1.537 seconds**, not the requested fifteen seconds. The in-flight
+notes job completed after wake and an explicit retry published with matching Phi
+model, source-first pipeline, and current source revision. Resource sampling was
+explicitly paused for sleep, never filled with zeros. Automatic wake was unavailable
+without administrator access; the operator agreed to wake the Mac manually.
+
 The two 30-minute comparison runs, marker/chunk-integrity adjudication, settled
-resource gates, twenty-sample responsiveness gates, and sleep/wake remain incomplete.
-The session could not schedule a guaranteed wake without administrator access, so
-no OS sleep was attempted. No production model routing or notes changed.
+resource gates, twenty-sample responsiveness gates, and complete fault matrix remain
+incomplete. This brief OS event pair is not evidence for longer sleep, recording
+across sleep, or every recovery condition. No production model routing or notes changed.
 
 ## September 7 residency repair and 12-case notes evaluation
 
