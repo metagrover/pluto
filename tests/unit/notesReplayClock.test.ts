@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createNotesReplayClock } from '../../scripts/lib/notesReplayClock';
 import { createMeetingNotesOptionalReviewBudget } from '../../electron/meetingAnalysisRuns';
+import { createNotesReplayClock } from '../../scripts/lib/notesReplayClock';
 
 describe('recorded replay clock', () => {
   it('preserves elapsed optional-review admission instead of granting a fresh budget', () => {

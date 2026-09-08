@@ -1,8 +1,8 @@
 // macOS-only diagnostic launcher. No production configuration or model mutation.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
