@@ -8,8 +8,13 @@ import type {
 } from '../../api/knowledgeWorkspace';
 import type { Meeting } from '../../types';
 import {
+  areActionsEquivalent,
+  canonicalizeActionText,
   getCommitmentState,
+  isThirdPartyAction,
+  isThirdPartyAssignee,
   parseActionMetadata,
+  type ThirdPartyAssigneeOptions,
 } from '../../utils/actionCommitment';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
@@ -70,6 +75,8 @@ export type DashboardLatestMeeting =
 export interface DashboardActionInsightItem {
   id: string;
   title: string;
+  assigneeName?: string | null;
+  assignedTo?: string | null;
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   commitmentState: 'possible' | 'confirmed';
@@ -228,11 +235,14 @@ export interface DashboardHomeModelInput {
   overdueActions: Entity[];
   staleActions: Entity[];
   activeActions: Entity[];
+  rejectedActions?: Entity[];
   attentionAlerts?: AttentionItem[];
   workspace: KnowledgeWorkspacePayload | null;
   workingMemorySnapshot?: WorkingMemorySnapshot | null;
   workingMemorySnapshots?: WorkingMemorySnapshot[];
   graphStats: KnowledgeGraphStats | null;
+  selfPersonId?: string | null;
+  selfNames?: string[];
 }
 
 export interface DashboardHomeModel {
@@ -781,6 +791,11 @@ const actionToInsightItem = (
     getCommitmentState(action.metadata) === 'confirmed'
       ? 'confirmed'
       : 'possible';
+  const assigneeName =
+    typeof metadata.assignee_name === 'string' ? metadata.assignee_name : null;
+  const title =
+    canonicalizeActionText(action.name, assigneeName ?? undefined) ||
+    action.name;
   const attentionContext = getDashboardActionAttentionContext(linkedAttention);
   const dueLabel = formatDueLabel(action.due_date);
   const sourceLabel = titleCase(action.domain_tag || 'workspace');
@@ -788,7 +803,9 @@ const actionToInsightItem = (
 
   return {
     id: action.id,
-    title: action.name,
+    title,
+    assigneeName,
+    assignedTo: action.assigned_to ?? null,
     dueLabel,
     status,
     commitmentState,
@@ -1117,13 +1134,24 @@ const buildTopOfMind = (
   };
 };
 
-const buildDashboardCommitments = (
+export const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
+  rejectedActions: Entity[] = [],
+  options?: ThirdPartyAssigneeOptions,
 ): DashboardCommitments => {
   const confirmedItems =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
-          .filter((item) => item.commitmentState === 'confirmed')
+          .filter(
+            (item) =>
+              item.commitmentState === 'confirmed' &&
+              !isThirdPartyAssignee(item.assigneeName, item.title, options) &&
+              !(
+                item.assignedTo &&
+                options?.selfPersonId &&
+                item.assignedTo !== options.selfPersonId
+              ),
+          )
           .sort((a, b) => {
             if (a.dailyPriorityRank !== null || b.dailyPriorityRank !== null) {
               if (a.dailyPriorityRank === null) return 1;
@@ -1137,12 +1165,51 @@ const buildDashboardCommitments = (
       : [];
   const items = confirmedItems.slice(0, MAX_DASHBOARD_BRIEFING_ITEMS);
   const backlog = confirmedItems.slice(MAX_DASHBOARD_BRIEFING_ITEMS);
-  const needsConfirmation =
+
+  const candidateItems =
     actionInsights.state === 'populated'
-      ? actionInsights.allItems
-          .filter((item) => item.commitmentState === 'possible')
-          .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
+      ? actionInsights.allItems.filter(
+          (item) => item.commitmentState === 'possible',
+        )
       : [];
+
+  const deduplicatedNeedsConfirmation: DashboardActionInsightItem[] = [];
+  for (const candidate of candidateItems) {
+    if (
+      isThirdPartyAssignee(candidate.assigneeName, candidate.title, options) ||
+      (candidate.assignedTo &&
+        options?.selfPersonId &&
+        candidate.assignedTo !== options.selfPersonId)
+    ) {
+      continue;
+    }
+    if (
+      confirmedItems.some((confirmed) =>
+        areActionsEquivalent(confirmed, candidate),
+      )
+    ) {
+      continue;
+    }
+    if (
+      rejectedActions.some((rejected) =>
+        areActionsEquivalent(rejected, candidate),
+      )
+    ) {
+      continue;
+    }
+    if (
+      deduplicatedNeedsConfirmation.some((existing) =>
+        areActionsEquivalent(existing, candidate),
+      )
+    ) {
+      continue;
+    }
+    deduplicatedNeedsConfirmation.push(candidate);
+    if (deduplicatedNeedsConfirmation.length >= MAX_DASHBOARD_BRIEFING_ITEMS) {
+      break;
+    }
+  }
+  const needsConfirmation = deduplicatedNeedsConfirmation;
 
   if (items.length === 0) {
     return {
@@ -1840,16 +1907,39 @@ export const buildDashboardHomeModel = (
     input.workingMemorySnapshots ??
     (input.workingMemorySnapshot ? [input.workingMemorySnapshot] : []);
   const attentionAlerts = input.attentionAlerts ?? [];
+  const selfOptions: ThirdPartyAssigneeOptions = {
+    selfPersonId: input.selfPersonId,
+    selfNames: input.selfNames,
+  };
+  const isPersonalAction = (action: Entity) =>
+    !isThirdPartyAction(action, selfOptions);
+
+  const rawOverdue = input.overdueActions.filter(isPersonalAction);
+  const rawStale = input.staleActions.filter(isPersonalAction);
+  const rawActive = input.activeActions.filter(isPersonalAction);
+
+  const rejectedActions = [
+    ...(input.rejectedActions ?? []).filter(isPersonalAction),
+    ...rawOverdue.filter(
+      (action) => getCommitmentState(action.metadata) === 'rejected',
+    ),
+    ...rawStale.filter(
+      (action) => getCommitmentState(action.metadata) === 'rejected',
+    ),
+    ...rawActive.filter(
+      (action) => getCommitmentState(action.metadata) === 'rejected',
+    ),
+  ];
   const overdueActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.overdueActions),
+    filterRejectedDashboardActions(rawOverdue),
     attentionAlerts,
   );
   const staleActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.staleActions),
+    filterRejectedDashboardActions(rawStale),
     attentionAlerts,
   );
   const activeActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.activeActions),
+    filterRejectedDashboardActions(rawActive),
     attentionAlerts,
   );
   const confirmedOverdueActions =
@@ -1866,7 +1956,11 @@ export const buildDashboardHomeModel = (
     input.dateKey ?? getDashboardDateKey(),
   );
   const topOfMind = buildTopOfMind(actionInsights);
-  const commitments = buildDashboardCommitments(actionInsights);
+  const commitments = buildDashboardCommitments(
+    actionInsights,
+    rejectedActions,
+    selfOptions,
+  );
   const recentWin = buildRecentWin(input.meetings);
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,

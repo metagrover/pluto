@@ -170,4 +170,109 @@ describe('extracted action idempotency', () => {
       processWithIdentity(extractedAction('Send note'), 'missing'),
     ).rejects.toThrow('commitment_generator_required');
   });
+
+  it('reuses existing action item when phrasing varies slightly between runs', async () => {
+    const meetingId = 'meeting-rephrased-action';
+    saveMeeting({ id: meetingId, title: 'Sync with Arnold' });
+
+    const first = await processExtractedEntities(
+      {
+        ...extractedAction(
+          'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+        ),
+        action_items: [
+          {
+            description:
+              'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+            assignee: 'Me',
+          },
+        ],
+      },
+      meetingId,
+    );
+
+    expect(first.entities[0].name).toBe(
+      'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+    );
+
+    // Replay with rephrased modal/infinitive description
+    const replay = await processExtractedEntities(
+      {
+        ...extractedAction(
+          'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
+        ),
+        action_items: [
+          {
+            description:
+              'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
+            assignee: 'Me',
+          },
+        ],
+      },
+      meetingId,
+    );
+
+    const actions = getEntitiesByType('action_item').filter((entity) => {
+      const metadata = JSON.parse(entity.metadata ?? '{}');
+      return metadata.source_meeting_id === meetingId;
+    });
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].id).toBe(first.entities[0].id);
+    expect(replay.updated).toBe(1);
+    expect(replay.created).toBe(0);
+  });
+
+  it('keeps action entity identity stable when meeting summary changes', async () => {
+    const meetingId = 'meeting-summary-change';
+    saveMeeting({ id: meetingId, title: 'Quarterly Kickoff' });
+
+    const first = await processWithIdentity(
+      extractedAction('Finalize the Q4 launch dates'),
+      meetingId,
+      { summary: 'First draft summary of the meeting.' },
+      undefined,
+      {
+        generate: async () =>
+          JSON.stringify({
+            status: 'unresolved',
+            personId: null,
+            speaker: null,
+            ownershipKind: 'ambiguous',
+            evidence: [],
+            identityEvidence: [],
+            reason: 'No source identity.',
+          }),
+      },
+    );
+
+    const second = await processWithIdentity(
+      extractedAction('Finalize the Q4 launch dates'),
+      meetingId,
+      { summary: 'Updated and rewritten meeting summary.' },
+      undefined,
+      {
+        generate: async () =>
+          JSON.stringify({
+            status: 'unresolved',
+            personId: null,
+            speaker: null,
+            ownershipKind: 'ambiguous',
+            evidence: [],
+            identityEvidence: [],
+            reason: 'No source identity.',
+          }),
+      },
+    );
+
+    const actions = getEntitiesByType('action_item').filter((entity) => {
+      const metadata = JSON.parse(entity.metadata ?? '{}');
+      return metadata.source_meeting_id === meetingId;
+    });
+
+    expect(actions).toHaveLength(1);
+    expect(second.entities[0].id).toBe(first.entities[0].id);
+    expect(second.created).toBe(0);
+    expect(second.updated).toBe(1);
+  });
 });

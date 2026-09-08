@@ -7,7 +7,11 @@
 
 import { createHash } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
-import type { ActionCommitmentMetadata } from '../src/utils/actionCommitment';
+import {
+  type ActionCommitmentMetadata,
+  areActionsEquivalent,
+  canonicalizeActionText,
+} from '../src/utils/actionCommitment';
 import { isUsablePersonName } from '../src/utils/personBriefing';
 import {
   assessProjectProposal,
@@ -40,6 +44,18 @@ export interface ProcessedEntities {
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+export const truncateAtWordBoundary = (
+  text: string,
+  maxLength = 100,
+): string => {
+  if (text.length <= maxLength) return text;
+  const truncated = text.substring(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return (
+    lastSpace > 20 ? truncated.substring(0, lastSpace) : truncated
+  ).trim();
 };
 
 const getRelationshipBias = (
@@ -507,6 +523,11 @@ function persistExtractedEntities(
   }
 
   // 3. Process Action Items
+  const existingMeetingActions = db
+    .getMeetingEntities(meetingId)
+    .filter((e) => e.type === 'action_item');
+  const matchedExistingActionIds = new Set<string>();
+
   for (const [actionIndex, actionItem] of extracted.action_items.entries()) {
     ensureCurrent();
     if (!actionItem?.description || typeof actionItem.description !== 'string')
@@ -515,15 +536,39 @@ function persistExtractedEntities(
     const actionId =
       options.actionIds?.get(actionIndex) ??
       getExtractedActionId(meetingId, actionItem.description);
-    const existingAction = db.resolveCommitmentIdentity(
+    let existingAction = db.resolveCommitmentIdentity(
       options.actionMatches?.get(actionId) ?? actionId,
     );
+    if (!existingAction) {
+      existingAction = existingMeetingActions.find(
+        (existing) =>
+          !matchedExistingActionIds.has(existing.id) &&
+          areActionsEquivalent(existing, {
+            title: actionItem.description,
+            assigneeName: actionItem.assignee,
+            sourceMeetingId: meetingId,
+          }),
+      );
+    }
+    if (existingAction) {
+      matchedExistingActionIds.add(existingAction.id);
+    }
+
+    const canonicalName = canonicalizeActionText(
+      actionItem.description,
+      actionItem.assignee,
+    );
+    const actionName = truncateAtWordBoundary(
+      canonicalName || actionItem.description,
+      100,
+    );
+
     const entity =
       existingAction ??
       db.upsertEntity({
         id: actionId,
         type: 'action_item',
-        name: actionItem.description.substring(0, 100), // Truncate for name
+        name: actionName,
         status: 'active',
         due_date: dueDate,
         dedupe_by_name: false,
@@ -927,7 +972,6 @@ export async function processExtractedEntities(
         createHash('sha256')
           .update(source?.transcript_json ?? transcriptForGrounding ?? '')
           .digest('hex'),
-        context?.summary,
       ]);
       const occurrence = occurrences.get(identity) ?? 0;
       occurrences.set(identity, occurrence + 1);

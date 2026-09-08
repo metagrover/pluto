@@ -2875,4 +2875,262 @@ describe('buildDashboardHomeModel', () => {
       target: 'projects',
     });
   });
+
+  describe('needsConfirmation briefing suggestions quality and deduplication', () => {
+    it('canonicalizes action title for display in action insights', () => {
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [
+          makeAction({
+            id: 'action-me',
+            name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+            metadata: JSON.stringify({
+              commitment_state: 'possible',
+              assignee_name: 'Me',
+            }),
+          }),
+        ],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(model.commitments.needsConfirmation).toHaveLength(1);
+      expect(model.commitments.needsConfirmation[0].title).toBe(
+        'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+      );
+      expect(model.commitments.needsConfirmation[0].assigneeName).toBe('Me');
+    });
+
+    it('does not surface suggestions that match an already confirmed commitment', () => {
+      const confirmedAction = makeAction({
+        id: 'confirmed-1',
+        name: 'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const duplicatePossibleAction = makeAction({
+        id: 'possible-dup',
+        name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [confirmedAction, duplicatePossibleAction],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(model.commitments.items).toHaveLength(1);
+      expect(model.commitments.items[0].id).toBe('confirmed-1');
+      // The duplicate should NOT be in needsConfirmation!
+      expect(model.commitments.needsConfirmation).toHaveLength(0);
+    });
+
+    it('does not surface suggestions that match a rejected action', () => {
+      const rejectedAction = makeAction({
+        id: 'rejected-1',
+        name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+        metadata: JSON.stringify({
+          commitment_state: 'rejected',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const candidateAction = makeAction({
+        id: 'possible-candidate',
+        name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [rejectedAction, candidateAction],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(model.commitments.needsConfirmation).toHaveLength(0);
+    });
+
+    it('filters out suggestions assigned to third parties', () => {
+      const themAction = makeAction({
+        id: 'possible-them',
+        name: 'Them to collect data and share it with Me.',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Them',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const remoteSpeakerAction = makeAction({
+        id: 'possible-remote',
+        name: 'Remote Speaker 1 will prepare the slide deck',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Remote Speaker 1',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const validPersonalAction = makeAction({
+        id: 'possible-me',
+        name: 'Send the updated proposal to client',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [themAction, remoteSpeakerAction, validPersonalAction],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(model.commitments.needsConfirmation).toHaveLength(1);
+      expect(model.commitments.needsConfirmation[0].id).toBe('possible-me');
+    });
+
+    it('deduplicates multiple equivalent possible suggestions against each other', () => {
+      const candidate1 = makeAction({
+        id: 'cand-1',
+        name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const candidate2 = makeAction({
+        id: 'cand-2',
+        name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const candidate3 = makeAction({
+        id: 'cand-3',
+        name: 'Prepare the roadmap presentation for next week',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [candidate1, candidate2, candidate3],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      // candidate1 and candidate2 are duplicates, so needsConfirmation has only 2 items (cand-3 and one of the duplicates)
+      expect(model.commitments.needsConfirmation).toHaveLength(2);
+      expect(model.commitments.needsConfirmation.map((c) => c.id)).toEqual([
+        'cand-3',
+        'cand-2',
+      ]);
+    });
+
+    it('excludes commitments assigned to other individuals from Daily Briefing suggestions and focus', () => {
+      const arnoldCandidateAction = makeAction({
+        id: 'arnold-candidate',
+        name: 'Arnold to run load testing on cluster',
+        assigned_to: null,
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Arnold',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const taylorConfirmedAction = makeAction({
+        id: 'taylor-confirmed',
+        name: 'Send updated benchmark numbers',
+        assigned_to: 'person-taylor',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          assignee_name: 'Taylor',
+          owner_source: 'user',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const myCandidateAction = makeAction({
+        id: 'my-candidate',
+        name: 'Send the updated proposal to client',
+        assigned_to: null,
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const myConfirmedAction = makeAction({
+        id: 'my-confirmed',
+        name: 'Draft launch announcement',
+        assigned_to: 'person-me',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          owner_source: 'user',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [
+          arnoldCandidateAction,
+          taylorConfirmedAction,
+          myCandidateAction,
+          myConfirmedAction,
+        ],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+        selfPersonId: 'person-me',
+        selfNames: ['Me'],
+      });
+
+      // Arnold's candidate action is excluded from suggestions
+      expect(model.commitments.needsConfirmation).toHaveLength(1);
+      expect(model.commitments.needsConfirmation[0].id).toBe('my-candidate');
+
+      // Taylor's confirmed action is excluded from Today's focus
+      expect(model.commitments.items).toHaveLength(1);
+      expect(model.commitments.items[0].id).toBe('my-confirmed');
+      expect(model.commitments.backlog).toHaveLength(0);
+    });
+  });
 });

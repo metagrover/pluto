@@ -17,6 +17,7 @@ import {
   type WorkingMemorySnapshot,
   listWorkingMemorySnapshots,
 } from '../../api/workingMemory';
+import { type IdentityState, getIdentityState } from '../../api/identity';
 import type { Meeting } from '../../types';
 import {
   type DashboardHomeModel,
@@ -68,6 +69,7 @@ interface DashboardHomeData {
         >
       >
   >;
+  identityState: IdentityState | null;
 }
 
 interface DashboardHomeLoaders {
@@ -79,6 +81,7 @@ interface DashboardHomeLoaders {
   listWorkingMemorySnapshots: () => Promise<WorkingMemorySnapshot[]>;
   getKnowledgeGraphStats: () => Promise<KnowledgeGraphStats | null>;
   getMeetingPreviews?: () => Promise<DashboardHomeData['meetingPreviews']>;
+  getIdentityState?: () => Promise<IdentityState | null>;
 }
 
 interface UseDashboardHomeParams {
@@ -100,6 +103,8 @@ const buildEmptyDashboardHomeModel = (
     workspace: null,
     workingMemorySnapshots: [],
     graphStats: null,
+    selfPersonId: null,
+    selfNames: [],
   });
 
 export const millisecondsUntilNextLocalDay = (now = new Date()): number => {
@@ -133,6 +138,7 @@ export const loadDashboardHomeData = async (
     workingMemorySnapshots,
     graphStats,
     meetingPreviews,
+    identityState,
   ] = await Promise.all([
     loaders.getOverdueActionItems(),
     loaders.getStaleActionItems(),
@@ -162,6 +168,11 @@ export const loadDashboardHomeData = async (
       loaders.getMeetingPreviews ?? (async () => []),
       [],
     ),
+    loadOptional<IdentityState | null>(
+      'identity state',
+      loaders.getIdentityState ?? getIdentityState,
+      null,
+    ),
   ]);
 
   return {
@@ -173,6 +184,7 @@ export const loadDashboardHomeData = async (
     workingMemorySnapshots,
     graphStats,
     meetingPreviews,
+    identityState,
   };
 };
 
@@ -280,11 +292,19 @@ export const useDashboardHome = ({
           ...meeting,
           ...previewsByMeeting.get(String(meeting.id)),
         }));
+        const selfNames = data.identityState?.profile?.preferredName
+          ? [
+              data.identityState.profile.preferredName,
+              ...(data.identityState.profile.aliases ?? []),
+            ].filter(Boolean)
+          : undefined;
         setState({
           model: buildDashboardHomeModel({
             isRecording,
             meetings: meetingsWithDashboardPreviews,
             dateKey,
+            selfPersonId: data.identityState?.selfPersonId ?? null,
+            selfNames,
             ...data,
           }),
           loading: false,
