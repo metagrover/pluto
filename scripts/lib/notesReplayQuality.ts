@@ -1,6 +1,6 @@
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 import type { NotesSource } from '../../electron/llm/meetingNotesTypes';
-import { visibleBlocks } from '../../tests/manual/fixtures/localIntelligenceNotesScoring';
+import { visibleBlocks } from './notesReplayProjection';
 
 const normalize = (value: string) =>
   value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');

@@ -94,8 +94,7 @@ export interface NotesPipelineMetadata {
   pipeline_version:
     | 'writer-audit-v1'
     | 'writer-editor-v1'
-    | 'writer-editor-bounded-v1'
-    | 'notes-v30-source-first';
+    | 'writer-editor-bounded-v1';
   mode: 'direct' | 'hierarchical';
   audit_status: 'complete' | 'complete_with_warnings';
   audit_change_count: number;

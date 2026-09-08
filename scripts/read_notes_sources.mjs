@@ -1,16 +1,18 @@
-// Usage: node scripts/read_phi_notes_sources.mjs /absolute/source/pluto.db
+// Usage: node scripts/read_notes_sources.mjs /absolute/source/pluto.db
 // Only source rows are exported. No production app is launched or modified.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readReadonlyMeetingSources } from './lib/phi_notes_readonly_sources.mjs';
+import { readReadonlyMeetingSources } from './lib/notes_readonly_sources.mjs';
 
 try {
   if (process.argv.length !== 3)
     throw new Error('one_explicit_source_database_required');
-  const result = readReadonlyMeetingSources(process.argv[2]);
+  const result = readReadonlyMeetingSources(process.argv[2], undefined, {
+    latestTen: true,
+  });
   const root = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'pluto-phi-readonly-sources-')),
+    fs.mkdtempSync(path.join(os.tmpdir(), 'pluto-notes-readonly-sources-')),
   );
   fs.chmodSync(root, 0o700);
   fs.writeFileSync(
@@ -21,7 +23,7 @@ try {
   console.log(
     JSON.stringify({
       privateOutput: root,
-      eligibleMeetings: result.rows.length,
+      selectedMeetings: result.rows.length,
       databaseSha256: result.databaseSha256,
     }),
   );

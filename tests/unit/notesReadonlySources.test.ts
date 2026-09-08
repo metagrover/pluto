@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readReadonlyMeetingSources } from '../../scripts/lib/phi_notes_readonly_sources.mjs';
+import { readReadonlyMeetingSources } from '../../scripts/lib/notes_readonly_sources.mjs';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -11,7 +11,7 @@ afterEach(() => {
 });
 const fixture = () => {
   const root = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'phi-readonly-unit-')),
+    fs.mkdtempSync(path.join(os.tmpdir(), 'notes-readonly-unit-')),
   );
   roots.push(root);
   const database = path.join(root, 'source.db');
@@ -48,6 +48,25 @@ describe('read-only notes sources', () => {
     ]);
     expect(fs.readFileSync(database)).toEqual(before);
     expect(fs.readdirSync(path.dirname(database))).toEqual(['source.db']);
+    const cli = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ['scripts/read_notes_sources.mjs', database],
+        {
+          encoding: 'utf8',
+        },
+      ),
+    );
+    roots.push(cli.privateOutput);
+    expect(cli.selectedMeetings).toBe(10);
+    expect(cli.eligibleMeetings).toBeUndefined();
+    expect(fs.statSync(cli.privateOutput).mode & 0o777).toBe(0o700);
+    const exported = path.join(cli.privateOutput, 'sources.json');
+    expect(fs.statSync(exported).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(fs.readFileSync(exported, 'utf8')).rows).toEqual(
+      result.rows,
+    );
+    expect(fs.readFileSync(database)).toEqual(before);
   });
   it('selects the latest ten without replacing ineligible meetings', () => {
     const query = vi.fn(() =>

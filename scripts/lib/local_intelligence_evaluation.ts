@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 export type LocalIntelligenceLane =
   | 'quick_chat'
   | 'meeting_notes'
@@ -13,57 +11,7 @@ export type EvaluationModelIdentity = {
   digest: string;
 };
 
-export type NotesExperimentConfiguration = {
-  configId: 'phi-notes-source-first' | 'gemma-notes-control';
-  lane: 'meeting_notes';
-  pipelineVariant: 'source_first' | 'compact_control';
-  sourceFirstReconciliation: boolean;
-  compactWriterContract: true;
-  tag: string;
-  digest: string;
-};
-
-export type NotesEvaluationCollection =
-  | 'semantic'
-  | 'ordinary_capacity'
-  | 'expected_rejection';
-
-export type NotesScheduledRun = {
-  runId: string;
-  caseId: string;
-  configId: NotesExperimentConfiguration['configId'];
-  collection: NotesEvaluationCollection;
-  repetition: number;
-  condition: 'cold' | 'warm';
-};
-
-export type NotesEvaluationCollections = {
-  semantic: string[];
-  ordinaryCapacity: string[];
-  expectedRejection: string[];
-};
-
-export type NotesExperimentSettings = {
-  seed: number;
-  temperature: 0.1;
-  threads: number;
-  thinking: false;
-  contextTokens: 16_384;
-  writerOutputTokens: 2_048;
-  editorOutputTokens: 2_048;
-  stageCache: 'disabled';
-};
-
-type LocalIntelligenceCeilings = {
-  ordinaryNotesMs: number;
-  longNotesMs: number;
-  chatMs: number;
-  dreamingMs: number;
-  notesPhysicalStarts: number;
-  minimumSamplesForP95: number;
-};
-
-export type LegacyLocalIntelligenceManifest = {
+export type LocalIntelligenceManifest = {
   schemaVersion: 1;
   suiteId: string;
   privacy: 'owner_only_private';
@@ -71,55 +19,15 @@ export type LegacyLocalIntelligenceManifest = {
   dirtyDiffSha256: string;
   corpusSha256: string;
   models: EvaluationModelIdentity[];
-  ceilings: LocalIntelligenceCeilings;
+  ceilings: {
+    ordinaryNotesMs: number;
+    longNotesMs: number;
+    chatMs: number;
+    dreamingMs: number;
+    notesPhysicalStarts: number;
+    minimumSamplesForP95: number;
+  };
 };
-
-export type NotesExperimentManifest = {
-  schemaVersion: 2;
-  suiteId: string;
-  privacy: 'owner_only_private';
-  sourceRevision: string;
-  dirtyDiffSha256: string;
-  corpusSha256: string;
-  rubricSha256: string;
-  scheduleSha256: string;
-  partition: 'development' | 'held_out';
-  models: EvaluationModelIdentity[];
-  configurations: NotesExperimentConfiguration[];
-  collections: NotesEvaluationCollections;
-  settings: NotesExperimentSettings;
-  schedule: NotesScheduledRun[];
-  ceilings: LocalIntelligenceCeilings;
-};
-
-export type LocalIntelligenceManifest =
-  | LegacyLocalIntelligenceManifest
-  | NotesExperimentManifest;
-
-export const PHI_NOTES_EXPERIMENT_CONFIGURATION = {
-  configId: 'phi-notes-source-first',
-  lane: 'meeting_notes',
-  pipelineVariant: 'source_first',
-  sourceFirstReconciliation: true,
-  compactWriterContract: true,
-  tag: 'phi4-mini:3.8b',
-  digest: '78fad5d182a7c33065e153a5f8ba210754207ba9d91973f57dffa7f487363753',
-} as const satisfies NotesExperimentConfiguration;
-
-export const GEMMA_NOTES_CONTROL_CONFIGURATION = {
-  configId: 'gemma-notes-control',
-  lane: 'meeting_notes',
-  pipelineVariant: 'compact_control',
-  sourceFirstReconciliation: false,
-  compactWriterContract: true,
-  tag: 'gemma4:12b',
-  digest: '4eb23ef187e2c5462566d6a1d3bbbc2f1346d0b4327cbb66d58fffbcc9b2b05c',
-} as const satisfies NotesExperimentConfiguration;
-
-export const NOTES_EXPERIMENT_CONFIGURATIONS = [
-  PHI_NOTES_EXPERIMENT_CONFIGURATION,
-  GEMMA_NOTES_CONTROL_CONFIGURATION,
-] as const;
 
 export type ResourceTelemetry = {
   memoryPressure: 'normal' | 'warning' | 'critical' | 'unknown';
@@ -168,13 +76,7 @@ type LogicalTerminalEvent = {
   eventId: string;
   runId: string;
   logicalStageId: string;
-  outcome:
-    | 'accepted'
-    | 'pending_review'
-    | 'rejected'
-    | 'failed'
-    | 'timeout'
-    | 'cancelled';
+  outcome: 'accepted' | 'rejected' | 'failed' | 'timeout' | 'cancelled';
   acceptedInReplay: boolean;
   published: boolean;
   sourceRevision: string;
@@ -219,49 +121,7 @@ const manifestKeys = [
   'models',
   'ceilings',
 ] as const;
-const notesManifestKeys = [
-  ...manifestKeys,
-  'rubricSha256',
-  'scheduleSha256',
-  'partition',
-  'configurations',
-  'collections',
-  'settings',
-  'schedule',
-] as const;
 const modelKeys = ['configId', 'tag', 'digest'] as const;
-const notesConfigurationKeys = [
-  'configId',
-  'lane',
-  'pipelineVariant',
-  'sourceFirstReconciliation',
-  'compactWriterContract',
-  'tag',
-  'digest',
-] as const;
-const notesCollectionKeys = [
-  'semantic',
-  'ordinaryCapacity',
-  'expectedRejection',
-] as const;
-const notesSettingsKeys = [
-  'seed',
-  'temperature',
-  'threads',
-  'thinking',
-  'contextTokens',
-  'writerOutputTokens',
-  'editorOutputTokens',
-  'stageCache',
-] as const;
-const notesScheduledRunKeys = [
-  'runId',
-  'caseId',
-  'configId',
-  'collection',
-  'repetition',
-  'condition',
-] as const;
 const ceilingKeys = [
   'ordinaryNotesMs',
   'longNotesMs',
@@ -312,119 +172,17 @@ const hasExactKeys = (
 const isPositiveInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
-const invalidManifest: () => never = () => {
+const invalidManifest = (): never => {
   throw new Error('evaluation_manifest_invalid');
 };
-
-const sha256Json = (value: unknown): string =>
-  createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
-
-const validateCaseIds = (
-  collections: NotesEvaluationCollections,
-): NotesEvaluationCollections => {
-  const seen = new Set<string>();
-  const validated = {} as NotesEvaluationCollections;
-  for (const key of notesCollectionKeys) {
-    const values = collections[key];
-    if (!Array.isArray(values) || values.length === 0) invalidManifest();
-    validated[key] = values.map((value) => {
-      if (
-        typeof value !== 'string' ||
-        !identifierPattern.test(value) ||
-        seen.has(value)
-      ) {
-        invalidManifest();
-      }
-      seen.add(value);
-      return value;
-    });
-  }
-  return validated;
-};
-
-const pairedConfigurations = (reverse: boolean) =>
-  reverse
-    ? ([
-        GEMMA_NOTES_CONTROL_CONFIGURATION,
-        PHI_NOTES_EXPERIMENT_CONFIGURATION,
-      ] as const)
-    : NOTES_EXPERIMENT_CONFIGURATIONS;
-
-export const buildFrozenNotesSchedule = (
-  rawCollections: NotesEvaluationCollections,
-): NotesScheduledRun[] => {
-  const collections = validateCaseIds(rawCollections);
-  const schedule: NotesScheduledRun[] = [];
-  let pairIndex = 0;
-  const appendPair = (
-    caseId: string,
-    collection: NotesEvaluationCollection,
-    repetition: number,
-    condition: NotesScheduledRun['condition'],
-  ) => {
-    for (const configuration of pairedConfigurations(pairIndex % 2 === 1)) {
-      schedule.push({
-        runId: `${collection}-${caseId}-${repetition}-${condition}-${configuration.configId}`,
-        caseId,
-        configId: configuration.configId,
-        collection,
-        repetition,
-        condition,
-      });
-    }
-    pairIndex += 1;
-  };
-
-  collections.semantic.forEach((caseId, caseIndex) => {
-    for (let repetition = 1; repetition <= 3; repetition += 1) {
-      const condition =
-        repetition === 1
-          ? 'cold'
-          : repetition === 2
-            ? 'warm'
-            : caseIndex % 2 === 0
-              ? 'cold'
-              : 'warm';
-      appendPair(caseId, 'semantic', repetition, condition);
-    }
-  });
-  collections.ordinaryCapacity.forEach((caseId) => {
-    for (const condition of ['cold', 'warm'] as const) {
-      for (let repetition = 1; repetition <= 3; repetition += 1) {
-        appendPair(caseId, 'ordinary_capacity', repetition, condition);
-      }
-    }
-  });
-  collections.expectedRejection.forEach((caseId, caseIndex) => {
-    for (let repetition = 1; repetition <= 3; repetition += 1) {
-      appendPair(
-        caseId,
-        'expected_rejection',
-        repetition,
-        (caseIndex + repetition) % 2 === 0 ? 'cold' : 'warm',
-      );
-    }
-  });
-  return schedule;
-};
-
-export const notesScheduleSha256 = (
-  schedule: readonly NotesScheduledRun[],
-): string => sha256Json(schedule);
 
 export const parseLocalIntelligenceManifest = (
   value: unknown,
   installedModels?: readonly { tag: string; digest: string }[],
 ): LocalIntelligenceManifest => {
-  if (!isRecord(value)) invalidManifest();
-  const schemaVersion = value.schemaVersion;
+  if (!isRecord(value) || !hasExactKeys(value, manifestKeys)) invalidManifest();
   if (
-    (schemaVersion !== 1 && schemaVersion !== 2) ||
-    !hasExactKeys(value, schemaVersion === 1 ? manifestKeys : notesManifestKeys)
-  ) {
-    invalidManifest();
-  }
-  if (
+    value.schemaVersion !== 1 ||
     value.privacy !== 'owner_only_private' ||
     typeof value.suiteId !== 'string' ||
     !identifierPattern.test(value.suiteId) ||
@@ -481,9 +239,10 @@ export const parseLocalIntelligenceManifest = (
     });
   }
 
-  const common = {
+  return {
+    schemaVersion: 1,
     suiteId: value.suiteId as string,
-    privacy: 'owner_only_private' as const,
+    privacy: 'owner_only_private',
     sourceRevision: value.sourceRevision as string,
     dirtyDiffSha256: value.dirtyDiffSha256 as string,
     corpusSha256: value.corpusSha256 as string,
@@ -496,124 +255,6 @@ export const parseLocalIntelligenceManifest = (
       notesPhysicalStarts: ceilings.notesPhysicalStarts as number,
       minimumSamplesForP95: ceilings.minimumSamplesForP95 as number,
     },
-  };
-
-  if (schemaVersion === 1) {
-    return { schemaVersion: 1, ...common };
-  }
-
-  if (
-    typeof value.rubricSha256 !== 'string' ||
-    !digestPattern.test(value.rubricSha256) ||
-    typeof value.scheduleSha256 !== 'string' ||
-    !digestPattern.test(value.scheduleSha256) ||
-    !['development', 'held_out'].includes(String(value.partition)) ||
-    !Array.isArray(value.configurations) ||
-    value.configurations.length !== NOTES_EXPERIMENT_CONFIGURATIONS.length ||
-    !isRecord(value.collections) ||
-    !hasExactKeys(value.collections, notesCollectionKeys) ||
-    !isRecord(value.settings) ||
-    !hasExactKeys(value.settings, notesSettingsKeys) ||
-    !Array.isArray(value.schedule)
-  ) {
-    invalidManifest();
-  }
-
-  const configurations = value.configurations.map((candidate) => {
-    if (
-      !isRecord(candidate) ||
-      !hasExactKeys(candidate, notesConfigurationKeys)
-    ) {
-      invalidManifest();
-    }
-    const expected = NOTES_EXPERIMENT_CONFIGURATIONS.find(
-      (configuration) => configuration.configId === candidate.configId,
-    );
-    if (
-      !expected ||
-      notesConfigurationKeys.some((key) => candidate[key] !== expected[key])
-    ) {
-      invalidManifest();
-    }
-    return { ...expected } as NotesExperimentConfiguration;
-  });
-  if (new Set(configurations.map(({ configId }) => configId)).size !== 2) {
-    invalidManifest();
-  }
-  if (
-    models.length !== configurations.length ||
-    configurations.some(
-      (configuration) =>
-        !models.some(
-          (model) =>
-            model.configId === configuration.configId &&
-            model.tag === configuration.tag &&
-            model.digest === configuration.digest,
-        ),
-    )
-  ) {
-    invalidManifest();
-  }
-
-  const rawCollections = value.collections as Record<string, unknown>;
-  const collections = validateCaseIds({
-    semantic: rawCollections.semantic as string[],
-    ordinaryCapacity: rawCollections.ordinaryCapacity as string[],
-    expectedRejection: rawCollections.expectedRejection as string[],
-  });
-  const settings = value.settings;
-  if (
-    !Number.isSafeInteger(settings.seed) ||
-    settings.temperature !== 0.1 ||
-    !isPositiveInteger(settings.threads) ||
-    settings.thinking !== false ||
-    settings.contextTokens !== 16_384 ||
-    settings.writerOutputTokens !== 2_048 ||
-    settings.editorOutputTokens !== 2_048 ||
-    settings.stageCache !== 'disabled'
-  ) {
-    invalidManifest();
-  }
-
-  const schedule = value.schedule.map((candidate) => {
-    if (
-      !isRecord(candidate) ||
-      !hasExactKeys(candidate, notesScheduledRunKeys) ||
-      typeof candidate.runId !== 'string' ||
-      !identifierPattern.test(candidate.runId) ||
-      typeof candidate.caseId !== 'string' ||
-      !identifierPattern.test(candidate.caseId) ||
-      !NOTES_EXPERIMENT_CONFIGURATIONS.some(
-        ({ configId }) => configId === candidate.configId,
-      ) ||
-      !['semantic', 'ordinary_capacity', 'expected_rejection'].includes(
-        String(candidate.collection),
-      ) ||
-      !isPositiveInteger(candidate.repetition) ||
-      !['cold', 'warm'].includes(String(candidate.condition))
-    ) {
-      invalidManifest();
-    }
-    return candidate as NotesScheduledRun;
-  });
-  const expectedSchedule = buildFrozenNotesSchedule(collections);
-  if (
-    JSON.stringify(schedule) !== JSON.stringify(expectedSchedule) ||
-    value.scheduleSha256 !== notesScheduleSha256(schedule)
-  ) {
-    throw new Error('evaluation_schedule_mismatch');
-  }
-
-  return {
-    schemaVersion: 2,
-    ...common,
-    rubricSha256: value.rubricSha256 as string,
-    scheduleSha256: value.scheduleSha256 as string,
-    partition: value.partition as NotesExperimentManifest['partition'],
-    configurations,
-    collections,
-    settings: settings as NotesExperimentSettings,
-    schedule,
   };
 };
 
@@ -687,7 +328,7 @@ const validTelemetry = (value: unknown): value is ResourceTelemetry =>
   Number.isFinite(value.swapUsedBytes) &&
   value.swapUsedBytes >= 0;
 
-const invalidEvent: () => never = () => {
+const invalidEvent = (): never => {
   throw new Error('evaluation_event_invalid');
 };
 
@@ -702,9 +343,7 @@ export const validateEvaluationEventLedger = (
   const eventIds = new Set<string>();
   const runs = new Map<string, RunStartedEvent>();
   const attempts = new Map<string, PhysicalStartedEvent>();
-  const terminalAttempts = new Set<string>();
   const logicalStages = new Set<string>();
-  const terminalRuns = new Set<string>();
   const contaminatedRuns = new Set<string>();
   let preemptionCount = 0;
   let acceptedReplayCount = 0;
@@ -773,9 +412,6 @@ export const validateEvaluationEventLedger = (
       if (!start || start.runId !== event.runId) {
         throw new Error('evaluation_terminal_without_start');
       }
-      if (terminalAttempts.has(event.attemptId)) {
-        throw new Error('evaluation_attempt_terminal_duplicate');
-      }
       if (
         !['complete', 'failed', 'timeout', 'cancelled', 'preempted'].includes(
           event.outcome,
@@ -789,7 +425,6 @@ export const validateEvaluationEventLedger = (
       ) {
         invalidEvent();
       }
-      terminalAttempts.add(event.attemptId);
       if (event.outcome === 'preempted') preemptionCount += 1;
       continue;
     }
@@ -813,14 +448,9 @@ export const validateEvaluationEventLedger = (
 
     if (
       !identifierPattern.test(event.logicalStageId) ||
-      ![
-        'accepted',
-        'pending_review',
-        'rejected',
-        'failed',
-        'timeout',
-        'cancelled',
-      ].includes(event.outcome) ||
+      !['accepted', 'rejected', 'failed', 'timeout', 'cancelled'].includes(
+        event.outcome,
+      ) ||
       event.sourceRevision !== parsedManifest.sourceRevision ||
       event.acceptedInReplay !== (event.outcome === 'accepted') ||
       event.atMs < run.atMs
@@ -833,11 +463,7 @@ export const validateEvaluationEventLedger = (
     if (event.published && run.environment !== 'disposable_integration') {
       throw new Error('evaluation_replay_not_published');
     }
-    if (logicalStages.has(`${event.runId}:${event.logicalStageId}`)) {
-      throw new Error('evaluation_logical_terminal_duplicate');
-    }
     logicalStages.add(`${event.runId}:${event.logicalStageId}`);
-    terminalRuns.add(event.runId);
     if (event.acceptedInReplay) acceptedReplayCount += 1;
     if (event.published) publishedCount += 1;
   }
@@ -850,45 +476,6 @@ export const validateEvaluationEventLedger = (
     acceptedReplayCount,
     publishedCount,
     contaminatedRunCount: contaminatedRuns.size,
-    interruptedRunCount: [...runs.keys()].filter(
-      (runId) => !terminalRuns.has(runId),
-    ).length,
-    orphanedPhysicalStartCount: [...attempts.keys()].filter(
-      (attemptId) => !terminalAttempts.has(attemptId),
-    ).length,
-  };
-};
-
-export const reconcileNotesEvaluationSchedule = (
-  manifest: NotesExperimentManifest,
-  events: readonly EvaluationEvent[],
-) => {
-  const parsed = parseLocalIntelligenceManifest(manifest);
-  if (parsed.schemaVersion !== 2) invalidManifest();
-  validateEvaluationEventLedger(parsed, events);
-  const startedRunIds = new Set(
-    events
-      .filter((event): event is RunStartedEvent => event.type === 'run_started')
-      .map((event) => event.runId),
-  );
-  const terminalRunIds = new Set(
-    events
-      .filter(
-        (event): event is LogicalTerminalEvent =>
-          event.type === 'logical_terminal',
-      )
-      .map((event) => event.runId),
-  );
-  const scheduledRunIds = new Set(parsed.schedule.map(({ runId }) => runId));
-  if ([...startedRunIds].some((runId) => !scheduledRunIds.has(runId))) {
-    throw new Error('evaluation_schedule_mismatch');
-  }
-  return {
-    unstarted: parsed.schedule.filter((run) => !startedRunIds.has(run.runId)),
-    interrupted: parsed.schedule.filter(
-      (run) => startedRunIds.has(run.runId) && !terminalRunIds.has(run.runId),
-    ),
-    completed: parsed.schedule.filter((run) => terminalRunIds.has(run.runId)),
   };
 };
 

@@ -7,7 +7,6 @@ import {
 import { initializeApplicationDatabase } from './database/applicationDatabase';
 import { describeDatabaseStartupError } from './database/errors';
 import { createLogger, initializeElectronLogging } from './logger';
-import { resolveNotesEvaluationActivation } from './notesEvaluationActivation';
 
 // Guard against broken-pipe errors (EPIPE / EIO) on stdout/stderr early in process lifetime
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
@@ -25,12 +24,6 @@ const developmentUserDataDir = resolveUserDataArgument(process.argv);
 if (!app.isPackaged && developmentUserDataDir) {
   app.setPath('userData', developmentUserDataDir);
 }
-// Reject a misplaced experiment capability before opening or migrating a DB.
-resolveNotesEvaluationActivation({
-  isPackaged: app.isPackaged,
-  userDataPath: app.getPath('userData'),
-  argv: process.argv,
-});
 const requiresLock = shouldAcquireProductionInstanceLock(app.isPackaged);
 const hasLock = !requiresLock || app.requestSingleInstanceLock();
 

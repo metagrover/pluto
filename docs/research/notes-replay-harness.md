@@ -1,9 +1,8 @@
 # Production-path notes development replay
 
-Phi-specific notes development is parked. This harness exercises the existing
-Gemma unified-provider route without changing production records or model routing.
-The synthetic Electron capture/recovery driver remains separate; this command is
-not a full application, held-out quality, or sustained performance acceptance test.
+This model-neutral harness exercises the existing Gemma unified-provider route
+without changing production records or model routing. It is not a full
+application, held-out quality, or sustained performance acceptance test.
 
 ## Run
 
@@ -13,6 +12,7 @@ reader. Reuse the same frozen export for a development comparison; do not silent
 replace ineligible meetings with older ones.
 
 ```sh
+node scripts/read_notes_sources.mjs /absolute/source/pluto.db
 pnpm exec tsx scripts/run_notes_replay.ts /absolute/private/sources.json --run
 pnpm exec tsx scripts/summarize_notes_replay.ts /printed/private/run-directory
 pnpm exec tsx scripts/replay_notes_response_case.ts /printed/private/run-directory 3
@@ -25,7 +25,7 @@ provider baseline rather than an exact reproduction of every production input.
 
 The manifest freezes input bytes, installed model digest, important code hashes,
 ten scheduled source IDs (hashed), context, and production review/deadline policy.
-The provider uses compact writer plus editor, not Phi source-first reconciliation.
+The provider uses the production compact writer plus editor.
 Local Ollama is the only allowed transport; redirects, wrong generation models,
 wrong context sizes, and malformed/incomplete streams fail closed.
 
@@ -133,3 +133,23 @@ that ledger upper bound is not proof of simultaneous server execution.
 
 See [the measured runtime diagnosis](2026-09-08-gemma-runtime-memory.md) for the
 separate failed attempts, complete sequential run, and remaining quality limits.
+
+## Historical evidence and cleanup
+
+The recorded development runs predate removal of the experimental application
+changes from PR #794. Their manifests identify the code that actually ran; they
+are not fresh inference evidence for the cleaned branch. Exact response replay
+must reject a changed code hash. Do not rewrite manifests or relax that check to
+reuse older results against a different implementation.
+
+## Next latency experiment (not implemented)
+
+Compare the unchanged production path with one concise streamed Markdown draft,
+using the same frozen sources, model, context and runtime profile. Measure time
+to first visible text separately from total completion, prompt/output token
+counts, physical requests, capacity failures and source-grounded quality.
+Streaming alone does not reduce required model work. Test reducing repeated
+generation passes, retaining source references and deterministic validation,
+with model repair only on a demonstrated validation failure. Partial text must
+remain a provisional draft, not approved notes or downstream commitments.
+No default-route change is justified by responsiveness alone.

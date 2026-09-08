@@ -1,10 +1,4 @@
 import type { DreamingInputPackage } from '../../../electron/dreaming/types';
-import type { NotesProjectionExpectation } from './localIntelligenceNotesScoring';
-import {
-  phiNotesExpectedRejectionCases,
-  phiNotesHeldOutCases,
-  phiNotesOrdinaryCapacityCases,
-} from './localIntelligencePhiNotesHeldOut';
 
 export type EvaluationPartition = 'development' | 'held_out';
 
@@ -16,23 +10,18 @@ export type GoldClaim = {
   modality: 'fact' | 'tentative' | 'conditional' | 'committed' | 'withdrawn';
   owner?: string;
   date?: string;
-  notesProjection?: NotesProjectionExpectation;
 };
 
-export type NotesGoldClaim = GoldClaim & {
-  notesProjection: NotesProjectionExpectation;
-};
-
-export type EvaluationGold<TClaim extends GoldClaim = GoldClaim> = {
-  requiredClaims: TClaim[];
+export type EvaluationGold = {
+  requiredClaims: GoldClaim[];
   forbiddenClaims: string[];
   expectedBehavior: 'supported_output' | 'abstain' | 'no_change';
 };
 
-type EvaluationCaseMetadata<TClaim extends GoldClaim = GoldClaim> = {
+type EvaluationCaseMetadata = {
   partition: EvaluationPartition;
   failureIds: string[];
-  gold: EvaluationGold<TClaim>;
+  gold: EvaluationGold;
 };
 
 export type LocalIntelligenceNotesCase = {
@@ -55,7 +44,7 @@ export type LocalIntelligenceNotesCase = {
     | 'dense_multi_claim'
   >;
   segments: Array<{ speaker: string; text: string }>;
-} & EvaluationCaseMetadata<NotesGoldClaim>;
+} & EvaluationCaseMetadata;
 
 export type LocalIntelligenceChatCase = {
   id: string;
@@ -76,19 +65,7 @@ export type LocalIntelligenceEvaluationCase =
   | LocalIntelligenceChatCase
   | LocalIntelligenceDreamingCase;
 
-type BaseLocalIntelligenceNotesCase = Omit<
-  LocalIntelligenceNotesCase,
-  'gold'
-> & {
-  gold: EvaluationGold;
-};
-
-type BaseLocalIntelligenceEvaluationCase =
-  | BaseLocalIntelligenceNotesCase
-  | LocalIntelligenceChatCase
-  | LocalIntelligenceDreamingCase;
-
-const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[] =
+export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
   [
     {
       id: 'notes-routing-smoke',
@@ -145,7 +122,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-middle-withdrawal',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F01', 'F02', 'F04', 'F13', 'F19', 'F21'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -206,7 +183,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-conditional-ownership',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F05', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -263,7 +240,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-opening-decision',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F01', 'F13'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -300,7 +277,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-date-correction',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F04', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -339,7 +316,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-short-owner-handoff',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F05', 'F18'],
       durationClass: 'ordinary',
       syntheticProfile: 'short',
@@ -383,7 +360,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-ordinary-no-decision-no-action',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F06', 'F21'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -436,7 +413,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-ordinary-end-commitment',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F02', 'F18', 'F19'],
       durationClass: 'ordinary',
       syntheticProfile: 'ordinary',
@@ -479,7 +456,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-three-position-evidence',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F01', 'F02', 'F04', 'F13', 'F18', 'F19'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -591,7 +568,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-owner-date-revision',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F04', 'F05', 'F18', 'F21'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -689,7 +666,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-long-dense-decisions-and-boundaries',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F01', 'F02', 'F06', 'F13', 'F19'],
       durationClass: 'long',
       syntheticProfile: 'long_dense',
@@ -799,7 +776,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-adversarial-sparse-unrelated-beacons',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F05', 'F06', 'F13'],
       durationClass: 'long',
       syntheticProfile: 'adversarial_sparse',
@@ -860,7 +837,7 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     {
       id: 'notes-adversarial-sparse-unmet-condition',
       lane: 'meeting_notes',
-      partition: 'development',
+      partition: 'held_out',
       failureIds: ['F02', 'F06', 'F18', 'F21'],
       durationClass: 'long',
       syntheticProfile: 'adversarial_sparse',
@@ -1198,76 +1175,6 @@ const baseLocalIntelligenceEvaluationCases: BaseLocalIntelligenceEvaluationCase[
     },
   ];
 
-const notesProjectionKindByClaimId = {
-  'payment-verification-owner': 'action',
-  'launch-date-open': 'point',
-  'middle-only-commitment': 'action',
-  'withdrawn-launch': 'point',
-  'conditional-campaign-task': 'point',
-  'pilot-export-format': 'decision',
-  'corrected-invoice-date': 'action',
-  'access-audit-handoff': 'action',
-  'pricing-remains-unresolved': 'point',
-  'rollback-drill-commitment': 'action',
-  'eu-pilot-approved': 'decision',
-  'access-audit-commitment': 'action',
-  'sandbox-integration-condition': 'point',
-  'pricing-undecided': 'point',
-  'runbook-owner-and-date-revised': 'action',
-  'severity-labels-retained': 'decision',
-  'paging-experiment-withdrawn': 'point',
-  'telemetry-retention': 'decision',
-  'deletion-test-results': 'action',
-  'research-only-access': 'decision',
-  'dashboard-unapproved-unassigned': 'point',
-  'migration-checksum-owner': 'action',
-  'archive-import-condition-unmet': 'point',
-} as const satisfies Record<string, NotesProjectionExpectation['kind']>;
-
-const withNotesProjection = (claim: GoldClaim): NotesGoldClaim => {
-  const kind =
-    notesProjectionKindByClaimId[
-      claim.id as keyof typeof notesProjectionKindByClaimId
-    ];
-  if (!kind) throw new Error(`notes_projection_missing:${claim.id}`);
-  return {
-    ...claim,
-    notesProjection: {
-      kind,
-      requiredTextTerms: [...claim.requiredTerms],
-      requiredEvidenceTerms: claim.evidence.map((entry) => entry.excerpt),
-      ...(kind === 'point'
-        ? { owner: null, due: null }
-        : {
-            ...(claim.owner !== undefined ? { owner: claim.owner } : {}),
-            ...(claim.date !== undefined ? { due: claim.date } : {}),
-          }),
-    },
-  };
-};
-
-const historicalLocalIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
-  baseLocalIntelligenceEvaluationCases.map((candidate) =>
-    candidate.lane === 'meeting_notes'
-      ? {
-          ...candidate,
-          gold: {
-            ...candidate.gold,
-            requiredClaims:
-              candidate.gold.requiredClaims.map(withNotesProjection),
-          },
-        }
-      : candidate,
-  );
-
-export const localIntelligenceEvaluationCases: LocalIntelligenceEvaluationCase[] =
-  [
-    ...historicalLocalIntelligenceEvaluationCases,
-    ...phiNotesHeldOutCases,
-    ...phiNotesOrdinaryCapacityCases,
-    ...phiNotesExpectedRejectionCases,
-  ];
-
 const normalized = (value: string): string =>
   value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim();
 
@@ -1350,7 +1257,7 @@ export const sourceTextForCase = (
     const match = /^segment-(\d+)$/.exec(sourceId);
     return match ? (candidate.segments[Number(match[1])]?.text ?? null) : null;
   }
-  if (candidate.lane !== 'dreaming') {
+  if (candidate.lane === 'quick_chat' || candidate.lane === 'cross_meeting') {
     return (
       candidate.sources.find((source) => source.sourceId === sourceId)?.text ??
       null

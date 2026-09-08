@@ -4,70 +4,6 @@
 **Tracking:** [#695](https://github.com/metagrover/pluto/issues/695)  
 **Frozen September 6 verdict:** No candidate passes the frozen protocol. Keep production defaults unchanged. Phi is the only notes candidate worth a larger, human-reviewed follow-up, but it is not approved for promotion by this evaluation.
 
-## September 7 source-first hardening implementation status
-
-September 8 real-application follow-up: `scripts/run_phi_notes_application.mjs` now builds and launches actual Electron processes with a capability-guarded temporary profile, real renderer IPC, installed Phi/Gemma, SQLite publication, physical HTTP evidence, and one-second resource/run-state sampling. Initial publication, abrupt process kill after persisted start, startup recovery, and explicit retry passed. Three real cancellation trials preserved prior notes and converged after retry. The source-edit trial also preserved prior notes, but the changed-source retry failed: Phi promoted a reported status into a decision with an unsupported owner placeholder, rejected by the existing commitment validator as `notes_writer_invalid`. This remains a candidate failure; unsuccessful prompt-only clarifications were not retained. A regression test distinguishes the invalid decision classification from the valid sourced fact. A separate attempt was contaminated by a concurrent SQLite ABI rebuild; the driver now pins a verified Electron binding. These are instrumented development diagnostics, not held-out or latency-ranking evidence. Full UI navigation requires native readiness and explicit boot-probe opt-in; sustained recording and OS sleep/wake remain controlled-session work.
-
-September 8 downstream follow-up: six paired development fixtures now exercise generated notes through the actual Gemma dreaming request, coordinator, validator, and SQLite proposal store. Fixture assertions cover correction, withdrawal, conditional tasks, same-name isolation, legitimate no-change/new proposals, and traceability from proposal excerpts through canonical note provenance to original transcripts. Negative mutations verify that the oracle rejects wrong current commitments and stale/unrelated sources. Two additional cases verify downstream cancellation on changed notes or foreground activity and successful explicit retry. All model responses for this coverage are scripted; model-generated downstream acceptance and the human-reviewed-notes comparison remain pending.
-
-September 8 harness follow-up: the development integration suite now runs the real provider inventory/editor path through the coordinator and SQLite publication, checks downstream project note packaging and same-name isolation, rejects a wrong installed Phi digest, and verifies prior-note preservation plus retry after source edits, transport failure, cancellation, and database-module restart recovery. Gemma chat routing is checked on the same provider. A dedicated TypeScript configuration covers the harness and scripts omitted by application typechecking. These checks use synthetic transport; real inference and sustained app acceptance remain pending. See [harness commands and coverage boundaries](phi-notes-harness.md).
-
-Issue #788 now has an experiment-disabled implementation of the source-first Phi notes path and its acceptance harness. The implementation scores visible note blocks through canonical source provenance, freezes a fresh semantic and capacity corpus, reconciles bounded leaf inventories before one mandatory meeting-wide editor, and isolates the added semantic guidance behind the explicit `phi-notes-source-first` configuration. The application coordinator exposes a disposable-integration-only activation seam and refuses publication when the returned model, pipeline version, or source revision does not match that candidate identity. Production Gemma routing and default prompt behavior are unchanged.
-
-The version-2 owner-only manifest freezes both exact model digests, corpus and rubric hashes, settings, all 180 paired schedule rows, and cold/warm order. Its append-only JSONL ledger records a run before inference, records physical starts before send, and treats a crash-started run as interrupted rather than silently rerunning its ID. Protocol-valid dry transport reaches both the inventory writer and final editor without an Ollama request. A separate disposable mixed-workload dry entry verifies isolated profile/database/settings paths and freezes the downstream, sustained-load, and recovery scenario inventory without capture or inference.
-
-This is implementation evidence, not promotion evidence. The 168 supported paired attempts plus expected-rejection runs, blinded human review, downstream generated-notes track, 30-minute recording control/mixed comparison, sustained resource acceptance, and complete fault-injection acceptance remain `incomplete`. Short real-application resource samples and the successful recovery cases above do not satisfy those gates. No result below is superseded, and Phi remains disabled for production notes until every frozen gate passes.
-
-The first frozen-settings capacity measurement is a blocking result. At 16,384 context tokens, all eight declared 20–40 minute ordinary-capacity fixtures fail the source-first preflight before inference because the complete-source final editor cannot reserve the worst-case aggregate inventories, editor output, safety margin, and permitted recovery split. Planned initial leaf counts were `2, 2, 2, 2, 3, 3, 4, 3`; the four-leaf case also exceeds the three-leaf limit. The corpus records this result without shrinking the fixtures or increasing context after observation. The 168 supported-attempt schedule must not start until a separately reviewed capacity revision is supported by measured 16 GB resource evidence.
-
-## September 8 controlled capture and read-only production-source follow-up
-
-With explicit operator authorization, a read-only source extractor inspected 79
-meetings marked finalized/validated without loading existing generated notes or
-settings. It rejected pending WAL/journal writes and verified the production
-database identity and hash remained unchanged after extraction. Source copies and
-per-meeting results remain owner-only local artifacts; no meeting content was
-committed. At the unchanged 16,384-token setting, **52 sources failed candidate
-capacity preflight, 25 reached the generation boundary, and 2 were rejected by the
-source parser**. The provider callback threw at that boundary, so this check made
-zero physical model requests. These are development-source admission counts, not
-generation completion or quality scores. Invalid sources remain in the denominator.
-
-The real-app driver now has explicitly opted-in capture rehearsals using copied
-native assets, a synthetic fake microphone, actual system-audio playback/tap,
-rendered transcript/health sampling, native/Ollama RSS, notes/Ask attempt outcomes,
-and finalization checks. The first attempt exposed a macOS native model-root alias
-comparison bug; normalizing both sides identically fixes it without weakening
-unrelated-root rejection. A 30-second rehearsal subsequently reached finalized,
-validated transcription. A 240-second mixed rehearsal completed all four injected
-Phi notes jobs and exercised actual Ask-driven notes preemption, but final
-transcription failed with `speaker_attribution_rejected` at 0.571 confidence versus
-the unchanged 0.80 threshold. That fixture replayed identical speech into both
-channels at different offsets; it is retained as a failed attribution stress case,
-not a clean workload comparison. The driver now accepts distinct microphone/system
-fixtures so this confound need not be repeated.
-
-A separate 240-second rehearsal with distinct, alternating channel fixtures reached
-finalized/validated transcription with no integrity causes and completed all four
-injected Phi notes jobs. All eight Ask attempts returned partial answers; first
-content ranged from 2.67 to 13.27 seconds, with six exceeding five seconds. This
-does not satisfy the minimum twenty comparable samples for the frozen p95 gate.
-The native/app/model paths are real, but these short instrumented development runs
-are not matched 30-minute controls or accepted recording-quality benchmarks.
-
-An additional operator-assisted, non-recording sleep/wake trial observed actual
-Electron OS suspend/resume events after a persisted notes start. The measured sleep
-interval was **1.537 seconds**, not the requested fifteen seconds. The in-flight
-notes job completed after wake and an explicit retry published with matching Phi
-model, source-first pipeline, and current source revision. Resource sampling was
-explicitly paused for sleep, never filled with zeros. Automatic wake was unavailable
-without administrator access; the operator agreed to wake the Mac manually.
-
-The two 30-minute comparison runs, marker/chunk-integrity adjudication, settled
-resource gates, twenty-sample responsiveness gates, and complete fault matrix remain
-incomplete. This brief OS event pair is not evidence for longer sleep, recording
-across sleep, or every recovery condition. No production model routing or notes changed.
-
 ## September 7 residency repair and 12-case notes evaluation
 
 [Issue #784](https://github.com/metagrover/pluto/issues/784) repairs the lifecycle blocker identified by the frozen evaluation. Before every serialized local generation, Pluto now asks Ollama which models are resident, retains an equivalent target, and unloads non-target residents before starting inference. Discovery and cleanup share a 40-second deadline and fail closed with explicit run failure codes. This changes lifecycle admission only; it does not change model selection or note acceptance policy.
@@ -214,29 +150,3 @@ This report is a **provisional screening decision**, not full protocol acceptanc
 5. Keep Gemma for production notes, dreaming, and deeper synthesis until a challenger passes the applicable evidence, resource, and integration gates.
 
 Rollback is trivial because this evaluation changes no production model setting, runtime policy, database, or accepted intelligence. The private raw ledger remains owner-only under `.private/local-intelligence-evaluation/`; this committed report contains configuration and aggregate results only.
-# Latest-ten read-only production development replay (2026-09-08)
-
-An explicitly authorized source-only immutable read selected the actual latest ten
-meetings by date, without replacing ineligible rows. Database content hash remained
-unchanged. No production notes/settings were loaded or changed. The unchanged Phi
-source-first 16K configuration ran through the real unified provider, not through
-application publication.
-
-Results: two ineligible sources, four capacity preflight rejects, one invalid
-editor output, one truncated writer (including its bounded retry), one invalid
-writer, and one accepted-in-replay output. Four meetings reached inference, with
-seven physical generation requests and 260.191 seconds total meeting elapsed time.
-
-Assistant source review rejected the sole accepted output as useful notes: it
-largely reproduced noisy transcript fragments as 32 key points. Five visible
-points also matched source segments other than their attached citations. This is
-evidence that schema/span validity is insufficient, not a blinded quality score.
-The noisy source limits recoverable meaning but does not excuse incorrect citation
-mapping. The original accepted-in-replay outcome is retained separately from this
-negative quality assessment.
-
-Next harness work: retain rejected raw responses and validation categories,
-reproduce visible-block citation mismatch with synthetic data, and add synthesis
-quality checks. Capacity and writer-output bounds remain blockers. All raw sources,
-requests, outputs, and detailed review stay owner-only locally. No paired quality,
-sustained-resource, or promotion claim is made from this development sample.

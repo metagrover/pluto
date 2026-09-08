@@ -5,9 +5,6 @@ import type { AnalysisProvider, MeetingType } from './analysisTypes';
 export const NOTES_PROMPT_VERSION = 'notes-v29';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
-export const PHI_NOTES_EXPERIMENT_MODEL = 'phi4-mini:3.8b';
-export const PHI_NOTES_EXPERIMENT_DIGEST =
-  '78fad5d182a7c33065e153a5f8ba210754207ba9d91973f57dffa7f487363753';
 
 export type SourceSpan = {
   segment: number;
@@ -85,7 +82,6 @@ export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
 export type NotesResponseContract =
   | 'draft'
   | 'compact_draft'
-  | 'reconciliation'
   | 'audit'
   | 'editor';
 
@@ -115,14 +111,11 @@ export type GenerateMeetingNotesInput = {
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
   /** Compact direct writer; deterministic-only remains a benchmark route. */
   compactWriterContract?: boolean;
-  /** Explicit, disabled-by-default Phi source-first experiment. */
-  sourceFirstReconciliation?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
   provider: AnalysisProvider;
   model: string;
-  modelDigest?: string;
   contextTokens: number;
   signal?: AbortSignal;
   onRepair?: (task: NotesTask) => void;

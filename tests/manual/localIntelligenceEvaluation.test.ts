@@ -6,33 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 import { buildDreamingGenerationRequest } from '../../electron/dreaming/prompt';
 import { validateDreamingOutput } from '../../electron/dreaming/validateDreamingOutput';
-import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 import {
-  type EvaluationEvent,
   type EvaluationModelIdentity,
   type LocalIntelligenceManifest,
-  type NotesEvaluationCollection,
-  type NotesExperimentConfiguration,
-  type NotesExperimentManifest,
-  type NotesScheduledRun,
-  assertEvaluationCeiling,
   parseLocalIntelligenceManifest,
-  reconcileNotesEvaluationSchedule,
 } from '../../scripts/lib/local_intelligence_evaluation';
-import {
-  appendOwnerOnlyPrivateLine,
-  writeOwnerOnlyPrivateFile,
-} from '../../scripts/lib/privateEvaluationFile';
-import { captureDryRunWire } from './fixtures/localIntelligenceDryTransport';
+import { writeOwnerOnlyPrivateFile } from '../../scripts/lib/privateEvaluationFile';
 import {
   type LocalIntelligenceEvaluationCase,
   evaluateReplayResponse,
   localIntelligenceEvaluationCases,
   scoreGoldOutput,
 } from './fixtures/localIntelligenceEvaluationCases';
-import { scoreNotesGoldOutput } from './fixtures/localIntelligenceNotesScoring';
 
 const enabled = process.env.RUN_LOCAL_INTELLIGENCE_EVALUATION === '1';
 const dryRun = process.env.LOCAL_INTELLIGENCE_EVALUATION_DRY_RUN === '1';
@@ -62,151 +49,30 @@ const selectedModel = (
   return model;
 };
 
-const selectedNotesConfiguration = (
-  manifest: LocalIntelligenceManifest,
-): NotesExperimentConfiguration | null => {
-  if (manifest.schemaVersion !== 2) return null;
-  if (process.env.LOCAL_INTELLIGENCE_EVALUATION_SCHEDULE === '1') {
-    if (process.env.LOCAL_INTELLIGENCE_EVALUATION_CONFIG) {
-      throw new Error('evaluation_schedule_single_config_conflict');
-    }
-    return null;
-  }
-  const requested = process.env.LOCAL_INTELLIGENCE_EVALUATION_CONFIG;
-  if (!requested) throw new Error('evaluation_config_required');
-  const configuration = manifest.configurations.find(
-    (candidate) => candidate.configId === requested,
-  );
-  if (!configuration) throw new Error('evaluation_config_unknown');
-  return configuration;
-};
-
-const selectedCases = (
-  manifest: LocalIntelligenceManifest,
-): LocalIntelligenceEvaluationCase[] => {
-  const partition = process.env.LOCAL_INTELLIGENCE_EVALUATION_PARTITION;
-  if (partition && partition !== 'development' && partition !== 'held_out') {
-    throw new Error('evaluation_partition_unknown');
-  }
-  if (manifest.schemaVersion === 2 && partition !== manifest.partition) {
-    throw new Error('evaluation_partition_mismatch');
-  }
-  const collection = process.env.LOCAL_INTELLIGENCE_EVALUATION_COLLECTION as
-    | NotesEvaluationCollection
-    | undefined;
-  if (
-    collection &&
-    !['semantic', 'ordinary_capacity', 'expected_rejection'].includes(
-      collection,
-    )
-  ) {
-    throw new Error('evaluation_collection_unknown');
-  }
+const selectedCases = (): LocalIntelligenceEvaluationCase[] => {
   const requested = process.env.LOCAL_INTELLIGENCE_EVALUATION_CASE?.split(',')
     .map((value) => value.trim())
     .filter(Boolean);
-  const collectionIds =
-    manifest.schemaVersion === 2 && collection
-      ? manifest.collections[
-          collection === 'ordinary_capacity'
-            ? 'ordinaryCapacity'
-            : collection === 'expected_rejection'
-              ? 'expectedRejection'
-              : 'semantic'
-        ]
-      : null;
-  const cases = localIntelligenceEvaluationCases.filter(
-    (candidate) =>
-      (!partition || candidate.partition === partition) &&
-      (!collectionIds || collectionIds.includes(candidate.id)) &&
-      (!requested?.length || requested.includes(candidate.id)),
-  );
+  const cases = requested?.length
+    ? localIntelligenceEvaluationCases.filter((candidate) =>
+        requested.includes(candidate.id),
+      )
+    : localIntelligenceEvaluationCases;
   if (!cases.length || (requested && cases.length !== requested.length)) {
     throw new Error('evaluation_case_unknown');
   }
   return cases;
 };
 
-const caseForScheduledRun = (
-  manifest: NotesExperimentManifest,
-  run: NotesScheduledRun,
-): LocalIntelligenceEvaluationCase => {
-  const candidate = localIntelligenceEvaluationCases.find(
-    ({ id }) => id === run.caseId,
-  );
-  const expectedIds =
-    run.collection === 'ordinary_capacity'
-      ? manifest.collections.ordinaryCapacity
-      : run.collection === 'expected_rejection'
-        ? manifest.collections.expectedRejection
-        : manifest.collections.semantic;
-  if (!candidate || !expectedIds.includes(run.caseId)) {
-    throw new Error('evaluation_schedule_mismatch');
-  }
-  return candidate;
-};
-
-type EvaluationExecutionRow = {
-  run: NotesScheduledRun | null;
-  candidate: LocalIntelligenceEvaluationCase;
-  model: EvaluationModelIdentity;
-  configuration: NotesExperimentConfiguration | null;
-};
-
-const executionRows = (
-  manifest: LocalIntelligenceManifest,
-): EvaluationExecutionRow[] => {
-  const scheduleMode =
-    process.env.LOCAL_INTELLIGENCE_EVALUATION_SCHEDULE === '1';
-  if (scheduleMode) {
-    if (manifest.schemaVersion !== 2) {
-      throw new Error('evaluation_schedule_manifest_required');
-    }
-    if (
-      process.env.LOCAL_INTELLIGENCE_EVALUATION_CASE ||
-      process.env.LOCAL_INTELLIGENCE_EVALUATION_COLLECTION
-    ) {
-      throw new Error('evaluation_schedule_filter_conflict');
-    }
-    selectedNotesConfiguration(manifest);
-    return manifest.schedule.map((run) => {
-      const configuration = manifest.configurations.find(
-        ({ configId }) => configId === run.configId,
-      );
-      const model = manifest.models.find(
-        ({ configId }) => configId === run.configId,
-      );
-      if (!configuration || !model) {
-        throw new Error('evaluation_schedule_mismatch');
-      }
-      return {
-        run,
-        candidate: caseForScheduledRun(manifest, run),
-        model,
-        configuration,
-      };
-    });
-  }
-
-  const configuration = selectedNotesConfiguration(manifest);
-  const model = configuration
-    ? manifest.models.find(
-        ({ configId }) => configId === configuration.configId,
-      )
-    : selectedModel(manifest);
-  if (!model) throw new Error('evaluation_config_unknown');
-  return selectedCases(manifest).map((candidate) => ({
-    run: null,
-    candidate,
-    model,
-    configuration,
-  }));
-};
-
 const pendingHumanReview = (automatedTriageAccepted: boolean) => ({
   automatedTriageAccepted,
   reviewStatus: 'pending_human_review' as const,
 });
+
+type CapturedWire = {
+  endpoint: string;
+  body: Record<string, unknown>;
+};
 
 type EvaluationWireRequest =
   | { kind: 'ignored' }
@@ -231,7 +97,6 @@ type EvaluationWireStart = {
   bodySha256: string;
   options: unknown;
   formatSha256: string;
-  responseContract: 'reconciliation' | 'compact_draft' | 'editor' | 'other';
 };
 
 type EvaluationResidencyEvent = {
@@ -293,18 +158,6 @@ const recordEvaluationWireRequest = (input: {
     return;
   }
   if (request.kind !== 'inference') return;
-  const format = request.body.format;
-  const properties =
-    format && typeof format === 'object' && 'properties' in format
-      ? (format as { properties?: Record<string, unknown> }).properties
-      : undefined;
-  const responseContract = properties?.facts
-    ? 'reconciliation'
-    : properties?.dispositions
-      ? 'editor'
-      : properties?.sections
-        ? 'compact_draft'
-        : 'other';
   input.wireStarts.push({
     at: input.at,
     endpoint: request.endpoint,
@@ -313,11 +166,61 @@ const recordEvaluationWireRequest = (input: {
     bodySha256: sha(input.bodyText as string),
     options: request.body.options,
     formatSha256: sha(JSON.stringify(request.body.format ?? null)),
-    responseContract,
   });
   if (request.actualModel !== input.expectedModel) {
     throw new Error('evaluation_wire_model_mismatch');
   }
+};
+
+type ProviderTransport = {
+  ollamaStream: (
+    endpoint: string,
+    options: RequestInit,
+    onChunk: (chunk: string) => void,
+  ) => Promise<unknown>;
+  ollamaFetch: (
+    endpoint: string,
+    options: RequestInit | undefined,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) => Promise<Response>;
+};
+
+const captureDryRunWire = async (
+  provider: UnifiedLLMProvider,
+  run: () => Promise<unknown>,
+): Promise<CapturedWire[]> => {
+  const captured: CapturedWire[] = [];
+  const transport = provider as unknown as ProviderTransport;
+  const capture = (endpoint: string, options: RequestInit): never => {
+    if (!/\/api\/(?:chat|generate)$/.test(endpoint)) {
+      throw new Error('evaluation_dry_run_unexpected_endpoint');
+    }
+    if (typeof options.body !== 'string') {
+      throw new Error('evaluation_dry_run_body_missing');
+    }
+    captured.push({ endpoint, body: JSON.parse(options.body) });
+    throw new Error('evaluation_dry_run_wire_captured');
+  };
+  transport.ollamaStream = async (endpoint, options) =>
+    capture(endpoint, options);
+  transport.ollamaFetch = async (endpoint, options) => {
+    if (endpoint === '/api/ps') {
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (!options) throw new Error('evaluation_dry_run_body_missing');
+    return capture(endpoint, options);
+  };
+  try {
+    await run();
+  } catch {
+    // Expected: transport is deliberately stopped after the request body exists.
+  }
+  if (!captured.length) throw new Error('evaluation_dry_run_no_wire_intent');
+  return captured;
 };
 
 const providerFor = (model: EvaluationModelIdentity): UnifiedLLMProvider =>
@@ -388,55 +291,7 @@ const resourceSnapshot = async () => {
       name: resident.name ?? 'unknown',
       residentBytes: resident.size_vram ?? resident.size ?? 0,
     })),
-  } as const;
-};
-
-const prepareScheduledCondition = async (
-  run: NotesScheduledRun,
-  model: EvaluationModelIdentity,
-  allModels: readonly EvaluationModelIdentity[],
-  request: typeof fetch,
-): Promise<{ condition: 'cold' | 'warm'; residentModel: string }> => {
-  for (const candidate of allModels) {
-    if (run.condition === 'warm' && candidate.tag === model.tag) continue;
-    const response = await request('http://127.0.0.1:11434/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: candidate.tag,
-        keep_alive: 0,
-        stream: false,
-      }),
-    });
-    if (!response.ok) throw new Error('evaluation_residency_cleanup_failed');
-  }
-  if (run.condition === 'warm') {
-    const response = await request('http://127.0.0.1:11434/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: model.tag,
-        prompt: 'Return exactly READY. This contains no evaluation content.',
-        stream: false,
-        keep_alive: '30m',
-        options: { seed: 41, temperature: 0, num_predict: 8 },
-      }),
-    });
-    if (!response.ok) throw new Error('evaluation_residency_prime_failed');
-  }
-  const resident = await request('http://127.0.0.1:11434/api/ps');
-  if (!resident.ok) throw new Error('evaluation_model_inventory_unavailable');
-  const payload = (await resident.json()) as {
-    models?: Array<{ name?: string }>;
   };
-  const names = (payload.models ?? []).map(({ name }) => name).filter(Boolean);
-  if (
-    (run.condition === 'cold' && names.includes(model.tag)) ||
-    (run.condition === 'warm' && !names.includes(model.tag))
-  ) {
-    throw new Error('evaluation_residency_condition_mismatch');
-  }
-  return { condition: run.condition, residentModel: model.tag };
 };
 
 describe('local intelligence replay acceptance boundary', () => {
@@ -548,15 +403,6 @@ realSuite('opt-in local intelligence production-path replay', () => {
     async () => {
       const manifest = loadManifest();
       const model = selectedModel(manifest);
-      const unchangedWorkloadModel =
-        manifest.schemaVersion === 2
-          ? manifest.models.find(
-              ({ configId }) => configId === 'gemma-notes-control',
-            )
-          : model;
-      if (!unchangedWorkloadModel) {
-        throw new Error('evaluation_control_model_missing');
-      }
       const notesCase = localIntelligenceEvaluationCases.find(
         (candidate) => candidate.lane === 'meeting_notes',
       );
@@ -585,21 +431,12 @@ realSuite('opt-in local intelligence production-path replay', () => {
         JSON.stringify({ segments: notesCase.segments }),
       );
       const notesProvider = providerFor(model);
-      const notesConfiguration = selectedNotesConfiguration(manifest);
-      let notesAnalysis: AnalysisDocumentV3 | undefined;
-      const notesWire = await captureDryRunWire(notesProvider, model, () =>
-        notesProvider
-          .generateStructuredAnalysis(notesTranscript, '', 'auto', {
-            source: notesSource,
-            contextTokens: 16_384,
-            compactWriterContract: true,
-            sourceFirstReconciliation:
-              notesConfiguration?.sourceFirstReconciliation ?? false,
-          })
-          .then((analysis) => {
-            notesAnalysis = analysis;
-            return analysis;
-          }),
+      const notesWire = await captureDryRunWire(notesProvider, () =>
+        notesProvider.generateStructuredAnalysis(notesTranscript, '', 'auto', {
+          source: notesSource,
+          contextTokens: 16_384,
+          compactWriterContract: true,
+        }),
       );
       expect(notesWire[0]).toMatchObject({
         endpoint: '/api/chat',
@@ -612,64 +449,36 @@ realSuite('opt-in local intelligence production-path replay', () => {
       });
       expect(notesWire[0]?.body.format).toBeTypeOf('object');
       expect(notesWire[0]?.body.messages).toBeInstanceOf(Array);
-      expect(
-        notesWire.map(({ body }) => {
-          const properties = (body.format as { properties?: object })
-            .properties;
-          return properties && 'facts' in properties
-            ? 'reconciliation'
-            : properties && 'dispositions' in properties
-              ? 'editor'
-              : 'compact_draft';
-        }),
-      ).toEqual(
-        notesConfiguration?.sourceFirstReconciliation
-          ? ['reconciliation', 'editor']
-          : ['compact_draft', 'editor'],
-      );
-      expect(notesAnalysis?.generation_metadata).toMatchObject({
-        model: model.tag,
-        pipeline_version: notesConfiguration?.sourceFirstReconciliation
-          ? 'notes-v30-source-first'
-          : expect.stringMatching(/^writer-editor/),
-        source_provenance: { source_revision: notesSource.revision },
-      });
 
-      const chatProvider = providerFor(unchangedWorkloadModel);
-      const chatWire = await captureDryRunWire(
-        chatProvider,
-        unchangedWorkloadModel,
-        () =>
-          chatProvider.answerAskPluto(chatCase.prompt, { mode: chatCase.mode }),
+      const chatProvider = providerFor(model);
+      const chatWire = await captureDryRunWire(chatProvider, () =>
+        chatProvider.answerAskPluto(chatCase.prompt, { mode: chatCase.mode }),
       );
       expect(chatWire[0]).toMatchObject({
         endpoint: '/api/generate',
         body: {
-          model: unchangedWorkloadModel.tag,
+          model: model.tag,
           stream: false,
           think: false,
           options: { num_predict: 192 },
         },
       });
 
-      const dreamingProvider = providerFor(unchangedWorkloadModel);
+      const dreamingProvider = providerFor(model);
       const dreamingRequest = buildDreamingGenerationRequest(
         dreamingCase.input,
       );
-      const dreamingWire = await captureDryRunWire(
-        dreamingProvider,
-        unchangedWorkloadModel,
-        () =>
-          dreamingProvider.synthesizeKnowledgeDocument(dreamingRequest.prompt, {
-            purpose: 'dreaming',
-            responseSchema: dreamingRequest.schema,
-            model: unchangedWorkloadModel.tag,
-            promptVersion: dreamingRequest.promptVersion,
-          }),
+      const dreamingWire = await captureDryRunWire(dreamingProvider, () =>
+        dreamingProvider.synthesizeKnowledgeDocument(dreamingRequest.prompt, {
+          purpose: 'dreaming',
+          responseSchema: dreamingRequest.schema,
+          model: model.tag,
+          promptVersion: dreamingRequest.promptVersion,
+        }),
       );
       expect(dreamingWire[0]).toMatchObject({
         body: {
-          model: unchangedWorkloadModel.tag,
+          model: model.tag,
           think: false,
           format: dreamingRequest.schema,
         },
@@ -681,110 +490,36 @@ realSuite('opt-in local intelligence production-path replay', () => {
     'runs only explicitly selected private replay cases and records every wire start',
     async () => {
       const manifest = loadManifest();
+      const model = selectedModel(manifest);
+      await assertInstalledModelIdentity(model);
+      const cases = selectedCases();
       const outputRoot = process.env.LOCAL_INTELLIGENCE_EVALUATION_OUT;
       if (!outputRoot || !path.isAbsolute(outputRoot)) {
         throw new Error('evaluation_output_absolute_path_required');
       }
-      let rows = executionRows(manifest);
-      const scheduleMode =
-        process.env.LOCAL_INTELLIGENCE_EVALUATION_SCHEDULE === '1';
-      const ledgerPath = path.join(outputRoot, 'events.private.jsonl');
-      const existingEvents: EvaluationEvent[] = fs.existsSync(ledgerPath)
-        ? fs
-            .readFileSync(ledgerPath, 'utf8')
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line) as EvaluationEvent)
-        : [];
-      if (scheduleMode) {
-        if (manifest.schemaVersion !== 2) {
-          throw new Error('evaluation_schedule_manifest_required');
-        }
-        const resumable = reconcileNotesEvaluationSchedule(
-          manifest,
-          existingEvents,
-        );
-        const unstartedIds = new Set(
-          resumable.unstarted.map(({ runId }) => runId),
-        );
-        rows = rows.filter(
-          ({ run }) => run !== null && unstartedIds.has(run.runId),
-        );
-      }
       const originalFetch = globalThis.fetch;
       const wireStarts: EvaluationWireStart[] = [];
       const residencyEvents: EvaluationResidencyEvent[] = [];
-      let activeRow: EvaluationExecutionRow | null = null;
-      let activeAttemptIds: string[] = [];
       globalThis.fetch = async (input, init) => {
         const endpoint = new URL(String(input)).pathname;
-        const before = wireStarts.length;
         recordEvaluationWireRequest({
           endpoint,
           bodyText: init?.body,
-          expectedModel: activeRow?.model.tag ?? '',
+          expectedModel: model.tag,
           at: new Date().toISOString(),
           wireStarts,
           residencyEvents,
         });
-        if (activeRow?.run && wireStarts.length > before) {
-          const attemptId = `attempt-${sha(
-            `${activeRow.run.runId}:${activeAttemptIds.length}`,
-          ).slice(0, 24)}`;
-          activeAttemptIds.push(attemptId);
-          appendOwnerOnlyPrivateLine(ledgerPath, {
-            type: 'physical_started',
-            eventId: `event-${attemptId}`,
-            runId: activeRow.run.runId,
-            logicalStageId:
-              wireStarts.at(-1)?.responseContract ?? 'notes_generation',
-            attemptId,
-            requestedModel: activeRow.model.tag,
-            actualModel: wireStarts.at(-1)?.actualModel ?? '',
-            atMs: performance.timeOrigin + performance.now(),
-          } satisfies EvaluationEvent);
-        }
         return originalFetch(input, init);
       };
 
       const results: Array<Record<string, unknown>> = [];
       try {
-        for (const row of rows) {
-          activeRow = row;
-          activeAttemptIds = [];
-          const { candidate, model, configuration, run } = row;
-          await assertInstalledModelIdentity(model);
-          if (run) {
-            await prepareScheduledCondition(
-              run,
-              model,
-              manifest.models,
-              originalFetch,
-            );
-            appendOwnerOnlyPrivateLine(ledgerPath, {
-              type: 'run_started',
-              eventId: `event-run-${sha(run.runId).slice(0, 24)}`,
-              runId: run.runId,
-              caseId: run.caseId,
-              configId: run.configId,
-              lane: 'meeting_notes',
-              environment: 'replay',
-              sourceRevision: manifest.sourceRevision,
-              atMs: performance.timeOrigin + performance.now(),
-            } satisfies EvaluationEvent);
-          }
+        for (const candidate of cases) {
           const provider = providerFor(model);
           const startedAt = Date.now();
           const wireStartIndex = wireStarts.length;
           const resourceBefore = await resourceSnapshot();
-          let logicalOutcome: Extract<
-            EvaluationEvent,
-            { type: 'logical_terminal' }
-          >['outcome'] = 'pending_review';
-          let physicalOutcome: Extract<
-            EvaluationEvent,
-            { type: 'physical_terminal' }
-          >['outcome'] = 'complete';
           try {
             if (candidate.lane === 'meeting_notes') {
               const transcript = transcriptFor(candidate);
@@ -796,49 +531,22 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 '',
                 'auto',
                 {
-                  signal: AbortSignal.timeout(
-                    candidate.durationClass === 'long'
-                      ? manifest.ceilings.longNotesMs
-                      : manifest.ceilings.ordinaryNotesMs,
-                  ),
                   source,
-                  contextTokens:
-                    manifest.schemaVersion === 2
-                      ? manifest.settings.contextTokens
-                      : 16_384,
-                  compactWriterContract:
-                    configuration?.compactWriterContract ?? true,
-                  sourceFirstReconciliation:
-                    configuration?.sourceFirstReconciliation ?? false,
+                  contextTokens: 16_384,
+                  compactWriterContract: true,
                 },
               );
-              if (run?.collection === 'expected_rejection') {
-                throw new Error(
-                  'evaluation_expected_rejection_produced_output',
-                );
-              }
-              const goldScore = scoreNotesGoldOutput(
+              const goldScore = scoreGoldOutput(
                 candidate,
-                analysis,
-                source,
+                JSON.stringify(analysis),
               );
               results.push({
-                runId: run?.runId ?? null,
                 caseId: candidate.id,
-                configId: model.configId,
-                collection: run?.collection ?? null,
-                repetition: run?.repetition ?? null,
-                condition: run?.condition ?? null,
                 lane: candidate.lane,
                 sourceRevision: source.revision,
                 sourceSegments: candidate.segments,
                 transcript,
                 analysis,
-                pipelineVersion:
-                  analysis.generation_metadata?.pipeline_version ?? null,
-                responseContracts: wireStarts
-                  .slice(wireStartIndex)
-                  .map(({ responseContract }) => responseContract),
                 goldScore,
                 ...pendingHumanReview(
                   analysis.analysis_schema_version === 3 && goldScore.passed,
@@ -848,7 +556,10 @@ realSuite('opt-in local intelligence production-path replay', () => {
                 resourceBefore,
                 resourceAfter: await resourceSnapshot(),
               });
-            } else if (candidate.lane !== 'dreaming') {
+            } else if (
+              candidate.lane === 'quick_chat' ||
+              candidate.lane === 'cross_meeting'
+            ) {
               const answer = await provider.answerAskPluto(candidate.prompt, {
                 mode: candidate.mode,
               });
@@ -895,96 +606,33 @@ realSuite('opt-in local intelligence production-path replay', () => {
               });
             }
           } catch (error) {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            const expectedFailure =
-              run?.collection === 'expected_rejection' &&
-              'expectedFailure' in candidate
-                ? candidate.expectedFailure
-                : null;
-            const expectedRejectionPassed = message === expectedFailure;
-            logicalOutcome = expectedRejectionPassed ? 'accepted' : 'failed';
-            physicalOutcome = expectedRejectionPassed ? 'complete' : 'failed';
             results.push({
-              runId: run?.runId ?? null,
               caseId: candidate.id,
-              configId: model.configId,
-              collection: run?.collection ?? null,
-              repetition: run?.repetition ?? null,
-              condition: run?.condition ?? null,
               lane: candidate.lane,
               ...pendingHumanReview(false),
-              expectedRejectionPassed,
               elapsedMs: Date.now() - startedAt,
               physicalStarts: wireStarts.length - wireStartIndex,
               resourceBefore,
               resourceAfter: await resourceSnapshot(),
-              error: message,
+              error: String(error),
             });
-          }
-          if (run) {
-            if (candidate.lane !== 'meeting_notes')
-              throw new Error('evaluation_schedule_lane_mismatch');
-            assertEvaluationCeiling(manifest, {
-              lane: 'meeting_notes',
-              durationClass: candidate.durationClass,
-              elapsedMs: Date.now() - startedAt,
-              physicalStarts: activeAttemptIds.length,
-            });
-            const terminalResource = await resourceSnapshot();
-            const telemetry = {
-              memoryPressure: terminalResource.memoryPressure,
-              thermalState: terminalResource.thermalState,
-              residentModelBytes: terminalResource.residentModels.reduce(
-                (total, resident) => total + resident.residentBytes,
-                0,
-              ),
-              swapUsedBytes: terminalResource.swapUsedBytes,
-            };
-            for (const attemptId of activeAttemptIds) {
-              appendOwnerOnlyPrivateLine(ledgerPath, {
-                type: 'physical_terminal',
-                eventId: `event-end-${attemptId}`,
-                runId: run.runId,
-                attemptId,
-                outcome: physicalOutcome,
-                atMs: performance.timeOrigin + performance.now(),
-                inputTokens: 0,
-                outputTokens: 0,
-                resourceTelemetry: telemetry,
-              } satisfies EvaluationEvent);
-            }
-            appendOwnerOnlyPrivateLine(ledgerPath, {
-              type: 'logical_terminal',
-              eventId: `event-end-${sha(run.runId).slice(0, 24)}`,
-              runId: run.runId,
-              logicalStageId: 'notes',
-              outcome: logicalOutcome,
-              acceptedInReplay: logicalOutcome === 'accepted',
-              published: false,
-              sourceRevision: manifest.sourceRevision,
-              atMs: performance.timeOrigin + performance.now(),
-            } satisfies EvaluationEvent);
           }
         }
       } finally {
-        activeRow = null;
         globalThis.fetch = originalFetch;
       }
 
       const artifactPath = path.join(
         outputRoot,
-        `${scheduleMode ? 'paired-schedule' : (rows[0]?.model.configId ?? 'empty')}-${Date.now()}.private.json`,
+        `${model.configId}-${Date.now()}.private.json`,
       );
       writeOwnerOnlyPrivateFile(
         artifactPath,
         `${JSON.stringify(
           {
-            schemaVersion: 2,
+            schemaVersion: 1,
             sourceRevision: manifest.sourceRevision,
-            scheduleMode,
-            scheduledRows: rows.map(({ run }) => run),
-            models: manifest.models,
+            model,
             wireStarts,
             residencyEvents,
             results,
@@ -993,18 +641,14 @@ realSuite('opt-in local intelligence production-path replay', () => {
           2,
         )}\n`,
       );
-      if (rows.length) expect(wireStarts.length).toBeGreaterThan(0);
-      expect(
-        wireStarts.every((start) =>
-          manifest.models.some(({ tag }) => tag === start.actualModel),
-        ),
-      ).toBe(true);
+      expect(wireStarts.length).toBeGreaterThan(0);
+      expect(wireStarts.every((start) => start.actualModel === model.tag)).toBe(
+        true,
+      );
       console.log(
         JSON.stringify({
           localIntelligenceEvaluation: {
-            configId: scheduleMode
-              ? 'paired-schedule'
-              : rows[0]?.model.configId,
+            configId: model.configId,
             caseCount: results.length,
             automatedTriageAcceptedCount: results.filter(
               (result) => result.automatedTriageAccepted,

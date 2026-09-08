@@ -38,38 +38,6 @@ export const buildNotesResponseSchema = (
     text: { type: 'string', minLength: 1, maxLength: 12000 },
     sources,
   };
-  if (contract === 'reconciliation') {
-    const reconciledText = object(
-      {
-        text: { type: 'string', minLength: 1, maxLength: 12_000 },
-        sources,
-      },
-      ['text', 'sources'],
-    );
-    const reconciledAction = object(
-      {
-        text: { type: 'string', minLength: 1, maxLength: 12_000 },
-        sources,
-        owner: nullableString,
-        due: nullableString,
-      },
-      ['text', 'sources', 'owner', 'due'],
-    );
-    const reconciledDecision = object(
-      {
-        text: { type: 'string', minLength: 1, maxLength: 12_000 },
-        sources,
-        owner: nullableString,
-      },
-      ['text', 'sources', 'owner'],
-    );
-    return object({
-      facts: array(reconciledText),
-      actions: array(reconciledAction),
-      decisions: array(reconciledDecision),
-      questions: array(reconciledText),
-    });
-  }
   if (contract === 'compact_draft') {
     const compactSources = { ...sources, maxItems: 3 };
     const compactItem = object(

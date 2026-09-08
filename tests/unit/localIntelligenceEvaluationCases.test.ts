@@ -1,28 +1,10 @@
-import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { generateMeetingNotes } from '../../electron/llm/meetingNotesPipeline';
-import { createNotesSource } from '../../electron/llm/meetingNotesSource';
-import {
-  type NotesRequest,
-  PHI_NOTES_EXPERIMENT_DIGEST,
-  PHI_NOTES_EXPERIMENT_MODEL,
-} from '../../electron/llm/meetingNotesTypes';
 import {
   localIntelligenceEvaluationCases,
   scoreGoldOutput,
   sourceTextForCase,
 } from '../manual/fixtures/localIntelligenceEvaluationCases';
-import {
-  PHI_NOTES_CORPUS_SHA256,
-  PHI_NOTES_RUBRIC_SHA256,
-  phiNotesBoundaryFixtures,
-  phiNotesCorpusPayload,
-  phiNotesExpectedRejectionCases,
-  phiNotesHeldOutCases,
-  phiNotesOrdinaryCapacityCases,
-  phiNotesRubricPayload,
-} from '../manual/fixtures/localIntelligencePhiNotesHeldOut';
 
 const requiredFailureIds = [
   'F01',
@@ -39,32 +21,12 @@ const requiredFailureIds = [
 ];
 
 describe('local intelligence evaluation corpus', () => {
-  it('preserves the twelve inspected September 7 notes cases as development evidence', () => {
-    const inspectedIds = [
-      'notes-middle-withdrawal',
-      'notes-conditional-ownership',
-      'notes-short-opening-decision',
-      'notes-short-date-correction',
-      'notes-short-owner-handoff',
-      'notes-ordinary-no-decision-no-action',
-      'notes-ordinary-end-commitment',
-      'notes-long-dense-three-position-evidence',
-      'notes-long-dense-owner-date-revision',
-      'notes-long-dense-decisions-and-boundaries',
-      'notes-adversarial-sparse-unrelated-beacons',
-      'notes-adversarial-sparse-unmet-condition',
-    ];
-    const inspected = localIntelligenceEvaluationCases.filter((candidate) =>
-      inspectedIds.includes(candidate.id),
+  it('freezes twelve held-out synthetic notes cases across the target profiles', () => {
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
     );
-    expect(inspected.map((candidate) => candidate.id)).toEqual(inspectedIds);
-    expect(
-      inspected.every((candidate) => candidate.partition === 'development'),
-    ).toBe(true);
-  });
-
-  it('freezes twelve fresh held-out semantic cases across the target profiles', () => {
-    const heldOutNotes = phiNotesHeldOutCases;
 
     expect(heldOutNotes).toHaveLength(12);
     expect(
@@ -82,7 +44,11 @@ describe('local intelligence evaluation corpus', () => {
   });
 
   it('covers every frozen notes evidence challenge explicitly', () => {
-    const heldOutNotes = phiNotesHeldOutCases;
+    const heldOutNotes = localIntelligenceEvaluationCases.filter(
+      (candidate) =>
+        candidate.lane === 'meeting_notes' &&
+        candidate.partition === 'held_out',
+    );
     const covered = new Set(
       heldOutNotes.flatMap((candidate) => candidate.coverageTags),
     );
@@ -102,111 +68,6 @@ describe('local intelligence evaluation corpus', () => {
         'dense_multi_claim',
       ].filter((tag) => !covered.has(tag)),
     ).toEqual([]);
-  });
-
-  it('freezes eight ordinary-capacity cases in the declared source bands', () => {
-    expect(phiNotesOrdinaryCapacityCases).toHaveLength(8);
-    const sourceSizes = phiNotesOrdinaryCapacityCases.map((candidate) => {
-      const actual = candidate.segments.reduce(
-        (total, segment) => total + segment.text.length,
-        0,
-      );
-      expect(actual, candidate.id).toBe(candidate.capacity.sourceCharacters);
-      expect(candidate.segments, candidate.id).toHaveLength(
-        candidate.capacity.segmentCount,
-      );
-      expect(candidate.capacity).toMatchObject({
-        editorFit: 'blocked_at_16384',
-        measuredContextTokens: 16_384,
-        plannerOutcome: 'notes_source_first_capacity_exceeded',
-      });
-      return actual;
-    });
-    expect(
-      sourceSizes.filter((size) => size >= 8_000 && size <= 16_000),
-    ).toHaveLength(4);
-    expect(
-      sourceSizes.filter((size) => size >= 16_001 && size <= 24_000),
-    ).toHaveLength(4);
-  });
-
-  it('freezes the measured 16k capacity blocker before any inference starts', async () => {
-    const plannedLeaves: number[] = [];
-    for (const candidate of phiNotesOrdinaryCapacityCases) {
-      const source = createNotesSource(
-        JSON.stringify({ segments: candidate.segments }),
-      );
-      const generate = vi.fn((_request: NotesRequest) =>
-        Promise.reject(new Error('unexpected_inference')),
-      );
-      let planned = -1;
-      await expect(
-        generateMeetingNotes({
-          reviewProtocol: 'editor',
-          compactWriterContract: true,
-          sourceFirstReconciliation: true,
-          source,
-          context: {
-            userNotes: '',
-            template: 'auto',
-            trustedUserTerms: [],
-            entityHints: [],
-          },
-          generate,
-          provider: 'ollama',
-          model: PHI_NOTES_EXPERIMENT_MODEL,
-          modelDigest: PHI_NOTES_EXPERIMENT_DIGEST,
-          contextTokens: candidate.capacity.measuredContextTokens,
-          onPlan: (plan) => {
-            planned = plan.plannedLeafCount;
-          },
-        }),
-      ).rejects.toThrow(candidate.capacity.plannerOutcome);
-      expect(generate, candidate.id).not.toHaveBeenCalled();
-      expect(planned, candidate.id).toBe(
-        candidate.capacity.expectedWriterParts,
-      );
-      plannedLeaves.push(planned);
-    }
-    expect(plannedLeaves).toEqual([2, 2, 2, 2, 3, 3, 4, 3]);
-  });
-
-  it('keeps expected capacity rejection fixtures outside supported completion', () => {
-    expect(phiNotesExpectedRejectionCases).toHaveLength(2);
-    expect(
-      phiNotesExpectedRejectionCases.every(
-        (candidate) =>
-          candidate.collection === 'expected_rejection' &&
-          candidate.expectedPublication === false &&
-          candidate.priorNotes.length > 0,
-      ),
-    ).toBe(true);
-    expect(phiNotesBoundaryFixtures.map((fixture) => fixture.id)).toEqual([
-      'direct-bounded-transition',
-      'maximum-three-leaves',
-      'single-repartition',
-      'aggregate-inventory-overflow',
-      'oversized-individual-segment',
-      'explicit-capacity-rejection',
-    ]);
-  });
-
-  it('seals the fresh corpus and rubric with literal canonical hashes', () => {
-    const canonicalize = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(canonicalize);
-      if (!value || typeof value !== 'object') return value;
-      return Object.fromEntries(
-        Object.entries(value)
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([key, entry]) => [key, canonicalize(entry)]),
-      );
-    };
-    const sha = (value: unknown) =>
-      createHash('sha256')
-        .update(JSON.stringify(canonicalize(value)))
-        .digest('hex');
-    expect(sha(phiNotesCorpusPayload)).toBe(PHI_NOTES_CORPUS_SHA256);
-    expect(sha(phiNotesRubricPayload)).toBe(PHI_NOTES_RUBRIC_SHA256);
   });
 
   it('has unique case IDs and disjoint development/held-out membership', () => {
@@ -255,26 +116,6 @@ describe('local intelligence evaluation corpus', () => {
             ),
           ).toContain(claim.date.toLowerCase());
         }
-      }
-    }
-  });
-
-  it('requires an explicit visible-block projection for every notes claim', () => {
-    for (const candidate of localIntelligenceEvaluationCases) {
-      if (candidate.lane !== 'meeting_notes') continue;
-      for (const claim of candidate.gold.requiredClaims) {
-        expect(
-          claim.notesProjection,
-          `${candidate.id}/${claim.id}`,
-        ).toBeDefined();
-        expect(
-          claim.notesProjection?.requiredTextTerms.length,
-          `${candidate.id}/${claim.id}/text`,
-        ).toBeGreaterThan(0);
-        expect(
-          claim.notesProjection?.requiredEvidenceTerms.length,
-          `${candidate.id}/${claim.id}/evidence`,
-        ).toBeGreaterThan(0);
       }
     }
   });

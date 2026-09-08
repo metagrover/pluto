@@ -5,7 +5,6 @@ import {
 } from './meetingNotesAudit';
 import {
   notesContentGuidance,
-  notesSourceFirstGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import {
@@ -53,7 +52,6 @@ export const buildNotesEditorPrompt = ({
   knownTerms,
   inherited,
   compactDraft = false,
-  sourceFirstReconciliation = false,
 }: {
   sourceText: string;
   draft: unknown;
@@ -61,7 +59,6 @@ export const buildNotesEditorPrompt = ({
   knownTerms: NotesKnownTerm[];
   inherited?: unknown[];
   compactDraft?: boolean;
-  sourceFirstReconciliation?: boolean;
 }): string =>
   [
     'You are the final meeting-notes editor. Return the complete corrected document against the original source. The draft may contain mistakes or omissions; restore missing material topics and current commitments.',
@@ -73,7 +70,6 @@ export const buildNotesEditorPrompt = ({
           'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, the speaker who states the settled choice is the decision owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
         ]
       : []),
-    ...(sourceFirstReconciliation ? [notesSourceFirstGuidance] : []),
     'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not copy unattributed "I" or "we" statements. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.',
     notesSourceGuidance,
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',
@@ -83,21 +79,15 @@ export const buildNotesEditorPrompt = ({
     'BEGIN SOURCE DATA',
     sourceText,
     'END SOURCE DATA',
-    ...(sourceFirstReconciliation
-      ? []
-      : ['BEGIN DRAFT DATA', JSON.stringify(draft), 'END DRAFT DATA']),
+    'BEGIN DRAFT DATA',
+    JSON.stringify(draft),
+    'END DRAFT DATA',
     ...(inherited?.length
       ? [
-          sourceFirstReconciliation
-            ? 'BEGIN SOURCE INVENTORY'
-            : 'BEGIN INHERITED COMMITMENTS',
+          'BEGIN INHERITED COMMITMENTS',
           JSON.stringify(inherited),
-          sourceFirstReconciliation
-            ? 'END SOURCE INVENTORY'
-            : 'END INHERITED COMMITMENTS',
-          sourceFirstReconciliation
-            ? 'Preserve the id, kind, exact text, evidence, owner and deadline of every retained inventory item. For any omission, add a source-backed disposition targeting its id. Deduplication requires an equivalent retained replacementId. Explain cancellation or supersession in a visible source-backed point. Do not omit facts, negative outcomes, reasons, questions, actions, or decisions merely to shorten notes.'
-            : 'Preserve the id of each retained inherited commitment along with its exact text, evidence, owner and deadline, unless original source cancels, supersedes or duplicates it. For omissions, add dispositions: Disposition[]. target is the omitted inherited id. Use cancelled/superseded with source support; for deduplicated, replacementId is the retained inherited id. Explain cancellation/supersession in a source-backed point. Do not omit commitments merely to shorten notes.',
+          'END INHERITED COMMITMENTS',
+          'Preserve the id of each retained inherited commitment along with its exact text, evidence, owner and deadline, unless original source cancels, supersedes or duplicates it. For omissions, add dispositions: Disposition[]. target is the omitted inherited id. Use cancelled/superseded with source support; for deduplicated, replacementId is the retained inherited id. Explain cancellation/supersession in a source-backed point. Do not omit commitments merely to shorten notes.',
           notesDispositionSchema,
         ]
       : []),

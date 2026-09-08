@@ -87,6 +87,10 @@ modified by the diagnostic launcher.
 
 ## Verification
 
+The following checks and inference results describe the pre-cleanup development
+revision. The later harness-only cleanup restores application code to the PR
+base; old manifests remain tied to their recorded hashes, not the cleaned HEAD.
+
 Focused verification passed 44 tests across eight files, the notes-evaluation
 TypeScript check, repository lint, and whitespace validation. This is not a claim
 that the full application suite or production mixed-workload acceptance ran.
@@ -99,3 +103,14 @@ budget incorrectly attempted an unrecorded review. Replay still does not simulat
 OS timers or scheduler behavior. The independent launcher lifecycle smoke used
 ten synthetic ineligible rows, made zero model requests, and verified clean daemon
 exit without touching the production runtime configuration.
+
+## Latency breakdown
+
+The completed 31-minute-9-second source took 520333 ms. Its four sequential
+requests processed 21074 prompt tokens in 167.51 seconds and generated 4910
+output tokens in 351.54 seconds (about 14 output tokens/second). Combined model
+time was 519.26 seconds; loading contributed only about 0.02 seconds. Repeated
+prompt processing and generated drafts/review dominate, not harness bookkeeping.
+The 27-minute-17-second source failed capacity admission without inference.
+There is therefore only one completed near-thirty-minute observation, not a
+meaningful average. These are historical measurements, not a latency promise.

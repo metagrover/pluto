@@ -25,7 +25,7 @@ import {
   watchNotesReplayResources,
 } from './lib/notesReplayResources';
 import { createNotesReplayTransport } from './lib/notesReplayTransport';
-import type { ReadonlyMeetingSource } from './lib/phi_notes_readonly_sources.mjs';
+import type { ReadonlyMeetingSource } from './lib/notes_readonly_sources.mjs';
 import {
   appendOwnerOnlyPrivateLine,
   writeOwnerOnlyPrivateFile,

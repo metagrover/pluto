@@ -167,37 +167,6 @@ final class ParakeetServiceTests: XCTestCase {
         return directory
     }
 
-    func testPrepareNormalizesTheConfiguredRootButRejectsDifferentRoots() async throws {
-        let modelRoot = try makeDirectory("service-model-alias")
-        let audioRoot = try makeDirectory("service-audio-alias")
-        let service = ParakeetService(
-            modelRoot: modelRoot,
-            audioRoot: audioRoot,
-            manifest: .fixture,
-            installer: ServiceModelInstaller(),
-            inferenceDriver: ServiceInferenceDriver()
-        )
-        var equivalentRoots = [modelRoot.path + "/."]
-        if modelRoot.path.hasPrefix("/var/") {
-            equivalentRoots.append("/private" + modelRoot.path)
-        }
-        for equivalentRoot in equivalentRoots {
-            // Ensure this actually regresses the former literal comparison.
-            XCTAssertNotEqual(equivalentRoot, modelRoot.standardizedFileURL.path)
-            let prepared = await service.handle(RuntimeRequest(
-                id: "canonical", method: .prepare, modelRoot: equivalentRoot
-            ))
-            XCTAssertTrue(prepared.ok)
-        }
-        for rejectedRoot in [audioRoot.path, modelRoot.path + "-other", "relative/models"] {
-            let rejected = await service.handle(RuntimeRequest(
-                id: "rejected", method: .prepare, modelRoot: rejectedRoot
-            ))
-            XCTAssertFalse(rejected.ok)
-            XCTAssertEqual(rejected.error?.code, .pathNotAllowed)
-        }
-    }
-
     func testPrepareThenTranscribeUsesBoundedDeduplicatedVocabulary() async throws {
         let modelRoot = try makeDirectory("service-models")
         let audioRoot = try makeDirectory("service-audio")

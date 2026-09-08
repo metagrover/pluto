@@ -72,7 +72,6 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
 } from './nativeAudioCapture';
-import { resolveNotesEvaluationActivation } from './notesEvaluationActivation';
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
@@ -529,11 +528,6 @@ const invalidateDreamingCatalog = () => {
 
 const meetingNotesRunCoordinator = createMeetingAnalysisRunCoordinator({
   db: db as unknown as MeetingAnalysisRunCoordinatorDb,
-  notesExperiment: resolveNotesEvaluationActivation({
-    isPackaged: app.isPackaged,
-    userDataPath: app.getPath('userData'),
-    argv: process.argv,
-  }),
   getSettings: () => getAllSettings(db),
   getProvider,
   knowledgeSynthesisPause,

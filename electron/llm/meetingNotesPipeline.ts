@@ -30,12 +30,6 @@ import {
   validateInheritedItems,
 } from './meetingNotesHierarchy';
 import {
-  type ReconciledSource,
-  buildSourceReconciliationPrompt,
-  parseReconciledSource,
-  reconciliationDraft,
-} from './meetingNotesReconciliation';
-import {
   type NotesKnownTerm,
   buildCompactNotesWriterPrompt,
   buildNotesAuditPrompt,
@@ -69,7 +63,6 @@ const reviewPrompt = (
     ? buildNotesEditorPrompt({
         ...options,
         compactDraft: input.compactWriterContract === true,
-        sourceFirstReconciliation: input.sourceFirstReconciliation === true,
       })
     : buildNotesAuditPrompt(options);
 const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
@@ -154,11 +147,9 @@ const makeRequest = (
       ? input.reviewProtocol === 'editor'
         ? 'editor'
         : 'audit'
-      : task === 'notesWriter' && input.sourceFirstReconciliation
-        ? 'reconciliation'
-        : task === 'notesWriter' && input.compactWriterContract
-          ? 'compact_draft'
-          : 'draft',
+      : task === 'notesWriter' && input.compactWriterContract
+        ? 'compact_draft'
+        : 'draft',
   prompt,
   outputTokens,
   contextTokens: input.contextTokens,
@@ -477,72 +468,6 @@ const writeDraft = async (
   return draft;
 };
 
-const writeReconciliation = async (
-  input: GenerateMeetingNotesInput,
-  prompt: string,
-  allowedSpans: SourceSpan[],
-  applicationIdPrefix: string,
-): Promise<ReconciledSource> => {
-  const evidenceRevision = createHash('sha256')
-    .update(
-      JSON.stringify(
-        allowedSpans.map((span) => {
-          const segment = input.source.segments.find(
-            (entry) => entry.index === span.segment,
-          );
-          return [
-            span,
-            segment?.speaker ?? null,
-            segment?.text.slice(span.start, span.end) ?? null,
-          ];
-        }),
-      ),
-      'utf8',
-    )
-    .digest('hex');
-  const key = createHash('sha256')
-    .update(
-      JSON.stringify([
-        input.cacheKey,
-        input.provider,
-        input.model,
-        input.modelDigest,
-        input.sourceFirstReconciliation,
-        evidenceRevision,
-        input.contextTokens,
-        prompt,
-        'notes-v30-source-first:reconciliation-schema-v1',
-      ]),
-    )
-    .digest('hex');
-  const cached = input.stageCache?.getReconciliation(key);
-  if (cached) {
-    return parseReconciledSource(
-      JSON.stringify(cached),
-      input.source,
-      allowedSpans,
-      applicationIdPrefix,
-    );
-  }
-  const reconciled = await withOneRepair(
-    input,
-    'notesWriter',
-    prompt,
-    COMPACT_WRITER_OUTPUT_TOKENS,
-    (raw) =>
-      parseReconciledSource(
-        raw,
-        input.source,
-        allowedSpans,
-        applicationIdPrefix,
-      ),
-    allowedSpans,
-    false,
-  );
-  input.stageCache?.setReconciliation(key, reconciled);
-  return reconciled;
-};
-
 const remapDraftIds = (draft: NotesDraft, prefix: string): NotesDraft => {
   const next = structuredClone(draft);
   if (next.overview) next.overview.id = `${prefix}:overview`;
@@ -735,17 +660,12 @@ const auditDraft = async (
         }
         try {
           validateInheritedItems(
-            input.sourceFirstReconciliation
-              ? inherited
-              : inherited.filter(
-                  (item): item is NotesItem & { kind: 'action' | 'decision' } =>
-                    item.kind === 'action' || item.kind === 'decision',
-                ),
-            input.sourceFirstReconciliation
-              ? finalDraft.sections.flatMap((section) => section.items)
-              : commitmentsFor(finalDraft),
+            inherited.filter(
+              (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+                item.kind === 'action' || item.kind === 'decision',
+            ),
+            commitmentsFor(finalDraft),
             audit.dispositions,
-            input.sourceFirstReconciliation === true,
           );
         } catch (error) {
           if (
@@ -777,7 +697,6 @@ const auditDraft = async (
           inherited,
           JSON.parse(raw),
           idPrefix,
-          input.sourceFirstReconciliation === true,
         );
         result.audited.draft = preserved;
         validateFinalDraft(preserved, result.audit, result.audited);
@@ -897,9 +816,8 @@ const metadataFor = (
         : NOTES_PROMPT_VERSION,
     generated_at: new Date().toISOString(),
     error_categories: document.generation_metadata?.error_categories ?? [],
-    pipeline_version: input.sourceFirstReconciliation
-      ? 'notes-v30-source-first'
-      : input.reviewProtocol === 'editor'
+    pipeline_version:
+      input.reviewProtocol === 'editor'
         ? mode === 'hierarchical' && input.compactWriterContract
           ? 'writer-editor-bounded-v1'
           : 'writer-editor-v1'
@@ -1658,183 +1576,12 @@ const runBoundedCompactNotes = async (
   );
 };
 
-const runSourceFirstNotes = async (
-  input: GenerateMeetingNotesInput,
-  knownTerms: NotesKnownTerm[],
-): Promise<AnalysisDocumentV3> => {
-  const completeSpans = input.source.segments
-    .filter((segment) => segment.text.trim())
-    .map((segment) => ({
-      segment: segment.index,
-      start: 0,
-      end: segment.text.length,
-    }));
-  const completeSourceText = serializeSource(input, completeSpans);
-  const writerPromptFor = (spans: SourceSpan[]) =>
-    buildSourceReconciliationPrompt(serializeSource(input, spans), true);
-  const editorFitsWithInventoryReserve = (writerCount: number): boolean => {
-    const reserveTokens = writerCount * COMPACT_WRITER_OUTPUT_TOKENS;
-    const prompt = buildNotesEditorPrompt({
-      sourceText: completeSourceText,
-      draft: {},
-      userNotes: input.context.userNotes,
-      knownTerms,
-      inherited: [
-        {
-          id: 'inventory-reserve',
-          kind: 'point',
-          text: '',
-          sources: [],
-        },
-      ],
-      compactDraft: true,
-      sourceFirstReconciliation: true,
-    });
-    return (
-      estimateNotesTokens(createNotesWireRequest(prompt, completeSpans).prompt) +
-        // The provider wire format replaces canonical spans with shorter
-        // opaque labels, so each compact inventory needs one output reserve.
-        reserveTokens +
-        reviewOutputTokens(input) +
-        SAFETY_TOKENS <=
-      input.contextTokens
-    );
-  };
-
-  const directWriterPrompt = writerPromptFor(completeSpans);
-  const direct =
-    sourceCharacterCount(completeSpans) <=
-      NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf &&
-    fits(
-      input,
-      directWriterPrompt,
-      COMPACT_WRITER_OUTPUT_TOKENS,
-      completeSpans,
-    ) &&
-    editorFitsWithInventoryReserve(1);
-  const leaves = direct
-    ? [{ primarySpans: completeSpans }]
-    : planNotesLeaves(input.source, (_packet, spans = []) => {
-        if (
-          sourceCharacterCount(spans) >
-          NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf
-        ) {
-          return false;
-        }
-        return fits(
-          input,
-          writerPromptFor(spans),
-          COMPACT_WRITER_OUTPUT_TOKENS,
-          spans,
-        );
-      });
-  input.onPlan?.({ plannedLeafCount: leaves.length });
-  if (
-    !leaves.length ||
-    leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves ||
-    !editorFitsWithInventoryReserve(
-      leaves.length + NOTES_BOUNDED_LIMITS.maxRecoverySplits,
-    )
-  ) {
-    throw new MeetingNotesError('notes_source_first_capacity_exceeded');
-  }
-
-  const inventories: ReconciledSource[] = [];
-  let recoverySplits = 0;
-  const processLeaf = async (
-    spans: SourceSpan[],
-    applicationIdPrefix: string,
-  ): Promise<void> => {
-    assertNotCancelled(input);
-    try {
-      inventories.push(
-        await writeReconciliation(
-          input,
-          writerPromptFor(spans),
-          spans,
-          applicationIdPrefix,
-        ),
-      );
-    } catch (error) {
-      if (
-        recoverySplits < NOTES_BOUNDED_LIMITS.maxRecoverySplits &&
-        error instanceof MeetingNotesError &&
-        error.code === 'notes_output_truncated'
-      ) {
-        const split = bisectNotesSourceSpans(input.source, spans);
-        if (split?.length === 2) {
-          recoverySplits += 1;
-          input.onRepartition?.();
-          await processLeaf(split[0]!, `${applicationIdPrefix}a`);
-          await processLeaf(split[1]!, `${applicationIdPrefix}b`);
-          return;
-        }
-      }
-      throw error;
-    }
-  };
-  for (const [index, leaf] of leaves.entries()) {
-    await processLeaf(leaf.primarySpans, `inventory:${index}`);
-  }
-  assertNotCancelled(input);
-
-  const combined: ReconciledSource = {
-    facts: inventories.flatMap((inventory) => inventory.facts),
-    actions: inventories.flatMap((inventory) => inventory.actions),
-    decisions: inventories.flatMap((inventory) => inventory.decisions),
-    questions: inventories.flatMap((inventory) => inventory.questions),
-  };
-  const inventoryDraft = reconciliationDraft(combined);
-  const inventoryItems = inventoryDraft.sections.flatMap(
-    (section) => section.items,
-  );
-  const actualEditorPrompt = reviewPrompt(input, {
-    sourceText: completeSourceText,
-    draft: inventoryDraft,
-    userNotes: input.context.userNotes,
-    knownTerms,
-    inherited: inventoryItems,
-  });
-  if (
-    !fits(input, actualEditorPrompt, reviewOutputTokens(input), completeSpans)
-  ) {
-    throw new MeetingNotesError('notes_source_first_capacity_exceeded');
-  }
-  const edited = await auditDraft(
-    input,
-    inventoryDraft,
-    completeSpans,
-    knownTerms,
-    inventoryItems,
-    'source-first',
-    true,
-  );
-  assertNotCancelled(input);
-  return metadataFor(
-    input,
-    projectAuditedNotes(edited.audited),
-    direct ? 'direct' : 'hierarchical',
-    edited.changeCount,
-    direct
-      ? undefined
-      : {
-          depth: 1,
-          nodes: inventories.length + 1,
-          max_depth: 1,
-          max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
-        },
-  );
-};
-
 const runMeetingNotes = async (
   input: GenerateMeetingNotesInput,
 ): Promise<AnalysisDocumentV3> => {
   assertNotCancelled(input);
   const sourceText = serializeSource(input);
   const knownTerms = knownTermsFor(input);
-  if (input.sourceFirstReconciliation) {
-    return runSourceFirstNotes(input, knownTerms);
-  }
   const compactEditor =
     input.compactWriterContract && input.reviewProtocol === 'editor';
   if (

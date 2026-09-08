@@ -2,18 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type EvaluationEvent,
-  GEMMA_NOTES_CONTROL_CONFIGURATION,
   type LocalIntelligenceManifest,
   type LocalIntelligenceRunResult,
-  type NotesExperimentManifest,
-  PHI_NOTES_EXPERIMENT_CONFIGURATION,
   aggregateLocalIntelligenceRuns,
   assertEvaluationCeiling,
-  buildFrozenNotesSchedule,
-  notesScheduleSha256,
   parseLocalIntelligenceManifest,
   projectContentFreeEvaluationReport,
-  reconcileNotesEvaluationSchedule,
   validateEvaluationEventLedger,
 } from '../../scripts/lib/local_intelligence_evaluation';
 
@@ -49,65 +43,6 @@ const manifestValue = (): LocalIntelligenceManifest => ({
   },
 });
 
-const notesManifestValue = (): NotesExperimentManifest => {
-  const collections = {
-    semantic: Array.from({ length: 12 }, (_, index) => `semantic-${index + 1}`),
-    ordinaryCapacity: Array.from(
-      { length: 8 },
-      (_, index) => `capacity-${index + 1}`,
-    ),
-    expectedRejection: ['reject-aggregate', 'reject-segment'],
-  };
-  const schedule = buildFrozenNotesSchedule(collections);
-  return {
-    schemaVersion: 2,
-    suiteId: 'phi-notes-source-first-2026-09-07',
-    privacy: 'owner_only_private',
-    sourceRevision: revision,
-    dirtyDiffSha256: digest('d'),
-    corpusSha256: digest('c'),
-    rubricSha256: digest('e'),
-    scheduleSha256: notesScheduleSha256(schedule),
-    partition: 'held_out',
-    models: [
-      {
-        configId: PHI_NOTES_EXPERIMENT_CONFIGURATION.configId,
-        tag: PHI_NOTES_EXPERIMENT_CONFIGURATION.tag,
-        digest: PHI_NOTES_EXPERIMENT_CONFIGURATION.digest,
-      },
-      {
-        configId: GEMMA_NOTES_CONTROL_CONFIGURATION.configId,
-        tag: GEMMA_NOTES_CONTROL_CONFIGURATION.tag,
-        digest: GEMMA_NOTES_CONTROL_CONFIGURATION.digest,
-      },
-    ],
-    configurations: [
-      { ...PHI_NOTES_EXPERIMENT_CONFIGURATION },
-      { ...GEMMA_NOTES_CONTROL_CONFIGURATION },
-    ],
-    collections,
-    settings: {
-      seed: 41,
-      temperature: 0.1,
-      threads: 8,
-      thinking: false,
-      contextTokens: 16_384,
-      writerOutputTokens: 2_048,
-      editorOutputTokens: 2_048,
-      stageCache: 'disabled',
-    },
-    schedule,
-    ceilings: {
-      ordinaryNotesMs: 600_000,
-      longNotesMs: 1_200_000,
-      chatMs: 120_000,
-      dreamingMs: 180_000,
-      notesPhysicalStarts: 12,
-      minimumSamplesForP95: 20,
-    },
-  };
-};
-
 const telemetry = {
   memoryPressure: 'normal' as const,
   thermalState: 'nominal' as const,
@@ -132,69 +67,6 @@ const acceptedRun = (
 });
 
 describe('local intelligence evaluation contract', () => {
-  it('keeps strict version-1 manifests readable', () => {
-    expect(parseLocalIntelligenceManifest(manifestValue()).schemaVersion).toBe(
-      1,
-    );
-  });
-
-  it('freezes the paired Phi and Gemma notes schedule before inference', () => {
-    const manifest = notesManifestValue();
-    const parsed = parseLocalIntelligenceManifest(manifest);
-    expect(parsed.schemaVersion).toBe(2);
-    if (parsed.schemaVersion !== 2) throw new Error('expected notes manifest');
-
-    expect(parsed.schedule).toHaveLength(180);
-    expect(parsed.schedule.slice(0, 4).map(({ configId }) => configId)).toEqual(
-      [
-        'phi-notes-source-first',
-        'gemma-notes-control',
-        'gemma-notes-control',
-        'phi-notes-source-first',
-      ],
-    );
-    for (const configId of ['phi-notes-source-first', 'gemma-notes-control']) {
-      for (const condition of ['cold', 'warm']) {
-        expect(
-          parsed.schedule.filter(
-            (run) =>
-              run.collection === 'ordinary_capacity' &&
-              run.configId === configId &&
-              run.condition === condition,
-          ),
-        ).toHaveLength(24);
-      }
-    }
-  });
-
-  it('rejects a disguised control route and any schedule mutation', () => {
-    const wrongRoute = notesManifestValue();
-    wrongRoute.configurations[0] = {
-      ...wrongRoute.configurations[0]!,
-      sourceFirstReconciliation: false,
-    };
-    expect(() => parseLocalIntelligenceManifest(wrongRoute)).toThrow(
-      'evaluation_manifest_invalid',
-    );
-
-    const changedSchedule = notesManifestValue();
-    changedSchedule.schedule = changedSchedule.schedule.slice(1);
-    changedSchedule.scheduleSha256 = notesScheduleSha256(
-      changedSchedule.schedule,
-    );
-    expect(() => parseLocalIntelligenceManifest(changedSchedule)).toThrow(
-      'evaluation_schedule_mismatch',
-    );
-
-    const wrongEditorBudget = notesManifestValue() as unknown as {
-      settings: { editorOutputTokens: number };
-    };
-    wrongEditorBudget.settings.editorOutputTokens = 4_096;
-    expect(() => parseLocalIntelligenceManifest(wrongEditorBudget)).toThrow(
-      'evaluation_manifest_invalid',
-    );
-  });
-
   it('rejects an unknown model or mismatched digest', () => {
     const unknown = manifestValue();
     unknown.models[1] = {
@@ -414,8 +286,6 @@ describe('local intelligence evaluation contract', () => {
       acceptedReplayCount: 1,
       publishedCount: 0,
       contaminatedRunCount: 0,
-      interruptedRunCount: 0,
-      orphanedPhysicalStartCount: 0,
     });
     expect(() =>
       validateEvaluationEventLedger(manifestValue(), events.slice(0, -1)),
@@ -424,53 +294,6 @@ describe('local intelligence evaluation contract', () => {
       validateEvaluationEventLedger(manifestValue(), events.slice(0, -1))
         .acceptedReplayCount,
     ).toBe(0);
-  });
-
-  it('preserves interrupted run IDs and resumes only never-started schedule rows', () => {
-    const manifest = notesManifestValue();
-    const interrupted = manifest.schedule[0]!;
-    const completed = manifest.schedule[1]!;
-    const events: EvaluationEvent[] = [
-      {
-        type: 'run_started',
-        eventId: 'event-interrupted',
-        runId: interrupted.runId,
-        caseId: interrupted.caseId,
-        configId: interrupted.configId,
-        lane: 'meeting_notes',
-        environment: 'replay',
-        sourceRevision: revision,
-        atMs: 1,
-      },
-      {
-        type: 'run_started',
-        eventId: 'event-completed-start',
-        runId: completed.runId,
-        caseId: completed.caseId,
-        configId: completed.configId,
-        lane: 'meeting_notes',
-        environment: 'replay',
-        sourceRevision: revision,
-        atMs: 2,
-      },
-      {
-        type: 'logical_terminal',
-        eventId: 'event-completed-end',
-        runId: completed.runId,
-        logicalStageId: 'notes',
-        outcome: 'failed',
-        acceptedInReplay: false,
-        published: false,
-        sourceRevision: revision,
-        atMs: 3,
-      },
-    ];
-
-    const reconciled = reconcileNotesEvaluationSchedule(manifest, events);
-    expect(reconciled.interrupted).toEqual([interrupted]);
-    expect(reconciled.completed).toEqual([completed]);
-    expect(reconciled.unstarted).toHaveLength(manifest.schedule.length - 2);
-    expect(reconciled.unstarted).not.toContainEqual(interrupted);
   });
 
   it('retains failures, timeouts, censored, and contaminated runs', () => {

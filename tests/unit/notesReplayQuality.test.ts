@@ -4,6 +4,7 @@ import {
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import { visibleBlocks } from '../../scripts/lib/notesReplayProjection';
 import { triageNotesReplay } from '../../scripts/lib/notesReplayQuality';
 
 function fixture(count = 3) {
@@ -46,6 +47,67 @@ function fixture(count = 3) {
   return { source, analysis };
 }
 describe('model-neutral notes quality triage', () => {
+  it.each([
+    { segment: 99, start: 0, end: 1 },
+    { segment: 0, start: -1, end: 1 },
+    { segment: 0, start: 0.5, end: 1 },
+    { segment: 0, start: 0, end: 0 },
+    { segment: 0, start: 0, end: 9999 },
+  ])('rejects invalid visible source offsets: %j', (span) => {
+    const { source, analysis } = fixture();
+    analysis.generation_metadata!.source_provenance!.blocks[
+      'topic:0:point:0'
+    ].sources = [span];
+    expect(triageNotesReplay(analysis, source).invalidProvenance).toContain(
+      'topic:0:point:0',
+    );
+  });
+  it('rejects a visible block without provenance metadata', () => {
+    const { source, analysis } = fixture();
+    const provenance = analysis.generation_metadata!.source_provenance!;
+    provenance.blocks = Object.fromEntries(
+      Object.entries(provenance.blocks).filter(
+        ([key]) => key !== 'topic:0:point:0',
+      ),
+    );
+    expect(triageNotesReplay(analysis, source).invalidProvenance).toContain(
+      'topic:0:point:0',
+    );
+  });
+  it('checks inline evidence on actions and their aggregate projection', () => {
+    const { source, analysis } = fixture();
+    const action = {
+      text: 'Check the notebook.',
+      assignee: null,
+      due: null,
+      evidence: visibleBlocks(analysis, source).find(
+        (block) => block.path === 'topic:0:point:0',
+      )!.resolvedEvidence,
+    };
+    analysis.topics[0].action_items.push(action);
+    analysis.all_action_items.push({ ...action, topic: 'Notebooks' });
+    const blocks = analysis.generation_metadata!.source_provenance!.blocks;
+    blocks['topic:0:action:0'] = { ...blocks['topic:0:point:0'] };
+    blocks['all_action_items:0'] = { ...blocks['topic:0:point:0'] };
+    const actions = () =>
+      visibleBlocks(analysis, source).filter(
+        (block) => block.kind === 'action' || block.kind === 'aggregate_action',
+      );
+    expect(actions().map((block) => block.provenanceValid)).toEqual([
+      true,
+      true,
+    ]);
+    analysis.all_action_items[0].evidence = 'Unrelated evidence.';
+    expect(actions().map((block) => block.provenanceValid)).toEqual([
+      true,
+      false,
+    ]);
+    analysis.topics[0].action_items[0].evidence = null;
+    expect(actions().map((block) => block.provenanceValid)).toEqual([
+      false,
+      false,
+    ]);
+  });
   it('surfaces guarded fallback warnings even when visible spans are valid', () => {
     const { source, analysis } = fixture();
     analysis.quality.issues.push('notes_direct_audit_fallback:guardrail');
