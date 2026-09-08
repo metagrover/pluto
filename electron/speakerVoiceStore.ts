@@ -12,6 +12,7 @@ export interface SpeakerVoiceEnrollment {
   sourceRevision: string;
   speaker: string;
   embedding: number[];
+  representativeEmbeddings: number[][];
   chunkCount: number;
   cleanDurationSeconds: number;
   minimumChunkSimilarity: number;
@@ -33,6 +34,7 @@ export interface CanonicalVoiceProfile {
   cleanDurationSeconds: number;
   isActive: boolean;
   embedding: number[];
+  representativeEmbeddings: number[][];
   referenceInterval?: {
     startTime: number;
     endTime: number;
@@ -58,14 +60,35 @@ export interface StoredSpeakerCandidateEvidence
 
 import * as dbModule from './db';
 
+const MAX_PROFILE_REPRESENTATIVES = 12;
+
+const selectProfileRepresentatives = (
+  sources: number[][][],
+): number[][] => {
+  const selected: number[][] = [];
+  const remaining = sources.map((embeddings) => [...embeddings]);
+  while (selected.length < MAX_PROFILE_REPRESENTATIVES) {
+    let added = false;
+    for (const source of remaining) {
+      const embedding = source.shift();
+      if (!embedding) continue;
+      selected.push(embedding);
+      added = true;
+      if (selected.length >= MAX_PROFILE_REPRESENTATIVES) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+};
+
 const UPSERT_MEETING_SPEAKER_CANDIDATE = `INSERT INTO meeting_speaker_candidates (
-  meeting_id, speaker, source_revision, candidate_digest, embedding_json,
+  meeting_id, speaker, source_revision, candidate_digest, embedding_json, representative_embeddings_json,
   clean_duration_sec, clean_segment_count, clean_chunk_count,
   minimum_chunk_similarity, mean_chunk_similarity,
   reference_start_sec, reference_end_sec, reference_excerpt,
   provenance_json, created_at
 ) VALUES (
-  ?, ?, ?, ?, ?,
+  ?, ?, ?, ?, ?, ?,
   ?, ?, ?,
   ?, ?,
   ?, ?, ?,
@@ -74,6 +97,7 @@ const UPSERT_MEETING_SPEAKER_CANDIDATE = `INSERT INTO meeting_speaker_candidates
 ON CONFLICT(meeting_id, speaker, source_revision) DO UPDATE SET
   candidate_digest = excluded.candidate_digest,
   embedding_json = excluded.embedding_json,
+  representative_embeddings_json = excluded.representative_embeddings_json,
   clean_duration_sec = excluded.clean_duration_sec,
   clean_segment_count = excluded.clean_segment_count,
   clean_chunk_count = excluded.clean_chunk_count,
@@ -102,6 +126,7 @@ function writeMeetingSpeakerCandidate(
     sourceRevision,
     candidate.candidateDigest,
     JSON.stringify(candidate.embedding),
+    JSON.stringify(candidate.representativeEmbeddings ?? []),
     candidate.cleanDurationSeconds,
     candidate.cleanSegmentCount,
     candidate.cleanChunkCount,
@@ -190,6 +215,7 @@ export function getMeetingSpeakerCandidates(
     source_revision: string;
     candidate_digest: string;
     embedding_json: string;
+    representative_embeddings_json: string;
     clean_duration_sec: number;
     clean_segment_count: number;
     clean_chunk_count: number;
@@ -212,6 +238,7 @@ export function getMeetingSpeakerCandidates(
       nativeCluster: r.speaker,
       candidateDigest: r.candidate_digest,
       embedding: JSON.parse(r.embedding_json),
+      representativeEmbeddings: JSON.parse(r.representative_embeddings_json),
       cleanDurationSeconds: r.clean_duration_sec,
       cleanSegmentCount: r.clean_segment_count,
       cleanChunkCount: r.clean_chunk_count,
@@ -256,6 +283,7 @@ export function enrollSpeakerVoice(
         source_revision: string;
         candidate_digest: string;
         embedding_json: string;
+        representative_embeddings_json: string;
         clean_duration_sec: number;
         clean_segment_count: number;
         clean_chunk_count: number;
@@ -276,29 +304,24 @@ export function enrollSpeakerVoice(
   const existing = d
     .prepare(
       `SELECT id, created_at FROM speaker_voice_enrollments
-       WHERE person_id = ? AND source_meeting_id = ? AND source_revision = ?
-         AND speaker = ? AND candidate_digest = ?
+       WHERE person_id = ? AND source_meeting_id = ? AND speaker = ?
        LIMIT 1`,
     )
-    .get(
-      params.personId,
-      params.sourceMeetingId,
-      params.sourceRevision,
-      params.speaker,
-      params.candidateDigest,
-    ) as { id: string; created_at: string } | undefined;
+    .get(params.personId, params.sourceMeetingId, params.speaker) as
+    | { id: string; created_at: string }
+    | undefined;
   const id = existing?.id ?? randomUUID();
   if (!existing) {
     d.prepare(
       `INSERT INTO speaker_voice_enrollments (
         id, person_id, source_meeting_id, source_revision, speaker,
-        embedding_json, chunk_count, clean_duration_sec,
+        embedding_json, representative_embeddings_json, chunk_count, clean_duration_sec,
         minimum_chunk_similarity, mean_chunk_similarity,
         reference_start_sec, reference_end_sec, reference_excerpt,
         provenance_json, candidate_digest, created_at
       ) VALUES (
         ?, ?, ?, ?, ?,
-        ?, ?, ?,
+        ?, ?, ?, ?,
         ?, ?,
         ?, ?, ?,
         ?, ?, CURRENT_TIMESTAMP
@@ -310,6 +333,7 @@ export function enrollSpeakerVoice(
       params.sourceRevision,
       params.speaker,
       candidate.embedding_json,
+      candidate.representative_embeddings_json,
       candidate.clean_chunk_count,
       candidate.clean_duration_sec,
       candidate.minimum_chunk_similarity,
@@ -320,13 +344,38 @@ export function enrollSpeakerVoice(
       candidate.provenance_json,
       params.candidateDigest,
     );
+  } else {
+    d.prepare(
+      `UPDATE speaker_voice_enrollments SET
+        source_revision = ?, embedding_json = ?, representative_embeddings_json = ?, chunk_count = ?, clean_duration_sec = ?,
+        minimum_chunk_similarity = ?, mean_chunk_similarity = ?,
+        reference_start_sec = ?, reference_end_sec = ?, reference_excerpt = ?,
+        provenance_json = ?, candidate_digest = ?, created_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    ).run(
+      params.sourceRevision,
+      candidate.embedding_json,
+      candidate.representative_embeddings_json,
+      candidate.clean_chunk_count,
+      candidate.clean_duration_sec,
+      candidate.minimum_chunk_similarity,
+      candidate.mean_chunk_similarity,
+      candidate.reference_start_sec,
+      candidate.reference_end_sec,
+      candidate.reference_excerpt,
+      candidate.provenance_json,
+      params.candidateDigest,
+      id,
+    );
+    d.prepare(
+      `DELETE FROM speaker_voice_enrollments
+       WHERE person_id = ? AND source_meeting_id = ? AND speaker = ? AND id <> ?`,
+    ).run(params.personId, params.sourceMeetingId, params.speaker, id);
   }
 
-  const row =
-    existing ??
-    (d
-      .prepare('SELECT created_at FROM speaker_voice_enrollments WHERE id = ?')
-      .get(id) as { created_at: string });
+  const row = d
+    .prepare('SELECT created_at FROM speaker_voice_enrollments WHERE id = ?')
+    .get(id) as { created_at: string };
 
   return {
     id,
@@ -335,6 +384,9 @@ export function enrollSpeakerVoice(
     sourceRevision: params.sourceRevision,
     speaker: params.speaker,
     embedding: JSON.parse(candidate.embedding_json),
+    representativeEmbeddings: JSON.parse(
+      candidate.representative_embeddings_json,
+    ),
     chunkCount: candidate.clean_chunk_count,
     cleanDurationSeconds: candidate.clean_duration_sec,
     minimumChunkSimilarity: candidate.minimum_chunk_similarity,
@@ -367,6 +419,7 @@ export function getCanonicalVoiceProfiles(options?: {
     source_revision: string;
     speaker: string;
     embedding_json: string;
+    representative_embeddings_json: string;
     chunk_count: number;
     clean_duration_sec: number;
     minimum_chunk_similarity: number;
@@ -384,6 +437,7 @@ export function getCanonicalVoiceProfiles(options?: {
     Array<{
       enrollment: (typeof rows)[0];
       embedding: number[];
+      representativeEmbeddings: number[][];
       provenance: SpeakerCandidateProvenance;
     }>
   >();
@@ -398,13 +452,14 @@ export function getCanonicalVoiceProfiles(options?: {
     group.push({
       enrollment: r,
       embedding: JSON.parse(r.embedding_json),
+      representativeEmbeddings: JSON.parse(r.representative_embeddings_json),
       provenance: JSON.parse(r.provenance_json),
     });
   }
 
   const profiles: CanonicalVoiceProfile[] = [];
 
-  for (const [canonicalPersonId, entries] of grouped.entries()) {
+  for (const [canonicalPersonId, allEntries] of grouped.entries()) {
     const setting = d
       .prepare(
         'SELECT is_active FROM speaker_voice_profile_settings WHERE person_id = ?',
@@ -415,6 +470,38 @@ export function getCanonicalVoiceProfiles(options?: {
     if (options?.activeOnly && !isActive) {
       continue;
     }
+
+    const cohorts = new Map<string, typeof allEntries>();
+    for (const entry of allEntries) {
+      const provenance = entry.provenance;
+      const compatibilityKey = JSON.stringify([
+        provenance.modelIdentifier,
+        provenance.modelRevision,
+        provenance.artifactDigest,
+        provenance.runtimeVersion,
+        provenance.profileAlgorithmVersion ?? 'v1',
+      ]);
+      const cohort = cohorts.get(compatibilityKey) ?? [];
+      cohort.push(entry);
+      cohorts.set(compatibilityKey, cohort);
+    }
+    const entries = [...cohorts.values()].sort((left, right) => {
+      const duration = (cohort: typeof allEntries) =>
+        cohort.reduce(
+          (total, entry) => total + entry.enrollment.clean_duration_sec,
+          0,
+        );
+      const durationDifference = duration(right) - duration(left);
+      if (Math.abs(durationDifference) > 1e-5) return durationDifference;
+      const newest = (cohort: typeof allEntries) =>
+        Math.max(
+          ...cohort.map((entry) =>
+            new Date(entry.enrollment.created_at).getTime(),
+          ),
+        );
+      return newest(right) - newest(left);
+    })[0];
+    if (!entries) continue;
 
     let totalDuration = 0;
     const sumEmbedding = new Array(256).fill(0);
@@ -464,6 +551,9 @@ export function getCanonicalVoiceProfiles(options?: {
       cleanDurationSeconds: totalDuration,
       isActive,
       embedding: centroid,
+      representativeEmbeddings: selectProfileRepresentatives(
+        entries.map((entry) => entry.representativeEmbeddings),
+      ),
       referenceInterval: {
         startTime: best.enrollment.reference_start_sec,
         endTime: best.enrollment.reference_end_sec,

@@ -247,6 +247,55 @@ describe('speakerVoiceMatcher & global acoustic calibration', () => {
     expect(result).toBeNull();
   });
 
+  it('uses two independently retained profile representatives when the centroid is unstable', () => {
+    const candidate = {
+      ...validCandidate,
+      embedding: createVector(5),
+      representativeEmbeddings: [createVector(0), createVector(4)],
+    };
+    const profile = {
+      ...profileAlex,
+      embedding: createVector(6),
+      representativeEmbeddings: [createVector(0), createVector(0)],
+    };
+
+    const result = matchSpeakerVoice({
+      meetingId: 'm1',
+      sourceRevision: 'gen-1',
+      candidate,
+      profiles: [profile],
+      rejections: [],
+      options: { policy: dummyPolicy, featureFlagEnabled: true },
+    });
+
+    expect(result?.suggestedPersonId).toBe(profile.canonicalPersonId);
+    expect(result?.similarityScore).toBe(1);
+  });
+
+  it('does not let one profile representative bypass the calibrated threshold', () => {
+    const candidate = {
+      ...validCandidate,
+      embedding: createVector(5),
+      representativeEmbeddings: [createVector(0)],
+    };
+    const profile = {
+      ...profileAlex,
+      embedding: createVector(6),
+      representativeEmbeddings: [createVector(0)],
+    };
+
+    expect(
+      matchSpeakerVoice({
+        meetingId: 'm1',
+        sourceRevision: 'gen-1',
+        candidate,
+        profiles: [profile],
+        rejections: [],
+        options: { policy: dummyPolicy, featureFlagEnabled: true },
+      }),
+    ).toBeNull();
+  });
+
   it('suppresses suggestion when margin between top 2 is below runner-up margin (0.10)', () => {
     // Top candidate similarity 0.85
     const angle1 = Math.acos(0.85);

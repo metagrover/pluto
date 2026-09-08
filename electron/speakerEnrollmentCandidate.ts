@@ -3,7 +3,7 @@ import { deriveReviewedSpeakerCandidate } from '../src/services/speakerCandidate
 import type { SpeakerSampleInterval } from '../src/utils/speakerReview';
 import {
   selectReviewableAnonymousSpeakers,
-  selectSpeakerSampleIntervals,
+  selectSpeakerEnrollmentIntervals,
 } from '../src/utils/speakerReview';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import {
@@ -55,6 +55,31 @@ type SpeakerEnrollmentBaseSource = {
 type SpeakerEnrollmentSource = SpeakerEnrollmentBaseSource & {
   transcriptFingerprint: string;
 };
+
+const MAX_REPRESENTATIVE_INTERVALS = 4;
+
+const selectRepresentativeIntervals = (
+  intervals: SpeakerSampleInterval[],
+): SpeakerSampleInterval[] => {
+  if (intervals.length <= MAX_REPRESENTATIVE_INTERVALS) return intervals;
+  return Array.from({ length: MAX_REPRESENTATIVE_INTERVALS }, (_, index) => {
+    const intervalIndex = Math.round(
+      (index * (intervals.length - 1)) / (MAX_REPRESENTATIVE_INTERVALS - 1),
+    );
+    return intervals[intervalIndex];
+  });
+};
+
+const sameEmbeddingProvenance = (
+  left: SpeakerEvidenceResult['provenance'],
+  right: SpeakerEvidenceResult['provenance'],
+): boolean =>
+  left.modelIdentifier === right.modelIdentifier &&
+  left.modelRevision === right.modelRevision &&
+  left.artifactDigest === right.artifactDigest &&
+  left.runtimeVersion === right.runtimeVersion &&
+  (left.profileAlgorithmVersion ?? 'v1') ===
+    (right.profileAlgorithmVersion ?? 'v1');
 
 const hasUsableEnrollmentTranscript = (
   meeting: EnrollmentMeeting,
@@ -162,11 +187,11 @@ export const getSpeakerEnrollmentSource = (
   const source = getSpeakerEnrollmentBaseSource(input.meetingId, dependencies);
   if (!source) return null;
 
-  const intervals = selectSpeakerSampleIntervals(
+  const intervals = selectSpeakerEnrollmentIntervals(
     source.transcriptSegments,
     input.speaker,
   );
-  return intervals.length === 2 ? { ...source, intervals } : null;
+  return intervals.length >= 2 ? { ...source, intervals } : null;
 };
 
 export const getSpeakerEnrollmentAvailability = (
@@ -191,8 +216,8 @@ export const getSpeakerEnrollmentAvailability = (
       speaker,
       Boolean(
         source &&
-          selectSpeakerSampleIntervals(source.transcriptSegments, speaker)
-            .length === 2,
+          selectSpeakerEnrollmentIntervals(source.transcriptSegments, speaker)
+            .length >= 2,
       ),
     ]),
   );
@@ -223,7 +248,7 @@ export const buildSpeakerEnrollmentCandidate = async (
       micAudioPath: audio.micPath,
       systemAudioPath: audio.systemPath,
     });
-    const candidate = deriveReviewedSpeakerCandidate({
+    const preliminaryCandidate = deriveReviewedSpeakerCandidate({
       speaker: input.speaker,
       clusterEvidence: evidence.clusterEvidence ?? [],
       provenance: evidence.provenance,
@@ -233,6 +258,52 @@ export const buildSpeakerEnrollmentCandidate = async (
     if (
       !currentSource ||
       currentSource.transcriptFingerprint !== transcriptFingerprint
+    ) {
+      return null;
+    }
+    if (!preliminaryCandidate) return null;
+
+    const representativeEmbeddings: number[][] = [];
+    for (const interval of selectRepresentativeIntervals(intervals)) {
+      const representativeAudio = await dependencies.createAudio({
+        sourcePath,
+        // Repeat only within this isolated embedding pass so FluidAudio gets
+        // enough context for short reviewed intervals. Eligibility and speech
+        // duration remain grounded in the non-duplicated full selection above.
+        intervals: [interval, interval],
+        outputDir: workDir,
+      });
+      if (!representativeAudio) continue;
+      const representativeEvidence = await dependencies.analyze({
+        mixedAudioPath: representativeAudio.systemPath,
+        micAudioPath: representativeAudio.micPath,
+        systemAudioPath: representativeAudio.systemPath,
+      });
+      if (
+        !sameEmbeddingProvenance(
+          evidence.provenance,
+          representativeEvidence.provenance,
+        )
+      ) {
+        continue;
+      }
+      const clusters = representativeEvidence.clusterEvidence ?? [];
+      if (clusters.length !== 1) continue;
+      representativeEmbeddings.push(clusters[0].embedding);
+    }
+    if (representativeEmbeddings.length < 2) return null;
+
+    const candidate = deriveReviewedSpeakerCandidate({
+      speaker: input.speaker,
+      clusterEvidence: evidence.clusterEvidence ?? [],
+      provenance: evidence.provenance,
+      reviewedIntervals: intervals,
+      representativeEmbeddings,
+    });
+    const finalSource = getSpeakerEnrollmentSource(input, dependencies);
+    if (
+      !finalSource ||
+      finalSource.transcriptFingerprint !== transcriptFingerprint
     ) {
       return null;
     }

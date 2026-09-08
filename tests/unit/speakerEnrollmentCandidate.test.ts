@@ -25,7 +25,45 @@ const validatedTranscriptTrust = {
 };
 
 describe('buildSpeakerEnrollmentCandidate', () => {
-  it('derives enrollment evidence from the same two system-audio samples as review', async () => {
+  it('passes more than two clean intervals to enrollment audio', async () => {
+    const createAudio = vi.fn(async () => ({
+      systemPath: '/recordings/work/system.wav',
+      micPath: '/recordings/work/mic.wav',
+      totalDurationSeconds: 18,
+    }));
+    await buildSpeakerEnrollmentCandidate(
+      { meetingId: 'meeting-1', speaker: 'Them' },
+      {
+        getMeeting: () => ({
+          id: 'meeting-1',
+          ...validatedTranscriptTrust,
+          capture_journal_generation: 'generation-1',
+          system_audio_path: '/recordings/full.wav',
+          transcript_json: JSON.stringify([
+            { speaker: 'Them', text: 'First sample', start: 0, end: 5 },
+            { speaker: 'Them', text: 'Second sample', start: 10, end: 15 },
+            { speaker: 'Them', text: 'Third sample', start: 20, end: 25 },
+          ]),
+        }),
+        fileExists: () => true,
+        createWorkDir: () => '/recordings/work',
+        removeWorkDir: async () => undefined,
+        createAudio,
+        analyze: async () => ({
+          turns: [],
+          energyWindows: [],
+          provenance,
+          timings: { diarizationMs: 1, energyAnalysisMs: 1, totalMs: 2 },
+          windowSeconds: 0.1,
+          clusterEvidence: [],
+        }),
+      },
+    );
+
+    expect(createAudio.mock.calls[0]?.[0].intervals).toHaveLength(3);
+  });
+
+  it('derives enrollment evidence from clean system-audio intervals', async () => {
     const createAudio = vi.fn(async () => ({
       systemPath: '/recordings/work/system.wav',
       micPath: '/recordings/work/mic.wav',

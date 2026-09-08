@@ -95,6 +95,30 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dotProduct / denom;
 }
 
+const representativeSimilarity = (
+  candidate: SpeakerCandidateEvidence,
+  profile: CanonicalVoiceProfile,
+): number => {
+  const candidateRepresentatives = candidate.representativeEmbeddings ?? [];
+  const profileRepresentatives = profile.representativeEmbeddings ?? [];
+  if (
+    candidateRepresentatives.length === 0 ||
+    profileRepresentatives.length < 2
+  ) {
+    return 0;
+  }
+  const profileSupport = profileRepresentatives
+    .map((profileEmbedding) =>
+      Math.max(
+        ...candidateRepresentatives.map((candidateEmbedding) =>
+          cosineSimilarity(profileEmbedding, candidateEmbedding),
+        ),
+      ),
+    )
+    .sort((left, right) => right - left);
+  return profileSupport[1] ?? 0;
+};
+
 export function matchSpeakerVoice(input: {
   meetingId: string;
   sourceRevision: string;
@@ -156,7 +180,10 @@ export function matchSpeakerVoice(input: {
   // Score all eligible profiles
   const scored = eligibleProfiles.map((profile) => ({
     profile,
-    score: cosineSimilarity(input.candidate.embedding, profile.embedding),
+    score: Math.max(
+      cosineSimilarity(input.candidate.embedding, profile.embedding),
+      representativeSimilarity(input.candidate, profile),
+    ),
   }));
 
   // Order strictly by acoustic similarity descending

@@ -15,6 +15,7 @@ import {
 } from '../../electron/speakerVoiceHandlers';
 import { saveMeetingSpeakerCandidates } from '../../electron/speakerVoiceStore';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
+import { ENROLLMENT_EXTRACTION_VERSION } from '../../src/services/speakerCandidateEvidence';
 import { DEFAULT_CALIBRATION_POLICY_V1 } from '../../src/services/speakerVoiceMatcher';
 
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -89,6 +90,10 @@ describe('speaker voice IPC handlers', () => {
     nativeCluster: 'S1',
     candidateDigest: 'cand-digest-abc',
     embedding: new Array(256).fill(0.1),
+    representativeEmbeddings: [
+      new Array(256).fill(0.1),
+      new Array(256).fill(0.1),
+    ],
     cleanDurationSeconds: 4.5,
     cleanSegmentCount: 2,
     cleanChunkCount: 3,
@@ -99,7 +104,10 @@ describe('speaker voice IPC handlers', () => {
       endTime: 3.5,
       excerpt: 'Hello, this is Robin speaking.',
     },
-    provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+    provenance: {
+      ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey,
+      enrollmentExtractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+    },
     isEligibleForEnrollment: true,
   };
 
@@ -616,6 +624,100 @@ describe('speaker voice IPC handlers', () => {
     expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
   });
 
+  it('replaces legacy evidence from the same source instead of double-counting it', async () => {
+    const legacyCandidate = {
+      ...dummyCandidate,
+      candidateDigest: 'legacy-candidate-digest',
+      provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+    };
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [legacyCandidate]);
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+      personId,
+      sourceMeetingId: meetingId,
+      sourceRevision,
+      speaker: legacyCandidate.speaker,
+      candidateDigest: legacyCandidate.candidateDigest,
+      expectedRevision: db.identityStore.getRevision(),
+    });
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: { ...dummyCandidate, cleanDurationSeconds: 18 },
+      sourceRevision,
+    }));
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    )) as {
+      profiles: Array<{ sampleCount: number; cleanDurationSeconds: number }>;
+    };
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+    expect(result.profiles[0]).toMatchObject({
+      sampleCount: 1,
+      cleanDurationSeconds: 18,
+    });
+    expect(
+      db.db
+        .prepare(
+          'SELECT count(*) AS count, candidate_digest FROM speaker_voice_enrollments WHERE person_id = ?',
+        )
+        .get(personId),
+    ).toEqual({ count: 1, candidate_digest: dummyCandidate.candidateDigest });
+  });
+
+  it('adds later confirmed sources to an existing profile in bounded passes', async () => {
+    const buildEnrollmentCandidate = vi.fn(async (input) => ({
+      candidate: {
+        ...dummyCandidate,
+        candidateDigest: `candidate-${input.meetingId}`,
+      },
+      sourceRevision,
+    }));
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    buildEnrollmentCandidate.mockClear();
+
+    for (let index = 0; index < 4; index += 1) {
+      const laterMeetingId = `${meetingId}-later-${index}`;
+      db.saveMeeting({
+        id: laterMeetingId,
+        title: `Later voice test ${index}`,
+        capture_journal_generation: sourceRevision,
+        ...validatedTranscriptTrust,
+        transcript_json: JSON.stringify([
+          { speaker: 'Remote Speaker 1', text: `Later sample ${index}` },
+        ]),
+      });
+      db.identityStore.setBinding(laterMeetingId, {
+        speaker: 'Remote Speaker 1',
+        personId,
+        individual: true,
+        source: 'user',
+        sourceRevision,
+        evidence: [],
+      });
+    }
+
+    const firstPass = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    )) as { profiles: Array<{ sampleCount: number }> };
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(3);
+    expect(firstPass.profiles[0]?.sampleCount).toBe(4);
+
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(4);
+  });
+
   it('reconciles confirmed speakers before matching a future meeting', async () => {
     const historicalMeetingId = meetingId;
     const futureMeetingId = `${meetingId}-future`;
@@ -646,6 +748,71 @@ describe('speaker voice IPC handlers', () => {
     expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
       personId,
     );
+  });
+
+  it('upgrades a legacy query candidate before cross-meeting matching', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
+    await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
+      personId,
+      sourceMeetingId: meetingId,
+      sourceRevision,
+      speaker: dummyCandidate.speaker,
+      candidateDigest: dummyCandidate.candidateDigest,
+      expectedRevision: db.identityStore.getRevision(),
+    });
+    const queryMeetingId = `${meetingId}-query`;
+    db.saveMeeting({
+      id: queryMeetingId,
+      title: 'Query voice test',
+      capture_journal_generation: sourceRevision,
+      ...validatedTranscriptTrust,
+      transcript_json: JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'Query sample' },
+      ]),
+    });
+    const legacyQuery = {
+      ...dummyCandidate,
+      speaker: 'Remote Speaker 2',
+      candidateDigest: 'legacy-query-digest',
+      representativeEmbeddings: undefined,
+      provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+    };
+    saveMeetingSpeakerCandidates(queryMeetingId, sourceRevision, [legacyQuery]);
+    const upgradedQuery = {
+      ...dummyCandidate,
+      speaker: 'Remote Speaker 2',
+      candidateDigest: 'upgraded-query-digest',
+    };
+    const buildEnrollmentCandidate = vi.fn(async (input) =>
+      input.meetingId === queryMeetingId
+        ? { candidate: upgradedQuery, sourceRevision }
+        : null,
+    );
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId: queryMeetingId },
+      { buildEnrollmentCandidate, isFeatureFlagEnabled: () => true },
+    )) as { suggestions: Record<string, { suggestedPersonId: string }> };
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
+      meetingId: queryMeetingId,
+      speaker: 'Remote Speaker 2',
+    });
+    expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
+      personId,
+    );
+    expect(
+      db.db
+        .prepare(
+          'SELECT representative_embeddings_json FROM meeting_speaker_candidates WHERE meeting_id = ?',
+        )
+        .get(queryMeetingId),
+    ).toEqual({
+      representative_embeddings_json: JSON.stringify(
+        upgradedQuery.representativeEmbeddings,
+      ),
+    });
   });
 
   it('does not recreate a voice profile after explicit deletion', async () => {

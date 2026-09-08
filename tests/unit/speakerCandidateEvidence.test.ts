@@ -38,6 +38,13 @@ describe('speakerCandidateEvidence', () => {
       dummyProvenance,
     );
     expect(digestDiffEmbedding).not.toBe(digest1);
+
+    const digestWithRepresentatives = computeCandidateDigest(
+      validEmbedding,
+      dummyProvenance,
+      [validEmbedding, slightlyDifferentEmbedding],
+    );
+    expect(digestWithRepresentatives).not.toBe(digest1);
   });
 
   it('determines enrollment eligibility based on purity gating criteria', () => {
@@ -202,6 +209,21 @@ describe('speakerCandidateEvidence', () => {
       },
     });
     expect(candidate?.candidateDigest).toHaveLength(64);
+
+    const representedCandidate = deriveReviewedSpeakerCandidate({
+      speaker: 'Them',
+      clusterEvidence: [strongEvidence],
+      provenance: dummyProvenance,
+      reviewedIntervals: intervals,
+      representativeEmbeddings: [validEmbedding, validEmbedding],
+    });
+    expect(representedCandidate).toMatchObject({
+      representativeEmbeddings: [validEmbedding, validEmbedding],
+      provenance: { enrollmentExtractionVersion: 'multi-interval-v1' },
+    });
+    expect(representedCandidate?.candidateDigest).not.toBe(
+      candidate?.candidateDigest,
+    );
 
     const durationCapped = deriveReviewedSpeakerCandidate({
       speaker: 'Them',
