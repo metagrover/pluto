@@ -68,11 +68,11 @@ import {
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { createLogger } from './logger';
-import { resolveNotesEvaluationActivation } from './notesEvaluationActivation';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
 } from './nativeAudioCapture';
+import { resolveNotesEvaluationActivation } from './notesEvaluationActivation';
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
