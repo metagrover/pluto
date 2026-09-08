@@ -45,7 +45,10 @@ const makeTransport = () => {
   return transport;
 };
 
-const makeSession = (transport = makeTransport()) => {
+const makeSession = (
+  transport = makeTransport(),
+  extraOptions?: Partial<Parameters<typeof createEouRendererSession>[0]>,
+) => {
   const onSegments = vi.fn();
   const onUnavailable = vi.fn();
   return {
@@ -59,6 +62,7 @@ const makeSession = (transport = makeTransport()) => {
       transport,
       onSegments,
       onUnavailable,
+      ...extraOptions,
     }),
   };
 };
@@ -248,7 +252,9 @@ describe('EOU renderer session', () => {
     transport.invoke = vi.fn((channel) =>
       channel === 'PARAKEET_EOU_APPEND' ? blocked.promise : Promise.resolve({}),
     );
-    const { session, onUnavailable } = makeSession(transport);
+    const { session, onUnavailable } = makeSession(transport, {
+      maxOutstanding: 4,
+    });
     await session.start();
 
     session.append('mic', new Float32Array(2_560 * 5));
@@ -379,5 +385,39 @@ describe('EOU renderer session', () => {
     session.append('mic', new Float32Array(2_560));
 
     expect(onUnavailable).toHaveBeenCalledWith('parakeet_live_unavailable');
+  });
+
+  it('buffers samples while starting and replays them once start completes', async () => {
+    const transport = makeTransport();
+    const startDeferred = deferred<unknown>();
+    const appendCalls: unknown[] = [];
+    transport.invoke = vi.fn((channel, payload) => {
+      if (channel === 'PARAKEET_EOU_START') {
+        return startDeferred.promise;
+      }
+      if (channel === 'PARAKEET_EOU_APPEND') {
+        appendCalls.push(payload);
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+    const { session } = makeSession(transport);
+    const startPromise = session.start();
+
+    expect(session.status()).toBe('starting');
+    // Append while starting - should not be dropped
+    session.append('mic', new Float32Array(2_560));
+    expect(appendCalls).toHaveLength(0);
+
+    // Now let start complete
+    startDeferred.resolve({});
+    await startPromise;
+
+    expect(session.status()).toBe('ready');
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]).toMatchObject({
+      source: 'mic',
+      meetingId: 'meeting-1',
+    });
   });
 });

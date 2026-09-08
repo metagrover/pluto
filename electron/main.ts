@@ -1402,7 +1402,7 @@ app.whenReady().then(async () => {
       return new ParakeetEouClient({
         runtimeHost: parakeetRuntimeHost,
         runtimeLease: lease,
-        maxOutstandingPerSource: 4,
+        maxOutstandingPerSource: 48,
       });
     },
     onUpdate: ({ meetingId, owner: ownerId, event }) => {

@@ -54,6 +54,7 @@
       ".claude/**",
       ".superpowers/**",
       ".worktrees/**",
+      ".github/**",
       "tmp/**"
     ]
   }

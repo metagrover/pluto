@@ -15,6 +15,17 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-07 - Instant audio capture startup, live ASR queue resilience, and complete silent intervals
+
+- **Status:** Accepted
+- **Source:** Diagnosis of 2026-09-07 recording startup delay and transcription backpressure incident
+- **Decision:** Pluto decouples durable audio capture from live transcription readiness:
+  1. Audio capture starts immediately (<300ms): `startSession` initiates microphone acquisition and Native AudioCap concurrently with journal setup, rather than blocking the microphone behind sequential `GET_TRANSCRIPTION_VOCABULARY` SQLite queries and `eouSession.start()` Neural Engine model compilation.
+  2. Live transcription attaches asynchronously: `eouRendererSession` introduces a startup buffering queue that retains initial PCM frames while the streaming CoreML pipeline compiles on ANE, replaying them in sequence once ready without dropping speech. `maxOutstanding` per source is raised from 4 frames (1.28s) to 48 frames (~15.36s) across renderer and main process (`ParakeetEouClient`), eliminating fatal `parakeet_backpressure` aborts during startup inference bursts. If live transcription fails or is delayed, capture continues safely and meeting audio is never lost.
+  3. Pre-roll and silent interval durability: Pluto eliminates the destructive wipe of pre-roll system audio chunks at synchronization, and synthesizes 48kHz silent PCM for intervals where the system audio source was active but no remote audio was produced. This guarantees that all system audio intervals in the capture journal manifest are marked `captured`, preventing false `system_capture_incomplete` aborts during final batch transcription.
+- **Rationale:** Previously, Pluto showed the meeting screen immediately while blocking microphone recording for 18–20 seconds on cold CoreML model preparation, losing meeting intros. A hardcoded 4-frame (1.28s) backpressure threshold caused live transcription to crash during ANE warm-up, and empty system audio intervals caused final transcription to abort and mark meetings as `needs_attention`.
+- **Consequences:** Audio capture begins within ~250ms of user action; meeting intros are never lost; live transcription recovers from initial Neural Engine compilation bursts; all meetings complete post-recording finalization even when system audio is completely silent.
+
 ## 2026-09-05 - Resolve Me speaker name from user profile and wire speaker candidate evidence in final transcription
 
 - **Status:** Accepted

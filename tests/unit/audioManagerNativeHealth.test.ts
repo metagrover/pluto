@@ -41,7 +41,7 @@ it('overlaps native PCM startup with independent meeting setup without weakening
     "'GET_TRANSCRIPTION_VOCABULARY'",
     journalStart,
   );
-  const eouStart = source.indexOf('await eouSession.start()', journalStart);
+  const eouStart = source.indexOf('eouSession.start()', journalStart);
   const microphoneAcquisition = source.indexOf(
     'navigator.mediaDevices.getUserMedia',
     journalStart,
@@ -67,6 +67,9 @@ it('overlaps native PCM startup with independent meeting setup without weakening
   expect(nativeLaunch).toBeLessThan(vocabularyStart);
   expect(nativeLaunch).toBeLessThan(eouStart);
   expect(nativeLaunch).toBeLessThan(microphoneAcquisition);
+  expect(source.slice(eouStart, microphoneAcquisition)).not.toContain(
+    'await eouSession.start()',
+  );
   expect(nativeSettlement).toBeGreaterThan(microphoneAcquisition);
   expect(nativeSettlement).toBeLessThan(microphoneRecorderStart);
   expect(recordingState).toBeGreaterThan(microphoneRecorderStart);
