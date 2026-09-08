@@ -205,4 +205,135 @@ describe('speaker review', () => {
       { startSec: 20, endSec: 24, excerpt: 'Second clean answer.' },
     ]);
   });
+
+  it.each([
+    'Them',
+    'Remote Speaker 2',
+    'Unknown',
+    'Unidentified speaker',
+    'Guest A',
+    '',
+    'Local Speaker 1',
+  ])(
+    'keeps overlapping %s speech out of numbered remote samples',
+    (otherSpeaker) => {
+      const segments = [
+        {
+          speaker: 'Remote Speaker 1',
+          start: 0,
+          end: 5,
+          text: 'Overlapped answer.',
+        },
+        {
+          speaker: otherSpeaker,
+          start: 1,
+          end: 3,
+          text: 'Unresolved or other voice.',
+        },
+      ];
+      expect(
+        selectSpeakerSampleIntervals(segments, 'Remote Speaker 1'),
+      ).toEqual([]);
+      expect(
+        selectSpeakerEnrollmentIntervals(segments, 'Remote Speaker 1'),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(['Them', 'Remote Speaker 2', 'Unknown'])(
+    'does not join clean remote segments across a short %s interruption',
+    (otherSpeaker) => {
+      const segments = [
+        {
+          speaker: 'Remote Speaker 1',
+          start: 0,
+          end: 3,
+          text: 'First answer.',
+        },
+        {
+          speaker: otherSpeaker,
+          start: 3,
+          end: 3.5,
+          text: 'Brief interruption.',
+        },
+        {
+          speaker: 'Remote Speaker 1',
+          start: 3.5,
+          end: 7,
+          text: 'Second answer.',
+        },
+      ];
+      expect(
+        selectSpeakerEnrollmentIntervals(segments, 'Remote Speaker 1'),
+      ).toEqual([
+        { startSec: 0, endSec: 3, excerpt: 'First answer.' },
+        { startSec: 3.5, endSec: 7, excerpt: 'Second answer.' },
+      ]);
+      expect(
+        selectSpeakerSampleIntervals(segments, 'Remote Speaker 1'),
+      ).toHaveLength(2);
+    },
+  );
+
+  it('retains the full extent of nested same-speaker segments', () => {
+    expect(
+      selectSpeakerEnrollmentIntervals(
+        [
+          {
+            speaker: 'Remote Speaker 1',
+            start: 0,
+            end: 7,
+            text: 'Long answer.',
+          },
+          {
+            speaker: 'Remote Speaker 1',
+            start: 1,
+            end: 2,
+            text: 'Nested segment.',
+          },
+        ],
+        'Remote Speaker 1',
+      ),
+    ).toEqual([
+      { startSec: 0, endSec: 7, excerpt: 'Long answer. Nested segment.' },
+    ]);
+  });
+
+  it('does not treat overlapping local mic speech as contamination of numbered remote system audio', () => {
+    const segments = [
+      {
+        speaker: 'Remote Speaker 1',
+        start: 0,
+        end: 5,
+        text: 'First remote answer.',
+      },
+      { speaker: 'Me', start: 1, end: 3, text: 'Local interruption.' },
+      {
+        speaker: 'Remote Speaker 1',
+        start: 10,
+        end: 15,
+        text: 'Second remote answer.',
+      },
+      { speaker: 'Me', start: 11, end: 13, text: 'Another interruption.' },
+      {
+        speaker: 'Remote Speaker 1',
+        start: 20,
+        end: 25,
+        text: 'Contaminated remote answer.',
+      },
+      {
+        speaker: 'Remote Speaker 2',
+        start: 22,
+        end: 24,
+        text: 'Other remote speaker.',
+      },
+    ];
+
+    expect(
+      selectSpeakerEnrollmentIntervals(segments, 'Remote Speaker 1'),
+    ).toEqual([
+      { startSec: 0, endSec: 5, excerpt: 'First remote answer.' },
+      { startSec: 10, endSec: 15, excerpt: 'Second remote answer.' },
+    ]);
+  });
 });

@@ -94,7 +94,16 @@ const selectCleanSpeakerIntervals = (
     .map(timedSegment)
     .filter((segment): segment is TimedSpeakerSegment => segment !== null)
     .sort((left, right) => left.start - right.start || left.end - right.end);
-  const otherSpeakers = timed.filter((segment) => segment.speaker !== speaker);
+  const numberedRemoteSpeaker = REMOTE_SPEAKER_PATTERN.test(speaker);
+  const otherSpeakers = timed.filter(
+    (segment) =>
+      segment.speaker !== speaker &&
+      // Numbered remote speakers are extracted from system audio. Local mic
+      // speech can overlap them in the unified transcript without contaminating
+      // the audio used for the voice profile. Only the canonical local label
+      // is exempt; every other label may contain another system-audio voice.
+      (!numberedRemoteSpeaker || segment.speaker !== 'Me'),
+  );
   const clean = timed.filter(
     (segment) =>
       segment.speaker === speaker &&
@@ -102,23 +111,31 @@ const selectCleanSpeakerIntervals = (
   );
 
   const groups: TimedSpeakerSegment[][] = [];
+  let currentEnd = 0;
   for (const segment of clean) {
     const current = groups.at(-1);
     if (
       current &&
-      segment.start - (current.at(-1)?.end ?? segment.start) <=
-        SAMPLE_JOIN_GAP_SECONDS
+      segment.start - currentEnd <= SAMPLE_JOIN_GAP_SECONDS &&
+      !otherSpeakers.some(
+        (other) => other.start < segment.start && other.end > currentEnd,
+      )
     ) {
       current.push(segment);
+      currentEnd = Math.max(currentEnd, segment.end);
     } else {
       groups.push([segment]);
+      currentEnd = segment.end;
     }
   }
 
   return groups
     .map((group) => {
       const startSec = group[0]?.start ?? 0;
-      const groupEnd = group.at(-1)?.end ?? startSec;
+      const groupEnd = group.reduce(
+        (end, segment) => Math.max(end, segment.end),
+        startSec,
+      );
       const endSec = Math.min(groupEnd, startSec + SAMPLE_MAX_SECONDS);
       return {
         startSec,
