@@ -50,7 +50,7 @@ export type NotesExperimentSettings = {
   thinking: false;
   contextTokens: 16_384;
   writerOutputTokens: 2_048;
-  editorOutputTokens: number;
+  editorOutputTokens: 2_048;
   stageCache: 'disabled';
 };
 
@@ -569,7 +569,7 @@ export const parseLocalIntelligenceManifest = (
     settings.thinking !== false ||
     settings.contextTokens !== 16_384 ||
     settings.writerOutputTokens !== 2_048 ||
-    !isPositiveInteger(settings.editorOutputTokens) ||
+    settings.editorOutputTokens !== 2_048 ||
     settings.stageCache !== 'disabled'
   ) {
     invalidManifest();

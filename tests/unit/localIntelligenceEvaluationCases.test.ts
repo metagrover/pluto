@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 
+import { generateMeetingNotes } from '../../electron/llm/meetingNotesPipeline';
+import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import {
+  type NotesRequest,
+  PHI_NOTES_EXPERIMENT_DIGEST,
+  PHI_NOTES_EXPERIMENT_MODEL,
+} from '../../electron/llm/meetingNotesTypes';
 import {
   localIntelligenceEvaluationCases,
   scoreGoldOutput,
@@ -108,9 +115,11 @@ describe('local intelligence evaluation corpus', () => {
       expect(candidate.segments, candidate.id).toHaveLength(
         candidate.capacity.segmentCount,
       );
-      expect(candidate.capacity.editorFit).toBe(
-        'pending_development_measurement',
-      );
+      expect(candidate.capacity).toMatchObject({
+        editorFit: 'blocked_at_16384',
+        measuredContextTokens: 16_384,
+        plannerOutcome: 'notes_source_first_capacity_exceeded',
+      });
       return actual;
     });
     expect(
@@ -119,6 +128,47 @@ describe('local intelligence evaluation corpus', () => {
     expect(
       sourceSizes.filter((size) => size >= 16_001 && size <= 24_000),
     ).toHaveLength(4);
+  });
+
+  it('freezes the measured 16k capacity blocker before any inference starts', async () => {
+    const plannedLeaves: number[] = [];
+    for (const candidate of phiNotesOrdinaryCapacityCases) {
+      const source = createNotesSource(
+        JSON.stringify({ segments: candidate.segments }),
+      );
+      const generate = vi.fn((_request: NotesRequest) =>
+        Promise.reject(new Error('unexpected_inference')),
+      );
+      let planned = -1;
+      await expect(
+        generateMeetingNotes({
+          reviewProtocol: 'editor',
+          compactWriterContract: true,
+          sourceFirstReconciliation: true,
+          source,
+          context: {
+            userNotes: '',
+            template: 'auto',
+            trustedUserTerms: [],
+            entityHints: [],
+          },
+          generate,
+          provider: 'ollama',
+          model: PHI_NOTES_EXPERIMENT_MODEL,
+          modelDigest: PHI_NOTES_EXPERIMENT_DIGEST,
+          contextTokens: candidate.capacity.measuredContextTokens,
+          onPlan: (plan) => {
+            planned = plan.plannedLeafCount;
+          },
+        }),
+      ).rejects.toThrow(candidate.capacity.plannerOutcome);
+      expect(generate, candidate.id).not.toHaveBeenCalled();
+      expect(planned, candidate.id).toBe(
+        candidate.capacity.expectedWriterParts,
+      );
+      plannedLeaves.push(planned);
+    }
+    expect(plannedLeaves).toEqual([2, 2, 2, 2, 3, 3, 4, 3]);
   });
 
   it('keeps expected capacity rejection fixtures outside supported completion', () => {

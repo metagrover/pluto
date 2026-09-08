@@ -93,7 +93,7 @@ const notesManifestValue = (): NotesExperimentManifest => {
       thinking: false,
       contextTokens: 16_384,
       writerOutputTokens: 2_048,
-      editorOutputTokens: 4_096,
+      editorOutputTokens: 2_048,
       stageCache: 'disabled',
     },
     schedule,
@@ -184,6 +184,14 @@ describe('local intelligence evaluation contract', () => {
     );
     expect(() => parseLocalIntelligenceManifest(changedSchedule)).toThrow(
       'evaluation_schedule_mismatch',
+    );
+
+    const wrongEditorBudget = notesManifestValue() as unknown as {
+      settings: { editorOutputTokens: number };
+    };
+    wrongEditorBudget.settings.editorOutputTokens = 4_096;
+    expect(() => parseLocalIntelligenceManifest(wrongEditorBudget)).toThrow(
+      'evaluation_manifest_invalid',
     );
   });
 

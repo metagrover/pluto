@@ -74,7 +74,7 @@ const manifest: NotesExperimentManifest = {
     thinking: false,
     contextTokens: 16_384,
     writerOutputTokens: 2_048,
-    editorOutputTokens: 4_096,
+    editorOutputTokens: 2_048,
     stageCache: 'disabled',
   },
   schedule,

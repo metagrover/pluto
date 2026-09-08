@@ -670,9 +670,11 @@ export type PhiNotesCapacityMetadata = {
   language: 'en';
   density: 'ordinary';
   criticalItemPositions: number[];
-  expectedWriterParts: 2 | 3;
+  expectedWriterParts: 2 | 3 | 4;
   estimatedSourceTokens: number;
-  editorFit: 'pending_development_measurement';
+  editorFit: 'blocked_at_16384';
+  measuredContextTokens: 16_384;
+  plannerOutcome: 'notes_source_first_capacity_exceeded';
 };
 
 export type PhiNotesCapacityCase = LocalIntelligenceNotesCase & {
@@ -732,7 +734,7 @@ const makeCapacityCase = ({
   segmentCount: number;
   criticalIndex: number;
   assumedDurationMinutes: number;
-  expectedWriterParts: 2 | 3;
+  expectedWriterParts: 2 | 3 | 4;
   sourceCharacters: number;
 }): PhiNotesCapacityCase => {
   const segments = capacitySegments(label, segmentCount, criticalIndex);
@@ -762,7 +764,9 @@ const makeCapacityCase = ({
       criticalItemPositions: [criticalIndex],
       expectedWriterParts,
       estimatedSourceTokens: Math.ceil(sourceCharacters / 4),
-      editorFit: 'pending_development_measurement',
+      editorFit: 'blocked_at_16384',
+      measuredContextTokens: 16_384,
+      plannerOutcome: 'notes_source_first_capacity_exceeded',
     },
     gold: {
       expectedBehavior: 'supported_output',
@@ -857,7 +861,7 @@ export const phiNotesOrdinaryCapacityCases: PhiNotesCapacityCase[] = [
     segmentCount: 165,
     criticalIndex: 25,
     assumedDurationMinutes: 38,
-    expectedWriterParts: 3,
+    expectedWriterParts: 4,
     sourceCharacters: 23_920,
   }),
   makeCapacityCase({
@@ -969,6 +973,6 @@ export const phiNotesRubricPayload = [
 ].map(({ id, gold }) => ({ id, gold }));
 
 export const PHI_NOTES_CORPUS_SHA256 =
-  '3e5a6106bda8ba4ef436420e892c35b673e21116e95c3759318e69bae598043f';
+  'dcaa8ca11056cfa830ce68d7a93866879a4bc8803832c3944fba1680e223cacf';
 export const PHI_NOTES_RUBRIC_SHA256 =
   '74010004c6ebd2bf07454c692065b8d7c64d7604bc55440eb26ecddcba688ccb';
