@@ -94,7 +94,18 @@ const selectCleanSpeakerIntervals = (
     .map(timedSegment)
     .filter((segment): segment is TimedSpeakerSegment => segment !== null)
     .sort((left, right) => left.start - right.start || left.end - right.end);
-  const otherSpeakers = timed.filter((segment) => segment.speaker !== speaker);
+  const numberedRemoteSpeaker = REMOTE_SPEAKER_PATTERN.test(speaker);
+  const otherSpeakers = timed.filter(
+    (segment) =>
+      segment.speaker !== speaker &&
+      // Numbered remote speakers are extracted from system audio. Local mic
+      // speech can overlap them in the unified transcript without contaminating
+      // the audio used for the voice profile. Other remote clusters and unknown
+      // speech still make the interval ambiguous.
+      (!numberedRemoteSpeaker ||
+        REMOTE_SPEAKER_PATTERN.test(segment.speaker) ||
+        /^(?:unknown|unidentified)/iu.test(segment.speaker)),
+  );
   const clean = timed.filter(
     (segment) =>
       segment.speaker === speaker &&
