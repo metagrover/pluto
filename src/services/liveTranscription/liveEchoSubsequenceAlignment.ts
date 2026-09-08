@@ -228,3 +228,65 @@ export const findExactEchoSubsequence = (
   }
   return best;
 };
+
+/** Match only source-owned words, across independent checkpoint boundaries.
+ * Unmatched words are never consumed, including local additions and corrections. */
+export const findSupportedEchoWordMatches = (
+  mic: TimedToken[],
+  system: TimedToken[],
+  evidence: EvidenceLookup,
+): Array<{ micIndex: number; systemIndex: number }> => {
+  const matches: Array<{ micIndex: number; systemIndex: number }> = [];
+  let cursor = 0;
+  for (let index = 0; index < mic.length; index++) {
+    const word = mic[index];
+    let best = -1;
+    let distance = 1_251;
+    for (let remote = cursor; remote < system.length; remote++) {
+      const candidate = system[remote];
+      if (candidate.timestampMs > word.timestampMs + 1_250) break;
+      const delta = Math.abs(candidate.timestampMs - word.timestampMs);
+      if (candidate.text === word.text && delta < distance) {
+        best = remote;
+        distance = delta;
+      }
+    }
+    if (best < 0) continue;
+    matches.push({ micIndex: index, systemIndex: best });
+    cursor = best + 1;
+  }
+  const supported = new Map<
+    number,
+    { micIndex: number; systemIndex: number }
+  >();
+  // Short overlapping anchors tolerate slow changes in acoustic lag without
+  // allowing an unsupported word to borrow evidence from distant speech.
+  for (let start = 0; start <= matches.length - MIN_ANCHOR_WORDS; start += 8) {
+    const chunk = matches.slice(start, start + 24);
+    const first = chunk[0];
+    const last = chunk.at(-1)!;
+    if (
+      chunk.length /
+        Math.max(
+          last.micIndex - first.micIndex + 1,
+          last.systemIndex - first.systemIndex + 1,
+        ) <
+        0.8 ||
+      mic[last.micIndex].timestampMs - mic[first.micIndex].timestampMs >
+        MAX_CHAIN_MS
+    )
+      continue;
+    const lag = anchorLag(
+      chunk.map(({ micIndex }) => mic[micIndex]),
+      chunk.map(({ systemIndex }) => system[systemIndex]),
+      evidence,
+    );
+    if (lag === undefined) continue;
+    const aligned = chunk.filter(({ micIndex, systemIndex }) =>
+      supportsOnset(mic[micIndex], system[systemIndex], lag),
+    );
+    if (aligned.length < MIN_ANCHOR_WORDS) continue;
+    for (const match of aligned) supported.set(match.micIndex, match);
+  }
+  return [...supported.values()].sort((a, b) => a.micIndex - b.micIndex);
+};

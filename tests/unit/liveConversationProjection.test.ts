@@ -89,6 +89,63 @@ describe('live conversation projection', () => {
     expect(second.metrics.lateArrivals).toBe(1);
   });
 
+  it('orders a retained local reply by its own time after removing an echo prefix', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const mic = row('mic', 'mic', 'remote phrase local reply', 1_000);
+    const system = row('system', 'system', 'remote phrase', 1_100);
+    projection.apply({
+      generation: 1,
+      reading: reading([mic, system]),
+      reason: 'recognition',
+    });
+    const corrected = projection.apply({
+      generation: 1,
+      reading: reading([mic, system], { mic: [[0, 2]] }),
+      reason: 'echo_evidence',
+    });
+    expect(corrected.rows.map(({ id }) => id)).toEqual(['system', 'mic']);
+    expect(corrected.rows[1]).toMatchObject({
+      timestampMs: 1_200,
+      text: 'local reply',
+    });
+    const restored = projection.apply({
+      generation: 1,
+      reading: reading([mic, system]),
+      reason: 'echo_evidence',
+    });
+    expect(restored.rows.map(({ id }) => id)).toEqual(['mic', 'system']);
+    expect(restored.rows[0].timestampMs).toBe(1_000);
+  });
+
+  it('places a sentence after silence at its own time while preserving raw row provenance', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const remote = {
+      ...row('remote', 'system', 'that next topic', 2_000),
+      wordTimings: [
+        { text: 'that', timestampMs: 2_000, endTimestampMs: 30_000 },
+        { text: 'next', timestampMs: 30_000, endTimestampMs: 30_300 },
+        { text: 'topic', timestampMs: 30_300, endTimestampMs: 31_000 },
+      ],
+    };
+    const local = row('local', 'mic', 'my reply', 10_000);
+    const raw = reading([remote, local]);
+    const snapshot = projection.apply({
+      generation: 1,
+      reading: raw,
+      reason: 'recognition',
+    });
+    expect(snapshot.rows.map(({ timestampMs }) => timestampMs)).toEqual([
+      2_000, 10_000, 30_000,
+    ]);
+    expect(snapshot.rows.map(({ text }) => text)).toEqual([
+      'that',
+      'my reply',
+      'next topic',
+    ]);
+    expect(snapshot.rows[2].parts[0].sourceSegmentId).toBe('remote');
+    expect(raw.segments).toEqual([remote, local]);
+  });
+
   it('produces the same event-time order for every callback permutation', () => {
     const segments = [
       row('system-later', 'system', 'remote later', 20_000),
@@ -136,10 +193,10 @@ describe('live conversation projection', () => {
       reason: 'echo_evidence',
     });
     expect(corrected.rows.map((item) => item.id)).toEqual([
-      'mic-1',
       'system-1',
+      'mic-1',
     ]);
-    expect(corrected.rows[0]).toMatchObject({
+    expect(corrected.rows[1]).toMatchObject({
       id: 'mic-1',
       text: 'local answer',
       qualifier: 'updated',

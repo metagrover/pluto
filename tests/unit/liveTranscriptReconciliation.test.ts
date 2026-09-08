@@ -26,6 +26,100 @@ const segment = (
 });
 
 describe('live transcript reconciliation', () => {
+  it('reconciles independently split checkpoints without consuming local additions', () => {
+    const words =
+      'the blue notebook is on the desk and we will review our meeting recording together tomorrow morning'.split(
+        ' ',
+      );
+    const make = (source: 'mic' | 'system', size: number) => {
+      const timings = words.map((text, index) => ({
+        text,
+        timestampMs: 1_000 + index * 300,
+        endTimestampMs: 1_250 + index * 300,
+      }));
+      if (source === 'mic')
+        timings.splice(9, 0, {
+          text: 'NO',
+          timestampMs: 3_550,
+          endTimestampMs: 3_650,
+        });
+      const rows = [];
+      for (let start = 0; start < timings.length; start += size) {
+        const chunk = timings.slice(start, start + size);
+        rows.push({
+          ...segment(
+            `${source}-${start}`,
+            source,
+            chunk.map((w) => w.text).join(' '),
+            chunk[0].timestampMs,
+            chunk.at(-1)!.endTimestampMs,
+          ),
+          wordTimings: chunk,
+        });
+      }
+      return rows;
+    };
+    const segments = [...make('mic', 5), ...make('system', 4)];
+    const reconcile = (
+      echoEvidence: Array<{
+        micStartMs: number;
+        micEndMs: number;
+        systemStartMs: number;
+        systemEndMs: number;
+      }>,
+    ) =>
+      reconcileLiveTranscriptReading({
+        segments,
+        activityWindows: [],
+        echoEvidence,
+      });
+    const supported = reconcile([
+      {
+        micStartMs: 1_000,
+        micEndMs: 7_000,
+        systemStartMs: 1_000,
+        systemEndMs: 7_000,
+      },
+    ]);
+    expect(
+      supported.ranges
+        .filter((r) => r.source === 'mic' && r.visibility === 'visible')
+        .map((r) => r.text),
+    ).toEqual(['NO']);
+    expect(supported.segments).toEqual(segments);
+    expect(
+      reconcile([]).ranges.filter((r) => r.visibility === 'suppressed_echo'),
+    ).toHaveLength(0);
+    const delayed = segments.map((row) =>
+      row.source !== 'mic'
+        ? row
+        : {
+            ...row,
+            timestampMs: row.timestampMs + 10_000,
+            endTimestampMs: row.endTimestampMs + 10_000,
+            wordTimings: row.wordTimings.map((word) => ({
+              ...word,
+              timestampMs: word.timestampMs + 10_000,
+              endTimestampMs: word.endTimestampMs + 10_000,
+            })),
+          },
+    );
+    expect(
+      reconcileLiveTranscriptReading({
+        segments: delayed,
+        activityWindows: [],
+        echoEvidence: [
+          {
+            micStartMs: 1_000,
+            micEndMs: 20_000,
+            systemStartMs: 1_000,
+            systemEndMs: 20_000,
+          },
+        ],
+      }).ranges.filter((r) => r.visibility === 'suppressed_echo'),
+    ).toHaveLength(0);
+  });
+
   it('partitions six supported echo spans without losing interleaved local words', () => {
     const fixture = liveTranscriptJumbledSourcesFixture();
     const reading = reconcileLiveTranscriptReading({

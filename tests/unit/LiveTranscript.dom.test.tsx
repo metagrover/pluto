@@ -110,7 +110,7 @@ describe('LiveTranscript reading experience', () => {
     const turns = () => [...container.querySelectorAll('.transcript-turn')];
     expect(
       turns().map((turn) => turn.querySelector('strong')?.textContent),
-    ).toEqual(['Call', 'You']);
+    ).toEqual(['Call', 'Mic']);
     expect(
       turns()[1]
         .querySelector('.transcript-turn__content')
@@ -256,7 +256,7 @@ describe('LiveTranscript reading experience', () => {
         ),
       );
       const youText = [...container.querySelectorAll('.transcript-turn')]
-        .filter((turn) => turn.querySelector('strong')?.textContent === 'You')
+        .filter((turn) => turn.querySelector('strong')?.textContent === 'Mic')
         .map(
           (turn) =>
             turn.querySelector('.transcript-turn__content')?.textContent,
@@ -317,7 +317,7 @@ describe('LiveTranscript reading experience', () => {
     render(rows);
     expect(
       turns().map((turn) => turn.querySelector('strong')?.textContent),
-    ).toEqual(['Call', 'You']);
+    ).toEqual(['Call', 'Mic']);
     expect(
       turns()[1].querySelector('.transcript-turn__content')?.textContent,
     ).toBe('can you hear mile vice ok');
@@ -344,7 +344,7 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
-  it('labels microphone and system audio as You and Call', () => {
+  it('labels microphone and system audio as Mic and Call', () => {
     const root = createRoot(container);
     act(() =>
       root.render(
@@ -359,7 +359,7 @@ describe('LiveTranscript reading experience', () => {
       [...container.querySelectorAll('.transcript-speaker strong')].map(
         (label) => label.textContent,
       ),
-    ).toEqual(['You', 'Call']);
+    ).toEqual(['Mic', 'Call']);
 
     act(() => root.unmount());
   });
@@ -535,7 +535,7 @@ describe('LiveTranscript reading experience', () => {
     expect(container.textContent).toContain('Refining');
 
     publish('mic', 2, 14, [...words, 'Wait', 'I', 'object']);
-    expect(labels()).toContain('You');
+    expect(labels()).toContain('Mic');
     expect(labels()).toContain('Call');
     expect(container.textContent).toContain('Wait I object');
 
@@ -651,7 +651,7 @@ describe('LiveTranscript reading experience', () => {
       };
       const youText = () =>
         [...container.querySelectorAll('.transcript-turn')]
-          .filter((turn) => turn.querySelector('strong')?.textContent === 'You')
+          .filter((turn) => turn.querySelector('strong')?.textContent === 'Mic')
           .map(
             (turn) =>
               turn.querySelector('.transcript-turn__content')?.textContent,
@@ -666,7 +666,7 @@ describe('LiveTranscript reading experience', () => {
         }));
       expect(renderedOrder().map((turn) => turn.speaker)).toEqual([
         'Call',
-        'You',
+        'Mic',
       ]);
       expect(renderedOrder()[1].time).toBe(new Date(43_520).toISOString());
       expect(
@@ -682,7 +682,7 @@ describe('LiveTranscript reading experience', () => {
       );
       expect(raw.every((row) => !row.presentation)).toBe(true);
       publish('system', 2, []);
-      expect(renderedOrder()[0].speaker).toBe('You');
+      expect(renderedOrder()[0].speaker).toBe('Mic');
       expect(renderedOrder()[0].time).toBe(new Date(31_920).toISOString());
       expect(youText()).toContain(mergedWord);
       expect(youText()).toContain(local);
@@ -751,7 +751,7 @@ describe('LiveTranscript reading experience', () => {
       };
       const youText = () =>
         [...container.querySelectorAll('.transcript-turn')]
-          .filter((turn) => turn.querySelector('strong')?.textContent === 'You')
+          .filter((turn) => turn.querySelector('strong')?.textContent === 'Mic')
           .map(
             (turn) =>
               turn.querySelector('.transcript-turn__content')?.textContent,
@@ -860,7 +860,7 @@ describe('LiveTranscript reading experience', () => {
       };
       const youText = () =>
         [...container.querySelectorAll('.transcript-turn')]
-          .filter((turn) => turn.querySelector('strong')?.textContent === 'You')
+          .filter((turn) => turn.querySelector('strong')?.textContent === 'Mic')
           .map(
             (turn) =>
               turn.querySelector('.transcript-turn__content')?.textContent,
@@ -959,7 +959,7 @@ describe('LiveTranscript reading experience', () => {
         ),
       );
       const you = [...container.querySelectorAll('.transcript-turn')]
-        .filter((turn) => turn.querySelector('strong')?.textContent === 'You')
+        .filter((turn) => turn.querySelector('strong')?.textContent === 'Mic')
         .map(
           (turn) =>
             turn.querySelector('.transcript-turn__content')?.textContent,
@@ -1091,7 +1091,7 @@ describe('LiveTranscript reading experience', () => {
       [...container.querySelectorAll('.transcript-speaker strong')].map(
         (label) => label.textContent,
       ),
-    ).toEqual(['You', 'Call']);
+    ).toEqual(['Mic', 'Call']);
     expect(
       [...container.querySelectorAll('.transcript-paragraph-part')].map(
         (node) => node.textContent,
@@ -1232,7 +1232,7 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
-  it('keeps row order stable while supported spans are corrected and restored in place', () => {
+  it('keeps keyed rows while ordering corrected speech by its retained timestamp', () => {
     const fixture = liveTranscriptJumbledSourcesFixture();
     const projection = createLiveConversationProjection({ generation: 1 });
     const project = (echoEvidence: typeof fixture.echoEvidence) =>
@@ -1252,9 +1252,14 @@ describe('LiveTranscript reading experience', () => {
         <LiveTranscript segments={[]} interimText="" conversation={initial} />,
       ),
     );
-    const initialOrder = [
-      ...container.querySelectorAll<HTMLElement>('[data-conversation-row]'),
-    ].map((element) => element.dataset.conversationRow);
+    const micText = () =>
+      [
+        ...container.querySelectorAll(
+          '[data-conversation-row^="mic-long-hypothesis"]',
+        ),
+      ]
+        .map((element) => element.textContent)
+        .join(' ');
 
     const corrected = project(fixture.echoEvidence);
     act(() =>
@@ -1270,11 +1275,15 @@ describe('LiveTranscript reading experience', () => {
       [
         ...container.querySelectorAll<HTMLElement>('[data-conversation-row]'),
       ].map((element) => element.dataset.conversationRow),
-    ).toEqual(initialOrder);
-    expect(
-      container.querySelector('[data-conversation-row="mic-long-hypothesis"]')
-        ?.textContent,
-    ).toContain(fixture.expectedLocalWords.join(' '));
+    ).toEqual([
+      'system-1',
+      'mic-long-hypothesis:speech-0',
+      'system-2',
+      'mic-long-hypothesis:speech-28',
+      'system-3',
+      'mic-long-hypothesis:speech-56',
+    ]);
+    expect(micText()).toContain(fixture.expectedLocalWords.join(' '));
     expect(container.textContent).toContain('Updated');
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       'Transcript updated',
@@ -1286,13 +1295,48 @@ describe('LiveTranscript reading experience', () => {
         <LiveTranscript segments={[]} interimText="" conversation={restored} />,
       ),
     );
-    expect(
-      container.querySelector('[data-conversation-row="mic-long-hypothesis"]')
-        ?.textContent,
-    ).toContain(fixture.mic.text);
+    expect(micText()).toContain(fixture.mic.text);
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       'Transcript wording restored',
     );
+    act(() => root.unmount());
+  });
+
+  it('groups consecutive source speech and hides duplicate bookkeeping from the conversation', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const segments = [liveSegment, continuedSegment, otherSpeakerSegment];
+    const conversation = projector.apply({
+      generation: 1,
+      reason: 'recognition',
+      reading: reconcileLiveTranscriptReading({
+        segments,
+        activityWindows: [],
+      }),
+    });
+    conversation.rows.splice(1, 0, {
+      ...conversation.rows[0],
+      id: 'removed',
+      text: '',
+      parts: [],
+      display: 'duplicate_removed',
+    });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={conversation}
+        />,
+      ),
+    );
+    expect(container.querySelectorAll('.transcript-turn')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-conversation-row]')).toHaveLength(
+      3,
+    );
+    expect(container.textContent).not.toContain('Duplicate removed');
+    expect(container.textContent).toContain(liveSegment.text);
+    expect(container.textContent).toContain(continuedSegment.text);
     act(() => root.unmount());
   });
 
@@ -1339,7 +1383,7 @@ describe('LiveTranscript reading experience', () => {
     expect(container.querySelectorAll('.live-conversation-draft')).toHaveLength(
       1,
     );
-    expect(container.textContent).toContain('You');
+    expect(container.textContent).toContain('Mic');
     expect(container.textContent).toContain('Call');
     expect(container.textContent).not.toContain(
       'legacy draft must stay hidden',

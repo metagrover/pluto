@@ -3,20 +3,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { createLiveConversationRollout } from '../../src/services/liveTranscription/liveConversationRollout';
 
 describe('live conversation rollout', () => {
-  it.each([null, '', 'false', false, '0'])(
-    'stays disabled for %s',
-    async (value) => {
-      const createProjector = vi.fn();
-      expect(
-        await createLiveConversationRollout({
-          generation: 1,
-          getSetting: vi.fn(async () => value),
-          createProjector,
-        }),
-      ).toBeNull();
-      expect(createProjector).not.toHaveBeenCalled();
-    },
-  );
+  it.each(['false', false, '0'])('stays disabled for %s', async (value) => {
+    const createProjector = vi.fn();
+    expect(
+      await createLiveConversationRollout({
+        generation: 1,
+        getSetting: vi.fn(async () => value),
+        createProjector,
+      }),
+    ).toBeNull();
+    expect(createProjector).not.toHaveBeenCalled();
+  });
 
   it('fails closed without constructing state when the setting read fails', async () => {
     const createProjector = vi.fn();
@@ -32,7 +29,7 @@ describe('live conversation rollout', () => {
     expect(createProjector).not.toHaveBeenCalled();
   });
 
-  it.each([true, 'true', '1'])(
+  it.each([null, undefined, '', true, 'true', '1'])(
     'constructs once at capture start for %s',
     async (value) => {
       const projector = { marker: true } as never;

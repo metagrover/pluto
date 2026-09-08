@@ -576,7 +576,8 @@ actor FluidAudioEouManager: ParakeetEouManaging {
 
     init(
         backend: any FluidAudioEouBackend,
-        maxPendingSeconds: Double = 45
+        // Keep continuous speech readable while retaining the unfinished word.
+        maxPendingSeconds: Double = 5
     ) async {
         precondition(maxPendingSeconds.isFinite && maxPendingSeconds > 0)
         let collector = FluidAudioEouCallbackCollector()

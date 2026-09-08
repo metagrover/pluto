@@ -25,7 +25,7 @@ import type {
 const LIVE_EDGE_TOLERANCE_PX = 48;
 
 const speakerLabel = (turn: LiveTranscriptTurn): string => {
-  if (turn.source === 'mic' || turn.speaker === 'Me') return 'You';
+  if (turn.source === 'mic' || turn.speaker === 'Me') return 'Mic';
   if (turn.source === 'system' || turn.speaker === 'Them') return 'Call';
   return turn.speaker;
 };
@@ -72,38 +72,51 @@ const TranscriptTurn = memo(
 );
 
 const sourceLabel = (source: 'mic' | 'system'): string =>
-  source === 'mic' ? 'You' : 'Call';
+  source === 'mic' ? 'Mic' : 'Call';
 
-const ConversationRow = memo(({ row }: { row: LiveConversationRow }) => {
-  const startedAt = new Date(row.timestampMs).toISOString();
+const ConversationTurn = memo(({ rows }: { rows: LiveConversationRow[] }) => {
+  const first = rows[0];
+  const startedAt = new Date(first.timestampMs).toISOString();
   return (
-    <article
-      className={`transcript-turn live-conversation-row${
-        row.display === 'duplicate_removed'
-          ? ' live-conversation-row--duplicate'
-          : ''
-      }`}
-      data-conversation-row={row.id}
-    >
+    <article className="transcript-turn live-conversation-row">
       <div className="transcript-speaker">
-        <strong>{sourceLabel(row.source)}</strong>
+        <strong>{sourceLabel(first.source)}</strong>
         <time dateTime={startedAt}>{startedAt.slice(14, 19)}</time>
       </div>
       <div className="transcript-turn__content">
-        {row.display === 'duplicate_removed' ? (
-          <p className="live-conversation-row__placeholder">
-            Duplicate removed
+        {rows.map((row) => (
+          <p key={row.id} data-conversation-row={row.id}>
+            {row.text}
           </p>
-        ) : (
-          <p>{row.text}</p>
-        )}
-        {row.qualifier && (
+        ))}
+        {rows.some((row) => row.qualifier) && (
           <span className="live-conversation-row__qualifier">Updated</span>
         )}
       </div>
     </article>
   );
 });
+
+const groupConversationRows = (rows: LiveConversationRow[]) => {
+  const groups: LiveConversationRow[][] = [];
+  for (const row of rows) {
+    if (row.display !== 'speech') continue;
+    const group = groups.at(-1);
+    const previous = group?.at(-1);
+    if (
+      group &&
+      previous &&
+      previous.source === row.source &&
+      row.timestampMs - group[0].timestampMs <= 30_000 &&
+      row.timestampMs -
+        Math.min(previous.endTimestampMs, previous.timestampMs + 5_000) <=
+        2_000
+    ) {
+      group.push(row);
+    } else groups.push([row]);
+  }
+  return groups;
+};
 
 const ConversationDraft = ({ draft }: { draft: LiveConversationDraft }) => {
   const [expanded, setExpanded] = useState(false);
@@ -151,8 +164,12 @@ export const LiveTranscript = ({
   const turns = useMemo(() => buildLiveTranscriptTurns(segments), [segments]);
   const visibleSegments = turns.flatMap((turn) => turn.segments);
   const showingConversation = conversation !== null;
+  const conversationTurns = useMemo(
+    () => groupConversationRows(conversation?.rows ?? []),
+    [conversation?.rows],
+  );
   const visibleCount = showingConversation
-    ? conversation.rows.length
+    ? conversation.rows.filter((row) => row.display === 'speech').length
     : visibleSegments.length;
   const [announcement, setAnnouncement] = useState('');
   const announcedMetricsRef = useRef({ corrections: 0, restorations: 0 });
@@ -229,8 +246,8 @@ export const LiveTranscript = ({
                   </span>
                 </div>
               )}
-              {conversation.rows.map((row) => (
-                <ConversationRow key={row.id} row={row} />
+              {conversationTurns.map((rows) => (
+                <ConversationTurn key={rows[0].id} rows={rows} />
               ))}
               {conversation.draft && (
                 <ConversationDraft

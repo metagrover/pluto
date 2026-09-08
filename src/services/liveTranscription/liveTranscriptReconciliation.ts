@@ -4,6 +4,7 @@ import type { LiveEchoEvidenceWindow } from './liveEchoEvidence';
 import {
   findExactEchoSubsequence,
   findSupportedExactEchoSpans,
+  findSupportedEchoWordMatches,
 } from './liveEchoSubsequenceAlignment';
 import { alignEchoTokens } from './liveEchoTokenAlignment';
 
@@ -818,6 +819,58 @@ export const reconcileLiveTranscriptReading = (input: {
         micWords,
       );
       if (candidate) candidates.push(candidate);
+    }
+  }
+
+  // Checkpoints split the same utterance differently on the two channels.
+  // Compare bounded neighbouring words, then map only exact supported matches
+  // back onto the original rows. Raw text and unmatched words remain intact.
+  if (input.echoEvidence?.length) {
+    const timed = (source: 'mic' | 'system') =>
+      segments
+        .filter((segment) => segment.source === source)
+        .flatMap((segment) => {
+          const words = originalWords(segment.text);
+          const times = verifiedTimedWords(segment, words);
+          return times
+            ? words.map((word, index) => ({
+                ...times[index],
+                text: word.normalized ?? `__${source}_${segment.id}_${index}`,
+                segmentId: segment.id,
+                wordIndex: index,
+              }))
+            : [];
+        })
+        .sort((a, b) => a.timestampMs - b.timestampMs);
+    const micWords = timed('mic');
+    const systemWords = timed('system');
+    for (let start = 0; start < micWords.length; start += 32) {
+      const mic = micWords
+        .slice(start, start + 128)
+        .filter(
+          (word) => word.timestampMs - micWords[start].timestampMs <= 30_000,
+        );
+      const system = systemWords
+        .filter(
+          (word) =>
+            word.timestampMs >= mic[0].timestampMs - MAX_BOUNDARY_SKEW_MS &&
+            word.timestampMs <= mic.at(-1)!.timestampMs + MAX_BOUNDARY_SKEW_MS,
+        )
+        .slice(0, MAX_ALIGNMENT_TOKENS);
+      for (const match of findSupportedEchoWordMatches(
+        mic,
+        system,
+        evidenceInRange,
+      )) {
+        const word = mic[match.micIndex];
+        candidates.push({
+          sourceSegmentId: word.segmentId,
+          startWord: word.wordIndex,
+          endWord: word.wordIndex + 1,
+          supportingSegmentIds: [system[match.systemIndex].segmentId],
+          confidence: 1,
+        });
+      }
     }
   }
 

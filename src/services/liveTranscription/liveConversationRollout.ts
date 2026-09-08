@@ -17,7 +17,8 @@ export const createLiveConversationRollout = async ({
 }): Promise<LiveConversationProjector | null> => {
   try {
     const value = await getSetting('stable_live_conversation_v1');
-    if (value !== true && value !== 'true' && value !== '1') return null;
+    // New recordings use the ordered conversation surface unless explicitly disabled.
+    if (value === false || value === 'false' || value === '0') return null;
     return createProjector({ generation });
   } catch {
     return null;

@@ -146,6 +146,23 @@ final class FluidAudioEouAdapterTests: XCTestCase {
         XCTAssertEqual(next.last?.transcript, "one two three four")
     }
 
+    func testDefaultCheckpointsContinuousSpeechWithinFiveSecondsWithoutCommittingLastWord() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: [[.partial("meeting now")]],
+            rawTokenBatches: [["▁meet", "ing", "▁now"]]
+        )
+        let manager = await FluidAudioEouManager(backend: backend)
+        _ = try await manager.append(frame(start: 0))
+        var output: [ParakeetEouManagerSnapshot] = []
+        for index in 1...16 {
+            output += try await manager.append(frame(start: Double(index) * 0.32))
+        }
+        XCTAssertEqual(output.filter { $0.kind == .eou }.last?.transcript, "meeting")
+        XCTAssertEqual(output.last?.transcript, "meeting now")
+        let cleanedUp = await backend.cleanedUp
+        XCTAssertFalse(cleanedUp)
+    }
+
     func testBoundsPendingSpeechWhileLaterFramesHaveNoCallbacks() async throws {
         let backend = FakeFluidEouBackend(
             callbackBatches: [[.partial("one two")], [], []],

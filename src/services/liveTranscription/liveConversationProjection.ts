@@ -148,6 +148,61 @@ const rowSignature = (row: LiveConversationRow): string =>
     row.parts,
   ]);
 
+// Split the reading surface only; source row IDs on parts retain provenance.
+const splitCommittedAtPauses = (
+  segment: LiveTranscriptSegment,
+  indexed: ReturnType<typeof indexRanges>,
+): LiveTranscriptSegment[] => {
+  const times = segment.wordTimings;
+  const words = [...segment.text.matchAll(/\S+/gu)];
+  if (!times || times.length !== words.length) return [segment];
+  const starts = [0];
+  for (let index = 1; index < times.length; index++) {
+    if (times[index].timestampMs - times[index - 1].timestampMs > 2_000)
+      starts.push(index);
+  }
+  if (starts.length === 1) return [segment];
+  const original = indexed.visible.get(segment.id) ?? [];
+  return starts.map((start, index) => {
+    const end = starts[index + 1] ?? times.length;
+    const id = `${segment.id}:speech-${start}`;
+    const ranges = original.flatMap((range) => {
+      const startWord = Math.max(start, range.startWord);
+      const endWord = Math.min(end, range.endWord);
+      if (startWord >= endWord) return [];
+      const startCharacter = words[startWord].index!;
+      const endCharacter =
+        words[endWord - 1].index! + words[endWord - 1][0].length;
+      return [
+        {
+          ...range,
+          id: `${range.id}:speech-${start}`,
+          startWord,
+          endWord,
+          startCharacter,
+          endCharacter,
+          text: segment.text.slice(startCharacter, endCharacter),
+          timestampMs: times[startWord].timestampMs,
+          endTimestampMs: times[endWord - 1].endTimestampMs,
+        },
+      ];
+    });
+    indexed.visible.set(id, ranges);
+    indexed.suppressedWords.set(
+      id,
+      end -
+        start -
+        ranges.reduce((n, range) => n + range.endWord - range.startWord, 0),
+    );
+    return {
+      ...segment,
+      id,
+      timestampMs: times[start].timestampMs,
+      endTimestampMs: times[end - 1].endTimestampMs,
+    };
+  });
+};
+
 export const createLiveConversationProjection = ({
   generation,
 }: {
@@ -283,11 +338,13 @@ export const createLiveConversationProjection = ({
       };
       const startedAt = performance.now();
       const rangesBySegment = indexRanges(reading);
-      const committed = reading.segments.filter(
-        (segment) =>
-          segment.confirmed &&
-          (segment.source === 'mic' || segment.source === 'system'),
-      );
+      const committed = reading.segments
+        .filter(
+          (segment) =>
+            segment.confirmed &&
+            (segment.source === 'mic' || segment.source === 'system'),
+        )
+        .flatMap((segment) => splitCommittedAtPauses(segment, rangesBySegment));
       const previousWatermarkMs = Math.max(
         sourceWatermarks.mic ?? Number.NEGATIVE_INFINITY,
         sourceWatermarks.system ?? Number.NEGATIVE_INFINITY,
@@ -317,7 +374,11 @@ export const createLiveConversationProjection = ({
         const text = parts.map((part) => part.text).join(' ');
         const next: LiveConversationRow = {
           ...previous.row,
-          endTimestampMs: segment.endTimestampMs ?? segment.timestampMs,
+          timestampMs: parts[0]?.timestampMs ?? segment.timestampMs,
+          endTimestampMs:
+            parts.at(-1)?.endTimestampMs ??
+            segment.endTimestampMs ??
+            segment.timestampMs,
           text,
           parts,
           display: parts.length ? 'speech' : 'duplicate_removed',
@@ -338,6 +399,10 @@ export const createLiveConversationProjection = ({
             suppressedWordCount: nextSuppressedWordCount,
             signature,
           });
+          if (next.timestampMs !== previous.row.timestampMs) {
+            order.splice(order.indexOf(segment.id), 1);
+            insertInEventTimeOrder(next);
+          }
           committedRowsDirty = true;
         }
       }
@@ -352,8 +417,11 @@ export const createLiveConversationProjection = ({
           id: segment.id,
           source: segment.source as 'mic' | 'system',
           speaker: segment.speaker,
-          timestampMs: segment.timestampMs,
-          endTimestampMs: segment.endTimestampMs ?? segment.timestampMs,
+          timestampMs: parts[0]?.timestampMs ?? segment.timestampMs,
+          endTimestampMs:
+            parts.at(-1)?.endTimestampMs ??
+            segment.endTimestampMs ??
+            segment.timestampMs,
           text: parts.map((part) => part.text).join(' '),
           parts,
           display: 'speech',
