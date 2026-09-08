@@ -214,3 +214,29 @@ This report is a **provisional screening decision**, not full protocol acceptanc
 5. Keep Gemma for production notes, dreaming, and deeper synthesis until a challenger passes the applicable evidence, resource, and integration gates.
 
 Rollback is trivial because this evaluation changes no production model setting, runtime policy, database, or accepted intelligence. The private raw ledger remains owner-only under `.private/local-intelligence-evaluation/`; this committed report contains configuration and aggregate results only.
+# Latest-ten read-only production development replay (2026-09-08)
+
+An explicitly authorized source-only immutable read selected the actual latest ten
+meetings by date, without replacing ineligible rows. Database content hash remained
+unchanged. No production notes/settings were loaded or changed. The unchanged Phi
+source-first 16K configuration ran through the real unified provider, not through
+application publication.
+
+Results: two ineligible sources, four capacity preflight rejects, one invalid
+editor output, one truncated writer (including its bounded retry), one invalid
+writer, and one accepted-in-replay output. Four meetings reached inference, with
+seven physical generation requests and 260.191 seconds total meeting elapsed time.
+
+Assistant source review rejected the sole accepted output as useful notes: it
+largely reproduced noisy transcript fragments as 32 key points. Five visible
+points also matched source segments other than their attached citations. This is
+evidence that schema/span validity is insufficient, not a blinded quality score.
+The noisy source limits recoverable meaning but does not excuse incorrect citation
+mapping. The original accepted-in-replay outcome is retained separately from this
+negative quality assessment.
+
+Next harness work: retain rejected raw responses and validation categories,
+reproduce visible-block citation mismatch with synthetic data, and add synthesis
+quality checks. Capacity and writer-output bounds remain blockers. All raw sources,
+requests, outputs, and detailed review stay owner-only locally. No paired quality,
+sustained-resource, or promotion claim is made from this development sample.

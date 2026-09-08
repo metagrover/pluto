@@ -5,6 +5,10 @@
     "electron",
     "scripts/create_phi_notes_evaluation_manifest.ts",
     "scripts/check_phi_notes_source_capacity.ts",
+    "scripts/run_phi_notes_recent.ts",
+    "scripts/run_notes_replay.ts",
+    "scripts/summarize_notes_replay.ts",
+    "scripts/replay_notes_response_case.ts",
     "tests/manual/localIntelligenceEvaluation.test.ts",
     "tests/manual/localIntelligenceMixedWorkload.test.ts",
     "tests/manual/phiNotesIntegration.test.ts"

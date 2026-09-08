@@ -1,5 +1,10 @@
 # Phi notes harness development
 
+**Parked as of 2026-09-08.** Preserve this experiment and its evidence; do not
+continue Phi-specific notes tuning. Current work uses the production Gemma path
+and [model-neutral replay harness](notes-replay-harness.md). Quick chat routing is
+unaffected.
+
 The candidate is opt-in and notes-specific. These commands exercise development
 fixtures; they do not consume the frozen promotion holdout or select a default.
 Run from the repository root with dependencies installed.
@@ -198,6 +203,28 @@ zero physical requests. Admission is not generation success, quality, or promoti
 evidence. Existing notes are deliberately excluded to avoid answer leakage. These
 sources are not imported into the synthetic-only application activation or counted
 as the frozen held-out corpus.
+
+For an explicitly authorized latest-ten development replay:
+
+```sh
+pnpm exec tsx scripts/run_phi_notes_recent.ts /absolute/production/pluto.db
+```
+
+This uses the same immutable reader, selects by descending
+`COALESCE(started_at, created_at)` with an ID tie-breaker, and keeps processing or
+needs-attention meetings in the ten-row denominator as ineligible. It calls the
+real unified notes provider with the unchanged Phi digest, 16K context, compact
+writer and mandatory source-first editor. No production application profile or
+settings are loaded, and generated notes are never published. Requests are local
+Ollama only; each meeting has a ten-minute cancellation ceiling.
+
+The owner-only output contains source rows, accepted replay outputs, a fsynced
+request/stage ledger and content-free results. Physical header events are not
+stream-completion evidence; use stage terminal events. This entry does not retain
+every raw response body and cannot fully diagnose rejected output semantics from
+the failure code alone. It is not a held-out quality comparison or a sustained
+resource benchmark. Acceptance in replay still requires source-grounded quality
+review, and no hidden retries or older replacement meetings are added.
 
 The existing `RUN_LOCAL_INTELLIGENCE_MIXED_WORKLOAD=1` entry supports dry scenario
 inventory only. Requesting its non-dry mode now fails explicitly instead of exiting

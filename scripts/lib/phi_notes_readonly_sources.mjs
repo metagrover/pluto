@@ -32,6 +32,7 @@ export function readReadonlyMeetingSources(
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     ),
+  { latestTen = false } = {},
 ) {
   assert.ok(databasePath.startsWith('/'), 'absolute_source_database_required');
   assert.equal(
@@ -59,7 +60,15 @@ export function readReadonlyMeetingSources(
   // before releasing any rows. Active/WAL sources fail closed, not checkpoint.
   let output;
   try {
-    output = query(uri.href, sql);
+    output = query(
+      uri.href,
+      latestTen
+        ? sql.replace(
+            /WHERE transcript_status[\s\S]*ORDER BY id/,
+            'ORDER BY COALESCE(started_at, created_at) DESC, id DESC LIMIT 10',
+          )
+        : sql,
+    );
   } catch {
     // Child-process exceptions can contain partial private stdout/stderr.
     throw new Error('readonly_source_query_failed');
@@ -82,9 +91,11 @@ export function readReadonlyMeetingSources(
   assert.ok(Array.isArray(rows), 'source_query_invalid');
   for (const row of rows) {
     assert.equal(typeof row.id, 'string');
-    assert.equal(typeof row.transcript_json, 'string');
-    assert.equal(row.transcript_status, 'validated');
-    assert.equal(row.finalization_status, 'finalized');
+    if (!latestTen) {
+      assert.equal(typeof row.transcript_json, 'string');
+      assert.equal(row.transcript_status, 'validated');
+      assert.equal(row.finalization_status, 'finalized');
+    }
   }
   return { source: 'readonly_production_sources', databaseSha256, rows };
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,55 @@ const fixture = () => {
   return database;
 };
 describe('read-only notes sources', () => {
+  it('orders real SQLite rows by date before limiting, including pending rows', () => {
+    const database = fixture();
+    fs.unlinkSync(database);
+    execFileSync('/usr/bin/sqlite3', [
+      database,
+      `
+      CREATE TABLE meetings (id TEXT, started_at TEXT, created_at TEXT, transcript_json TEXT, transcript_status TEXT, finalization_status TEXT, transcript_integrity_json TEXT, duration_seconds INTEGER);
+      WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 11)
+      INSERT INTO meetings SELECT printf('%02d', 12-value), printf('2026-09-%02d', value), NULL, NULL, 'validating', 'processing', NULL, 0 FROM n;
+    `,
+    ]);
+    const before = fs.readFileSync(database);
+    const result = readReadonlyMeetingSources(database, undefined, {
+      latestTen: true,
+    });
+    expect(result.rows.map((row) => row.id)).toEqual([
+      '01',
+      '02',
+      '03',
+      '04',
+      '05',
+      '06',
+      '07',
+      '08',
+      '09',
+      '10',
+    ]);
+    expect(fs.readFileSync(database)).toEqual(before);
+    expect(fs.readdirSync(path.dirname(database))).toEqual(['source.db']);
+  });
+  it('selects the latest ten without replacing ineligible meetings', () => {
+    const query = vi.fn(() =>
+      JSON.stringify([
+        {
+          id: 'pending',
+          transcript_json: null,
+          finalization_status: 'processing',
+        },
+      ]),
+    );
+    const result = readReadonlyMeetingSources(fixture(), query, {
+      latestTen: true,
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(query.mock.calls[0][1]).toContain(
+      'ORDER BY COALESCE(started_at, created_at) DESC, id DESC LIMIT 10',
+    );
+    expect(query.mock.calls[0][1]).not.toContain('WHERE transcript_status');
+  });
   it('does not expose private subprocess output on failure', () => {
     const database = fixture();
     expect(() =>
