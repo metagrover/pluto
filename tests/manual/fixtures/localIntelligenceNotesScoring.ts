@@ -178,7 +178,7 @@ const expectedEvidenceMatches = (
     );
   });
 
-const visibleBlocks = (
+export const visibleBlocks = (
   analysis: AnalysisDocumentV3,
   source: NotesSource,
 ): ScoredVisibleNotesBlock[] => {

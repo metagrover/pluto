@@ -22,7 +22,10 @@ export const captureDryRunWire = async (
   provider: UnifiedLLMProvider,
   model: EvaluationModelIdentity,
   run: () => Promise<unknown>,
-  hooks?: { beforeResponse?: (wire: CapturedWire) => void | Promise<void> },
+  hooks?: {
+    beforeResponse?: (wire: CapturedWire) => void | Promise<void>;
+    response?: (wire: CapturedWire) => unknown;
+  },
 ): Promise<CapturedWire[]> => {
   const captured: CapturedWire[] = [];
   const transport = provider as unknown as ProviderTransport;
@@ -154,9 +157,14 @@ export const captureDryRunWire = async (
   transport.ollamaStream = async (endpoint, options, onChunk) => {
     const body = capture(endpoint, options);
     await hooks?.beforeResponse?.({ endpoint, body });
+    const content = JSON.stringify(
+      hooks?.response ? hooks.response({ endpoint, body }) : responseFor(body),
+    );
     onChunk(
       `${JSON.stringify({
-        message: { content: JSON.stringify(responseFor(body)) },
+        ...(endpoint === '/api/generate'
+          ? { response: content }
+          : { message: { content } }),
         done: true,
         done_reason: 'stop',
         prompt_eval_count: 10,
@@ -179,8 +187,20 @@ export const captureDryRunWire = async (
       });
     }
     if (!options) throw new Error('evaluation_dry_run_body_missing');
-    capture(endpoint, options);
-    return new Response(JSON.stringify({ done: true }), {
+    const body = capture(endpoint, options);
+    const unload =
+      body.keep_alive === 0 &&
+      !Object.hasOwn(body, 'prompt') &&
+      !Object.hasOwn(body, 'messages');
+    if (!unload) await hooks?.beforeResponse?.({ endpoint, body });
+    const content = unload
+      ? ''
+      : JSON.stringify(
+          hooks?.response
+            ? hooks.response({ endpoint, body })
+            : responseFor(body),
+        );
+    return new Response(JSON.stringify({ done: true, response: content }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

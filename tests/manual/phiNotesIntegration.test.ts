@@ -5,7 +5,15 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type * as ApplicationDatabase from '../../electron/database/applicationDatabase';
+import {
+  createIdleDreamingCoordinator,
+  generateDreamingWithProvider,
+} from '../../electron/dreaming/idleDreamingCoordinator';
 import type { packageEntityNotes as PackageEntityNotes } from '../../electron/dreaming/packageEntityNotes';
+import type {
+  RawDreamingOutput,
+  RawDreamingProposal,
+} from '../../electron/dreaming/types';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 import { createMeetingAnalysisRunCoordinator } from '../../electron/meetingAnalysisRuns';
@@ -14,6 +22,11 @@ import {
   PHI_NOTES_EXPERIMENT_CONFIGURATION,
 } from '../../scripts/lib/local_intelligence_evaluation';
 import { captureDryRunWire } from './fixtures/localIntelligenceDryTransport';
+import {
+  type DownstreamSource,
+  phiDownstreamCases,
+  scoreDownstreamFixture,
+} from './fixtures/phiNotesDownstream';
 
 const profile = vi.hoisted(() => ({ root: '' }));
 vi.mock('electron', () => ({
@@ -143,6 +156,222 @@ const setup = () => {
 };
 
 suite('Phi notes provider to persisted publication', () => {
+  it.runIf(dry).each(['source_changed', 'foreground_preempted'] as const)(
+    'cancels downstream %s before persistence and allows explicit retry',
+    async (fault) => {
+      const id = `downstream-${fault}`;
+      seed(id);
+      const notes = setup();
+      await captureDryRunWire(notes.provider, candidate, () =>
+        notes.generate(id),
+      );
+      const project = db.upsertEntity({
+        type: 'project',
+        name: id,
+        dedupe_by_name: false,
+      });
+      db.addMeetingEntity({ meeting_id: id, entity_id: project.id });
+      const { provider } = setup();
+      const downstream = createIdleDreamingCoordinator({
+        getPolicy: () => ({
+          systemIdleSeconds: 600,
+          onBattery: false,
+          thermalState: 'nominal',
+          paused: false,
+        }),
+        getNextDirtyEntityId: () => ({ entityId: project.id, type: 'project' }),
+        getEntity: db.getEntity,
+        packageNotes: packageEntityNotes,
+        proposalStore: db.dreamingProposalStore,
+        generate: (...args) => generateDreamingWithProvider(provider, ...args),
+      });
+      let status: string | undefined;
+      await captureDryRunWire(
+        provider,
+        GEMMA_NOTES_CONTROL_CONFIGURATION,
+        async () => {
+          status = (await downstream.attemptIdleRun()).status;
+        },
+        {
+          beforeResponse: () => {
+            if (fault === 'source_changed') {
+              db.saveMeeting({
+                ...getMeeting(id),
+                enhanced_notes:
+                  'Updated synthetic notes. No action item is assigned.',
+              });
+            } else downstream.notifyForegroundActivity();
+          },
+          response: () => ({ status: 'no_change', proposals: [] }),
+        },
+      );
+      expect(status).toBe('cancelled');
+      expect(
+        db.dreamingProposalStore
+          .listRuns(project.id, 'project')
+          .every((run) => run.status === 'cancelled'),
+      ).toBe(true);
+      expect(
+        db.dreamingProposalStore.listPendingProposals(project.id, 'project'),
+      ).toEqual([]);
+      await captureDryRunWire(
+        provider,
+        GEMMA_NOTES_CONTROL_CONFIGURATION,
+        async () => {
+          status = (await downstream.triggerNow({ entityId: project.id }))
+            .status;
+        },
+        { response: () => ({ status: 'no_change', proposals: [] }) },
+      );
+      expect(status).toBe('no_change');
+      expect(
+        db.dreamingProposalStore.listPendingProposals(project.id, 'project'),
+      ).toEqual([]);
+    },
+  );
+
+  it.runIf(dry).each(phiDownstreamCases)(
+    'persists and adjudicates downstream $id against original sources',
+    async (fixture) => {
+      const project = db.upsertEntity({
+        type: 'project',
+        name: `Atlas ${fixture.id}`,
+        dedupe_by_name: false,
+      });
+      const unrelated = db.upsertEntity({
+        type: 'project',
+        name: `Atlas ${fixture.id}`,
+        dedupe_by_name: false,
+      });
+      const sources = new Map<string, DownstreamSource>();
+      for (const [index, text] of [
+        fixture.earlier,
+        fixture.current,
+      ].entries()) {
+        const id = `downstream-${fixture.id}-${index}`;
+        seed(id, text);
+        db.saveMeeting({
+          ...getMeeting(id),
+          started_at: `2026-09-0${index + 1}T12:00:00.000Z`,
+        });
+        const notes = setup();
+        await captureDryRunWire(notes.provider, candidate, () =>
+          notes.generate(id),
+        );
+        db.addMeetingEntity({ meeting_id: id, entity_id: project.id });
+        const meeting = getMeeting(id);
+        sources.set(id, {
+          transcript: meeting.transcript_json!,
+          analysis: JSON.parse(meeting.analysis_json!),
+        });
+      }
+      const currentId = `downstream-${fixture.id}-1`;
+      const output: RawDreamingOutput =
+        fixture.expectedTask === null
+          ? { status: 'no_change', proposals: [] }
+          : {
+              status: 'proposed',
+              proposals: [
+                {
+                  kind: 'project_commitment',
+                  payload: { task: fixture.expectedTask },
+                  evidence: [
+                    { meetingId: currentId, excerpt: fixture.expectedTask },
+                  ],
+                },
+              ],
+            };
+      const { provider } = setup();
+      const downstream = createIdleDreamingCoordinator({
+        getPolicy: () => ({
+          systemIdleSeconds: 600,
+          onBattery: false,
+          thermalState: 'nominal',
+          paused: false,
+        }),
+        getNextDirtyEntityId: () => ({ entityId: project.id, type: 'project' }),
+        getEntity: db.getEntity,
+        packageNotes: packageEntityNotes,
+        proposalStore: db.dreamingProposalStore,
+        generate: (...args) => generateDreamingWithProvider(provider, ...args),
+      });
+      let result: Awaited<ReturnType<typeof downstream.triggerNow>> | undefined;
+      const wire = await captureDryRunWire(
+        provider,
+        GEMMA_NOTES_CONTROL_CONFIGURATION,
+        async () => {
+          result = await downstream.triggerNow({ entityId: project.id });
+        },
+        { response: () => output },
+      );
+      expect(result, JSON.stringify(result)).toMatchObject({
+        status: output.status,
+      });
+      expect(wire).toHaveLength(1);
+      expect(wire[0].body.model).toBe(GEMMA_NOTES_CONTROL_CONFIGURATION.tag);
+      const proposals = db.dreamingProposalStore.listPendingProposals(
+        project.id,
+        'project',
+      );
+      expect(
+        scoreDownstreamFixture(proposals, fixture.expectedTask, sources),
+      ).toEqual({ passed: true, errors: [] });
+      expect(
+        db.dreamingProposalStore.listRuns(project.id, 'project'),
+      ).toHaveLength(1);
+      expect(
+        db.dreamingProposalStore.listPendingProposals(unrelated.id, 'project'),
+      ).toEqual([]);
+      expect(packageEntityNotes(unrelated.id)?.recentMeetingNotes).toEqual([]);
+      // Repeated scheduling must not duplicate persisted proposals or inference.
+      expect(
+        (await downstream.triggerNow({ entityId: project.id })).status,
+      ).toBe('existing');
+      expect(
+        db.dreamingProposalStore.listPendingProposals(project.id, 'project'),
+      ).toHaveLength(proposals.length);
+      const wrong: RawDreamingProposal = {
+        kind: 'project_commitment',
+        payload: { task: fixture.forbiddenTask },
+        evidence: [
+          { meetingId: `downstream-${fixture.id}-0`, excerpt: fixture.earlier },
+        ],
+      };
+      expect(
+        scoreDownstreamFixture([wrong], fixture.expectedTask, sources).errors,
+      ).toContain('current_commitment_mismatch');
+      if (proposals.length) {
+        expect(
+          scoreDownstreamFixture([], fixture.expectedTask, sources).errors,
+        ).toContain('proposal_count_mismatch');
+        const staleSources = new Map(sources);
+        const current = staleSources.get(currentId)!;
+        staleSources.set(currentId, {
+          ...current,
+          transcript: JSON.stringify({
+            segments: [{ speaker: 7, text: 'Changed original transcript.' }],
+          }),
+        });
+        expect(
+          scoreDownstreamFixture(proposals, fixture.expectedTask, staleSources)
+            .errors,
+        ).toContain('original_source_unresolved');
+        expect(
+          scoreDownstreamFixture(
+            proposals.map((p) => ({
+              ...p,
+              evidence: [
+                { meetingId: 'unrelated-meeting', excerpt: fixture.current },
+              ],
+            })),
+            fixture.expectedTask,
+            sources,
+          ).errors,
+        ).toContain('unrelated_meeting');
+      }
+    },
+  );
+
   it.runIf(dry)(
     'rejects an installed Phi digest mismatch before inference or publication',
     async () => {

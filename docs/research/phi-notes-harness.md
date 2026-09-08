@@ -40,8 +40,28 @@ The assertions cover:
 
 The interrupted-run test closes SQLite, reloads database modules, reopens the same
 temporary database, and invokes startup recovery. It is not an OS process-kill,
-Electron relaunch, or sleep/wake test. The downstream assertion checks packaging;
-it does not establish proposal quality or commitment extraction accuracy.
+Electron relaunch, or sleep/wake test.
+
+## Downstream fixture contracts
+
+The dry suite also passes paired generated meeting notes through the real idle
+dreaming coordinator, Gemma provider request, output validator, and SQLite proposal
+store. Six development fixtures cover owner/date correction, withdrawal, an unmet
+condition, unrelated same-name projects, legitimate no-change, and a new commitment.
+It verifies persisted proposals and completed run state, idempotent scheduling, and
+cancellation when notes change or foreground activity interrupts automatic dreaming.
+Explicit retry must converge without duplicate proposals.
+
+The fixture oracle checks the expected current commitment and follows each proposal
+excerpt through a visible note block's canonical source spans to its original
+transcript revision. Mutation checks reject missing proposals, historical/wrong
+owners and dates, unrelated meetings, and changed original transcripts. Expected
+tasks use exact fixture text; this is deliberately not a general semantic judge.
+
+Ollama responses in these tests are scripted. Passing establishes integration and
+oracle sensitivity, not that either model actually chooses the correct proposal.
+The six fixture cases and interruption tests are skipped in the real-provider smoke
+mode below; that mode remains a single notes-publication smoke.
 
 ## Optional real-provider smoke
 
@@ -63,7 +83,8 @@ inventory only. Requesting its non-dry mode now fails explicitly instead of exit
 with all tests skipped. Use the provider/publication smoke above for the implemented
 integration path.
 
-Full downstream proposal/commitment adjudication, renderer/IPC orchestration,
+Model-generated downstream proposal/commitment adjudication, a fixed human-reviewed
+notes control, renderer/IPC orchestration,
 30-minute recording comparisons, resource sampling, process crash, sleep/wake,
 and repeated preemption still require implementation and execution. The paired
 held-out model evaluation and blinded human review remain separate subsequent
