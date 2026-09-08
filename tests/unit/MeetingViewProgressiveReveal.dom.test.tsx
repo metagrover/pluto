@@ -1349,6 +1349,75 @@ describe('MeetingView progressive reveal', () => {
     expect(document.body.textContent).toContain('Identify Speakers');
   });
 
+  it('surfaces a tentative voice match in the meeting header and opens that speaker for review', async () => {
+    const meetingWithVoiceMatch: Meeting = {
+      ...analyzedMeeting,
+      id: 'meeting-with-voice-match',
+      transcript_json: JSON.stringify([
+        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'Good morning.',
+          startTime: 2,
+          endTime: 4,
+        },
+      ]),
+    };
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke: vi.fn(async (channel: string) => {
+          if (channel === 'GET_MEETING_IDENTITY') {
+            return {
+              meetingId: meetingWithVoiceMatch.id,
+              speakers: ['Me', 'Remote Speaker 1'],
+              bindings: [],
+              capture: { origin: 'local', selfPersonId: null },
+              people: [{ id: 'person-avery', name: 'Avery' }],
+              selfPersonId: null,
+              revision: 1,
+              profile: {},
+              job: null,
+            };
+          }
+          if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+            return {
+              suggestions: {
+                'Remote Speaker 1': {
+                  speaker: 'Remote Speaker 1',
+                  suggestedPersonId: 'person-avery',
+                  suggestedPersonName: 'Avery',
+                  similarityScore: 0.91,
+                  confidenceTier: 'strong',
+                  isCalendarAttendee: false,
+                  candidateDigest: 'candidate-digest',
+                  sourceRevision: 'source-revision',
+                },
+              },
+              candidates: {},
+              enrollmentAvailability: {},
+            };
+          }
+          return null;
+        }),
+      },
+    });
+
+    await act(async () => renderMeeting(meetingWithVoiceMatch, true));
+
+    const match = container.querySelector<HTMLButtonElement>(
+      '[data-tentative-speaker-match="Remote Speaker 1"]',
+    );
+    expect(match?.textContent).toContain('Maybe Avery');
+    expect(container.textContent).not.toContain('1 unidentified speaker');
+
+    await act(async () => match?.click());
+
+    expect(document.body.querySelector('dialog')).not.toBeNull();
+    expect(document.body.textContent).toContain('Speaker 1 of 1');
+    expect(document.body.textContent).toContain('Speaker 1 may be Avery');
+  });
+
   it('opens identification for Them from the meeting transcript', async () => {
     const meetingWithAggregateSpeaker: Meeting = {
       ...analyzedMeeting,
