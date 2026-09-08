@@ -26,10 +26,7 @@ import {
   type VoiceMatchSuggestion,
   getSpeakerVoiceSuggestions,
 } from '../../api/speakerVoice';
-import {
-  canImproveHistoricalSpeakerLabels,
-  canRetryMeetingSpeakerLabels,
-} from '../../services/postMeetingProcessingCoordinator';
+import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   parseAnalysisEditConflictsJson,
@@ -976,9 +973,7 @@ export const MeetingView = ({
   const transcriptValidationRetrying = Boolean(selectedMeetingRetryOperation);
   const transcriptValidationBusy = transcriptValidationRetryOperation !== null;
   const canImproveHistoricalSpeakerLabelsForMeeting =
-    canImproveHistoricalSpeakerLabels(selectedMeeting) ||
-    (unidentifiedSpeakerCount > 0 &&
-      canRetryMeetingSpeakerLabels(selectedMeeting));
+    canImproveHistoricalSpeakerLabels(selectedMeeting);
 
   const notesDocument = buildMeetingNotesDocument({
     v2,

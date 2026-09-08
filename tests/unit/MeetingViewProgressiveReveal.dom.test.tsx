@@ -1313,21 +1313,38 @@ describe('MeetingView progressive reveal', () => {
     const meetingWithSpeakers: Meeting = {
       ...analyzedMeeting,
       id: 'meeting-with-speakers',
-      transcript_json: JSON.stringify([
-        { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
-        {
-          speaker: 'Remote Speaker 1',
-          text: 'Good morning.',
-          startTime: 2,
-          endTime: 4,
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v2',
+          confidence: 0.95,
+          diarizationAttempted: true,
+          mappingApplied: true,
         },
-        {
-          speaker: 'Remote Speaker 2',
-          text: 'Hi all.',
-          startTime: 4,
-          endTime: 6,
+        segments: [
+          { speaker: 'Me', text: 'Hello everyone.', startTime: 0, endTime: 2 },
+          {
+            speaker: 'Remote Speaker 1',
+            text: 'Good morning.',
+            startTime: 2,
+            endTime: 4,
+          },
+          {
+            speaker: 'Remote Speaker 2',
+            text: 'Hi all.',
+            startTime: 4,
+            endTime: 6,
+          },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
         },
-      ]),
+      }),
+      capture_journal_generation: 'verified-generation',
+      mixed_audio_path: '/tmp/mix.wav',
     };
 
     await act(async () => renderMeeting(meetingWithSpeakers, true));
@@ -1337,6 +1354,7 @@ describe('MeetingView progressive reveal', () => {
     );
     expect(trigger).not.toBeNull();
     expect(trigger?.textContent).toContain('2 unidentified speakers');
+    expect(container.textContent).not.toContain('Improve speaker labels');
 
     // Bulky accordion above transcript should be removed
     expect(
