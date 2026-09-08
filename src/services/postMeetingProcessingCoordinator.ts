@@ -104,6 +104,13 @@ export function canImproveHistoricalSpeakerLabels(
   if (!completedParakeetFinal) return false;
   if (meeting.transcript_json) {
     const attribution = readStoredSpeakerAttribution(meeting.transcript_json);
+    if (
+      attribution?.remoteDiarization?.attempted === true &&
+      attribution.remoteDiarization.applied === false &&
+      attribution.remoteDiarization.fallbackReason === 'low_coverage'
+    ) {
+      return true;
+    }
     return (
       attribution?.source === 'recovered_channel_acoustic_v1' ||
       !hasVerifiedSpeakerAttribution(meeting.transcript_json)

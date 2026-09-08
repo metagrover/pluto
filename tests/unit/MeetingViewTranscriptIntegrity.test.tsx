@@ -390,6 +390,33 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Improve labels');
   });
 
+  it('offers a fresh retry for a validated meeting whose remote labels need repair', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'complete',
+            diagnostics: { confidence: 0.78 },
+          },
+        })}
+        transcriptJson={JSON.stringify({ segments: [{ text: 'Synthetic' }] })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        mixedAudioPath="/synthetic/mix.wav"
+        speakerLabelsRequired
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Improve speaker labels');
+    expect(markup).toContain('Improve labels');
+    expect(markup).not.toContain('Speaker labels could not be improved');
+  });
+
   it('keeps historical speaker repair out of the inline notice', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

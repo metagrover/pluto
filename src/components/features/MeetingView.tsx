@@ -280,6 +280,7 @@ export const TranscriptIntegrityPanel = ({
   }
   canRetryFinalTranscription ||= speakerLabelsRequired;
   speakerAttributionFailure ||= speakerLabelsRequired;
+  if (speakerLabelsRequired) speakerAttributionAttempted = false;
   if (
     hasExistingAnalysis &&
     !systemCaptureIncomplete &&

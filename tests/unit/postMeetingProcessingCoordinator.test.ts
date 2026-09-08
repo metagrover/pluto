@@ -290,6 +290,80 @@ describe('post-meeting processing coordinator', () => {
     expect(isParakeetValidatedMeeting(meeting)).toBe(true);
   });
 
+  it('offers a retry when remote diarization recorded low coverage', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v2',
+          confidence: 0.95,
+          mappingApplied: true,
+          remoteDiarization: {
+            attempted: true,
+            input: 'system_audio',
+            applied: false,
+            confidence: 0.78,
+            clusterCount: 4,
+            labeledSegmentCount: 0,
+            fallbackReason: 'low_coverage',
+          },
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(true);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+  });
+
+  it('does not retry remote diarization after partial labels were applied', () => {
+    const meeting = {
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: '/approved/mixed.wav',
+      transcript_json: JSON.stringify({
+        speakerAttribution: {
+          source: 'recovered_channel_acoustic_v2',
+          confidence: 0.95,
+          mappingApplied: true,
+          remoteDiarization: {
+            attempted: true,
+            input: 'system_audio',
+            applied: true,
+            confidence: 0.78,
+            clusterCount: 4,
+            labeledSegmentCount: 293,
+            coverage: 'partial',
+          },
+        },
+        segments: [{ text: 'visible transcript' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'complete',
+        },
+      }),
+      speaker_attribution_verified: true,
+    };
+
+    expect(canImproveHistoricalSpeakerLabels(meeting)).toBe(false);
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(false);
+  });
+
   it('does not classify a fresh attribution rejection as historical repair', () => {
     expect(
       canImproveHistoricalSpeakerLabels({
