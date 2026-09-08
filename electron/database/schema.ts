@@ -1029,6 +1029,9 @@ export const meetingSpeakerCandidates = sqliteTable(
     sourceRevision: text('source_revision').notNull(),
     candidateDigest: text('candidate_digest').notNull(),
     embeddingJson: text('embedding_json').notNull(),
+    representativeEmbeddingsJson: text('representative_embeddings_json')
+      .notNull()
+      .default('[]'),
     cleanDurationSec: real('clean_duration_sec').notNull(),
     cleanSegmentCount: integer('clean_segment_count').notNull(),
     cleanChunkCount: integer('clean_chunk_count').notNull(),
@@ -1061,6 +1064,9 @@ export const speakerVoiceEnrollments = sqliteTable(
     sourceRevision: text('source_revision').notNull(),
     speaker: text('speaker').notNull(),
     embeddingJson: text('embedding_json').notNull(),
+    representativeEmbeddingsJson: text('representative_embeddings_json')
+      .notNull()
+      .default('[]'),
     chunkCount: integer('chunk_count').notNull(),
     cleanDurationSec: real('clean_duration_sec').notNull(),
     minimumChunkSimilarity: real('minimum_chunk_similarity').notNull(),

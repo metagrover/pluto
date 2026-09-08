@@ -3,6 +3,7 @@ import {
   getAnonymousSpeakerDisplayLabel,
   isGenericSpeakerLabel,
   selectReviewableAnonymousSpeakers,
+  selectSpeakerEnrollmentIntervals,
   selectSpeakerSampleIntervals,
 } from '../../src/utils/speakerReview';
 
@@ -161,6 +162,47 @@ describe('speaker review', () => {
         endSec: 7,
         excerpt: 'Aggregate remote sample.',
       },
+    ]);
+  });
+
+  it('selects richer enrollment evidence without changing the two-sample review cap', () => {
+    const segments = Array.from({ length: 10 }, (_, index) => ({
+      speaker: 'Remote Speaker 1',
+      start: index * 12,
+      end: index * 12 + 8,
+      text: `Clean answer ${index + 1}.`,
+    }));
+
+    expect(
+      selectSpeakerSampleIntervals(segments, 'Remote Speaker 1', 12),
+    ).toHaveLength(2);
+    const enrollment = selectSpeakerEnrollmentIntervals(
+      segments,
+      'Remote Speaker 1',
+    );
+    expect(enrollment).toHaveLength(10);
+    expect(
+      enrollment.reduce(
+        (total, interval) => total + interval.endSec - interval.startSec,
+        0,
+      ),
+    ).toBe(60);
+    expect(enrollment.map((interval) => interval.startSec)).toEqual([
+      0, 12, 24, 36, 48, 60, 72, 84, 96, 108,
+    ]);
+  });
+
+  it('keeps overlap out of enrollment evidence and requires two clean intervals', () => {
+    const segments = [
+      { speaker: 'Them', start: 0, end: 5, text: 'First clean answer.' },
+      { speaker: 'Them', start: 10, end: 16, text: 'Overlapped answer.' },
+      { speaker: 'Me', start: 12, end: 13, text: 'Interruption.' },
+      { speaker: 'Them', start: 20, end: 24, text: 'Second clean answer.' },
+    ];
+
+    expect(selectSpeakerEnrollmentIntervals(segments, 'Them')).toEqual([
+      { startSec: 0, endSec: 5, excerpt: 'First clean answer.' },
+      { startSec: 20, endSec: 24, excerpt: 'Second clean answer.' },
     ]);
   });
 });

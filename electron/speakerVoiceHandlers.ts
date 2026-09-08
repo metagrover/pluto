@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import {
+  ENROLLMENT_EXTRACTION_VERSION,
   type SpeakerCandidateEvidence,
   isCandidateEligibleForEnrollment,
 } from '../src/services/speakerCandidateEvidence';
@@ -65,7 +66,19 @@ export interface SpeakerVoiceDependencies {
 type ConfirmedSpeakerBinding = {
   meetingId: string;
   speaker: string;
+  sourceRevision: string;
 };
+
+const MAX_RECONCILIATION_SOURCES_PER_PERSON = 3;
+
+const enrollmentSourceKey = (input: ConfirmedSpeakerBinding): string =>
+  `${input.meetingId}\u0000${input.speaker}\u0000${input.sourceRevision}`;
+
+const usesCurrentEnrollmentExtraction = (
+  candidate: Pick<SpeakerCandidateEvidence, 'provenance'>,
+): boolean =>
+  candidate.provenance.enrollmentExtractionVersion ===
+  ENROLLMENT_EXTRACTION_VERSION;
 
 type ReconciliationOutcome =
   | 'enrolled'
@@ -177,6 +190,43 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
         (profile) => profile.canonicalPersonId,
       ),
     );
+    const currentSourcesByPerson = new Map<string, Set<string>>();
+    const enrollmentRows = d
+      .prepare(
+        `SELECT person_id, source_meeting_id, source_revision, speaker, provenance_json
+         FROM speaker_voice_enrollments`,
+      )
+      .all() as Array<{
+      person_id: string;
+      source_meeting_id: string;
+      source_revision: string;
+      speaker: string;
+      provenance_json: string;
+    }>;
+    for (const enrollment of enrollmentRows) {
+      let provenance: SpeakerCandidateEvidence['provenance'];
+      try {
+        provenance = JSON.parse(enrollment.provenance_json);
+      } catch {
+        continue;
+      }
+      if (
+        provenance.enrollmentExtractionVersion !== ENROLLMENT_EXTRACTION_VERSION
+      ) {
+        continue;
+      }
+      const canonicalPersonId = resolvePersonId(enrollment.person_id, d);
+      const sources =
+        currentSourcesByPerson.get(canonicalPersonId) ?? new Set();
+      sources.add(
+        enrollmentSourceKey({
+          meetingId: enrollment.source_meeting_id,
+          speaker: enrollment.speaker,
+          sourceRevision: enrollment.source_revision,
+        }),
+      );
+      currentSourcesByPerson.set(canonicalPersonId, sources);
+    }
     const disabledPeople = new Set(
       (
         d
@@ -197,7 +247,8 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
 
     const rows = d
       .prepare(
-        `SELECT binding.meeting_id, binding.speaker, binding.payload
+        `SELECT binding.meeting_id, binding.speaker, binding.payload,
+                meeting.capture_journal_generation AS source_revision
          FROM identity_bindings binding
          LEFT JOIN meetings meeting ON meeting.id = binding.meeting_id
          WHERE json_valid(binding.payload)
@@ -207,7 +258,12 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
          ORDER BY datetime(COALESCE(meeting.started_at, meeting.created_at)) DESC,
                   binding.meeting_id DESC`,
       )
-      .all() as Array<{ meeting_id: string; speaker: string; payload: string }>;
+      .all() as Array<{
+      meeting_id: string;
+      speaker: string;
+      payload: string;
+      source_revision: string | null;
+    }>;
 
     const bindingsByPerson = new Map<string, ConfirmedSpeakerBinding[]>();
     for (const row of rows) {
@@ -219,25 +275,43 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
         outcomes.set(personId, 'self');
         continue;
       }
-      if (profiledPeople.has(personId)) {
-        outcomes.set(personId, 'already_enrolled');
-        continue;
-      }
       if (disabledPeople.has(personId)) {
         outcomes.set(personId, 'opted_out');
         continue;
       }
-      const bindings = bindingsByPerson.get(personId) ?? [];
-      bindings.push({
+      if (!row.source_revision) continue;
+      const binding = {
         meetingId: row.meeting_id,
         speaker: row.speaker,
-      });
+        sourceRevision: row.source_revision,
+      };
+      if (
+        currentSourcesByPerson.get(personId)?.has(enrollmentSourceKey(binding))
+      ) {
+        if (profiledPeople.has(personId)) {
+          outcomes.set(personId, 'already_enrolled');
+        }
+        continue;
+      }
+      const bindings = bindingsByPerson.get(personId) ?? [];
+      if (
+        !bindings.some(
+          (existing) =>
+            enrollmentSourceKey(existing) === enrollmentSourceKey(binding),
+        )
+      ) {
+        bindings.push(binding);
+      }
       bindingsByPerson.set(personId, bindings);
     }
 
     for (const [personId, bindings] of bindingsByPerson) {
       let sawFailure = false;
-      for (const binding of bindings) {
+      let enrolledSources = 0;
+      for (const binding of bindings.slice(
+        0,
+        MAX_RECONCILIATION_SOURCES_PER_PERSON,
+      )) {
         try {
           const storedCandidate = getMeetingSpeakerCandidates(
             binding.meetingId,
@@ -245,6 +319,7 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
           ).find((candidate) => candidate.speaker === binding.speaker);
           const usesStoredCandidate = Boolean(
             storedCandidate &&
+              usesCurrentEnrollmentExtraction(storedCandidate) &&
               isCurrentEligibleCandidate(
                 binding.meetingId,
                 storedCandidate.sourceRevision,
@@ -319,13 +394,14 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
             );
           })();
           profiledPeople.add(personId);
-          outcomes.set(personId, 'enrolled');
-          break;
+          enrolledSources += 1;
         } catch {
           sawFailure = true;
         }
       }
-      if (!outcomes.has(personId)) {
+      if (enrolledSources > 0) {
+        outcomes.set(personId, 'enrolled');
+      } else if (!outcomes.has(personId)) {
         outcomes.set(
           personId,
           isVoiceProfileOptedOut(personId, d)
@@ -368,7 +444,40 @@ export async function handleSpeakerVoiceRequest(
 
       await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
 
-      const candidates = getMeetingSpeakerCandidates(meetingId, d);
+      let candidates = getMeetingSpeakerCandidates(meetingId, d);
+      if (deps?.buildEnrollmentCandidate) {
+        for (const candidate of candidates) {
+          if (usesCurrentEnrollmentExtraction(candidate)) continue;
+          try {
+            const built = await deps.buildEnrollmentCandidate({
+              meetingId,
+              speaker: candidate.speaker,
+            });
+            if (
+              built &&
+              built.candidate.speaker === candidate.speaker &&
+              usesCurrentEnrollmentExtraction(built.candidate) &&
+              isCurrentEligibleCandidate(
+                meetingId,
+                built.sourceRevision,
+                built.candidate,
+                deps,
+                d,
+              )
+            ) {
+              saveMeetingSpeakerCandidate(
+                meetingId,
+                built.sourceRevision,
+                built.candidate,
+                d,
+              );
+            }
+          } catch {
+            // Keep the existing candidate available if representative extraction fails.
+          }
+        }
+        candidates = getMeetingSpeakerCandidates(meetingId, d);
+      }
       const clientCandidates: Record<string, unknown> = {};
       for (const candidate of candidates) {
         clientCandidates[candidate.speaker] = {

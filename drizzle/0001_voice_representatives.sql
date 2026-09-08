@@ -1,0 +1,2 @@
+ALTER TABLE `meeting_speaker_candidates` ADD `representative_embeddings_json` text DEFAULT '[]' NOT NULL;--> statement-breakpoint
+ALTER TABLE `speaker_voice_enrollments` ADD `representative_embeddings_json` text DEFAULT '[]' NOT NULL;

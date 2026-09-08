@@ -16,13 +16,17 @@ export interface SpeakerCandidateProvenance {
   artifactDigest: string;
   runtimeVersion: string;
   profileAlgorithmVersion?: string;
+  enrollmentExtractionVersion?: string;
 }
+
+export const ENROLLMENT_EXTRACTION_VERSION = 'multi-interval-v1';
 
 export interface SpeakerCandidateEvidence {
   speaker: string;
   nativeCluster: string;
   candidateDigest: string;
   embedding: number[];
+  representativeEmbeddings?: number[][];
   cleanDurationSeconds: number;
   cleanSegmentCount: number;
   cleanChunkCount: number;
@@ -130,13 +134,21 @@ export function sha256Bytes(bytes: Uint8Array): string {
 export function computeCandidateDigest(
   embedding: number[],
   provenance: SpeakerCandidateProvenance,
+  representativeEmbeddings: number[][] = [],
 ): string {
-  const floatBytes = new Uint8Array(embedding.length * 4);
+  const embeddedVectors = [embedding, ...representativeEmbeddings];
+  const floatBytes = new Uint8Array(
+    embeddedVectors.reduce((count, vector) => count + vector.length, 0) * 4,
+  );
   const view = new DataView(floatBytes.buffer);
-  for (let i = 0; i < embedding.length; i++) {
-    view.setFloat32(i * 4, embedding[i], true);
+  let offset = 0;
+  for (const vector of embeddedVectors) {
+    for (const value of vector) {
+      view.setFloat32(offset, value, true);
+      offset += 4;
+    }
   }
-  const provenanceTuple = `${provenance.modelIdentifier}:${provenance.modelRevision}:${provenance.artifactDigest}:${provenance.runtimeVersion}:${provenance.profileAlgorithmVersion ?? 'v1'}`;
+  const provenanceTuple = `${provenance.modelIdentifier}:${provenance.modelRevision}:${provenance.artifactDigest}:${provenance.runtimeVersion}:${provenance.profileAlgorithmVersion ?? 'v1'}:${provenance.enrollmentExtractionVersion ?? 'legacy'}`;
   const provenanceBytes = new TextEncoder().encode(provenanceTuple);
   const totalBytes = new Uint8Array(floatBytes.length + provenanceBytes.length);
   totalBytes.set(floatBytes, 0);
@@ -243,6 +255,7 @@ export function deriveReviewedSpeakerCandidate(input: {
     endSec: number;
     excerpt: string;
   }>;
+  representativeEmbeddings?: number[][];
 }): SpeakerCandidateEvidence | null {
   const reviewedIntervals = input.reviewedIntervals.filter(
     (interval) =>
@@ -278,15 +291,35 @@ export function deriveReviewedSpeakerCandidate(input: {
   });
   if (eligible.length !== 1) return null;
 
+  const representativeEmbeddings = (
+    input.representativeEmbeddings ?? []
+  ).filter(
+    (embedding) =>
+      embedding.length === 256 &&
+      embedding.every((value) => Number.isFinite(value)) &&
+      Math.hypot(...embedding) > 1e-6,
+  );
+  const provenance = {
+    ...input.provenance,
+    profileAlgorithmVersion: input.provenance.profileAlgorithmVersion ?? 'v1',
+    ...(representativeEmbeddings.length >= 2
+      ? { enrollmentExtractionVersion: ENROLLMENT_EXTRACTION_VERSION }
+      : {}),
+  };
+
   const evidence = eligible[0];
   return {
     speaker: input.speaker,
     nativeCluster: evidence.cluster,
     candidateDigest: computeCandidateDigest(
       evidence.embedding,
-      input.provenance,
+      provenance,
+      representativeEmbeddings,
     ),
     embedding: evidence.embedding,
+    ...(representativeEmbeddings.length > 0
+      ? { representativeEmbeddings }
+      : {}),
     cleanDurationSeconds: evidence.cleanDurationSeconds,
     cleanSegmentCount: evidence.cleanSegmentCount,
     cleanChunkCount: evidence.cleanChunkCount,
@@ -297,10 +330,7 @@ export function deriveReviewedSpeakerCandidate(input: {
       endTime: reviewedIntervals[0].endSec,
       excerpt: reviewedIntervals[0].excerpt,
     },
-    provenance: {
-      ...input.provenance,
-      profileAlgorithmVersion: input.provenance.profileAlgorithmVersion ?? 'v1',
-    },
+    provenance,
     isEligibleForEnrollment: true,
   };
 }

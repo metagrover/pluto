@@ -65,6 +65,7 @@ describe('speakerVoiceStore & candidate database operations', () => {
         source_revision TEXT NOT NULL,
         candidate_digest TEXT NOT NULL,
         embedding_json TEXT NOT NULL,
+        representative_embeddings_json TEXT NOT NULL DEFAULT '[]',
         clean_duration_sec REAL NOT NULL,
         clean_segment_count INTEGER NOT NULL,
         clean_chunk_count INTEGER NOT NULL,
@@ -85,6 +86,7 @@ describe('speakerVoiceStore & candidate database operations', () => {
         source_revision TEXT NOT NULL,
         speaker TEXT NOT NULL,
         embedding_json TEXT NOT NULL,
+        representative_embeddings_json TEXT NOT NULL DEFAULT '[]',
         chunk_count INTEGER NOT NULL,
         clean_duration_sec REAL NOT NULL,
         minimum_chunk_similarity REAL NOT NULL,
@@ -193,6 +195,60 @@ describe('speakerVoiceStore & candidate database operations', () => {
 
     expect(replay.id).toBe(first.id);
     expect(count.count).toBe(1);
+  });
+
+  it('never blends enrollment vectors from incompatible embedding cohorts', async () => {
+    const {
+      enrollSpeakerVoice,
+      getCanonicalVoiceProfiles,
+      saveMeetingSpeakerCandidates,
+    } = await import('../../electron/speakerVoiceStore');
+    db.prepare(
+      "INSERT INTO entities (id, name, type) VALUES ('person-1', 'Test Person', 'person')",
+    ).run();
+    const compatible = {
+      ...dummyCandidate,
+      embedding: [1, ...new Array(255).fill(0)],
+      cleanDurationSeconds: 10,
+    };
+    const incompatible = {
+      ...dummyCandidate,
+      candidateDigest: 'd'.repeat(64),
+      embedding: [0, 1, ...new Array(254).fill(0)],
+      cleanDurationSeconds: 4,
+      provenance: {
+        ...dummyCandidate.provenance,
+        modelRevision: 'f'.repeat(40),
+      },
+    };
+    for (const [meetingId, candidate] of [
+      ['m1', compatible],
+      ['m2', incompatible],
+    ] as const) {
+      db.prepare(
+        'INSERT INTO meetings (id, capture_journal_generation) VALUES (?, ?)',
+      ).run(meetingId, 'gen-1');
+      saveMeetingSpeakerCandidates(meetingId, 'gen-1', [candidate], db);
+      enrollSpeakerVoice(
+        {
+          personId: 'person-1',
+          sourceMeetingId: meetingId,
+          sourceRevision: 'gen-1',
+          speaker: candidate.speaker,
+          candidateDigest: candidate.candidateDigest,
+        },
+        db,
+      );
+    }
+
+    expect(getCanonicalVoiceProfiles({ dbInstance: db })).toEqual([
+      expect.objectContaining({
+        sampleCount: 1,
+        cleanDurationSeconds: 10,
+        embedding: compatible.embedding,
+        provenance: compatible.provenance,
+      }),
+    ]);
   });
 
   it('overwrites prior candidate generations on new commit for the same meeting', async () => {

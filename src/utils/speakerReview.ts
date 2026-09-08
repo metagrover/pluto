@@ -11,6 +11,8 @@ const SAMPLE_PREFERRED_SECONDS = 5;
 const SAMPLE_MAX_SECONDS = 8;
 const SAMPLE_JOIN_GAP_SECONDS = 0.75;
 const SAMPLE_LIMIT = 2;
+const ENROLLMENT_MAX_INTERVALS = 12;
+const ENROLLMENT_MAX_SPEECH_SECONDS = 60;
 
 type SpeakerSegment = {
   speaker?: unknown;
@@ -81,15 +83,11 @@ export const selectReviewableAnonymousSpeakers = (
   return unique.includes('Them') ? ['Them'] : [];
 };
 
-export const selectSpeakerSampleIntervals = (
+const selectCleanSpeakerIntervals = (
   segments: SpeakerSegment[],
   speaker: string,
-  limit = SAMPLE_LIMIT,
 ): SpeakerSampleInterval[] => {
-  if (
-    (!REMOTE_SPEAKER_PATTERN.test(speaker) && speaker !== 'Them') ||
-    limit <= 0
-  ) {
+  if (!REMOTE_SPEAKER_PATTERN.test(speaker) && speaker !== 'Them') {
     return [];
   }
   const timed = segments
@@ -146,6 +144,64 @@ export const selectSpeakerSampleIntervals = (
       const durationDifference =
         right.endSec - right.startSec - (left.endSec - left.startSec);
       return durationDifference || left.startSec - right.startSec;
-    })
-    .slice(0, Math.min(SAMPLE_LIMIT, Math.floor(limit)));
+    });
+};
+
+export const selectSpeakerSampleIntervals = (
+  segments: SpeakerSegment[],
+  speaker: string,
+  limit = SAMPLE_LIMIT,
+): SpeakerSampleInterval[] => {
+  if (limit <= 0) return [];
+  return selectCleanSpeakerIntervals(segments, speaker).slice(
+    0,
+    Math.min(SAMPLE_LIMIT, Math.floor(limit)),
+  );
+};
+
+export const selectSpeakerEnrollmentIntervals = (
+  segments: SpeakerSegment[],
+  speaker: string,
+): SpeakerSampleInterval[] => {
+  const clean = selectCleanSpeakerIntervals(segments, speaker).sort(
+    (left, right) =>
+      left.startSec - right.startSec || left.endSec - right.endSec,
+  );
+  const selected =
+    clean.length <= ENROLLMENT_MAX_INTERVALS
+      ? clean
+      : Array.from({ length: ENROLLMENT_MAX_INTERVALS }, (_, index) => {
+          const cleanIndex = Math.round(
+            (index * (clean.length - 1)) / (ENROLLMENT_MAX_INTERVALS - 1),
+          );
+          return clean[cleanIndex];
+        });
+  const totalDuration = selected.reduce(
+    (total, interval) => total + interval.endSec - interval.startSec,
+    0,
+  );
+  if (totalDuration <= ENROLLMENT_MAX_SPEECH_SECONDS) return selected;
+
+  let remainingSeconds = ENROLLMENT_MAX_SPEECH_SECONDS;
+  let remainingIntervals = selected.length;
+  let durationCap = SAMPLE_MAX_SECONDS;
+  const durations = selected
+    .map((interval) => interval.endSec - interval.startSec)
+    .sort((left, right) => left - right);
+  for (const duration of durations) {
+    const equalShare = remainingSeconds / remainingIntervals;
+    if (duration > equalShare) {
+      durationCap = equalShare;
+      break;
+    }
+    remainingSeconds -= duration;
+    remainingIntervals -= 1;
+  }
+
+  return selected.map((interval) => ({
+    ...interval,
+    endSec:
+      interval.startSec +
+      Math.min(interval.endSec - interval.startSec, durationCap),
+  }));
 };
