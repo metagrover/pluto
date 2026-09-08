@@ -11,8 +11,10 @@ import {
   areActionsEquivalent,
   canonicalizeActionText,
   getCommitmentState,
+  isThirdPartyAction,
   isThirdPartyAssignee,
   parseActionMetadata,
+  type ThirdPartyAssigneeOptions,
 } from '../../utils/actionCommitment';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
@@ -74,6 +76,7 @@ export interface DashboardActionInsightItem {
   id: string;
   title: string;
   assigneeName?: string | null;
+  assignedTo?: string | null;
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   commitmentState: 'possible' | 'confirmed';
@@ -238,6 +241,8 @@ export interface DashboardHomeModelInput {
   workingMemorySnapshot?: WorkingMemorySnapshot | null;
   workingMemorySnapshots?: WorkingMemorySnapshot[];
   graphStats: KnowledgeGraphStats | null;
+  selfPersonId?: string | null;
+  selfNames?: string[];
 }
 
 export interface DashboardHomeModel {
@@ -800,6 +805,7 @@ const actionToInsightItem = (
     id: action.id,
     title,
     assigneeName,
+    assignedTo: action.assigned_to ?? null,
     dueLabel,
     status,
     commitmentState,
@@ -1131,11 +1137,21 @@ const buildTopOfMind = (
 export const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
   rejectedActions: Entity[] = [],
+  options?: ThirdPartyAssigneeOptions,
 ): DashboardCommitments => {
   const confirmedItems =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
-          .filter((item) => item.commitmentState === 'confirmed')
+          .filter(
+            (item) =>
+              item.commitmentState === 'confirmed' &&
+              !isThirdPartyAssignee(item.assigneeName, item.title, options) &&
+              !(
+                item.assignedTo &&
+                options?.selfPersonId &&
+                item.assignedTo !== options.selfPersonId
+              ),
+          )
           .sort((a, b) => {
             if (a.dailyPriorityRank !== null || b.dailyPriorityRank !== null) {
               if (a.dailyPriorityRank === null) return 1;
@@ -1159,7 +1175,12 @@ export const buildDashboardCommitments = (
 
   const deduplicatedNeedsConfirmation: DashboardActionInsightItem[] = [];
   for (const candidate of candidateItems) {
-    if (isThirdPartyAssignee(candidate.assigneeName, candidate.title)) {
+    if (
+      isThirdPartyAssignee(candidate.assigneeName, candidate.title, options) ||
+      (candidate.assignedTo &&
+        options?.selfPersonId &&
+        candidate.assignedTo !== options.selfPersonId)
+    ) {
       continue;
     }
     if (
@@ -1886,28 +1907,39 @@ export const buildDashboardHomeModel = (
     input.workingMemorySnapshots ??
     (input.workingMemorySnapshot ? [input.workingMemorySnapshot] : []);
   const attentionAlerts = input.attentionAlerts ?? [];
+  const selfOptions: ThirdPartyAssigneeOptions = {
+    selfPersonId: input.selfPersonId,
+    selfNames: input.selfNames,
+  };
+  const isPersonalAction = (action: Entity) =>
+    !isThirdPartyAction(action, selfOptions);
+
+  const rawOverdue = input.overdueActions.filter(isPersonalAction);
+  const rawStale = input.staleActions.filter(isPersonalAction);
+  const rawActive = input.activeActions.filter(isPersonalAction);
+
   const rejectedActions = [
-    ...(input.rejectedActions ?? []),
-    ...input.overdueActions.filter(
+    ...(input.rejectedActions ?? []).filter(isPersonalAction),
+    ...rawOverdue.filter(
       (action) => getCommitmentState(action.metadata) === 'rejected',
     ),
-    ...input.staleActions.filter(
+    ...rawStale.filter(
       (action) => getCommitmentState(action.metadata) === 'rejected',
     ),
-    ...input.activeActions.filter(
+    ...rawActive.filter(
       (action) => getCommitmentState(action.metadata) === 'rejected',
     ),
   ];
   const overdueActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.overdueActions),
+    filterRejectedDashboardActions(rawOverdue),
     attentionAlerts,
   );
   const staleActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.staleActions),
+    filterRejectedDashboardActions(rawStale),
     attentionAlerts,
   );
   const activeActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(input.activeActions),
+    filterRejectedDashboardActions(rawActive),
     attentionAlerts,
   );
   const confirmedOverdueActions =
@@ -1927,6 +1959,7 @@ export const buildDashboardHomeModel = (
   const commitments = buildDashboardCommitments(
     actionInsights,
     rejectedActions,
+    selfOptions,
   );
   const recentWin = buildRecentWin(input.meetings);
   const knowledgeDocuments = buildKnowledgeDocuments(

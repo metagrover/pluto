@@ -2,6 +2,7 @@ import {
   areActionsEquivalent,
   canonicalizeActionText,
   getCommitmentState,
+  isThirdPartyAction,
   isThirdPartyAssignee,
   mergeCommitmentReview,
   parseActionMetadata,
@@ -107,10 +108,28 @@ describe('action commitment metadata', () => {
     expect(isThirdPartyAssignee('Them')).toBe(true);
     expect(isThirdPartyAssignee('them')).toBe(true);
     expect(isThirdPartyAssignee('Remote Speaker 1')).toBe(true);
+    expect(isThirdPartyAssignee('Arnold')).toBe(true);
+    expect(isThirdPartyAssignee('Taylor')).toBe(true);
+    expect(isThirdPartyAssignee('Sarah')).toBe(true);
+
     expect(isThirdPartyAssignee('Me')).toBe(false);
+    expect(isThirdPartyAssignee('I')).toBe(false);
     expect(isThirdPartyAssignee('you')).toBe(false);
+    expect(isThirdPartyAssignee('myself')).toBe(false);
+    expect(isThirdPartyAssignee('(You)')).toBe(false);
+    expect(isThirdPartyAssignee('team')).toBe(false);
+    expect(isThirdPartyAssignee('the team')).toBe(false);
+    expect(isThirdPartyAssignee('we')).toBe(false);
     expect(isThirdPartyAssignee(null)).toBe(false);
     expect(isThirdPartyAssignee(undefined)).toBe(false);
+
+    // Recognizes workspace user's name when provided
+    expect(
+      isThirdPartyAssignee('Taylor', null, { selfNames: ['Taylor'] }),
+    ).toBe(false);
+    expect(
+      isThirdPartyAssignee('Arnold', null, { selfNames: ['Taylor'] }),
+    ).toBe(true);
 
     expect(
       isThirdPartyAssignee(
@@ -124,9 +143,67 @@ describe('action commitment metadata', () => {
     expect(
       isThirdPartyAssignee(undefined, 'Remote speaker to provide updates.'),
     ).toBe(true);
-    expect(isThirdPartyAssignee('Me', 'Me will circle back with Arnold.')).toBe(
-      false,
-    );
+    expect(
+      isThirdPartyAssignee(undefined, 'Taylor will send the benchmark numbers.'),
+    ).toBe(true);
+    expect(
+      isThirdPartyAssignee(undefined, 'Arnold needs to circle back with team.'),
+    ).toBe(true);
+    expect(
+      isThirdPartyAssignee('Me', 'Me will circle back with Arnold.'),
+    ).toBe(false);
+    expect(
+      isThirdPartyAssignee(undefined, 'Circle back with Arnold offline.'),
+    ).toBe(false);
+    expect(
+      isThirdPartyAssignee(undefined, 'Remember to send release notes.'),
+    ).toBe(false);
+  });
+
+  it('determines whether an entity action item is assigned to a third party', () => {
+    expect(
+      isThirdPartyAction({
+        assigned_to: 'person-arnold',
+      }),
+    ).toBe(true);
+
+    expect(
+      isThirdPartyAction(
+        { assigned_to: 'person-me' },
+        { selfPersonId: 'person-me' },
+      ),
+    ).toBe(false);
+
+    expect(
+      isThirdPartyAction(
+        { assigned_to: 'person-arnold' },
+        { selfPersonId: 'person-me' },
+      ),
+    ).toBe(true);
+
+    expect(
+      isThirdPartyAction({
+        assigned_to: null,
+        metadata: JSON.stringify({ assignee_name: 'Taylor' }),
+        name: 'Send benchmark report',
+      }),
+    ).toBe(true);
+
+    expect(
+      isThirdPartyAction({
+        assigned_to: null,
+        metadata: JSON.stringify({ assignee_name: 'Me' }),
+        name: 'Send benchmark report',
+      }),
+    ).toBe(false);
+
+    expect(
+      isThirdPartyAction({
+        assigned_to: null,
+        metadata: '{}',
+        name: 'Send benchmark report',
+      }),
+    ).toBe(false);
   });
 
   it('recognizes equivalent action items from the same meeting', () => {

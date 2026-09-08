@@ -3061,5 +3061,76 @@ describe('buildDashboardHomeModel', () => {
         'cand-2',
       ]);
     });
+
+    it('excludes commitments assigned to other individuals from Daily Briefing suggestions and focus', () => {
+      const arnoldCandidateAction = makeAction({
+        id: 'arnold-candidate',
+        name: 'Arnold to run load testing on cluster',
+        assigned_to: null,
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Arnold',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const taylorConfirmedAction = makeAction({
+        id: 'taylor-confirmed',
+        name: 'Send updated benchmark numbers',
+        assigned_to: 'person-taylor',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          assignee_name: 'Taylor',
+          owner_source: 'user',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const myCandidateAction = makeAction({
+        id: 'my-candidate',
+        name: 'Send the updated proposal to client',
+        assigned_to: null,
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const myConfirmedAction = makeAction({
+        id: 'my-confirmed',
+        name: 'Draft launch announcement',
+        assigned_to: 'person-me',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          owner_source: 'user',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [
+          arnoldCandidateAction,
+          taylorConfirmedAction,
+          myCandidateAction,
+          myConfirmedAction,
+        ],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+        selfPersonId: 'person-me',
+        selfNames: ['Me'],
+      });
+
+      // Arnold's candidate action is excluded from suggestions
+      expect(model.commitments.needsConfirmation).toHaveLength(1);
+      expect(model.commitments.needsConfirmation[0].id).toBe('my-candidate');
+
+      // Taylor's confirmed action is excluded from Today's focus
+      expect(model.commitments.items).toHaveLength(1);
+      expect(model.commitments.items[0].id).toBe('my-confirmed');
+      expect(model.commitments.backlog).toHaveLength(0);
+    });
   });
 });

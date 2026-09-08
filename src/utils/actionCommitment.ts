@@ -49,25 +49,108 @@ export const mergeCommitmentReview = (
 export const GENERIC_ACTION_ASSIGNEE =
   /^(?:(?:and|so|then)\s+)?(?:group|team|the team|we|everyone|i|me|you|them)$/i;
 
+export const SELF_ACTION_ASSIGNEES = new Set([
+  'me',
+  'i',
+  'you',
+  'myself',
+  '(you)',
+  'user',
+  'self',
+]);
+
+export const COLLECTIVE_ACTION_ASSIGNEES = new Set([
+  'we',
+  'team',
+  'the team',
+  'everyone',
+  'group',
+  'all',
+]);
+
+export interface ThirdPartyAssigneeOptions {
+  selfNames?: string[];
+  selfPersonId?: string | null;
+}
+
 export const isThirdPartyAssignee = (
   assignee?: string | null,
   text?: string | null,
+  options?: ThirdPartyAssigneeOptions,
 ): boolean => {
+  const selfNamesSet = new Set(
+    (options?.selfNames ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
+  );
+
   if (assignee && typeof assignee === 'string') {
     const trimmed = assignee.trim().toLowerCase();
-    if (trimmed === 'them' || /^remote\s+speaker/i.test(trimmed)) return true;
+    if (trimmed) {
+      if (
+        SELF_ACTION_ASSIGNEES.has(trimmed) ||
+        COLLECTIVE_ACTION_ASSIGNEES.has(trimmed) ||
+        selfNamesSet.has(trimmed)
+      ) {
+        return false;
+      }
+      return true;
+    }
   }
+
   if (text && typeof text === 'string') {
-    const trimmed = text.trim().toLowerCase();
+    const trimmed = text.trim();
     if (
-      /^(?:them|they|remote\s+speaker(?:\s+\d+)?)\s+(?:will|to|shall|must|should|needs?\s+to|is\s+to|are\s+to|has\s+to|have\s+to)\b/i.test(
+      /^(?:them|they|he|she|remote\s+speaker(?:\s+\d+)?|speaker\s+\d+)\s+(?:will|to|shall|must|should|needs?\s+to|is\s+to|are\s+to|has\s+to|have\s+to)\b/i.test(
         trimmed,
       )
     ) {
       return true;
     }
+
+    const modalMatch = trimmed.match(
+      /^([A-Za-z0-9_'-]+)\s+(?:will|shall|must|should|needs?\s+to|is\s+to|has\s+to)\b/i,
+    );
+    if (modalMatch) {
+      const subject = modalMatch[1].toLowerCase();
+      if (
+        !SELF_ACTION_ASSIGNEES.has(subject) &&
+        !COLLECTIVE_ACTION_ASSIGNEES.has(subject) &&
+        !selfNamesSet.has(subject)
+      ) {
+        return true;
+      }
+    }
   }
   return false;
+};
+
+export const isThirdPartyAction = (
+  action: {
+    assigned_to?: string | null;
+    metadata?: string | null;
+    name?: string;
+  },
+  options?: ThirdPartyAssigneeOptions,
+): boolean => {
+  if (action.assigned_to) {
+    if (options?.selfPersonId) {
+      return action.assigned_to !== options.selfPersonId;
+    }
+    return true;
+  }
+
+  const metadata = parseActionMetadata(action.metadata ?? null);
+  const assigneeName =
+    typeof metadata.assignee_name === 'string' ? metadata.assignee_name : null;
+  const description =
+    typeof metadata.full_description === 'string'
+      ? metadata.full_description
+      : action.name;
+
+  return isThirdPartyAssignee(
+    assigneeName,
+    description || action.name,
+    options,
+  );
 };
 
 export const capitalizeActionText = (value: string): string =>
