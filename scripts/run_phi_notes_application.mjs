@@ -1,5 +1,6 @@
 // Real Electron / renderer IPC smoke and process-restart recovery. Never opens
-// the production profile, records audio, or consumes promotion holdout fixtures.
+// the production profile or consumes promotion holdout fixtures. Capture requires
+// explicit CLI opt-in and uses copied native assets in the disposable profile.
 import assert from 'node:assert/strict';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -21,6 +22,8 @@ const argument = (key) =>
     .find((value) => value.startsWith(`--${key}=`))
     ?.slice(key.length + 3);
 const allowReadinessProbes = process.argv.includes('--allow-readiness-probes');
+const captureSeconds = Number(argument('capture-seconds') ?? 0);
+const captureWorkload = argument('capture-workload') ?? 'control';
 const writePrivate = (file, value) =>
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, {
     mode: 0o600,
@@ -36,10 +39,45 @@ async function launch() {
   assert.ok(
     process.argv
       .slice(2)
-      .every((value) => value === '--allow-readiness-probes') &&
-      process.argv.length <= 3,
-    'only --allow-readiness-probes is accepted; external profile arguments are forbidden',
+      .every(
+        (value) =>
+          value === '--allow-readiness-probes' ||
+          /^--(capture-seconds|capture-workload|native-bin|model-root|audio-fixture|microphone-fixture)=/.test(
+            value,
+          ),
+      ),
+    'unsupported argument; external profile arguments are forbidden',
   );
+  if (captureSeconds) {
+    assert.ok(
+      allowReadinessProbes &&
+        Number.isInteger(captureSeconds) &&
+        captureSeconds >= 30 &&
+        captureSeconds <= 1800,
+    );
+    assert.ok(['control', 'mixed'].includes(captureWorkload));
+    for (const key of [
+      'native-bin',
+      'model-root',
+      'audio-fixture',
+      'microphone-fixture',
+    ]) {
+      assert.ok(
+        path.isAbsolute(argument(key) ?? ''),
+        `${key} absolute path required`,
+      );
+      assert.ok(fs.existsSync(argument(key)), `${key} unavailable`);
+    }
+  } else {
+    assert.ok(
+      !process.argv.some((value) =>
+        /^--(capture-|native-bin|model-root|audio-fixture|microphone-fixture)/.test(
+          value,
+        ),
+      ),
+      'capture configuration requires a positive duration',
+    );
+  }
   for (const args of [
     ['exec', 'vite', 'build'],
     ['run', 'ensure:sqlite-abi'],
@@ -65,6 +103,53 @@ async function launch() {
     token,
     userDataPath: root,
   });
+  if (captureSeconds) {
+    // Never hand a production model directory to a writable runtime. Copy its
+    // contents, including activation metadata, before launching the app.
+    fs.cpSync(
+      argument('model-root'),
+      path.join(root, 'models/transcription/parakeet'),
+      { recursive: true, dereference: true, errorOnExist: true, force: false },
+    );
+    fs.mkdirSync(path.join(root, 'bin'), { mode: 0o700 });
+    for (const name of ['audiocap', 'parakeet-runtime']) {
+      fs.copyFileSync(
+        path.join(argument('native-bin'), name),
+        path.join(root, 'bin', name),
+        fs.constants.COPYFILE_EXCL,
+      );
+      fs.chmodSync(path.join(root, 'bin', name), 0o700);
+    }
+    fs.copyFileSync(
+      argument('microphone-fixture'),
+      path.join(root, 'input.wav'),
+      fs.constants.COPYFILE_EXCL,
+    );
+    fs.chmodSync(path.join(root, 'input.wav'), 0o600);
+    fs.copyFileSync(
+      argument('audio-fixture'),
+      path.join(root, 'system-input.wav'),
+      fs.constants.COPYFILE_EXCL,
+    );
+    fs.chmodSync(path.join(root, 'system-input.wav'), 0o600);
+    writePrivate(path.join(root, 'capture-input.json'), {
+      durationSeconds: captureSeconds,
+      workload: captureWorkload,
+      microphoneSha256: digest(fs.readFileSync(path.join(root, 'input.wav'))),
+      systemAudioSha256: digest(
+        fs.readFileSync(path.join(root, 'system-input.wav')),
+      ),
+      microphone:
+        'Chromium fake microphone replay; not hardware microphone acceptance',
+      systemAudio: 'real native tap; keep unrelated system audio off',
+      nativeHashes: Object.fromEntries(
+        ['audiocap', 'parakeet-runtime'].map((name) => [
+          name,
+          digest(fs.readFileSync(path.join(root, 'bin', name))),
+        ]),
+      ),
+    });
+  }
   const electron = (await import('electron')).default;
   const require = createRequire(import.meta.url);
   const binding = path.join(
@@ -104,6 +189,8 @@ async function launch() {
     diagnosticSourceHashes: Object.fromEntries(
       [
         'scripts/run_phi_notes_application.mjs',
+        'scripts/lib/phi_notes_capture.mjs',
+        'native/parakeet-runtime/Sources/ParakeetRuntimeEngine/ParakeetService.swift',
         'electron/bootstrap.ts',
         'electron/main.ts',
         'electron/notesEvaluationActivation.ts',
@@ -119,13 +206,9 @@ async function launch() {
   const phases = [];
   console.log(`Private application evidence: ${root}`);
   try {
-    for (const phase of [
-      'publish',
-      'crash',
-      'recover',
-      'interruptions',
-      'renderer',
-    ]) {
+    for (const phase of captureSeconds
+      ? ['capture']
+      : ['publish', 'crash', 'recover', 'interruptions', 'renderer']) {
       const code = await new Promise((resolve, reject) => {
         const log = fs.openSync(path.join(root, `${phase}.log`), 'wx', 0o600);
         const child = spawn(
@@ -136,6 +219,16 @@ async function launch() {
             `--user-data-dir=${root}`,
             `--phi-notes-evaluation=${token}`,
             ...(allowReadinessProbes ? ['--allow-readiness-probes'] : []),
+            ...(captureSeconds
+              ? [
+                  `--capture-seconds=${captureSeconds}`,
+                  `--capture-workload=${captureWorkload}`,
+                  '--use-fake-device-for-media-stream',
+                  '--use-fake-ui-for-media-stream',
+                  '--disable-features=AudioServiceSandbox',
+                  `--use-file-for-fake-audio-capture=${path.join(root, 'input.wav')}`,
+                ]
+              : []),
           ],
           {
             cwd: repository,
@@ -149,7 +242,10 @@ async function launch() {
           },
         );
         fs.closeSync(log);
-        const timeout = setTimeout(() => child.kill('SIGKILL'), 12 * 60_000);
+        const timeout = setTimeout(
+          () => child.kill('SIGKILL'),
+          captureSeconds ? (captureSeconds + 1200) * 1000 : 12 * 60_000,
+        );
         child.once('error', (error) => {
           clearTimeout(timeout);
           reject(error);
@@ -159,6 +255,7 @@ async function launch() {
           resolve({ status, signal });
         });
       });
+      phases.push({ phase, ...code });
       if (phase === 'crash') {
         assert.equal(
           code.signal,
@@ -175,25 +272,28 @@ async function launch() {
           0,
           `${phase} failed; inspect owner-only application log`,
         );
-      phases.push({ phase, ...code });
       console.log(
         `Application phase ${phase}: ${code.status === 0 || phase === 'crash' ? 'verified' : 'failed; evidence preserved'}`,
       );
     }
     writePrivate(path.join(root, 'result.json'), {
-      schema: 'phi-application-smoke-v1',
+      schema: captureSeconds
+        ? 'phi-application-capture-diagnostic-v1'
+        : 'phi-application-smoke-v1',
       status: phases.every(
         (result) => result.status === 0 || result.phase === 'crash',
       )
         ? 'passed'
         : 'failed',
       phases,
-      evidence:
-        'real Electron renderer IPC, real Ollama, real SQLite, abrupt process kill and relaunch',
+      evidence: captureSeconds
+        ? 'real Electron capture lifecycle, fake microphone input, native system tap, private SQLite; diagnostic only'
+        : 'real Electron renderer IPC, real Ollama, real SQLite, abrupt process kill and relaunch',
       promotion: 'not_evaluated',
       excluded: [
-        'recording',
-        '30_minute_mixed_workload',
+        ...(captureSeconds
+          ? ['paired_capture_acceptance_unscored']
+          : ['recording', '30_minute_mixed_workload']),
         'sleep_wake',
         'human_quality',
       ],
@@ -219,9 +319,14 @@ async function application() {
   const root = argument('user-data-dir');
   const phase = argument('phase');
   assert.ok(
-    ['publish', 'crash', 'recover', 'interruptions', 'renderer'].includes(
-      phase,
-    ),
+    [
+      'publish',
+      'crash',
+      'recover',
+      'interruptions',
+      'renderer',
+      'capture',
+    ].includes(phase),
   );
   assert.equal(fs.realpathSync(root), root);
   assert.equal(path.dirname(root), fs.realpathSync(os.tmpdir()));
@@ -318,7 +423,22 @@ async function application() {
       `window.ipcRenderer.invoke(${JSON.stringify(channel)}, ...${JSON.stringify(args)})`,
     );
   const id = 'phi-application-synthetic';
-  const get = () => invoke('GET_MEETING', id);
+  const get = async () => {
+    let timer;
+    try {
+      return await Promise.race([
+        invoke('GET_MEETING', id),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('renderer_state_timeout')),
+            2000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   let currentRequestId;
   const generate = (requestId) => {
     if (telemetryError) throw telemetryError;
@@ -346,21 +466,52 @@ async function application() {
     while (!stopping) {
       const started = Date.now();
       try {
-        const [pressure, swap, paging, resident] = await Promise.all([
-          runFile(
-            '/usr/sbin/sysctl',
-            ['-n', 'kern.memorystatus_vm_pressure_level'],
-            { timeout: 2000 },
-          ),
-          runFile('/usr/sbin/sysctl', ['vm.swapusage'], { timeout: 2000 }),
-          runFile('/usr/bin/vm_stat', [], { timeout: 2000 }),
-          fetch('http://127.0.0.1:11434/api/ps', {
-            signal: AbortSignal.timeout(2000),
-          }).then((response) => {
-            assert.ok(response.ok);
-            return response.json();
-          }),
-        ]);
+        const [pressure, swap, paging, resident, processTable] =
+          await Promise.all([
+            runFile(
+              '/usr/sbin/sysctl',
+              ['-n', 'kern.memorystatus_vm_pressure_level'],
+              { timeout: 2000 },
+            ),
+            runFile('/usr/sbin/sysctl', ['vm.swapusage'], { timeout: 2000 }),
+            runFile('/usr/bin/vm_stat', [], { timeout: 2000 }),
+            fetch('http://127.0.0.1:11434/api/ps', {
+              signal: AbortSignal.timeout(2000),
+            }).then((response) => {
+              assert.ok(response.ok);
+              return response.json();
+            }),
+            runFile('/bin/ps', ['-axo', 'pid,ppid,rss,comm'], {
+              timeout: 2000,
+            }),
+          ]);
+        const table = processTable.stdout
+          .trim()
+          .split('\n')
+          .slice(1)
+          .map((line) => {
+            const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+            assert.ok(match, 'process RSS telemetry invalid');
+            return {
+              pid: Number(match[1]),
+              parentPid: Number(match[2]),
+              rssBytes: Number(match[3]) * 1024,
+              name: path.basename(match[4]),
+            };
+          });
+        assert.ok(
+          table.some((row) => row.pid === process.pid),
+          'application RSS unavailable',
+        );
+        const descendants = new Set([process.pid]);
+        for (let size = 0; size !== descendants.size; ) {
+          size = descendants.size;
+          for (const row of table)
+            if (descendants.has(row.parentPid)) descendants.add(row.pid);
+        }
+        const nativeAndProcessRss = table.filter(
+          (row) => descendants.has(row.pid) || row.name === 'ollama',
+        );
         const memoryPressure = Number(pressure.stdout.trim());
         assert.ok(
           [1, 2, 4].includes(memoryPressure),
@@ -413,6 +564,7 @@ async function application() {
           swapUsedBytes: Number(swapUsed[1]) * 1024 * 1024,
           paging: paging.stdout,
           processes,
+          nativeAndProcessRss,
           ollama: resident.models,
           notesRun: JSON.parse((await get())?.analysis_run_json ?? 'null'),
         };
@@ -433,12 +585,15 @@ async function application() {
         stopping = true;
         firstSampleReady();
         fs.fsyncSync(ledger);
-        await invoke('CANCEL_MEETING_NOTES', {
-          meetingId: id,
-          requestId: currentRequestId ?? '',
-        }).catch(() => {});
-        // This entry never captures audio. Exit also stops unrelated optional
-        // work started by the real app, not just the current notes request.
+        await Promise.race([
+          invoke('CANCEL_MEETING_NOTES', {
+            meetingId: id,
+            requestId: currentRequestId ?? '',
+          }).catch(() => {}),
+          wait(1000),
+        ]);
+        // Abrupt safety termination is never a successful capture. Preserve the
+        // journal for recovery and stop admitting work even if the UI is blocked.
         app.exit(2);
       }
       if (!stopping) await wait(Math.max(0, 1000 - (Date.now() - started)));
@@ -664,6 +819,17 @@ async function application() {
         outcomes.every((result) => result.retry.completed),
         'model rejected a post-interruption retry; see recorded outcomes',
       );
+    } else if (phase === 'capture') {
+      const { runControlledCapture } = await import(
+        './lib/phi_notes_capture.mjs'
+      );
+      await runControlledCapture({
+        window,
+        invoke,
+        root,
+        seconds: captureSeconds,
+        workload: captureWorkload,
+      });
     } else {
       const navigate = (label, readySelector) =>
         window.webContents.executeJavaScript(`(async () => {

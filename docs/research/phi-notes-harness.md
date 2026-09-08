@@ -85,8 +85,8 @@ node scripts/run_phi_notes_application.mjs
 This builds the current checkout, prepares and pins an Electron-compatible SQLite
 binding, then launches real Electron processes against one newly created owner-only
 temporary profile. Default mode leaves onboarding incomplete so boot-time capture
-probes cannot run. It never accepts a production profile path, starts a recording,
-downloads a model, or consumes held-out fixtures. A profile-bound random capability
+probes cannot run. Default smoke mode never accepts a production profile path,
+starts a recording, downloads a model, or consumes held-out fixtures. A profile-bound random capability
 is checked before database initialization; packaged or ordinary launches cannot
 activate this route through a setting. Gemma remains the other-workload default.
 
@@ -121,6 +121,67 @@ fact. Prompt-only clarifications tried during development did not resolve the fa
 and were not retained. This is a known candidate failure, not an integration pass.
 
 ## Remaining controlled acceptance work
+
+### Opt-in capture rehearsals
+
+With operator permission for a controlled desktop, prepare a synthetic PCM WAV
+and build native assets with `pnpm run build:parakeet` and
+`pnpm run build:audio-cap`, then run:
+
+```sh
+node scripts/run_phi_notes_application.mjs --allow-readiness-probes --capture-seconds=240 --capture-workload=mixed --native-bin=/absolute/native/bin --model-root=/absolute/parakeet/models --audio-fixture=/absolute/synthetic-system.wav --microphone-fixture=/absolute/synthetic-mic.wav
+```
+
+Use `control` for recording without injected notes/Ask traffic. Each launch copies
+models and native executables into a new private profile; the runtime cannot modify
+the source assets. Both WAVs are copied and hashed. Chromium replays the microphone
+fixture and `afplay` replays the system fixture into the real native tap. Use
+distinct, alternating speech rather than offset copies of identical speech on both
+channels: the latter is an attribution stress case, not a clean load control. Keep unrelated
+audio/calls off the desktop. This is not hardware-microphone acceptance. The
+audio-service sandbox is disabled only for this opted-in test process so it can
+read the owner-only WAV; the ordinary application launch is unchanged.
+
+Mixed mode schedules four notes jobs and eight Ask requests at fifteen-second
+intervals, retaining every terminal outcome. The driver uses real start/stop
+handlers, samples rendered transcript/health, and waits for persisted finalized,
+validated transcription. Failed readiness, unavailable capture sources, failed
+finalization, and convergence timeouts fail the run. Private resource telemetry
+includes native-descendant/Ollama RSS as well as Electron metrics. Runtime failure
+and interrupted evidence are retained. Native readiness also now normalizes the
+configured and requested model roots identically, fixing the macOS `/private/var`
+alias rejection without admitting unrelated or relative roots.
+
+These are diagnostic rehearsals, even when configured for 1,800 seconds. Marker
+alignment, zero-loss/chunk-integrity adjudication, settled paired baselines,
+navigation, and twenty-sample responsiveness gates are not implemented by this
+entry and remain explicitly unscored. Eight Ask requests with missing first-useful
+content do not form a passing p95. Do not substitute successful lifecycle completion
+for sustained acceptance or model-quality evidence.
+
+### Explicitly authorized read-only production sources
+
+```sh
+node scripts/read_phi_notes_sources.mjs /absolute/production/pluto.db
+pnpm exec tsx scripts/check_phi_notes_source_capacity.ts /printed/private/directory/sources.json
+```
+
+The first command requires explicit permission to read production meetings. It
+never launches the app on that profile, initializes/migrates SQLite, checkpoints a
+WAL, reads existing generated notes/settings, or changes meeting rows. It uses an
+immutable read-only connection with `query_only`, refuses pending WAL/journal
+writes, and verifies the database inode, size, modification time, and hash after
+reading. Active sources require a separately supplied consistent snapshot; this
+command will not create one by mutating production. Source-only rows go to a new
+owner-only temporary directory, never Git. Child-process/parser errors are scrubbed
+of partial private output.
+
+The second command checks the frozen 16K candidate preflight against those private
+development sources with a callback that throws before provider access. It makes
+zero physical requests. Admission is not generation success, quality, or promotion
+evidence. Existing notes are deliberately excluded to avoid answer leakage. These
+sources are not imported into the synthetic-only application activation or counted
+as the frozen held-out corpus.
 
 The existing `RUN_LOCAL_INTELLIGENCE_MIXED_WORKLOAD=1` entry supports dry scenario
 inventory only. Requesting its non-dry mode now fails explicitly instead of exiting

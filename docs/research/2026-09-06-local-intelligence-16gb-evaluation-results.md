@@ -20,6 +20,46 @@ This is implementation evidence, not promotion evidence. The 168 supported paire
 
 The first frozen-settings capacity measurement is a blocking result. At 16,384 context tokens, all eight declared 20–40 minute ordinary-capacity fixtures fail the source-first preflight before inference because the complete-source final editor cannot reserve the worst-case aggregate inventories, editor output, safety margin, and permitted recovery split. Planned initial leaf counts were `2, 2, 2, 2, 3, 3, 4, 3`; the four-leaf case also exceeds the three-leaf limit. The corpus records this result without shrinking the fixtures or increasing context after observation. The 168 supported-attempt schedule must not start until a separately reviewed capacity revision is supported by measured 16 GB resource evidence.
 
+## September 8 controlled capture and read-only production-source follow-up
+
+With explicit operator authorization, a read-only source extractor inspected 79
+meetings marked finalized/validated without loading existing generated notes or
+settings. It rejected pending WAL/journal writes and verified the production
+database identity and hash remained unchanged after extraction. Source copies and
+per-meeting results remain owner-only local artifacts; no meeting content was
+committed. At the unchanged 16,384-token setting, **52 sources failed candidate
+capacity preflight, 25 reached the generation boundary, and 2 were rejected by the
+source parser**. The provider callback threw at that boundary, so this check made
+zero physical model requests. These are development-source admission counts, not
+generation completion or quality scores. Invalid sources remain in the denominator.
+
+The real-app driver now has explicitly opted-in capture rehearsals using copied
+native assets, a synthetic fake microphone, actual system-audio playback/tap,
+rendered transcript/health sampling, native/Ollama RSS, notes/Ask attempt outcomes,
+and finalization checks. The first attempt exposed a macOS native model-root alias
+comparison bug; normalizing both sides identically fixes it without weakening
+unrelated-root rejection. A 30-second rehearsal subsequently reached finalized,
+validated transcription. A 240-second mixed rehearsal completed all four injected
+Phi notes jobs and exercised actual Ask-driven notes preemption, but final
+transcription failed with `speaker_attribution_rejected` at 0.571 confidence versus
+the unchanged 0.80 threshold. That fixture replayed identical speech into both
+channels at different offsets; it is retained as a failed attribution stress case,
+not a clean workload comparison. The driver now accepts distinct microphone/system
+fixtures so this confound need not be repeated.
+
+A separate 240-second rehearsal with distinct, alternating channel fixtures reached
+finalized/validated transcription with no integrity causes and completed all four
+injected Phi notes jobs. All eight Ask attempts returned partial answers; first
+content ranged from 2.67 to 13.27 seconds, with six exceeding five seconds. This
+does not satisfy the minimum twenty comparable samples for the frozen p95 gate.
+The native/app/model paths are real, but these short instrumented development runs
+are not matched 30-minute controls or accepted recording-quality benchmarks.
+
+The two 30-minute comparison runs, marker/chunk-integrity adjudication, settled
+resource gates, twenty-sample responsiveness gates, and sleep/wake remain incomplete.
+The session could not schedule a guaranteed wake without administrator access, so
+no OS sleep was attempted. No production model routing or notes changed.
+
 ## September 7 residency repair and 12-case notes evaluation
 
 [Issue #784](https://github.com/metagrover/pluto/issues/784) repairs the lifecycle blocker identified by the frozen evaluation. Before every serialized local generation, Pluto now asks Ollama which models are resident, retains an equivalent target, and unloads non-target residents before starting inference. Discovery and cleanup share a 40-second deadline and fail closed with explicit run failure codes. This changes lifecycle admission only; it does not change model selection or note acceptance policy.

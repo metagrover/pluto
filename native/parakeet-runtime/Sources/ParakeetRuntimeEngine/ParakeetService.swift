@@ -186,8 +186,14 @@ public actor ParakeetService {
     }
 
     private func prepare(_ request: RuntimeRequest) async -> RuntimeResponse {
-        guard request.modelRoot == nil || request.modelRoot == modelRoot.path else {
-            return .failure(id: request.id, code: .pathNotAllowed)
+        if let requestedRoot = request.modelRoot {
+            // Foundation normalizes macOS /private/var aliases when the service
+            // is constructed. Apply the same normalization to the request;
+            // otherwise a canonical disposable profile rejects its own root.
+            guard requestedRoot.hasPrefix("/"),
+                  URL(fileURLWithPath: requestedRoot).standardizedFileURL == modelRoot else {
+                return .failure(id: request.id, code: .pathNotAllowed)
+            }
         }
         do {
             if let liveSession {

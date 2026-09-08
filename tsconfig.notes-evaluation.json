@@ -4,6 +4,7 @@
     "src",
     "electron",
     "scripts/create_phi_notes_evaluation_manifest.ts",
+    "scripts/check_phi_notes_source_capacity.ts",
     "tests/manual/localIntelligenceEvaluation.test.ts",
     "tests/manual/localIntelligenceMixedWorkload.test.ts",
     "tests/manual/phiNotesIntegration.test.ts"
