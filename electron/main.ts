@@ -21,6 +21,7 @@ import {
 import ffmpegStatic from 'ffmpeg-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
+import type { ScopedMeetingCapability } from '../src/services/transcription/contracts';
 import type {
   AskPlutoConversationTurn,
   AskPlutoCurrentMeeting,
@@ -58,6 +59,7 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import { getAudioKeyStore } from './crypto/audioKeyStore';
 import { closeApplicationDatabase } from './database/applicationDatabase';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
@@ -1188,10 +1190,49 @@ app.whenReady().then(async () => {
     if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
     const meetingId = String(request?.meetingId || '');
     const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    let capability: ScopedMeetingCapability | undefined = request?.capability;
+    if (!capability && meetingId) {
+      const audioKeyStore = getAudioKeyStore();
+      const keyResult = audioKeyStore?.getMeetingAudioKey(meetingId);
+      if (keyResult) {
+        const meeting = db.getMeeting(meetingId) as
+          | { capture_journal_generation?: string | null }
+          | undefined;
+        const generation = meeting?.capture_journal_generation?.trim();
+        if (!generation) {
+          throw new Error(
+            `capture_generation_unavailable: Meeting ${meetingId} has no capture journal generation`,
+          );
+        }
+        capability = {
+          version: 1,
+          meetingId,
+          keyId: keyResult.keyId,
+          meetingKeyBase64: keyResult.meetingKey.toString('base64'),
+          generation,
+          allowedOperations: ['transcribe'],
+          expiresAtMs: Date.now() + 5 * 60 * 1000,
+        };
+      }
+    }
+    if (
+      capability &&
+      (!capability.generation ||
+        typeof capability.generation !== 'string' ||
+        !capability.generation.trim())
+    ) {
+      throw new Error(
+        'invalid_capability: Capability generation must not be empty',
+      );
+    }
     beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
     try {
-      return await parakeetFinalClient.transcribe({ ...request, signal });
+      return await parakeetFinalClient.transcribe({
+        ...request,
+        capability,
+        signal,
+      });
     } finally {
       endMeetingTranscription(meetingId || null);
       endTranscriptionWork();
@@ -1202,13 +1243,50 @@ app.whenReady().then(async () => {
     if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
     const meetingId = String(request?.meetingId || '');
     const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    let capability: ScopedMeetingCapability | undefined = request?.capability;
+    if (!capability && meetingId) {
+      const audioKeyStore = getAudioKeyStore();
+      const keyResult = audioKeyStore?.getMeetingAudioKey(meetingId);
+      if (keyResult) {
+        const meeting = db.getMeeting(meetingId) as
+          | { capture_journal_generation?: string | null }
+          | undefined;
+        const generation = meeting?.capture_journal_generation?.trim();
+        if (!generation) {
+          throw new Error(
+            `capture_generation_unavailable: Meeting ${meetingId} has no capture journal generation`,
+          );
+        }
+        capability = {
+          version: 1,
+          meetingId,
+          keyId: keyResult.keyId,
+          meetingKeyBase64: keyResult.meetingKey.toString('base64'),
+          generation,
+          allowedOperations: ['speakerEvidence'],
+          expiresAtMs: Date.now() + 5 * 60 * 1000,
+        };
+      }
+    }
+    if (
+      capability &&
+      (!capability.generation ||
+        typeof capability.generation !== 'string' ||
+        !capability.generation.trim())
+    ) {
+      throw new Error(
+        'invalid_capability: Capability generation must not be empty',
+      );
+    }
     beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
     try {
       return await parakeetFinalClient.speakerEvidence({
+        meetingId,
         mixedAudioPath: String(request?.mixedAudioPath || ''),
         micAudioPath: String(request?.micAudioPath || ''),
         systemAudioPath: String(request?.systemAudioPath || ''),
+        capability,
         signal,
       });
     } finally {

@@ -592,7 +592,8 @@ export const retryMeetingTranscriptValidation = async (
   let verifiedCheckpointEvidence: CheckpointVerification | null = null;
   const storedCheckpointCandidate =
     recovery?.source === 'capture_journal' &&
-    recovery.journalSchemaVersion === 3 &&
+    (recovery.journalSchemaVersion === 3 ||
+      recovery.journalSchemaVersion === 4) &&
     recovery.checkpointEvidenceVerified === true &&
     recovery.gapDetected === false &&
     provisionalSegments.length > 0 &&

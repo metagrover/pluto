@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { segmentRecognizedWords } from '../../src/services/finalTranscription/segmentRecognizedWords';
 import type {
+  ScopedMeetingCapability,
   TranscriptionRequest,
   TranscriptionResult,
   TranscriptionRuntimeHealth,
@@ -39,10 +40,12 @@ type NativeTranscription = {
 };
 
 export type SpeakerEvidenceRequest = {
+  meetingId?: string;
   mixedAudioPath: string;
   micAudioPath: string;
   systemAudioPath: string;
   signal?: AbortSignal;
+  capability?: ScopedMeetingCapability;
 };
 
 export type SpeakerClusterEvidence = {
@@ -362,6 +365,7 @@ export class ParakeetFinalClient {
           audioPath: request.audioPath,
           language: request.language,
           vocabulary: request.vocabulary ?? [],
+          ...(request.capability ? { capability: request.capability } : {}),
         });
         transcriptionSettled = nativeRequest.then(
           () => undefined,
@@ -458,6 +462,7 @@ export class ParakeetFinalClient {
         mixedAudioPath: request.mixedAudioPath,
         micAudioPath: request.micAudioPath,
         systemAudioPath: request.systemAudioPath,
+        ...(request.capability ? { capability: request.capability } : {}),
       });
       settled = nativeRequest.then(
         () => undefined,
