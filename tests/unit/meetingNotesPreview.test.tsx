@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { NotesDraft } from '../../electron/llm/meetingNotesTypes';
 import { createNotesSourceFromText } from '../../electron/llm/meetingNotesSource';
 import { createNotesStreamPreview } from '../../electron/llm/meetingNotesStreamPreview';
+import type { NotesDraft } from '../../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { createMeetingNotesPreviewStore } from '../../electron/meetingNotesPreview';
 import {
