@@ -60,6 +60,86 @@ const audio = (source: 'mic' | 'system') => ({
 });
 
 describe('ParakeetEouMeetingCoordinator', () => {
+  it('fences a cancelled pending creation and preserves the next meeting', async () => {
+    const cancelledClient = makeClient();
+    const nextClient = makeClient();
+    let resolveCreation!: (client: ReturnType<typeof makeClient>) => void;
+    const pendingCreation = new Promise<ReturnType<typeof makeClient>>(
+      (resolve) => {
+        resolveCreation = resolve;
+      },
+    );
+    const createClient = vi
+      .fn()
+      .mockReturnValueOnce(pendingCreation)
+      .mockResolvedValue(nextClient);
+    const onUnavailable = vi.fn();
+    const coordinator = new ParakeetEouMeetingCoordinator({
+      createClient,
+      onUnavailable,
+      onUpdate: vi.fn(),
+    });
+    const pendingStart = coordinator.start(start);
+    const rejectedStart =
+      expect(pendingStart).rejects.toThrow('parakeet_cancelled');
+    await expect(coordinator.start(start)).rejects.toThrow(
+      'parakeet_meeting_active',
+    );
+    await coordinator.cancel('other-meeting');
+    expect(onUnavailable).not.toHaveBeenCalled();
+    await coordinator.cancel(start.meetingId);
+    await coordinator.cancel(start.meetingId);
+    await coordinator.start({
+      ...start,
+      meetingId: 'meeting-2',
+      generation: 2,
+    });
+    resolveCreation(cancelledClient);
+    await rejectedStart;
+    expect(cancelledClient.open).not.toHaveBeenCalled();
+    expect(cancelledClient.close).toHaveBeenCalledOnce();
+    expect(nextClient.open).toHaveBeenCalledTimes(2);
+    expect(nextClient.close).not.toHaveBeenCalled();
+    expect(coordinator.isActive()).toBe(true);
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    await coordinator.finish('meeting-2');
+  });
+
+  it('does not fail a newer meeting when an old cancelled open rejects', async () => {
+    const oldClient = makeClient();
+    const nextClient = makeClient();
+    let rejectOpen!: (error: Error) => void;
+    oldClient.open.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectOpen = reject;
+        }),
+    );
+    const createClient = vi
+      .fn()
+      .mockResolvedValueOnce(oldClient)
+      .mockResolvedValue(nextClient);
+    const coordinator = new ParakeetEouMeetingCoordinator({
+      createClient,
+      onUnavailable: vi.fn(),
+      onUpdate: vi.fn(),
+    });
+    const pending = coordinator.start(start);
+    const rejected = expect(pending).rejects.toThrow('parakeet_cancelled');
+    await vi.waitFor(() => expect(oldClient.open).toHaveBeenCalledTimes(2));
+    await coordinator.cancel(start.meetingId);
+    await coordinator.start({
+      ...start,
+      meetingId: 'meeting-2',
+      generation: 2,
+    });
+    rejectOpen(new Error('old open failed'));
+    await rejected;
+    expect(nextClient.close).not.toHaveBeenCalled();
+    expect(coordinator.isActive()).toBe(true);
+    await coordinator.finish('meeting-2');
+  });
+
   it('opens both English EOU sources under one meeting owner', async () => {
     const { coordinator, client } = makeCoordinator();
 

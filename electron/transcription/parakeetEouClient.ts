@@ -53,6 +53,7 @@ export class ParakeetEouClient {
   private runtimeLeasePromise: Promise<ParakeetRuntimeLease> | null = null;
   private nextId = 0;
   private closed = false;
+  private closePromise: Promise<void> | null = null;
   private terminalCode: string | null = null;
   private readonly cleanupTimeoutMs: number;
 
@@ -180,8 +181,12 @@ export class ParakeetEouClient {
     await this.releaseRuntimeLeaseIfIdle();
   }
 
-  async close(cleanupTimeoutMs = this.cleanupTimeoutMs): Promise<void> {
-    if (this.closed) return;
+  close(cleanupTimeoutMs = this.cleanupTimeoutMs): Promise<void> {
+    this.closePromise ??= this.closeOnce(cleanupTimeoutMs);
+    return this.closePromise;
+  }
+
+  private async closeOnce(cleanupTimeoutMs: number): Promise<void> {
     this.closed = true;
     this.unsubscribeEvent();
     this.unsubscribeFailure();
@@ -298,9 +303,9 @@ export class ParakeetEouClient {
       for (const waiter of state.drainWaiters.splice(0)) waiter.reject(error);
     }
     if (cancelNative) {
-      void Promise.all(states.map((state) => this.cancelState(state))).finally(
-        () => this.releaseRuntimeLeaseIfIdle(true),
-      );
+      // Keep streams owned until the shared bounded cleanup has tracked them.
+      // Terminal listeners may call close again; they must await this same work.
+      void this.close();
     } else {
       for (const state of states) this.remove(state);
       void this.releaseRuntimeLeaseIfIdle(true);

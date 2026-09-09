@@ -60,6 +60,7 @@ const ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 /** Owns the one visible two-source EOU session for an active meeting. */
 export class ParakeetEouMeetingCoordinator {
   private active: ActiveMeeting | null = null;
+  private pendingStart: ParakeetEouMeetingStart | null = null;
   private failing: Promise<void> | null = null;
 
   constructor(private readonly options: CoordinatorOptions) {}
@@ -70,13 +71,19 @@ export class ParakeetEouMeetingCoordinator {
 
   async start(start: ParakeetEouMeetingStart): Promise<void> {
     this.validateStart(start);
-    if (this.active) throw new Error('parakeet_meeting_active');
-    if (this.failing) await this.failing;
+    if (this.active || this.pendingStart)
+      throw new Error('parakeet_meeting_active');
+    const pending = { ...start };
+    this.pendingStart = pending;
 
     let client: EouClient;
     try {
+      if (this.failing) await this.failing;
+      if (this.pendingStart !== pending) throw new Error('parakeet_cancelled');
       client = await this.options.createClient();
     } catch {
+      if (this.pendingStart !== pending) throw new Error('parakeet_cancelled');
+      this.pendingStart = null;
       this.options.onUnavailable({
         meetingId: start.meetingId,
         owner: start.owner,
@@ -84,6 +91,11 @@ export class ParakeetEouMeetingCoordinator {
       });
       throw new Error('parakeet_live_unavailable');
     }
+    if (this.pendingStart !== pending) {
+      await client.close();
+      throw new Error('parakeet_cancelled');
+    }
+    this.pendingStart = null;
     const identities = Object.fromEntries(
       SOURCES.map((source) => [
         source,
@@ -118,6 +130,7 @@ export class ParakeetEouMeetingCoordinator {
     const opens = await Promise.allSettled(
       SOURCES.map((source) => client.open(identities[source])),
     );
+    if (this.active !== meeting) throw new Error('parakeet_cancelled');
     if (opens.some((result) => result.status === 'rejected')) {
       await this.fail('parakeet_live_unavailable');
       throw new Error('parakeet_live_unavailable');
@@ -140,7 +153,7 @@ export class ParakeetEouMeetingCoordinator {
       });
       if (this.active === meeting) meeting.nextSequence[append.source] += 1;
     } catch {
-      await this.fail('parakeet_live_unavailable');
+      if (this.active === meeting) await this.fail('parakeet_live_unavailable');
       throw new Error('parakeet_live_unavailable');
     }
   }
@@ -156,19 +169,29 @@ export class ParakeetEouMeetingCoordinator {
       if (this.active === meeting) this.detach(meeting);
       await meeting.client.close();
     } catch {
-      await this.fail('parakeet_live_unavailable');
+      if (this.active === meeting) await this.fail('parakeet_live_unavailable');
       throw new Error('parakeet_live_unavailable');
     }
   }
 
   async cancel(meetingId?: string): Promise<void> {
-    if (meetingId && this.active && this.active.meetingId !== meetingId) {
+    const current = this.active ?? this.pendingStart;
+    if (meetingId && current && current.meetingId !== meetingId) {
       return;
     }
     await this.fail('parakeet_cancelled');
   }
 
   async fail(code: string): Promise<void> {
+    const pending = this.pendingStart;
+    if (pending) {
+      this.pendingStart = null;
+      this.options.onUnavailable({
+        meetingId: pending.meetingId,
+        owner: pending.owner,
+        code,
+      });
+    }
     if (this.failing) return this.failing;
     const meeting = this.active;
     if (!meeting) return;
