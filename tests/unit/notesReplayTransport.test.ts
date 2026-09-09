@@ -8,7 +8,11 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true });
 });
-function setup(response: () => Promise<Response>, isolated = false) {
+function setup(
+  response: () => Promise<Response>,
+  isolated = false,
+  loadMode?: 'mmap' | 'none',
+) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-wire-test-'));
   roots.push(root);
   const events: Array<Record<string, unknown>> = [];
@@ -19,6 +23,7 @@ function setup(response: () => Promise<Response>, isolated = false) {
     request,
     wire: createNotesReplayTransport({
       isolated,
+      loadMode,
       root,
       model: 'gemma4:12b',
       contextTokens: 16384,
@@ -38,6 +43,25 @@ const init = {
   }),
 };
 describe('private notes replay transport', () => {
+  it('captures an explicit non-mapped diagnostic profile without altering the shared runtime', async () => {
+    for (const isolated of [true, false]) {
+      const state = setup(
+        async () => new Response('{"model":"gemma4:12b","done":true}\n'),
+        isolated,
+        'none',
+      );
+      await (
+        await state.wire.fetch('http://127.0.0.1:11434/api/chat', init)
+      ).text();
+      const captured = JSON.parse(
+        fs.readFileSync(
+          path.join(state.root, 'case-3-attempt-1-request.json'),
+          'utf8',
+        ),
+      );
+      expect(captured.options.use_mmap).toBe(isolated ? false : undefined);
+    }
+  });
   it('refuses a second generation until the first stream has terminated', async () => {
     const state = setup(
       async () => new Response('{"model":"gemma4:12b","done":true}\n'),
@@ -147,6 +171,8 @@ describe('private notes replay transport', () => {
       event: 'physical_terminal',
       outcome: 'complete',
       wireDone: true,
+      firstAnswerMs: expect.any(Number),
+      firstReasoningMs: null,
     });
     const file = path.join(state.root, 'case-3-attempt-1-response.ndjson');
     expect(fs.readFileSync(file, 'utf8')).toBe(raw);
@@ -157,6 +183,7 @@ describe('private notes replay transport', () => {
     ['{"message":{"content":"partial"}}\n', 'incomplete_or_invalid'],
     ['{"model":"other","done":true}\n', 'stream_failed'],
     ['not-json\n', 'stream_failed'],
+    ['{"done":true}\n{"message":{"content":"late"}}\n', 'stream_failed'],
   ])(
     'retains rejected responses and fails closed: %s',
     async (raw, outcome) => {

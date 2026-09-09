@@ -547,6 +547,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         trustedUserTerms: [],
         entityHints: terms,
         contextTokens: NOTES_CONTEXT_TOKENS,
+        compactWriterContract: true,
         stageCache,
         cacheKey,
         workClass: 'background',

@@ -201,7 +201,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v29');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v30');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -252,7 +252,7 @@ it('routes the compact product writer through the complete-document editor', asy
     ),
   ).toEqual([false, true]);
   expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
-  expect(result.generation_metadata?.prompt_version).toBe('notes-v29');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v30');
 });
 
 it('repairs malformed writer output once and still requires an independent legacy audit', async () => {
@@ -427,6 +427,66 @@ it('precomputes one closed leaf with background priority and no audit', async ()
   expect(generate).toHaveBeenCalledTimes(1);
   expect(generate).toHaveBeenCalledWith(
     expect.objectContaining({ task: 'notesWriter', workClass: 'background' }),
+  );
+});
+
+it('precomputes the compact product contract at background priority', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 443 }, (_, i) => ({
+      speaker: 'Milo',
+      text: `Dense meeting detail ${i}. Follow-up context.`,
+    })),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'gemma4:12b',
+  });
+  const generate = vi
+    .spyOn(provider as never, 'generateText')
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        sections: [
+          {
+            title: 'Context',
+            items: [
+              {
+                kind: 'point',
+                text: source.segments[0].text,
+                owner: null,
+                due: null,
+                sources: ['R0'],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  await expect(
+    provider.precomputeStructuredAnalysisLeaf('', '', 'auto', {
+      source,
+      contextTokens: 16384,
+      compactWriterContract: true,
+      stageCache: new NotesStageCache(),
+      cacheKey: 'compact-config',
+      workClass: 'background',
+    }),
+  ).resolves.toBe('generated');
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      task: 'notesWriter',
+      workClass: 'background',
+      notesResponseSchema: expect.objectContaining({
+        properties: {
+          sections: expect.objectContaining({
+            items: expect.objectContaining({
+              properties: expect.objectContaining({
+                title: expect.objectContaining({ type: 'string' }),
+              }),
+            }),
+          }),
+        },
+      }),
+    }),
   );
 });
 

@@ -72,6 +72,9 @@ export function summarizeNotesReplay(
     censoredRequests: [...attempts.values()].filter(
       (attempt) => attempt.caseIndex === row.index && !attempt.terminal,
     ).length,
+    elapsedMs: row.terminal?.elapsedMs ?? null,
+    durationSeconds: row.terminal?.durationSeconds ?? null,
+    sourceCharacters: row.terminal?.sourceCharacters ?? null,
   }));
   return {
     runStatus:
@@ -92,6 +95,10 @@ export function summarizeNotesReplay(
         value.terminal?.doneReason === 'length'
           ? 'output_truncated'
           : (value.terminal?.outcome ?? 'no_terminal_record'),
+      elapsedMs: value.terminal?.elapsedMs ?? null,
+      firstAnswerMs: value.terminal?.firstAnswerMs ?? null,
+      firstReasoningMs: value.terminal?.firstReasoningMs ?? null,
+      metrics: value.terminal?.metrics ?? null,
     })),
     counts: Object.fromEntries(
       [...new Set(rows.map((row) => row.outcome))].map((outcome) => [

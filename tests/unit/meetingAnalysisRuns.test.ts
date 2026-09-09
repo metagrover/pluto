@@ -69,6 +69,7 @@ describe('meeting analysis run coordinator', () => {
         entityHints: ['Apollo'],
         trustedUserTerms: [],
         contextTokens: 16_384,
+        compactWriterContract: true,
         stageCache: expect.anything(),
         cacheKey: expect.stringMatching(/^[a-f0-9]{64}$/),
         workClass: 'background',
@@ -522,7 +523,7 @@ describe('meeting analysis run coordinator', () => {
           thinking: null,
           seed: null,
           contextTokens: 16384,
-          promptVersion: 'notes-v29',
+          promptVersion: 'notes-v30',
         }),
         'utf8',
       )
@@ -828,7 +829,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v29',
+            promptVersion: 'notes-v30',
           }),
           'utf8',
         )
@@ -847,7 +848,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v29',
+            promptVersion: 'notes-v30',
           }),
           'utf8',
         )

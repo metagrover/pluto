@@ -42,6 +42,118 @@ const reviewedDraft = (prompt: string) => {
   return JSON.stringify({ ...draft, dispositions: [], terminology: [] });
 };
 
+it('does not spend live inference on a compact meeting that still fits the direct final path', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 250 }, (_, i) => ({
+      speaker: 'Milo',
+      text: `Dense meeting detail ${i}. Follow-up context.`,
+    })),
+  );
+  const generate = vi.fn();
+  await expect(
+    precomputeNextMeetingNotesLeaf({
+      source,
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'test',
+      contextTokens: 16384,
+      stageCache: new NotesStageCache(),
+      cacheKey: 'compact-config',
+    }),
+  ).resolves.toBe('discarded');
+  expect(generate).not.toHaveBeenCalled();
+});
+
+it('reuses compact live work in the real bounded final plan, without skipping final review', async () => {
+  const finalSource = makeSyntheticNotesSource(
+    Array.from({ length: 443 }, (_, i) => ({
+      speaker: i % 2 ? 'Milo' : 'Nira',
+      text: `Dense meeting detail ${i}. Follow-up context.`,
+    })),
+  );
+  const prefixSource = makeSyntheticNotesSource(
+    finalSource.segments.slice(0, 420),
+  );
+  const stageCache = new NotesStageCache();
+  const generate = vi.fn(async (request) => {
+    if (request.task === 'notesAudit') return reviewedDraft(request.prompt);
+    const span = descriptors(request.prompt)[0]!;
+    const sourceRow = JSON.parse(
+      request.prompt.split('BEGIN SOURCE DATA\n')[1].split('\n')[0],
+    );
+    return JSON.stringify({
+      sections: [
+        {
+          title: 'Context',
+          items: [
+            {
+              kind: 'point',
+              text: sourceRow.text,
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  const input = {
+    source: prefixSource,
+    reviewProtocol: 'editor' as const,
+    compactWriterContract: true,
+    context: makeNotesContext(),
+    generate,
+    provider: 'ollama' as const,
+    model: 'test',
+    contextTokens: 16384,
+    stageCache,
+    cacheKey: 'compact-config',
+  };
+  await expect(precomputeNextMeetingNotesLeaf(input)).resolves.toBe(
+    'generated',
+  );
+  const cachedPrompt = generate.mock.calls[0][0].prompt;
+  await expect(precomputeNextMeetingNotesLeaf(input)).resolves.toBe(
+    'generated',
+  );
+  generate.mockClear();
+  await expect(precomputeNextMeetingNotesLeaf(input)).resolves.toBe('reused');
+  expect(generate).not.toHaveBeenCalled();
+  const onPlan = vi.fn();
+  await generateMeetingNotes({ ...input, source: finalSource, onPlan });
+  expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 3 });
+  expect(
+    generate.mock.calls.filter(([request]) => request.task === 'notesWriter'),
+  ).toHaveLength(1);
+  expect(
+    generate.mock.calls.filter(([request]) => request.task === 'notesAudit'),
+  ).toHaveLength(3);
+  expect(
+    generate.mock.calls
+      .filter(([request]) => request.task === 'notesWriter')
+      .every(([request]) => request.prompt !== cachedPrompt),
+  ).toBe(true);
+  generate.mockClear();
+  const corrected = makeSyntheticNotesSource(
+    finalSource.segments.map((segment, i) => ({
+      speaker: segment.speaker,
+      text: i === 0 ? segment.text.replace('Dense', 'Fresh') : segment.text,
+    })),
+  );
+  await generateMeetingNotes({ ...input, source: corrected });
+  expect(
+    generate.mock.calls.filter(([request]) => request.task === 'notesWriter'),
+  ).toHaveLength(1);
+  expect(
+    generate.mock.calls.find(([request]) => request.task === 'notesWriter')![0]
+      .prompt,
+  ).toContain('Fresh meeting detail');
+});
+
 it('precomputes only a closed leaf and reuses it during final generation', async () => {
   const finalSource = makeSyntheticNotesSource(
     Array.from({ length: 6 }, (_, index) => ({

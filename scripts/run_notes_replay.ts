@@ -18,6 +18,10 @@ import {
   MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
   createMeetingNotesOptionalReviewBudget,
 } from '../electron/meetingAnalysisRuns';
+import {
+  MARKDOWN_NOTES_VERSION,
+  generateMarkdownNotes,
+} from './lib/notesReplayMarkdown';
 import { triageNotesReplay } from './lib/notesReplayQuality';
 import {
   notesReplayResourceStop,
@@ -34,6 +38,38 @@ import {
 const sha = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 async function main() {
+  const mode = process.env.NOTES_REPLAY_MODE ?? 'production';
+  const contextTokens = Number(process.env.NOTES_REPLAY_CONTEXT ?? '16384');
+  assert.ok([16384, 32768].includes(contextTokens), 'invalid_replay_context');
+  assert.ok(
+    mode !== 'markdown' || contextTokens === 16384,
+    'markdown_context_is_fixed',
+  );
+  assert.ok(['production', 'markdown'].includes(mode), 'invalid_replay_mode');
+  const replayModel = process.env.NOTES_REPLAY_MODEL ?? NOTES_OLLAMA_MODEL;
+  assert.ok(
+    [NOTES_OLLAMA_MODEL, 'qwen3.5:4b'].includes(replayModel),
+    'invalid_replay_model',
+  );
+  const loadMode = process.env.NOTES_REPLAY_LOAD_MODE ?? 'mmap';
+  assert.ok(
+    loadMode === 'mmap' || loadMode === 'none',
+    'invalid_replay_load_mode',
+  );
+  const selection = process.env.NOTES_REPLAY_CASES;
+  assert.ok(
+    selection === undefined ||
+      /^(?:10|[1-9])(?:,(?:10|[1-9]))*$/.test(selection),
+    'invalid_case_selection',
+  );
+  const selectedCases =
+    selection?.split(',').map(Number) ??
+    Array.from({ length: 10 }, (_, i) => i + 1);
+  assert.equal(
+    new Set(selectedCases).size,
+    selectedCases.length,
+    'duplicate_case_selection',
+  );
   const isolated = process.env.NOTES_REPLAY_ISOLATED === '1';
   assert.ok(
     process.env.NOTES_REPLAY_ISOLATED === undefined || isolated,
@@ -94,8 +130,10 @@ async function main() {
   print(
     JSON.stringify({
       privateEvidence: root,
-      selected: input.rows.length,
-      model: NOTES_OLLAMA_MODEL,
+      scheduled: input.rows.length,
+      selected: selectedCases.length,
+      model: replayModel,
+      mode,
     }),
   );
   console.log = (...args) => record({ event: 'provider_log', args });
@@ -105,9 +143,10 @@ async function main() {
   let current = 0;
   const wire = createNotesReplayTransport({
     isolated,
+    loadMode: loadMode as 'mmap' | 'none',
     root,
-    model: NOTES_OLLAMA_MODEL,
-    contextTokens: 16384,
+    model: replayModel,
+    contextTokens,
     fetch: originalFetch,
     record,
     currentCase: () => current,
@@ -149,7 +188,7 @@ async function main() {
     assert.ok(inventoryResponse.ok, 'model_inventory_failed');
     const inventory = await inventoryResponse.json();
     const model = inventory.models.find(
-      (entry: { name: string }) => entry.name === NOTES_OLLAMA_MODEL,
+      (entry: { name: string }) => entry.name === replayModel,
     );
     assert.ok(
       model && /^[a-f0-9]{64}$/.test(model.digest),
@@ -160,30 +199,49 @@ async function main() {
       '..',
     );
     const codePaths = [
-      'electron/llm/unifiedProvider.ts',
-      'electron/llm/meetingNotesPipeline.ts',
-      'electron/llm/meetingNotesAudit.ts',
-      'electron/meetingAnalysisRuns.ts',
-      'scripts/run_notes_replay.ts',
-      'scripts/lib/notesReplayTransport.ts',
-      'scripts/lib/notesReplayQuality.ts',
-      'scripts/lib/notesReplayResources.ts',
+      ...new Set([
+        ...fs
+          .readdirSync(path.join(repository, 'electron/llm'))
+          .filter((file) => /^meetingNotes.*\.ts$/.test(file))
+          .map((file) => `electron/llm/${file}`),
+        'electron/llm/unifiedProvider.ts',
+        'electron/llm/meetingNotesPipeline.ts',
+        'electron/llm/meetingNotesAudit.ts',
+        'electron/llm/meetingNotesWire.ts',
+        'electron/llm/meetingNotesEditor.ts',
+        'electron/llm/meetingNotesSchema.ts',
+        'electron/llm/meetingNotesPrompts.ts',
+        'electron/llm/meetingNotesTypes.ts',
+        'electron/llm/meetingNotesBudget.ts',
+        'electron/meetingAnalysisRuns.ts',
+        'scripts/run_notes_replay.ts',
+        'scripts/lib/notesReplayTransport.ts',
+        'scripts/lib/notesReplayQuality.ts',
+        'scripts/lib/notesReplayResources.ts',
+        'scripts/lib/notesReplayMarkdown.ts',
+      ]),
     ];
     write('manifest.json', {
       schema: 'notes-production-replay-v1',
       partition: 'development_not_held_out',
+      mode,
+      candidateVersion: mode === 'markdown' ? MARKDOWN_NOTES_VERSION : null,
+      selectedCases,
       runtimeEndpoint: isolated
         ? 'http://127.0.0.1:11435'
         : 'http://127.0.0.1:11434',
       runtimeConfiguration:
         'verify against daemon startup evidence; not inferred from endpoint',
-      useMmapOverride: isolated ? true : null,
+      requestedKvCacheType: isolated
+        ? (process.env.NOTES_REPLAY_KV_CACHE_TYPE ?? 'f16')
+        : null,
+      useMmapOverride: isolated ? loadMode === 'mmap' : null,
       inputSha256: sha(bytes),
       sourceDatabaseSha256: input.databaseSha256,
       model: model.name,
       digest: model.digest,
-      contextTokens: 16384,
-      compactWriterContract: true,
+      contextTokens,
+      compactWriterContract: mode === 'production',
       sourceFirstReconciliation: false,
       deadlineMs: MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
       safetyPolicy: {
@@ -216,7 +274,7 @@ async function main() {
     if (admissionStop) stop(admissionStop);
     else disposeGuard = watchNotesReplayResources({ baseline, record, stop });
     const provider = new UnifiedLLMProvider('ollama', {
-      ollama_model: NOTES_OLLAMA_MODEL,
+      ollama_model: replayModel,
     });
     for (const row of input.rows) {
       if (safetyController.signal.aborted) break;
@@ -236,6 +294,8 @@ async function main() {
         MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
       );
       try {
+        if (!selectedCases.includes(current))
+          throw new MeetingNotesError('not_selected');
         if (
           row.transcript_status !== 'validated' ||
           row.finalization_status !== 'finalized'
@@ -248,50 +308,78 @@ async function main() {
           (sum, segment) => sum + segment.text.length,
           0,
         );
-        const analysis = await provider.generateStructuredAnalysis(
-          '',
-          '',
-          'auto',
-          {
+        if (mode === 'markdown') {
+          const candidate = await generateMarkdownNotes({
             source,
-            contextTokens: 16384,
-            compactWriterContract: true,
+            model: replayModel,
             signal: AbortSignal.any([
               controller.signal,
               safetyController.signal,
             ]),
-            ...createMeetingNotesOptionalReviewBudget(started),
-            workClass: 'manual_notes',
-            onStageEvent: (detail) =>
-              record({ event: 'stage_event', caseIndex: current, detail }),
-            onPlan: (plan) => {
-              result.plannedLeafCount = plan.plannedLeafCount;
+            onText: (text) =>
+              record({ event: 'provisional_text', caseIndex: current, text }),
+          });
+          write(`case-${current}-candidate.json`, candidate);
+          writeOwnerOnlyPrivateFile(
+            path.join(root, `case-${current}-review.md`),
+            `# Case ${current}: provisional Markdown, not quality-approved\n\n${candidate.markdown}\n\n## Canonical source\n\n${source.segments.map((s) => `[S${s.index}] ${s.speaker ?? 'Unknown'}: ${s.text}`).join('\n\n')}`,
+          );
+          result.outcome = 'candidate_generated_not_approved';
+          result.firstTextMs = candidate.firstTextMs;
+          result.metrics = candidate.metrics;
+          result.triage = {
+            status: candidate.triage.status,
+            qualityApproved: false,
+            invalidLines: candidate.triage.invalidLines,
+            claimCount: candidate.triage.claims.length,
+          };
+        } else {
+          const analysis = await provider.generateStructuredAnalysis(
+            '',
+            '',
+            'auto',
+            {
+              source,
+              contextTokens,
+              compactWriterContract: true,
+              signal: AbortSignal.any([
+                controller.signal,
+                safetyController.signal,
+              ]),
+              ...createMeetingNotesOptionalReviewBudget(started),
+              workClass: 'manual_notes',
+              onStageEvent: (detail) =>
+                record({ event: 'stage_event', caseIndex: current, detail }),
+              onPlan: (plan) => {
+                result.plannedLeafCount = plan.plannedLeafCount;
+              },
+              onRepair: (task) =>
+                record({ event: 'repair', caseIndex: current, task }),
+              onRepartition: () =>
+                record({ event: 'repartition', caseIndex: current }),
             },
-            onRepair: (task) =>
-              record({ event: 'repair', caseIndex: current, task }),
-            onRepartition: () =>
-              record({ event: 'repartition', caseIndex: current }),
-          },
-        );
-        write(`case-${current}-analysis.json`, analysis);
-        assert.equal(
-          analysis.generation_metadata?.model,
-          NOTES_OLLAMA_MODEL,
-          'result_model_mismatch',
-        );
-        assert.equal(
-          analysis.generation_metadata?.source_provenance?.source_revision,
-          source.revision,
-          'result_source_revision_mismatch',
-        );
-        result.outcome = 'accepted_in_replay';
-        result.triage = triageNotesReplay(analysis, source);
-        result.pipelineVersion = analysis.generation_metadata?.pipeline_version;
-        result.auditStatus = analysis.generation_metadata?.audit_status;
-        writeOwnerOnlyPrivateFile(
-          path.join(root, `case-${current}-review.md`),
-          `# Case ${current}: private review\n\nNot quality-approved. Assess factual support, critical omissions, commitments and usefulness against the source. Record evidence for each verdict; do not infer truth from model fluency.\n\n## Generated notes\n\n${analysisDocumentV3ToMarkdown(analysis)}\n\n## Canonical source\n\n${source.segments.map((segment) => `[${segment.index}] ${segment.speaker ?? 'Unknown'}: ${segment.text}`).join('\n\n')}\n`,
-        );
+          );
+          write(`case-${current}-analysis.json`, analysis);
+          assert.equal(
+            analysis.generation_metadata?.model,
+            replayModel,
+            'result_model_mismatch',
+          );
+          assert.equal(
+            analysis.generation_metadata?.source_provenance?.source_revision,
+            source.revision,
+            'result_source_revision_mismatch',
+          );
+          result.outcome = 'accepted_in_replay';
+          result.triage = triageNotesReplay(analysis, source);
+          result.pipelineVersion =
+            analysis.generation_metadata?.pipeline_version;
+          result.auditStatus = analysis.generation_metadata?.audit_status;
+          writeOwnerOnlyPrivateFile(
+            path.join(root, `case-${current}-review.md`),
+            `# Case ${current}: private review\n\nNot quality-approved. Assess factual support, critical omissions, commitments and usefulness against the source. Record evidence for each verdict; do not infer truth from model fluency.\n\n## Generated notes\n\n${analysisDocumentV3ToMarkdown(analysis)}\n\n## Canonical source\n\n${source.segments.map((segment) => `[${segment.index}] ${segment.speaker ?? 'Unknown'}: ${segment.text}`).join('\n\n')}\n`,
+          );
+        }
       } catch (error) {
         result.outcome = safetyController.signal.aborted
           ? 'replay_safety_stop'

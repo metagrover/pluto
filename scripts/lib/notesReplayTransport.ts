@@ -12,6 +12,7 @@ export function createNotesReplayTransport(input: {
   currentCase: () => number;
   /** Dedicated diagnostic daemon; never permit an arbitrary remote endpoint. */
   isolated?: boolean;
+  loadMode?: 'mmap' | 'none';
 }) {
   let count = 0;
   const active = new Set<number>();
@@ -53,7 +54,7 @@ export function createNotesReplayTransport(input: {
     // Match the original worker's mapped loading; the daemon may otherwise
     // choose an eager-copy load on Metal. Capture the actual modified wire body.
     if (input.isolated) {
-      body.options.use_mmap = true;
+      body.options.use_mmap = input.loadMode !== 'none';
     }
     const generationInit = input.isolated
       ? { ...init, body: JSON.stringify(body) }
@@ -93,17 +94,39 @@ export function createNotesReplayTransport(input: {
     let doneReason: unknown = null;
     let responseModel: unknown = null;
     let invalid = false;
+    let firstAnswerMs: number | null = null;
+    let firstReasoningMs: number | null = null;
+    let metrics: Record<string, unknown> | null = null;
     const decoder = new TextDecoder();
     const parseLine = (line: string) => {
       if (!line.trim()) return;
       try {
         const packet = JSON.parse(line);
+        if (done) invalid = true;
+        const answer = packet.message?.content ?? packet.response;
+        if (typeof answer === 'string' && answer.length)
+          firstAnswerMs ??= Date.now() - started;
+        const reasoning = packet.message?.thinking ?? packet.thinking;
+        if (typeof reasoning === 'string' && reasoning.length)
+          firstReasoningMs ??= Date.now() - started;
         if (packet.model) responseModel = packet.model;
         if (packet.model && packet.model !== input.model) invalid = true;
         if (packet.error) invalid = true;
         if (packet.done === true) {
           done = true;
           doneReason = packet.done_reason ?? null;
+          metrics = Object.fromEntries(
+            [
+              'prompt_eval_count',
+              'eval_count',
+              'prompt_eval_duration',
+              'eval_duration',
+              'load_duration',
+              'total_duration',
+            ]
+              .filter((key) => typeof packet[key] === 'number')
+              .map((key) => [key, packet[key]]),
+          );
         }
       } catch {
         invalid = true;
@@ -125,6 +148,9 @@ export function createNotesReplayTransport(input: {
         doneReason,
         responseModel,
         invalid,
+        firstAnswerMs,
+        firstReasoningMs,
+        metrics,
         elapsedMs: Date.now() - started,
       });
     };

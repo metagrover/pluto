@@ -9,6 +9,43 @@ const scheduled = [
 ];
 const started = { event: 'meeting_started', index: 1, sourceIdSha256: 'a' };
 describe('durable replay denominators', () => {
+  it('reports latency with outcomes and leaves unavailable measurements null', () => {
+    const result = summarizeNotesReplay(scheduled, [
+      started,
+      { event: 'physical_started', caseIndex: 1, attempt: 1 },
+      {
+        event: 'physical_terminal',
+        caseIndex: 1,
+        attempt: 1,
+        outcome: 'complete',
+        elapsedMs: 400,
+        firstAnswerMs: 150,
+        metrics: { eval_count: 20 },
+      },
+      {
+        event: 'meeting_terminal',
+        index: 1,
+        sourceIdSha256: 'a',
+        outcome: 'accepted_in_replay',
+        elapsedMs: 420,
+        durationSeconds: 1800,
+        sourceCharacters: 22000,
+      },
+    ]);
+    expect(result.rows[0]).toMatchObject({
+      elapsedMs: 420,
+      durationSeconds: 1800,
+      sourceCharacters: 22000,
+    });
+    expect(result.rows[1]).toMatchObject({ elapsedMs: null });
+    expect(result.physicalOutcomes[0]).toMatchObject({
+      elapsedMs: 400,
+      firstAnswerMs: 150,
+      firstReasoningMs: null,
+      metrics: { eval_count: 20 },
+    });
+    expect(result.qualityApproved).toBe(false);
+  });
   it('normalizes private suffixes without conflating distinct failure categories', () => {
     expect(
       notesReplayOutcomeLabel('notes_guardrail:[{"code":"missing_action"}]'),

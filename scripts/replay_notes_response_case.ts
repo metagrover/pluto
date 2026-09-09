@@ -11,6 +11,7 @@ import { MeetingNotesError } from '../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../electron/llm/meetingNotesWire';
 import { createMeetingNotesOptionalReviewBudget } from '../electron/meetingAnalysisRuns';
 import { createNotesReplayClock } from './lib/notesReplayClock';
+import { generateMarkdownNotes } from './lib/notesReplayMarkdown';
 import { notesReplayOutcomeLabel } from './lib/notesReplaySummary';
 import {
   appendOwnerOnlyPrivateLine,
@@ -51,10 +52,16 @@ async function main() {
     path.dirname(fileURLToPath(import.meta.url)),
     '..',
   );
-  for (const file of [
+  const identityFiles = new Set([
     'electron/llm/meetingNotesPipeline.ts',
     'electron/llm/meetingNotesAudit.ts',
-  ]) {
+    ...Object.keys(manifest.codeHashes).filter((file) =>
+      /^electron\/(?:llm\/(?:meetingNotes[^/]+|unifiedProvider)|meetingAnalysisRuns)\.ts$/.test(
+        file,
+      ),
+    ),
+  ]);
+  for (const file of identityFiles) {
     assert.equal(
       createHash('sha256')
         .update(fs.readFileSync(path.join(repository, file)))
@@ -73,6 +80,97 @@ async function main() {
   const attempts = events.filter(
     (event) =>
       event.event === 'physical_started' && event.caseIndex === caseIndex,
+  );
+  if (manifest.mode === 'markdown') {
+    const candidateFile = 'scripts/lib/notesReplayMarkdown.ts';
+    assert.equal(
+      createHash('sha256')
+        .update(fs.readFileSync(path.join(repository, candidateFile)))
+        .digest('hex'),
+      manifest.codeHashes[candidateFile],
+      'candidate_changed_requires_new_replay_identity',
+    );
+    assert.equal(attempts.length, 1, 'single_pass_attempt_required');
+    const attempt = attempts[0];
+    assert.equal(
+      attempt.prefix,
+      `case-${caseIndex}-attempt-${attempt.attempt}`,
+      'unsafe_attempt_path',
+    );
+    assert.ok(
+      events.some(
+        (event) =>
+          event.event === 'physical_terminal' &&
+          event.attempt === attempt.attempt &&
+          event.caseIndex === caseIndex &&
+          event.outcome === 'complete',
+      ),
+      'complete_attempt_required',
+    );
+    const captured = JSON.parse(read(`${attempt.prefix}-request.json`));
+    if (typeof manifest.useMmapOverride === 'boolean') {
+      const { use_mmap, ...options } = captured.options;
+      assert.equal(use_mmap, manifest.useMmapOverride);
+      captured.options = options;
+    }
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    try {
+      globalThis.fetch = async (url, init) => {
+        assert.equal(String(url), 'http://127.0.0.1:11434/api/chat');
+        assert.equal(++requests, 1, 'unexpected_replay_request');
+        assert.deepEqual(
+          JSON.parse(String(init?.body)),
+          captured,
+          'recorded_request_mismatch',
+        );
+        return new Response(read(`${attempt.prefix}-response.ndjson`));
+      };
+      const replay = await generateMarkdownNotes({
+        source,
+        model: manifest.model,
+        signal: new AbortController().signal,
+        onText: () => {},
+      });
+      const expected = JSON.parse(read(`case-${caseIndex}-candidate.json`));
+      assert.equal(
+        replay.markdown,
+        expected.markdown,
+        'replayed_markdown_mismatch',
+      );
+      assert.deepEqual(
+        replay.triage,
+        expected.triage,
+        'replayed_triage_mismatch',
+      );
+      assert.deepEqual(
+        replay.metrics,
+        expected.metrics,
+        'replayed_metrics_mismatch',
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const result = {
+      caseIndex,
+      physicalRequests: 0,
+      capturedAttemptsConsumed: requests,
+      exactResultReproduced: true,
+      outcome: 'candidate_generated_not_approved',
+      qualityApproved: false,
+      caveat:
+        'Exact Markdown, triage and provider metrics; not latency, publication or quality acceptance.',
+    };
+    writeOwnerOnlyPrivateFile(
+      path.join(root, `case-${caseIndex}-offline-replay.json`),
+      JSON.stringify(result, null, 2),
+    );
+    console.log(JSON.stringify(result));
+    return;
+  }
+  assert.ok(
+    manifest.mode === undefined || manifest.mode === 'production',
+    'unknown_replay_mode',
   );
   let consumed = 0;
   let outcome = 'accepted_in_replay';

@@ -70,6 +70,26 @@ const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
     ? WRITER_OUTPUT_TOKENS
     : AUDIT_OUTPUT_TOKENS;
 const SAFETY_TOKENS = 512;
+const planDirectCapacity = (
+  input: GenerateMeetingNotesInput,
+  writerPrompt: string,
+  preliminaryAuditPrompt: string,
+  evidenceSpans: SourceSpan[],
+) =>
+  planNotesCapacity({
+    contextTokens: input.contextTokens,
+    writerInputTokens: estimateNotesTokens(
+      createNotesWireRequest(writerPrompt, evidenceSpans).prompt,
+    ),
+    auditBaseInputTokens: estimateNotesTokens(
+      createNotesWireRequest(preliminaryAuditPrompt, evidenceSpans).prompt,
+    ),
+    writerOutputTokens: input.compactWriterContract
+      ? COMPACT_WRITER_OUTPUT_TOKENS
+      : WRITER_OUTPUT_TOKENS,
+    auditOutputTokens: reviewOutputTokens(input),
+    safetyTokens: SAFETY_TOKENS,
+  });
 const NOTES_COMPACT_RETRY_INSTRUCTION =
   'COMPACT RETRY: Return the complete same JSON contract more concisely. Preserve every supported action, decision, condition, owner, due date, disposition, and exact source reference.';
 export const NOTES_HIERARCHY_LIMITS = {
@@ -838,46 +858,85 @@ export const precomputeNextMeetingNotesLeaf = async (
   assertNotCancelled(input);
   if (!input.stageCache || !input.cacheKey) return 'discarded';
   const knownTerms = knownTermsFor(input);
-  const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
-    const sourceText = serializeSource(input, spans);
-    const writerPrompt = buildNotesWriterPrompt({
+  const compactEditor =
+    input.compactWriterContract && input.reviewProtocol === 'editor';
+  const buildWriterPrompt = compactEditor
+    ? buildCompactNotesWriterPrompt
+    : buildNotesWriterPrompt;
+  if (compactEditor) {
+    const sourceText = serializeSource(input);
+    const evidenceSpans = input.source.segments
+      .filter((segment) => segment.text.trim())
+      .map((segment) => ({
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      }));
+    const writerPrompt = buildWriterPrompt({
       sourceText,
       userNotes: input.context.userNotes,
       knownTerms,
       template: input.context.template,
     });
-    const auditPrompt = reviewPrompt(input, {
+    const preliminaryAuditPrompt = reviewPrompt(input, {
       sourceText,
       draft: {},
       userNotes: input.context.userNotes,
       knownTerms,
     });
-    return (
-      fits(
+    if (
+      planDirectCapacity(
         input,
-        `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-        WRITER_OUTPUT_TOKENS,
-      ) &&
-      estimateNotesTokens(
-        `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
-      ) +
-        WRITER_OUTPUT_TOKENS +
-        reviewOutputTokens(input) +
-        SAFETY_TOKENS <=
-        input.contextTokens
-    );
-  });
+        writerPrompt,
+        preliminaryAuditPrompt,
+        evidenceSpans,
+      ).mode === 'direct'
+    )
+      return 'discarded';
+  }
+  const leaves = compactEditor
+    ? planBoundedCompactLeaves(input, knownTerms)
+    : planNotesLeaves(input.source, (_packet, spans = []) => {
+        const sourceText = serializeSource(input, spans);
+        const writerPrompt = buildNotesWriterPrompt({
+          sourceText,
+          userNotes: input.context.userNotes,
+          knownTerms,
+          template: input.context.template,
+        });
+        const auditPrompt = reviewPrompt(input, {
+          sourceText,
+          draft: {},
+          userNotes: input.context.userNotes,
+          knownTerms,
+        });
+        return (
+          fits(
+            input,
+            `${writerPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+            WRITER_OUTPUT_TOKENS,
+          ) &&
+          estimateNotesTokens(
+            `${auditPrompt}\n\n${NOTES_COMPACT_RETRY_INSTRUCTION}`,
+          ) +
+            WRITER_OUTPUT_TOKENS +
+            reviewOutputTokens(input) +
+            SAFETY_TOKENS <=
+            input.contextTokens
+        );
+      });
+  if (compactEditor && leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves)
+    return 'discarded';
   // The final leaf is still growing. Cache only closed leaves whose exact
   // source packet can recur unchanged in the canonical final hierarchy.
   const closedLeaves = leaves.slice(0, -1);
   if (!closedLeaves.length) return 'discarded';
   let reused = false;
   for (const leaf of closedLeaves) {
-    let evidenceSpans = uniqueSpans([
-      ...leaf.overlapSpans,
-      ...leaf.primarySpans,
-    ]);
-    let writerPrompt = buildNotesWriterPrompt({
+    let evidenceSpans = compactEditor
+      ? leaf.primarySpans
+      : uniqueSpans([...leaf.overlapSpans, ...leaf.primarySpans]);
+    let writerPrompt = buildWriterPrompt({
       sourceText: serializeSource(input, evidenceSpans),
       userNotes: input.context.userNotes,
       knownTerms,
@@ -885,7 +944,7 @@ export const precomputeNextMeetingNotesLeaf = async (
     });
     if (!fits(input, writerPrompt, WRITER_OUTPUT_TOKENS)) {
       evidenceSpans = leaf.primarySpans;
-      writerPrompt = buildNotesWriterPrompt({
+      writerPrompt = buildWriterPrompt({
         sourceText: serializeSource(input, evidenceSpans),
         userNotes: input.context.userNotes,
         knownTerms,
@@ -900,18 +959,23 @@ export const precomputeNextMeetingNotesLeaf = async (
         input.onStage?.(task);
       },
     };
-    await withOneTransientLeafRetry(runInput, () =>
-      withTruncationRetry(runInput, (retryInstruction) =>
-        writeDraft(
-          runInput,
-          'notesWriter',
-          retryInstruction
-            ? `${writerPrompt}\n\n${retryInstruction}`
-            : writerPrompt,
-          evidenceSpans,
+    if (compactEditor) {
+      // Use the exact final writer key and contract. Failed speculative work
+      // stays uncached; retries and repartitioning belong to final generation.
+      await writeDraft(runInput, 'notesWriter', writerPrompt, evidenceSpans);
+    } else
+      await withOneTransientLeafRetry(runInput, () =>
+        withTruncationRetry(runInput, (retryInstruction) =>
+          writeDraft(
+            runInput,
+            'notesWriter',
+            retryInstruction
+              ? `${writerPrompt}\n\n${retryInstruction}`
+              : writerPrompt,
+            evidenceSpans,
+          ),
         ),
-      ),
-    );
+      );
     if (requested) return 'generated';
     reused = true;
   }
@@ -1375,11 +1439,11 @@ const runHierarchy = async (
   });
 };
 
-const runBoundedCompactNotes = async (
+const planBoundedCompactLeaves = (
   input: GenerateMeetingNotesInput,
   knownTerms: NotesKnownTerm[],
-): Promise<AnalysisDocumentV3> => {
-  const leaves = planNotesLeaves(input.source, (_packet, spans = []) => {
+) =>
+  planNotesLeaves(input.source, (_packet, spans = []) => {
     if (
       sourceCharacterCount(spans) >
       NOTES_BOUNDED_LIMITS.maxSourceCharactersPerLeaf
@@ -1411,6 +1475,12 @@ const runBoundedCompactNotes = async (
         input.contextTokens
     );
   });
+
+const runBoundedCompactNotes = async (
+  input: GenerateMeetingNotesInput,
+  knownTerms: NotesKnownTerm[],
+): Promise<AnalysisDocumentV3> => {
+  const leaves = planBoundedCompactLeaves(input, knownTerms);
   input.onPlan?.({ plannedLeafCount: leaves.length });
   if (leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves) {
     throw new MeetingNotesError('notes_bounded_plan_exceeded');
@@ -1642,21 +1712,12 @@ const runMeetingNotes = async (
     userNotes: input.context.userNotes,
     knownTerms,
   });
-  const writerOutputTokens = input.compactWriterContract
-    ? COMPACT_WRITER_OUTPUT_TOKENS
-    : WRITER_OUTPUT_TOKENS;
-  const capacity = planNotesCapacity({
-    contextTokens: input.contextTokens,
-    writerInputTokens: estimateNotesTokens(
-      createNotesWireRequest(writerPrompt, evidenceSpans).prompt,
-    ),
-    auditBaseInputTokens: estimateNotesTokens(
-      createNotesWireRequest(preliminaryAuditPrompt, evidenceSpans).prompt,
-    ),
-    writerOutputTokens,
-    auditOutputTokens: reviewOutputTokens(input),
-    safetyTokens: SAFETY_TOKENS,
-  });
+  const capacity = planDirectCapacity(
+    input,
+    writerPrompt,
+    preliminaryAuditPrompt,
+    evidenceSpans,
+  );
   if (capacity.mode !== 'direct') {
     if (!compactEditor) return runHierarchy(input, knownTerms);
     return runBoundedCompactNotes(input, knownTerms);

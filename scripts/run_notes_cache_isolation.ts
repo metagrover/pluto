@@ -14,6 +14,10 @@ import {
 } from './lib/privateEvaluationFile';
 
 async function main() {
+  const loadMode = process.env.NOTES_REPLAY_LOAD_MODE ?? 'mmap';
+  assert.ok(['mmap', 'none'].includes(loadMode), 'invalid_replay_load_mode');
+  const kvCacheType = process.env.NOTES_REPLAY_KV_CACHE_TYPE ?? 'f16';
+  assert.ok(['f16', 'q8_0'].includes(kvCacheType), 'invalid_kv_cache_type');
   assert.equal(process.platform, 'darwin', 'macos_diagnostic_only');
   assert.equal(
     process.argv.length,
@@ -60,6 +64,8 @@ async function main() {
     OLLAMA_MAX_LOADED_MODELS: '1',
     LLAMA_ARG_CACHE_RAM: '0',
     LLAMA_ARG_CTX_CHECKPOINTS: '0',
+    OLLAMA_KV_CACHE_TYPE: kvCacheType,
+    OLLAMA_FLASH_ATTENTION: '1',
   };
   const log = fs.openSync(path.join(root, 'daemon.log'), 'wx', 0o600);
   const daemon = spawn(binary, ['serve'], {
@@ -106,7 +112,8 @@ async function main() {
     endpoint: env.OLLAMA_HOST,
     requestedCacheRamMiB: 0,
     requestedContextCheckpoints: 0,
-    useMmap: true,
+    requestedKvCacheType: kvCacheType,
+    useMmap: loadMode === 'mmap',
     source,
     runtimeSettingsRequireLogVerification: true,
   };
@@ -213,12 +220,17 @@ async function main() {
         'runtime_cache_configuration_unverified',
       );
       assert.ok(
-        runtimeLog.includes('(load_mode = mmap)'),
+        runtimeLog.includes(`(load_mode = ${loadMode})`),
         'runtime_mapped_load_unverified',
       );
       assert.ok(
         !runtimeLog.includes('created context checkpoint'),
         'runtime_checkpoint_configuration_mismatch',
+      );
+      assert.ok(
+        runtimeLog.includes(`K (${kvCacheType})`) &&
+          runtimeLog.includes(`V (${kvCacheType})`),
+        'runtime_kv_cache_configuration_mismatch',
       );
     }
     write({

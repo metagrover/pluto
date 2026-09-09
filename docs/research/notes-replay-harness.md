@@ -142,14 +142,64 @@ are not fresh inference evidence for the cleaned branch. Exact response replay
 must reject a changed code hash. Do not rewrite manifests or relax that check to
 reuse older results against a different implementation.
 
-## Next latency experiment (not implemented)
+## Development latency comparisons
 
-Compare the unchanged production path with one concise streamed Markdown draft,
-using the same frozen sources, model, context and runtime profile. Measure time
-to first visible text separately from total completion, prompt/output token
-counts, physical requests, capacity failures and source-grounded quality.
-Streaming alone does not reduce required model work. Test reducing repeated
-generation passes, retaining source references and deterministic validation,
-with model repair only on a demonstrated validation failure. Partial text must
-remain a provisional draft, not approved notes or downstream commitments.
-No default-route change is justified by responsiveness alone.
+The same frozen ten-row schedule can now run selected cases without rereading
+the production database. Unselected rows remain explicit `not_selected` entries.
+These options affect only the diagnostic process:
+
+- `NOTES_REPLAY_CASES=9,10`: selected one-based case numbers, always serial.
+- `NOTES_REPLAY_MODE=production|markdown`: existing structured pipeline (default)
+  or a single-pass provisional Markdown comparison. Neither publishes notes.
+- `NOTES_REPLAY_MODEL=gemma4:12b|qwen3.5:4b`: installed model, digest verified.
+  “production” names the pipeline, not approval of an overridden model.
+- `NOTES_REPLAY_CONTEXT=16384|32768`: default 16K; Markdown is fixed at 16K.
+- `NOTES_REPLAY_KV_CACHE_TYPE=f16|q8_0`: isolated daemon only, default f16.
+  The launcher enables flash attention and checks actual K/V types in its log.
+- `NOTES_REPLAY_LOAD_MODE=mmap|none`: isolated loading comparison, default mmap.
+  The actual load mode must match the requested profile.
+
+Do not promote these diagnostic overrides to application defaults merely because
+a run completes. In particular, the 32K Gemma trials hit the resource guard.
+The guard is unchanged; failed startup and incomplete output stay in the ledger.
+
+Markdown packs every original source segment into lossless labelled passages.
+It does not discard the transcript middle or tail. Mechanical citation triage
+does not establish entailment, correct ownership, coverage, or note quality.
+Provisional fragments stay in private evidence files, never the application UI,
+database, or downstream commitments. Input truncation and context shifting are
+explicitly disabled; over-capacity source is rejected.
+
+Development evidence on the 16GB Mac found a genuine latency/quality tradeoff:
+the historical structured Gemma run took 8m40s for one 31-minute meeting.
+Single-pass Gemma Markdown with 16K/q8 completed the eight eligible cases without
+a resource stop; the two long cases took 2m23s and 1m50s. Source review still found
+ownership, omission, and action/decision errors. The smaller-model Markdown
+comparison was faster but also made material factual errors. A smaller-model
+structured comparison took 2m21s for the 31-minute case and passed pipeline
+validation, yet still omitted an important deadline and used ambiguous ownership.
+None of those results is quality approval or an average production latency.
+
+Measure first answer text separately from reasoning and complete output.
+Streaming changes when text appears, not the amount of inference required.
+Keep physical token/timing metrics, resource outcomes, pipeline acceptance,
+source-grounded review, and actual UI publication as separate measurements.
+
+The minified-wire 16K/q8 development run reduced the short case from a historical
+618 generated tokens to 260 (59s to 41s). The 31-minute case still took 8m18s:
+three writers and two editors, versus the historical 8m40s with three writers and
+one editor. The optional-review budget consumed some savings on additional review.
+Do not turn reduced writer token counts into a claim of proportional end-to-end
+speedup. Larger 12,000-character leaves took 7m26s but retained an ownership
+error; that change was reverted, and its next case was intentionally cancelled.
+
+The production cache regression is separate: live precomputation previously used
+the legacy full draft and a different partitioner, while final generation used
+the compact contract. A failing-then-passing test now proves reuse with the real
+bounded planner, retained final reviews, and invalidation of corrected source.
+This does not prove reuse across live-to-canonical transcription changes in an
+actual recording, nor eliminate cold generation cost for historical meetings.
+Compact precomputation also skips meetings whose current source still fits the
+direct writer/editor pair. The final short q8 smoke test completed and reproduced
+exactly offline; an f16 long-case retry stopped on resource pressure during
+startup. These are not evidence of sustained production performance.

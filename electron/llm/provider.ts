@@ -165,6 +165,7 @@ export interface LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      compactWriterContract?: boolean;
       stageCache: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;

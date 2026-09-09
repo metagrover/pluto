@@ -889,6 +889,14 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Trust boundary:** Row existence alone never proves finalization. Validated or generation-mismatched meetings are not reopened, recovery-required journals retain their fail-closed path, and unverified simultaneous microphone text is presented neutrally rather than promoted to remote identity. Canonical attribution, validation, compare-and-save, and downstream gates are unchanged.
 - **Measurement boundary:** [Issue #739](https://github.com/metagrover/pluto/issues/739) may measure sealed-to-canonical stage cost, but notes-cost diagnostics do not own or bypass capture recovery behavior.
 
+## 2026-09-08 - Reuse compatible live notes work and reduce wire overhead
+
+- **Status:** Implemented; real capture-to-final latency acceptance remains open.
+- **Supersedes:** The prompt identity in “Bound direct meeting notes to a compact writer and editor” below advances to `notes-v30`. Its writer/editor and publication safeguards remain. This repairs the compact-path implementation of “Admit only exact incremental note leaves under capture headroom”; it does not relax that admission policy.
+- **Decision:** Live compact precomputation and bounded final generation share the same source partitioner, primary spans, writer contract and prompt. Only closed leaves are cached; corrected source evidence invalidates reuse, and final reviews still run. Do not spend speculative retries on an unsuccessful compact precomputation.
+- **Wire:** Encode source rows losslessly as labelled JSON tuples, request minified JSON, bound Ollama prompt processing to 128 tokens per internal batch, and explicitly refuse input truncation/context shifting. This is not concurrent meeting processing. Cache/run identity changes with the prompt version.
+- **Boundary:** Gemma routing and the 16K production context are unchanged. Raw Markdown, smaller-model and alternative runtime profiles remain private development comparisons, not published notes or default routes. Lower token counts and synthetic cache reuse are not proof of end-to-end production latency.
+
 ## 2026-09-03 - Bound direct meeting notes to a compact writer and editor
 
 - **Status:** Accepted and implemented.
