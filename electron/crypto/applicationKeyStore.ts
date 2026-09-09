@@ -181,8 +181,28 @@ export class ApplicationKeyStore {
     const tmpPath = `${this.envelopePath}.${randomUUID()}.tmp`;
     const payload = JSON.stringify(envelope, null, 2);
 
-    fs.writeFileSync(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
+    const fd = fs.openSync(tmpPath, 'w', 0o600);
+    try {
+      fs.writeFileSync(fd, payload, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.chmodSync(tmpPath, 0o600);
     fs.renameSync(tmpPath, this.envelopePath);
+
+    const destFd = fs.openSync(this.envelopePath, 'r');
+    try {
+      fs.fsyncSync(destFd);
+    } finally {
+      fs.closeSync(destFd);
+    }
+
+    const dirFd = fs.openSync(this.storageDir, 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
   }
 }

@@ -101,4 +101,48 @@ describe('ApplicationKeyStore', () => {
 
     expect(() => store.getMasterKey()).toThrow(/unsupported version/);
   });
+
+  it('durably fsyncs key envelope file and parent directory on creation', () => {
+    let fsyncCount = 0;
+    const originalFsyncSync = fs.fsyncSync;
+    fs.fsyncSync = ((fd: number) => {
+      fsyncCount++;
+      return originalFsyncSync(fd);
+    }) as typeof fs.fsyncSync;
+
+    try {
+      const store = new ApplicationKeyStore({
+        storageDir: tmpDir,
+        backend: mockBackend,
+      });
+
+      store.getOrCreateMasterKey();
+
+      // Must have fsynced the tmp file, destination file, and parent directory (at least 3 fsync calls)
+      expect(fsyncCount).toBeGreaterThanOrEqual(3);
+    } finally {
+      fs.fsyncSync = originalFsyncSync;
+    }
+  });
+
+  it('fails closed when fsync fails during key envelope creation', () => {
+    const originalFsyncSync = fs.fsyncSync;
+    fs.fsyncSync = (() => {
+      throw new Error('Injected I/O fsync failure');
+    }) as typeof fs.fsyncSync;
+
+    try {
+      const store = new ApplicationKeyStore({
+        storageDir: tmpDir,
+        backend: mockBackend,
+      });
+
+      expect(() => store.getOrCreateMasterKey()).toThrow(
+        /Injected I\/O fsync failure/,
+      );
+      expect(store.hasMasterKey()).toBe(false);
+    } finally {
+      fs.fsyncSync = originalFsyncSync;
+    }
+  });
 });

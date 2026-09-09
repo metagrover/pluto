@@ -65,6 +65,7 @@
     "@tanstack/react-virtual": "^3.13.21",
     "@xyflow/react": "^12.10.1",
     "better-sqlite3": "^12.5.0",
+    "better-sqlite3-multiple-ciphers": "13.0.3",
     "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",
     "drizzle-orm": "^0.45.2",

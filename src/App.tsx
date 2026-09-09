@@ -110,6 +110,7 @@ import {
   type SettingsTabId,
 } from './components/features/SettingsTab';
 // Overlays
+import { DatabaseRecoveryOverlay } from './components/overlays/DatabaseRecoveryOverlay';
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
@@ -240,6 +241,11 @@ function App() {
   );
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [databaseRecovery, setDatabaseRecovery] = useState<{
+    visible: boolean;
+    errorCode?: string;
+    errorMessage?: string;
+  }>({ visible: false });
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
   const [exportIncludeTranscript, setExportIncludeTranscript] = useState(false);
   const [calendarSnapshot, setCalendarSnapshot] =
@@ -1366,6 +1372,41 @@ function App() {
       );
   }, []);
 
+  useEffect(() => {
+    const handleDbRecovery = (event: Event) => {
+      const detail =
+        (
+          event as CustomEvent<{
+            errorCode?: string;
+            errorMessage?: string;
+          }>
+        ).detail || {};
+      setDatabaseRecovery({
+        visible: true,
+        errorCode: detail.errorCode,
+        errorMessage: detail.errorMessage,
+      });
+    };
+    window.addEventListener('SHOW_DATABASE_RECOVERY_OVERLAY', handleDbRecovery);
+    const removeIpc = window.ipcRenderer?.on?.(
+      'database-recovery-required',
+      (_event, payload: { errorCode?: string; errorMessage?: string }) => {
+        setDatabaseRecovery({
+          visible: true,
+          errorCode: payload?.errorCode,
+          errorMessage: payload?.errorMessage,
+        });
+      },
+    );
+    return () => {
+      window.removeEventListener(
+        'SHOW_DATABASE_RECOVERY_OVERLAY',
+        handleDbRecovery,
+      );
+      removeIpc?.();
+    };
+  }, []);
+
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH');
   };
@@ -1770,6 +1811,22 @@ function App() {
         onRetry={retryRecordingIfReady}
         onOpenSystemSettings={(pane) => {
           window.ipcRenderer.invoke('OPEN_SYSTEM_SETTINGS_PRIVACY', pane);
+        }}
+      />
+
+      <DatabaseRecoveryOverlay
+        visible={databaseRecovery.visible}
+        errorCode={databaseRecovery.errorCode}
+        errorMessage={databaseRecovery.errorMessage}
+        onRetry={() => {
+          setDatabaseRecovery({ visible: false });
+          void window.ipcRenderer?.invoke?.('DATABASE_RETRY');
+        }}
+        onOpenDataFolder={() => {
+          void window.ipcRenderer?.invoke?.('OPEN_USER_DATA_DIR');
+        }}
+        onQuit={() => {
+          void window.ipcRenderer?.invoke?.('QUIT_APP');
         }}
       />
 

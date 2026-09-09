@@ -1,14 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import type { ApplicationKeyStore } from '../crypto/applicationKeyStore';
+import { deriveDatabaseKey } from '../crypto/keyDerivation';
 import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 import {
   type StagedDatabase,
   cleanupStagedDatabase,
   stageDatabaseArtifacts,
 } from './artifacts';
+import {
+  DatabaseEncryptionMigrator,
+  isPlaintextSqliteDatabase,
+} from './encryptionMigration';
 import { DatabaseLifecycleError } from './errors';
 import {
   assertSupportedMigrationHistory,
@@ -30,6 +36,9 @@ export interface DatabaseRuntimeOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   cleanupStaged?: (staged: StagedDatabase) => void;
   openConnection?: (databasePath: string) => Database.Database;
+  encryptionKeyHex?: string;
+  keyStore?: ApplicationKeyStore;
+  enableEncryption?: boolean;
 }
 
 type DatabaseKind = 'blank' | 'legacy' | 'managed';
@@ -206,19 +215,104 @@ export const createDatabaseRuntime = (
     );
   };
 
-  const initializeFresh = () => {
-    connection = openDatabase(options.databasePath, opener);
+  const isEncryptedDatabaseTarget = (
+    databasePath: string,
+    isEncryptionConfigured: boolean,
+  ): boolean => {
+    if (databasePath === ':memory:') return false;
+    if (!fs.existsSync(databasePath) || fs.statSync(databasePath).size === 0) {
+      return false;
+    }
+    if (isPlaintextSqliteDatabase(databasePath)) {
+      return false;
+    }
+    if (isEncryptionConfigured) {
+      return true;
+    }
+    const envelopePath = path.join(
+      path.dirname(databasePath),
+      'app-key-envelope.json',
+    );
+    return fs.existsSync(envelopePath);
+  };
+
+  const resolveEncryptionKeyHex = (): string | null => {
+    if (options.encryptionKeyHex) return options.encryptionKeyHex;
+    if (options.keyStore) {
+      try {
+        const exists =
+          !inMemory &&
+          fs.existsSync(options.databasePath) &&
+          fs.statSync(options.databasePath).size > 0;
+        if (!exists) {
+          const master = options.keyStore.getOrCreateMasterKey();
+          return deriveDatabaseKey(master.key, master.salt).toString('hex');
+        }
+
+        const isPlaintext = isPlaintextSqliteDatabase(options.databasePath);
+        if (isPlaintext) {
+          const master =
+            options.keyStore.getMasterKey() ??
+            options.keyStore.getOrCreateMasterKey();
+          return deriveDatabaseKey(master.key, master.salt).toString('hex');
+        }
+
+        const master = options.keyStore.getMasterKey();
+        if (!master) {
+          throw new DatabaseLifecycleError(
+            'database_key_unavailable',
+            'Database encryption key envelope is missing beside existing database.',
+          );
+        }
+        return deriveDatabaseKey(master.key, master.salt).toString('hex');
+      } catch (error) {
+        if (error instanceof DatabaseLifecycleError) throw error;
+        throw new DatabaseLifecycleError(
+          'database_key_unavailable',
+          'Database encryption key is unavailable or locked in macOS Keychain.',
+          {},
+          { cause: error },
+        );
+      }
+    }
+    return null;
+  };
+
+  const openWithKey = (dbPath: string, keyHex: string | null) => {
+    const sqlite = openDatabase(dbPath, opener);
+    if (keyHex && dbPath !== ':memory:') {
+      try {
+        sqlite.pragma("cipher = 'sqlcipher'");
+        sqlite.pragma(`key = "x'${keyHex}'"`);
+      } catch (error) {
+        sqlite.close();
+        throw new DatabaseLifecycleError(
+          'database_cipher_unsupported',
+          'Could not apply cipher to database connection.',
+          { sqliteCode: sqliteCode(error) },
+          { cause: error },
+        );
+      }
+    }
+    return sqlite;
+  };
+
+  const initializeFresh = (keyHex: string | null) => {
+    connection = openWithKey(options.databasePath, keyHex);
     configureConnection(connection, inMemory);
     applyPendingMigrations(connection);
     verifyHealth(connection);
     return connection;
   };
 
-  const replaceExisting = (reason: 'integrity-failed') => {
+  const replaceExisting = (
+    reason: 'integrity-failed',
+    keyHex: string | null,
+  ) => {
     closeConnection();
     const staged = stageDatabaseArtifacts(options.databasePath, reason);
     try {
-      const sqlite = initializeFresh();
+      const sqlite = initializeFresh(keyHex);
       try {
         cleanup(staged);
       } catch (error) {
@@ -252,24 +346,79 @@ export const createDatabaseRuntime = (
       if (connection) return connection;
 
       prepareDirectory(options.databasePath);
+      const fileExists =
+        !inMemory &&
+        fs.existsSync(options.databasePath) &&
+        fs.statSync(options.databasePath).size > 0;
+      let keyHex: string | null = null;
+      const encryptionConfigured = Boolean(
+        options.enableEncryption ||
+          options.keyStore ||
+          options.encryptionKeyHex,
+      );
+      if (encryptionConfigured) {
+        keyHex = resolveEncryptionKeyHex();
+      }
+
+      if (
+        fileExists &&
+        keyHex &&
+        isPlaintextSqliteDatabase(options.databasePath)
+      ) {
+        const migrator = new DatabaseEncryptionMigrator({
+          databasePath: options.databasePath,
+          rawDatabaseKeyHex: keyHex,
+          logger: options.logger,
+        });
+        migrator.migrate();
+      }
+
+      const isEncrypted = isEncryptedDatabaseTarget(
+        options.databasePath,
+        encryptionConfigured,
+      );
+      if (isEncrypted && !keyHex) {
+        throw new DatabaseLifecycleError(
+          'database_key_unavailable',
+          'Database is encrypted but no encryption key is available.',
+        );
+      }
+
       try {
-        connection = openDatabase(options.databasePath, opener);
+        connection = openWithKey(options.databasePath, keyHex);
         try {
           verifyHealth(connection);
         } catch (error) {
+          const cause =
+            error instanceof DatabaseLifecycleError ? error.cause : error;
+          const code = sqliteCode(cause);
+
+          if (isEncrypted) {
+            // Encrypted database must NEVER reach replaceExisting!
+            if (code === 'SQLITE_NOTADB') {
+              throw new DatabaseLifecycleError(
+                keyHex ? 'database_key_rejected' : 'database_key_unavailable',
+                keyHex
+                  ? 'Database encryption key was rejected or database is corrupted.'
+                  : 'Database is encrypted but no encryption key is available.',
+                { sqliteCode: code },
+                { cause },
+              );
+            }
+            throw error;
+          }
+
           if (
             !inMemory &&
             (isCorruptionError(error) ||
               error instanceof DatabaseLifecycleError)
           ) {
-            const cause =
-              error instanceof DatabaseLifecycleError ? error.cause : error;
             if (
               isCorruptionError(cause) ||
               (error instanceof DatabaseLifecycleError &&
                 error.code === 'database_integrity_failed')
             ) {
-              connection = replaceExisting('integrity-failed');
+              connection = replaceExisting('integrity-failed', keyHex);
               currentState = 'open';
               return connection;
             }
@@ -298,7 +447,6 @@ export const createDatabaseRuntime = (
         return connection;
       } catch (error) {
         closeConnection();
-        currentState = 'closed';
         throw error;
       }
     },

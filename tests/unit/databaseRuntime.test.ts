@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3-multiple-ciphers';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ApplicationKeyStore } from '../../electron/crypto/applicationKeyStore';
+import { deriveDatabaseKey } from '../../electron/crypto/keyDerivation';
+import { DatabaseLifecycleError } from '../../electron/database/errors';
 import { createDatabaseRuntime } from '../../electron/database/runtime';
 
 const roots: string[] = [];
@@ -329,5 +332,274 @@ describe('database runtime', () => {
     expect(() => runtime.initialize()).toThrowError(
       expect.objectContaining({ code: 'database_integrity_failed' }),
     );
+  });
+});
+
+describe('createDatabaseRuntime with encryption', () => {
+  let tempDir: string;
+  let dbPath: string;
+  const migrationsFolder = path.join(process.cwd(), 'drizzle');
+  const validKeyHex =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const wrongKeyHex =
+    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pluto-db-runtime-test-'));
+    dbPath = path.join(tempDir, 'pluto.db');
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it('initializes a fresh encrypted database when encryptionKeyHex is provided', () => {
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: validKeyHex,
+    });
+
+    const conn = runtime.initialize();
+    expect(conn.open).toBe(true);
+    expect(conn.pragma('quick_check', { simple: true })).toBe('ok');
+    expect(conn.pragma('cipher_integrity_check')).toEqual([]);
+    runtime.close();
+
+    // Verify raw file on disk is not plaintext SQLite
+    const header = Buffer.alloc(16);
+    const fd = fs.openSync(dbPath, 'r');
+    fs.readSync(fd, header, 0, 16, 0);
+    fs.closeSync(fd);
+    expect(header.toString('utf8')).not.toBe('SQLite format 3\0');
+  });
+
+  it('refuses to open an encrypted database without a key and does NOT replace it', () => {
+    const encryptedRuntime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: validKeyHex,
+    });
+    encryptedRuntime.initialize();
+    encryptedRuntime.close();
+
+    const originalStat = fs.statSync(dbPath);
+
+    // Try to open without key
+    const unkeyedRuntime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      enableEncryption: true,
+    });
+
+    try {
+      unkeyedRuntime.initialize();
+      expect.unreachable('Should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DatabaseLifecycleError);
+      expect((err as DatabaseLifecycleError).code).toBe(
+        'database_key_unavailable',
+      );
+    }
+
+    // Ensure original file was NOT deleted, replaced, or modified
+    const currentStat = fs.statSync(dbPath);
+    expect(currentStat.size).toBe(originalStat.size);
+  });
+
+  it('refuses to open an encrypted database with the wrong key and does NOT replace it', () => {
+    const encryptedRuntime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: validKeyHex,
+    });
+    encryptedRuntime.initialize();
+    encryptedRuntime.close();
+
+    const originalStat = fs.statSync(dbPath);
+
+    // Try to open with wrong key
+    const wrongKeyRuntime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: wrongKeyHex,
+    });
+
+    try {
+      wrongKeyRuntime.initialize();
+      expect.unreachable('Should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DatabaseLifecycleError);
+      expect((err as DatabaseLifecycleError).code).toBe(
+        'database_key_rejected',
+      );
+    }
+
+    // Ensure original file was NOT deleted, replaced, or modified
+    const currentStat = fs.statSync(dbPath);
+    expect(currentStat.size).toBe(originalStat.size);
+  });
+
+  it('automatically migrates an existing plaintext database when initialized with encryptionKeyHex', () => {
+    const plainDb = new Database(dbPath);
+    plainDb.exec('CREATE TABLE notes (id TEXT PRIMARY KEY, text TEXT);');
+    plainDb
+      .prepare("INSERT INTO notes (id, text) VALUES ('n1', 'Secret Note')")
+      .run();
+    plainDb.close();
+
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: validKeyHex,
+    });
+
+    const conn = runtime.initialize();
+    expect(conn.pragma('cipher_integrity_check')).toEqual([]);
+
+    const note = conn.prepare('SELECT * FROM notes WHERE id = ?').get('n1') as {
+      text: string;
+    };
+    expect(note.text).toBe('Secret Note');
+    runtime.close();
+  });
+
+  it('automatically upgrades an existing pre-encryption plaintext database with ApplicationKeyStore', () => {
+    // Simulate pre-encryption Pluto database: exists, has data, but NO key envelope exists
+    const plainDb = new Database(dbPath);
+    plainDb.exec('CREATE TABLE user_notes (id TEXT PRIMARY KEY, title TEXT);');
+    plainDb
+      .prepare(
+        "INSERT INTO user_notes (id, title) VALUES ('un-1', 'Legacy Meeting Note')",
+      )
+      .run();
+    plainDb.close();
+
+    const keyStore = new ApplicationKeyStore({
+      storageDir: tempDir,
+    });
+
+    // Ensure no key envelope exists yet before upgrade
+    expect(keyStore.hasMasterKey()).toBe(false);
+
+    // Upgraded Pluto starts with keyStore
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      keyStore,
+    });
+
+    const conn = runtime.initialize();
+    expect(conn.open).toBe(true);
+    expect(conn.pragma('cipher_integrity_check')).toEqual([]);
+
+    // Master key was created during upgrade
+    expect(keyStore.hasMasterKey()).toBe(true);
+
+    // Data was preserved bit-for-bit in encrypted format
+    const row = conn
+      .prepare('SELECT * FROM user_notes WHERE id = ?')
+      .get('un-1') as {
+      title: string;
+    };
+    expect(row.title).toBe('Legacy Meeting Note');
+    runtime.close();
+
+    // Verify raw file on disk is now SQLCipher ciphertext (not plaintext)
+    const header = Buffer.alloc(16);
+    const fd = fs.openSync(dbPath, 'r');
+    fs.readSync(fd, header, 0, 16, 0);
+    fs.closeSync(fd);
+    expect(header.toString('utf8')).not.toBe('SQLite format 3\0');
+  });
+
+  it('fails closed with typed database_key_unavailable when Keychain is locked', () => {
+    const lockedKeyStore = new ApplicationKeyStore({
+      storageDir: tempDir,
+      backend: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => {
+          throw new Error('OS key storage is unavailable or locked');
+        },
+        decryptString: () => {
+          throw new Error('OS key storage is unavailable or locked');
+        },
+      },
+    });
+
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      keyStore: lockedKeyStore,
+    });
+
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({
+        code: 'database_key_unavailable',
+      }),
+    );
+  });
+
+  it('allows retry after database_key_rejected and consults keyStore again', () => {
+    const salt = Buffer.alloc(16, 0x12);
+    const validMasterKey = Buffer.alloc(32, 0xaa);
+    const badMasterKey = Buffer.alloc(32, 0xbb);
+    const derivedValidHex = deriveDatabaseKey(validMasterKey, salt).toString(
+      'hex',
+    );
+
+    // Initialize an encrypted database with derivedValidHex
+    const initRuntime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      encryptionKeyHex: derivedValidHex,
+    });
+    const firstConn = initRuntime.initialize();
+    firstConn.exec('CREATE TABLE sample (id TEXT);');
+    initRuntime.close();
+
+    // Now create a runtime using a mock keyStore that initially returns badMasterKey, then validMasterKey
+    let currentKey = badMasterKey;
+    const mockKeyStore = {
+      hasMasterKey: () => true,
+      getMasterKey: () => ({
+        key: currentKey,
+        keyId: 'mock-id',
+        salt,
+      }),
+      getOrCreateMasterKey: () => ({
+        key: currentKey,
+        keyId: 'mock-id',
+        salt,
+      }),
+    } as unknown as ApplicationKeyStore;
+
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      keyStore: mockKeyStore,
+    });
+
+    // First attempt: key is rejected because badMasterKey is used
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({
+        code: 'database_key_rejected',
+      }),
+    );
+
+    // Runtime state must not be permanently closed
+    expect(runtime.state).not.toBe('closed');
+
+    // Update key in store (simulating user unlocking Keychain or entering correct password)
+    currentKey = validMasterKey;
+
+    // Retry via getConnection(): must consult keyStore again and succeed, NOT throw database_closed!
+    const retryConn = runtime.getConnection();
+    expect(retryConn.open).toBe(true);
+    expect(runtime.state).toBe('open');
+    runtime.close();
+    expect(runtime.state).toBe('closed');
   });
 });
