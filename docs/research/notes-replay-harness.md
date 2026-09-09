@@ -153,7 +153,7 @@ These options affect only the diagnostic process:
   or a single-pass provisional Markdown comparison. Neither publishes notes.
 - `NOTES_REPLAY_MODEL=gemma4:12b|qwen3.5:4b`: installed model, digest verified.
   “production” names the pipeline, not approval of an overridden model.
-- `NOTES_REPLAY_CONTEXT=16384|32768`: default 16K; Markdown is fixed at 16K.
+- `NOTES_REPLAY_CONTEXT=16384|24576|32768`: default 16K; Markdown is fixed at 16K.
 - `NOTES_REPLAY_KV_CACHE_TYPE=f16|q8_0`: isolated daemon only, default f16.
   The launcher enables flash attention and checks actual K/V types in its log.
 - `NOTES_REPLAY_LOAD_MODE=mmap|none`: isolated loading comparison, default mmap.
@@ -203,3 +203,65 @@ Compact precomputation also skips meetings whose current source still fits the
 direct writer/editor pair. The final short q8 smoke test completed and reproduced
 exactly offline; an f16 long-case retry stopped on resource pressure during
 startup. These are not evidence of sustained production performance.
+
+The isolated launcher holds a temporary idle-sleep assertion only for its own
+lifetime; it never changes persistent power settings or blocks explicit sleep.
+Monitoring gaps over 30 seconds, backwards wall-clock jumps, and changes between
+AC/battery stop the run. Summaries also detect gaps in historical ledgers without
+rewriting their original outcomes. A 24K attempt interrupted by macOS idle sleep
+and its retry interrupted by AC-to-battery transition are contaminated tests, not
+evidence that the 24K profile is fast, slow, or capacity-safe.
+
+Timing fields have separate meanings: `elapsedMs` and `firstAnswerMs` are host
+wall-clock milliseconds; Ollama's `*_duration` metrics remain nanoseconds.
+First answer text is not approved or visible application notes. A
+`no_recorded_gap` summary means only that the ledger has no detected gap above
+the threshold, not that a workload or quality gate passed. A completed schedule
+may still contain failed, ineligible, or unselected meetings.
+
+The uninterrupted 24K/q8 diagnostic completed the long case in 423,954 ms with
+two serial calls: 210,936 ms of prompt evaluation and 209,406 ms of decoding.
+No resource or timing-continuity stop was recorded. Exact offline replay passed,
+but manual source review still found stale timing and missing follow-ups; this
+does not promote the context profile or establish a representative average.
+
+`NOTES_REPLAY_CONTEXT_REUSE=1` is an isolated diagnostic opt-in. An immediately
+completed writer can become the exact conversation prefix for its editor only
+when source blocks and model/context match. The original source stays verbatim
+in the first message; the raw writer response and current canonical editor draft
+remain untrusted. The whole conversation must fit the conservative input/output
+budget. Otherwise the original standalone editor request is sent. Failed calls
+and meeting changes cannot seed reuse. Captures contain the actual wire messages;
+offline replay reconstructs them and checks the continuation helper's hash.
+This is a cache-reuse hypothesis, not a claimed cache hit or app default.
+
+The first continuation trial was deliberately cancelled after runtime logs
+proved full prompt reprocessing: the rendered answer prefix differed and no
+sliding-window checkpoint was available. Its partial editor is not a completed
+latency sample. `NOTES_REPLAY_CHECKPOINTS=1` permits exactly one context checkpoint
+in the isolated launcher (default zero); the historical multi-prompt RAM cache
+remains disabled. A subsequent trial restored a 170 MiB checkpoint and finished
+in 352,990 ms. Editor prompt processing was 45,315 ms versus 115,830 ms in the
+earlier standalone-editor run, with no resource stop. Different generated drafts
+and power conditions mean this is not a controlled total-latency speedup estimate.
+Offline replay reproduced the result, but missing follow-ups remained. The
+launcher initially flagged its old zero-checkpoint-only postcondition after that
+completed run; validation now checks the explicitly requested zero/one profile.
+Neither the experiment nor the validation repair changes application defaults.
+
+The broader smaller-model follow-up was stopped early on quality: the first
+eligible case omitted an approval gate and scheduled follow-up retained by the
+Gemma baseline, and the next case failed the notes guardrail. Those two outcomes
+reproduced offline. A short subsequent case completed; the next partial request
+was deliberately cancelled. This is not a completed eight-case comparison.
+
+Production now has an ephemeral section-level draft preview, not raw-token
+Markdown publication. The harness records `draft_preview_ready` events and
+`firstDraftMs` separately from physical first-answer text and final completion.
+A fresh short Gemma/q8 run produced a draft at 21,278 ms and completed at
+42,321 ms; offline result replay matched exactly. Cache regression tests expose
+two matching precomputed sections before any new model request, then the final
+section after one writer call, while retaining all three final reviews.
+Neither the short replay nor that exact-source test proves capture-to-canonical
+cache reuse in a real recording. Cold historical long-meeting completion remains
+minutes rather than instantaneous.

@@ -124,7 +124,20 @@ it('reuses compact live work in the real bounded final plan, without skipping fi
   await expect(precomputeNextMeetingNotesLeaf(input)).resolves.toBe('reused');
   expect(generate).not.toHaveBeenCalled();
   const onPlan = vi.fn();
-  await generateMeetingNotes({ ...input, source: finalSource, onPlan });
+  const previews: NotesDraft[] = [];
+  const physicalCallsAtPreview: number[] = [];
+  await generateMeetingNotes({
+    ...input,
+    source: finalSource,
+    onPlan,
+    onDraft: (draft) => {
+      previews.push(draft);
+      physicalCallsAtPreview.push(generate.mock.calls.length);
+    },
+  });
+  expect(previews.map((draft) => draft.sections.length)).toEqual([1, 2, 3]);
+  expect(previews[0].sections).toHaveLength(1);
+  expect(physicalCallsAtPreview).toEqual([0, 0, 1]);
   expect(onPlan).toHaveBeenCalledWith({ plannedLeafCount: 3 });
   expect(
     generate.mock.calls.filter(([request]) => request.task === 'notesWriter'),

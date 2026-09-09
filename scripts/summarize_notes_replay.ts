@@ -43,6 +43,7 @@ try {
     JSON.stringify({
       privateSummary: path.join(root, 'summary.json'),
       scheduled: summary.scheduled,
+      timingContinuity: summary.timingContinuity,
       counts: summary.counts,
       physicalRequests: summary.physicalRequests,
       censoredRequests: summary.censoredRequests,

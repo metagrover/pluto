@@ -2834,6 +2834,9 @@ app.whenReady().then(async () => {
                 }
               : null,
           ),
+          notes_preview: meetingNotesRunCoordinator.getMeetingNotesPreview(
+            meeting.id,
+          ),
         }
       : meeting;
   };
@@ -2841,9 +2844,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_MEETING_PROCESSING_STATUSES', () =>
     db.getMeetingProcessingStatuses(),
   );
-  ipcMain.handle('GET_MEETING_STATUS', (_event, id) =>
-    db.getMeetingSummary(id),
-  );
+  ipcMain.handle('GET_MEETING_STATUS', (_event, id) => {
+    const summary = db.getMeetingSummary(id);
+    return summary
+      ? {
+          ...summary,
+          notes_preview: meetingNotesRunCoordinator.getMeetingNotesPreview(id),
+        }
+      : summary;
+  });
   ipcMain.handle('SEARCH_MEETING_SUMMARIES', (_event, query) =>
     typeof query === 'string' ? db.searchMeetingSummaries(query, 5) : [],
   );

@@ -530,6 +530,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onDraft?: (draft: import('./meetingNotesTypes').NotesDraft) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       /** Explicit benchmark experiment; product callers retain model repair. */
       recoverWriterDraft?: (raw: string) => string | null;
@@ -565,6 +566,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       optionalReviewDeadlineAtMs: options.optionalReviewDeadlineAtMs,
       optionalReviewMinStartMs: options.optionalReviewMinStartMs,
       onStage: options.onStage,
+      onDraft: options.onDraft,
       onRepair: options.onRepair,
       recoverWriterDraft: options.recoverWriterDraft,
       onDeterministicWriterRecovery: options.onDeterministicWriterRecovery,

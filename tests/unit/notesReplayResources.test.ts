@@ -10,6 +10,46 @@ const baseline = {
   thermalNominal: true,
 };
 describe('notes replay safety guard', () => {
+  it.each(['before_read', 'during_read', 'dispose'])(
+    'censors a monitoring gap %s without silently resuming',
+    async (phase) => {
+      vi.useFakeTimers();
+      let now = 0;
+      try {
+        const stop = vi.fn();
+        const record = vi.fn();
+        const read = vi.fn(async () => {
+          if (phase === 'during_read') now = 100;
+          return baseline;
+        });
+        const dispose = watchNotesReplayResources({
+          baseline,
+          read,
+          record,
+          stop,
+          now: () => now,
+          intervalMs: 5,
+          maxSampleGapMs: 30,
+        });
+        if (phase !== 'during_read') now = 100;
+        if (phase !== 'dispose') await vi.advanceTimersByTimeAsync(5);
+        await dispose();
+        await dispose();
+        expect(stop).toHaveBeenCalledExactlyOnceWith('resource_sampling_gap');
+        expect(record).toHaveBeenCalledWith({
+          event: 'resource_sampling_gap',
+          gapMs: 100,
+        });
+        expect(
+          record.mock.calls.some(
+            ([event]) => event.event === 'resource_sample',
+          ),
+        ).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
   it('parses telemetry and rejects missing evidence', () => {
     expect(
       parseNotesReplayResources(
@@ -27,6 +67,12 @@ describe('notes replay safety guard', () => {
     );
   });
   it('permits preexisting swap but stops growth, low headroom or warning', () => {
+    expect(
+      notesReplayResourceStop(
+        { ...baseline, powerSource: 'ac' },
+        { ...baseline, powerSource: 'battery' },
+      ),
+    ).toBe('power_source_changed');
     expect(notesReplayResourceStop(baseline, baseline)).toBeNull();
     expect(
       notesReplayResourceStop(baseline, {

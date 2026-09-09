@@ -84,6 +84,7 @@ import { processValidatedMeetingDownstream } from './services/processValidatedMe
 import { shouldAutoProcessMeetingAnalysis } from './services/retryMeetingTranscriptValidation';
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 import {
+  createMeetingStatusRequestGate,
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
@@ -157,6 +158,7 @@ function App() {
   const [selectedMeetingDetail, setSelectedMeetingDetail] =
     useState<Meeting | null>(null);
   const selectedMeetingIdRef = useRef<string | number | null>(null);
+  const notesStatusRequestsRef = useRef(createMeetingStatusRequestGate());
   const [
     transcriptValidationRetryOperation,
     setTranscriptValidationRetryOperation,
@@ -826,9 +828,13 @@ function App() {
           void fetchMeetings();
           return;
         }
+        const statusRequest = notesStatusRequestsRef.current.start(
+          String(meetingId),
+        );
         void window.ipcRenderer
           .invoke('GET_MEETING_STATUS', meetingId)
           .then((status) => {
+            if (!statusRequest.isLatest()) return;
             if (!status) return;
             setMeetings((current) => {
               const index = current.findIndex(
@@ -858,6 +864,9 @@ function App() {
           })
           .catch((error) => {
             console.error('Failed to refresh meeting status', error);
+          })
+          .finally(() => {
+            statusRequest.finish();
           });
       }),
     [],

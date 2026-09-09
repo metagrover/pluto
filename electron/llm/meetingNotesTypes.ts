@@ -123,6 +123,8 @@ export type GenerateMeetingNotesInput = {
   recoverWriterDraft?: (raw: string) => string | null;
   onDeterministicWriterRecovery?: () => void;
   onStage?: (task: NotesTask) => void;
+  /** Ephemeral, unreviewed document preview; never a publication signal. */
+  onDraft?: (draft: NotesDraft) => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;
   /** Product deadline for optional model review; writers remain fail-closed. */

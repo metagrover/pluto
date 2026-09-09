@@ -1,3 +1,4 @@
+import { NOTES_REPLAY_MAX_SAMPLE_GAP_MS } from './notesReplayResources';
 type ReplayEvent = Record<string, unknown>;
 /** Public outcome labels omit private diagnostic suffixes, not error classes. */
 export const notesReplayOutcomeLabel = (code: string) => code.split(':')[0];
@@ -6,6 +7,26 @@ export function summarizeNotesReplay(
   scheduled: Array<{ index: number; sourceIdSha256: string }>,
   events: ReplayEvent[],
 ) {
+  const samples = events.filter(
+    (event) =>
+      ['resource_baseline', 'resource_sample', 'run_terminal'].includes(
+        String(event.event),
+      ) && typeof event.at === 'number',
+  );
+  const gaps = samples
+    .slice(1)
+    .map((event, index) => Number(event.at) - Number(samples[index].at));
+  const timingContinuity = {
+    status:
+      events.some((event) => event.event === 'resource_sampling_gap') ||
+      gaps.some((gap) => gap < 0 || gap > NOTES_REPLAY_MAX_SAMPLE_GAP_MS)
+        ? 'gap_detected'
+        : samples.some((event) => event.event === 'resource_baseline') &&
+            samples.some((event) => event.event === 'run_terminal')
+          ? 'no_recorded_gap'
+          : 'unavailable',
+    maxSampleGapMs: gaps.length ? Math.max(...gaps) : null,
+  };
   const cases = new Map(
     scheduled.map((row) => [
       row.index,
@@ -77,6 +98,7 @@ export function summarizeNotesReplay(
     sourceCharacters: row.terminal?.sourceCharacters ?? null,
   }));
   return {
+    timingContinuity,
     runStatus:
       [...events].reverse().find((event) => event.event === 'run_terminal')
         ?.status ?? 'no_terminal_record',

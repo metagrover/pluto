@@ -11,6 +11,10 @@ import { MeetingNotesError } from '../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../electron/llm/meetingNotesWire';
 import { createMeetingNotesOptionalReviewBudget } from '../electron/meetingAnalysisRuns';
 import { createNotesReplayClock } from './lib/notesReplayClock';
+import {
+  type CompletedWriter,
+  continueNotesEditor,
+} from './lib/notesReplayContinuation';
 import { generateMarkdownNotes } from './lib/notesReplayMarkdown';
 import { notesReplayOutcomeLabel } from './lib/notesReplaySummary';
 import {
@@ -53,6 +57,9 @@ async function main() {
     '..',
   );
   const identityFiles = new Set([
+    ...(manifest.contextReuse
+      ? ['scripts/lib/notesReplayContinuation.ts']
+      : []),
     'electron/llm/meetingNotesPipeline.ts',
     'electron/llm/meetingNotesAudit.ts',
     ...Object.keys(manifest.codeHashes).filter((file) =>
@@ -183,6 +190,7 @@ async function main() {
   );
   const originalNow = Date.now;
   Date.now = clock.now;
+  let previous: CompletedWriter | undefined;
   try {
     analysis = await generateMeetingNotes({
       source,
@@ -221,14 +229,21 @@ async function main() {
         );
         assert.equal(captured.model, manifest.model);
         assert.equal(captured.options.num_ctx, manifest.contextTokens);
-        assert.equal(
-          captured.messages?.length,
-          1,
-          'recorded_message_shape_mismatch',
-        );
-        assert.equal(
-          captured.messages?.[0]?.content,
-          wire.prompt,
+        const originalRequest = {
+          model: manifest.model,
+          options: {
+            num_ctx: manifest.contextTokens,
+            num_predict: request.outputTokens,
+          },
+          messages: [{ role: 'user', content: wire.prompt }],
+        };
+        const expectedMessages = manifest.contextReuse
+          ? continueNotesEditor(previous, originalRequest).messages
+          : originalRequest.messages;
+        previous = undefined;
+        assert.deepEqual(
+          captured.messages,
+          expectedMessages,
           'recorded_prompt_mismatch',
         );
         assert.equal(
@@ -259,11 +274,14 @@ async function main() {
         );
         if (packets.some((packet) => packet.done_reason === 'length'))
           throw new MeetingNotesError('notes_output_truncated');
-        return wire.decode(
-          packets
-            .map((packet) => packet.message?.content ?? packet.response ?? '')
-            .join(''),
-        );
+        const answer = packets
+          .map((packet) => packet.message?.content ?? packet.response ?? '')
+          .join('');
+        previous = {
+          request: { ...originalRequest, messages: expectedMessages },
+          answer,
+        };
+        return wire.decode(answer);
       },
     });
   } catch (error) {

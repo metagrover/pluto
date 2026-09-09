@@ -55,6 +55,18 @@ import { createNotesWireRequest } from './meetingNotesWire';
 const WRITER_OUTPUT_TOKENS = 2048;
 const COMPACT_WRITER_OUTPUT_TOKENS = 2048;
 const AUDIT_OUTPUT_TOKENS = 1536;
+const emitDraftPreview = (
+  input: GenerateMeetingNotesInput,
+  draft: NotesDraft,
+) => {
+  if (input.signal?.aborted) return;
+  try {
+    input.onDraft?.(structuredClone(draft));
+  } catch {
+    // Observability/UI must not change generation or publication outcomes.
+    console.warn('[Notes] Draft preview observer failed');
+  }
+};
 const reviewPrompt = (
   input: GenerateMeetingNotesInput,
   options: Parameters<typeof buildNotesAuditPrompt>[0],
@@ -1528,6 +1540,10 @@ const runBoundedCompactNotes = async (
       throw error;
     }
     writtenLeaves.push({ draft, evidenceSpans, idPrefix });
+    emitDraftPreview(input, {
+      ...draft,
+      sections: writtenLeaves.flatMap((leaf) => leaf.draft.sections),
+    });
   };
   for (const [index, leaf] of leaves.entries()) {
     await processLeaf(leaf.primarySpans, `leaf${index}`);
@@ -1742,6 +1758,7 @@ const runMeetingNotes = async (
     userNotes: input.context.userNotes,
     knownTerms,
   });
+  emitDraftPreview(input, draft);
   if (
     estimateNotesTokens(
       createNotesWireRequest(auditPrompt, evidenceSpans).prompt,

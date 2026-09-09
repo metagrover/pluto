@@ -9,6 +9,22 @@ const scheduled = [
 ];
 const started = { event: 'meeting_started', index: 1, sourceIdSha256: 'a' };
 describe('durable replay denominators', () => {
+  it('detects historical sleep gaps even if the old run was labelled completed', () => {
+    const summary = summarizeNotesReplay(scheduled, [
+      { event: 'resource_baseline', at: 0 },
+      { event: 'resource_sample', at: 5000 },
+      { event: 'resource_sample', at: 1_000_000 },
+      { event: 'run_terminal', at: 1_000_001, status: 'completed' },
+    ]);
+    expect(summary.timingContinuity).toEqual({
+      status: 'gap_detected',
+      maxSampleGapMs: 995000,
+    });
+    expect(summary.runStatus).toBe('completed');
+    expect(summarizeNotesReplay(scheduled, []).timingContinuity.status).toBe(
+      'unavailable',
+    );
+  });
   it('reports latency with outcomes and leaves unavailable measurements null', () => {
     const result = summarizeNotesReplay(scheduled, [
       started,

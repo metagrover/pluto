@@ -14,7 +14,26 @@ const STATUS_FIELDS = [
   'downstream_processing_json',
   'capture_journal_generation',
   'analysis_run_json',
+  'notes_preview',
 ] as const;
+
+/** Late IPC responses must not restore a draft from an older run. */
+export const createMeetingStatusRequestGate = () => {
+  let sequence = 0;
+  const latest = new Map<string, number>();
+  return {
+    start(meetingId: string) {
+      const request = ++sequence;
+      latest.set(meetingId, request);
+      return {
+        isLatest: () => latest.get(meetingId) === request,
+        finish: () => {
+          if (latest.get(meetingId) === request) latest.delete(meetingId);
+        },
+      };
+    },
+  };
+};
 
 export const loadSelectedMeetingDetail = async <T>(input: {
   meetingId: string | number;

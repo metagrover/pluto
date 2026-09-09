@@ -12,6 +12,7 @@ function setup(
   response: () => Promise<Response>,
   isolated = false,
   loadMode?: 'mmap' | 'none',
+  contextReuse = false,
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-wire-test-'));
   roots.push(root);
@@ -24,6 +25,7 @@ function setup(
     wire: createNotesReplayTransport({
       isolated,
       loadMode,
+      contextReuse,
       root,
       model: 'gemma4:12b',
       contextTokens: 16384,
@@ -43,6 +45,63 @@ const init = {
   }),
 };
 describe('private notes replay transport', () => {
+  it('captures the actual continued request and never reuses a failed writer', async () => {
+    for (const successful of [true, false]) {
+      let calls = 0;
+      const state = setup(
+        async () => {
+          calls++;
+          return new Response(
+            `${JSON.stringify({
+              model: 'gemma4:12b',
+              message: { content: '{}' },
+              done: calls > 1 || successful,
+              done_reason: 'stop',
+            })}\n`,
+          );
+        },
+        true,
+        'mmap',
+        true,
+      );
+      const source = 'BEGIN SOURCE DATA\n["R0","Me","A fact"]\nEND SOURCE DATA';
+      const request = (prompt: string) => ({
+        ...init,
+        body: JSON.stringify({
+          model: 'gemma4:12b',
+          stream: true,
+          options: { num_ctx: 16384, num_predict: 2048 },
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      try {
+        await (
+          await state.wire.fetch(
+            'http://127.0.0.1:11434/api/chat',
+            request(source),
+          )
+        ).text();
+      } catch {
+        expect(successful).toBe(false);
+      }
+      await (
+        await state.wire.fetch(
+          'http://127.0.0.1:11434/api/chat',
+          request(`${source}\nBEGIN DRAFT DATA\n{}\nEND DRAFT DATA`),
+        )
+      ).text();
+      const sent = JSON.parse(state.request.mock.calls[1][1]?.body as string);
+      expect(sent.messages).toHaveLength(successful ? 3 : 1);
+      expect(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(state.root, 'case-3-attempt-2-request.json'),
+            'utf8',
+          ),
+        ),
+      ).toEqual(sent);
+    }
+  });
   it('captures an explicit non-mapped diagnostic profile without altering the shared runtime', async () => {
     for (const isolated of [true, false]) {
       const state = setup(

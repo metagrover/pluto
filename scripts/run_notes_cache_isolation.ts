@@ -1,6 +1,7 @@
 // macOS-only diagnostic launcher. No production configuration or model mutation.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
@@ -17,6 +18,8 @@ async function main() {
   const loadMode = process.env.NOTES_REPLAY_LOAD_MODE ?? 'mmap';
   assert.ok(['mmap', 'none'].includes(loadMode), 'invalid_replay_load_mode');
   const kvCacheType = process.env.NOTES_REPLAY_KV_CACHE_TYPE ?? 'f16';
+  const checkpoints = process.env.NOTES_REPLAY_CHECKPOINTS ?? '0';
+  assert.ok(['0', '1'].includes(checkpoints), 'invalid_checkpoint_count');
   assert.ok(['f16', 'q8_0'].includes(kvCacheType), 'invalid_kv_cache_type');
   assert.equal(process.platform, 'darwin', 'macos_diagnostic_only');
   assert.equal(
@@ -63,7 +66,7 @@ async function main() {
     OLLAMA_NUM_PARALLEL: '1',
     OLLAMA_MAX_LOADED_MODELS: '1',
     LLAMA_ARG_CACHE_RAM: '0',
-    LLAMA_ARG_CTX_CHECKPOINTS: '0',
+    LLAMA_ARG_CTX_CHECKPOINTS: checkpoints,
     OLLAMA_KV_CACHE_TYPE: kvCacheType,
     OLLAMA_FLASH_ATTENTION: '1',
   };
@@ -78,6 +81,7 @@ async function main() {
     daemonError = error;
   });
   let replay: ReturnType<typeof spawn> | undefined;
+  let idleSleepAssertion: ReturnType<typeof spawn> | undefined;
   let sampling: ReturnType<typeof setInterval> | undefined;
   let sampleFailed = false;
   let cleanupFailed = false;
@@ -107,6 +111,10 @@ async function main() {
       JSON.stringify(value, null, 2),
     );
   const configuration = {
+    launcherSha256: createHash('sha256')
+      .update(fs.readFileSync(fileURLToPath(import.meta.url)))
+      .digest('hex'),
+    preventIdleSleep: 'launcher_lifetime_only',
     binary,
     daemonPid: daemon.pid,
     endpoint: env.OLLAMA_HOST,
@@ -118,6 +126,15 @@ async function main() {
     runtimeSettingsRequireLogVerification: true,
   };
   try {
+    idleSleepAssertion = spawn(
+      '/usr/bin/caffeinate',
+      ['-i', '-w', String(process.pid)],
+      { stdio: 'ignore' },
+    );
+    await new Promise<void>((resolve, reject) => {
+      idleSleepAssertion!.once('spawn', resolve);
+      idleSleepAssertion!.once('error', reject);
+    });
     write({ ...configuration, status: 'starting' });
     console.log(JSON.stringify({ privateRuntimeEvidence: root }));
     let ready = false;
@@ -224,7 +241,10 @@ async function main() {
         'runtime_mapped_load_unverified',
       );
       assert.ok(
-        !runtimeLog.includes('created context checkpoint'),
+        checkpoints === '0'
+          ? runtimeLog.includes('context checkpoints disabled') &&
+              !runtimeLog.includes('created context checkpoint')
+          : runtimeLog.includes('context checkpoints enabled, max = 1,'),
         'runtime_checkpoint_configuration_mismatch',
       );
       assert.ok(
@@ -259,6 +279,13 @@ async function main() {
         await delay(100);
       if (running()) signalOwned('SIGKILL');
     }
+    // -w also releases the assertion if this launcher crashes. Never alter
+    // persistent power settings or prevent an explicit sleep/lid close.
+    if (
+      idleSleepAssertion?.exitCode === null &&
+      idleSleepAssertion.signalCode === null
+    )
+      idleSleepAssertion.kill('SIGTERM');
     fs.closeSync(log);
     writeOwnerOnlyPrivateFile(
       path.join(root, 'cleanup.json'),
@@ -266,6 +293,7 @@ async function main() {
         daemonPid: daemon.pid,
         cleanupFailed,
         daemonExited: !running(),
+        idleSleepAssertionPid: idleSleepAssertion?.pid,
       }),
     );
   }

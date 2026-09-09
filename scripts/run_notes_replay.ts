@@ -40,7 +40,10 @@ const sha = (value: string | Buffer) =>
 async function main() {
   const mode = process.env.NOTES_REPLAY_MODE ?? 'production';
   const contextTokens = Number(process.env.NOTES_REPLAY_CONTEXT ?? '16384');
-  assert.ok([16384, 32768].includes(contextTokens), 'invalid_replay_context');
+  assert.ok(
+    [16384, 24576, 32768].includes(contextTokens),
+    'invalid_replay_context',
+  );
   assert.ok(
     mode !== 'markdown' || contextTokens === 16384,
     'markdown_context_is_fixed',
@@ -142,6 +145,7 @@ async function main() {
   const originalFetch = globalThis.fetch;
   let current = 0;
   const wire = createNotesReplayTransport({
+    contextReuse: process.env.NOTES_REPLAY_CONTEXT_REUSE === '1',
     isolated,
     loadMode: loadMode as 'mmap' | 'none',
     root,
@@ -216,6 +220,7 @@ async function main() {
         'electron/meetingAnalysisRuns.ts',
         'scripts/run_notes_replay.ts',
         'scripts/lib/notesReplayTransport.ts',
+        'scripts/lib/notesReplayContinuation.ts',
         'scripts/lib/notesReplayQuality.ts',
         'scripts/lib/notesReplayResources.ts',
         'scripts/lib/notesReplayMarkdown.ts',
@@ -242,10 +247,12 @@ async function main() {
       digest: model.digest,
       contextTokens,
       compactWriterContract: mode === 'production',
+      contextReuse: process.env.NOTES_REPLAY_CONTEXT_REUSE === '1',
       sourceFirstReconciliation: false,
       deadlineMs: MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
       safetyPolicy: {
         sampleIntervalMs: 5000,
+        maxSampleGapMs: 30000,
         minMemoryFreePercent: 10,
         maxSwapGrowthBytes: 512 * 1024 * 1024,
         thermalWarningsAllowed: false,
@@ -342,6 +349,16 @@ async function main() {
               source,
               contextTokens,
               compactWriterContract: true,
+              onDraft: (draft) => {
+                result.firstDraftMs ??= Date.now() - started;
+                record({
+                  event: 'draft_preview_ready',
+                  caseIndex: current,
+                  elapsedMs: Date.now() - started,
+                  sectionCount: draft.sections.length,
+                  publication: false,
+                });
+              },
               signal: AbortSignal.any([
                 controller.signal,
                 safetyController.signal,

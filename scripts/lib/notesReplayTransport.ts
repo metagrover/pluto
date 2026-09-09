@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  type CompletedWriter,
+  continueNotesEditor,
+} from './notesReplayContinuation';
 
 /** Private, streaming transport evidence. HTTP headers never mean completion. */
 export function createNotesReplayTransport(input: {
@@ -13,8 +17,10 @@ export function createNotesReplayTransport(input: {
   /** Dedicated diagnostic daemon; never permit an arbitrary remote endpoint. */
   isolated?: boolean;
   loadMode?: 'mmap' | 'none';
+  contextReuse?: boolean;
 }) {
   let count = 0;
+  let previous: (CompletedWriter & { caseIndex: number }) | undefined;
   const active = new Set<number>();
   const capturedFetch: typeof fetch = async (urlInput, init) => {
     const url = new URL(String(urlInput));
@@ -51,6 +57,18 @@ export function createNotesReplayTransport(input: {
     );
     assert.equal(body.stream, true, 'replay_stream_required');
     assert.equal(active.size, 0, 'replay_concurrent_generation_forbidden');
+    const caseIndex = input.currentCase();
+    let continuationReason = 'disabled';
+    if (input.contextReuse) {
+      assert.ok(input.isolated, 'continuation_requires_isolated_runtime');
+      const result = continueNotesEditor(
+        previous?.caseIndex === caseIndex ? previous : undefined,
+        body,
+      );
+      body.messages = result.messages;
+      continuationReason = result.reason;
+    }
+    previous = undefined;
     // Match the original worker's mapped loading; the daemon may otherwise
     // choose an eager-copy load on Metal. Capture the actual modified wire body.
     if (input.isolated) {
@@ -60,7 +78,6 @@ export function createNotesReplayTransport(input: {
       ? { ...init, body: JSON.stringify(body) }
       : init;
     const attempt = ++count;
-    const caseIndex = input.currentCase();
     const prefix = `case-${caseIndex}-attempt-${attempt}`;
     const requestFd = fs.openSync(
       path.join(input.root, `${prefix}-request.json`),
@@ -86,9 +103,11 @@ export function createNotesReplayTransport(input: {
       caseIndex,
       prefix,
       endpoint: url.pathname,
+      continuationReason,
     });
     let closed = false;
     let pending = '';
+    let answerText = '';
     let bytes = 0;
     let done = false;
     let doneReason: unknown = null;
@@ -104,6 +123,7 @@ export function createNotesReplayTransport(input: {
         const packet = JSON.parse(line);
         if (done) invalid = true;
         const answer = packet.message?.content ?? packet.response;
+        if (typeof answer === 'string') answerText += answer;
         if (typeof answer === 'string' && answer.length)
           firstAnswerMs ??= Date.now() - started;
         const reasoning = packet.message?.thinking ?? packet.thinking;
@@ -138,6 +158,12 @@ export function createNotesReplayTransport(input: {
       fs.fsyncSync(fd);
       fs.closeSync(fd);
       active.delete(attempt);
+      if (
+        input.contextReuse &&
+        outcome === 'complete' &&
+        doneReason !== 'length'
+      )
+        previous = { request: body, answer: answerText, caseIndex };
       input.record({
         event: 'physical_terminal',
         attempt,

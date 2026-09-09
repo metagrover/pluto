@@ -153,6 +153,63 @@ describe('MeetingView progressive reveal', () => {
       />,
     );
 
+  it('progressively reveals an unsaved draft without replacing reviewed notes', async () => {
+    const drafting: Meeting = {
+      ...analyzedMeeting,
+      analysis_json: undefined,
+      analysis_run_json: JSON.stringify({
+        run_id: 'draft-run',
+        notes_status: 'running',
+        stage: 'notesAudit',
+      }),
+      notes_preview: {
+        runId: 'draft-run',
+        sections: [{ title: 'Early context', items: ['A draft fact.'] }],
+      },
+    };
+    await act(async () => renderMeeting(drafting));
+    expect(container.textContent).toContain('Draft preview');
+    expect(container.textContent).toContain('not saved yet');
+    expect(container.textContent).toContain('A draft fact.');
+    expect(
+      container.querySelector('[data-meeting-artifact="analysis"]'),
+    ).toBeNull();
+    await act(async () =>
+      renderMeeting({
+        ...drafting,
+        notes_preview: {
+          ...drafting.notes_preview!,
+          sections: [
+            ...drafting.notes_preview!.sections,
+            { title: 'Later context', items: ['Another draft fact.'] },
+          ],
+        },
+      }),
+    );
+    expect(container.textContent).toContain('A draft fact.');
+    expect(container.textContent).toContain('Another draft fact.');
+    await act(async () =>
+      renderMeeting({
+        ...analyzedMeeting,
+        analysis_run_json: drafting.analysis_run_json,
+        notes_preview: drafting.notes_preview,
+      }),
+    );
+    expect(container.textContent).toContain('The analysis arrived in place.');
+    expect(container.textContent).not.toContain('Draft preview');
+    expect(container.textContent).not.toContain('A draft fact.');
+    await act(async () =>
+      renderMeeting({
+        ...drafting,
+        analysis_run_json: JSON.stringify({
+          run_id: 'draft-run',
+          notes_status: 'cancelled',
+        }),
+      }),
+    );
+    expect(container.textContent).not.toContain('A draft fact.');
+  });
+
   it('renders transcript content cleanly without noisy remote speaker status banner', async () => {
     const meeting = {
       ...analyzedMeeting,

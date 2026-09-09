@@ -9,6 +9,102 @@ import {
 } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  it('keeps draft previews in memory only and clears them at publication', async () => {
+    let running = false;
+    let current = true;
+    const publish = vi.fn().mockImplementation(() => {
+      running = false;
+      return true;
+    });
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'preview-meeting',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'source',
+          eligibilityRevision: 'eligibility',
+          userNotesHash: 'notes',
+        }),
+        getMeetingAnalysisRun: () =>
+          running
+            ? {
+                run_id: 'preview-run',
+                input_revision: 'revision',
+                notes_status: 'running',
+              }
+            : null,
+        beginMeetingAnalysisRun: () => {
+          running = true;
+        },
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: () => true,
+        isMeetingAnalysisRunCurrent: () => current,
+        publishMeetingNotesIfCurrent: publish,
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      createRunId: () => 'preview-run',
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async (
+          _transcript,
+          _notes,
+          _template,
+          options,
+        ) => {
+          const draft = {
+            meetingType: 'general' as const,
+            overview: null,
+            sections: [
+              { title: { text: 'Preview only', sources: [] }, items: [] },
+            ],
+          };
+          options?.onDraft?.(draft);
+          expect(
+            coordinator.getMeetingNotesPreview('preview-meeting')?.sections[0]
+              .title,
+          ).toBe('Preview only');
+          expect(publish).not.toHaveBeenCalled();
+          current = false;
+          expect(
+            coordinator.getMeetingNotesPreview('preview-meeting'),
+          ).toBeNull();
+          current = true;
+          options?.onDraft?.(draft);
+          return {
+            analysis_schema_version: 3,
+            overview: 'Reviewed notes.',
+            topics: [],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          };
+        },
+      }),
+    });
+    await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'preview-meeting',
+      requestId: 'preview-request',
+      template: 'auto',
+      reason: 'manual',
+    });
+    expect(coordinator.getMeetingNotesPreview('preview-meeting')).toBeNull();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(publish.mock.calls)).not.toContain('Preview only');
+  });
   it('applies the optional review budget only to the local Ollama provider', () => {
     expect(shouldUseMeetingNotesOptionalReviewBudget('Ollama (Local)')).toBe(
       true,
