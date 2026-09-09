@@ -1,6 +1,6 @@
 # Notes efficiency: progressive previews and measured limits
 
-Status: experimental, not production promotion. Continues the merged #794 work.
+Status: narrowed preview/diagnostic changes ready for review; no model promotion.
 The production Gemma model, 16K context, editor contract, source guards and runtime
 settings remain unchanged. The branch adds progressive, memory-only draft previews;
 this does not change saved output, model requests or source acceptance. Existing recordings are sufficient for development;
@@ -74,9 +74,11 @@ a new meeting is not a prerequisite for source/audio replay.
   general tokenizer coverage or permission to reduce production margins. See the
   pinned [renderer resolution](https://github.com/ollama/ollama/blob/v0.33.3/server/renderer_resolution.go)
   and [Gemma renderer](https://github.com/ollama/ollama/blob/v0.33.3/model/renderers/gemma4.go).
-- Three inherited owner/due/condition tests fail only on an expected trailing
-  period. The identical failures reproduce on untouched merge commit `44eff0b1`.
-  They are disclosed baseline failures, not edited away for this experiment.
+- Three inherited owner/due/condition expectations initially failed on a trailing
+  period, also on untouched merge commit `44eff0b1`. Closeout traced this to the
+  existing `canonicalizeActionText` normalization, not a new notes behavior.
+  Expectations now explicitly retain the full condition/deadline without the
+  terminal period; focused normalization regression coverage was added.
 
 ## Follow-on experiments and decisions
 
@@ -152,19 +154,36 @@ The immediate acceptance target is a repeatable resource-safe baseline with
 source-grounded notes. The broader ideas below are deferred, not a commitment to
 continue expanding this PR until every experiment has been attempted.
 
-Final closeout checks: 88 focused unit tests passed, as did both TypeScript
-configurations and repository lint. The audio helper suite passed six tests with
-one real-runtime test skipped. A current-code replay of the older full-editor
-long capture matched the captured requests but failed exact final-result equality
-on trailing punctuation; it is not reported as an exact replay pass. The earlier
-compact-result replay passed before that experiment was retired. The revised
-audio timing/cleanup implementation still needs a fresh real-runtime acceptance
-run. These limitations keep the PR draft; they are not reasons to resume broad
-model experimentation.
+Final closeout checks: 176 focused unit tests passed, including the full pipeline,
+source-to-preview-store-to-rendered-component integration, cancellation and retry
+coverage. Both TypeScript configurations and repository lint pass. Existing action
+normalization strips terminal punctuation, explaining the historical replay
+discrepancy; no production text behavior was changed to match the capture. The
+grounding module and shared action normalizer are now hashed in future manifests
+and required by strict replay. Older captures without those hashes require the
+explicit current-code comparison and cannot prove exact historical code identity.
+The historical output is not relabeled an exact replay pass.
+
+Two private 30-second dual-source clips derived from existing recordings completed
+real-time replay. The final implementation measured 302 ms preparation, 1,000 ms
+first partial after readiness, 6,111 ms first EOU, and 87 ms p95 update latency.
+Both tails reached 30 seconds; queue depth was one, with no native/presentation
+failures. A separate timed cancellation exited successfully. Final telemetry is
+drained before writing success. These are short runtime checks, not whole-meeting
+ASR quality or packaged-application UI paint benchmarks.
+
+The bounded smaller-model screen used the existing production notes contract with
+local Qwen 3.5 4B, one selected frozen source, 16K context and q8 cache. It stopped
+at 5,039 ms on an OS pressure warning (23% reported headroom, approximately 241 MiB
+swap growth), before producing notes. Cleanup confirmed the owned daemon exited.
+No warm repeat or quality verdict is justified; no additional model trials were
+run. The preview/diagnostic PR can be reviewed independently of this incomplete
+hardware-fit evaluation. GitHub mergeability is available, but this credential
+cannot read the check rollup; remote CI must still be confirmed before merging.
 
 ## Deferred research and acceptance
 
-1. Treat compact review as an unaccepted experimental control, not a winning
+1. Treat retired compact review as historical evidence, not a winning
    production route. Freeze source-backed quality expectations before further
    prompt tuning: critical facts, commitments, owner uncertainty, conditions,
    corrections, and citation entailment. Separate held-out sources from tuned ones.

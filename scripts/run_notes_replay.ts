@@ -224,6 +224,8 @@ async function main() {
         'electron/llm/meetingNotesTypes.ts',
         'electron/llm/meetingNotesBudget.ts',
         'electron/meetingAnalysisRuns.ts',
+        'electron/llm/analysisGrounding.ts',
+        'src/utils/actionCommitment.ts',
         'scripts/run_notes_replay.ts',
         'scripts/lib/notesReplayTransport.ts',
         'scripts/lib/notesReplayContinuation.ts',

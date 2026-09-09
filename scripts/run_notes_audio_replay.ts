@@ -85,6 +85,9 @@ async function main() {
         if (Date.now() - lastSnapshot >= 30000) save();
       },
     });
+    // Drain the final telemetry read before recording success. A late pressure
+    // stop or sampling gap must not coexist with a completed result artifact.
+    await dispose();
     controller.signal.throwIfAborted();
     save();
     const result = {

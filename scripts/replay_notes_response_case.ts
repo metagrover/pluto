@@ -75,6 +75,8 @@ async function main() {
       : []),
     'electron/llm/meetingNotesPipeline.ts',
     'electron/llm/meetingNotesAudit.ts',
+    'electron/llm/analysisGrounding.ts',
+    'src/utils/actionCommitment.ts',
     ...Object.keys(manifest.codeHashes).filter((file) =>
       /^electron\/(?:llm\/(?:meetingNotes[^/]+|unifiedProvider)|meetingAnalysisRuns)\.ts$/.test(
         file,
