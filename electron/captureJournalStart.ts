@@ -2,6 +2,7 @@ import {
   createCaptureJournal,
   readCaptureJournalManifest,
 } from './captureJournal';
+import type { AudioKeyStore } from './crypto/audioKeyStore';
 import { getRecordingReadinessStatus } from './recordingReadiness';
 
 type GetReadinessStatusParams = Parameters<
@@ -28,6 +29,7 @@ export async function handleAudioCaptureJournalStart(options: {
   checkReadiness?: typeof getRecordingReadinessStatus;
   /** Freeze profile state synchronously; the returned write runs only for a new successful journal. */
   prepareCaptureIdentity?: (meetingId: string) => () => void;
+  audioKeyStore?: Pick<AudioKeyStore, 'getOrCreateMeetingAudioKey'> | null;
 }) {
   const normalizedMeetingId = String(options.meetingId || '');
   const commitCaptureIdentity =
@@ -66,10 +68,31 @@ export async function handleAudioCaptureJournalStart(options: {
   }
   try {
     const artifactsRoot = options.getMeetingArtifactsRootDir();
+    let keyId: string | undefined;
+    let meetingKey: Buffer | undefined;
+    let schemaVersion: 3 | 4 = 3;
+
+    if (options.audioKeyStore) {
+      try {
+        const keyResult =
+          options.audioKeyStore.getOrCreateMeetingAudioKey(normalizedMeetingId);
+        keyId = keyResult.keyId;
+        meetingKey = keyResult.meetingKey;
+        schemaVersion = 4;
+      } catch (err) {
+        console.error('[Pluto] Failed to acquire meeting encryption key:', err);
+        throw new Error(
+          `audio_key_failure: Failed to acquire encryption key for meeting ${normalizedMeetingId}`,
+        );
+      }
+    }
+
     let newJournal = false;
     if (commitCaptureIdentity && acquisition.status === 'acquired') {
       try {
-        await readCaptureJournalManifest(artifactsRoot, normalizedMeetingId);
+        await readCaptureJournalManifest(artifactsRoot, normalizedMeetingId, {
+          meetingKey,
+        });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         newJournal = true;
@@ -81,7 +104,9 @@ export async function handleAudioCaptureJournalStart(options: {
         typeof options.startedAtMs === 'number'
           ? options.startedAtMs
           : Date.now(),
-      schemaVersion: 3,
+      schemaVersion,
+      keyId,
+      meetingKey,
       expectedSources: options.expectedSources,
       // Fresh main-process readiness admits both required capture permissions.
       // A renderer permission snapshot can be stale after a successful prompt.

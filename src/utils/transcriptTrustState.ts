@@ -128,7 +128,7 @@ export type TranscriptTrustEnvelopeV2 = {
   };
   recovery?: {
     source: 'capture_journal';
-    journalSchemaVersion?: 1 | 2 | 3;
+    journalSchemaVersion?: 1 | 2 | 3 | 4;
     checkpointEvidenceVerified?: boolean;
     gapDetected: boolean;
     sourceScope: 'mic' | 'system' | 'multiple' | 'unknown';
@@ -570,7 +570,7 @@ const validRecovery = (
     Number(recovery.recoveredChunkCount) <=
       Number(recovery.acknowledgedChunkCount) &&
     (recovery.journalSchemaVersion === undefined ||
-      [1, 2, 3].includes(Number(recovery.journalSchemaVersion))) &&
+      [1, 2, 3, 4].includes(Number(recovery.journalSchemaVersion))) &&
     (recovery.checkpointEvidenceVerified === undefined ||
       typeof recovery.checkpointEvidenceVerified === 'boolean')
   );

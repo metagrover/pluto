@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   appendCaptureJournalChunk,
   appendCaptureTranscriptAcceptanceFrame,
@@ -23,13 +23,20 @@ import {
   markCaptureJournalSourceFailed,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
+  readCaptureJournalChunk,
   readCaptureJournalManifest,
   readCaptureJournalSidecar,
+  recordCaptureJournalStickyFailure,
   replaceCaptureTranscriptCheckpoint,
   sealCaptureJournal,
+  setCaptureJournalAudioKeyProvider,
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
+import {
+  ENVELOPE_MAGIC,
+  EncryptedArtifactStore,
+} from '../../electron/crypto/encryptedArtifactStore';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 import { canonicalizeTranscriptCheckpointConfig } from '../../src/utils/transcriptCheckpointConfig';
 
@@ -1330,5 +1337,752 @@ describe('capture journal', () => {
     );
 
     expect(manifestJson).toEqual(manifest);
+  });
+
+  describe('schema v4 encrypted capture journal', () => {
+    it('requires an encryption key to create a v4 journal', async () => {
+      const root = await makeRoot();
+      setCaptureJournalAudioKeyProvider(null);
+      await expect(
+        createCaptureJournal(root, {
+          meetingId: 'meeting-v4-nokey',
+          startedAtMs: 1_000,
+          schemaVersion: 4,
+        }),
+      ).rejects.toThrow('audio_key_unavailable');
+    });
+
+    it('creates a v4 journal with plaintext locator and encrypted manifest.enc', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const manifest = await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-basic',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      expect(manifest.schemaVersion).toBe(4);
+      expect(manifest.lifecycleState).toBe('recording');
+
+      // Check on disk: manifest.json is a locator
+      const locatorRaw = await readFile(
+        join(root, manifest.artifactRootRelativePath, 'manifest.json'),
+        'utf8',
+      );
+      const locator = JSON.parse(locatorRaw);
+      expect(locator.schemaVersion).toBe(4);
+      expect(locator.envelopeVersion).toBe(1);
+      expect(locator.encryptedManifestRelativePath).toBe(
+        'meeting-v4-basic/capture-journal/manifest.enc',
+      );
+      expect(locator.ciphertextSha256).toBeDefined();
+
+      // manifest.enc exists
+      const encStat = await stat(
+        join(root, locator.encryptedManifestRelativePath),
+      );
+      expect(encStat.size).toBeGreaterThan(0);
+
+      // Reading without key fails
+      setCaptureJournalAudioKeyProvider(null);
+      await expect(
+        readCaptureJournalManifest(root, 'meeting-v4-basic'),
+      ).rejects.toThrow('audio_key_unavailable');
+
+      // Reading with wrong key fails (decryption error)
+      const wrongKey = randomBytes(32);
+      await expect(
+        readCaptureJournalManifest(root, 'meeting-v4-basic', {
+          meetingKey: wrongKey,
+        }),
+      ).rejects.toThrow();
+
+      // Reading with correct key succeeds
+      const readManifest = await readCaptureJournalManifest(
+        root,
+        'meeting-v4-basic',
+        { meetingKey },
+      );
+      expect(readManifest.meetingId).toBe('meeting-v4-basic');
+      expect(readManifest.schemaVersion).toBe(4);
+    });
+
+    it('appends and reads encrypted chunks with opaque filenames', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-chunks',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      const audioData = Buffer.from('v4-secret-audio-payload-12345');
+      const updated = await appendCaptureJournalChunk(root, {
+        meetingId: 'meeting-v4-chunks',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        format: 'wav',
+        data: audioData,
+        meetingKey,
+      });
+
+      expect(updated.entries).toHaveLength(1);
+      const entry = updated.entries[0];
+      expect(entry.relativePath).toMatch(
+        /meeting-v4-chunks\/capture-journal\/chunks\/[a-f0-9-]+\.enc$/,
+      );
+      expect(entry.ciphertextSha256).toBeDefined();
+
+      // Ensure ciphertext on disk does not contain plaintext string
+      const rawDiskBytes = await readFile(join(root, entry.relativePath));
+      expect(rawDiskBytes.includes(audioData)).toBe(false);
+
+      // Read chunk decrypted
+      const decrypted = await readCaptureJournalChunk(
+        root,
+        'meeting-v4-chunks',
+        entry.relativePath,
+        { meetingKey },
+      );
+      expect(decrypted.equals(audioData)).toBe(true);
+
+      // Read chunk with wrong key throws
+      await expect(
+        readCaptureJournalChunk(root, 'meeting-v4-chunks', entry.relativePath, {
+          meetingKey: randomBytes(32),
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects plaintext repairPath in v4 and requires in-memory repairData', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const manifest = (await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-repair',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      })) as any;
+
+      await authorizeCaptureJournalInterval(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 0,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        meetingKey,
+      });
+
+      const rawData = Buffer.from('raw-audio-stream-data');
+      await persistCaptureJournalRawChunk(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 1,
+        source: 'mic',
+        sequence: 0,
+        format: 'wav',
+        data: rawData,
+        meetingKey,
+      });
+
+      const rawChecksum = createHash('sha256').update(rawData).digest('hex');
+
+      // Attempting to complete with repairPath must throw
+      await expect(
+        completeCaptureJournalCapturedChunk(root, {
+          meetingId: 'meeting-v4-repair',
+          generation: manifest.generation,
+          expectedRevision: 2,
+          source: 'mic',
+          sequence: 0,
+          rawChecksumSha256: rawChecksum,
+          repairPath: join(root, 'some-plaintext-file.wav'),
+          meetingKey,
+        }),
+      ).rejects.toThrow(
+        'Capture journal v4 does not permit plaintext repairPath',
+      );
+
+      // Completing with in-memory repairData succeeds
+      const repairData = Buffer.from('repaired-flac-or-wav-audio');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId: 'meeting-v4-repair',
+        generation: manifest.generation,
+        expectedRevision: 2,
+        source: 'mic',
+        sequence: 0,
+        rawChecksumSha256: rawChecksum,
+        repairData,
+        meetingKey,
+      });
+
+      const completedInterval = completed.manifest.intervals.find(
+        (i) => i.sequence === 0,
+      );
+      const micSource = completedInterval?.sources.mic;
+      expect(micSource?.disposition).toBe('captured');
+      if (micSource && micSource.disposition === 'captured') {
+        expect(micSource.repairRelativePath).toMatch(
+          /repair\/[a-f0-9-]+\.enc$/,
+        );
+
+        // Read decrypted repair chunk
+        const decryptedRepair = await readCaptureJournalChunk(
+          root,
+          'meeting-v4-repair',
+          micSource.repairRelativePath,
+          { meetingKey },
+        );
+        expect(decryptedRepair.equals(repairData)).toBe(true);
+      }
+    });
+
+    it('records sticky failure on manifest and prevents sealing', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      await createCaptureJournal(root, {
+        meetingId: 'meeting-v4-sticky',
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      });
+
+      const failedManifest = await recordCaptureJournalStickyFailure(root, {
+        meetingId: 'meeting-v4-sticky',
+        code: 'authentication_failed',
+        reason: 'Decryption authentication tag verification failed',
+        meetingKey,
+      });
+
+      expect(failedManifest.stickyFailure).toBeDefined();
+      expect(failedManifest.stickyFailure?.message).toBe(
+        'Decryption authentication tag verification failed',
+      );
+      expect(failedManifest.stickyFailure?.code).toBe('authentication_failed');
+
+      // Attempting to seal must fail
+      await expect(
+        sealCaptureJournal(root, {
+          meetingId: 'meeting-v4-sticky',
+          endedAtMs: 5_000,
+          meetingKey,
+        }),
+      ).rejects.toThrow('Cannot seal capture journal: sticky failure recorded');
+    });
+
+    it('encrypts transcript checkpoint and acceptance frame sidecars in v4 journals', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const meetingId = 'meeting-v4-sidecars';
+      const created = (await createCaptureJournal(root, {
+        meetingId,
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      })) as any;
+
+      await authorizeCaptureJournalInterval(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 0,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        meetingKey,
+      });
+
+      const rawData = Buffer.from('v4-mic-audio-raw');
+      await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 1,
+        source: 'mic',
+        sequence: 0,
+        format: 'wav',
+        data: rawData,
+        meetingKey,
+      });
+
+      const rawChecksum = createHash('sha256').update(rawData).digest('hex');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 2,
+        source: 'mic',
+        sequence: 0,
+        rawChecksumSha256: rawChecksum,
+        repairData: Buffer.from('v4-mic-audio-repair'),
+        meetingKey,
+      });
+
+      const checkpointSidecar = {
+        schemaVersion: 1 as const,
+        meetingId,
+        source: 'mic' as const,
+        sequence: 0,
+        chunkChecksumSha256: completed.receipt.checksumSha256,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        transcriptionConfig: {
+          backend: 'parakeet',
+          preset: 'fast',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
+          computeType: 'float16',
+          languageMode: 'detected' as const,
+          requestedLanguage: null,
+          pipelineVersion: 'live_chunk_v1' as const,
+        },
+        backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+        segments: [
+          { start: 0.5, end: 2.5, text: 'confidential transcript text' },
+        ],
+      };
+      const configKey = createHash('sha256')
+        .update(
+          canonicalizeTranscriptCheckpointConfig(
+            checkpointSidecar.transcriptionConfig,
+          ),
+        )
+        .digest('hex');
+
+      const checkpointResult = await appendCaptureTranscriptCheckpoint(root, {
+        receipt: completed.receipt,
+        expectedManifestRevision: completed.manifest.revision,
+        transcriptionConfigKey: configKey,
+        sidecar: checkpointSidecar,
+        meetingKey,
+      });
+
+      expect(checkpointResult.checkpoint.relativePath).toMatch(
+        /transcript-checkpoints\/mic-000000-r0\.enc$/,
+      );
+
+      // Verify on disk: starts with PENC and does NOT contain plaintext
+      const checkpointDiskBytes = await readFile(
+        join(root, checkpointResult.checkpoint.relativePath),
+      );
+      expect(checkpointDiskBytes.subarray(0, 4)).toEqual(ENVELOPE_MAGIC);
+      expect(
+        checkpointDiskBytes.includes(
+          Buffer.from('confidential transcript text'),
+        ),
+      ).toBe(false);
+
+      // Decrypt cleanly via readCaptureJournalSidecar
+      const decryptedCheckpointBytes = await readCaptureJournalSidecar(
+        root,
+        meetingId,
+        checkpointResult.checkpoint.relativePath,
+        checkpointResult.checkpoint.transcriptChecksumSha256,
+        { meetingKey },
+      );
+      expect(JSON.parse(decryptedCheckpointBytes.toString('utf8'))).toEqual(
+        checkpointSidecar,
+      );
+
+      // Reading with wrong key fails
+      await expect(
+        readCaptureJournalSidecar(
+          root,
+          meetingId,
+          checkpointResult.checkpoint.relativePath,
+          checkpointResult.checkpoint.transcriptChecksumSha256,
+          { meetingKey: randomBytes(32) },
+        ),
+      ).rejects.toThrow();
+
+      // Append acceptance frame sidecar
+      const activityInputs = { chunkStartSec: 0, chunkEndSec: 5 };
+      const digest = createHash('sha256')
+        .update(JSON.stringify(activityInputs))
+        .digest('hex');
+
+      const acceptanceSidecar = {
+        schemaVersion: 1 as const,
+        meetingId,
+        sequence: 0,
+        arbitrationVersion: 'chunk_arbitration_v1' as const,
+        activityInputs,
+        segments: [
+          {
+            source: 'mic' as const,
+            start: 0.5,
+            end: 2.5,
+            text: 'confidential accepted text',
+          },
+        ],
+      };
+
+      const frameResult = await appendCaptureTranscriptAcceptanceFrame(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: checkpointResult.manifest.revision,
+        sequence: 0,
+        micCheckpointChecksumSha256:
+          checkpointResult.checkpoint.transcriptChecksumSha256,
+        systemCheckpointChecksumSha256: null,
+        activityEvidenceDigestSha256: digest,
+        sidecar: acceptanceSidecar,
+        meetingKey,
+      });
+
+      expect(frameResult.frame.relativePath).toMatch(
+        /acceptance-frames\/000000\.enc$/,
+      );
+
+      // Verify on disk: starts with PENC and does NOT contain plaintext
+      const frameDiskBytes = await readFile(
+        join(root, frameResult.frame.relativePath),
+      );
+      expect(frameDiskBytes.subarray(0, 4)).toEqual(ENVELOPE_MAGIC);
+      expect(
+        frameDiskBytes.includes(Buffer.from('confidential accepted text')),
+      ).toBe(false);
+
+      // Decrypt cleanly via readCaptureJournalSidecar
+      const decryptedFrameBytes = await readCaptureJournalSidecar(
+        root,
+        meetingId,
+        frameResult.frame.relativePath,
+        frameResult.frame.acceptedChecksumSha256,
+        { meetingKey },
+      );
+      expect(JSON.parse(decryptedFrameBytes.toString('utf8'))).toEqual(
+        acceptanceSidecar,
+      );
+
+      // Test idempotency: calling appendCaptureTranscriptAcceptanceFrame again returns existing
+      const idempotentFrame = await appendCaptureTranscriptAcceptanceFrame(
+        root,
+        {
+          meetingId,
+          generation: created.generation,
+          expectedRevision: frameResult.manifest.revision,
+          sequence: 0,
+          micCheckpointChecksumSha256:
+            checkpointResult.checkpoint.transcriptChecksumSha256,
+          systemCheckpointChecksumSha256: null,
+          activityEvidenceDigestSha256: digest,
+          sidecar: acceptanceSidecar,
+          meetingKey,
+        },
+      );
+      expect(idempotentFrame.frame.relativePath).toBe(
+        frameResult.frame.relativePath,
+      );
+
+      // Promote transcript checkpoint
+      const promotedSidecar = {
+        ...checkpointSidecar,
+        transcriptionConfig: {
+          ...checkpointSidecar.transcriptionConfig,
+          model: 'parakeet-tdt-0.6b-v3',
+        },
+        segments: [
+          { start: 0.5, end: 2.5, text: 'promoted confidential text' },
+        ],
+      };
+      const promotedConfigKey = createHash('sha256')
+        .update(
+          canonicalizeTranscriptCheckpointConfig(
+            promotedSidecar.transcriptionConfig,
+          ),
+        )
+        .digest('hex');
+
+      const promotedResult = await promoteCaptureTranscriptCheckpoint(root, {
+        receipt: completed.receipt,
+        expectedManifestRevision: frameResult.manifest.revision,
+        expectedPriorTranscriptChecksumSha256:
+          checkpointResult.checkpoint.transcriptChecksumSha256,
+        transcriptionConfigKey: promotedConfigKey,
+        sidecar: promotedSidecar,
+        expectedPriorAcceptedChecksumSha256:
+          frameResult.frame.acceptedChecksumSha256,
+        acceptance: {
+          sequence: 0,
+          micCheckpointChecksumSha256:
+            checkpointResult.checkpoint.transcriptChecksumSha256,
+          systemCheckpointChecksumSha256: null,
+          activityEvidenceDigestSha256: digest,
+          sidecar: {
+            schemaVersion: 1,
+            meetingId,
+            sequence: 0,
+            arbitrationVersion: 'chunk_arbitration_v1',
+            activityInputs,
+            segments: [
+              {
+                source: 'mic',
+                start: 0.5,
+                end: 2.5,
+                text: 'promoted confidential text',
+              },
+            ],
+          },
+        },
+        meetingKey,
+      });
+
+      expect(promotedResult.checkpoint.relativePath).toMatch(
+        /transcript-checkpoints\/mic-000000-r1\.enc$/,
+      );
+      expect(promotedResult.frame.relativePath).toMatch(
+        /acceptance-frames\/000000-r1\.enc$/,
+      );
+
+      // Both promoted files are encrypted envelopes
+      const promotedCheckpointDisk = await readFile(
+        join(root, promotedResult.checkpoint.relativePath),
+      );
+      expect(promotedCheckpointDisk.subarray(0, 4)).toEqual(ENVELOPE_MAGIC);
+      expect(
+        promotedCheckpointDisk.includes(
+          Buffer.from('promoted confidential text'),
+        ),
+      ).toBe(false);
+
+      const promotedFrameDisk = await readFile(
+        join(root, promotedResult.frame.relativePath),
+      );
+      expect(promotedFrameDisk.subarray(0, 4)).toEqual(ENVELOPE_MAGIC);
+      expect(
+        promotedFrameDisk.includes(Buffer.from('promoted confidential text')),
+      ).toBe(false);
+
+      // Decrypt promoted sidecars
+      const decryptedPromotedCheckpoint = await readCaptureJournalSidecar(
+        root,
+        meetingId,
+        promotedResult.checkpoint.relativePath,
+        promotedResult.checkpoint.transcriptChecksumSha256,
+        { meetingKey },
+      );
+      expect(JSON.parse(decryptedPromotedCheckpoint.toString('utf8'))).toEqual(
+        promotedSidecar,
+      );
+
+      // Tampering detection: modify byte in encrypted checkpoint
+      const tamperedBytes = Buffer.from(promotedCheckpointDisk);
+      tamperedBytes[tamperedBytes.length - 1] ^= 0xff;
+      await writeFile(
+        join(root, promotedResult.checkpoint.relativePath),
+        tamperedBytes,
+      );
+      await expect(
+        readCaptureJournalSidecar(
+          root,
+          meetingId,
+          promotedResult.checkpoint.relativePath,
+          promotedResult.checkpoint.transcriptChecksumSha256,
+          { meetingKey },
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('rejects plaintext sidecar in schema 4 journals', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const meetingId = 'meeting-v4-plaintext-rejection';
+      const created = (await createCaptureJournal(root, {
+        meetingId,
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      })) as any;
+
+      await authorizeCaptureJournalInterval(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 0,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        meetingKey,
+      });
+
+      const rawData = Buffer.from('v4-mic-audio-raw');
+      await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 1,
+        source: 'mic',
+        sequence: 0,
+        format: 'wav',
+        data: rawData,
+        meetingKey,
+      });
+
+      const rawChecksum = createHash('sha256').update(rawData).digest('hex');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 2,
+        source: 'mic',
+        sequence: 0,
+        rawChecksumSha256: rawChecksum,
+        repairData: Buffer.from('v4-mic-audio-repair'),
+        meetingKey,
+      });
+
+      const checkpointSidecar = {
+        schemaVersion: 1 as const,
+        meetingId,
+        source: 'mic' as const,
+        sequence: 0,
+        chunkChecksumSha256: completed.receipt.checksumSha256,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        transcriptionConfig: {
+          backend: 'parakeet',
+          preset: 'fast',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
+          computeType: 'float16',
+          languageMode: 'detected' as const,
+          requestedLanguage: null,
+          pipelineVersion: 'live_chunk_v1' as const,
+        },
+        backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+        segments: [
+          { start: 0.5, end: 2.5, text: 'confidential transcript text' },
+        ],
+      };
+      const configKey = createHash('sha256')
+        .update(
+          canonicalizeTranscriptCheckpointConfig(
+            checkpointSidecar.transcriptionConfig,
+          ),
+        )
+        .digest('hex');
+
+      // Append a valid sidecar first
+      const checkpointRes = await appendCaptureTranscriptCheckpoint(root, {
+        receipt: completed.receipt,
+        expectedManifestRevision: completed.manifest.revision,
+        transcriptionConfigKey: configKey,
+        sidecar: checkpointSidecar,
+        meetingKey,
+      });
+
+      // Overwrite the sidecar with unencrypted plaintext JSON on disk
+      const sidecarAbsPath = join(root, checkpointRes.checkpoint.relativePath);
+      const plaintextJson = Buffer.from(
+        JSON.stringify({ text: 'plaintext sidecar' }),
+      );
+      const plaintextChecksum = createHash('sha256')
+        .update(plaintextJson)
+        .digest('hex');
+      await writeFile(sidecarAbsPath, plaintextJson);
+
+      // Mutate the encrypted manifest so the checkpoint has the plaintext checksum
+      const manifest = (await readCaptureJournalManifest(root, meetingId, {
+        meetingKey,
+      })) as any;
+      manifest.transcriptCheckpoints[0].transcriptChecksumSha256 =
+        plaintextChecksum;
+      const manifestEncPath = join(
+        root,
+        `${manifest.artifactRootRelativePath}/manifest.enc`,
+      );
+      const writeResult = await EncryptedArtifactStore.writeEncryptedFile(
+        manifestEncPath,
+        Buffer.from(JSON.stringify(manifest, null, 2)),
+        meetingKey,
+        {
+          keyId: manifest.keyId,
+          meetingId,
+          generation: manifest.generation,
+          artifactKind: 'manifest',
+          source: 'none',
+          sequence: manifest.revision,
+        },
+      );
+      const locatorPath = join(
+        root,
+        `${manifest.artifactRootRelativePath}/manifest.json`,
+      );
+      const locator = JSON.parse(
+        (await readFile(locatorPath)).toString('utf8'),
+      );
+      locator.manifestCiphertextSha256 = writeResult.ciphertextSha256;
+      await writeFile(locatorPath, JSON.stringify(locator, null, 2));
+
+      // Now readCaptureJournalSidecar should pass checksum check but reject because schema 4 requires encrypted envelopes
+      await expect(
+        readCaptureJournalSidecar(
+          root,
+          meetingId,
+          checkpointRes.checkpoint.relativePath,
+          plaintextChecksum,
+          { meetingKey },
+        ),
+      ).rejects.toThrow(/schema 4 sidecars must be encrypted envelopes/);
+    });
+
+    it('fails closed when sealing sidecar without meetingKey in v4', async () => {
+      const root = await makeRoot();
+      const meetingKey = randomBytes(32);
+      const meetingId = 'meeting-v4-no-key';
+      const created = (await createCaptureJournal(root, {
+        meetingId,
+        startedAtMs: 1_000,
+        schemaVersion: 4,
+        meetingKey,
+      })) as any;
+
+      await authorizeCaptureJournalInterval(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 0,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        meetingKey,
+      });
+
+      const rawData = Buffer.from('v4-mic-audio-raw');
+      await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 1,
+        source: 'mic',
+        sequence: 0,
+        format: 'wav',
+        data: rawData,
+        meetingKey,
+      });
+
+      const rawChecksum = createHash('sha256').update(rawData).digest('hex');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: created.generation,
+        expectedRevision: 2,
+        source: 'mic',
+        sequence: 0,
+        rawChecksumSha256: rawChecksum,
+        repairData: Buffer.from('v4-mic-audio-repair'),
+        meetingKey,
+      });
+
+      await expect(
+        appendCaptureTranscriptCheckpoint(root, {
+          receipt: completed.receipt,
+          expectedManifestRevision: completed.manifest.revision,
+          transcriptionConfigKey: 'default',
+          sidecar: {
+            text: 'test',
+            transcriptionConfig: { model: 'parakeet' },
+          },
+          meetingKey: null as any,
+        }),
+      ).rejects.toThrow(/audio_key_/);
+    });
   });
 });
