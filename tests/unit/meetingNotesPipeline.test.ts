@@ -2204,7 +2204,9 @@ it.each(['owner', 'due', 'condition'] as const)(
       expect(mergeAuditCalls).toBe(field === 'owner' ? 1 : 2);
       expect(result.quality.retry_count).toBe(field === 'owner' ? 0 : 1);
       expect(result.all_action_items[0]).toMatchObject({
-        text: original.text,
+        // Existing action canonicalization removes terminal punctuation, not
+        // the inherited condition or deadline.
+        text: 'Send the outline by Friday if legal approves',
         assignee: 'Milo',
         due: 'Friday',
       });

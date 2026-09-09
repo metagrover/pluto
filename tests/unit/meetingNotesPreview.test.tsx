@@ -1,6 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { createNotesSourceFromText } from '../../electron/llm/meetingNotesSource';
+import { createNotesStreamPreview } from '../../electron/llm/meetingNotesStreamPreview';
 import type { NotesDraft } from '../../electron/llm/meetingNotesTypes';
+import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
 import { createMeetingNotesPreviewStore } from '../../electron/meetingNotesPreview';
 import {
   MeetingNotesDraftPreview,
@@ -25,6 +28,38 @@ const draft: NotesDraft = {
   ],
 };
 describe('ephemeral notes previews', () => {
+  it('renders a complete streamed item through the preview store and drops it on cancellation', () => {
+    const source = createNotesSourceFromText('Wait for approval.');
+    const spans = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const store = createMeetingNotesPreviewStore();
+    const controller = new AbortController();
+    const push = createNotesStreamPreview({
+      source,
+      spans,
+      decode: createNotesWireRequest('', spans).decode,
+      signal: controller.signal,
+      onDraft: (value) =>
+        store.set('meeting', 'run', value, () => !controller.signal.aborted),
+    });
+    const prefix =
+      '{"sections":[{"title":"Next step","items":[{"kind":"point","text":"Wait for approval.","owner":null,"due":null,"sources":["R0"]}';
+    push(prefix.slice(0, -1));
+    expect(store.get('meeting')).toBeNull();
+    push(prefix);
+    const html = renderToStaticMarkup(
+      <MeetingNotesDraftPreview preview={store.get('meeting')!} />,
+    );
+    expect(html).toContain('Wait for approval.');
+    expect(html).toContain('not final');
+    expect(html).not.toContain('<button');
+    controller.abort();
+    push(`${prefix}]}]}`);
+    expect(store.get('meeting')).toBeNull();
+  });
   it('isolates meetings, clones content, and removes stale source/run previews', () => {
     const store = createMeetingNotesPreviewStore();
     let current = true;

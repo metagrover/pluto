@@ -104,6 +104,18 @@ describe('action commitment metadata', () => {
     );
   });
 
+  it('normalizes terminal punctuation without losing conditions or internal decimals', () => {
+    expect(
+      canonicalizeActionText('Send version 1.2 by Friday if legal approves.'),
+    ).toBe('Send version 1.2 by Friday if legal approves');
+    expect(
+      canonicalizeActionText('Do not send version 1.2 until legal approves.'),
+    ).toBe('Do not send version 1.2 until legal approves');
+    expect(canonicalizeActionText('Send the outline?')).toBe(
+      'Send the outline?',
+    );
+  });
+
   it('detects third-party assignees from name or text', () => {
     expect(isThirdPartyAssignee('Them')).toBe(true);
     expect(isThirdPartyAssignee('them')).toBe(true);
@@ -144,14 +156,17 @@ describe('action commitment metadata', () => {
       isThirdPartyAssignee(undefined, 'Remote speaker to provide updates.'),
     ).toBe(true);
     expect(
-      isThirdPartyAssignee(undefined, 'Taylor will send the benchmark numbers.'),
+      isThirdPartyAssignee(
+        undefined,
+        'Taylor will send the benchmark numbers.',
+      ),
     ).toBe(true);
     expect(
       isThirdPartyAssignee(undefined, 'Arnold needs to circle back with team.'),
     ).toBe(true);
-    expect(
-      isThirdPartyAssignee('Me', 'Me will circle back with Arnold.'),
-    ).toBe(false);
+    expect(isThirdPartyAssignee('Me', 'Me will circle back with Arnold.')).toBe(
+      false,
+    );
     expect(
       isThirdPartyAssignee(undefined, 'Circle back with Arnold offline.'),
     ).toBe(false);

@@ -31,6 +31,9 @@ type ReplayClock = {
 };
 
 type ReplayMetrics = {
+  preparationMs: number | null;
+  firstPartialAfterReadyMs: number | null;
+  firstEouAfterReadyMs: number | null;
   firstPartialMs: number | null;
   firstEouMs: number | null;
   p50UpdateLatencyMs: number | null;
@@ -120,26 +123,46 @@ export const replayCausalFrames = async (options: {
   };
   const appendLatenciesMs: number[] = [];
   let maximumQueueDepth = 0;
+  let failure: { error: unknown } | undefined;
+  const throwIfFailed = () => {
+    if (failure) throw failure.error;
+  };
 
-  for (const frame of options.frames) {
-    const targetMs = startedAtMs + frame.audioEndSeconds * 1_000;
-    const waitMs = targetMs - options.clock.nowMs();
-    if (waitMs > 0) await options.clock.sleep(waitMs);
-    const sourceQueue = pending[frame.source];
-    while (sourceQueue.length >= 4) await sourceQueue.shift();
-    const appendStartedAt = options.clock.nowMs();
-    const operation: Promise<void> = options.append(frame).then(() => {
-      appendLatenciesMs.push(
-        Math.max(0, options.clock.nowMs() - appendStartedAt),
-      );
-      const index = sourceQueue.indexOf(operation);
-      if (index >= 0) sourceQueue.splice(index, 1);
-    });
-    sourceQueue.push(operation);
-    maximumQueueDepth = Math.max(maximumQueueDepth, sourceQueue.length);
-    options.onMaximumQueueDepth?.(maximumQueueDepth);
+  try {
+    for (const frame of options.frames) {
+      throwIfFailed();
+      const targetMs = startedAtMs + frame.audioEndSeconds * 1_000;
+      const waitMs = targetMs - options.clock.nowMs();
+      if (waitMs > 0) await options.clock.sleep(waitMs);
+      throwIfFailed();
+      const sourceQueue = pending[frame.source];
+      while (sourceQueue.length >= 4) await sourceQueue.shift();
+      throwIfFailed();
+      const appendStartedAt = options.clock.nowMs();
+      const operation: Promise<void> = options
+        .append(frame)
+        .then(
+          () => {
+            appendLatenciesMs.push(
+              Math.max(0, options.clock.nowMs() - appendStartedAt),
+            );
+          },
+          (error) => {
+            failure ??= { error };
+          },
+        )
+        .finally(() => {
+          const index = sourceQueue.indexOf(operation);
+          if (index >= 0) sourceQueue.splice(index, 1);
+        });
+      sourceQueue.push(operation);
+      maximumQueueDepth = Math.max(maximumQueueDepth, sourceQueue.length);
+      options.onMaximumQueueDepth?.(maximumQueueDepth);
+    }
+  } finally {
+    await Promise.all([...pending.mic, ...pending.system]);
   }
-  await Promise.all([...pending.mic, ...pending.system]);
+  throwIfFailed();
   return { appendLatenciesMs, maximumQueueDepth };
 };
 
@@ -222,15 +245,43 @@ const realClock: ReplayClock = {
   sleep: async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
+/** Decode/prepare time is not per-update ASR latency. Unstarted replay is unknown. */
+export const replayUpdateLatencyMs = (
+  receivedAtMs: number,
+  replayStartedAtMs: number | null,
+  processedAudioSeconds: number,
+): number | null =>
+  replayStartedAtMs === null
+    ? null
+    : Math.max(
+        0,
+        receivedAtMs - replayStartedAtMs - processedAudioSeconds * 1000,
+      );
+
 export const runPrivateParakeetEouReplay = async (
   manifestPath: string,
+  options: {
+    signal?: AbortSignal;
+    /** Private diagnostic observer only; callers must not publish raw content. */
+    onTranscript?: (
+      segments: ReturnType<
+        ReturnType<typeof createEouTranscriptProjection>['apply']
+      >,
+    ) => void;
+  } = {},
 ): Promise<ReplayMetrics> => {
+  options.signal?.throwIfAborted();
   let manifest = readPrivateParakeetEouManifest(manifestPath);
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), 'pluto-eou-pcm-'),
   );
   const host = makeRuntimeHost({ paths: runtimePaths(manifest) });
+  const stopOwned = () => host.shutdown();
+  options.signal?.addEventListener('abort', stopOwned, { once: true });
   const metrics: ReplayMetrics = {
+    preparationMs: null,
+    firstPartialAfterReadyMs: null,
+    firstEouAfterReadyMs: null,
     firstPartialMs: null,
     firstEouMs: null,
     p50UpdateLatencyMs: null,
@@ -289,6 +340,7 @@ export const runPrivateParakeetEouReplay = async (
     }
   };
   const startedAtMs = realClock.nowMs();
+  let replayStartedAtMs: number | null = null;
   let client: ParakeetEouClient | null = null;
   const finalClient = new ParakeetFinalClient({
     paths: runtimePaths(manifest),
@@ -329,25 +381,31 @@ export const runPrivateParakeetEouReplay = async (
         metrics.tailCoverageSeconds[source],
         event.processedAudioSeconds,
       );
-      const latency = Math.max(
-        0,
-        receivedAtMs - startedAtMs - event.processedAudioSeconds * 1_000,
+      const latency = replayUpdateLatencyMs(
+        receivedAtMs,
+        replayStartedAtMs,
+        event.processedAudioSeconds,
       );
-      updateLatencies.push(latency);
+      if (latency !== null) updateLatencies.push(latency);
       if (
         metrics.firstPartialMs === null &&
         (event.committedText.length > 0 || event.tentativeText.length > 0)
       ) {
         metrics.firstPartialMs = receivedAtMs - startedAtMs;
+        metrics.firstPartialAfterReadyMs =
+          replayStartedAtMs === null ? null : receivedAtMs - replayStartedAtMs;
       }
       if (
         metrics.firstEouMs === null &&
         event.committedText.length > committedLengths[source]
       ) {
         metrics.firstEouMs = receivedAtMs - startedAtMs;
+        metrics.firstEouAfterReadyMs =
+          replayStartedAtMs === null ? null : receivedAtMs - replayStartedAtMs;
       }
       committedLengths[source] = event.committedText.length;
       latestSegments = rawProjection.apply(event);
+      options.onTranscript?.(structuredClone(latestSegments));
       projectConversation('recognition');
       metrics.nativeRssPeakBytes = Math.max(
         metrics.nativeRssPeakBytes,
@@ -370,10 +428,20 @@ export const runPrivateParakeetEouReplay = async (
       SOURCES.map((source) => client!.open(identities[source])),
     );
     const frames = buildCausalReplayFrames(inputs);
+    replayStartedAtMs = realClock.nowMs();
+    metrics.preparationMs = replayStartedAtMs - startedAtMs;
     const replay = await replayCausalFrames({
       frames,
-      clock: realClock,
+      clock: {
+        nowMs: realClock.nowMs,
+        sleep: async (ms) => {
+          options.signal?.throwIfAborted();
+          await realClock.sleep(ms);
+          options.signal?.throwIfAborted();
+        },
+      },
       append: async (frame) => {
+        options.signal?.throwIfAborted();
         const evidenceChanged = echoEvidence.append({
           source: frame.source,
           sampleRate: frame.sampleRate,
@@ -410,6 +478,7 @@ export const runPrivateParakeetEouReplay = async (
     }
     return metrics;
   } finally {
+    options.signal?.removeEventListener('abort', stopOwned);
     await client?.close().catch(() => undefined);
     finalClient.close();
     host.shutdown();

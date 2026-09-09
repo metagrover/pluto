@@ -24,6 +24,7 @@ import {
 } from './lib/notesReplayMarkdown';
 import { triageNotesReplay } from './lib/notesReplayQuality';
 import {
+  NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES,
   notesReplayResourceStop,
   readNotesReplayResources,
   watchNotesReplayResources,
@@ -39,6 +40,11 @@ const sha = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 async function main() {
   const mode = process.env.NOTES_REPLAY_MODE ?? 'production';
+  assert.equal(
+    process.env.NOTES_REPLAY_COMPACT_EDITOR,
+    undefined,
+    'compact_editor_experiment_retired_use_archived_source',
+  );
   const contextTokens = Number(process.env.NOTES_REPLAY_CONTEXT ?? '16384');
   assert.ok(
     [16384, 24576, 32768].includes(contextTokens),
@@ -218,6 +224,8 @@ async function main() {
         'electron/llm/meetingNotesTypes.ts',
         'electron/llm/meetingNotesBudget.ts',
         'electron/meetingAnalysisRuns.ts',
+        'electron/llm/analysisGrounding.ts',
+        'src/utils/actionCommitment.ts',
         'scripts/run_notes_replay.ts',
         'scripts/lib/notesReplayTransport.ts',
         'scripts/lib/notesReplayContinuation.ts',
@@ -254,7 +262,10 @@ async function main() {
         sampleIntervalMs: 5000,
         maxSampleGapMs: 30000,
         minMemoryFreePercent: 10,
-        maxSwapGrowthBytes: 512 * 1024 * 1024,
+        version: 'os-pressure-bounded-swap-v2',
+        maxSwapGrowthBytes: NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES,
+        requiredMemoryPressure: 'normal',
+        legacyWithoutPressureMaxSwapGrowthBytes: 512 * 1024 * 1024,
         thermalWarningsAllowed: false,
       },
       codeHashes: Object.fromEntries(
@@ -349,10 +360,16 @@ async function main() {
               source,
               contextTokens,
               compactWriterContract: true,
-              onDraft: (draft) => {
-                result.firstDraftMs ??= Date.now() - started;
+              onDraft: (draft, phase) => {
+                if (!draft.sections.some((s) => s.items.length)) return;
+                result.firstCompleteBulletMs ??= Date.now() - started;
+                if (phase !== 'streaming')
+                  result.firstDraftMs ??= Date.now() - started;
                 record({
-                  event: 'draft_preview_ready',
+                  event:
+                    phase === 'streaming'
+                      ? 'streaming_bullet_ready'
+                      : 'draft_preview_ready',
                   caseIndex: current,
                   elapsedMs: Date.now() - started,
                   sectionCount: draft.sections.length,

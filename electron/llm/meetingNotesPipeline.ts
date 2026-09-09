@@ -61,7 +61,7 @@ const emitDraftPreview = (
 ) => {
   if (input.signal?.aborted) return;
   try {
-    input.onDraft?.(structuredClone(draft));
+    input.onDraft?.(structuredClone(draft), 'complete');
   } catch {
     // Observability/UI must not change generation or publication outcomes.
     console.warn('[Notes] Draft preview observer failed');
