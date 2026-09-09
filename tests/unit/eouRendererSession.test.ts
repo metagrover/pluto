@@ -420,4 +420,181 @@ describe('EOU renderer session', () => {
       meetingId: 'meeting-1',
     });
   });
+
+  it('buffers 49 320ms mic frames before readiness and dispatches all 49 in order without backpressure', async () => {
+    const transport = makeTransport();
+    const startDeferred = deferred<unknown>();
+    const appendCalls: Array<{ sequence: number; audioStartSeconds: number }> =
+      [];
+    transport.invoke = vi.fn((channel, payload) => {
+      if (channel === 'PARAKEET_EOU_START') return startDeferred.promise;
+      if (channel === 'PARAKEET_EOU_APPEND') {
+        appendCalls.push(
+          payload as { sequence: number; audioStartSeconds: number },
+        );
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+    const { session, onUnavailable } = makeSession(transport);
+    const startPromise = session.start();
+
+    // 49 frames of 320ms at 8000Hz = 2,560 samples each
+    for (let i = 0; i < 49; i++) {
+      session.append('mic', new Float32Array(2_560));
+    }
+    expect(appendCalls).toHaveLength(0);
+
+    // Resolve start and wait for pump to dispatch all frames
+    startDeferred.resolve({});
+    await startPromise;
+    await session.drain();
+
+    expect(onUnavailable).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(49);
+    for (let i = 0; i < 49; i++) {
+      expect(appendCalls[i].sequence).toBe(i + 1);
+      expect(appendCalls[i].audioStartSeconds).toBeCloseTo(i * 0.32, 2);
+    }
+  });
+
+  it('retains all 130 ten-ms buffers during startup and one afterward without discarding audio or shortening time', async () => {
+    const transport = makeTransport();
+    const startDeferred = deferred<unknown>();
+    const appendCalls: Array<{ samples: Float32Array; sequence: number }> = [];
+    transport.invoke = vi.fn((channel, payload) => {
+      if (channel === 'PARAKEET_EOU_START') return startDeferred.promise;
+      if (channel === 'PARAKEET_EOU_APPEND') {
+        appendCalls.push(
+          payload as { samples: Float32Array; sequence: number },
+        );
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    });
+    const { session, onUnavailable } = makeSession(transport);
+    const startPromise = session.start();
+
+    // 130 x 10ms at 8000Hz = 80 samples each (total 10,400 samples)
+    for (let i = 0; i < 130; i++) {
+      session.append('mic', new Float32Array(80).fill(1));
+    }
+    expect(appendCalls).toHaveLength(0);
+
+    startDeferred.resolve({});
+    await startPromise;
+
+    // Buffer 131: 80 samples
+    session.append('mic', new Float32Array(80).fill(2));
+    await session.finish();
+
+    expect(onUnavailable).not.toHaveBeenCalled();
+    // 131 * 80 = 10,480 samples total.
+    // Chunked into 320ms frames (2,560 samples): 4 full frames + 1 tail frame
+    const totalSamplesDispatched = appendCalls.reduce(
+      (acc, c) => acc + c.samples.length,
+      0,
+    );
+    expect(totalSamplesDispatched).toBe(10_480);
+    expect(appendCalls).toHaveLength(5);
+  });
+
+  it('fails explicitly with parakeet_backpressure when retained duration exceeds configured budget', async () => {
+    const transport = makeTransport();
+    const { session, onUnavailable } = makeSession(transport, {
+      maxRetainedAudioSecondsPerSource: 1.0, // 1 second limit
+    });
+    await session.start();
+
+    // 1 second at 8000Hz is 8000 samples. 2560 * 4 = 10,240 samples = 1.28s > 1.0s
+    session.append('mic', new Float32Array(2_560 * 4));
+
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_backpressure');
+    expect(session.status()).toBe('unavailable');
+  });
+
+  it('fails explicitly with parakeet_backpressure when startup buffering exceeds duration limit', async () => {
+    const transport = makeTransport();
+    const startDeferred = deferred<unknown>();
+    transport.invoke = vi.fn((channel) => {
+      if (channel === 'PARAKEET_EOU_START') return startDeferred.promise;
+      return Promise.resolve({});
+    });
+    const { session, onUnavailable } = makeSession(transport, {
+      maxRetainedAudioSecondsPerSource: 1.0,
+    });
+    const startPromise = session.start().catch(() => undefined);
+
+    // 1 second at 8000Hz is 8000 samples. 2560 * 4 = 10,240 samples = 1.28s > 1.0s
+    session.append('mic', new Float32Array(2_560 * 4));
+
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_backpressure');
+    expect(session.status()).toBe('unavailable');
+
+    // Trying to append after exhaustion does not dispatch or resume
+    session.append('mic', new Float32Array(2_560));
+    startDeferred.resolve({});
+    await startPromise;
+    expect(session.status()).toBe('unavailable');
+  });
+
+  it('preflights oversized appends and fails with parakeet_backpressure before allocating past byte limit', async () => {
+    const transport = makeTransport();
+    const { session, onUnavailable } = makeSession(transport, {
+      maxRetainedPcmBytes: 4096, // 4 KB limit (1024 Float32 samples)
+    });
+    await session.start();
+
+    // 2560 Float32 samples = 10,240 bytes > 4096 bytes
+    session.append('mic', new Float32Array(2_560));
+
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_backpressure');
+    expect(session.status()).toBe('unavailable');
+  });
+
+  it('bounds finish while startup is unresolved within timeout and fences listeners', async () => {
+    const transport = makeTransport();
+    const startDeferred = deferred<unknown>();
+    transport.invoke = vi.fn((channel) => {
+      if (channel === 'PARAKEET_EOU_START') return startDeferred.promise;
+      return Promise.resolve({});
+    });
+    const { session, onUnavailable, onSegments } = makeSession(transport, {
+      finishTimeoutMs: 50,
+    });
+    const startPromise = session.start().catch(() => undefined);
+    session.append('mic', new Float32Array(2_560));
+
+    // Finish while start is still unresolved
+    await session.finish();
+
+    expect(session.status()).toBe('unavailable');
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_timeout');
+    expect(transport.invoke).toHaveBeenCalledWith('PARAKEET_EOU_CANCEL', {
+      meetingId: 'meeting-1',
+      generation: 1,
+    });
+
+    // Late start resolution must not restore ready status
+    startDeferred.resolve({});
+    await startPromise;
+    expect(session.status()).toBe('unavailable');
+
+    // Late update event must be fenced and ignored
+    transport.emitUpdate({
+      meetingId: 'meeting-1',
+      generation: 1,
+      event: {
+        streamId: 'eou-meeting-1-mic',
+        source: 'mic',
+        generation: 1,
+        revision: 1,
+        processedAudioSeconds: 0.32,
+        committedText: 'late text',
+        tentativeText: '',
+        tokens: [],
+      },
+    });
+    expect(onSegments).not.toHaveBeenCalled();
+  });
 });

@@ -13,6 +13,7 @@ export type EouPcmChunker = {
   append(samples: Float32Array): void;
   flush(): EouRendererFrame | null;
   reset(): void;
+  bufferedSamples(): number;
 };
 
 const MINIMUM_SAMPLE_RATE = 8_000;
@@ -85,6 +86,9 @@ export function createEouPcmChunker(options: {
       buffered = new Float32Array(0);
       emittedSamples = 0;
       nextSequence = 1;
+    },
+    bufferedSamples() {
+      return buffered.length;
     },
   };
 }

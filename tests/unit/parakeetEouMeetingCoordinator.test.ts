@@ -197,4 +197,23 @@ describe('ParakeetEouMeetingCoordinator', () => {
     expect(onUnavailable).toHaveBeenCalledOnce();
     expect(coordinator.isActive()).toBe(false);
   });
+
+  it('cancels the active meeting and detaches listeners without error', async () => {
+    const { coordinator, client, onUnavailable } = makeCoordinator();
+    await coordinator.start(start);
+
+    await coordinator.cancel('meeting-1');
+
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith({
+      meetingId: 'meeting-1',
+      owner: 'renderer-7',
+      code: 'parakeet_cancelled',
+    });
+    expect(coordinator.isActive()).toBe(false);
+
+    // Subsequent cancel is idempotent
+    await coordinator.cancel('meeting-1');
+    expect(client.close).toHaveBeenCalledOnce();
+  });
 });

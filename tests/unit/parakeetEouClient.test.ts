@@ -287,4 +287,54 @@ describe('ParakeetEouClient', () => {
     await client.finish(identity('system'));
     expect(lease.release).toHaveBeenCalledOnce();
   });
+
+  it('invalidates worker when native cancel takes longer than cleanup timeout on close', async () => {
+    const process = new FakeTransport();
+    process.request = vi.fn(async (payload: Record<string, unknown>) => {
+      if (payload.method === 'eou_cancel') {
+        return new Promise<NativeResponse>(() => {});
+      }
+      return {
+        schemaVersion: 1 as const,
+        id: String(payload.id),
+        ok: true,
+        result: {},
+      };
+    });
+    const lease = {
+      kind: 'live' as const,
+      release: vi.fn(async () => {}),
+      cancelAndPersistForRetry: vi.fn(),
+      setPreemptionHandler: vi.fn(),
+      invalidateWorker: vi.fn(async () => {}),
+    };
+    const client = new ParakeetEouClient({
+      process,
+      runtimeLease: lease,
+      maxOutstandingPerSource: 4,
+      cleanupTimeoutMs: 50,
+    });
+    await client.open(identity('mic'));
+
+    await client.close();
+
+    expect(lease.invalidateWorker).toHaveBeenCalledWith(
+      'parakeet_cleanup_timeout',
+    );
+    expect(lease.release).toHaveBeenCalledOnce();
+  });
+
+  it('rejects pending and in-flight appends with parakeet_cancelled on close', async () => {
+    const process = new FakeTransport();
+    const client = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await client.open(identity('mic'));
+
+    const appendPromise = client.append(append('mic', 1));
+    await client.close();
+
+    await expect(appendPromise).rejects.toThrow('parakeet_cancelled');
+  });
 });

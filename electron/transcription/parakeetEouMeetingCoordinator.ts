@@ -161,6 +161,13 @@ export class ParakeetEouMeetingCoordinator {
     }
   }
 
+  async cancel(meetingId?: string): Promise<void> {
+    if (meetingId && this.active && this.active.meetingId !== meetingId) {
+      return;
+    }
+    await this.fail('parakeet_cancelled');
+  }
+
   async fail(code: string): Promise<void> {
     if (this.failing) return this.failing;
     const meeting = this.active;

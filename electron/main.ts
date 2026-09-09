@@ -1528,7 +1528,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('PARAKEET_EOU_CANCEL', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
-    await eouCoordinator.fail('parakeet_cancelled');
+    await eouCoordinator.cancel(meetingId);
     parakeetEouOwner = null;
     parakeetEouGeneration = null;
     return {};

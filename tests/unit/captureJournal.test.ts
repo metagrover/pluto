@@ -568,6 +568,35 @@ describe('capture journal', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('marks unsupplied system audio as missing with pending_at_stop when system source was available at start', async () => {
+    const root = await makeRoot();
+    const created = await createCaptureJournal(root, {
+      meetingId: 'meeting-system-missing',
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+      sourceAvailability: { mic: 'available', system: 'available' },
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const stopped = await stopCaptureJournal(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+    });
+    expect(stopped.intervals[0].sources.system).toEqual({
+      disposition: 'missing',
+      reason: 'pending_at_stop',
+    });
+    await deleteCaptureJournal(root, created.meetingId);
+  });
+
   it('reads a legacy v1 manifest as uncertain evidence', async () => {
     const root = await makeRoot();
     const artifactRoot = join(root, 'meeting-123', 'capture-journal');

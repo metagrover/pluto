@@ -277,18 +277,17 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(previewIndex).toBeLessThan(recorderStopIndex);
   });
 
-  it('synthesizes silent 48kHz PCM for empty system intervals when system recorder is active', () => {
-    expect(source).toContain(
+  it('does not synthesize silent PCM for empty system intervals and preserves truthful missing evidence', () => {
+    expect(source).not.toContain(
       'else if (hasSystemRecorderRef.current && !systemFailureRecorded)',
     );
-    expect(source).toContain(
-      'const targetSampleCount = Math.max(\n                1,\n                Math.round(48000 * chunkDurationSec),\n              );',
-    );
-    expect(source).toContain(
+    expect(source).not.toContain(
       'const silentPcm = new Float32Array(targetSampleCount);',
     );
+    expect(source).toContain('const floatChunks = systemPcmChunksRef.current;');
+    expect(source).toContain('if (floatChunks.length > 0) {');
     expect(source).toContain(
-      'systemBlob = createWavBlob(silentPcm, 48000, 1);',
+      'systemBlob = createWavBlob(intervalPcm, 48000, 1);',
     );
   });
 

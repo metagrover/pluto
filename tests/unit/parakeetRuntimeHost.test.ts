@@ -173,4 +173,44 @@ describe('ParakeetRuntimeHost', () => {
     await expect(live).resolves.toMatchObject({ kind: 'live' });
     expect(persisted).toHaveBeenCalledTimes(2);
   });
+
+  it('terminates child and drains host when active lease calls invalidateWorker', async () => {
+    const child = new FakeChild();
+    const diagnostic = vi.fn();
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      diagnostic,
+    });
+    const live = await host.acquire('live');
+    expect(child.kill).not.toHaveBeenCalled();
+
+    await live.invalidateWorker('parakeet_cleanup_timeout');
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(diagnostic).toHaveBeenCalledWith('parakeet_cleanup_timeout');
+    expect(host.diagnostics().activeLeaseCount).toBe(0);
+  });
+
+  it('does not terminate child if lease is already released or ownership has changed', async () => {
+    const child1 = new FakeChild();
+    const child2 = new FakeChild();
+    let spawnCount = 0;
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => (spawnCount++ === 0 ? child1 : child2),
+    });
+    const live1 = await host.acquire('live');
+    await live1.release();
+
+    const live2 = await host.acquire('live');
+    // Stale live1 calls invalidateWorker
+    await live1.invalidateWorker('stale_call');
+
+    // child2 should NOT be killed because live1 is not the active lease
+    expect(child2.kill).not.toHaveBeenCalled();
+    expect(host.diagnostics().activeLeaseCount).toBe(1);
+
+    await live2.release();
+  });
 });
