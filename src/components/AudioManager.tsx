@@ -1359,14 +1359,6 @@ export const AudioManager = ({
               systemBlob = createWavBlob(intervalPcm, 48000, 1);
               // Clear for next chunk
               systemPcmChunksRef.current = [];
-            } else if (hasSystemRecorderRef.current && !systemFailureRecorded) {
-              // Synthesize silent 48kHz Float32 PCM for this interval so the journal record is complete and durable
-              const targetSampleCount = Math.max(
-                1,
-                Math.round(48000 * chunkDurationSec),
-              );
-              const silentPcm = new Float32Array(targetSampleCount);
-              systemBlob = createWavBlob(silentPcm, 48000, 1);
             }
 
             const meetingIdForChunk = currentMeetingIdRef.current;
@@ -2089,6 +2081,8 @@ export const AudioManager = ({
       await captureActivitySessionRef.current?.drain();
       try {
         await eouSessionAtStop?.finish();
+      } catch (err) {
+        console.warn('[Pluto] EOU finish failed or timed out:', err);
       } finally {
         meetingContextIngestionAtStop?.close();
       }

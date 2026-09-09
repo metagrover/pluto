@@ -53,7 +53,9 @@ export class ParakeetEouClient {
   private runtimeLeasePromise: Promise<ParakeetRuntimeLease> | null = null;
   private nextId = 0;
   private closed = false;
+  private closePromise: Promise<void> | null = null;
   private terminalCode: string | null = null;
+  private readonly cleanupTimeoutMs: number;
 
   constructor(
     private readonly options: {
@@ -61,6 +63,7 @@ export class ParakeetEouClient {
       runtimeHost?: ParakeetRuntimeHost;
       runtimeLease?: ParakeetRuntimeLease;
       maxOutstandingPerSource: number;
+      cleanupTimeoutMs?: number;
     },
   ) {
     if (
@@ -71,6 +74,7 @@ export class ParakeetEouClient {
     ) {
       throw new Error('parakeet_request_invalid');
     }
+    this.cleanupTimeoutMs = options.cleanupTimeoutMs ?? 1_000;
     this.process = options.process ?? options.runtimeHost!.transport;
     this.runtimeLease = options.runtimeLease ?? null;
     this.unsubscribeEvent = this.process.onEvent((event) =>
@@ -177,15 +181,52 @@ export class ParakeetEouClient {
     await this.releaseRuntimeLeaseIfIdle();
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(cleanupTimeoutMs = this.cleanupTimeoutMs): Promise<void> {
+    this.closePromise ??= this.closeOnce(cleanupTimeoutMs);
+    return this.closePromise;
+  }
+
+  private async closeOnce(cleanupTimeoutMs: number): Promise<void> {
     this.closed = true;
-    await Promise.all(
-      [...this.streams.values()].map((state) => this.cancelState(state)),
-    );
-    await this.releaseRuntimeLeaseIfIdle(true);
     this.unsubscribeEvent();
     this.unsubscribeFailure();
+
+    const states = [...this.streams.values()];
+    const cancelError = new Error('parakeet_cancelled');
+    for (const state of states) {
+      if (state.inFlight) state.inFlight.reject(cancelError);
+      state.inFlight = null;
+      for (const queued of state.queue.splice(0)) queued.reject(cancelError);
+      for (const waiter of state.drainWaiters.splice(0)) {
+        waiter.reject(cancelError);
+      }
+    }
+
+    const cancelOperations = Promise.all(
+      states.map((state) => this.cancelState(state)),
+    );
+
+    let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      cleanupTimer = setTimeout(() => resolve('timeout'), cleanupTimeoutMs);
+    });
+
+    const outcome = await Promise.race([
+      cancelOperations.then(() => 'completed' as const),
+      timeoutPromise,
+    ]);
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+
+    if (outcome === 'timeout') {
+      console.warn(
+        '[ParakeetEOU] native cleanup timed out, invalidating runtime worker',
+      );
+      if (this.runtimeLease) {
+        await this.runtimeLease.invalidateWorker('parakeet_cleanup_timeout');
+      }
+    }
+
+    await this.releaseRuntimeLeaseIfIdle(true);
   }
 
   private pump(
@@ -262,9 +303,9 @@ export class ParakeetEouClient {
       for (const waiter of state.drainWaiters.splice(0)) waiter.reject(error);
     }
     if (cancelNative) {
-      void Promise.all(states.map((state) => this.cancelState(state))).finally(
-        () => this.releaseRuntimeLeaseIfIdle(true),
-      );
+      // Keep streams owned until the shared bounded cleanup has tracked them.
+      // Terminal listeners may call close again; they must await this same work.
+      void this.close();
     } else {
       for (const state of states) this.remove(state);
       void this.releaseRuntimeLeaseIfIdle(true);

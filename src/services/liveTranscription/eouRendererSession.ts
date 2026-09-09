@@ -28,14 +28,11 @@ type SessionStatus =
   | 'finished'
   | 'unavailable';
 
-type SourceDispatch = {
-  outstanding: number;
-  tail: Promise<void>;
-};
-
 const SOURCES: readonly LiveSource[] = ['mic', 'system'];
 const DEFAULT_MAX_OUTSTANDING = 48;
-const MAX_STARTUP_FRAMES = 120;
+const DEFAULT_MAX_RETAINED_AUDIO_SECONDS_PER_SOURCE = 20;
+const DEFAULT_MAX_RETAINED_PCM_BYTES = 8 * 1024 * 1024; // 8 MiB
+const DEFAULT_FINISH_TIMEOUT_MS = 2_000;
 const MEETING_ID_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 
@@ -46,6 +43,9 @@ export function createEouRendererSession(options: {
   transport: EouRendererTransport;
   nowSeconds?: () => number;
   maxOutstanding?: number;
+  maxRetainedAudioSecondsPerSource?: number;
+  maxRetainedPcmBytes?: number;
+  finishTimeoutMs?: number;
   onSegments(
     segments: LiveTranscriptSegment[],
     echoEvidence: LiveEchoEvidenceWindow[],
@@ -57,11 +57,29 @@ export function createEouRendererSession(options: {
     !MEETING_ID_PATTERN.test(options.meetingId) ||
     options.meetingId.includes('..') ||
     !Number.isSafeInteger(options.generation) ||
-    options.generation <= 0
+    options.generation <= 0 ||
+    (options.maxRetainedAudioSecondsPerSource !== undefined &&
+      (!Number.isFinite(options.maxRetainedAudioSecondsPerSource) ||
+        options.maxRetainedAudioSecondsPerSource <= 0)) ||
+    (options.maxRetainedPcmBytes !== undefined &&
+      (!Number.isSafeInteger(options.maxRetainedPcmBytes) ||
+        options.maxRetainedPcmBytes <= 0)) ||
+    (options.finishTimeoutMs !== undefined &&
+      (!Number.isFinite(options.finishTimeoutMs) ||
+        options.finishTimeoutMs <= 0))
   ) {
     throw new Error('parakeet_request_invalid');
   }
-  const maxOutstanding = options.maxOutstanding ?? DEFAULT_MAX_OUTSTANDING;
+  const maxRetainedAudioSecondsPerSource =
+    options.maxRetainedAudioSecondsPerSource ??
+    (options.maxOutstanding !== undefined &&
+    options.maxOutstanding !== DEFAULT_MAX_OUTSTANDING
+      ? options.maxOutstanding * 0.32
+      : DEFAULT_MAX_RETAINED_AUDIO_SECONDS_PER_SOURCE);
+  const maxRetainedPcmBytes =
+    options.maxRetainedPcmBytes ?? DEFAULT_MAX_RETAINED_PCM_BYTES;
+  const finishTimeoutMs = options.finishTimeoutMs ?? DEFAULT_FINISH_TIMEOUT_MS;
+
   const projection = createEouTranscriptProjection();
   projection.reset(options.generation);
   const echoEvidence = createLiveEchoEvidence();
@@ -69,23 +87,76 @@ export function createEouRendererSession(options: {
   let currentStatus: SessionStatus = 'idle';
   let accepting = false;
   let startPromise: Promise<void> | null = null;
-  const startupBuffer: Array<{ source: LiveSource; samples: Float32Array }> =
-    [];
   let detachListeners: () => void = () => undefined;
-  const dispatch: Record<LiveSource, SourceDispatch> = {
-    mic: { outstanding: 0, tail: Promise.resolve() },
-    system: { outstanding: 0, tail: Promise.resolve() },
+
+  type PerSourceQueue = {
+    frames: EouRendererFrame[];
+    inFlight: EouRendererFrame | null;
+    isPumping: boolean;
+    drainWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }>;
+  };
+
+  const queues: Record<LiveSource, PerSourceQueue> = {
+    mic: { frames: [], inFlight: null, isPumping: false, drainWaiters: [] },
+    system: { frames: [], inFlight: null, isPumping: false, drainWaiters: [] },
   };
   const sourceOffsetsSeconds: Record<LiveSource, number | null> = {
     mic: null,
     system: null,
   };
 
+  const chunkers: Partial<Record<LiveSource, EouPcmChunker>> = {};
+
+  const getSampleRate = (source: LiveSource): number => {
+    const configured = options.sampleRates[source];
+    const sampleRate =
+      typeof configured === 'function' ? configured() : configured;
+    if (
+      !Number.isSafeInteger(sampleRate) ||
+      sampleRate < 8_000 ||
+      sampleRate > 192_000
+    ) {
+      throw new Error('parakeet_request_invalid');
+    }
+    return sampleRate;
+  };
+
+  const getSourceRetainedSamples = (source: LiveSource): number => {
+    const q = queues[source];
+    const queuedSamples = q.frames.reduce(
+      (acc, f) => acc + f.samples.length,
+      0,
+    );
+    const inFlightSamples = q.inFlight ? q.inFlight.samples.length : 0;
+    const chunker = chunkers[source];
+    const unframedSamples = chunker ? chunker.bufferedSamples() : 0;
+    return queuedSamples + inFlightSamples + unframedSamples;
+  };
+
+  const getSourceRetainedDurationSeconds = (source: LiveSource): number => {
+    const rate = getSampleRate(source);
+    return getSourceRetainedSamples(source) / rate;
+  };
+
+  const getTotalRetainedBytes = (): number => {
+    const micSamples = getSourceRetainedSamples('mic');
+    const systemSamples = getSourceRetainedSamples('system');
+    return (micSamples + systemSamples) * Float32Array.BYTES_PER_ELEMENT;
+  };
+
   const fail = (code: string): void => {
     if (currentStatus === 'unavailable' || currentStatus === 'finished') return;
     currentStatus = 'unavailable';
     accepting = false;
-    startupBuffer.length = 0;
+    const error = new Error(code);
+    for (const source of SOURCES) {
+      queues[source].frames.length = 0;
+      queues[source].inFlight = null;
+      for (const waiter of queues[source].drainWaiters.splice(0)) {
+        waiter.reject(error);
+      }
+      chunkers[source]?.reset();
+    }
     echoEvidence.reset();
     lastProjectedSegments = [];
     detachListeners();
@@ -98,61 +169,92 @@ export function createEouRendererSession(options: {
       .catch(() => undefined);
   };
 
-  const sendFrame = (frame: EouRendererFrame): void => {
+  const wakePump = (source: LiveSource): void => {
+    const q = queues[source];
+    if (q.isPumping) return;
     if (currentStatus !== 'ready' && currentStatus !== 'finishing') return;
-    const source = dispatch[frame.source];
-    if (source.outstanding >= maxOutstanding) {
-      fail('parakeet_backpressure');
+    if (q.frames.length === 0) {
+      if (q.inFlight === null) {
+        for (const waiter of q.drainWaiters.splice(0)) waiter.resolve();
+      }
       return;
     }
-    const sourceOffset = sourceOffsetsSeconds[frame.source];
-    if (sourceOffset !== null) {
-      const evidenceChanged = echoEvidence.append({
-        source: frame.source,
-        sampleRate: frame.sampleRate,
-        samples: frame.samples,
-        startTimeMs: (sourceOffset + frame.audioStartSeconds) * 1_000,
-        endTimeMs: (sourceOffset + frame.audioEndSeconds) * 1_000,
-      });
-      // Acoustic corroboration can arrive after the final ASR revision. Refresh
-      // its presentation when support changes, without waiting for more speech.
-      if (evidenceChanged && lastProjectedSegments.length > 0) {
-        options.onSegments(
-          lastProjectedSegments,
-          echoEvidence.snapshot(),
-          'echo_evidence',
-        );
-      }
-    }
-    source.outstanding += 1;
-    const operation = source.tail.then(async () => {
-      if (currentStatus === 'unavailable') return;
+
+    q.isPumping = true;
+    void (async () => {
       try {
-        await options.transport.invoke('PARAKEET_EOU_APPEND', {
-          meetingId: options.meetingId,
-          generation: options.generation,
-          ...frame,
-        });
-      } catch {
-        fail('parakeet_live_unavailable');
+        while (
+          q.frames.length > 0 &&
+          (currentStatus === 'ready' || currentStatus === 'finishing')
+        ) {
+          const frame = q.frames[0];
+          q.inFlight = frame;
+
+          const sourceOffset = sourceOffsetsSeconds[frame.source];
+          if (sourceOffset !== null) {
+            const evidenceChanged = echoEvidence.append({
+              source: frame.source,
+              sampleRate: frame.sampleRate,
+              samples: frame.samples,
+              startTimeMs: (sourceOffset + frame.audioStartSeconds) * 1_000,
+              endTimeMs: (sourceOffset + frame.audioEndSeconds) * 1_000,
+            });
+            if (evidenceChanged && lastProjectedSegments.length > 0) {
+              options.onSegments(
+                lastProjectedSegments,
+                echoEvidence.snapshot(),
+                'echo_evidence',
+              );
+            }
+          }
+
+          try {
+            await options.transport.invoke('PARAKEET_EOU_APPEND', {
+              meetingId: options.meetingId,
+              generation: options.generation,
+              ...frame,
+            });
+          } catch {
+            fail('parakeet_live_unavailable');
+            return;
+          }
+
+          if (isUnavailable()) return;
+
+          q.frames.shift();
+          q.inFlight = null;
+
+          if (q.frames.length === 0) {
+            for (const waiter of q.drainWaiters.splice(0)) waiter.resolve();
+          }
+        }
+      } finally {
+        q.isPumping = false;
+        if (
+          q.frames.length > 0 &&
+          (currentStatus === 'ready' || currentStatus === 'finishing')
+        ) {
+          wakePump(source);
+        } else if (q.frames.length === 0 && q.inFlight === null) {
+          for (const waiter of q.drainWaiters.splice(0)) waiter.resolve();
+        }
       }
-    });
-    source.tail = operation.finally(() => {
-      source.outstanding = Math.max(0, source.outstanding - 1);
-    });
+    })();
   };
 
-  const chunkers: Partial<Record<LiveSource, EouPcmChunker>> = {};
   const chunkerFor = (source: LiveSource): EouPcmChunker => {
     const existing = chunkers[source];
     if (existing) return existing;
-    const configured = options.sampleRates[source];
-    const sampleRate =
-      typeof configured === 'function' ? configured() : configured;
+    const sampleRate = getSampleRate(source);
     const created = createEouPcmChunker({
       source,
       sampleRate,
-      onFrame: sendFrame,
+      onFrame: (frame) => {
+        queues[frame.source].frames.push(frame);
+        if (currentStatus === 'ready' || currentStatus === 'finishing') {
+          wakePump(frame.source);
+        }
+      },
     });
     chunkers[source] = created;
     return created;
@@ -198,11 +300,7 @@ export function createEouRendererSession(options: {
   ): void => {
     if (sourceOffsetsSeconds[source] === null) {
       const nowSeconds = options.nowSeconds?.() ?? 0;
-      const configuredSampleRate = options.sampleRates[source];
-      const sampleRate =
-        typeof configuredSampleRate === 'function'
-          ? configuredSampleRate()
-          : configuredSampleRate;
+      const sampleRate = getSampleRate(source);
       const offset = Math.max(0, nowSeconds - samplesLength / sampleRate);
       if (
         !Number.isFinite(nowSeconds) ||
@@ -213,6 +311,31 @@ export function createEouRendererSession(options: {
       }
       sourceOffsetsSeconds[source] = offset;
     }
+  };
+
+  const drainAll = async (): Promise<void> => {
+    if (currentStatus === 'unavailable') return;
+    if (currentStatus === 'starting' && startPromise) {
+      try {
+        await startPromise;
+      } catch {
+        if (isUnavailable()) return;
+        throw new Error('parakeet_session_invalid');
+      }
+    }
+    if (isUnavailable()) return;
+    const promises: Promise<void>[] = [];
+    for (const source of SOURCES) {
+      const q = queues[source];
+      if (q.frames.length > 0 || q.inFlight !== null) {
+        promises.push(
+          new Promise<void>((resolve, reject) => {
+            q.drainWaiters.push({ resolve, reject });
+          }),
+        );
+      }
+    }
+    await Promise.all(promises);
   };
 
   return {
@@ -226,68 +349,120 @@ export function createEouRendererSession(options: {
             generation: options.generation,
           });
         } catch {
-          startupBuffer.length = 0;
           fail('parakeet_live_unavailable');
           throw new Error('parakeet_live_unavailable');
         }
         if (isUnavailable()) {
-          startupBuffer.length = 0;
           throw new Error('parakeet_live_unavailable');
         }
-        currentStatus = 'ready';
-        accepting = true;
-        const buffered = startupBuffer.splice(0, startupBuffer.length);
-        for (const item of buffered) {
-          chunkerFor(item.source).append(item.samples);
+        if (currentStatus === 'starting') {
+          currentStatus = 'ready';
+          accepting = true;
+        }
+        for (const source of SOURCES) {
+          wakePump(source);
         }
       })();
       return startPromise;
     },
     append(source: LiveSource, samples: Float32Array): void {
+      if (
+        currentStatus !== 'starting' &&
+        (!accepting || currentStatus !== 'ready')
+      ) {
+        return;
+      }
       try {
-        ensureSourceOffset(source, samples.length);
-        if (currentStatus === 'starting') {
-          if (startupBuffer.length < MAX_STARTUP_FRAMES) {
-            startupBuffer.push({ source, samples: new Float32Array(samples) });
+        if (!(samples instanceof Float32Array) || samples.length === 0) {
+          throw new Error('parakeet_request_invalid');
+        }
+        for (const sample of samples) {
+          if (!Number.isFinite(sample)) {
+            throw new Error('parakeet_request_invalid');
           }
+        }
+        const sampleRate = getSampleRate(source);
+
+        const incomingSamples = samples.length;
+        const incomingDurationSeconds = incomingSamples / sampleRate;
+        const incomingBytes = incomingSamples * Float32Array.BYTES_PER_ELEMENT;
+
+        const currentSourceDuration = getSourceRetainedDurationSeconds(source);
+        const currentTotalBytes = getTotalRetainedBytes();
+
+        if (
+          currentSourceDuration + incomingDurationSeconds >
+            maxRetainedAudioSecondsPerSource ||
+          currentTotalBytes + incomingBytes > maxRetainedPcmBytes
+        ) {
+          fail('parakeet_backpressure');
           return;
         }
-        if (!accepting || currentStatus !== 'ready') return;
+
+        ensureSourceOffset(source, samples.length);
         chunkerFor(source).append(samples);
       } catch {
         fail('parakeet_request_invalid');
       }
     },
-    async drain(): Promise<void> {
-      await Promise.all(SOURCES.map((source) => dispatch[source].tail));
-    },
-    async finish(): Promise<void> {
-      if (currentStatus === 'starting' && startPromise) {
-        try {
-          await startPromise;
-        } catch {
-          if (isUnavailable()) return;
-          throw new Error('parakeet_session_invalid');
-        }
-      }
-      if (currentStatus !== 'ready') {
-        if (currentStatus === 'unavailable') return;
+    drain: drainAll,
+    async finish(finishOptions?: { timeoutMs?: number }): Promise<void> {
+      if (currentStatus === 'finished' || currentStatus === 'unavailable')
+        return;
+      if (currentStatus !== 'ready' && currentStatus !== 'starting') {
         throw new Error('parakeet_session_invalid');
       }
       accepting = false;
       currentStatus = 'finishing';
-      for (const source of SOURCES) chunkers[source]?.flush();
-      await Promise.all(SOURCES.map((source) => dispatch[source].tail));
-      if (isUnavailable()) return;
+
+      const timeout = finishOptions?.timeoutMs ?? finishTimeoutMs;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeout);
+      });
+
+      const finishWork = (async (): Promise<'completed'> => {
+        if (startPromise) {
+          try {
+            await startPromise;
+          } catch {
+            if (isUnavailable()) return 'completed';
+            throw new Error('parakeet_session_invalid');
+          }
+        }
+        if (isUnavailable()) return 'completed';
+
+        for (const source of SOURCES) {
+          chunkers[source]?.flush();
+        }
+        for (const source of SOURCES) {
+          wakePump(source);
+        }
+        await drainAll();
+        if (isUnavailable()) return 'completed';
+
+        try {
+          await options.transport.invoke('PARAKEET_EOU_FINISH', {
+            meetingId: options.meetingId,
+            generation: options.generation,
+          });
+          currentStatus = 'finished';
+          detachListeners();
+        } catch {
+          fail('parakeet_live_unavailable');
+        }
+        return 'completed';
+      })();
+
       try {
-        await options.transport.invoke('PARAKEET_EOU_FINISH', {
-          meetingId: options.meetingId,
-          generation: options.generation,
-        });
-        currentStatus = 'finished';
-        detachListeners();
+        const outcome = await Promise.race([finishWork, timeoutPromise]);
+        if (outcome === 'timeout') {
+          fail('parakeet_timeout');
+        }
       } catch {
         fail('parakeet_live_unavailable');
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     },
     cancel(): void {

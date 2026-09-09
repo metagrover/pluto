@@ -21,6 +21,7 @@ export type ParakeetRuntimeLease = {
   release(): Promise<void>;
   cancelAndPersistForRetry(): Promise<void>;
   setPreemptionHandler(handler: () => Promise<void>): void;
+  invalidateWorker(code?: string): Promise<void>;
 };
 
 type LeaseRecord = {
@@ -212,6 +213,8 @@ export class ParakeetRuntimeHost {
       setPreemptionHandler: (handler) => {
         record.preemptionHandler = handler;
       },
+      invalidateWorker: async (code) =>
+        this.invalidateWorkerForLease(record, code),
     };
     Object.assign(record, {
       kind,
@@ -223,6 +226,18 @@ export class ParakeetRuntimeHost {
       lease,
     });
     return record;
+  }
+
+  private async invalidateWorkerForLease(
+    record: LeaseRecord,
+    code = 'parakeet_cleanup_timeout',
+  ): Promise<void> {
+    if (this.active !== record || record.released) return;
+    record.released = true;
+    this.active = null;
+    this.options.diagnostic?.(code);
+    this.process.terminate();
+    this.drain();
   }
 
   private drain(): void {

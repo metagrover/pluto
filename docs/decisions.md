@@ -23,9 +23,20 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Rationale:** The prior absolute microphone-activity filter contradicted Pluto's dual-source echo model and could reduce hundreds of seconds of remote speech to a few seconds of candidate evidence. The prior all-or-nothing 80 percent publication rule then erased every supported cluster when a minority of System words had no diarization turn, preventing both honest partial labels and voice-profile matching.
 - **Consequences:** Meetings with loudspeaker echo can retain clean remote voice candidates, and partially covered multi-speaker meetings expose only their supported anonymous labels while preserving uncertainty. Named suggestions still require the existing purity, provenance, absolute-similarity, and runner-up-margin gates. This supersedes only the all-or-nothing 80 percent publication rule in the 2026-09-04 remote-participant diarization decision; its per-item ambiguity checks and identity boundaries remain in force.
 
-## 2026-09-07 - Instant audio capture startup, live ASR queue resilience, and complete silent intervals
+## 2026-09-09 - Truthful system capture evidence, paced live ASR queue, and deadline-bound cleanup
 
 - **Status:** Accepted
+- **Source:** [Recording Reliability Delivery Plan](recording_startup_pending_delivery_plan.md), superseding 2026-09-07 instant capture and queue resilience decision
+- **Decision:** Pluto corrects capture truthfulness, live transcription pacing, and stop bounds:
+  1. Truthful system capture evidence: Pluto eliminates synthesized silent PCM for empty system audio intervals. Absent system audio remains missing in the capture journal (`pending_at_stop`) rather than fabricating silence proof, preserving the `system_capture_incomplete` / `required_source_failed` guard at finalization. Legitimate captured silence (zero-valued PCM) continues to be packaged as `captured`.
+  2. Bounded, paced live transcription queue: `eouRendererSession` unifies startup and live streaming into one per-source ordered queue bounded by 20 seconds of retained audio per source and 8 MiB retained PCM across the session. Input is dispatched serially per source (one in-flight request at a time), eliminating backpressure errors caused by synchronous replay bursts across transport slots. Exceeding either budget fails immediately and explicitly with `parakeet_backpressure` instead of silently dropping middle frames and shortening time.
+  3. Deadline-bound stop and native cleanup: Live EOU finish is bounded by a single 2-second budget covering startup wait, queue drain, and native finish. If exceeded, the session transitions to unavailable and cancels. Native cleanup in the main process is bounded by 1 second before invalidating the native worker owned by that live lease, ensuring hung native streams cannot delay journal sealing or poison the next recording session through the shared two-hour request timeout.
+- **Rationale:** Fabricating silence masked real capture gaps and bypassed integrity validation; synchronous startup replay overflowed the client dispatcher even when transport acknowledgements were immediate; the 120-buffer startup cap silently dropped live speech; and unbounded stop operations could hang indefinitely on cold or failed CoreML streams.
+- **Consequences:** Captures are truthful; live speech is preserved in contiguous sequence or explicitly rejected; stop latency is strictly bounded; and next-meeting readiness is protected from hung workers.
+
+## 2026-09-07 - Instant audio capture startup, live ASR queue resilience, and complete silent intervals
+
+- **Status:** Superseded by 2026-09-09 — Truthful system capture evidence, paced live ASR queue, and deadline-bound cleanup
 - **Source:** Diagnosis of 2026-09-07 recording startup delay and transcription backpressure incident
 - **Decision:** Pluto decouples durable audio capture from live transcription readiness:
   1. Audio capture starts immediately (<300ms): `startSession` initiates microphone acquisition and Native AudioCap concurrently with journal setup, rather than blocking the microphone behind sequential `GET_TRANSCRIPTION_VOCABULARY` SQLite queries and `eouSession.start()` Neural Engine model compilation.

@@ -1482,7 +1482,10 @@ app.whenReady().then(async () => {
       });
       return {};
     } catch (error) {
-      if (parakeetEouOwner?.id === event.sender.id) {
+      if (
+        parakeetEouOwner?.id === event.sender.id &&
+        parakeetEouGeneration === generation
+      ) {
         parakeetEouOwner = null;
         parakeetEouGeneration = null;
       }
@@ -1519,18 +1522,30 @@ app.whenReady().then(async () => {
   ipcMain.handle('PARAKEET_EOU_FINISH', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
+    const generation = parakeetEouGeneration;
     await eouCoordinator.finish(meetingId);
-    parakeetEouOwner = null;
-    parakeetEouGeneration = null;
+    if (
+      parakeetEouOwner?.id === event.sender.id &&
+      parakeetEouGeneration === generation
+    ) {
+      parakeetEouOwner = null;
+      parakeetEouGeneration = null;
+    }
     return {};
   });
 
   ipcMain.handle('PARAKEET_EOU_CANCEL', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
-    await eouCoordinator.fail('parakeet_cancelled');
-    parakeetEouOwner = null;
-    parakeetEouGeneration = null;
+    const generation = parakeetEouGeneration;
+    await eouCoordinator.cancel(meetingId);
+    if (
+      parakeetEouOwner?.id === event.sender.id &&
+      parakeetEouGeneration === generation
+    ) {
+      parakeetEouOwner = null;
+      parakeetEouGeneration = null;
+    }
     return {};
   });
 
