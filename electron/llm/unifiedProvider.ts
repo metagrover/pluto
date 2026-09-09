@@ -525,6 +525,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         | 'deterministic_only';
       /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
       compactWriterContract?: boolean;
+      /** Replay-only, never enabled from application settings. */
+      compactEditorContract?: boolean;
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
@@ -563,6 +565,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           ? 'editor'
           : undefined,
       compactWriterContract: options.compactWriterContract,
+      compactEditorContract: options.compactEditorContract,
       optionalReviewDeadlineAtMs: options.optionalReviewDeadlineAtMs,
       optionalReviewMinStartMs: options.optionalReviewMinStartMs,
       onStage: options.onStage,

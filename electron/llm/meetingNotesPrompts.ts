@@ -60,7 +60,7 @@ export const notesDraftSchema = [
   'Use null for absent overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
 ].join('\n');
 
-const compactNotesDraftSchema = [
+export const compactNotesDraftSchema = [
   'Field definitions (not output content):',
   'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
   'Use kind: "point" for discussion.',

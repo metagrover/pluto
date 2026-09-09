@@ -82,6 +82,7 @@ export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
 export type NotesResponseContract =
   | 'draft'
   | 'compact_draft'
+  | 'compact_editor'
   | 'audit'
   | 'editor';
 
@@ -111,6 +112,8 @@ export type GenerateMeetingNotesInput = {
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
   /** Compact direct writer; deterministic-only remains a benchmark route. */
   compactWriterContract?: boolean;
+  /** Replay-only compact full-document editor; not a production default. */
+  compactEditorContract?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;

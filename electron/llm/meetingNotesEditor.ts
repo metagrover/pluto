@@ -1,5 +1,6 @@
 import {
   acceptEditedNotes,
+  parseCompactNotesDraft,
   parseNotesAudit,
   parseNotesDraft,
 } from './meetingNotesAudit';
@@ -9,11 +10,34 @@ import {
 } from './meetingNotesGuidance';
 import {
   type NotesKnownTerm,
+  compactNotesDraftSchema,
   notesDispositionSchema,
   notesDraftSchema,
   notesTerminologySchema,
 } from './meetingNotesPrompts';
-import type { NotesDraft, NotesSource } from './meetingNotesTypes';
+import {
+  MeetingNotesError,
+  type NotesDraft,
+  type NotesSource,
+} from './meetingNotesTypes';
+
+/** The compact writer has no independent overview/recent-win content to discard. */
+export const compactEditorInput = (draft: NotesDraft) => {
+  if (draft.overview || draft.recentWin)
+    throw new MeetingNotesError('notes_compact_editor_requires_compact_draft');
+  return {
+    sections: draft.sections.map((section) => ({
+      title: section.title.text,
+      items: section.items.map(({ kind, text, owner, due, sources }) => ({
+        kind,
+        text,
+        owner: owner ?? null,
+        due: due ?? null,
+        sources,
+      })),
+    })),
+  };
+};
 
 /** Content-level changes, excluding application-assigned ids and block order. */
 export const countEditedBlocks = (
@@ -52,6 +76,7 @@ export const buildNotesEditorPrompt = ({
   knownTerms,
   inherited,
   compactDraft = false,
+  compactOutput = false,
 }: {
   sourceText: string;
   draft: unknown;
@@ -59,13 +84,19 @@ export const buildNotesEditorPrompt = ({
   knownTerms: NotesKnownTerm[];
   inherited?: unknown[];
   compactDraft?: boolean;
-}): string =>
-  [
+  compactOutput?: boolean;
+}): string => {
+  if (compactOutput && inherited?.length) {
+    throw new MeetingNotesError('notes_compact_editor_inherited_not_supported');
+  }
+  return [
     'You are the final meeting-notes editor. Return the complete corrected document against the original source. The draft may contain mistakes or omissions; restore missing material topics and current commitments.',
     notesContentGuidance,
     ...(compactDraft
       ? [
-          'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in the overview or topic discussion, even when a related action or decision is also structured separately.',
+          compactOutput
+            ? 'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in topic items, even when a related action or decision is also structured separately.'
+            : 'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in the overview or topic discussion, even when a related action or decision is also structured separately.',
           'For every action or decision, copy the source-supported owner into owner and the source-supported deadline into due; use null only when absent.',
           'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, the speaker who states the settled choice is the decision owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
         ]
@@ -80,7 +111,11 @@ export const buildNotesEditorPrompt = ({
     sourceText,
     'END SOURCE DATA',
     'BEGIN DRAFT DATA',
-    JSON.stringify(draft),
+    JSON.stringify(
+      compactOutput && draft && typeof draft === 'object' && 'sections' in draft
+        ? compactEditorInput(draft as NotesDraft)
+        : draft,
+    ),
     'END DRAFT DATA',
     ...(inherited?.length
       ? [
@@ -92,22 +127,58 @@ export const buildNotesEditorPrompt = ({
         ]
       : []),
     'Return compact JSON only using these fields:',
-    notesDraftSchema,
+    compactOutput
+      ? compactNotesDraftSchema.replace(
+          'Document = {sections: Section[]}. The final editor classifies the meeting.',
+          'Document = {meetingType: one_on_one | team_sync | brainstorm | presentation | general, sections: Section[], terminology?: Terminology[]}. Return the complete corrected set of sections, not patches. Put all useful facts in items. Do not generate ids, overview, heading evidence or recentWin: code derives presentation from items.',
+        )
+      : notesDraftSchema,
   ].join('\n');
+};
 
 export const parseEditedNotes = ({
   raw,
   source,
   terminology,
   compactDraft = false,
+  compactOutput = false,
 }: {
   raw: string;
   source: NotesSource;
   terminology?: { trustedUserTerms: string[]; provider: string; model: string };
   compactDraft?: boolean;
+  compactOutput?: boolean;
 }) => {
-  const draft: NotesDraft = parseNotesDraft(raw);
-  const extra = JSON.parse(raw) as Record<string, unknown>;
+  let extra: Record<string, unknown>;
+  try {
+    extra = JSON.parse(raw);
+  } catch {
+    throw new MeetingNotesError(
+      compactOutput ? 'notes_audit_invalid' : 'notes_writer_invalid',
+    );
+  }
+  if (
+    compactOutput &&
+    (!extra ||
+      typeof extra !== 'object' ||
+      Array.isArray(extra) ||
+      !Object.hasOwn(extra, 'meetingType') ||
+      Object.keys(extra).some(
+        (key) => !['meetingType', 'sections', 'terminology'].includes(key),
+      ))
+  ) {
+    throw new MeetingNotesError('notes_audit_invalid');
+  }
+  const draft: NotesDraft = compactOutput
+    ? parseNotesDraft(
+        JSON.stringify({
+          ...parseCompactNotesDraft(
+            JSON.stringify({ sections: extra.sections }),
+          ),
+          meetingType: extra.meetingType,
+        }),
+      )
+    : parseNotesDraft(raw);
   // Reuse validation of optional terminology and hierarchy reconciliation records;
   // no model-generated patches or per-block verdicts are part of this contract.
   const audit = parseNotesAudit(

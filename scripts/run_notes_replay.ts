@@ -39,6 +39,15 @@ const sha = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 async function main() {
   const mode = process.env.NOTES_REPLAY_MODE ?? 'production';
+  const compactEditor = process.env.NOTES_REPLAY_COMPACT_EDITOR === '1';
+  assert.ok(
+    process.env.NOTES_REPLAY_COMPACT_EDITOR === undefined || compactEditor,
+    'invalid_compact_editor_opt_in',
+  );
+  assert.ok(
+    !compactEditor || mode === 'production',
+    'compact_editor_requires_structured_replay',
+  );
   const contextTokens = Number(process.env.NOTES_REPLAY_CONTEXT ?? '16384');
   assert.ok(
     [16384, 24576, 32768].includes(contextTokens),
@@ -247,6 +256,7 @@ async function main() {
       digest: model.digest,
       contextTokens,
       compactWriterContract: mode === 'production',
+      compactEditorContract: compactEditor,
       contextReuse: process.env.NOTES_REPLAY_CONTEXT_REUSE === '1',
       sourceFirstReconciliation: false,
       deadlineMs: MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
@@ -349,6 +359,7 @@ async function main() {
               source,
               contextTokens,
               compactWriterContract: true,
+              compactEditorContract: compactEditor,
               onDraft: (draft) => {
                 result.firstDraftMs ??= Date.now() - started;
                 record({

@@ -202,6 +202,7 @@ async function main() {
       },
       reviewProtocol: 'editor',
       compactWriterContract: true,
+      compactEditorContract: manifest.compactEditorContract === true,
       provider: 'ollama',
       model: manifest.model,
       contextTokens: manifest.contextTokens,
