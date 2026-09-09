@@ -1,22 +1,18 @@
-# Notes efficiency implementation: compact review and token accounting
+# Notes efficiency: progressive previews and measured limits
 
 Status: experimental, not production promotion. Continues the merged #794 work.
 The production Gemma model, 16K context, editor contract, source guards and runtime
-settings remain unchanged. Existing recordings are sufficient for development;
+settings remain unchanged. The branch adds progressive, memory-only draft previews;
+this does not change saved output, model requests or source acceptance. Existing recordings are sufficient for development;
 a new meeting is not a prerequisite for source/audio replay.
 
 ## Implemented
 
-- A replay-only compact full-document editor selected with
-  `NOTES_REPLAY_COMPACT_EDITOR=1`. This is a structured replay option, not a UI
-  setting or automatic route. The manifest and generated prompt identity identify
-  the experiment; offline replay reconstructs the selected contract.
-- Editor input removes application-generated IDs and duplicated heading evidence.
-  Editor output retains meeting classification, complete topic items, owner/due,
-  short source markers, and optional validated terminology. The existing parser,
-  source checks and guarded acceptance still run. Independent overview/recent-win
-  input and inherited-commitment reconciliation are explicitly unsupported rather
-  than silently discarded. This is not patch-based review or review removal.
+- The unsuccessful compact-editor implementation was removed during closeout,
+  including its production-module branches and dedicated tests. Its private source
+  archive and existing commit history preserve reproducibility. The replay CLI
+  explicitly rejects the retired flag/captures rather than silently running a
+  different editor. The historical results below are not results of the final code.
 - `inspect_notes_token_accounting.ts` reads existing owner-only captures without
   model calls or writes. It distinguishes content/message-JSON estimates from
   observed prompt/output counts, retains incomplete telemetry as unavailable, and
@@ -25,6 +21,18 @@ a new meeting is not a prerequisite for source/audio replay.
   running, PID-verified private worker. It requires the captured model digest and
   Ollama 0.33.3, makes no generation requests, and emits counts/hashes only. Its
   narrow text-only Gemma renderer rejects unsupported requests and versions.
+- Complete compact-writer items now reach the existing plain-text, unsaved preview
+  before the writer finishes. Partial strings/items, unresolved citations and
+  leaf-only drafts are excluded. Retries reset preview state; cancellation/current
+  run checks and final validation remain separate. Observer errors cannot fail
+  generation. The UI says "not final" during both writing and review.
+- Replay distinguishes `firstCompleteBulletMs` from `firstDraftMs` instead of
+  changing the meaning of the existing full-draft metric. The explicit
+  `--compare-current` response-replay option reports changed code hashes and
+  writes a separate comparison artifact; it does not silently bypass identity.
+- Private audio replay can record sampled live transcript revisions, stop its
+  own runtime on cancellation/resource pressure, and inspect offer/planning policy
+  without generating notes or initializing a database.
 
 ## Evidence and boundaries
 
@@ -70,7 +78,91 @@ a new meeting is not a prerequisite for source/audio replay.
   period. The identical failures reproduce on untouched merge commit `44eff0b1`.
   They are disclosed baseline failures, not edited away for this experiment.
 
-## Remaining implementation and acceptance
+## Follow-on experiments and decisions
+
+- A fixed-draft correction-only review generated 134 tokens in 70,147 ms on the
+  medium case. It added a duplicate follow-up, left the critical prerequisite and
+  attribution errors, and failed the existing source validator. Rejected for
+  promotion. Its implementation was removed from the proposed changes; a private
+  source archive retains the experiment for reproducibility.
+- A stronger commitment/condition prompt restored one missing launch condition,
+  but retained the attribution error and failed final validation. Total time was
+  242,810 ms (two calls). The unsuccessful prompt/version change was removed;
+  its patch against `dff70c3d6` and source-backed review evidence remain private.
+- That fresh run verified progressive callbacks: the first complete bullet was
+  available at 58,891 ms and the full draft at 119,850 ms. This does not reduce
+  total model work or establish UI paint latency. Earlier captured long-response
+  chunks yield a first complete bullet at 103,727 ms versus writer completion at
+  182,527 ms; these are recorded transport timestamps, not a new live UI benchmark.
+- The existing full 593-second dual-source audio recording was replayed in real
+  time, with no concurrent notes generation. Both source tails reached 593.053s,
+  maximum queue depth was one, and there were no native or presentation failures.
+  Twenty sampled snapshots stayed below the 12,000-character offer threshold
+  (maximum 11,814), so none offered incremental notes. This is sampled policy
+  evidence, not proof about every transient update or other meeting lengths.
+- The first audio replay exposed a measurement bug: update latency included
+  decode/model preparation. The harness now separates preparation and ready-time
+  latency. Its original p50/p95 figures must not be cited as ASR update latency.
+  Queued append failures are also consumed and drained rather than becoming
+  unhandled rejections during cancellation.
+- A subsequently retired diagnostic Markdown control supported a second, full-source
+  review call, with separate writer/reviewer metrics and no fallback on reviewer
+  failure. It is not a production route or a quality-approved result. Its first
+  reviewed attempt stopped during model startup: swap grew approximately 849 MiB
+  in ten seconds, exceeding the unchanged 512 MiB guard. AC power and nominal
+  thermal state were confirmed; the owned daemon exited cleanly. This censored
+  attempt is excluded from completed-generation timing. A preceding single-pass
+  attempt stopped on a switch to battery and is likewise not a completed sample.
+
+## Bounded closeout: performance and memory reassessment
+
+| Observation | Earlier | Later | Interpretation |
+| --- | --- | --- | --- |
+| 31m09s meeting, total elapsed | 520,333 ms | 307,492 ms | 40.9% lower observed time; not a controlled comparison or quality-approved result |
+| Fresh medium run, visible content | Full draft at 119,850 ms | First complete bullet at 58,891 ms | 50.9% earlier preview; same run, not final notes or UI paint latency |
+| Recorded long writer stream | Full draft at 182,527 ms | First complete bullet at 103,727 ms | 43.2% earlier complete bullet in captured chunks |
+
+There is no defensible average for a thirty-minute meeting and no measured
+quality-approved end-to-end speedup. Interrupted runs are not completed samples.
+
+The original 512 MiB swap-growth stop was a diagnostic policy, not a macOS memory
+limit. Apple's [memory guidance](https://support.apple.com/guide/activity-monitor/view-memory-usage-actmntr1004/mac)
+uses pressure informed by multiple signals, not swap occupancy alone. The guard
+now reads the kernel's pressure state and allows at most 2 GiB growth only with
+affirmative normal pressure. This is an engineering test budget, not an Apple
+recommendation. It still stops at warning/critical pressure, below 10% reported
+headroom, thermal warnings, or telemetry loss. Unknown pressure fails closed;
+legacy evidence without pressure retains the old 512 MiB interpretation. The
+sysctl exports [dispatch flags](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event_private.h),
+not the similarly named internal pressure enum. No OS or production limits change.
+
+One repeat of the unchanged medium compact-editor configuration under this policy
+stopped after 10,135 ms: macOS reported warning pressure, 13% headroom, and about
+1.23 GiB swap growth. Its owned daemon exited cleanly. This demonstrates real OS
+pressure in that attempt, not proof that every startup fails or that older stops
+were out-of-memory crashes. No further retry of that configuration was made.
+
+Correction-only and the unfinished reviewed-Markdown additions were removed from
+the proposed changes and archived privately. No new prompt or model variant is
+being added. The older opt-in compact editor was also removed, including its
+application code paths. Useful preview, replay, telemetry and
+audio-measurement fixes remain separate from model promotion.
+
+The immediate acceptance target is a repeatable resource-safe baseline with
+source-grounded notes. The broader ideas below are deferred, not a commitment to
+continue expanding this PR until every experiment has been attempted.
+
+Final closeout checks: 88 focused unit tests passed, as did both TypeScript
+configurations and repository lint. The audio helper suite passed six tests with
+one real-runtime test skipped. A current-code replay of the older full-editor
+long capture matched the captured requests but failed exact final-result equality
+on trailing punctuation; it is not reported as an exact replay pass. The earlier
+compact-result replay passed before that experiment was retired. The revised
+audio timing/cleanup implementation still needs a fresh real-runtime acceptance
+run. These limitations keep the PR draft; they are not reasons to resume broad
+model experimentation.
+
+## Deferred research and acceptance
 
 1. Treat compact review as an unaccepted experimental control, not a winning
    production route. Freeze source-backed quality expectations before further
@@ -82,7 +174,8 @@ a new meeting is not a prerequisite for source/audio replay.
    estimates down from two samples.
 3. Compare Markdown plus evidence markers against compact JSON with equivalent
    source coverage and semantic review. The existing single-pass Markdown runner
-   is not an equivalent reviewed control.
+   is not an equivalent reviewed control. The unfinished two-call diagnostic was
+   removed during scope reduction.
 4. Evaluate minimal correction-only review only after the compact full-document
    control is established. Do not recreate a deterministic semantic rules engine.
 5. Validate bounded context reuse separately, then combine winning changes.

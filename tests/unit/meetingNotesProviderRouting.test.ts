@@ -255,6 +255,72 @@ it('routes the compact product writer through the complete-document editor', asy
   expect(result.generation_metadata?.prompt_version).toBe('notes-v30');
 });
 
+it('emits a complete provisional bullet on actual streamed transport before writer completion', async () => {
+  const fixture = makeDirectNotesFixture();
+  const encode = (value: unknown) =>
+    JSON.stringify(value, (key, entry) => (key === 'sources' ? ['R0'] : entry));
+  const item = {
+    kind: 'action',
+    text: 'Send the outline',
+    owner: 'Milo',
+    due: null,
+    sources: ['R0'],
+  };
+  const prefix = `{"sections":[{"title":"Outline","items":[${JSON.stringify(item)}`;
+  let calls = 0;
+  let writerFinished = false;
+  let release: () => void = () => {};
+  const previewSeen = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const onDraft = vi.fn((draft, _phase?: 'streaming' | 'complete') => {
+    if (!writerFinished) {
+      expect(draft.sections[0].items[0].text).toBe('Send the outline');
+      release();
+    }
+  });
+  const packet = (content: string, done: boolean) =>
+    new TextEncoder().encode(
+      `${JSON.stringify({ message: { content }, done, ...(done ? { done_reason: 'stop' } : {}) })}\n`,
+    );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url) => {
+      if (String(url).endsWith('/api/ps')) return Response.json({ models: [] });
+      calls++;
+      if (calls === 2) return new Response(packet(encode(fixture.draft), true));
+      expect(calls).toBe(1);
+      let first = true;
+      return new Response(
+        new ReadableStream({
+          async pull(controller) {
+            if (first) {
+              first = false;
+              controller.enqueue(packet(prefix, false));
+              return;
+            }
+            await previewSeen;
+            writerFinished = true;
+            controller.enqueue(packet(']}]}', true));
+            controller.close();
+          },
+        }),
+      );
+    }),
+  );
+  const provider = new UnifiedLLMProvider('ollama', {});
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source: fixture.source,
+    compactWriterContract: true,
+    onDraft,
+  });
+  expect(onDraft).toHaveBeenCalled();
+  expect(onDraft.mock.calls[0]?.[1]).toBe('streaming');
+  expect(onDraft.mock.calls.at(-1)?.[1]).toBe('complete');
+  expect(calls).toBe(2);
+  expect(result.all_action_items[0]).toMatchObject(fixture.expectedAction);
+});
+
 it('repairs malformed writer output once and still requires an independent legacy audit', async () => {
   const f = makeDirectNotesFixture();
   const p = new UnifiedLLMProvider('ollama', {});

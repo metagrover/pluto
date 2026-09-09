@@ -28,6 +28,7 @@ import type {
 } from './meetingNotesRunMetrics';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
+import { createNotesStreamPreview } from './meetingNotesStreamPreview';
 import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
@@ -452,6 +453,8 @@ interface TextGenerationOptions {
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
+  /** Entire current physical answer, reset to empty on each retry. UI only. */
+  onNotesPartial?: (answer: string) => void;
   notesBudget?: { contextTokens: number; outputTokens: number };
   notesModel?: string;
   notesResponseSchema?: Record<string, unknown>;
@@ -526,13 +529,15 @@ export class UnifiedLLMProvider implements LLMProvider {
       /** Use the compact direct writer; non-benchmark calls pair it with the editor. */
       compactWriterContract?: boolean;
       /** Replay-only, never enabled from application settings. */
-      compactEditorContract?: boolean;
       optionalReviewDeadlineAtMs?: number;
       optionalReviewMinStartMs?: number;
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
-      onDraft?: (draft: import('./meetingNotesTypes').NotesDraft) => void;
+      onDraft?: (
+        draft: import('./meetingNotesTypes').NotesDraft,
+        phase?: 'streaming' | 'complete',
+      ) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       /** Explicit benchmark experiment; product callers retain model repair. */
       recoverWriterDraft?: (raw: string) => string | null;
@@ -548,8 +553,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       this.providerType === 'ollama'
         ? await this.resolveOllamaModel('notesWriter')
         : this.getConfiguredAnalysisModel();
+    const source = options.source ?? createNotesSourceFromText(transcript);
     return generateMeetingNotes({
-      source: options.source ?? createNotesSourceFromText(transcript),
+      source,
       context: {
         userNotes: userNotes ?? '',
         template,
@@ -565,7 +571,6 @@ export class UnifiedLLMProvider implements LLMProvider {
           ? 'editor'
           : undefined,
       compactWriterContract: options.compactWriterContract,
-      compactEditorContract: options.compactEditorContract,
       optionalReviewDeadlineAtMs: options.optionalReviewDeadlineAtMs,
       optionalReviewMinStartMs: options.optionalReviewMinStartMs,
       onStage: options.onStage,
@@ -585,6 +590,19 @@ export class UnifiedLLMProvider implements LLMProvider {
           task: request.task,
           jsonMode: true,
           signal: request.signal,
+          ...(this.providerType === 'ollama' &&
+          request.responseContract === 'compact_draft' &&
+          options.onDraft
+            ? {
+                onNotesPartial: createNotesStreamPreview({
+                  source,
+                  spans: request.sourceSpans ?? [],
+                  decode: wire.decode,
+                  onDraft: (draft) => options.onDraft?.(draft, 'streaming'),
+                  signal: request.signal,
+                }),
+              }
+            : {}),
           ...(this.providerType === 'ollama'
             ? {
                 notesResponseSchema: buildNotesResponseSchema(
@@ -1352,6 +1370,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesModel,
     modelOverride,
     onNotesMetrics,
+    onNotesPartial,
   }: TextGenerationOptions): Promise<string> {
     ollamaActivityEpoch += 1;
     const model = modelOverride
@@ -1440,6 +1459,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (shouldStream) {
       let pending = '';
       let answer = '';
+      onNotesPartial?.('');
       let completed = false;
       const deadline = progressAware
         ? createOllamaGenerationDeadline({
@@ -1503,6 +1523,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           if (typeof content !== 'string' || !content) continue;
           answer += content;
           onToken?.(content);
+          if (content.includes('}')) onNotesPartial?.(answer);
         }
       };
       try {

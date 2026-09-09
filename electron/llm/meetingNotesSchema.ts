@@ -38,19 +38,6 @@ export const buildNotesResponseSchema = (
     text: { type: 'string', minLength: 1, maxLength: 12000 },
     sources,
   };
-  if (contract === 'compact_editor') {
-    const compact = buildNotesResponseSchema('compact_draft', sourceLabels);
-    const full = buildNotesResponseSchema('editor', sourceLabels);
-    const properties = full.properties as Record<string, Schema>;
-    return object(
-      {
-        ...(compact.properties as Record<string, Schema>),
-        meetingType: properties.meetingType,
-        terminology: properties.terminology,
-      },
-      ['meetingType', 'sections'],
-    );
-  }
   if (contract === 'compact_draft') {
     const compactSources = { ...sources, maxItems: 3 };
     const compactItem = object(

@@ -24,7 +24,10 @@ import {
 
 let failureRoot: string | undefined;
 async function main() {
-  assert.equal(process.argv.length, 4);
+  const compareCurrent = process.argv[4] === '--compare-current';
+  assert.ok(
+    process.argv.length === 4 || (process.argv.length === 5 && compareCurrent),
+  );
   const root = process.argv[2];
   const caseIndex = Number(process.argv[3]);
   assert.ok(
@@ -50,6 +53,10 @@ async function main() {
     return fs.readFileSync(file, 'utf8');
   };
   const manifest = JSON.parse(read('manifest.json'));
+  assert.ok(
+    !manifest.compactEditorContract,
+    'compact_editor_experiment_retired_use_archived_source',
+  );
   assert.equal(manifest.schema, 'notes-production-replay-v1');
   failureRoot = root;
   const repository = path.resolve(
@@ -57,6 +64,12 @@ async function main() {
     '..',
   );
   const identityFiles = new Set([
+    ...(compareCurrent
+      ? fs
+          .readdirSync(path.join(repository, 'electron/llm'))
+          .filter((name) => /^meetingNotes.*\.ts$/.test(name))
+          .map((name) => `electron/llm/${name}`)
+      : []),
     ...(manifest.contextReuse
       ? ['scripts/lib/notesReplayContinuation.ts']
       : []),
@@ -68,15 +81,28 @@ async function main() {
       ),
     ),
   ]);
+  const changedCodeFiles: string[] = [];
+  const currentCodeHashes: Record<string, string> = {};
   for (const file of identityFiles) {
-    assert.equal(
-      createHash('sha256')
-        .update(fs.readFileSync(path.join(repository, file)))
-        .digest('hex'),
-      manifest.codeHashes[file],
-      'pipeline_changed_requires_new_replay_identity',
-    );
+    const digest = createHash('sha256')
+      .update(fs.readFileSync(path.join(repository, file)))
+      .digest('hex');
+    currentCodeHashes[file] = digest;
+    if (digest !== manifest.codeHashes[file]) changedCodeFiles.push(file);
+    if (!compareCurrent)
+      assert.equal(
+        digest,
+        manifest.codeHashes[file],
+        'pipeline_changed_requires_new_replay_identity',
+      );
   }
+  const comparison = {
+    comparison: compareCurrent
+      ? 'recorded_responses_current_code'
+      : 'recorded_code_identity',
+    changedCodeFiles,
+    currentCodeHashes,
+  };
   const source = createNotesSource(
     JSON.parse(read('sources.json')).rows[caseIndex - 1].transcript_json,
   );
@@ -202,7 +228,6 @@ async function main() {
       },
       reviewProtocol: 'editor',
       compactWriterContract: true,
-      compactEditorContract: manifest.compactEditorContract === true,
       provider: 'ollama',
       model: manifest.model,
       contextTokens: manifest.contextTokens,
@@ -324,6 +349,7 @@ async function main() {
     );
   }
   const result = {
+    ...comparison,
     caseIndex,
     physicalRequests: 0,
     capturedAttemptsConsumed: consumed,
@@ -334,10 +360,14 @@ async function main() {
       'Recorded-boundary validation replay only; no OS timer, scheduler, or publication replay.',
   };
   writeOwnerOnlyPrivateFile(
-    path.join(root, `case-${caseIndex}-offline-replay.json`),
+    path.join(
+      root,
+      `case-${caseIndex}-${compareCurrent ? 'current-code' : 'offline'}-replay.json`,
+    ),
     JSON.stringify(result, null, 2),
   );
-  console.log(JSON.stringify(result));
+  const { currentCodeHashes: _hashes, ...summary } = result;
+  console.log(JSON.stringify(summary));
 }
 void main().catch((error) => {
   if (failureRoot)

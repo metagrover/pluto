@@ -10,6 +10,70 @@ const baseline = {
   thermalNominal: true,
 };
 describe('notes replay safety guard', () => {
+  it('allows bounded paging only with affirmative normal OS pressure', () => {
+    const normal = { ...baseline, memoryPressure: 'normal' as const };
+    const paging = {
+      ...normal,
+      swapUsedBytes: baseline.swapUsedBytes + 849 * 1024 ** 2,
+    };
+    expect(notesReplayResourceStop(normal, paging)).toBeNull();
+    expect(
+      notesReplayResourceStop(normal, { ...paging, memoryPressure: 'warning' }),
+    ).toBe('memory_pressure_warning');
+    expect(
+      notesReplayResourceStop(normal, {
+        ...paging,
+        memoryPressure: 'critical',
+      }),
+    ).toBe('memory_pressure_warning');
+    expect(
+      notesReplayResourceStop(normal, { ...paging, memoryFreePercent: 9 }),
+    ).toBe('low_memory_headroom');
+    expect(
+      notesReplayResourceStop(normal, { ...paging, memoryPressure: undefined }),
+    ).toBe('resource_telemetry_unavailable');
+    expect(
+      notesReplayResourceStop(normal, {
+        ...paging,
+        swapUsedBytes: baseline.swapUsedBytes + 2 * 1024 ** 3,
+      }),
+    ).toBeNull();
+    expect(
+      notesReplayResourceStop(normal, {
+        ...paging,
+        swapUsedBytes: baseline.swapUsedBytes + 2 * 1024 ** 3 + 1,
+      }),
+    ).toBe('swap_growth_exceeded');
+  });
+  it.each([
+    ['1', 'normal'],
+    ['2', 'warning'],
+    ['4', 'critical'],
+  ])('parses dispatch pressure %s as %s', (value, expected) => {
+    expect(
+      parseNotesReplayResources(
+        'used = 0.00M',
+        'free percentage: 50%',
+        '',
+        undefined,
+        value,
+      ).memoryPressure,
+    ).toBe(expected);
+  });
+  it.each(['', '0', '3', 'unknown'])(
+    'rejects unknown pressure telemetry %s',
+    (value) => {
+      expect(() =>
+        parseNotesReplayResources(
+          'used = 0.00M',
+          'free percentage: 50%',
+          '',
+          undefined,
+          value,
+        ),
+      ).toThrow('resource_telemetry_invalid');
+    },
+  );
   it.each(['before_read', 'during_read', 'dispose'])(
     'censors a monitoring gap %s without silently resuming',
     async (phase) => {

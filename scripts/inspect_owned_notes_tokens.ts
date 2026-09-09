@@ -105,7 +105,7 @@ async function main() {
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    const terminal = packets.findLast((packet) => packet.done);
+    const terminal = [...packets].reverse().find((packet) => packet.done);
     rows.push({
       attempt: name.replace('-request.json', ''),
       renderedPromptSha256: createHash('sha256').update(prompt).digest('hex'),

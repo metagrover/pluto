@@ -82,7 +82,6 @@ export type NotesTask = 'notesWriter' | 'notesAudit' | 'notesMerge';
 export type NotesResponseContract =
   | 'draft'
   | 'compact_draft'
-  | 'compact_editor'
   | 'audit'
   | 'editor';
 
@@ -112,8 +111,6 @@ export type GenerateMeetingNotesInput = {
   hierarchyAuditStrategy?: 'every_node' | 'final_only' | 'deterministic_only';
   /** Compact direct writer; deterministic-only remains a benchmark route. */
   compactWriterContract?: boolean;
-  /** Replay-only compact full-document editor; not a production default. */
-  compactEditorContract?: boolean;
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
@@ -127,7 +124,7 @@ export type GenerateMeetingNotesInput = {
   onDeterministicWriterRecovery?: () => void;
   onStage?: (task: NotesTask) => void;
   /** Ephemeral, unreviewed document preview; never a publication signal. */
-  onDraft?: (draft: NotesDraft) => void;
+  onDraft?: (draft: NotesDraft, phase?: 'streaming' | 'complete') => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;
   /** Product deadline for optional model review; writers remain fail-closed. */

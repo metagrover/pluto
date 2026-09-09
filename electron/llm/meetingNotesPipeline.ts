@@ -61,7 +61,7 @@ const emitDraftPreview = (
 ) => {
   if (input.signal?.aborted) return;
   try {
-    input.onDraft?.(structuredClone(draft));
+    input.onDraft?.(structuredClone(draft), 'complete');
   } catch {
     // Observability/UI must not change generation or publication outcomes.
     console.warn('[Notes] Draft preview observer failed');
@@ -75,7 +75,6 @@ const reviewPrompt = (
     ? buildNotesEditorPrompt({
         ...options,
         compactDraft: input.compactWriterContract === true,
-        compactOutput: input.compactEditorContract === true,
       })
     : buildNotesAuditPrompt(options);
 const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
@@ -178,9 +177,7 @@ const makeRequest = (
   responseContract:
     task === 'notesAudit'
       ? input.reviewProtocol === 'editor'
-        ? input.compactEditorContract
-          ? 'compact_editor'
-          : 'editor'
+        ? 'editor'
         : 'audit'
       : task === 'notesWriter' && input.compactWriterContract
         ? 'compact_draft'
@@ -724,7 +721,6 @@ const auditDraft = async (
             model: input.model,
           },
           compactDraft: input.compactWriterContract === true,
-          compactOutput: input.compactEditorContract === true,
         });
         assertAllowedSources(result.draft, evidenceSpans);
         assertAuditSourcesAllowed(result.audit, evidenceSpans);
@@ -846,9 +842,8 @@ const metadataFor = (
     provider: input.provider,
     model: input.model,
     generation_path: mode === 'direct' ? 'single_pass' : 'multi_pass',
-    prompt_version: input.compactEditorContract
-      ? `${NOTES_EDITOR_PROMPT_VERSION}-compact-editor-v1-experimental`
-      : input.reviewProtocol === 'editor'
+    prompt_version:
+      input.reviewProtocol === 'editor'
         ? NOTES_EDITOR_PROMPT_VERSION
         : NOTES_PROMPT_VERSION,
     generated_at: new Date().toISOString(),
@@ -1480,7 +1475,6 @@ const planBoundedCompactLeaves = (
       userNotes: input.context.userNotes,
       knownTerms,
       compactDraft: true,
-      compactOutput: input.compactEditorContract === true,
     });
     return (
       fits(input, writerPrompt, COMPACT_WRITER_OUTPUT_TOKENS, spans) &&
@@ -1672,16 +1666,6 @@ const runMeetingNotes = async (
   input: GenerateMeetingNotesInput,
 ): Promise<AnalysisDocumentV3> => {
   assertNotCancelled(input);
-  if (
-    input.compactEditorContract &&
-    (!input.compactWriterContract ||
-      input.reviewProtocol !== 'editor' ||
-      input.hierarchyAuditStrategy)
-  ) {
-    throw new MeetingNotesError(
-      'notes_compact_editor_requires_compact_pipeline',
-    );
-  }
   const sourceText = serializeSource(input);
   const knownTerms = knownTermsFor(input);
   const compactEditor =

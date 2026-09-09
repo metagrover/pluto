@@ -24,6 +24,7 @@ import {
 } from './lib/notesReplayMarkdown';
 import { triageNotesReplay } from './lib/notesReplayQuality';
 import {
+  NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES,
   notesReplayResourceStop,
   readNotesReplayResources,
   watchNotesReplayResources,
@@ -39,14 +40,10 @@ const sha = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 async function main() {
   const mode = process.env.NOTES_REPLAY_MODE ?? 'production';
-  const compactEditor = process.env.NOTES_REPLAY_COMPACT_EDITOR === '1';
-  assert.ok(
-    process.env.NOTES_REPLAY_COMPACT_EDITOR === undefined || compactEditor,
-    'invalid_compact_editor_opt_in',
-  );
-  assert.ok(
-    !compactEditor || mode === 'production',
-    'compact_editor_requires_structured_replay',
+  assert.equal(
+    process.env.NOTES_REPLAY_COMPACT_EDITOR,
+    undefined,
+    'compact_editor_experiment_retired_use_archived_source',
   );
   const contextTokens = Number(process.env.NOTES_REPLAY_CONTEXT ?? '16384');
   assert.ok(
@@ -256,7 +253,6 @@ async function main() {
       digest: model.digest,
       contextTokens,
       compactWriterContract: mode === 'production',
-      compactEditorContract: compactEditor,
       contextReuse: process.env.NOTES_REPLAY_CONTEXT_REUSE === '1',
       sourceFirstReconciliation: false,
       deadlineMs: MEETING_NOTES_ABSOLUTE_DEADLINE_MS,
@@ -264,7 +260,10 @@ async function main() {
         sampleIntervalMs: 5000,
         maxSampleGapMs: 30000,
         minMemoryFreePercent: 10,
-        maxSwapGrowthBytes: 512 * 1024 * 1024,
+        version: 'os-pressure-bounded-swap-v2',
+        maxSwapGrowthBytes: NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES,
+        requiredMemoryPressure: 'normal',
+        legacyWithoutPressureMaxSwapGrowthBytes: 512 * 1024 * 1024,
         thermalWarningsAllowed: false,
       },
       codeHashes: Object.fromEntries(
@@ -359,11 +358,16 @@ async function main() {
               source,
               contextTokens,
               compactWriterContract: true,
-              compactEditorContract: compactEditor,
-              onDraft: (draft) => {
-                result.firstDraftMs ??= Date.now() - started;
+              onDraft: (draft, phase) => {
+                if (!draft.sections.some((s) => s.items.length)) return;
+                result.firstCompleteBulletMs ??= Date.now() - started;
+                if (phase !== 'streaming')
+                  result.firstDraftMs ??= Date.now() - started;
                 record({
-                  event: 'draft_preview_ready',
+                  event:
+                    phase === 'streaming'
+                      ? 'streaming_bullet_ready'
+                      : 'draft_preview_ready',
                   caseIndex: current,
                   elapsedMs: Date.now() - started,
                   sectionCount: draft.sections.length,

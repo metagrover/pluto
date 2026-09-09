@@ -6,14 +6,52 @@ import {
   buildCausalReplayFrames,
   replayAcceptanceFailures,
   replayCausalFrames,
+  replayUpdateLatencyMs,
   runPrivateParakeetEouReplay,
 } from '../../scripts/run_private_parakeet_eou_replay.ts';
 
 describe('Parakeet EOU causal replay', () => {
+  it('measures update latency from replay readiness rather than model preparation', () => {
+    expect(replayUpdateLatencyMs(12340, 11000, 1.28)).toBe(60);
+    expect(replayUpdateLatencyMs(12340, null, 1.28)).toBeNull();
+  });
+  it('settles failed queued appends and reports failure without unhandled rejections', async () => {
+    let now = 0;
+    const failure = new Error('native_append_failed');
+    await expect(
+      replayCausalFrames({
+        frames: buildCausalReplayFrames({
+          mic: { sampleRate: 8000, samples: new Float32Array(8000) },
+          system: { sampleRate: 8000, samples: new Float32Array(8000) },
+        }),
+        clock: {
+          nowMs: () => now,
+          sleep: async (ms) => {
+            now += ms;
+          },
+        },
+        append: async () => {
+          throw failure;
+        },
+      }),
+    ).rejects.toBe(failure);
+  });
+  it('rejects a pre-cancelled replay before opening source files or starting a runtime', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled_before_start'));
+    await expect(
+      runPrivateParakeetEouReplay('/unavailable/private-manifest.json', {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('cancelled_before_start');
+  });
   it('reports content-free acceptance failure names', () => {
     expect(
       replayAcceptanceFailures(
         {
+          preparationMs: null,
+          firstPartialAfterReadyMs: null,
+          firstEouAfterReadyMs: null,
           firstPartialMs: null,
           firstEouMs: null,
           p50UpdateLatencyMs: null,

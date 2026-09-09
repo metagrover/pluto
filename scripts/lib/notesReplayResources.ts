@@ -2,10 +2,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
 export const NOTES_REPLAY_MAX_SAMPLE_GAP_MS = 30_000;
+export const NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES = 2 * 1024 ** 3;
 export type NotesReplayResources = {
   swapUsedBytes: number;
   memoryFreePercent: number;
   thermalNominal: boolean;
+  memoryPressure?: 'normal' | 'warning' | 'critical';
   powerSource?: 'ac' | 'battery' | 'unknown';
 };
 
@@ -14,6 +16,7 @@ export function parseNotesReplayResources(
   memory: string,
   thermal: string,
   power?: string,
+  pressure?: string,
 ): NotesReplayResources {
   const swapMatch = /used = ([0-9.]+)M/.exec(swap);
   const memoryMatch = /free percentage:\s*(\d+)%/i.exec(memory);
@@ -21,6 +24,10 @@ export function parseNotesReplayResources(
     throw new Error('resource_telemetry_unavailable');
   const swapUsedBytes = Number(swapMatch[1]) * 1024 * 1024;
   const memoryFreePercent = Number(memoryMatch[1]);
+  // This sysctl exports dispatch flags (1/2/4), not the internal 0/1/2/3 enum.
+  const pressureLevel = pressure?.trim();
+  if (pressure !== undefined && !['1', '2', '4'].includes(pressureLevel!))
+    throw new Error('resource_telemetry_invalid');
   if (
     !Number.isFinite(swapUsedBytes) ||
     memoryFreePercent < 0 ||
@@ -28,6 +35,16 @@ export function parseNotesReplayResources(
   )
     throw new Error('resource_telemetry_invalid');
   return {
+    ...(pressureLevel === undefined
+      ? {}
+      : {
+          memoryPressure:
+            pressureLevel === '1'
+              ? ('normal' as const)
+              : pressureLevel === '2'
+                ? ('warning' as const)
+                : ('critical' as const),
+        }),
     powerSource: power?.includes("'AC Power'")
       ? 'ac'
       : power?.includes("'Battery Power'")
@@ -42,17 +59,23 @@ export function parseNotesReplayResources(
 }
 export async function readNotesReplayResources(): Promise<NotesReplayResources> {
   const options = { timeout: 3000, maxBuffer: 64 * 1024 };
-  const [swap, memory, thermal, power] = await Promise.all([
+  const [swap, memory, thermal, power, pressure] = await Promise.all([
     exec('/usr/sbin/sysctl', ['vm.swapusage'], options),
     exec('/usr/bin/memory_pressure', ['-Q'], options),
     exec('/usr/bin/pmset', ['-g', 'therm'], options),
     exec('/usr/bin/pmset', ['-g', 'batt'], options),
+    exec(
+      '/usr/sbin/sysctl',
+      ['-n', 'kern.memorystatus_vm_pressure_level'],
+      options,
+    ),
   ]);
   return parseNotesReplayResources(
     swap.stdout,
     memory.stdout,
     thermal.stdout,
     power.stdout,
+    pressure.stdout,
   );
 }
 export function notesReplayResourceStop(
@@ -66,8 +89,21 @@ export function notesReplayResourceStop(
   )
     return 'power_source_changed';
   if (!sample.thermalNominal) return 'thermal_or_performance_warning';
+  if (
+    baseline.memoryPressure !== undefined &&
+    sample.memoryPressure === undefined
+  )
+    return 'resource_telemetry_unavailable';
+  if (sample.memoryPressure && sample.memoryPressure !== 'normal')
+    return 'memory_pressure_warning';
   if (sample.memoryFreePercent < 10) return 'low_memory_headroom';
-  if (sample.swapUsedBytes - baseline.swapUsedBytes > 512 * 1024 * 1024)
+  // Allow bounded startup paging only with affirmative OS pressure evidence.
+  // Old captures without that evidence retain their conservative interpretation.
+  const swapBudget =
+    baseline.memoryPressure === 'normal' && sample.memoryPressure === 'normal'
+      ? NOTES_REPLAY_NORMAL_PRESSURE_SWAP_BUDGET_BYTES
+      : 512 * 1024 * 1024;
+  if (sample.swapUsedBytes - baseline.swapUsedBytes > swapBudget)
     return 'swap_growth_exceeded';
   return null;
 }

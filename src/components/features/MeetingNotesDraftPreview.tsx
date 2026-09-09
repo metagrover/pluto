@@ -25,7 +25,7 @@ export function MeetingNotesDraftPreview({
       className="mx-auto w-full max-w-[760px] px-5 py-4 md:px-8"
     >
       <p className="mb-1 text-sm font-medium text-pro-text">
-        Draft preview · reviewing
+        Draft preview · not final
       </p>
       <p className="mb-5 text-sm text-pro-text-muted">
         These notes are incomplete and may change. They are not saved yet.

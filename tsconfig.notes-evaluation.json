@@ -6,6 +6,11 @@
     "scripts/run_notes_replay.ts",
     "scripts/run_notes_cache_isolation.ts",
     "scripts/summarize_notes_replay.ts",
-    "scripts/replay_notes_response_case.ts"
+    "scripts/replay_notes_response_case.ts",
+    "scripts/inspect_notes_token_accounting.ts",
+    "scripts/inspect_owned_notes_tokens.ts",
+    "scripts/inspect_notes_stream_preview.ts",
+    "scripts/run_notes_audio_replay.ts",
+    "scripts/inspect_notes_audio_cache.ts"
   ]
 }
