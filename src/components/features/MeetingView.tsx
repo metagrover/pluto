@@ -57,6 +57,10 @@ import {
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
+import {
+  MeetingNotesDraftPreview,
+  currentNotesPreview,
+} from './MeetingNotesDraftPreview';
 import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
@@ -982,6 +986,9 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
+  const draftPreview = !notesDocument.hasAnalysis
+    ? currentNotesPreview(selectedMeeting)
+    : null;
   const inlineSpeakerLabelRepairRequired =
     downstreamPresentation.state === 'failed' &&
     !notesDocument.hasAnalysis &&
@@ -1503,7 +1510,9 @@ export const MeetingView = ({
           </section>
         ) : null}
 
-        {isMeetingProcessing && downstreamPresentation.state === 'loading' ? (
+        {isMeetingProcessing &&
+        downstreamPresentation.state === 'loading' &&
+        !draftPreview ? (
           <MeetingAnalysisSkeleton
             title={downstreamPresentation.title}
             detail={downstreamPresentation.detail}
@@ -1518,6 +1527,9 @@ export const MeetingView = ({
         {downstreamPresentation.state === 'failed' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisUnavailable />
+        ) : null}
+        {draftPreview ? (
+          <MeetingNotesDraftPreview preview={draftPreview} />
         ) : null}
         {notesDocument.hasAnalysis ? (
           <div data-meeting-artifact="analysis" data-state="ready">

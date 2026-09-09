@@ -905,6 +905,14 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Trust boundary:** Row existence alone never proves finalization. Validated or generation-mismatched meetings are not reopened, recovery-required journals retain their fail-closed path, and unverified simultaneous microphone text is presented neutrally rather than promoted to remote identity. Canonical attribution, validation, compare-and-save, and downstream gates are unchanged.
 - **Measurement boundary:** [Issue #739](https://github.com/metagrover/pluto/issues/739) may measure sealed-to-canonical stage cost, but notes-cost diagnostics do not own or bypass capture recovery behavior.
 
+## 2026-09-08 - Reuse compatible live notes work and reduce wire overhead
+
+- **Status:** Implemented; real capture-to-final latency acceptance remains open.
+- **Supersedes:** The prompt identity in “Bound direct meeting notes to a compact writer and editor” below advances to `notes-v30`. Its writer/editor and publication safeguards remain. This repairs the compact-path implementation of “Admit only exact incremental note leaves under capture headroom”; it does not relax that admission policy.
+- **Decision:** Live compact precomputation and bounded final generation share the same source partitioner, primary spans, writer contract and prompt. Only closed leaves are cached; corrected source evidence invalidates reuse, and final reviews still run. Do not spend speculative retries on an unsuccessful compact precomputation.
+- **Wire:** Encode source rows losslessly as labelled JSON tuples, request minified JSON, bound Ollama prompt processing to 128 tokens per internal batch, and explicitly refuse input truncation/context shifting. This is not concurrent meeting processing. Cache/run identity changes with the prompt version.
+- **Boundary:** Gemma routing and the 16K production context are unchanged. Raw Markdown, smaller-model and alternative runtime profiles remain private development comparisons, not published notes or default routes. Lower token counts and synthetic cache reuse are not proof of end-to-end production latency.
+
 ## 2026-09-03 - Bound direct meeting notes to a compact writer and editor
 
 - **Status:** Accepted and implemented.
@@ -1015,3 +1023,33 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The 2026-05-01 issue-first development decision and the 2026-04-30 requirement that every meaningful change add a changelog fragment. Existing issues, decisions, changelog fragments, specs, and plans remain historical and product evidence, while their embedded workflow and skill mandates no longer govern new work.
 - **Automation:** The standalone PM GitHub preflight command and test are retired because the associated local PM and Builder automations are paused and do not invoke the command. If autonomous GitHub mutation is enabled again, that automation must establish reachability, authentication, repository permission, and redacted diagnostics before mutation; this preserves the safety intent of the 2026-05-01 PM preflight decision without retaining an unused project wrapper.
 - **Consequences:** The repository no longer bundles Superpowers or language-specific agent playbooks. Future agents should choose the smallest useful process for the task, preserve unrelated work and private evidence, and update this log whenever an accepted decision is intentionally replaced.
+
+## 2026-09-08 - Park experimental Phi notes and prioritize Gemma evaluation
+
+- **Status:** Accepted by the owner after the read-only latest-ten development replay.
+- **Decision:** Stop Phi-specific notes tuning and capacity redesign. Preserve the experiment and its failed evidence, and reuse model-neutral evaluation infrastructure around the existing production Gemma notes path. Do not port the experimental source-first route into Gemma merely to continue the prior investment.
+- **Evidence:** Of eight eligible latest-ten sources, four failed Phi capacity preflight, three failed generation/validation, and the sole accepted replay output failed assistant source-grounded quality review. This small, noisy development sample is not a blinded comparison or proof of universal model incapability; it is enough to redirect engineering effort.
+- **Scope:** This parks the notes experiment proposed in PR #789 and implemented experimentally in PR #794. It does not supersede the 2026-08-28 routing decision, change Gemma production defaults, or remove Phi from approved Quick chat use.
+- **Next gate:** Establish an unchanged Gemma provider baseline on the same source export. Retain complete private transport evidence and interrupted denominators; distinguish mechanical provenance checks, heuristic quality triage, assistant source review, and blinded human acceptance. Revisit alternative notes models only after the shared harness demonstrates a concrete production need and a bounded comparison is justified.
+
+## 2026-09-08 - Remove the parked notes experiment from the merge candidate
+
+- **Status:** Accepted following the owner's explicit cleanup request.
+- **Supersedes:** The implementation-preservation portion of “Park experimental Phi notes and prioritize Gemma evaluation” above. Preserve the experiment in Git history and its private evidence, not as dormant application code or experiment-only fixtures.
+- **Decision:** PR #794 retains only model-neutral read-only replay, transport evidence, resource diagnosis, quality triage, tests and measured reports. Restore application, native runtime and existing evaluator files to the PR base; remove the experimental activation, source-first inference route and dedicated capture/sleep-wake runners.
+- **Boundary:** Existing Quick Chat Phi support and production Gemma routing are unchanged. Historical run manifests retain their original code identities; cleanup checks are not new inference or production acceptance evidence. Further notes work should target measured latency, capacity and quality of the production path rather than revive the parked experiment.
+
+## 2026-09-08 - Reveal ephemeral notes drafts before final review completes
+
+- **Decision:** Expose complete parsed draft sections progressively while the existing final review continues. This is a section-level preview, not token-level Markdown streaming, a second inference route, or publication. It complements the compact live-cache repair: matching cached sections can be revealed before any new model call.
+- **Trust boundary:** The preview is plain text, explicitly incomplete and unsaved, held only in main-process memory, bounded to 64 KB, and served only for the current running source/run revision. Cancellation, supersession and terminal completion remove it. Existing reviewed notes always win during regeneration. Preview content cannot be edited, exported, or consumed as actions/insights.
+- **UI:** Replace the loading skeleton once a preview exists. Late IPC responses cannot restore an older preview. Original transcripts, user notes, final review, source correction invalidation and guarded publication remain unchanged.
+- **Evidence:** Regression coverage proves cache-backed previews before fresh inference, progressive growth, current-revision invalidation, publication isolation, HTML escaping, late-status rejection, and preservation of existing notes. Short real-source replay measured draft availability at 21.3 seconds and reviewed completion at 42.3 seconds; this is not a thirty-minute-meeting forecast or packaged capture acceptance.
+
+## 2026-09-08 - Gate live notes acceleration on observed source continuity
+
+- **Clarification:** The preceding guarded-preview decision remains in force. Exact-source cache tests establish mechanism correctness, not a promised stop-to-notes latency for real recordings.
+- **Evidence:** A zero-inference inspection of the frozen latest-ten export found no cached packets from the final saved live snapshots: six eligible sources skip precomputation as direct-fit and two exceed the three-leaf precompute bound. Earlier live offers were not reconstructed. These sources use recovered-channel finalization and do not substitute for fresh canonical-session capture acceptance.
+- **Decision:** Keep Gemma routing, final review and exact source identity unchanged. Do not broaden precomputation or relax provenance based on the ten-second preview/ninety-second reviewed-note targets; those targets remain unachieved. Require measured live packet completion/reuse, source invalidation and recording continuity before claiming live acceleration.
+- **Safety:** Cancellation covers the asynchronous admission window and pending offers. Battery, suspend and non-nominal thermal transitions cancel incremental inference. This adds event-driven cancellation, not a continuous memory-pressure guarantee.
+- **Scope clarification:** This extends the measured production work permitted by the cleanup decision above; it does not restore any parked Phi implementation or promote a diagnostic model, KV-cache, context, or checkpoint profile.

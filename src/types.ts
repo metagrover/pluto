@@ -1,5 +1,10 @@
 import type { TranscriptLifecycleStatus } from './utils/transcriptIntegrity';
 
+export type MeetingNotesPreview = {
+  runId: string;
+  sections: Array<{ title: string; items: string[] }>;
+};
+
 export interface TranscriptSegment {
   text: string;
   speaker?: string | number;
@@ -219,6 +224,8 @@ export interface Meeting {
   user_edits_json?: string;
   analysis_edit_conflicts_json?: string;
   analysis_run_json?: string | null;
+  /** Transient local draft, never persisted as meeting analysis. */
+  notes_preview?: MeetingNotesPreview | null;
   transcript_status?: TranscriptLifecycleStatus;
   transcript_integrity_json?: string;
   system_audio_path?: string;

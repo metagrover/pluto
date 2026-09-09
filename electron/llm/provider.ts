@@ -146,6 +146,7 @@ export interface LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onDraft?: (draft: import('./meetingNotesTypes').NotesDraft) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       onStageEvent?: import('./meetingNotesRunMetrics').NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
@@ -165,6 +166,7 @@ export interface LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      compactWriterContract?: boolean;
       stageCache: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;

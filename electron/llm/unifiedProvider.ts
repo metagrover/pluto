@@ -530,6 +530,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stageCache?: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
+      onDraft?: (draft: import('./meetingNotesTypes').NotesDraft) => void;
       onRepair?: (task: import('./meetingNotesTypes').NotesTask) => void;
       /** Explicit benchmark experiment; product callers retain model repair. */
       recoverWriterDraft?: (raw: string) => string | null;
@@ -565,6 +566,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       optionalReviewDeadlineAtMs: options.optionalReviewDeadlineAtMs,
       optionalReviewMinStartMs: options.optionalReviewMinStartMs,
       onStage: options.onStage,
+      onDraft: options.onDraft,
       onRepair: options.onRepair,
       recoverWriterDraft: options.recoverWriterDraft,
       onDeterministicWriterRecovery: options.onDeterministicWriterRecovery,
@@ -616,6 +618,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       trustedUserTerms?: string[];
       entityHints?: string[];
       contextTokens?: number;
+      compactWriterContract?: boolean;
       stageCache: import('./meetingNotesStageCache').NotesStageCache;
       cacheKey: string;
       onStage?: (task: import('./meetingNotesTypes').NotesTask) => void;
@@ -630,6 +633,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         ? await this.resolveOllamaModel('notesWriter')
         : this.getConfiguredAnalysisModel();
     return precomputeNextMeetingNotesLeaf({
+      compactWriterContract: options.compactWriterContract,
+      reviewProtocol: options.compactWriterContract ? 'editor' : undefined,
       source: options.source ?? createNotesSourceFromText(transcript),
       context: {
         userNotes,
@@ -1372,6 +1377,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       options: {
         num_ctx,
         num_predict,
+        ...(notesBudget ? { num_batch: 128 } : {}),
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
@@ -1412,6 +1418,9 @@ export class UnifiedLLMProvider implements LLMProvider {
     // channel, yielding no final answer. Chat defers grammar until the answer.
     const useNotesChat = Boolean(notesBudget);
     if (useNotesChat) {
+      // Never silently discard source turns or shift them out while answering.
+      requestBody.truncate = false;
+      requestBody.shift = false;
       requestBody.prompt = undefined;
       requestBody.messages = [{ role: 'user', content: prompt }];
     }

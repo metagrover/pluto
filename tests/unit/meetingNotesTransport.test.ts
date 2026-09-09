@@ -189,6 +189,26 @@ const request = {
   notesBudget: { contextTokens: 16384, outputTokens: 2048 },
 };
 
+it('keeps the complete source in Ollama notes requests and bounds prompt batching', async () => {
+  stubOllamaFetch(async (url, init) => {
+    expect(String(url)).toBe('http://127.0.0.1:11434/api/chat');
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({
+      truncate: false,
+      shift: false,
+      options: { num_batch: 128, num_ctx: 16384, num_predict: 2048 },
+      messages: [{ role: 'user', content: request.prompt }],
+    });
+    return new Response(
+      '{"message":{"content":"{}"},"done":true,"done_reason":"stop"}',
+    );
+  });
+  const provider = new UnifiedLLMProvider('ollama', {
+    ollama_model: 'gemma4:12b',
+  }) as unknown as Transport;
+  await expect(provider.generateText(request)).resolves.toBe('{}');
+});
+
 it('decodes chat packets split at every byte without leaking reasoning or duplicating the final packet', async () => {
   const payload = new TextEncoder().encode(
     [

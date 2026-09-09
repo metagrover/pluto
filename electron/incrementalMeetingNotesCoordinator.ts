@@ -92,13 +92,18 @@ export const createIncrementalMeetingNotesCoordinator = <
     while (pending) {
       const input = pending;
       pending = null;
-      if (!(await dependencies.admit(input))) {
-        record('discarded', input);
-        continue;
-      }
       const controller = new AbortController();
       active = { input, controller };
       try {
+        const admitted = await dependencies.admit(input);
+        if (controller.signal.aborted) {
+          record('preempted', input);
+          continue;
+        }
+        if (!admitted) {
+          record('discarded', input);
+          continue;
+        }
         record(await dependencies.run(input, controller.signal), input);
       } catch {
         record(controller.signal.aborted ? 'preempted' : 'discarded', input);
@@ -142,6 +147,16 @@ export const createIncrementalMeetingNotesCoordinator = <
           new DOMException('Incremental notes cancelled', 'AbortError'),
         );
       }
+    },
+    cancelAll(): void {
+      latestCharacterCountByMeeting.clear();
+      if (pending) {
+        record('discarded', pending);
+        pending = null;
+      }
+      active?.controller.abort(
+        new DOMException('Incremental notes cancelled', 'AbortError'),
+      );
     },
     async drain(): Promise<void> {
       while (loop) await loop;

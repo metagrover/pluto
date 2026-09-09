@@ -2,7 +2,7 @@ import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v29';
+export const NOTES_PROMPT_VERSION = 'notes-v30';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
@@ -123,6 +123,8 @@ export type GenerateMeetingNotesInput = {
   recoverWriterDraft?: (raw: string) => string | null;
   onDeterministicWriterRecovery?: () => void;
   onStage?: (task: NotesTask) => void;
+  /** Ephemeral, unreviewed document preview; never a publication signal. */
+  onDraft?: (draft: NotesDraft) => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;
   /** Product deadline for optional model review; writers remain fail-closed. */

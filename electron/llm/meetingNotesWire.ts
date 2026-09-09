@@ -23,11 +23,11 @@ export const createNotesWireRequest = (prompt: string, spans: SourceSpan[]) => {
               speaker: unknown;
               text: string;
             };
-            return JSON.stringify({
-              descriptor: bySpan.get(spanKey(parsed.descriptor)),
-              speaker: parsed.speaker,
-              text: parsed.text,
-            });
+            return JSON.stringify([
+              bySpan.get(spanKey(parsed.descriptor)),
+              parsed.speaker,
+              parsed.text,
+            ]);
           });
         return `BEGIN SOURCE DATA\n${rows.join('\n')}\nEND SOURCE DATA`;
       },
@@ -65,7 +65,7 @@ export const createNotesWireRequest = (prompt: string, spans: SourceSpan[]) => {
   };
   return {
     sourceLabels: [...byLabel.keys()],
-    prompt: `Source descriptors are opaque labels such as R0. Use sources:["R0"] and copy the labels from SOURCE DATA. Never write or calculate character offsets. Each label resolves to an exact original source span.\n${encoded}`,
+    prompt: `Return one-line minified JSON: no indentation, formatting newlines, or whitespace outside string values. Preserve spaces within text. SOURCE DATA rows are JSON arrays [descriptor, speaker, text]. Source descriptors are opaque labels such as R0. Use sources:["R0"] and copy the labels from SOURCE DATA. Never write or calculate character offsets. Each label resolves to an exact original source span.\n${encoded}`,
     decode: (raw: string): string => {
       try {
         return JSON.stringify(decodeValue(JSON.parse(raw)));

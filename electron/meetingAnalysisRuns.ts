@@ -15,6 +15,7 @@ import {
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 import type { LLMProvider } from './llm/provider';
+import { createMeetingNotesPreviewStore } from './meetingNotesPreview';
 import { createMeetingNotesScheduler } from './meetingNotesScheduler';
 
 type MeetingRecord = {
@@ -153,6 +154,7 @@ type NotesProvider = {
       stageCache?: NotesStageCache;
       cacheKey?: string;
       onStage?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
+      onDraft?: (draft: import('./llm/meetingNotesTypes').NotesDraft) => void;
       onRepair?: (task: import('./llm/meetingNotesTypes').NotesTask) => void;
       onStageEvent?: import('./llm/meetingNotesRunMetrics').NotesStageObserver;
       onPlan?: (plan: { plannedLeafCount: number }) => void;
@@ -358,6 +360,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   }) => Promise<void>;
 }) => {
   const activeByMeeting = new Map<string, ActiveRun>();
+  const previews = createMeetingNotesPreviewStore();
   const secondaryByMeeting = new Map<
     string,
     { runId: string; controller: AbortController }
@@ -547,6 +550,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         trustedUserTerms: [],
         entityHints: terms,
         contextTokens: NOTES_CONTEXT_TOKENS,
+        compactWriterContract: true,
         stageCache,
         cacheKey,
         workClass: 'background',
@@ -854,6 +858,24 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     stageCache,
                     cacheKey: stageCacheKey,
                     onStageEvent: runMetrics.observe,
+                    onDraft: (draft) => {
+                      previews.set(
+                        meetingId,
+                        runId,
+                        draft,
+                        () =>
+                          !controller.signal.aborted &&
+                          dependencies.db.getMeetingAnalysisRun(meetingId)
+                            ?.notes_status === 'running' &&
+                          dependencies.db.isMeetingAnalysisRunCurrent({
+                            meetingId,
+                            runId,
+                            inputRevision: fingerprint,
+                            ...revisions,
+                          }),
+                      );
+                      notify(meetingId);
+                    },
                     onPlan: ({ plannedLeafCount }) =>
                       runMetrics.setPlannedLeafCount(plannedLeafCount),
                     onRepair: () => runMetrics.recordRepair(),
@@ -946,6 +968,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           notify(meetingId);
           throw terminalError;
         } finally {
+          previews.clear(meetingId, runId);
           dependencies.knowledgeSynthesisPause?.release('meeting_notes_run');
           if (activeByMeeting.get(meetingId)?.runId === runId) {
             activeByMeeting.delete(meetingId);
@@ -955,6 +978,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       },
     });
     const promise = scheduledPromise.finally(() => {
+      previews.clear(meetingId, runId);
       if (activeByMeeting.get(meetingId)?.runId === runId) {
         activeByMeeting.delete(meetingId);
       }
@@ -975,6 +999,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   };
 
   return {
+    getMeetingNotesPreview: (meetingId: string | number) =>
+      previews.get(String(meetingId)),
     generateAndPublishMeetingNotes,
     precomputeIncrementalMeetingNotes,
     cancelMeetingNotes,
