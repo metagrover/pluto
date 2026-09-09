@@ -64,6 +64,42 @@ it('fails closed when capture headroom admission is denied', async () => {
   );
 });
 
+it('does not start work when capture stops during the asynchronous admission probe', async () => {
+  const admission = deferred<boolean>();
+  const run = vi.fn().mockResolvedValue('generated');
+  const coordinator = createIncrementalMeetingNotesCoordinator({
+    admit: () => admission.promise,
+    run,
+  });
+  coordinator.offer(offer(1));
+  coordinator.cancel('meeting-a');
+  admission.resolve(true);
+  await coordinator.drain();
+  expect(run).not.toHaveBeenCalled();
+});
+
+it('handles a failed admission probe without losing the newest pending work', async () => {
+  const admission = deferred<boolean>();
+  const run = vi.fn().mockResolvedValue('generated');
+  const coordinator = createIncrementalMeetingNotesCoordinator({
+    admit: vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await admission.promise;
+        throw new Error('probe failed');
+      })
+      .mockResolvedValue(true),
+    run,
+  });
+  coordinator.offer(offer(1));
+  coordinator.offer(offer(2));
+  admission.resolve(false);
+  await coordinator.drain();
+  expect(run.mock.calls.map(([input]) => input.sourceRevision)).toEqual([
+    'revision-2',
+  ]);
+});
+
 it('discards a duplicate or older source offer instead of running it', async () => {
   const run = vi.fn().mockResolvedValue('generated');
   const events: string[] = [];
@@ -110,6 +146,51 @@ it('aborts active work and discards pending work for a stopped meeting', async (
   expect(run).toHaveBeenCalledTimes(1);
   expect(events).toContain('preempted');
   expect(events).toContain('discarded');
+});
+
+it('cancels all admission and pending work, allowing a later healthy offer', async () => {
+  const admission = deferred<boolean>();
+  const run = vi.fn().mockResolvedValue('generated');
+  const coordinator = createIncrementalMeetingNotesCoordinator({
+    admit: vi
+      .fn()
+      .mockImplementationOnce(() => admission.promise)
+      .mockResolvedValue(true),
+    run,
+  });
+  coordinator.offer(offer(1));
+  coordinator.offer({ ...offer(2), meetingId: 'meeting-b' });
+  coordinator.cancelAll();
+  admission.resolve(true);
+  await coordinator.drain();
+  expect(run).not.toHaveBeenCalled();
+  coordinator.offer(offer(1));
+  await coordinator.drain();
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
+it('aborts in-flight inference and drops every pending offer on cancelAll', async () => {
+  const started = deferred<void>();
+  const run = vi.fn(async (_input, signal: AbortSignal) => {
+    started.resolve();
+    await new Promise((_, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      }),
+    );
+    return 'generated' as const;
+  });
+  const coordinator = createIncrementalMeetingNotesCoordinator({
+    admit: async () => true,
+    run,
+  });
+  coordinator.offer(offer(1));
+  await started.promise;
+  coordinator.offer({ ...offer(2), meetingId: 'meeting-b' });
+  coordinator.cancelAll();
+  await coordinator.drain();
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(run.mock.calls[0][1].aborted).toBe(true);
 });
 
 const healthyPolicy = {

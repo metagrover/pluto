@@ -1266,6 +1266,7 @@ app.whenReady().then(async () => {
   const incrementalNotesCoordinator =
     createIncrementalMeetingNotesCoordinator<CaptureIncrementalNotesOffer>({
       admit: async (input) => {
+        const availableMemory = await probeAvailableMemory();
         const active = captureSessionLease.recordingForOwner(input.ownerId);
         const policy = {
           captureOwned: active?.meetingId === input.meetingId,
@@ -1274,7 +1275,7 @@ app.whenReady().then(async () => {
           thermalState: powerMonitor.getCurrentThermalState(),
           freeMemoryBytes: os.freemem(),
           totalMemoryBytes: os.totalmem(),
-          ...(await probeAvailableMemory()),
+          ...availableMemory,
         };
         return evaluateIncrementalMeetingNotesAdmission(policy).admitted;
       },
@@ -1289,6 +1290,15 @@ app.whenReady().then(async () => {
         console.log('[Incremental notes]', JSON.stringify(metric));
       },
     });
+
+  // Admission is not a lease to continue through a later power/thermal change.
+  powerMonitor.on('on-battery', () => incrementalNotesCoordinator.cancelAll());
+  powerMonitor.on('suspend', () => incrementalNotesCoordinator.cancelAll());
+  powerMonitor.on('thermal-state-change', () => {
+    if (powerMonitor.getCurrentThermalState() !== 'nominal') {
+      incrementalNotesCoordinator.cancelAll();
+    }
+  });
 
   const stopNativeAudioCapture = () => {
     const processToStop = nativeAudioProcess;

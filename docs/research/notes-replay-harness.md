@@ -265,3 +265,40 @@ section after one writer call, while retaining all three final reviews.
 Neither the short replay nor that exact-source test proves capture-to-canonical
 cache reuse in a real recording. Cold historical long-meeting completion remains
 minutes rather than instantaneous.
+
+## Saved live-to-final cache identity inspection
+
+Run `pnpm exec tsx scripts/inspect_notes_live_reuse.ts /absolute/private/sources.json`
+against an existing owner-only latest-ten export. This does not open the database,
+invoke a model, or replay historical capture/admission timing. It reconstructs the
+saved live snapshot's event-time sorting and adjacent-speaker merging, then uses
+the actual precompute/final planners and cache keys with explicitly synthetic
+responses. Positive-control tests require genuine exact-key reuse; corrected
+source must miss. Output is a private content-free report with source/code hashes.
+Synthetic guardrail outcomes are not model-quality results.
+
+The frozen ten-row inspection retained two ineligible sources in its denominator.
+Of eight eligible saved live snapshots, six fit the direct path and therefore
+skip precomputation. The two long snapshots plan four leaves, above the existing
+three-leaf limit, and also skip precomputation. No live packets were cached in
+this saved-final-snapshot probe. This does not prove that every earlier offer
+would miss: earlier prefixes, admission decisions, cache expiry and runtime
+requests were not recorded or reconstructed. The eligible snapshots came from
+recovered-channel finalization, not a fresh canonical-session capture acceptance
+test. Finalization also changes source row boundaries/text; exact-source unit
+reuse must not be presented as real capture-to-final reuse evidence.
+
+Consequently, a ten-second useful preview and ninety-second reviewed completion
+for a thirty-minute meeting remain unachieved product targets. Do not expand
+precompute limits or introduce fuzzy source matching to manufacture a hit rate.
+The next performance acceptance needs a fresh recording with content-free counts
+for admitted/completed live packets, exact final hits and invalidations, alongside
+stop-to-preview/reviewed timing and capture/resource continuity. Cold historical
+generation remains a separate workload and is currently measured in minutes.
+
+Incremental admission now registers cancellation before awaiting the memory
+probe, rechecks capture/power/thermal state after that probe, and recovers from
+probe errors without losing the next pending offer. Battery, suspend and
+non-nominal thermal events cancel active and queued incremental work. These are
+event-driven protections, not continuous memory-pressure monitoring or proof of
+packaged sleep/wake behavior.
