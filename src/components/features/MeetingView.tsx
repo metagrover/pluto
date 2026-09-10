@@ -1230,16 +1230,18 @@ export const MeetingView = ({
                   onClick={() => void restorePreviousGeneratedNotes()}
                   disabled={isRestoringNotes}
                   className="meeting-toolbar-button meeting-toolbar-button--undo"
-                  aria-label="Restore previous generated notes"
+                  aria-label={
+                    isRestoringNotes
+                      ? 'Restoring previous notes…'
+                      : 'Undo rewrite'
+                  }
+                  title={isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}
                 >
                   {isRestoringNotes ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="h-6 w-6 animate-spin" />
                   ) : (
-                    <Undo2 className="w-3.5 h-3.5 opacity-70" />
+                    <Undo2 className="h-6 w-6" strokeWidth={2.25} />
                   )}
-                  <span>
-                    {isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}
-                  </span>
                 </button>
               ) : null}
               {downstreamPresentation.state === 'ready' &&
@@ -1537,7 +1539,7 @@ export const MeetingView = ({
             downstreamPresentation.notesUpdateQueuePosition ? (
               <output
                 aria-atomic="true"
-                className="mx-auto mb-4 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
+                className="mx-auto mb-2 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
               >
                 {downstreamPresentation.notesUpdateQueuePosition === 1
                   ? 'Notes update is next in the local queue.'
@@ -1548,28 +1550,8 @@ export const MeetingView = ({
             downstreamPresentation.notesUpdateFailed &&
             !regenerateNotesError &&
             !isRegeneratingNotes ? (
-              <output className="mx-auto mb-4 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8">
+              <output className="meeting-status-card mb-2">
                 Couldn’t update notes. Your previous notes are still here.
-              </output>
-            ) : null}
-            {downstreamPresentation.state === 'ready' &&
-            downstreamPresentation.secondaryStatus ? (
-              <output className="mx-auto mb-4 flex w-full max-w-[760px] items-center gap-3 px-6 text-sm text-pro-text-muted md:px-8">
-                <span>
-                  {downstreamPresentation.secondaryStatus === 'failed'
-                    ? 'Notes are ready. Related insights could not finish.'
-                    : 'Notes are ready. Updating related insights…'}
-                </span>
-                {downstreamPresentation.secondaryStatus === 'failed' ? (
-                  <button
-                    type="button"
-                    className="underline underline-offset-2 disabled:opacity-50"
-                    disabled={isRegeneratingNotes}
-                    onClick={() => void regenerateEnhancedNotes('secondary')}
-                  >
-                    {isRegeneratingNotes ? 'Retrying…' : 'Retry insights'}
-                  </button>
-                ) : null}
               </output>
             ) : null}
             <SavedEditConflicts
@@ -1582,6 +1564,30 @@ export const MeetingView = ({
               transcriptSegments={transcriptSegments}
               onDocumentChanged={fetchMeetings}
               onShowTranscript={() => setTranscriptVisible(true)}
+              workspaceStatus={
+                downstreamPresentation.state === 'ready' &&
+                downstreamPresentation.secondaryStatus ? (
+                  <output className="meeting-status-card">
+                    <span>
+                      {downstreamPresentation.secondaryStatus === 'failed'
+                        ? 'Notes are ready. Related insights could not finish.'
+                        : 'Notes are ready. Updating related insights…'}
+                    </span>
+                    {downstreamPresentation.secondaryStatus === 'failed' ? (
+                      <button
+                        type="button"
+                        className="meeting-status-card__action"
+                        disabled={isRegeneratingNotes}
+                        onClick={() =>
+                          void regenerateEnhancedNotes('secondary')
+                        }
+                      >
+                        {isRegeneratingNotes ? 'Retrying…' : 'Retry insights'}
+                      </button>
+                    ) : null}
+                  </output>
+                ) : null
+              }
             />
           </div>
         ) : null}

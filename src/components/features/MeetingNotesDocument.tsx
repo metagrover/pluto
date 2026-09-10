@@ -22,6 +22,7 @@ interface MeetingNotesDocumentProps {
   onDocumentChanged: () => void;
   onShowTranscript: () => void;
   header?: React.ReactNode;
+  workspaceStatus?: React.ReactNode;
 }
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
@@ -1019,6 +1020,7 @@ export const MeetingNotesDocument = ({
   onDocumentChanged,
   onShowTranscript,
   header,
+  workspaceStatus,
 }: MeetingNotesDocumentProps) => {
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [retrySave, setRetrySave] = useState<(() => void) | null>(null);
@@ -1236,6 +1238,7 @@ export const MeetingNotesDocument = ({
   );
   return (
     <div className="meeting-document-workspace">
+      {workspaceStatus}
       <article
         className="meeting-notes-document"
         data-reading-surface="meeting-notes"

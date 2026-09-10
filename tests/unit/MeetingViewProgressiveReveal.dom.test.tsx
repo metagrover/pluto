@@ -1257,7 +1257,7 @@ describe('MeetingView progressive reveal', () => {
     await act(async () =>
       container
         .querySelector<HTMLButtonElement>(
-          'button[aria-label="Restore previous generated notes"]',
+          'button[aria-label="Undo rewrite"]',
         )
         ?.click(),
     );

@@ -981,14 +981,14 @@
     letter-spacing: 0.005em;
   }
   .meeting-document-header {
-    @apply mx-auto flex w-full max-w-[760px] flex-col px-6 pb-7 pt-16 md:px-8;
+    @apply mx-auto flex w-full max-w-[760px] flex-col px-6 pb-4 pt-16 md:px-8;
     border-color: transparent;
   }
   .meeting-document-meta-row {
-    @apply mt-3 flex w-full min-w-0 items-start justify-between gap-4;
+    @apply mt-3 flex w-full min-w-0 items-center justify-between gap-4;
   }
   .meeting-document-meta {
-    @apply flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8rem] leading-5;
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.85rem] leading-5;
     color: var(--notes-muted);
   }
   .meeting-document-meta span + span::before {
@@ -1075,8 +1075,9 @@
     @apply mt-1;
   }
   .meeting-toolbar-button--undo {
-    @apply border;
+    @apply h-8 w-8 justify-center border px-0;
     border-color: var(--notes-rule);
+    color: var(--notes-ink);
     background: var(--notes-paper-raised);
   }
   .meeting-template-picker {
@@ -1113,6 +1114,29 @@
   }
   .meeting-notes-surface {
     @apply pt-0;
+  }
+  .meeting-status-card {
+    @apply mx-auto mt-7 flex items-center justify-between gap-4 rounded-lg border px-5 py-3 text-sm md:px-6;
+    width: calc(100% - 4rem);
+    margin-bottom: 2rem;
+    border-color: var(--notes-rule);
+    color: var(--notes-muted);
+    background: color-mix(
+      in oklch,
+      var(--notes-paper) 92%,
+      var(--notes-muted) 8%
+    );
+  }
+  .meeting-status-card__action {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+    border-color: var(--notes-rule);
+    color: var(--notes-muted);
+    background: var(--notes-paper-raised);
+  }
+  .meeting-status-card__action:hover {
+    color: var(--notes-ink);
+    background: var(--notes-wash);
+    border-color: var(--notes-muted);
   }
   .meeting-failure-notice {
     @apply relative mx-auto flex w-full max-w-[760px] items-center gap-4 px-6 py-5 md:px-8;
