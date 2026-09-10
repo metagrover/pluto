@@ -44,6 +44,31 @@ public protocol ParakeetInferenceDriving: Sendable {
         vocabulary: [String],
         decoderIdentifier: UUID
     ) async throws -> TranscriptionOutput
+    func transcribe(
+        audioInput: AudioInput,
+        language: String?,
+        vocabulary: [String],
+        decoderIdentifier: UUID
+    ) async throws -> TranscriptionOutput
+}
+
+extension ParakeetInferenceDriving {
+    public func transcribe(
+        audioInput: AudioInput,
+        language: String?,
+        vocabulary: [String],
+        decoderIdentifier: UUID
+    ) async throws -> TranscriptionOutput {
+        guard case .fileURL(let url) = audioInput else {
+            throw RuntimeFailure.transcriptionFailed
+        }
+        return try await transcribe(
+            audioURL: url,
+            language: language,
+            vocabulary: vocabulary,
+            decoderIdentifier: decoderIdentifier
+        )
+    }
 }
 
 public actor ParakeetTranscriber {
@@ -62,6 +87,20 @@ public actor ParakeetTranscriber {
         language: String?,
         vocabulary: [String] = []
     ) async throws -> TranscriptionOutput {
+        try await transcribe(
+            modelURL: modelURL,
+            audioInput: .fileURL(audioURL.standardizedFileURL),
+            language: language,
+            vocabulary: vocabulary
+        )
+    }
+
+    public func transcribe(
+        modelURL: URL,
+        audioInput: AudioInput,
+        language: String?,
+        vocabulary: [String] = []
+    ) async throws -> TranscriptionOutput {
         await acquire()
         defer { release() }
 
@@ -72,7 +111,7 @@ public actor ParakeetTranscriber {
                 loadedModelURL = standardizedModelURL
             }
             return try await driver.transcribe(
-                audioURL: audioURL.standardizedFileURL,
+                audioInput: audioInput,
                 language: language,
                 vocabulary: Array(vocabulary.prefix(100)),
                 decoderIdentifier: UUID()

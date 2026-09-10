@@ -802,10 +802,10 @@ describe('retryMeetingTranscriptValidation', () => {
         source: 'mic',
       }),
     );
-    expect(invoke).toHaveBeenCalledWith(
-      'AUDIO_PROBE_DURATION',
-      '/synthetic/mic.wav',
-    );
+    expect(invoke).toHaveBeenCalledWith('AUDIO_PROBE_DURATION', {
+      audioPath: '/synthetic/mic.wav',
+      meetingId: 'synthetic-id',
+    });
     expect(invoke).toHaveBeenCalledWith(
       'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
       expect.objectContaining({ meetingId: 'synthetic-id' }),

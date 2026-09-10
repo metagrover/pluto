@@ -49,6 +49,7 @@ import {
   promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
   sealCaptureJournal,
+  setCaptureJournalAudioKeyProvider,
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from './captureJournal';
@@ -60,6 +61,11 @@ import {
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { getAudioKeyStore } from './crypto/audioKeyStore';
+import {
+  mixEncryptedAudioArtifacts,
+  probeEncryptedAudioDuration,
+  sliceEncryptedAudio,
+} from './crypto/encryptedAudioPipeline';
 import {
   closeApplicationDatabase,
   getApplicationDatabase,
@@ -852,6 +858,45 @@ app.on(
 );
 
 app.whenReady().then(async () => {
+  setCaptureJournalAudioKeyProvider((meetingId) => {
+    const result = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
+    return result?.meetingKey ?? null;
+  });
+  const readEncryptedMeetingSlice = async ({
+    meetingId,
+    inputPath,
+    startSec,
+    durationSec,
+  }: {
+    meetingId: string;
+    inputPath: string;
+    startSec: number;
+    durationSec: number;
+  }) => {
+    const manifest = await readCaptureJournalManifest(
+      getMeetingArtifactsRootDir(),
+      meetingId,
+    );
+    const keyResult = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
+    if (
+      manifest.schemaVersion !== 4 ||
+      !keyResult ||
+      keyResult.keyId !== manifest.keyId
+    ) {
+      return null;
+    }
+    return await sliceEncryptedAudio({
+      filePath: inputPath,
+      startSec,
+      durationSec,
+      context: {
+        meetingId,
+        generation: manifest.generation,
+        keyId: manifest.keyId,
+        meetingKey: keyResult.meetingKey,
+      },
+    });
+  };
   db.recoverInterruptedMeetingAnalysisRuns();
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
     getPolicy: () => ({
@@ -1037,6 +1082,7 @@ app.whenReady().then(async () => {
         removeFile: async (outputPath) => {
           await fs.promises.unlink(outputPath);
         },
+        readEncryptedSlice: readEncryptedMeetingSlice,
         buildEnrollmentCandidate: async (input) => {
           if (!parakeetFinalClient) return null;
           return await buildSpeakerEnrollmentCandidate(input, {
@@ -2407,15 +2453,18 @@ app.whenReady().then(async () => {
       removeFile: async (outputPath) => {
         await fs.promises.unlink(outputPath);
       },
+      readEncryptedSlice: readEncryptedMeetingSlice,
     }),
   );
 
   const mixWavSources = async ({
     inputPaths,
     outputTag,
+    meetingId,
   }: {
     inputPaths?: unknown[];
     outputTag?: string;
+    meetingId?: string;
   }) => {
     if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
     const validPaths = inputPaths.filter(
@@ -2423,6 +2472,36 @@ app.whenReady().then(async () => {
         typeof value === 'string' && value.length > 0 && fs.existsSync(value),
     );
     if (validPaths.length < 2) return null;
+
+    const encryptedInputs = validPaths.filter((inputPath) =>
+      inputPath.endsWith('.enc'),
+    );
+    if (encryptedInputs.length > 0) {
+      if (encryptedInputs.length !== validPaths.length || !meetingId) {
+        throw new Error('encrypted_audio_mix_context_invalid');
+      }
+      const manifest = await readCaptureJournalManifest(
+        getMeetingArtifactsRootDir(),
+        meetingId,
+      );
+      if (manifest.schemaVersion !== 4) {
+        throw new Error('encrypted_audio_mix_manifest_invalid');
+      }
+      const keyResult = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
+      if (!keyResult || keyResult.keyId !== manifest.keyId) {
+        throw new Error('audio_key_unavailable');
+      }
+      return await mixEncryptedAudioArtifacts({
+        rootDir: getMeetingArtifactsRootDir(),
+        inputPaths: [validPaths[0], validPaths[1]],
+        context: {
+          meetingId,
+          generation: manifest.generation,
+          keyId: manifest.keyId,
+          meetingKey: keyResult.meetingKey,
+        },
+      });
+    }
 
     const tag =
       (typeof outputTag === 'string' ? outputTag : 'mix')
@@ -2468,8 +2547,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_MIX_WAV',
-    async (_event, { inputPaths, outputTag } = {}) =>
-      await mixWavSources({ inputPaths, outputTag }),
+    async (_event, { inputPaths, outputTag, meetingId } = {}) =>
+      await mixWavSources({ inputPaths, outputTag, meetingId }),
   );
 
   const stitchWavSegments = async ({
@@ -2550,13 +2629,38 @@ app.whenReady().then(async () => {
     return { deleted };
   });
 
-  ipcMain.handle('AUDIO_PROBE_DURATION', async (_event, rawPath) => {
+  ipcMain.handle('AUDIO_PROBE_DURATION', async (_event, input) => {
+    const rawPath =
+      typeof input === 'string' ? input : String(input?.audioPath || '');
+    const meetingId =
+      typeof input === 'object' && input ? String(input.meetingId || '') : '';
     if (typeof rawPath !== 'string' || rawPath.length === 0) return null;
     const resolvedPath = path.resolve(rawPath);
     const meetingsRoot = path.resolve(app.getPath('userData'), 'meetings');
     if (!resolvedPath.startsWith(`${meetingsRoot}${path.sep}`)) return null;
     if (!fs.existsSync(resolvedPath)) return null;
 
+    if (resolvedPath.endsWith('.enc')) {
+      if (!meetingId) return null;
+      const manifest = await readCaptureJournalManifest(
+        getMeetingArtifactsRootDir(),
+        meetingId,
+      );
+      const keyResult = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
+      if (
+        manifest.schemaVersion !== 4 ||
+        !keyResult ||
+        keyResult.keyId !== manifest.keyId
+      ) {
+        return null;
+      }
+      return await probeEncryptedAudioDuration(resolvedPath, {
+        meetingId,
+        generation: manifest.generation,
+        keyId: manifest.keyId,
+        meetingKey: keyResult.meetingKey,
+      });
+    }
     return await probeAudioDuration(resolvedPath);
   });
 
@@ -5447,8 +5551,8 @@ app.whenReady().then(async () => {
         },
         stitchWavSegments: async (segments, outputTag) =>
           await stitchWavSegments({ segments, outputTag }),
-        mixWavSources: async (inputPaths, outputTag) =>
-          await mixWavSources({ inputPaths, outputTag }),
+        mixWavSources: async (inputPaths, outputTag, meetingId) =>
+          await mixWavSources({ inputPaths, outputTag, meetingId }),
         repairRawChunk: async (inputPath) => {
           const outputPath = path.join(
             app.getPath('temp'),
@@ -5473,11 +5577,40 @@ app.whenReady().then(async () => {
             fs.unlinkSync(outputPath);
           }
         },
-        transcribeChunk: async (inputPath, _config, journalDurationSeconds) => {
+        transcribeChunk: async (
+          inputPath,
+          _config,
+          journalDurationSeconds,
+          encryptedContext,
+        ) => {
           if (!parakeetFinalClient) {
             throw new Error('parakeet_runtime_unavailable');
           }
           const recoveryFinalClient = parakeetFinalClient;
+          if (encryptedContext) {
+            const result = await recoveryFinalClient.transcribe({
+              meetingId: encryptedContext.meetingId,
+              role: 'final_validation',
+              source: encryptedContext.source,
+              audioPath: inputPath,
+              language: 'en',
+              capability: {
+                version: 1,
+                meetingId: encryptedContext.meetingId,
+                keyId: encryptedContext.keyId,
+                meetingKeyBase64:
+                  encryptedContext.meetingKey.toString('base64'),
+                generation: encryptedContext.generation,
+                allowedOperations: ['transcribe'],
+                expiresAtMs: Date.now() + 5 * 60 * 1000,
+              },
+            });
+            return {
+              detectedLanguage: result.language ?? null,
+              providerLabel: 'Parakeet (FluidAudio)',
+              segments: Array.isArray(result.segments) ? result.segments : [],
+            };
+          }
           const result = await transcribeJournalAlignedAudio(
             inputPath,
             journalDurationSeconds,

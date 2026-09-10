@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   truncate,
@@ -21,6 +23,7 @@ import {
   persistCaptureJournalRawChunk,
   readCaptureJournalManifest,
   sealCaptureJournal,
+  setCaptureJournalAudioKeyProvider,
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
@@ -40,6 +43,7 @@ describe('capture journal recovery', () => {
   const tempRoots: string[] = [];
 
   afterEach(async () => {
+    setCaptureJournalAudioKeyProvider(null);
     await Promise.all(
       tempRoots
         .splice(0)
@@ -69,6 +73,25 @@ describe('capture journal recovery', () => {
         algorithmVersion: 'speaker_activity_v1',
       },
     );
+
+  const floatWav = (durationSeconds: number) => {
+    const sampleRate = 48_000;
+    const frames = Math.round(sampleRate * durationSeconds);
+    const wav = Buffer.alloc(44 + frames * 4);
+    wav.write('RIFF');
+    wav.writeUInt32LE(wav.length - 8, 4);
+    wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(3, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(sampleRate, 24);
+    wav.writeUInt32LE(sampleRate * 4, 28);
+    wav.writeUInt16LE(4, 32);
+    wav.writeUInt16LE(32, 34);
+    wav.write('data', 36);
+    wav.writeUInt32LE(wav.length - 44, 40);
+    return wav;
+  };
 
   it('stitches a verified source directly from a sealed v3 journal', async () => {
     const root = await makeRoot();
@@ -143,6 +166,185 @@ describe('capture journal recovery', () => {
       ],
       'session-system',
     );
+  });
+
+  it('materializes a sealed v4 source as authenticated encrypted audio', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-v4-stop';
+    const meetingKey = randomBytes(32);
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 4,
+      expectedSources: ['system'],
+      meetingKey,
+    });
+    if (manifest.schemaVersion !== 4) throw new Error('expected v4 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 0.25,
+      meetingKey,
+    });
+    manifest = await persistCaptureJournalRawChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system',
+      sequence: 0,
+      format: 'wav',
+      data: floatWav(0.25),
+      meetingKey,
+    });
+    const raw = manifest.intervals[0].sources.system;
+    if (raw.disposition !== 'raw_durable') {
+      throw new Error('expected raw durable system tuple');
+    }
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system',
+      sequence: 0,
+      rawChecksumSha256: raw.rawChecksumSha256,
+      repairData: floatWav(0.25),
+      meetingKey,
+    });
+    manifest = await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+      meetingKey,
+    });
+    manifest = await stopCaptureJournal(root, {
+      meetingId,
+      generation: completed.manifest.generation,
+      expectedRevision: manifest.revision,
+      meetingKey,
+    });
+    await sealCaptureJournal(root, {
+      meetingId,
+      endedAtMs: 1_250,
+      meetingKey,
+    });
+    setCaptureJournalAudioKeyProvider((candidate) =>
+      candidate === meetingId ? meetingKey : null,
+    );
+
+    const stitch = vi.fn();
+    const outputPath = await stitchSealedCaptureJournalSource(
+      root,
+      meetingId,
+      'system',
+      stitch,
+      'unused',
+    );
+
+    expect(outputPath).toMatch(/\.enc$/);
+    expect((await readFile(outputPath!)).toString('ascii', 0, 4)).toBe('PENC');
+    expect(stitch).not.toHaveBeenCalled();
+  });
+
+  it('recovers an interrupted v4 raw chunk without a plaintext repair file', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-v4-interrupted';
+    const meetingKey = randomBytes(32);
+    setCaptureJournalAudioKeyProvider((candidate) =>
+      candidate === meetingId ? meetingKey : null,
+    );
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 4,
+      expectedSources: ['system'],
+      meetingKey,
+    });
+    if (manifest.schemaVersion !== 4) throw new Error('expected v4 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 0.25,
+      meetingKey,
+    });
+    manifest = await persistCaptureJournalRawChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system',
+      sequence: 0,
+      format: 'wav',
+      data: floatWav(0.25),
+      meetingKey,
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+      meetingKey,
+    });
+    const saveMeeting = vi.fn();
+    const repairLegacyRaw = vi.fn();
+    const stitchLegacyWav = vi.fn();
+    const transcribeChunk = vi.fn(async () => ({
+      detectedLanguage: 'en',
+      providerLabel: 'local',
+      segments: [
+        {
+          start: 0,
+          end: 0.2,
+          text: 'Recovered encrypted speech',
+        },
+      ],
+    }));
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments: stitchLegacyWav,
+      repairRawChunk: repairLegacyRaw,
+      transcribeChunk,
+      transcriptionConfig: {
+        backend: 'parakeet',
+        preset: 'balanced',
+        model: 'parakeet-tdt-0.6b-v3',
+        device: 'coreml',
+        computeType: 'int8',
+        languageMode: 'fixed',
+        requestedLanguage: 'en',
+        pipelineVersion: 'live_chunk_v1',
+      },
+      nowMs: 2_000,
+    });
+
+    expect(result.failedRecoveryCount).toBe(0);
+    expect(result.recoveredCount).toBe(1);
+    expect(repairLegacyRaw).not.toHaveBeenCalled();
+    expect(stitchLegacyWav).not.toHaveBeenCalled();
+    expect(transcribeChunk).toHaveBeenCalledWith(
+      expect.stringMatching(/\.enc$/),
+      expect.any(Object),
+      0.25,
+      expect.objectContaining({
+        meetingId,
+        generation: manifest.generation,
+        keyId: manifest.keyId,
+        meetingKey,
+        source: 'system',
+      }),
+    );
+    const recovered = saveMeeting.mock.calls[0][0] as PersistedMeeting;
+    expect(recovered.system_audio_path).toMatch(/\.enc$/);
+    expect(
+      (await readFile(recovered.system_audio_path!)).toString('ascii', 0, 4),
+    ).toBe('PENC');
+    const files = await readdir(join(root, meetingId, 'capture-journal'), {
+      recursive: true,
+    });
+    expect(files.some((file) => String(file).endsWith('.wav'))).toBe(false);
   });
 
   it('rejects checkpoint metadata outside the fixed MLX preview contract', () => {

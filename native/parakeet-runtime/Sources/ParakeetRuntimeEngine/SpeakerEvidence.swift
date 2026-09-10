@@ -20,6 +20,13 @@ public struct OfflineDiarizationResult: Sendable {
 
 public protocol OfflineSpeakerDiarizing: Sendable {
     func diarize(audioURL: URL) async throws -> OfflineDiarizationResult
+    func diarize(samples: [Float]) async throws -> OfflineDiarizationResult
+}
+
+extension OfflineSpeakerDiarizing {
+    public func diarize(samples _: [Float]) async throws -> OfflineDiarizationResult {
+        throw RuntimeFailure.diarizationFailed
+    }
 }
 
 public protocol SpeakerEvidenceDriving: Sendable {
@@ -28,6 +35,26 @@ public protocol SpeakerEvidenceDriving: Sendable {
         micURL: URL,
         systemURL: URL
     ) async throws -> SpeakerEvidenceOutput
+    func analyze(
+        mixedInput: AudioInput,
+        micInput: AudioInput,
+        systemInput: AudioInput
+    ) async throws -> SpeakerEvidenceOutput
+}
+
+extension SpeakerEvidenceDriving {
+    public func analyze(
+        mixedInput: AudioInput,
+        micInput: AudioInput,
+        systemInput: AudioInput
+    ) async throws -> SpeakerEvidenceOutput {
+        guard case .fileURL(let mixedURL) = mixedInput,
+              case .fileURL(let micURL) = micInput,
+              case .fileURL(let systemURL) = systemInput else {
+            throw RuntimeFailure.diarizationFailed
+        }
+        return try await analyze(mixedURL: mixedURL, micURL: micURL, systemURL: systemURL)
+    }
 }
 
 func isExpectedDiarizationSilence(_ error: Error) -> Bool {
@@ -364,6 +391,71 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
         )
     }
 
+    public func analyze(
+        mixedInput: AudioInput,
+        micInput: AudioInput,
+        systemInput: AudioInput
+    ) async throws -> SpeakerEvidenceOutput {
+        if case .fileURL(let mixedURL) = mixedInput,
+           case .fileURL(let micURL) = micInput,
+           case .fileURL(let systemURL) = systemInput {
+            return try await analyze(mixedURL: mixedURL, micURL: micURL, systemURL: systemURL)
+        }
+        guard case .pcmSamples(let micSamples, let micRate) = micInput,
+              case .pcmSamples(let systemSamples, let systemRate) = systemInput else {
+            throw RuntimeFailure.audioAnalysisFailed
+        }
+
+        let totalStart = ContinuousClock.now
+        try Task.checkCancellation()
+        let energyStart = ContinuousClock.now
+        let windows = try await energyAnalyzer.analyze(
+            micSamples: micSamples,
+            micRate: micRate,
+            systemSamples: systemSamples,
+            systemRate: systemRate
+        )
+        let energyMs = elapsedMilliseconds(since: energyStart)
+        guard !windows.isEmpty else { throw RuntimeFailure.audioAnalysisFailed }
+
+        let diarizationStart = ContinuousClock.now
+        let systemIsSilent = windows.allSatisfy { $0.systemRms == 0 }
+        let diarizationResult: OfflineDiarizationResult
+        if systemIsSilent {
+            diarizationResult = OfflineDiarizationResult(turns: [], chunkEmbeddings: [])
+        } else {
+            let samples = systemRate == 16_000
+                ? systemSamples
+                : try AudioConverter().resample(systemSamples, from: systemRate)
+            diarizationResult = try await diarizer.diarize(samples: samples)
+        }
+        let turns = diarizationResult.turns
+        let diarizationMs = systemIsSilent ? 0 : elapsedMilliseconds(since: diarizationStart)
+        try Task.checkCancellation()
+        let clusterEvidence = systemIsSilent ? [] : SpeakerClusterEvidenceAggregator.buildClusterEvidence(
+            turns: turns,
+            windows: windows,
+            rawChunks: diarizationResult.chunkEmbeddings
+        )
+        return SpeakerEvidenceOutput(
+            turns: turns,
+            energyWindows: windows,
+            provenance: SpeakerEvidenceProvenance(
+                modelIdentifier: manifest.identifier,
+                modelRevision: manifest.revision,
+                artifactDigest: manifest.artifactSHA256,
+                runtimeVersion: runtimeVersion
+            ),
+            timings: SpeakerEvidenceTimings(
+                diarizationMs: diarizationMs,
+                energyAnalysisMs: energyMs,
+                totalMs: elapsedMilliseconds(since: totalStart)
+            ),
+            windowSeconds: 0.1,
+            clusterEvidence: clusterEvidence
+        )
+    }
+
     private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
         let duration = start.duration(to: .now)
         return max(0, Int(duration.components.seconds * 1_000)
@@ -447,6 +539,53 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
         }
     }
 
+    public func diarize(samples: [Float]) async throws -> OfflineDiarizationResult {
+        try await runDiarization { try await self.manager.process(audio: samples) }
+    }
+
+    private func runDiarization(
+        _ process: () async throws -> DiarizationResult
+    ) async throws -> OfflineDiarizationResult {
+        do {
+            if !prepared {
+                ModelRegistry.setPinnedRevision(manifest.revision, for: manifest.repository)
+                defer { ModelRegistry.setPinnedRevision(nil, for: manifest.repository) }
+                try await manager.prepareModels(directory: modelsRoot)
+                try verifyInstalledModels()
+                prepared = true
+            }
+            try Task.checkCancellation()
+            let result: DiarizationResult
+            do {
+                result = try await process()
+            } catch where isExpectedDiarizationSilence(error) {
+                return OfflineDiarizationResult(turns: [], chunkEmbeddings: [])
+            }
+            try Task.checkCancellation()
+            let turns = result.segments.compactMap { segment -> SpeakerEvidenceTurn? in
+                let start = Double(segment.startTimeSeconds)
+                let end = Double(segment.endTimeSeconds)
+                guard start.isFinite, end.isFinite, start >= 0, end > start,
+                    !segment.speakerId.isEmpty else { return nil }
+                return SpeakerEvidenceTurn(startTime: start, endTime: end, cluster: segment.speakerId)
+            }.sorted { left, right in
+                left.startTime == right.startTime
+                    ? left.endTime < right.endTime
+                    : left.startTime < right.startTime
+            }
+            return OfflineDiarizationResult(
+                turns: turns,
+                chunkEmbeddings: result.chunkEmbeddings ?? []
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as RuntimeFailure {
+            throw failure
+        } catch {
+            throw RuntimeFailure.diarizationFailed
+        }
+    }
+
     private func verifyInstalledModels() throws {
         let repositoryDirectory = modelsRoot.appendingPathComponent(
             Repo.diarizer.folderName,
@@ -470,6 +609,23 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
 
 public protocol SpeakerEnergyAnalyzing: Sendable {
     func analyze(micURL: URL, systemURL: URL) async throws -> [SpeakerEnergyWindow]
+    func analyze(
+        micSamples: [Float],
+        micRate: Double,
+        systemSamples: [Float],
+        systemRate: Double
+    ) async throws -> [SpeakerEnergyWindow]
+}
+
+extension SpeakerEnergyAnalyzing {
+    public func analyze(
+        micSamples _: [Float],
+        micRate _: Double,
+        systemSamples _: [Float],
+        systemRate _: Double
+    ) async throws -> [SpeakerEnergyWindow] {
+        throw RuntimeFailure.audioAnalysisFailed
+    }
 }
 
 public struct SpeakerEnergyAnalyzer: SpeakerEnergyAnalyzing, Sendable {
@@ -503,9 +659,56 @@ public struct SpeakerEnergyAnalyzer: SpeakerEnergyAnalyzing, Sendable {
         }
     }
 
+    public func analyze(
+        micSamples: [Float],
+        micRate: Double,
+        systemSamples: [Float],
+        systemRate: Double
+    ) async throws -> [SpeakerEnergyWindow] {
+        try Task.checkCancellation()
+        guard micRate.isFinite, micRate > 0, systemRate.isFinite, systemRate > 0 else {
+            throw RuntimeFailure.audioAnalysisFailed
+        }
+        let mic = computeWindows(samples: micSamples, sampleRate: micRate)
+        let system = computeWindows(samples: systemSamples, sampleRate: systemRate)
+        let count = max(mic.count, system.count)
+        return (0..<count).map { index in
+            let start = Double(index) * windowSeconds
+            return SpeakerEnergyWindow(
+                startTime: start,
+                endTime: max(
+                    mic.indices.contains(index) ? mic[index].endTime : start,
+                    system.indices.contains(index) ? system[index].endTime : start
+                ),
+                micRms: mic.indices.contains(index) ? mic[index].rms : 0,
+                systemRms: system.indices.contains(index) ? system[index].rms : 0
+            )
+        }
+    }
+
     private struct RmsWindow {
         let endTime: Double
         let rms: Double
+    }
+
+    private func computeWindows(samples: [Float], sampleRate: Double) -> [RmsWindow] {
+        let framesPerWindow = max(1, Int((sampleRate * windowSeconds).rounded()))
+        var result: [RmsWindow] = []
+        var offset = 0
+        while offset < samples.count {
+            let count = min(framesPerWindow, samples.count - offset)
+            var sumSquares = 0.0
+            for index in offset..<(offset + count) {
+                let sample = Double(samples[index])
+                sumSquares += sample * sample
+            }
+            offset += count
+            result.append(RmsWindow(
+                endTime: Double(offset) / sampleRate,
+                rms: count > 0 ? sqrt(sumSquares / Double(count)) : 0
+            ))
+        }
+        return result
     }
 
     private func readWindows(from url: URL) throws -> [RmsWindow] {

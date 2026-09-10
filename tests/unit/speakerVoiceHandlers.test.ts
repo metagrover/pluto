@@ -428,6 +428,35 @@ describe('speaker voice IPC handlers', () => {
     );
   });
 
+  it('loads encrypted profile reference audio without a plaintext temporary file', async () => {
+    const readEncryptedSlice = vi.fn(async () => Buffer.from([1, 2, 3]));
+    const createTemporaryPath = vi.fn(() => '/approved/sample.wav');
+
+    const result = await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_REFERENCE_SAMPLE',
+      { sourceMeetingId: meetingId, startTime: 2, endTime: 5 },
+      {
+        getMeeting: () => ({
+          id: meetingId,
+          audio_path: '/approved/mic.enc',
+          system_audio_path: '/approved/system.enc',
+        }),
+        fileExists: () => true,
+        createTemporaryPath,
+        readEncryptedSlice,
+      },
+    );
+
+    expect(result).toMatchObject({ mimeType: 'audio/wav', durationSeconds: 3 });
+    expect(readEncryptedSlice).toHaveBeenCalledWith({
+      meetingId,
+      inputPath: '/approved/system.enc',
+      startSec: 2,
+      durationSec: 3,
+    });
+    expect(createTemporaryPath).not.toHaveBeenCalled();
+  });
+
   it('advertises reviewed-sample enrollment without a stored candidate', async () => {
     const result = (await handleSpeakerVoiceRequest(
       'SPEAKER_VOICE_GET_SUGGESTIONS',

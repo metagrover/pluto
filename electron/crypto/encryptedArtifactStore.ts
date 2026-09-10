@@ -399,8 +399,6 @@ export const EncryptedArtifactStore = {
     const dirFd = await fs.promises.open(dir, 'r');
     try {
       await dirFd.sync();
-    } catch {
-      // Best-effort directory sync on non-POSIX / platforms where dir sync is not permitted
     } finally {
       await dirFd.close();
     }

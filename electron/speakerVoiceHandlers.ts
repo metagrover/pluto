@@ -54,6 +54,12 @@ export interface SpeakerVoiceDependencies {
   }) => Promise<boolean>;
   readFile?: (path: string) => Promise<Buffer>;
   removeFile?: (path: string) => Promise<void>;
+  readEncryptedSlice?: (input: {
+    meetingId: string;
+    inputPath: string;
+    startSec: number;
+    durationSec: number;
+  }) => Promise<Buffer | null>;
   buildEnrollmentCandidate?: (input: {
     meetingId: string;
     speaker: string;
@@ -796,15 +802,31 @@ export async function handleSpeakerVoiceRequest(
         return null;
       }
 
+      const durationSec = Math.max(
+        0.5,
+        Math.min(Number(endTime) - Number(startTime), 10),
+      );
+
+      if (meeting.system_audio_path.endsWith('.enc')) {
+        const buffer = await deps?.readEncryptedSlice?.({
+          meetingId: sourceMeetingId,
+          inputPath: meeting.system_audio_path,
+          startSec: Math.max(0, Number(startTime)),
+          durationSec,
+        });
+        if (!buffer) return null;
+        return {
+          bytes: new Uint8Array(buffer),
+          mimeType: 'audio/wav',
+          durationSeconds: durationSec,
+        };
+      }
+
       if (!deps?.sliceWav || !deps?.readFile || !deps?.createTemporaryPath) {
         return null;
       }
 
       const tempPath = deps.createTemporaryPath();
-      const durationSec = Math.max(
-        0.5,
-        Math.min(Number(endTime) - Number(startTime), 10),
-      );
 
       const ok = await deps.sliceWav({
         inputPath: meeting.system_audio_path,

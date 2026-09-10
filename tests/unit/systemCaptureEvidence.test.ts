@@ -13,6 +13,9 @@ describe('System capture evidence', () => {
   it('accepts captured silence without requiring speech or energy', () => {
     expect(hasCompleteSystemCapture(journal, 'capture-1')).toBe(true);
     expect(
+      hasCompleteSystemCapture({ ...journal, schemaVersion: 4 }, 'capture-1'),
+    ).toBe(true);
+    expect(
       hasCompleteSystemCapture(
         {
           ...journal,

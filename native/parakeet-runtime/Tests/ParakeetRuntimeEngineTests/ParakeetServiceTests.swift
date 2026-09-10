@@ -37,6 +37,40 @@ private actor ServiceInferenceDriver: ParakeetInferenceDriving {
     }
 }
 
+private actor EncryptedServiceInferenceDriver: ParakeetInferenceDriving {
+    private(set) var receivedSampleCount = 0
+
+    func loadModel(at _: URL) async throws {}
+
+    func transcribe(
+        audioURL _: URL,
+        language _: String?,
+        vocabulary _: [String],
+        decoderIdentifier _: UUID
+    ) async throws -> TranscriptionOutput {
+        throw RuntimeFailure.transcriptionFailed
+    }
+
+    func transcribe(
+        audioInput: AudioInput,
+        language _: String?,
+        vocabulary _: [String],
+        decoderIdentifier _: UUID
+    ) async throws -> TranscriptionOutput {
+        guard case .pcmSamples(let samples, let sampleRate) = audioInput else {
+            throw RuntimeFailure.transcriptionFailed
+        }
+        receivedSampleCount = samples.count
+        return TranscriptionOutput(
+            text: "encrypted",
+            confidence: 0.9,
+            durationSeconds: Double(samples.count) / sampleRate,
+            words: [],
+            noSpeech: false
+        )
+    }
+}
+
 private actor ServiceLiveManager: ParakeetLiveManaging {
     func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         LiveDriverAppendOutcome(updates: [
@@ -151,6 +185,47 @@ private actor CapturingSpeakerEvidenceDriver: SpeakerEvidenceDriving {
     }
 }
 
+private actor EncryptedSpeakerEvidenceDriver: SpeakerEvidenceDriving {
+    private(set) var receivedSampleCounts: [Int] = []
+
+    func analyze(
+        mixedURL _: URL,
+        micURL _: URL,
+        systemURL _: URL
+    ) async throws -> SpeakerEvidenceOutput {
+        throw RuntimeFailure.diarizationFailed
+    }
+
+    func analyze(
+        mixedInput: AudioInput,
+        micInput: AudioInput,
+        systemInput: AudioInput
+    ) async throws -> SpeakerEvidenceOutput {
+        let inputs = [mixedInput, micInput, systemInput]
+        receivedSampleCounts = try inputs.map { input in
+            guard case .pcmSamples(let samples, _) = input else {
+                throw RuntimeFailure.diarizationFailed
+            }
+            return samples.count
+        }
+        return SpeakerEvidenceOutput(
+            turns: [],
+            energyWindows: [
+                SpeakerEnergyWindow(startTime: 0, endTime: 0.1, micRms: 0, systemRms: 0)
+            ],
+            provenance: SpeakerEvidenceProvenance(
+                modelIdentifier: "test",
+                modelRevision: String(repeating: "a", count: 40),
+                artifactDigest: String(repeating: "b", count: 64),
+                runtimeVersion: "test"
+            ),
+            timings: SpeakerEvidenceTimings(
+                diarizationMs: 0, energyAnalysisMs: 1, totalMs: 1),
+            windowSeconds: 0.1
+        )
+    }
+}
+
 private extension RuntimeEvent {
     var eouUpdate: EouUpdate? {
         guard case .eouUpdate(let update) = self else { return nil }
@@ -165,6 +240,135 @@ final class ParakeetServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         return directory
+    }
+
+    private func makePcmWav(sampleCount: Int = 1600) -> Data {
+        var data = Data()
+        data.append(contentsOf: "RIFF".utf8)
+        let audioBytes = sampleCount * 2
+        for value in [Int32(36 + audioBytes)] {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Data($0) })
+        }
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        for value in [Int32(16)] {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Data($0) })
+        }
+        for value in [Int16(1), Int16(1)] {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Data($0) })
+        }
+        for value in [Int32(16_000), Int32(32_000)] {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Data($0) })
+        }
+        for value in [Int16(2), Int16(16)] {
+            data.append(contentsOf: withUnsafeBytes(of: value.littleEndian) { Data($0) })
+        }
+        data.append(contentsOf: "data".utf8)
+        data.append(contentsOf: withUnsafeBytes(of: Int32(audioBytes).littleEndian) { Data($0) })
+        data.append(Data(count: audioBytes))
+        return data
+    }
+
+    func testTranscribesAuthenticatedEncryptedAudioFromMemory() async throws {
+        let modelRoot = try makeDirectory("encrypted-service-models")
+        let audioRoot = try makeDirectory("encrypted-service-audio")
+        let key = Data(repeating: 7, count: 32)
+        let capability = ScopedMeetingCapability(
+            meetingId: "meeting-1",
+            keyId: "key-1",
+            meetingKeyBase64: key.base64EncodedString(),
+            generation: "generation-1",
+            allowedOperations: ["transcribe"],
+            expiresAtMs: Int64((Date().timeIntervalSince1970 + 60) * 1000)
+        )
+        let encrypted = try EncryptedAudioLoader.seal(
+            plaintext: makePcmWav(),
+            keyData: key,
+            keyId: capability.keyId,
+            meetingId: capability.meetingId,
+            generation: capability.generation,
+            artifactKind: "mic",
+            source: "mic"
+        )
+        let audio = audioRoot.appendingPathComponent("meeting.enc")
+        try encrypted.write(to: audio)
+        let driver = EncryptedServiceInferenceDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: driver
+        )
+
+        _ = await service.handle(RuntimeRequest(
+            id: "prepare-encrypted",
+            method: .prepare,
+            modelRoot: modelRoot.path
+        ))
+        let response = await service.handle(RuntimeRequest(
+            id: "transcribe-encrypted",
+            method: .transcribe,
+            audioPath: audio.path,
+            language: "en",
+            capability: capability
+        ))
+
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(response.result?.transcription?.text, "encrypted")
+        let receivedSampleCount = await driver.receivedSampleCount
+        XCTAssertEqual(receivedSampleCount, 1600)
+    }
+
+    func testAnalyzesAuthenticatedEncryptedSpeakerInputsFromMemory() async throws {
+        let modelRoot = try makeDirectory("encrypted-speaker-models")
+        let audioRoot = try makeDirectory("encrypted-speaker-audio")
+        let key = Data(repeating: 9, count: 32)
+        let capability = ScopedMeetingCapability(
+            meetingId: "meeting-speaker",
+            keyId: "key-speaker",
+            meetingKeyBase64: key.base64EncodedString(),
+            generation: "generation-speaker",
+            allowedOperations: ["speakerEvidence"],
+            expiresAtMs: Int64((Date().timeIntervalSince1970 + 60) * 1000)
+        )
+        var paths: [URL] = []
+        for (index, source) in ["mixed", "mic", "system"].enumerated() {
+            let encrypted = try EncryptedAudioLoader.seal(
+                plaintext: makePcmWav(),
+                keyData: key,
+                keyId: capability.keyId,
+                meetingId: capability.meetingId,
+                generation: capability.generation,
+                artifactKind: source,
+                source: source,
+                sequence: index
+            )
+            let path = audioRoot.appendingPathComponent("\(source).enc")
+            try encrypted.write(to: path)
+            paths.append(path)
+        }
+        let driver = EncryptedSpeakerEvidenceDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            speakerEvidenceDriver: driver
+        )
+
+        let response = await service.handle(RuntimeRequest(
+            id: "speaker-encrypted",
+            method: .speakerEvidence,
+            mixedAudioPath: paths[0].path,
+            micAudioPath: paths[1].path,
+            systemAudioPath: paths[2].path,
+            capability: capability
+        ))
+
+        XCTAssertTrue(response.ok)
+        let receivedSampleCounts = await driver.receivedSampleCounts
+        XCTAssertEqual(receivedSampleCounts, [1600, 1600, 1600])
     }
 
     func testPrepareThenTranscribeUsesBoundedDeduplicatedVocabulary() async throws {

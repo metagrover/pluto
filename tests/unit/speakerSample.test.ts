@@ -61,6 +61,35 @@ describe('meeting speaker samples', () => {
     expect(deps.removeFile).toHaveBeenCalledWith('/tmp/speaker-sample.wav');
   });
 
+  it('returns an authenticated in-memory slice for encrypted audio', async () => {
+    const deps = dependencies();
+    deps.getMeeting.mockReturnValue({
+      id: 'meeting-a',
+      transcript_json: transcriptJson,
+      system_audio_path: '/meetings/meeting-a/system.enc',
+    });
+    const readEncryptedSlice = vi.fn(async () => Buffer.from([82, 73, 70, 70]));
+
+    const result = await loadSpeakerSample(
+      {
+        meetingId: 'meeting-a',
+        speaker: 'Remote Speaker 1',
+        sampleIndex: 0,
+      },
+      { ...deps, readEncryptedSlice },
+    );
+
+    expect(readEncryptedSlice).toHaveBeenCalledWith({
+      meetingId: 'meeting-a',
+      inputPath: '/meetings/meeting-a/system.enc',
+      startSec: 10,
+      durationSec: 6,
+    });
+    expect(deps.createTemporaryPath).not.toHaveBeenCalled();
+    expect(deps.sliceWav).not.toHaveBeenCalled();
+    expect(result?.bytes).toEqual(Buffer.from([82, 73, 70, 70]));
+  });
+
   it('resolves a bounded sample for the aggregate Them speaker', async () => {
     const deps = dependencies();
     deps.getMeeting.mockReturnValue({

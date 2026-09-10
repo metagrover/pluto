@@ -98,7 +98,7 @@ final class EncryptedAudioLoaderTests: XCTestCase {
             keyId: "key-123",
             meetingId: "meeting-abc",
             generation: "gen-1",
-            artifactKind: "raw",
+            artifactKind: "mic",
             source: "mic",
             sequence: 0
         )
@@ -125,6 +125,41 @@ final class EncryptedAudioLoaderTests: XCTestCase {
         XCTAssertEqual(loaded.sampleRate, 16000)
         XCTAssertEqual(loaded.samples.count, 1600)
         XCTAssertGreaterThan(loaded.samples[10], 0)
+    }
+
+    func testRejectsNonAudioArtifactForTranscription() throws {
+        let keyData = Data(repeating: 5, count: 32)
+        let sealed = try EncryptedAudioLoader.seal(
+            plaintext: makePcmWav(),
+            keyData: keyData,
+            keyId: "key-123",
+            meetingId: "meeting-abc",
+            generation: "gen-1",
+            artifactKind: "sidecar",
+            source: "none"
+        )
+        let filePath = tempDirectory.appendingPathComponent("sidecar.enc").path
+        try sealed.write(to: URL(fileURLWithPath: filePath))
+        let capability = ScopedMeetingCapability(
+            meetingId: "meeting-abc",
+            keyId: "key-123",
+            meetingKeyBase64: keyData.base64EncodedString(),
+            generation: "gen-1",
+            allowedOperations: ["transcribe"],
+            expiresAtMs: Int64((Date().timeIntervalSince1970 + 60) * 1000)
+        )
+
+        XCTAssertThrowsError(
+            try EncryptedAudioLoader.load(
+                filePath: filePath,
+                capability: capability,
+                expectedOperation: "transcribe"
+            )
+        ) { error in
+            guard case EncryptedAudioLoaderError.capabilityMismatch = error else {
+                return XCTFail("Expected capability mismatch, got \(error)")
+            }
+        }
     }
 
     func testRejectsWrongKeyId() throws {

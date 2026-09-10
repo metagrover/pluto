@@ -42,7 +42,7 @@ const rebuildSealedAudioForRetry = async (
     intervals?: Array<{ sources?: { system?: { disposition?: unknown } } }>;
   } | null;
   if (
-    journal?.schemaVersion !== 3 ||
+    (journal?.schemaVersion !== 3 && journal?.schemaVersion !== 4) ||
     journal.lifecycleState !== 'sealed' ||
     journal.generation !== meeting.capture_journal_generation
   ) {
@@ -80,6 +80,7 @@ const rebuildSealedAudioForRetry = async (
     const mixedAudioPath = await invoke('AUDIO_MIX_WAV', {
       inputPaths: [meeting.audio_path, systemAudioPath],
       outputTag: `${meetingId}-repaired-mix`,
+      meetingId,
     });
     if (typeof mixedAudioPath !== 'string' || mixedAudioPath.length === 0) {
       throw new Error('sealed_capture_mix_rebuild_failed');
@@ -284,7 +285,10 @@ export const runPersistedMeetingFinalTranscription = async (
       speakerEvidence: async (request) =>
         (await invoke('TRANSCRIPTION_SPEAKER_EVIDENCE', request)) as never,
       probeDuration: async (audioPath) =>
-        (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
+        (await invoke('AUDIO_PROBE_DURATION', {
+          audioPath,
+          meetingId,
+        })) as number | null,
       commitCanonical: async (commit) => {
         const speakerAttribution = commit.metadata.speakerAttribution as
           | StoredTranscriptSpeakerAttribution

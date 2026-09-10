@@ -39,6 +39,21 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(request.vocabulary, ["Pluto", "FluidAudio"])
     }
 
+    func testDecodesAndRoundTripsScopedMeetingCapability() throws {
+        let data = Data(#"{"schemaVersion":1,"id":"request-encrypted","method":"transcribe","audioPath":"/approved/audio.enc","language":"en","capability":{"version":1,"meetingId":"meeting-1","keyId":"key-1","meetingKeyBase64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","generation":"generation-1","allowedOperations":["transcribe"],"expiresAtMs":4102444800000}}"#.utf8)
+
+        let request = try JSONDecoder().decode(RuntimeRequest.self, from: data)
+        XCTAssertEqual(request.capability?.meetingId, "meeting-1")
+        XCTAssertEqual(request.capability?.generation, "generation-1")
+        XCTAssertEqual(request.capability?.allowedOperations, ["transcribe"])
+
+        let roundTripped = try JSONDecoder().decode(
+            RuntimeRequest.self,
+            from: JSONEncoder().encode(request)
+        )
+        XCTAssertEqual(roundTripped.capability, request.capability)
+    }
+
     func testDecodesCancellationTarget() throws {
         let data = Data(#"{"schemaVersion":1,"id":"request-3","method":"cancel","targetId":"request-2"}"#.utf8)
 
