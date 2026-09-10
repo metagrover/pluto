@@ -960,6 +960,60 @@ describe('MeetingView progressive reveal', () => {
     ).toBeNull();
   });
 
+  it('only offers transcript copy after the transcript is expanded', async () => {
+    const copy = vi.fn();
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={analyzedMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={analyzedMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={copy}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.querySelector('button[data-copy-transcript]')).toBeNull();
+
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={analyzedMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={analyzedMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={copy}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+
+    const copyButton = container.querySelector<HTMLButtonElement>(
+      'button[data-copy-transcript]',
+    );
+    expect(copyButton?.textContent).toContain('Copy');
+
+    await act(async () => copyButton?.click());
+
+    expect(copy).toHaveBeenCalledWith(
+      'Me (0:00)\nThe transcript is ready first.',
+    );
+  });
+
   it('renders preserved conflicts as text and copies the saved edit on request', async () => {
     const copy = vi.fn();
     const conflictingMeeting: Meeting = {
