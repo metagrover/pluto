@@ -136,6 +136,35 @@ describe('ollamaHttpFetch', () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 
+  it('finishes immediately when the consumer observes logical completion', async () => {
+    let upstreamClosed = false;
+    const server = createServer((request, response) => {
+      request.on('close', () => {
+        upstreamClosed = true;
+      });
+      response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      response.write('{"response":"Done.","done":true}\n');
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no address');
+
+    const result = await Promise.race([
+      ollamaHttpStream(
+        `http://127.0.0.1:${address.port}/api/generate`,
+        { method: 'POST', body: '{}' },
+        (chunk) => !chunk.includes('"done":true'),
+      ).then(() => 'completed'),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 100)),
+    ]);
+
+    expect(result).toBe('completed');
+    await vi.waitFor(() => expect(upstreamClosed).toBe(true));
+  });
+
   it('closes the active upstream response when streaming is aborted', async () => {
     const controller = new AbortController();
     let upstreamClosed = false;

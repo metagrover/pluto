@@ -433,6 +433,7 @@ import {
   resolveCurrentMeeting,
   resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
+import { createLiveMeetingContextCoordinator } from './intelligence/liveMeetingContextCoordinator';
 import {
   buildLiveMeetingAskPlutoContext,
   buildLiveMeetingFallbackResponse,
@@ -715,6 +716,27 @@ const activeMeetingAskPlutoQueries = new Map<
   string,
   { controller: AbortController; ownerId: number; settled: Promise<void> }
 >();
+const MEETING_ASK_PLUTO_CANCEL_SETTLE_MS = 1_500;
+const waitForMeetingAskPlutoCancellation = async (
+  pending: Promise<void>[],
+): Promise<boolean> => {
+  if (pending.length === 0) return true;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  try {
+    await Promise.race([
+      Promise.all(pending).then(() => {
+        settled = true;
+      }),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, MEETING_ASK_PLUTO_CANCEL_SETTLE_MS);
+      }),
+    ]);
+    return settled;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
 const activeAskPlutoSessionOwners = new Set<number>();
 let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
@@ -1427,6 +1449,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  const liveMeetingContextIndex = createLiveMeetingContextCoordinator({
+    loadCheckpoint: db.getLiveMeetingContextCheckpoint,
+    saveCheckpoint: db.saveLiveMeetingContextCheckpoint,
+    deleteCheckpoint: db.deleteLiveMeetingContextCheckpoint,
+    onError: (operation, error) => {
+      console.warn(
+        `[Pluto][Live context] Checkpoint ${operation} failed:`,
+        error,
+      );
+    },
+  });
+
   const stopNativeAudioCapture = () => {
     const processToStop = nativeAudioProcess;
     nativeAudioProcess = null;
@@ -1450,6 +1484,10 @@ app.whenReady().then(async () => {
         parakeetEouGeneration = null;
       }
       if (released) {
+        liveMeetingContextIndex.flush(released.meetingId);
+        liveMeetingContextIndex.clear(released.meetingId, {
+          retainCheckpoint: true,
+        });
         incrementalNotesCoordinator.cancel(released.meetingId);
         knowledgeSynthesisPause.release('capture');
         captureLog.warn('Released: owner_destroyed');
@@ -1581,6 +1619,7 @@ app.whenReady().then(async () => {
     getEventByKey: db.getMeetingContextEventByKey,
     appendEvent: db.appendMeetingContextEvent,
     listEvents: db.listMeetingContextEvents,
+    listEventsSince: db.listMeetingContextEventsSince,
     getLatestSnapshot: db.getLatestMeetingContextSnapshot,
     saveSnapshot: db.saveMeetingContextSnapshot,
   });
@@ -1642,6 +1681,13 @@ app.whenReady().then(async () => {
     async (event, request = {}) => {
       const meetingId = String(request.meetingId || '');
       captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+      try {
+        if (Array.isArray(request.segments)) {
+          liveMeetingContextIndex.ingest(meetingId, request.segments);
+        }
+      } catch (error) {
+        console.warn('[Pluto][Live context] Index update failed:', error);
+      }
       return await meetingContextProducer.ingest(request);
     },
   );
@@ -1815,6 +1861,7 @@ app.whenReady().then(async () => {
           normalizedMeetingId,
         );
       } finally {
+        liveMeetingContextIndex.clear(normalizedMeetingId);
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
           captureLog.warn('Released: capture_start_aborted');
@@ -1978,6 +2025,7 @@ app.whenReady().then(async () => {
       ...request,
       meetingId: normalizedMeetingId,
     });
+    liveMeetingContextIndex.flush(normalizedMeetingId);
     await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
     captureLog.info('Transitioned: capture_stopped');
@@ -2000,6 +2048,10 @@ app.whenReady().then(async () => {
           endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
         });
       } catch (error) {
+        liveMeetingContextIndex.flush(normalizedMeetingId);
+        liveMeetingContextIndex.clear(normalizedMeetingId, {
+          retainCheckpoint: true,
+        });
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
           knowledgeSynthesisPause.release('capture');
           captureLog.warn('Released: seal_failed_after_stop');
@@ -2007,6 +2059,7 @@ app.whenReady().then(async () => {
         throw error;
       }
       if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+        liveMeetingContextIndex.clear(normalizedMeetingId);
         knowledgeSynthesisPause.release('capture');
         captureLog.info('Released: capture_sealed');
       }
@@ -3108,6 +3161,7 @@ app.whenReady().then(async () => {
       abortMeetingTasks(meetingId);
       meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
       await meetingContextProducer.cancel(meetingId);
+      liveMeetingContextIndex.clear(meetingId);
 
       const result = db.deleteMeeting(id);
       if (downstreamActivity.runId) {
@@ -5167,7 +5221,12 @@ app.whenReady().then(async () => {
           replacedRequests.push(active.settled);
         }
       }
-      await Promise.all(replacedRequests);
+      if (!(await waitForMeetingAskPlutoCancellation(replacedRequests))) {
+        console.warn(
+          '[Pluto][Ask Pluto][main] previous meeting request did not settle after cancellation',
+          { senderId: event.sender.id },
+        );
+      }
       const controller = new AbortController();
       let markSettled: () => void = () => {};
       const settled = new Promise<void>((resolve) => {
@@ -5193,7 +5252,47 @@ app.whenReady().then(async () => {
       try {
         const context =
           request.scope.type === 'live_meeting'
-            ? buildLiveMeetingAskPlutoContext(request.scope)
+            ? (() => {
+                const activeMeeting = captureSessionLease.activeForOwner(
+                  event.sender.id,
+                );
+                if (!activeMeeting) {
+                  return buildLiveMeetingAskPlutoContext(request.scope);
+                }
+                const selection = liveMeetingContextIndex.select(
+                  activeMeeting.meetingId,
+                  query,
+                );
+                console.info('[Pluto][Live context] selected', {
+                  meetingId: activeMeeting.meetingId,
+                  intent: selection.intent,
+                  selectedSegments: selection.segments.length,
+                  totalConfirmedSegments: selection.totalConfirmedSegments,
+                });
+                const rollingContext = db.getLatestMeetingContextSnapshot(
+                  activeMeeting.meetingId,
+                )?.state.summary;
+                const speakerContext = selection.speakerStats?.length
+                  ? `Conversation signals:\n${selection.speakerStats
+                      .map(
+                        (speaker) =>
+                          `${speaker.speaker}: ${speaker.segmentCount} turns, ${speaker.questionCount} questions, ${speaker.longTurnCount} long turns`,
+                      )
+                      .join('\n')}`
+                  : undefined;
+                return buildLiveMeetingAskPlutoContext({
+                  ...request.scope,
+                  meetingId: activeMeeting.meetingId,
+                  notes: [request.scope.notes, rollingContext, speakerContext]
+                    .filter((value): value is string => Boolean(value?.trim()))
+                    .join('\n\n')
+                    .slice(0, 1_800),
+                  transcript:
+                    selection.segments.length > 0
+                      ? selection.segments
+                      : request.scope.transcript,
+                });
+              })()
             : (() => {
                 const meetingId = request.scope.meetingId.trim();
                 const meeting = db.getMeeting(meetingId) as
@@ -5377,8 +5476,10 @@ app.whenReady().then(async () => {
       active.controller.abort(
         new DOMException('Meeting chat request cancelled', 'AbortError'),
       );
-      await active.settled;
-      return { cancelled: true };
+      const settled = await waitForMeetingAskPlutoCancellation([
+        active.settled,
+      ]);
+      return { cancelled: true, settled };
     },
   );
 

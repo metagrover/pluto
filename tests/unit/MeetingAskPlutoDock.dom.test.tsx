@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -233,6 +234,7 @@ describe('MeetingAskPlutoDock', () => {
     expect(container.textContent).not.toContain('This must stay hidden.');
     expect(container.querySelector('strong')?.textContent).toBe('GraphQL');
     expect(container.textContent).toContain('GraphQL was selected');
+    expect(container.textContent).toContain('Pluto is responding…');
     expect(scrollIntoView).toHaveBeenCalled();
     expect(
       container.querySelector('.meeting-ask-pluto-dock__stream-caret'),
@@ -246,12 +248,151 @@ describe('MeetingAskPlutoDock', () => {
 
     expect(container.textContent).toContain(response.answer);
     expect(container.textContent).not.toContain('GraphQL was selected');
+    expect(container.textContent).not.toContain('Pluto is responding…');
     expect(
       container.querySelector('.meeting-ask-pluto-dock__stream-caret'),
     ).toBeNull();
 
     await act(async () => root.unmount());
     expect(ipcListeners.has('intelligence:meeting-chat:delta')).toBe(false);
+  });
+
+  it('leaves answering state after completion under React Strict Mode', async () => {
+    const root = createRoot(container);
+    let resolveResponse: (packet: MeetingAskPlutoResponse) => void = () => {};
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise<MeetingAskPlutoResponse>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <MeetingAskPlutoDock liveContext={liveContext} />
+        </StrictMode>,
+      );
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
+    await typeInto(input!, 'Summarize this discussion');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    const requestId = invoke.mock.calls[0]?.[1]?.requestId as string;
+    await act(async () => {
+      ipcListeners.get('intelligence:meeting-chat:delta')?.(null, {
+        requestId,
+        delta: 'A complete streamed answer.',
+      });
+      await flushPromises();
+    });
+    expect(container.textContent).toContain('Pluto is responding…');
+
+    await act(async () => {
+      resolveResponse(response);
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain(response.answer);
+    expect(container.textContent).not.toContain('Pluto is responding…');
+    expect(
+      container.querySelector('button[aria-label="Send question"]'),
+    ).not.toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
+  it('keeps a follow-up draft editable and can stop a stuck answer', async () => {
+    const root = createRoot(container);
+    let resolveResponse: (packet: MeetingAskPlutoResponse) => void = () => {};
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise<MeetingAskPlutoResponse>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+
+    await act(async () => {
+      root.render(<MeetingAskPlutoDock liveContext={liveContext} />);
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>('textarea');
+    await typeInto(input!, 'Give me a gist');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    await typeInto(input!, 'What kind of questions can I ask?');
+    expect(input?.disabled).toBe(false);
+    expect(input?.value).toBe('What kind of questions can I ask?');
+    const stopButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Stop answering"]',
+    );
+    expect(stopButton).not.toBeNull();
+
+    const requestId = invoke.mock.calls[0]?.[1]?.requestId as string;
+    await act(async () => {
+      ipcListeners.get('intelligence:meeting-chat:delta')?.(null, {
+        requestId,
+        delta: 'This is a useful partial answer.',
+      });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      stopButton!.click();
+      await flushPromises();
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:meeting-chat:cancel',
+      expect.stringMatching(/^ask-pluto-/),
+    );
+    expect(input?.value).toBe('What kind of questions can I ask?');
+    expect(
+      container.querySelector('button[aria-label="Send question"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('.meeting-ask-pluto-dock__loading'),
+    ).toBeNull();
+    expect(container.textContent).toContain('This is a useful partial answer.');
+    expect(container.textContent).toContain('Stopped');
+
+    await act(async () => {
+      resolveResponse(response);
+      await flushPromises();
+    });
+    expect(container.textContent).not.toContain(response.answer);
+
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+    const chatCalls = invoke.mock.calls.filter(
+      ([channel]) => channel === 'intelligence:meeting-chat',
+    );
+    expect(chatCalls).toHaveLength(2);
+    expect(chatCalls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        query: 'What kind of questions can I ask?',
+        turns: [{ role: 'user', content: 'Give me a gist' }],
+      }),
+    );
+
+    await act(async () => root.unmount());
   });
 
   it('preserves structured Markdown in Pluto answers', async () => {

@@ -348,6 +348,7 @@ describe('meeting-scoped Ask Pluto context', () => {
 
   it('retains the latest 24 live transcript segments for model synthesis', () => {
     const context = buildLiveMeetingAskPlutoContext({
+      meetingId: 'meeting-live-1',
       title: 'Launch review',
       participants: ['Avery'],
       notes: 'Follow up on pricing.',
@@ -365,6 +366,7 @@ describe('meeting-scoped Ask Pluto context', () => {
       (item) => item.kind === 'transcript' && item.id !== 'live-interim',
     );
     expect(transcriptItems).toHaveLength(24);
+    expect(context.scope.meetingId).toBe('meeting-live-1');
     expect(transcriptItems[0].text).toContain('Transcript segment 7');
     expect(transcriptItems.at(-1)?.text).toContain('Transcript segment 30');
   });
@@ -394,7 +396,44 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('Synthesize across the relevant evidence');
     expect(prompt).toContain('Answer conversationally and directly');
     expect(prompt).toContain('Do not merely repeat transcript lines');
+    expect(prompt).toContain(
+      '“Call audio” is the combined remote audio stream',
+    );
+    expect(prompt).toContain(
+      'Do not infer participant count or identity from segment boundaries',
+    );
     expect(prompt).toContain('give me a brief');
+  });
+
+  it('presents alternating capture channels as provenance rather than people', () => {
+    const context = buildLiveMeetingAskPlutoContext({
+      title: 'Launch review',
+      participants: [],
+      notes: '',
+      transcript: [
+        {
+          id: 'mic-turn',
+          speaker: 'Speaker 1',
+          source: 'mic',
+          text: 'I have a question.',
+          timestampMs: 1_000,
+          confirmed: true,
+        },
+        {
+          id: 'call-turn',
+          speaker: 'Speaker 2',
+          source: 'system',
+          text: 'Here is the answer.',
+          timestampMs: 2_000,
+          confirmed: true,
+        },
+      ],
+    });
+
+    expect(context.evidenceItems.map(({ text }) => text)).toEqual([
+      'Me (1s): I have a question.',
+      'Call audio (2s): Here is the answer.',
+    ]);
   });
 
   it.each([
@@ -459,6 +498,36 @@ describe('meeting-scoped Ask Pluto context', () => {
       }
     },
   );
+
+  it.each([
+    ['coaching', 'Do not infer personality or intent'],
+    [
+      'clarification',
+      "do not claim to know a speaker's internal understanding",
+    ],
+  ] as const)('adds the evidence boundary for %s', (mode, instruction) => {
+    const context = buildLiveMeetingAskPlutoContext({
+      title: 'Launch review',
+      participants: ['Avery'],
+      notes: '',
+      transcript: [
+        {
+          id: '1',
+          speaker: 'Avery',
+          text: 'Can you explain the pricing assumption again?',
+          timestampMs: 4_000,
+          confirmed: true,
+        },
+      ],
+    });
+
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'How did that exchange go?',
+      context,
+      assistanceRoute: { mode },
+    });
+    expect(prompt).toContain(instruction);
+  });
 
   it('returns a labeled deduplicated transcript fallback when model-backed answering fails', () => {
     const context = buildLiveMeetingAskPlutoContext({

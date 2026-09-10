@@ -4,6 +4,7 @@ import {
   Loader2,
   MessageCircle,
   Send,
+  Square,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -58,6 +59,7 @@ const trimToLimit = (value: string | undefined, limit: number) =>
 const buildBoundedLiveContext = (
   liveContext: MeetingAskPlutoLiveContext,
 ): MeetingAskPlutoLiveContext => ({
+  ...(liveContext.meetingId ? { meetingId: liveContext.meetingId } : {}),
   title: trimToLimit(liveContext.title, LIVE_TITLE_CHAR_LIMIT) || 'Meeting',
   participants: liveContext.participants
     .map((participant) => participant.trim())
@@ -76,20 +78,21 @@ const buildBoundedLiveContext = (
 const toTurns = (
   messages: MeetingAskPlutoConversationMessage[],
 ): MeetingAskPlutoTurn[] =>
-  messages.map((message) => {
+  messages.reduce<MeetingAskPlutoTurn[]>((turns, message) => {
     if (message.role === 'user') {
-      return {
-        role: 'user',
-        content: message.content,
-      };
+      turns.push({ role: 'user', content: message.content });
+      return turns;
     }
 
-    return {
+    if (message.interrupted) return turns;
+
+    turns.push({
       role: 'assistant',
       content: message.content,
-      citationIds: message.packet.citations.map((citation) => citation.id),
-    };
-  });
+      citationIds: message.packet?.citations.map((citation) => citation.id),
+    });
+    return turns;
+  }, []);
 
 export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   meeting,
@@ -217,8 +220,12 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     [],
   );
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // React Strict Mode replays effect setup/cleanup in development. Restore the
+    // mounted flag during setup so a completed IPC response is not discarded
+    // after the simulated cleanup.
+    mountedRef.current = true;
+    return () => {
       const activeRequestId = activeRequestIdRef.current;
       if (activeRequestId) {
         void window.ipcRenderer.invoke(
@@ -228,9 +235,8 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
       }
       mountedRef.current = false;
       activeRequestIdRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -244,6 +250,30 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
     observer.observe(threadContentRef.current);
     return () => observer.disconnect();
   }, [scrollToLatest, showsConversation]);
+
+  const stopAnswer = useCallback(() => {
+    const activeRequestId = activeRequestIdRef.current;
+    if (!activeRequestId) return;
+    activeRequestIdRef.current = null;
+    const partialAnswer = streamingAnswer.trim();
+    if (partialAnswer) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-stopped-${Date.now()}`,
+          role: 'assistant',
+          content: partialAnswer,
+          interrupted: true,
+        },
+      ]);
+    }
+    setStreamingAnswer('');
+    setIsAsking(false);
+    void window.ipcRenderer.invoke(
+      'intelligence:meeting-chat:cancel',
+      activeRequestId,
+    );
+  }, [setMessages, streamingAnswer]);
 
   const submitQuestion = async (value: string) => {
     const trimmed = value.trim();
@@ -424,6 +454,11 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                     >
                       {message.content}
                     </ReactMarkdown>
+                    {message.interrupted ? (
+                      <span className="meeting-ask-pluto-dock__interrupted">
+                        Stopped
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ),
@@ -444,6 +479,15 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
                   </ReactMarkdown>
                 </div>
               </div>
+            ) : null}
+            {isAsking && streamingAnswer ? (
+              <output className="meeting-ask-pluto-dock__loading meeting-ask-pluto-dock__responding">
+                <Loader2
+                  className="h-3.5 w-3.5 animate-spin"
+                  aria-hidden="true"
+                />
+                Pluto is responding…
+              </output>
             ) : null}
             {isAsking && !streamingAnswer ? (
               <output className="meeting-ask-pluto-dock__loading">
@@ -487,12 +531,14 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
             placeholder="Ask about this meeting"
           />
           <button
-            type="submit"
-            disabled={!query.trim() || isAsking}
-            aria-label={isAsking ? 'Ask Pluto is answering' : 'Send question'}
+            type={isAsking ? 'button' : 'submit'}
+            disabled={!isAsking && !query.trim()}
+            aria-label={isAsking ? 'Stop answering' : 'Send question'}
+            title={isAsking ? 'Stop answering' : 'Send question'}
+            onClick={isAsking ? stopAnswer : undefined}
           >
             {isAsking ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
             ) : (
               <Send className="h-4 w-4" aria-hidden="true" />
             )}

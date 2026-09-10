@@ -7,8 +7,12 @@ import type {
   MeetingContextRollingStateV1,
   MeetingContextSnapshot,
 } from '../../src/types/meetingContext';
+import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 import { extractDeterministicMeetingContextEvents } from './deterministicMeetingContextExtractor';
-import { reduceMeetingContextEvents } from './meetingContextReducer';
+import {
+  applyMeetingContextEvents,
+  reduceMeetingContextEvents,
+} from './meetingContextReducer';
 
 export type MeetingContextProducerDependencies = {
   getEventByKey(
@@ -19,6 +23,10 @@ export type MeetingContextProducerDependencies = {
     input: MeetingContextEventInput,
   ): MeetingContextEvent | Promise<MeetingContextEvent>;
   listEvents(meetingId: string): MeetingContextEvent[];
+  listEventsSince(
+    meetingId: string,
+    observedAtMs: number,
+  ): MeetingContextEvent[];
   getLatestSnapshot(meetingId: string): MeetingContextSnapshot | undefined;
   saveSnapshot(state: MeetingContextRollingStateV1): MeetingContextSnapshot;
 };
@@ -44,6 +52,9 @@ const parseSegment = (value: unknown): MeetingContextIngestionSegment => {
     !isSafeId(segment.id) ||
     typeof segment.speaker !== 'string' ||
     !segment.speaker.trim() ||
+    (segment.source !== undefined &&
+      segment.source !== 'mic' &&
+      segment.source !== 'system') ||
     typeof segment.text !== 'string' ||
     !normalize(segment.text) ||
     typeof segment.timestampMs !== 'number' ||
@@ -56,7 +67,10 @@ const parseSegment = (value: unknown): MeetingContextIngestionSegment => {
 
   return {
     id: segment.id,
-    speaker: normalize(segment.speaker),
+    speaker: resolveMeetingSpeakerLabel(segment),
+    ...(segment.source === 'mic' || segment.source === 'system'
+      ? { source: segment.source }
+      : {}),
     text: normalize(segment.text),
     timestampMs: segment.timestampMs,
     confirmed: true,
@@ -135,10 +149,18 @@ export const createMeetingContextProducer = (
 
     assertActive(request.meetingId);
     const latest = dependencies.getLatestSnapshot(request.meetingId);
-    const state = reduceMeetingContextEvents(
-      request.meetingId,
-      dependencies.listEvents(request.meetingId),
-    );
+    const state = latest
+      ? applyMeetingContextEvents(
+          latest.state,
+          dependencies.listEventsSince(
+            request.meetingId,
+            latest.lastSegmentTimestampMs ?? 0,
+          ),
+        )
+      : reduceMeetingContextEvents(
+          request.meetingId,
+          dependencies.listEvents(request.meetingId),
+        );
     const saved = dependencies.saveSnapshot(state);
     return {
       acceptedSegmentCount: request.segments.length,

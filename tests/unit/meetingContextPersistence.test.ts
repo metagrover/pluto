@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  LiveMeetingContextCheckpointV1,
   MeetingContextEventInput,
   MeetingContextRollingStateV1,
 } from '../../src/types/meetingContext';
@@ -9,6 +10,7 @@ const storeState = vi.hoisted(() => ({
   schemaSql: [] as string[],
   events: [] as Array<Record<string, unknown>>,
   snapshots: [] as Array<Record<string, unknown>>,
+  checkpoints: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('electron', () => ({
@@ -80,6 +82,40 @@ vi.mock('better-sqlite3', () => {
         return { changes: 1 };
       }
 
+      if (this.sql.includes('INSERT INTO live_meeting_context_checkpoints')) {
+        const [
+          meeting_id,
+          schema_version,
+          state_json,
+          last_segment_id,
+          last_segment_timestamp_ms,
+          generated_at,
+          updated_at,
+        ] = args;
+        storeState.checkpoints = storeState.checkpoints.filter(
+          (row) => row.meeting_id !== meeting_id,
+        );
+        storeState.checkpoints.push({
+          meeting_id,
+          schema_version,
+          state_json,
+          last_segment_id,
+          last_segment_timestamp_ms,
+          generated_at,
+          updated_at,
+        });
+        return { changes: 1 };
+      }
+
+      if (this.sql.includes('DELETE FROM live_meeting_context_checkpoints')) {
+        const [meetingId] = args;
+        const before = storeState.checkpoints.length;
+        storeState.checkpoints = storeState.checkpoints.filter(
+          (row) => row.meeting_id !== meetingId,
+        );
+        return { changes: before - storeState.checkpoints.length };
+      }
+
       return { changes: 1 };
     }
 
@@ -112,6 +148,12 @@ vi.mock('better-sqlite3', () => {
             (left, right) =>
               Number(right.revision || 0) - Number(left.revision || 0),
           )[0];
+      }
+      if (this.sql.includes('FROM live_meeting_context_checkpoints')) {
+        const [meetingId] = args;
+        return storeState.checkpoints.find(
+          (row) => row.meeting_id === meetingId,
+        );
       }
       return undefined;
     }
@@ -170,10 +212,13 @@ vi.mock('../../electron/database/applicationDatabase', async () => {
 
 import {
   appendMeetingContextEvent,
+  deleteLiveMeetingContextCheckpoint,
   getLatestMeetingContextSnapshot,
+  getLiveMeetingContextCheckpoint,
   getMeetingContextEventByKey,
   listMeetingContextEvents,
   listMeetingContextSnapshots,
+  saveLiveMeetingContextCheckpoint,
   saveMeetingContextSnapshot,
 } from '../../electron/db';
 
@@ -245,6 +290,7 @@ describe('embedded meeting context persistence', () => {
   beforeEach(() => {
     storeState.events = [];
     storeState.snapshots = [];
+    storeState.checkpoints = [];
   });
 
   it('leaves schema initialization to the database lifecycle', () => {
@@ -341,5 +387,48 @@ describe('embedded meeting context persistence', () => {
       ),
     ).toEqual([2, 1]);
     expect(getLatestMeetingContextSnapshot('meeting-2')).toBeUndefined();
+  });
+
+  it('upserts and deletes one bounded live context checkpoint per meeting', () => {
+    const checkpoint: LiveMeetingContextCheckpointV1 = {
+      schemaVersion: 1,
+      meetingId: 'meeting-1',
+      updatedThrough: { segmentId: 'segment-1', timestampMs: 4_000 },
+      segments: [
+        {
+          id: 'segment-1',
+          speaker: 'Avery',
+          text: 'Pricing needs another pass.',
+          timestampMs: 4_000,
+          confirmed: true,
+        },
+      ],
+      generatedAt: '2026-09-10T10:00:00.000Z',
+    };
+
+    saveLiveMeetingContextCheckpoint(checkpoint);
+    expect(getLiveMeetingContextCheckpoint('meeting-1')).toEqual(checkpoint);
+
+    saveLiveMeetingContextCheckpoint({
+      ...checkpoint,
+      updatedThrough: { segmentId: 'segment-2', timestampMs: 8_000 },
+      segments: [
+        ...checkpoint.segments,
+        {
+          id: 'segment-2',
+          speaker: 'Riley',
+          text: 'We decided to launch Friday.',
+          timestampMs: 8_000,
+          confirmed: true,
+        },
+      ],
+    });
+    expect(storeState.checkpoints).toHaveLength(1);
+    expect(getLiveMeetingContextCheckpoint('meeting-1')?.segments).toHaveLength(
+      2,
+    );
+
+    deleteLiveMeetingContextCheckpoint('meeting-1');
+    expect(getLiveMeetingContextCheckpoint('meeting-1')).toBeUndefined();
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { reduceMeetingContextEvents } from '../../electron/intelligence/meetingContextReducer';
+import {
+  applyMeetingContextEvents,
+  reduceMeetingContextEvents,
+} from '../../electron/intelligence/meetingContextReducer';
 import type { MeetingContextEvent } from '../../src/types/meetingContext';
 
 const event = (
@@ -95,5 +98,25 @@ describe('meeting context reducer', () => {
       openQuestions: [],
       importantFacts: [],
     });
+  });
+
+  it('incrementally applies new events with the same bounded result', () => {
+    const initial = [
+      event('1', 'topic', 'Launch plan', 1_000),
+      event('2', 'decision', 'Launch Monday', 2_000),
+    ];
+    const next = [
+      event('3', 'decision', '  launch monday ', 3_000),
+      event('4', 'action', 'Send checklist', 4_000, {
+        attributes: { owner: 'Riley', deadline: null },
+      }),
+    ];
+
+    expect(
+      applyMeetingContextEvents(
+        reduceMeetingContextEvents('meeting-1', initial),
+        next,
+      ),
+    ).toEqual(reduceMeetingContextEvents('meeting-1', [...initial, ...next]));
   });
 });

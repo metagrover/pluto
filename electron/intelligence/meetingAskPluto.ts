@@ -5,6 +5,7 @@ import type {
   MeetingAskPlutoScope,
   MeetingAskPlutoTurn,
 } from '../../src/types/askPluto';
+import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
@@ -90,7 +91,7 @@ const buildScope = (meeting: Pick<PersistedMeeting, 'id' | 'title'>) => ({
 
 const buildLiveScope = (context: MeetingAskPlutoLiveContext) => ({
   type: 'live_meeting' as const,
-  meetingId: 'active-recording',
+  meetingId: context.meetingId?.trim() || 'active-recording',
   title: context.title || 'Meeting',
 });
 
@@ -336,6 +337,7 @@ export const buildLiveMeetingAskPlutoContext = (
     const text = asString(segment.text);
     if (!text) continue;
     const seconds = Math.max(0, Math.round(segment.timestampMs / 1_000));
+    const speaker = resolveMeetingSpeakerLabel(segment);
     addEvidence(
       evidenceItems,
       {
@@ -343,7 +345,7 @@ export const buildLiveMeetingAskPlutoContext = (
         kind: 'transcript',
         meetingId: scope.meetingId,
         title: segment.confirmed ? 'Live transcript' : 'Provisional transcript',
-        text: `${segment.speaker || 'Speaker'} (${seconds}s): ${text}`,
+        text: `${speaker} (${seconds}s): ${text}`,
         quote: text,
       },
       LIVE_MEETING_ASK_PLUTO_EVIDENCE_LIMIT,
@@ -645,7 +647,11 @@ export const buildMeetingAskPlutoPrompt = ({
   const assistancePolicy =
     assistanceRoute.mode === 'recall'
       ? `Assistance mode: Recall (${assistanceRoute.recallKind})\n${recallPolicy}\nSay when live evidence is incomplete, provisional, or too noisy to support the requested recall.`
-      : 'Assistance mode: General conversation';
+      : assistanceRoute.mode === 'coaching'
+        ? 'Assistance mode: Private coaching\nUse observable conversational behavior only. Give one supported strength, one improvement, the evidence and one small next experiment when the evidence permits. Do not infer personality or intent, diagnose ability, score people, compare participants, or present this as an employer evaluation.'
+        : assistanceRoute.mode === 'clarification'
+          ? "Assistance mode: Understanding check\nSeparate explicit confusion or clarification requests from your inference. Describe the exchange and evidence; do not claim to know a speaker's internal understanding. If the transcript only suggests uncertainty, say so."
+          : 'Assistance mode: General conversation';
 
   return `You are Pluto, answering inside a single meeting note.
 
@@ -662,6 +668,7 @@ Rules:
 6. Answer conversationally and directly, matching the depth requested by the user.
 7. Do not merely repeat transcript lines. Explain the situation, decisions, open questions, and next steps when relevant.
 8. Keep the answer concise unless the user asks for detail.
+9. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
 
 ${assistancePolicy}
 

@@ -38,6 +38,37 @@ describe('confirmed meeting context ingestion', () => {
     });
   });
 
+  it('preserves audio provenance without treating turns as new people', () => {
+    const submit = vi.fn(() => Promise.resolve());
+    const session = createConfirmedSegmentIngestionSession({
+      meetingId: 'meeting-1',
+      submit,
+      onError: vi.fn(),
+    });
+
+    session.accept([
+      live({ id: 'mic-1', source: 'mic', speaker: 'Speaker 1' }),
+      live({ id: 'system-1', source: 'system', speaker: 'Speaker 2' }),
+      live({ id: 'mic-2', source: 'mic', speaker: 'Speaker 3' }),
+      live({ id: 'system-2', source: 'system', speaker: 'Speaker 4' }),
+    ]);
+
+    expect(submit.mock.calls[0][0].segments).toEqual([
+      expect.objectContaining({ id: 'mic-1', source: 'mic', speaker: 'Me' }),
+      expect.objectContaining({
+        id: 'system-1',
+        source: 'system',
+        speaker: 'Call audio',
+      }),
+      expect.objectContaining({ id: 'mic-2', source: 'mic', speaker: 'Me' }),
+      expect.objectContaining({
+        id: 'system-2',
+        source: 'system',
+        speaker: 'Call audio',
+      }),
+    ]);
+  });
+
   it('returns before asynchronous submission settles', () => {
     let resolve!: () => void;
     const submit = vi.fn(

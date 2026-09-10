@@ -75,7 +75,7 @@ export const ollamaHttpFetch = (
 export const ollamaHttpStream = (
   input: string,
   init: RequestInit,
-  onChunk: (chunk: string) => void,
+  onChunk: (chunk: string) => unknown,
   maxResponseBytes = OLLAMA_MAX_RESPONSE_BYTES,
 ): Promise<{
   ok: boolean;
@@ -109,7 +109,15 @@ export const ollamaHttpStream = (
             return true;
           }
           try {
-            onChunk(chunk);
+            if (onChunk(chunk) === false) {
+              resolve({
+                ok,
+                status: response.statusCode ?? 500,
+                statusText: response.statusMessage || 'Unknown response',
+              });
+              response.destroy();
+              return false;
+            }
             return true;
           } catch (error) {
             reject(error);

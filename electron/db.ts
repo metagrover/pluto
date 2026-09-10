@@ -24,6 +24,7 @@ import {
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
 import type {
+  LiveMeetingContextCheckpointV1,
   MeetingContextAttributeValue,
   MeetingContextEvent,
   MeetingContextEventInput,
@@ -205,6 +206,16 @@ type MeetingContextSnapshotRow = {
   last_segment_timestamp_ms: number | null;
   generated_at: string;
   created_at: string;
+};
+
+type LiveMeetingContextCheckpointRow = {
+  meeting_id: string;
+  schema_version: number;
+  state_json: string;
+  last_segment_id: string | null;
+  last_segment_timestamp_ms: number | null;
+  generated_at: string;
+  updated_at: string;
 };
 
 export interface PersistedMeeting {
@@ -872,6 +883,25 @@ export const listMeetingContextEvents = (
   return rows.map(mapMeetingContextEventRow);
 };
 
+export const listMeetingContextEventsSince = (
+  meetingId: string,
+  observedAtMs: number,
+): MeetingContextEvent[] => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId || !Number.isFinite(observedAtMs)) return [];
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_context_events
+       WHERE meeting_id = ? AND observed_at_ms >= ?
+       ORDER BY observed_at_ms ASC, created_at ASC`,
+    )
+    .all(
+      normalizedMeetingId,
+      Math.max(0, observedAtMs),
+    ) as MeetingContextEventRow[];
+  return rows.map(mapMeetingContextEventRow);
+};
+
 export const getLatestMeetingContextSnapshot = (
   meetingId: string,
 ): MeetingContextSnapshot | undefined => {
@@ -952,6 +982,77 @@ export const saveMeetingContextSnapshot = (
   });
 
   return save();
+};
+
+export const getLiveMeetingContextCheckpoint = (
+  meetingId: string,
+): LiveMeetingContextCheckpointV1 | undefined => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return undefined;
+  const row = db
+    .prepare(
+      'SELECT * FROM live_meeting_context_checkpoints WHERE meeting_id = ?',
+    )
+    .get(normalizedMeetingId) as LiveMeetingContextCheckpointRow | undefined;
+  if (!row) return undefined;
+  const checkpoint = parseMeetingContextJson<LiveMeetingContextCheckpointV1>(
+    row.state_json,
+    'live checkpoint',
+  );
+  if (
+    row.schema_version !== 1 ||
+    checkpoint.schemaVersion !== 1 ||
+    checkpoint.meetingId !== normalizedMeetingId ||
+    !Array.isArray(checkpoint.segments)
+  ) {
+    throw new Error('Invalid live meeting context checkpoint');
+  }
+  return checkpoint;
+};
+
+export const saveLiveMeetingContextCheckpoint = (
+  checkpoint: LiveMeetingContextCheckpointV1,
+): void => {
+  const meetingId = requireMeetingContextText(
+    checkpoint.meetingId,
+    'meeting ID',
+  );
+  if (checkpoint.schemaVersion !== 1 || !Array.isArray(checkpoint.segments)) {
+    throw new Error('Unsupported live meeting context checkpoint');
+  }
+  const stateJson = JSON.stringify({ ...checkpoint, meetingId });
+  if (Buffer.byteLength(stateJson, 'utf8') > 300_000) {
+    throw new Error('Live meeting context checkpoint is too large');
+  }
+  db.prepare(
+    `INSERT INTO live_meeting_context_checkpoints (
+       meeting_id, schema_version, state_json, last_segment_id,
+       last_segment_timestamp_ms, generated_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(meeting_id) DO UPDATE SET
+       schema_version = excluded.schema_version,
+       state_json = excluded.state_json,
+       last_segment_id = excluded.last_segment_id,
+       last_segment_timestamp_ms = excluded.last_segment_timestamp_ms,
+       generated_at = excluded.generated_at,
+       updated_at = excluded.updated_at`,
+  ).run(
+    meetingId,
+    checkpoint.schemaVersion,
+    stateJson,
+    checkpoint.updatedThrough.segmentId,
+    checkpoint.updatedThrough.timestampMs,
+    checkpoint.generatedAt,
+    new Date().toISOString(),
+  );
+};
+
+export const deleteLiveMeetingContextCheckpoint = (meetingId: string): void => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return;
+  db.prepare(
+    'DELETE FROM live_meeting_context_checkpoints WHERE meeting_id = ?',
+  ).run(normalizedMeetingId);
 };
 
 /**

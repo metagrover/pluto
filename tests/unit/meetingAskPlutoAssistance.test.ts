@@ -41,4 +41,14 @@ describe('meeting Ask Pluto assistance routing', () => {
       ),
     ).toEqual({ mode: 'general' });
   });
+
+  it.each([
+    ['What could I do better in this conversation?', 'coaching'],
+    ['How is the speaker doing?', 'coaching'],
+    ['How is Mira doing in this conversation?', 'coaching'],
+    ['Did Riley understand the proposal?', 'clarification'],
+    ['What was confusing in that exchange?', 'clarification'],
+  ] as const)('routes reflective question %s to %s', (query, mode) => {
+    expect(routeMeetingAskPlutoAssistance(query)).toEqual({ mode });
+  });
 });

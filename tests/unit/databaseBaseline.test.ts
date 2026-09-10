@@ -37,6 +37,7 @@ const expectedTables = [
   'knowledge_doc_user_edits',
   'knowledge_doc_versions',
   'knowledge_docs',
+  'live_meeting_context_checkpoints',
   'meeting_analysis_run_history',
   'meeting_analysis_runs',
   'meeting_calendar_context',

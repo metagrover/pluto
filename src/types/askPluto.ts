@@ -9,12 +9,14 @@ export interface MeetingAskPlutoScope {
 export interface MeetingAskPlutoLiveTranscriptSegment {
   id: string;
   speaker: string;
+  source?: 'mic' | 'system';
   text: string;
   timestampMs: number;
   confirmed: boolean;
 }
 
 export interface MeetingAskPlutoLiveContext {
+  meetingId?: string;
   title: string;
   participants: string[];
   notes: string;
@@ -84,5 +86,6 @@ export type MeetingAskPlutoConversationMessage =
       id: string;
       role: 'assistant';
       content: string;
-      packet: MeetingAskPlutoResponse;
+      packet?: MeetingAskPlutoResponse;
+      interrupted?: boolean;
     };

@@ -75,6 +75,9 @@ const isValidSegment = (
       MEETING_ASK_PLUTO_LIMITS.transcriptSegmentChars,
       true,
     ) &&
+    (value.source === undefined ||
+      value.source === 'mic' ||
+      value.source === 'system') &&
     typeof value.timestampMs === 'number' &&
     Number.isFinite(value.timestampMs) &&
     value.timestampMs >= 0 &&
@@ -122,6 +125,8 @@ export const parseMeetingAskPlutoRequest = (
   } else if (value.scope.type === 'live_meeting') {
     const scope = value.scope;
     if (
+      (scope.meetingId !== undefined &&
+        !isValidId(scope.meetingId, MEETING_ASK_PLUTO_LIMITS.meetingIdChars)) ||
       !isBoundedString(scope.title, MEETING_ASK_PLUTO_LIMITS.titleChars) ||
       !Array.isArray(scope.participants) ||
       scope.participants.length > MEETING_ASK_PLUTO_LIMITS.participants ||

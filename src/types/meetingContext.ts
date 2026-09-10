@@ -75,6 +75,7 @@ export interface MeetingContextSnapshot {
 export interface MeetingContextIngestionSegment {
   id: string;
   speaker: string;
+  source?: 'mic' | 'system';
   text: string;
   timestampMs: number;
   confirmed: boolean;
@@ -92,4 +93,15 @@ export interface MeetingContextIngestionResult {
   reusedEventCount: number;
   snapshotRevision: number | null;
   snapshotChanged: boolean;
+}
+
+export interface LiveMeetingContextCheckpointV1 {
+  schemaVersion: 1;
+  meetingId: string;
+  updatedThrough: {
+    segmentId: string | null;
+    timestampMs: number | null;
+  };
+  segments: MeetingContextIngestionSegment[];
+  generatedAt: string;
 }

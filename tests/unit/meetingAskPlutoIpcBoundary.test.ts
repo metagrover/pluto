@@ -25,8 +25,13 @@ describe('meeting Ask Pluto IPC boundary', () => {
     expect(meetingChatHandler).toContain(
       'const activeRequestKey = `${event.sender.id}:${requestId}`',
     );
-    expect(meetingChatHandler).toContain('await Promise.all(replacedRequests)');
-    expect(main).toContain('await active.settled');
+    expect(meetingChatHandler).toContain(
+      'await waitForMeetingAskPlutoCancellation(replacedRequests)',
+    );
+    expect(main).toContain('MEETING_ASK_PLUTO_CANCEL_SETTLE_MS = 1_500');
+    expect(main).toContain(
+      'waitForMeetingAskPlutoCancellation([\n        active.settled',
+    );
     expect(meetingChatHandler).toContain('requestId,');
     expect(meetingChatHandler).toContain('onToken: (delta) =>');
     expect(meetingChatHandler).toContain('visibleStream.push(delta)');
