@@ -3,6 +3,7 @@ import type {
   LiveMeetingContextCheckpointV1,
   MeetingContextIngestionSegment,
 } from '../../src/types/meetingContext';
+import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 
 export type LiveMeetingQueryIntent =
   | 'recent_range'
@@ -276,7 +277,8 @@ export const createLiveMeetingContextIndex = (
         const previous = state.segmentsById.get(segment.id);
         const stored: MeetingAskPlutoLiveTranscriptSegment = {
           id: segment.id,
-          speaker: segment.speaker?.trim() || 'Speaker',
+          speaker: resolveMeetingSpeakerLabel(segment),
+          ...(segment.source ? { source: segment.source } : {}),
           text: segment.text.trim().slice(0, ASK_PLUTO_SEGMENT_CHARACTER_LIMIT),
           timestampMs: segment.timestampMs,
           confirmed: true,

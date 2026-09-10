@@ -7,6 +7,7 @@ import type {
   MeetingContextRollingStateV1,
   MeetingContextSnapshot,
 } from '../../src/types/meetingContext';
+import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 import { extractDeterministicMeetingContextEvents } from './deterministicMeetingContextExtractor';
 import {
   applyMeetingContextEvents,
@@ -51,6 +52,9 @@ const parseSegment = (value: unknown): MeetingContextIngestionSegment => {
     !isSafeId(segment.id) ||
     typeof segment.speaker !== 'string' ||
     !segment.speaker.trim() ||
+    (segment.source !== undefined &&
+      segment.source !== 'mic' &&
+      segment.source !== 'system') ||
     typeof segment.text !== 'string' ||
     !normalize(segment.text) ||
     typeof segment.timestampMs !== 'number' ||
@@ -63,7 +67,10 @@ const parseSegment = (value: unknown): MeetingContextIngestionSegment => {
 
   return {
     id: segment.id,
-    speaker: normalize(segment.speaker),
+    speaker: resolveMeetingSpeakerLabel(segment),
+    ...(segment.source === 'mic' || segment.source === 'system'
+      ? { source: segment.source }
+      : {}),
     text: normalize(segment.text),
     timestampMs: segment.timestampMs,
     confirmed: true,

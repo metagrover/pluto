@@ -3,6 +3,7 @@ import type {
   MeetingContextIngestionRequest,
   MeetingContextIngestionSegment,
 } from '../../types/meetingContext';
+import { resolveMeetingSpeakerLabel } from '../../utils/meetingSpeakerProvenance';
 
 const MAX_SEGMENTS = 24;
 const MAX_TEXT_CHARACTERS = 12_000;
@@ -31,7 +32,8 @@ const eligibleSegment = (
   }
   return {
     id,
-    speaker: segment.speaker,
+    speaker: resolveMeetingSpeakerLabel(segment),
+    ...(segment.source ? { source: segment.source } : {}),
     text,
     timestampMs: segment.timestampMs,
     confirmed: true,

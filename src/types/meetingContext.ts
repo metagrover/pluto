@@ -75,6 +75,7 @@ export interface MeetingContextSnapshot {
 export interface MeetingContextIngestionSegment {
   id: string;
   speaker: string;
+  source?: 'mic' | 'system';
   text: string;
   timestampMs: number;
   confirmed: boolean;

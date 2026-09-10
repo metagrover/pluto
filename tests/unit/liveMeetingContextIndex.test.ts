@@ -162,6 +162,44 @@ describe('live meeting context index', () => {
     ]);
   });
 
+  it('groups alternating generic turns by audio source rather than inferred people', () => {
+    const index = createLiveMeetingContextIndex();
+    index.ingest('meeting-1', [
+      {
+        ...segment('one', 1_000, 'My first point.', 'Speaker 1'),
+        source: 'mic',
+      },
+      {
+        ...segment('two', 2_000, 'A response from the call.', 'Speaker 2'),
+        source: 'system',
+      },
+      {
+        ...segment('three', 3_000, 'My follow-up?', 'Speaker 3'),
+        source: 'mic',
+      },
+      {
+        ...segment('four', 4_000, 'Another remote response.', 'Speaker 4'),
+        source: 'system',
+      },
+    ]);
+
+    const selected = index.select('meeting-1', 'How am I doing?', 4);
+
+    expect(
+      index
+        .createCheckpoint('meeting-1')
+        ?.segments.map(({ speaker }) => speaker),
+    ).toEqual(['Me', 'Call audio', 'Me', 'Call audio']);
+    expect(selected.segments.map(({ speaker }) => speaker)).toEqual([
+      'Me',
+      'Call audio',
+    ]);
+    expect(selected.speakerStats?.map(({ speaker }) => speaker)).toEqual([
+      'Call audio',
+      'Me',
+    ]);
+  });
+
   it('keeps serialized crash checkpoints under the database size limit', () => {
     const index = createLiveMeetingContextIndex();
     index.ingest(

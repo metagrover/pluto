@@ -5,6 +5,7 @@ import type {
   MeetingAskPlutoScope,
   MeetingAskPlutoTurn,
 } from '../../src/types/askPluto';
+import { resolveMeetingSpeakerLabel } from '../../src/utils/meetingSpeakerProvenance';
 import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
@@ -336,6 +337,7 @@ export const buildLiveMeetingAskPlutoContext = (
     const text = asString(segment.text);
     if (!text) continue;
     const seconds = Math.max(0, Math.round(segment.timestampMs / 1_000));
+    const speaker = resolveMeetingSpeakerLabel(segment);
     addEvidence(
       evidenceItems,
       {
@@ -343,7 +345,7 @@ export const buildLiveMeetingAskPlutoContext = (
         kind: 'transcript',
         meetingId: scope.meetingId,
         title: segment.confirmed ? 'Live transcript' : 'Provisional transcript',
-        text: `${segment.speaker || 'Speaker'} (${seconds}s): ${text}`,
+        text: `${speaker} (${seconds}s): ${text}`,
         quote: text,
       },
       LIVE_MEETING_ASK_PLUTO_EVIDENCE_LIMIT,
@@ -666,6 +668,7 @@ Rules:
 6. Answer conversationally and directly, matching the depth requested by the user.
 7. Do not merely repeat transcript lines. Explain the situation, decisions, open questions, and next steps when relevant.
 8. Keep the answer concise unless the user asks for detail.
+9. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
 
 ${assistancePolicy}
 

@@ -75,6 +75,9 @@ const isValidSegment = (
       MEETING_ASK_PLUTO_LIMITS.transcriptSegmentChars,
       true,
     ) &&
+    (value.source === undefined ||
+      value.source === 'mic' ||
+      value.source === 'system') &&
     typeof value.timestampMs === 'number' &&
     Number.isFinite(value.timestampMs) &&
     value.timestampMs >= 0 &&

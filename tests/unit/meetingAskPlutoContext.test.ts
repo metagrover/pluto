@@ -396,7 +396,44 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('Synthesize across the relevant evidence');
     expect(prompt).toContain('Answer conversationally and directly');
     expect(prompt).toContain('Do not merely repeat transcript lines');
+    expect(prompt).toContain(
+      '“Call audio” is the combined remote audio stream',
+    );
+    expect(prompt).toContain(
+      'Do not infer participant count or identity from segment boundaries',
+    );
     expect(prompt).toContain('give me a brief');
+  });
+
+  it('presents alternating capture channels as provenance rather than people', () => {
+    const context = buildLiveMeetingAskPlutoContext({
+      title: 'Launch review',
+      participants: [],
+      notes: '',
+      transcript: [
+        {
+          id: 'mic-turn',
+          speaker: 'Speaker 1',
+          source: 'mic',
+          text: 'I have a question.',
+          timestampMs: 1_000,
+          confirmed: true,
+        },
+        {
+          id: 'call-turn',
+          speaker: 'Speaker 2',
+          source: 'system',
+          text: 'Here is the answer.',
+          timestampMs: 2_000,
+          confirmed: true,
+        },
+      ],
+    });
+
+    expect(context.evidenceItems.map(({ text }) => text)).toEqual([
+      'Me (1s): I have a question.',
+      'Call audio (2s): Here is the answer.',
+    ]);
   });
 
   it.each([

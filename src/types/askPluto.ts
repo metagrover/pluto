@@ -9,6 +9,7 @@ export interface MeetingAskPlutoScope {
 export interface MeetingAskPlutoLiveTranscriptSegment {
   id: string;
   speaker: string;
+  source?: 'mic' | 'system';
   text: string;
   timestampMs: number;
   confirmed: boolean;
