@@ -3,43 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildInitialValidatedMeetingPayload,
   markStopToValidatedLatencyUnavailable,
-  persistAttributedTranscriptBeforeDownstream,
   persistDerivedAfterLatencyPatch,
   persistLatencyAndDerivedIntelligence,
   persistTranscriptThenRunLatencyPatchAndDownstream,
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../../src/services/diarizationFirstFinalization';
 import { createStopToValidatedLatencyAccumulator } from '../../src/utils/stopToValidatedLatency';
-
-describe('persistAttributedTranscriptBeforeDownstream', () => {
-  it('persists the attributed transcript before downstream intelligence', async () => {
-    const order: string[] = [];
-    const result = await persistAttributedTranscriptBeforeDownstream({
-      persistTranscript: async () => order.push('persist'),
-      runDownstream: async () => {
-        order.push('downstream');
-        return 'analysis';
-      },
-    });
-    expect(order).toEqual(['persist', 'downstream']);
-    expect(result).toBe('analysis');
-  });
-
-  it('does not run downstream intelligence when persistence fails', async () => {
-    let downstreamRan = false;
-    await expect(
-      persistAttributedTranscriptBeforeDownstream({
-        persistTranscript: async () => {
-          throw new Error('save failed');
-        },
-        runDownstream: async () => {
-          downstreamRan = true;
-        },
-      }),
-    ).rejects.toThrow('save failed');
-    expect(downstreamRan).toBe(false);
-  });
-});
 
 describe('stop-to-validated persistence orchestration', () => {
   it('starts latency only for an accepted stop', () => {

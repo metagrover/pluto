@@ -1,10 +1,5 @@
 import type { RetrievalResult } from './intelligenceTypes';
 
-export const getSynonymExpansionPrompt = (keywords: string[]): string => {
-  return `Given the keywords [${keywords.join(', ')}], suggest 3-5 synonyms or related terms that might be used in a professional meeting context.
-Return ONLY a comma-separated list of synonyms, nothing else.`;
-};
-
 export const getIntentClassificationPrompt = (query: string): string => {
   return `Analyze the following user query sent to an AI meeting assistant.
 Classify the intent into one of these categories:

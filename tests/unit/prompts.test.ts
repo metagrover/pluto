@@ -12,7 +12,6 @@ import {
   getTerminologyReconciliationPrompt,
   getTitlePrompt,
   getTopicAnalysisPrompt,
-  getTopicSegmentationPrompt,
   getValueSignalsPrompt,
 } from '../../electron/llm/prompts';
 
@@ -243,17 +242,6 @@ describe('global structured analysis editor', () => {
 });
 
 describe('terminology reconciliation prompts', () => {
-  it('discovers bounded spelling candidates without treating them as corrections', () => {
-    const prompt = getTopicSegmentationPrompt(
-      'Speaker: The unfamiliar product name may be misspelled.',
-    );
-
-    expect(prompt).toContain('"terminology_candidates"');
-    expect(prompt).toContain('at most 6');
-    expect(prompt).toContain('Candidates are hypotheses');
-    expect(prompt).toContain('Do not propose a preferred spelling');
-  });
-
   it('limits reconciliation to spelling and requires independent support', () => {
     const prompt = getTerminologyReconciliationPrompt(
       [

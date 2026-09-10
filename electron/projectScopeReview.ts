@@ -354,40 +354,6 @@ function projectScopeResponseSchema(
   };
 }
 
-export function selectProjectReviewExcerpt(
-  text: string,
-  name: string,
-  limit = 3000,
-): string {
-  if (text.length <= limit) return text;
-  const lowered = text.toLocaleLowerCase();
-  const needle = name.trim().toLocaleLowerCase();
-  const centers: number[] = [];
-  if (needle) {
-    let from = 0;
-    while (centers.length < 3) {
-      const index = lowered.indexOf(needle, from);
-      if (index < 0) break;
-      centers.push(index);
-      from = index + Math.max(needle.length, 1000);
-    }
-  }
-  // When a canonical name is absent, sample the whole conversation, not only its tail.
-  if (!centers.length)
-    centers.push(0, Math.floor(text.length / 2), text.length);
-  const width = Math.floor((limit - 32) / centers.length);
-  return centers
-    .map((center) => {
-      const start = Math.max(
-        0,
-        Math.min(text.length - width, center - Math.floor(width / 3)),
-      );
-      return text.slice(start, start + width);
-    })
-    .join('\n[excerpt break]\n')
-    .slice(0, limit);
-}
-
 export function isProjectScopeReviewBusy(
   reasons: Record<string, number | undefined>,
 ): boolean {
