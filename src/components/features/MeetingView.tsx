@@ -1537,7 +1537,7 @@ export const MeetingView = ({
             downstreamPresentation.notesUpdateQueuePosition ? (
               <output
                 aria-atomic="true"
-                className="mx-auto mb-4 block w-full max-w-[760px] px-5 text-sm text-pro-text-muted md:px-8"
+                className="mx-auto mb-4 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8"
               >
                 {downstreamPresentation.notesUpdateQueuePosition === 1
                   ? 'Notes update is next in the local queue.'
@@ -1548,13 +1548,13 @@ export const MeetingView = ({
             downstreamPresentation.notesUpdateFailed &&
             !regenerateNotesError &&
             !isRegeneratingNotes ? (
-              <output className="mx-auto mb-4 block w-full max-w-[760px] px-5 text-sm text-pro-text-muted md:px-8">
+              <output className="mx-auto mb-4 block w-full max-w-[760px] px-6 text-sm text-pro-text-muted md:px-8">
                 Couldn’t update notes. Your previous notes are still here.
               </output>
             ) : null}
             {downstreamPresentation.state === 'ready' &&
             downstreamPresentation.secondaryStatus ? (
-              <output className="mx-auto mb-4 flex w-full max-w-[760px] items-center gap-3 px-5 text-sm text-pro-text-muted md:px-8">
+              <output className="mx-auto mb-4 flex w-full max-w-[760px] items-center gap-3 px-6 text-sm text-pro-text-muted md:px-8">
                 <span>
                   {downstreamPresentation.secondaryStatus === 'failed'
                     ? 'Notes are ready. Related insights could not finish.'

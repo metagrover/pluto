@@ -981,14 +981,14 @@
     letter-spacing: 0.005em;
   }
   .meeting-document-header {
-    @apply mx-auto flex w-full max-w-[760px] flex-col px-6 pb-9 pt-16 md:px-8;
+    @apply mx-auto flex w-full max-w-[760px] flex-col px-6 pb-7 pt-16 md:px-8;
     border-color: transparent;
   }
   .meeting-document-meta-row {
-    @apply mt-2 flex w-full min-w-0 items-center justify-between gap-4;
+    @apply mt-3 flex w-full min-w-0 items-start justify-between gap-4;
   }
   .meeting-document-meta {
-    @apply flex flex-wrap items-center gap-3 text-[0.8rem] leading-5;
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.8rem] leading-5;
     color: var(--notes-muted);
   }
   .meeting-document-meta span + span::before {
@@ -1761,7 +1761,7 @@
       @apply text-[1.75rem];
     }
     .meeting-document-meta {
-      @apply gap-2 text-[0.75rem];
+      @apply gap-x-2 gap-y-1 text-[0.75rem];
     }
     .meeting-document-meta span + span::before {
       @apply mr-2;
