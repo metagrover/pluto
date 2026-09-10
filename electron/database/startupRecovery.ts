@@ -35,6 +35,16 @@ export const runDatabaseStartupRecovery = (
          )`,
       )
       .run().changes;
+    const liveCheckpoints = sqlite
+      .prepare(
+        `DELETE FROM live_meeting_context_checkpoints
+         WHERE NOT EXISTS (
+           SELECT 1 FROM meetings
+           WHERE meetings.id = live_meeting_context_checkpoints.meeting_id
+         )
+           AND datetime(updated_at) < datetime('now', '-7 days')`,
+      )
+      .run().changes;
 
     const genericCandidates = sqlite
       .prepare(
@@ -71,7 +81,7 @@ export const runDatabaseStartupRecovery = (
 
     return {
       identityJobsRecovered: recoverInterruptedIdentityJobs(sqlite),
-      orphanContextRowsRemoved: events + snapshots,
+      orphanContextRowsRemoved: events + snapshots + liveCheckpoints,
       genericSpeakerEntitiesPurged: genericCandidates.length,
     };
   })();

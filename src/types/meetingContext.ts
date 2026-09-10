@@ -93,3 +93,14 @@ export interface MeetingContextIngestionResult {
   snapshotRevision: number | null;
   snapshotChanged: boolean;
 }
+
+export interface LiveMeetingContextCheckpointV1 {
+  schemaVersion: 1;
+  meetingId: string;
+  updatedThrough: {
+    segmentId: string | null;
+    timestampMs: number | null;
+  };
+  segments: MeetingContextIngestionSegment[];
+  generatedAt: string;
+}

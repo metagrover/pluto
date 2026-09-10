@@ -9,6 +9,7 @@ const validLiveRequest = () => ({
   query: 'What did we decide?',
   scope: {
     type: 'live_meeting',
+    meetingId: 'meeting-live-1',
     title: 'Launch review',
     participants: ['Avery'],
     notes: '',
@@ -31,6 +32,15 @@ describe('meeting Ask Pluto request validation', () => {
     expect(parseMeetingAskPlutoRequest(validLiveRequest())).toMatchObject({
       ok: true,
     });
+  });
+
+  it('rejects a malformed optional live meeting ID', () => {
+    expect(
+      parseMeetingAskPlutoRequest({
+        ...validLiveRequest(),
+        scope: { ...validLiveRequest().scope, meetingId: 'not valid!' },
+      }).ok,
+    ).toBe(false);
   });
 
   it.each([

@@ -147,3 +147,117 @@ export const reduceMeetingContextEvents = (
     importantFacts,
   };
 };
+
+const mergeStateItem = (
+  items: MeetingContextStateItem[],
+  event: MeetingContextEvent,
+  limit: number,
+): MeetingContextStateItem[] => {
+  const key = keyFor(event.summary);
+  const existingIndex = items.findIndex((item) => keyFor(item.text) === key);
+  const evidenceSegmentIds = event.evidence
+    .map((reference) => reference.segmentId.trim())
+    .filter(Boolean);
+  const next: MeetingContextStateItem =
+    existingIndex >= 0
+      ? {
+          ...items[existingIndex],
+          sourceEventIds: unique([
+            ...items[existingIndex].sourceEventIds,
+            event.id,
+          ]),
+          sourceSegmentIds: unique([
+            ...items[existingIndex].sourceSegmentIds,
+            ...evidenceSegmentIds,
+          ]),
+        }
+      : {
+          id: event.id,
+          text: normalize(event.summary),
+          sourceEventIds: [event.id],
+          sourceSegmentIds: unique(evidenceSegmentIds),
+        };
+  const withoutExisting = items.filter((_, index) => index !== existingIndex);
+  return [...withoutExisting, next].slice(-limit);
+};
+
+export const applyMeetingContextEvents = (
+  previous: MeetingContextRollingStateV1,
+  inputEvents: MeetingContextEvent[],
+): MeetingContextRollingStateV1 => {
+  let currentTopics = [...previous.currentTopics];
+  let proposals = [...previous.proposals];
+  let decisions = [...previous.decisions];
+  let actions = [...previous.actions];
+  let openQuestions = [...previous.openQuestions];
+  let importantFacts = [...previous.importantFacts];
+  let cursor = { ...previous.updatedThrough };
+
+  const events = inputEvents
+    .filter((event) => event.meetingId === previous.meetingId)
+    .sort(
+      (left, right) =>
+        left.observedAtMs - right.observedAtMs ||
+        left.createdAt.localeCompare(right.createdAt),
+    );
+  for (const event of events) {
+    if (event.kind === 'topic') {
+      currentTopics = mergeStateItem(currentTopics, event, LIMITS.topic);
+    } else if (event.kind === 'proposal') {
+      proposals = mergeStateItem(proposals, event, LIMITS.proposal);
+    } else if (event.kind === 'decision') {
+      decisions = mergeStateItem(decisions, event, LIMITS.decision);
+    } else if (event.kind === 'action') {
+      const merged = mergeStateItem(actions, event, LIMITS.action);
+      actions = merged.map((item) =>
+        item.sourceEventIds.includes(event.id)
+          ? {
+              ...item,
+              owner: attributeText(event, 'owner'),
+              deadline: attributeText(event, 'deadline'),
+            }
+          : (item as MeetingContextActionItem),
+      );
+    } else if (event.kind === 'open_question') {
+      openQuestions = mergeStateItem(
+        openQuestions,
+        event,
+        LIMITS.open_question,
+      );
+    } else if (event.kind === 'fact') {
+      importantFacts = mergeStateItem(importantFacts, event, LIMITS.fact);
+    }
+    for (const evidence of event.evidence) {
+      if (
+        cursor.timestampMs === null ||
+        evidence.timestampMs >= cursor.timestampMs
+      ) {
+        cursor = {
+          segmentId: evidence.segmentId,
+          timestampMs: evidence.timestampMs,
+        };
+      }
+    }
+  }
+
+  return {
+    ...previous,
+    updatedThrough: cursor,
+    summary: [
+      summarySection('Decisions', decisions),
+      summarySection('Actions', actions),
+      summarySection('Topics', currentTopics),
+      summarySection('Proposals', proposals),
+      summarySection('Questions', openQuestions),
+      summarySection('Facts', importantFacts),
+    ]
+      .filter((section): section is string => section !== null)
+      .join('\n'),
+    currentTopics,
+    proposals,
+    decisions,
+    actions,
+    openQuestions,
+    importantFacts,
+  };
+};

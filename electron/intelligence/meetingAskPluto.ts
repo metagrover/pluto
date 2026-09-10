@@ -90,7 +90,7 @@ const buildScope = (meeting: Pick<PersistedMeeting, 'id' | 'title'>) => ({
 
 const buildLiveScope = (context: MeetingAskPlutoLiveContext) => ({
   type: 'live_meeting' as const,
-  meetingId: 'active-recording',
+  meetingId: context.meetingId?.trim() || 'active-recording',
   title: context.title || 'Meeting',
 });
 
@@ -645,7 +645,11 @@ export const buildMeetingAskPlutoPrompt = ({
   const assistancePolicy =
     assistanceRoute.mode === 'recall'
       ? `Assistance mode: Recall (${assistanceRoute.recallKind})\n${recallPolicy}\nSay when live evidence is incomplete, provisional, or too noisy to support the requested recall.`
-      : 'Assistance mode: General conversation';
+      : assistanceRoute.mode === 'coaching'
+        ? 'Assistance mode: Private coaching\nUse observable conversational behavior only. Give one supported strength, one improvement, the evidence and one small next experiment when the evidence permits. Do not infer personality or intent, diagnose ability, score people, compare participants, or present this as an employer evaluation.'
+        : assistanceRoute.mode === 'clarification'
+          ? "Assistance mode: Understanding check\nSeparate explicit confusion or clarification requests from your inference. Describe the exchange and evidence; do not claim to know a speaker's internal understanding. If the transcript only suggests uncertainty, say so."
+          : 'Assistance mode: General conversation';
 
   return `You are Pluto, answering inside a single meeting note.
 

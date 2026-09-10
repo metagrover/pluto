@@ -328,6 +328,20 @@ export const meetingContextSnapshots = sqliteTable(
   ],
 );
 
+export const liveMeetingContextCheckpoints = sqliteTable(
+  'live_meeting_context_checkpoints',
+  {
+    meetingId: text('meeting_id').primaryKey(),
+    schemaVersion: integer('schema_version').notNull(),
+    stateJson: text('state_json').notNull(),
+    lastSegmentId: text('last_segment_id'),
+    lastSegmentTimestampMs: integer('last_segment_timestamp_ms'),
+    generatedAt: datetime('generated_at').notNull(),
+    updatedAt: datetime('updated_at').notNull(),
+  },
+  (table) => [index('idx_live_context_updated_at').on(table.updatedAt)],
+);
+
 export const entityLinks = sqliteTable(
   'entity_links',
   {

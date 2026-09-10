@@ -60,6 +60,11 @@ const repositoryDependencies = (
     },
     listEvents: (meetingId: string) =>
       events.filter((event) => event.meetingId === meetingId),
+    listEventsSince: (meetingId: string, observedAtMs: number) =>
+      events.filter(
+        (event) =>
+          event.meetingId === meetingId && event.observedAtMs >= observedAtMs,
+      ),
     getLatestSnapshot: (meetingId: string) => snapshots.get(meetingId),
     saveSnapshot: (state: MeetingContextRollingStateV1) => {
       const latest = snapshots.get(state.meetingId);

@@ -718,6 +718,40 @@ describe('UnifiedLLMProvider', () => {
     });
   });
 
+  it('finishes live Ask Pluto on Ollama done without waiting for transport close', async () => {
+    let streamCancelled = false;
+    const encoder = new TextEncoder();
+    installFetchMock(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({ response: 'Complete answer.', done: true })}\n`,
+                ),
+              );
+            },
+            cancel() {
+              streamCancelled = true;
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const onToken = vi.fn();
+
+    await expect(
+      provider.answerAskPluto('What happened?', { live: true, onToken }),
+    ).resolves.toBe('Complete answer.');
+    expect(onToken).toHaveBeenCalledWith('Complete answer.');
+    expect(streamCancelled).toBe(true);
+  });
+
   it('reports when an Ask Pluto request is admitted to the provider', async () => {
     installFetchMock(() => jsonResponse({ response: 'Grounded answer' }));
     const provider = new UnifiedLLMProvider('ollama', {

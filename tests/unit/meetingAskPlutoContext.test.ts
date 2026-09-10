@@ -348,6 +348,7 @@ describe('meeting-scoped Ask Pluto context', () => {
 
   it('retains the latest 24 live transcript segments for model synthesis', () => {
     const context = buildLiveMeetingAskPlutoContext({
+      meetingId: 'meeting-live-1',
       title: 'Launch review',
       participants: ['Avery'],
       notes: 'Follow up on pricing.',
@@ -365,6 +366,7 @@ describe('meeting-scoped Ask Pluto context', () => {
       (item) => item.kind === 'transcript' && item.id !== 'live-interim',
     );
     expect(transcriptItems).toHaveLength(24);
+    expect(context.scope.meetingId).toBe('meeting-live-1');
     expect(transcriptItems[0].text).toContain('Transcript segment 7');
     expect(transcriptItems.at(-1)?.text).toContain('Transcript segment 30');
   });
@@ -459,6 +461,36 @@ describe('meeting-scoped Ask Pluto context', () => {
       }
     },
   );
+
+  it.each([
+    ['coaching', 'Do not infer personality or intent'],
+    [
+      'clarification',
+      "do not claim to know a speaker's internal understanding",
+    ],
+  ] as const)('adds the evidence boundary for %s', (mode, instruction) => {
+    const context = buildLiveMeetingAskPlutoContext({
+      title: 'Launch review',
+      participants: ['Avery'],
+      notes: '',
+      transcript: [
+        {
+          id: '1',
+          speaker: 'Avery',
+          text: 'Can you explain the pricing assumption again?',
+          timestampMs: 4_000,
+          confirmed: true,
+        },
+      ],
+    });
+
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'How did that exchange go?',
+      context,
+      assistanceRoute: { mode },
+    });
+    expect(prompt).toContain(instruction);
+  });
 
   it('returns a labeled deduplicated transcript fallback when model-backed answering fails', () => {
     const context = buildLiveMeetingAskPlutoContext({

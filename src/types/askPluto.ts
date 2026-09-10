@@ -15,6 +15,7 @@ export interface MeetingAskPlutoLiveTranscriptSegment {
 }
 
 export interface MeetingAskPlutoLiveContext {
+  meetingId?: string;
   title: string;
   participants: string[];
   notes: string;
@@ -84,5 +85,6 @@ export type MeetingAskPlutoConversationMessage =
       id: string;
       role: 'assistant';
       content: string;
-      packet: MeetingAskPlutoResponse;
+      packet?: MeetingAskPlutoResponse;
+      interrupted?: boolean;
     };

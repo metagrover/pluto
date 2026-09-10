@@ -1483,18 +1483,17 @@ export class UnifiedLLMProvider implements LLMProvider {
         for (const line of lines) {
           if (!line.trim()) continue;
           const packet = JSON.parse(line) as Record<string, unknown>;
+          const isDone = packet.done === true;
+          if (isDone) completed = true;
           if (task === 'projectScopeReview' && packet.done === true) {
-            completed = true;
             if (packet.done_reason === 'length')
               throw new Error('project_scope_response_incomplete');
           }
           if (task === 'commitmentReconciliation' && packet.done === true) {
-            completed = true;
             if (packet.done_reason === 'length')
               throw new Error('commitment_response_incomplete');
           }
           if (notesBudget && packet.done) {
-            completed = true;
             const notesMetrics = readNotesMetrics(packet);
             onNotesMetrics?.({
               inputTokens: notesMetrics.inputTokens,
@@ -1520,11 +1519,14 @@ export class UnifiedLLMProvider implements LLMProvider {
           const content = useNotesChat
             ? (packet.message as { content?: unknown } | undefined)?.content
             : packet.response;
-          if (typeof content !== 'string' || !content) continue;
-          answer += content;
-          onToken?.(content);
-          if (content.includes('}')) onNotesPartial?.(answer);
+          if (typeof content === 'string' && content) {
+            answer += content;
+            onToken?.(content);
+            if (content.includes('}')) onNotesPartial?.(answer);
+          }
+          if (isDone) return false;
         }
+        return true;
       };
       try {
         const response = await this.ollamaStream(
@@ -1537,7 +1539,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           },
           (chunk) => {
             deadline?.recordProgress();
-            consumeChunk(chunk);
+            return consumeChunk(chunk);
           },
         );
         if (pending.trim()) consumeChunk('\n');
@@ -1804,7 +1806,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async ollamaStream(
     path: string,
     options: RequestInit,
-    onChunk: (chunk: string) => void,
+    onChunk: (chunk: string) => unknown,
   ): Promise<{
     ok: boolean;
     status: number;
@@ -1829,13 +1831,18 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let endedLogically = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        onChunk(decoder.decode(value, { stream: true }));
+        if (onChunk(decoder.decode(value, { stream: true })) === false) {
+          endedLogically = true;
+          await reader.cancel();
+          break;
+        }
       }
-      const tail = decoder.decode();
+      const tail = endedLogically ? '' : decoder.decode();
       if (tail) onChunk(tail);
     } catch (error) {
       await reader.cancel().catch(() => undefined);

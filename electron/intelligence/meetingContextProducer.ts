@@ -8,7 +8,10 @@ import type {
   MeetingContextSnapshot,
 } from '../../src/types/meetingContext';
 import { extractDeterministicMeetingContextEvents } from './deterministicMeetingContextExtractor';
-import { reduceMeetingContextEvents } from './meetingContextReducer';
+import {
+  applyMeetingContextEvents,
+  reduceMeetingContextEvents,
+} from './meetingContextReducer';
 
 export type MeetingContextProducerDependencies = {
   getEventByKey(
@@ -19,6 +22,10 @@ export type MeetingContextProducerDependencies = {
     input: MeetingContextEventInput,
   ): MeetingContextEvent | Promise<MeetingContextEvent>;
   listEvents(meetingId: string): MeetingContextEvent[];
+  listEventsSince(
+    meetingId: string,
+    observedAtMs: number,
+  ): MeetingContextEvent[];
   getLatestSnapshot(meetingId: string): MeetingContextSnapshot | undefined;
   saveSnapshot(state: MeetingContextRollingStateV1): MeetingContextSnapshot;
 };
@@ -135,10 +142,18 @@ export const createMeetingContextProducer = (
 
     assertActive(request.meetingId);
     const latest = dependencies.getLatestSnapshot(request.meetingId);
-    const state = reduceMeetingContextEvents(
-      request.meetingId,
-      dependencies.listEvents(request.meetingId),
-    );
+    const state = latest
+      ? applyMeetingContextEvents(
+          latest.state,
+          dependencies.listEventsSince(
+            request.meetingId,
+            latest.lastSegmentTimestampMs ?? 0,
+          ),
+        )
+      : reduceMeetingContextEvents(
+          request.meetingId,
+          dependencies.listEvents(request.meetingId),
+        );
     const saved = dependencies.saveSnapshot(state);
     return {
       acceptedSegmentCount: request.segments.length,

@@ -122,6 +122,8 @@ export const parseMeetingAskPlutoRequest = (
   } else if (value.scope.type === 'live_meeting') {
     const scope = value.scope;
     if (
+      (scope.meetingId !== undefined &&
+        !isValidId(scope.meetingId, MEETING_ASK_PLUTO_LIMITS.meetingIdChars)) ||
       !isBoundedString(scope.title, MEETING_ASK_PLUTO_LIMITS.titleChars) ||
       !Array.isArray(scope.participants) ||
       scope.participants.length > MEETING_ASK_PLUTO_LIMITS.participants ||

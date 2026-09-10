@@ -809,8 +809,14 @@
   .meeting-ask-pluto-dock__message--assistant pre code {
     @apply bg-transparent p-0;
   }
+  .meeting-ask-pluto-dock__interrupted {
+    @apply mt-1 block text-[10px] font-medium text-pro-text-muted;
+  }
   .meeting-ask-pluto-dock__loading {
     @apply flex items-center gap-2 px-3 py-2 text-xs font-bold text-pro-text-muted;
+  }
+  .meeting-ask-pluto-dock__responding {
+    @apply py-0 pl-10 font-medium;
   }
   .meeting-ask-pluto-dock__error {
     @apply px-2 text-xs font-semibold text-red-600;

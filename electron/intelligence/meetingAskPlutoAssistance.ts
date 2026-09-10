@@ -9,6 +9,8 @@ export type MeetingAskPlutoAssistanceRoute =
       mode: 'recall';
       recallKind: MeetingAskPlutoRecallKind;
     }
+  | { mode: 'coaching' }
+  | { mode: 'clarification' }
   | { mode: 'general' };
 
 const ACTION_PATTERN =
@@ -23,6 +25,10 @@ const DIRECT_FACT_PATTERN =
   /\b(?:what(?:'s| is| was) (?:the )?(?:name|time|date|place|location)\b|who (?:is|was|were) (?:the )?(?:person|participant|speaker)\b|when (?:is|was|are|were|does|did|will)\b|where (?:is|was|are|were|does|did|will)\b)/i;
 const UNSUPPORTED_CREATION_PATTERN =
   /^\s*(?:please\s+)?(?:draft|write|create|compose|generate)\b/i;
+const COACHING_PATTERN =
+  /\b(?:what (?:can|could|should) (?:i|the speaker|they) do better|how (?:am i|is|are|was|were) .{0,48}\bdoing|coach(?:ing)?|communication feedback|improve (?:my|their) communication)\b/i;
+const CLARIFICATION_PATTERN =
+  /\b(?:did [\p{L}\p{N} .'-]{1,80} understand|not understand|confused?|confusion|unclear|misunderstood?|needed? clarification|what (?:was|is) confusing)\b/iu;
 
 export const routeMeetingAskPlutoAssistance = (
   query: string,
@@ -31,6 +37,12 @@ export const routeMeetingAskPlutoAssistance = (
 
   if (UNSUPPORTED_CREATION_PATTERN.test(normalized)) {
     return { mode: 'general' };
+  }
+  if (COACHING_PATTERN.test(normalized)) {
+    return { mode: 'coaching' };
+  }
+  if (CLARIFICATION_PATTERN.test(normalized)) {
+    return { mode: 'clarification' };
   }
   if (ACTION_PATTERN.test(normalized)) {
     return { mode: 'recall', recallKind: 'action' };
