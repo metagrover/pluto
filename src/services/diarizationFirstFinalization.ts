@@ -61,14 +61,6 @@ export const buildInitialValidatedMeetingPayload = <
   finalization_error_category: null,
 });
 
-export const persistAttributedTranscriptBeforeDownstream = async <T>(params: {
-  persistTranscript: () => Promise<unknown>;
-  runDownstream: () => Promise<T>;
-}): Promise<T> => {
-  await params.persistTranscript();
-  return await params.runDownstream();
-};
-
 export type LatencyPatchOutcome =
   | 'updated'
   | 'already_current'

@@ -9,7 +9,6 @@ import {
   mapDiarizationSpeakers,
   resolveCrossChannelDuplicates,
   resolveCrossChannelNearDuplicates,
-  shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
   splitCanonicalSegmentsAtChannelBoundaries,
   splitSegmentsAtDiarizationBoundaries,
@@ -114,16 +113,6 @@ describe('speakerAttribution utilities', () => {
     });
 
     expect(shouldDropThem).toBe(false);
-  });
-
-  it('skips full-session Me recovery when bleed is likely', () => {
-    const shouldRecover = shouldApplyFullSessionMeRecovery({
-      hasChunkMeSegments: false,
-      recoveredMeCount: 7,
-      bleedLikely: true,
-    });
-
-    expect(shouldRecover).toBe(false);
   });
 
   it('preserves middle Them turn in long-short-long sequence', () => {

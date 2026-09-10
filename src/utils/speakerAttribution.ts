@@ -1254,15 +1254,6 @@ export const shouldDropBySpeakerActivity = (params: {
   );
 };
 
-export const shouldApplyFullSessionMeRecovery = (params: {
-  hasChunkMeSegments: boolean;
-  recoveredMeCount: number;
-  bleedLikely: boolean;
-}): boolean => {
-  const { hasChunkMeSegments, recoveredMeCount, bleedLikely } = params;
-  return !hasChunkMeSegments && recoveredMeCount > 0 && !bleedLikely;
-};
-
 /** Approximate character cut in original text at normalized word boundary. */
 const splitOriginalTextAtWordIndex = (
   original: string,

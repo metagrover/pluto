@@ -785,40 +785,6 @@ Draft local analysis:
 ${draftAnalysisJson}`;
 };
 
-/**
- * Topic segmentation prompt for multi-pass (Ollama) pipeline.
- * Pass 1: identify distinct discussion topics with segment ranges.
- */
-export const getTopicSegmentationPrompt = (transcript: string): string => {
-  return `You are a meeting topic segmenter. Read the transcript and identify distinct discussion topics in chronological order.
-
-Return valid JSON only in this exact shape:
-{
-  "topics": [
-    { "title": "Short descriptive title", "start_segment": 0, "end_segment": 15 }
-  ],
-  "terminology_candidates": [
-    { "raw_text": "exact transcript span", "segment_indexes": [0], "kind": "name | organization | product | acronym | domain_term", "reason": "variant | ambiguous | known_term_match | spoken_definition" }
-  ]
-}
-
-Rules:
-- Each topic should represent a coherent discussion thread.
-- Build each title from distinctive transcript nouns plus the outcome or operation. Preserve named systems, products, programs, and technical terms; avoid generic labels such as "Discussion" or "Approach".
-- Use segment indices (0-based, line numbers in the transcript) to mark the approximate start and end.
-- If the meeting has a single topic throughout, return one topic covering all segments.
-- Keep titles concise and descriptive (3-8 words).
-- Do not invent topics. Only identify what's clearly discussed.
-- Return at most 6 terminology candidates. Candidates are hypotheses: include only unfamiliar proper names, organizations, products, acronyms, domain terms, or inconsistent variants whose spelling may matter to the notes.
-- Each candidate raw_text must be an exact span in every referenced transcript line. Do not include ordinary words, numbers, dates, URLs, negation, or speaker labels.
-- Do not propose a preferred spelling and do not reinterpret meaning in this pass.
-
-Return valid JSON only. No markdown fences, no commentary.
-
-Transcript:
-${transcript}`;
-};
-
 export const getTerminologyReconciliationPrompt = (
   candidates: TerminologyCandidateCluster[],
   knownTerms: string[] = [],

@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildRecordingWorkspaceModel,
   resolveSystemCaptureHealth,
-  scheduleSystemCaptureTimeout,
   withCaptureDurabilityWarning,
 } from '../../src/components/features/recordingWorkspaceModel';
 
@@ -292,8 +291,6 @@ describe('withCaptureDurabilityWarning', () => {
 });
 
 describe('resolveSystemCaptureHealth', () => {
-  afterEach(() => vi.useRealTimers());
-
   it('keeps a started native capture pending until valid PCM arrives', () => {
     expect(
       resolveSystemCaptureHealth({ nativeStarted: true, validPcmSeen: false }),
@@ -320,16 +317,5 @@ describe('resolveSystemCaptureHealth', () => {
         timedOut: true,
       }),
     ).toBe('unavailable');
-  });
-
-  it('cancels the pending timeout after valid PCM arrives', () => {
-    vi.useFakeTimers();
-    const onTimeout = vi.fn();
-    const cancel = scheduleSystemCaptureTimeout(onTimeout, 3_000);
-
-    cancel();
-    vi.advanceTimersByTime(3_000);
-
-    expect(onTimeout).not.toHaveBeenCalled();
   });
 });

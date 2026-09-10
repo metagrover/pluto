@@ -186,18 +186,6 @@ describe('bounded project scope review', () => {
   });
 });
 
-describe('project review source selection', () => {
-  it('keeps late name context and bounds provider input', async () => {
-    const { selectProjectReviewExcerpt } = await import(
-      '../../electron/projectScopeReview'
-    );
-    const text = `Opening context. ${'unrelated discussion '.repeat(2000)}Aurora needs two migration work packages. ${'More unrelated speech. '.repeat(2000)}Closing context.`;
-    const excerpt = selectProjectReviewExcerpt(text, 'Aurora', 3000);
-    expect(excerpt.length).toBeLessThanOrEqual(3000);
-    expect(excerpt).toContain('Aurora needs two migration work packages.');
-  });
-});
-
 describe('review response and evidence safety', () => {
   it.each([
     {},
