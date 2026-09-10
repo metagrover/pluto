@@ -1256,9 +1256,7 @@ describe('MeetingView progressive reveal', () => {
 
     await act(async () =>
       container
-        .querySelector<HTMLButtonElement>(
-          'button[aria-label="Undo rewrite"]',
-        )
+        .querySelector<HTMLButtonElement>('button[aria-label="Undo rewrite"]')
         ?.click(),
     );
 
