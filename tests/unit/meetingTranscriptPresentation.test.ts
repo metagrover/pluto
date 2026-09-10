@@ -3,6 +3,7 @@ import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
   extractSpeakerDisplayNames,
+  formatMeetingTranscriptForClipboard,
   getMeetingRemoteSpeakerStatus,
 } from '../../src/components/features/meetingTranscriptPresentation';
 import type { TranscriptSegment } from '../../src/types';
@@ -38,6 +39,17 @@ describe('meeting transcript presentation', () => {
     ]);
 
     expect(turns.map((turn) => turn.speaker)).toEqual(['Me', 'Them']);
+  });
+
+  it('formats the displayed turns as readable clipboard text', () => {
+    const turns = buildMeetingTranscriptTurns([
+      { speaker: 'Avery (You)', startTime: 0, endTime: 2, text: ' Hello. ' },
+      { speaker: 'Speaker 1', startTime: 65, endTime: 68, text: ' Hi there. ' },
+    ]);
+
+    expect(formatMeetingTranscriptForClipboard(turns)).toBe(
+      'Avery (You) (0:00)\nHello.\n\nSpeaker 1 (1:05)\nHi there.',
+    );
   });
 
   it('projects confirmed names across matching turns without mutating evidence rows', () => {

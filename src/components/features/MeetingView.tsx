@@ -3,6 +3,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleAlert,
+  Copy,
   FileText,
   Loader2,
   MoreHorizontal,
@@ -76,6 +77,7 @@ import {
   applyMeetingSpeakerDisplayNames,
   buildMeetingTranscriptTurns,
   extractSpeakerDisplayNames,
+  formatMeetingTranscriptForClipboard,
 } from './meetingTranscriptPresentation';
 
 const speakerDisplayNamesCache: Record<string, Record<string, string>> = {};
@@ -678,6 +680,7 @@ export const MeetingView = ({
   setTitleValue,
   fetchMeetings,
   handleCopySummary,
+  copySuccess,
   handleDeleteMeeting,
   transcriptVisible,
   setTranscriptVisible,
@@ -964,6 +967,8 @@ export const MeetingView = ({
     selectedMeeting.transcript_validated_at,
   ]);
   const hasTranscriptContent = transcriptTurns.length > 0;
+  const transcriptClipboardText =
+    formatMeetingTranscriptForClipboard(transcriptTurns);
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
@@ -1625,14 +1630,32 @@ export const MeetingView = ({
               <p>Source record</p>
               <h2 id="meeting-transcript-heading">Transcript</h2>
             </div>
-            <button
-              type="button"
-              onClick={() => setTranscriptVisible(false)}
-              aria-label="Close transcript"
-            >
-              <span>Hide</span>
-              <ChevronUp aria-hidden="true" size={15} />
-            </button>
+            <div className="meeting-transcript-header__actions">
+              <button
+                type="button"
+                data-copy-transcript
+                onClick={() => handleCopySummary(transcriptClipboardText)}
+                disabled={!hasTranscriptContent}
+                aria-label={
+                  copySuccess ? 'Transcript copied' : 'Copy transcript'
+                }
+              >
+                {copySuccess ? (
+                  <Check aria-hidden="true" size={15} />
+                ) : (
+                  <Copy aria-hidden="true" size={15} />
+                )}
+                <span>{copySuccess ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTranscriptVisible(false)}
+                aria-label="Close transcript"
+              >
+                <span>Hide</span>
+                <ChevronUp aria-hidden="true" size={15} />
+              </button>
+            </div>
           </header>
           <div className="meeting-transcript-record">
             {hasTranscriptContent ? (

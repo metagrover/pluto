@@ -121,6 +121,27 @@ export const buildMeetingTranscriptTurns = <T extends TranscriptSegment>(
   return turns;
 };
 
+export const formatMeetingTranscriptForClipboard = <
+  T extends TranscriptSegment,
+>(
+  turns: MeetingTranscriptTurn<T>[],
+): string =>
+  turns
+    .map((turn) => {
+      const minutes = Math.floor(turn.startSeconds / 60);
+      const seconds = Math.floor(turn.startSeconds % 60)
+        .toString()
+        .padStart(2, '0');
+      const text = turn.segments
+        .map((segment) => segment.text.trim())
+        .filter(Boolean)
+        .join(' ');
+      if (!text) return '';
+      return `${String(turn.speaker || 'Unknown speaker')} (${minutes}:${seconds})\n${text}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
 /** Transcription completion and remote voice separation are distinct outcomes. */
 export const getMeetingRemoteSpeakerStatus = (meeting: {
   transcript_status?: string;

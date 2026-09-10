@@ -1237,6 +1237,12 @@
     @apply inline-flex min-h-10 items-center gap-1 rounded-md px-2.5 text-sm font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
+  .meeting-transcript-header button:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+  .meeting-transcript-header__actions {
+    @apply flex items-center gap-1;
+  }
   .meeting-transcript-record {
     @apply py-1;
   }
