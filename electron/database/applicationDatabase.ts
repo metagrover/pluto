@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { app } from 'electron';
+import { ApplicationKeyStore } from '../crypto/applicationKeyStore';
 import {
   type DatabaseRuntime,
   type DatabaseRuntimeOptions,
@@ -75,6 +76,7 @@ const getOwner = () => {
         appRoot,
         resourcesPath: process.resourcesPath ?? appRoot,
       }),
+      keyStore: new ApplicationKeyStore(),
     });
   }
   return applicationDatabase;
@@ -87,4 +89,9 @@ export const initializeApplicationDatabase = (): Database.Database => {
 export const getApplicationDatabase = (): Database.Database =>
   getOwner().getConnection();
 
-export const closeApplicationDatabase = (): void => getOwner().close();
+export const closeApplicationDatabase = (): void => {
+  if (applicationDatabase) {
+    applicationDatabase.close();
+    applicationDatabase = null;
+  }
+};

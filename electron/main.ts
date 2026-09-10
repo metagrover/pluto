@@ -60,7 +60,10 @@ import {
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { getAudioKeyStore } from './crypto/audioKeyStore';
-import { closeApplicationDatabase } from './database/applicationDatabase';
+import {
+  closeApplicationDatabase,
+  getApplicationDatabase,
+} from './database/applicationDatabase';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
   type IncrementalMeetingNotesOffer,
@@ -5358,6 +5361,29 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('APP_RELAUNCH', () => {
     app.relaunch();
+    app.quit();
+    return true;
+  });
+
+  ipcMain.handle('DATABASE_RETRY', () => {
+    try {
+      const conn = getApplicationDatabase();
+      return { ok: conn.open };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle('OPEN_USER_DATA_DIR', async () => {
+    try {
+      await shell.openPath(app.getPath('userData'));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle('QUIT_APP', () => {
     app.quit();
     return true;
   });

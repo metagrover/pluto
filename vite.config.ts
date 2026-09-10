@@ -33,6 +33,7 @@ export default defineConfig({
             rollupOptions: {
               external: [
                 'better-sqlite3',
+                'better-sqlite3-multiple-ciphers',
                 'fluent-ffmpeg',
                 'ffmpeg-static',
                 '@ffprobe-installer/ffprobe',

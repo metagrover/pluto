@@ -1,11 +1,14 @@
-import { app, dialog } from 'electron';
+import { app, dialog, shell } from 'electron';
 
 import {
   resolveUserDataArgument,
   shouldAcquireProductionInstanceLock,
 } from './appRuntimePolicy';
 import { initializeApplicationDatabase } from './database/applicationDatabase';
-import { describeDatabaseStartupError } from './database/errors';
+import {
+  DatabaseLifecycleError,
+  describeDatabaseStartupError,
+} from './database/errors';
 import { createLogger, initializeElectronLogging } from './logger';
 
 // Guard against broken-pipe errors (EPIPE / EIO) on stdout/stderr early in process lifetime
@@ -34,17 +37,51 @@ if (!hasLock) {
   app.quit();
 } else {
   app.on('second-instance', () => focusPrimaryWindow?.());
-  try {
-    initializeApplicationDatabase();
-    void import('./main').then((main) => {
-      focusPrimaryWindow = main.focusPrimaryWindow;
-    });
-  } catch (error) {
-    log.error('Database startup failed:', error);
-    dialog.showErrorBox(
-      'Pluto could not start',
-      describeDatabaseStartupError(error),
-    );
-    app.quit();
+
+  let initialized = false;
+  while (!initialized) {
+    try {
+      initializeApplicationDatabase();
+      initialized = true;
+      void import('./main').then((main) => {
+        focusPrimaryWindow = main.focusPrimaryWindow;
+      });
+    } catch (error) {
+      log.error('Database startup failed:', error);
+      const isKeyLocked =
+        error instanceof DatabaseLifecycleError &&
+        error.code === 'database_key_unavailable';
+      const isKeyRejected =
+        error instanceof DatabaseLifecycleError &&
+        error.code === 'database_key_rejected';
+
+      const title =
+        isKeyLocked || isKeyRejected
+          ? 'Database Encryption Locked'
+          : 'Pluto could not start';
+      const detail = `${describeDatabaseStartupError(error)}\n\nYour data is preserved safely. Pluto will never replace or overwrite your encrypted database without your explicit action.`;
+
+      const choice = dialog.showMessageBoxSync({
+        type: 'error',
+        title,
+        message: title,
+        detail,
+        buttons: isKeyLocked
+          ? ['Retry Keychain Access', 'Open Data Folder', 'Quit Pluto']
+          : ['Retry', 'Open Data Folder', 'Quit Pluto'],
+        defaultId: 0,
+        cancelId: 2,
+      });
+
+      if (choice === 0) {
+        continue;
+      }
+      if (choice === 1) {
+        void shell.openPath(app.getPath('userData'));
+        continue;
+      }
+      app.quit();
+      break;
+    }
   }
 }

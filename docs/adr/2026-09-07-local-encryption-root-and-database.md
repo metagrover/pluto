@@ -26,15 +26,15 @@ Pluto requires application-layer encryption whose root key access is mediated by
    - Generate an independent 256-bit `meetingAudioKey` per meeting, wrapped with `audioWrappingKey` (AES-256-GCM) and persisted in SQLite table `meeting_audio_keys`.
 
 3. **Implementation Phasing:**
-   - **PR A (Contract and Key Custody - Current):**
+   - **PR A (Contract and Key Custody - Completed):**
      - Defines the canonical cross-language binary envelope specification (`PENC` v1, AES-256-GCM, deterministic JSON header with byte-for-byte canonical verification) shared between TypeScript (`EncryptedArtifactStore`) and Swift (`EncryptedAudioLoader`).
      - Establishes fail-closed `ScopedMeetingCapability` with mandatory generation, allowedOperations, and expiresAtMs.
      - Implements sidecar encryption for v4 capture journal artifacts, rejecting unencrypted sidecars in schema 4.
      - Implements HKDF-SHA-256 key derivation and key custody probing with explicit guarantees and limitations.
-   - **PR B (Database Safety & Cipher Migration - Upcoming):**
-     - Adopts `better-sqlite3-multiple-ciphers` pinned at `^13.0.3` with SQLCipher profile (`PRAGMA cipher = 'sqlcipher'`, raw 256-bit hex keys).
+   - **PR B (Database Safety & Cipher Migration - Current):**
+     - Adopts `better-sqlite3-multiple-ciphers` pinned at `13.0.3` with SQLCipher profile (`PRAGMA cipher = 'sqlcipher'`, raw 256-bit hex keys).
      - Implements SQLite header inspection (`"SQLite format 3\000"` vs encrypted pages), downgrade guard, and typed `DatabaseLifecycleError`.
-     - Implements crash-safe, resumable migration state machine and non-destructive recovery overlay when Keychain access is denied or locked.
+     - Implements crash-safe, resumable migration state machine with durable fsync and deep structural verification, and non-destructive recovery overlay when Keychain access is denied or locked.
    - **PR C through F (Upcoming):**
      - Encrypted capture pipeline and native decryption (PR C), performance budgets (PR D), storage quotas (PR E), and staged rollout (PR F).
 
