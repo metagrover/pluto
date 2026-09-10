@@ -590,6 +590,11 @@ describe('speaker voice IPC handlers', () => {
     const buildEnrollmentCandidate = vi.fn(async () => ({
       candidate: dummyCandidate,
       sourceRevision,
+      timings: {
+        candidateConstructionMs: 42,
+        initialInferenceMs: 12,
+        representativeInferencesMs: [10, 10],
+      },
     }));
 
     await expect(
@@ -603,12 +608,21 @@ describe('speaker voice IPC handlers', () => {
         },
         { buildEnrollmentCandidate },
       ),
-    ).resolves.toMatchObject({ success: true });
-
-    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
-      meetingId,
-      speaker: 'Remote Speaker 1',
+    ).resolves.toMatchObject({
+      success: true,
+      timings: {
+        candidateConstructionMs: 42,
+        initialInferenceMs: 12,
+        representativeInferencesMs: [10, 10],
+      },
     });
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId,
+        speaker: 'Remote Speaker 1',
+      }),
+    );
     expect(
       db.db
         .prepare(
@@ -624,6 +638,35 @@ describe('speaker voice IPC handlers', () => {
     expect(profiles).toEqual([
       expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
     ]);
+  });
+
+  it('times out long-running candidate construction during enrollment', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async ({ signal }: { signal?: AbortSignal }) => {
+        return await new Promise<{
+          candidate: typeof dummyCandidate;
+          sourceRevision: string;
+        }>((resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        });
+      },
+    );
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+          timeoutMs: 10,
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).rejects.toThrow('speaker_enrollment_timeout');
   });
 
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {

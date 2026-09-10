@@ -310,7 +310,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
   });
 
-  it('keeps the speaker in place and surfaces a failed voice enrollment', async () => {
+  it('persists identity and advances cleanly without noisy error when voice enrollment fails', async () => {
     enrollmentShouldFail = true;
     await act(async () => {
       root.render(
@@ -327,10 +327,18 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
     await act(async () => confirmButton?.click());
 
-    expect(document.body.textContent).toContain(
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-alex',
+      }),
+    );
+    expect(document.body.textContent).toContain('All speakers reviewed');
+    expect(document.body.textContent).toContain('is Alex Chen');
+    expect(document.body.textContent).not.toContain(
       'This person was identified, but Pluto could not remember their voice. Try again.',
     );
-    expect(document.body.textContent).toContain('Speaker 1');
   });
 
   it('does not require a separate per-person voice checkbox after reopening', async () => {
@@ -401,5 +409,93 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(document.body.textContent).not.toContain(
       'Speaker 1 may be Alex Chen',
     );
+  });
+
+  it('advances to the next speaker immediately without stalling on voice enrollment', async () => {
+    const multiMeeting: MeetingIdentityState = {
+      ...workspace,
+      meetingId: 'meeting-multi',
+      speakers: ['Remote Speaker 1', 'Remote Speaker 2'],
+      bindings: [],
+      capture: { origin: 'local', selfPersonId: 'person-aditya' },
+      job: null,
+    };
+
+    let resolveEnrollment: ((val: any) => void) | null = null;
+    const slowEnrollmentPromise = new Promise((resolve) => {
+      resolveEnrollment = resolve;
+    });
+
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') return multiMeeting;
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {},
+          candidates: {},
+          enrollmentAvailability: {
+            'Remote Speaker 1': true,
+            'Remote Speaker 2': true,
+          },
+        };
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        const next = { ...multiMeeting, bindings: [...multiMeeting.bindings] };
+        next.bindings.push({
+          speaker: payload.speaker,
+          source: 'user',
+          personId: payload.personId,
+          individual: true,
+        });
+        return next;
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return await slowEnrollmentPromise;
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-multi"
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain('Speaker 1 of 2');
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm & Next'),
+    );
+    await act(async () => confirmButton?.click());
+
+    // Immediately advanced to Speaker 2 of 2 without waiting for enrollment
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+
+    // Cleanly resolve the in-flight enrollment promise
+    await act(async () => {
+      resolveEnrollment?.({ success: true, enrollmentId: 'enroll-1' });
+    });
   });
 });

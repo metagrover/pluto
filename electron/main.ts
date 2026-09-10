@@ -1120,8 +1120,15 @@ app.whenReady().then(async () => {
               await fs.promises.rm(workDir, { recursive: true, force: true });
             },
             createAudio: createSpeakerEnrollmentAudio,
+            signal: input.signal,
             analyze: async (request) => {
-              const signal = getAbortSignalForMeeting(input.meetingId);
+              const meetingSignal = getAbortSignalForMeeting(input.meetingId);
+              const signal = input.signal
+                ? typeof AbortSignal.any === 'function'
+                  ? AbortSignal.any([meetingSignal, input.signal])
+                  : input.signal
+                : meetingSignal;
+              const infStart = performance.now();
               beginTranscriptionWork();
               beginMeetingTranscription(input.meetingId);
               try {
@@ -1130,6 +1137,15 @@ app.whenReady().then(async () => {
                   signal,
                 });
               } finally {
+                const infDurationMs = Math.round(performance.now() - infStart);
+                console.log(
+                  '[Pluto][SpeakerVoice] parakeet inference completed',
+                  {
+                    meetingId: input.meetingId,
+                    speaker: input.speaker,
+                    durationMs: infDurationMs,
+                  },
+                );
                 endMeetingTranscription(input.meetingId);
                 endTranscriptionWork();
               }

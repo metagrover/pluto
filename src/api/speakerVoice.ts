@@ -50,6 +50,16 @@ export async function getSpeakerVoiceSuggestions(
   };
 }
 
+export interface SpeakerVoiceEnrollmentResult {
+  success: boolean;
+  enrollmentId: string;
+  timings?: {
+    candidateConstructionMs?: number;
+    initialInferenceMs?: number;
+    representativeInferencesMs?: number[];
+  };
+}
+
 export function enrollSpeakerVoice(params: {
   personId: string;
   sourceMeetingId: string;
@@ -57,7 +67,8 @@ export function enrollSpeakerVoice(params: {
   speaker: string;
   candidateDigest?: string;
   expectedRevision: number;
-}): Promise<{ success: boolean; enrollmentId: string }> {
+  timeoutMs?: number;
+}): Promise<SpeakerVoiceEnrollmentResult> {
   return invoke('SPEAKER_VOICE_ENROLL', params);
 }
 

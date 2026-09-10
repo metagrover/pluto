@@ -94,8 +94,16 @@ export const SpeakerIdentificationModal = ({
   >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
+  const isMountedRef = useRef(true);
   const [refSampleLoading, setRefSampleLoading] = useState(false);
   const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const releaseSample = useCallback(() => {
     sampleAudio.current?.pause();
@@ -155,14 +163,21 @@ export const SpeakerIdentificationModal = ({
   attendeeNamesRef.current = attendeeNames;
 
   const loadVoiceSuggestions = useCallback(async () => {
+    const refreshStart = performance.now();
     try {
       const res = await getSpeakerVoiceSuggestions(
         meetingId,
         attendeeNamesRef.current,
       );
+      if (!isMountedRef.current) return;
       setVoiceSuggestions(res.suggestions);
       setSpeakerCandidates(res.candidates);
       setVoiceEnrollmentAvailability(res.enrollmentAvailability);
+      const refreshDurationMs = Math.round(performance.now() - refreshStart);
+      console.log('[Pluto][SpeakerVoice] post-confirmation refresh completed', {
+        meetingId,
+        durationMs: refreshDurationMs,
+      });
     } catch {
       // non-fatal
     }
@@ -423,6 +438,7 @@ export const SpeakerIdentificationModal = ({
     if (!state || busy) return;
     setBusy(true);
     setError('');
+    const bindingStart = performance.now();
     try {
       const next = await setMeetingIdentityBinding(
         meetingId,
@@ -430,6 +446,12 @@ export const SpeakerIdentificationModal = ({
         selection,
         state.revision,
       );
+      const bindingDurationMs = Math.round(performance.now() - bindingStart);
+      console.log('[Pluto][SpeakerVoice] binding persistence completed', {
+        meetingId,
+        speaker,
+        durationMs: bindingDurationMs,
+      });
       setState(next);
 
       // A confirmed peer identity should become reusable voice evidence whenever
@@ -441,42 +463,55 @@ export const SpeakerIdentificationModal = ({
       const canEnrollVoice =
         candidate?.isEligibleForEnrollment ||
         voiceEnrollmentAvailability[speaker];
-      if (canEnrollVoice && enrolledPersonId) {
-        try {
-          await enrollSpeakerVoice({
-            personId: enrolledPersonId,
-            sourceMeetingId: meetingId,
-            speaker,
-            expectedRevision: next.revision,
-            ...(candidate?.isEligibleForEnrollment
-              ? {
-                  sourceRevision: candidate.sourceRevision,
-                  candidateDigest: candidate.candidateDigest,
-                }
-              : {}),
-          });
-        } catch {
-          const enrolledPerson = next.people.find(
-            (person) => person.id === enrolledPersonId,
-          );
-          setSelectedSelection({ personId: enrolledPersonId });
-          if (enrolledPerson) {
-            setSearchQuery(enrolledPerson.name);
-          }
-          await loadVoiceSuggestions();
-          setError(
-            'This person was identified, but Pluto could not remember their voice. Try again.',
-          );
-          return;
-        }
-      }
 
+      // Auto-advance immediately upon persistence so wizard is never stalled.
       if (autoAdvance) {
         if (stepIndex + 1 < totalSpeakers) {
           setStepIndex(stepIndex + 1);
         } else {
           setIsSummaryView(true);
         }
+      }
+
+      // Voice enrollment is a non-blocking follow-up.
+      if (canEnrollVoice && enrolledPersonId) {
+        void (async () => {
+          try {
+            const res = await enrollSpeakerVoice({
+              personId: enrolledPersonId,
+              sourceMeetingId: meetingId,
+              speaker,
+              expectedRevision: next.revision,
+              ...(candidate?.isEligibleForEnrollment
+                ? {
+                    sourceRevision: candidate.sourceRevision,
+                    candidateDigest: candidate.candidateDigest,
+                  }
+                : {}),
+            });
+            if (res?.timings) {
+              console.log('[Pluto][SpeakerVoice] voice enrollment timings', {
+                meetingId,
+                speaker,
+                personId: enrolledPersonId,
+                ...res.timings,
+              });
+            }
+            if (isMountedRef.current) {
+              void loadVoiceSuggestions();
+            }
+          } catch (err) {
+            console.warn(
+              '[Pluto][SpeakerVoice] background voice profile enrollment failed',
+              {
+                meetingId,
+                speaker,
+                personId: enrolledPersonId,
+                err,
+              },
+            );
+          }
+        })();
       }
     } catch (failure) {
       setError(identityErrorMessage(failure));

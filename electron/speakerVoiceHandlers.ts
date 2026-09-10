@@ -63,9 +63,15 @@ export interface SpeakerVoiceDependencies {
   buildEnrollmentCandidate?: (input: {
     meetingId: string;
     speaker: string;
+    signal?: AbortSignal;
   }) => Promise<{
     candidate: SpeakerCandidateEvidence;
     sourceRevision: string;
+    timings?: {
+      candidateConstructionMs: number;
+      initialInferenceMs: number;
+      representativeInferencesMs: number[];
+    };
   } | null>;
 }
 
@@ -573,6 +579,7 @@ export async function handleSpeakerVoiceRequest(
         speaker,
         candidateDigest,
         expectedRevision,
+        timeoutMs = 30000,
       } = payload ?? {};
 
       if (
@@ -613,6 +620,13 @@ export async function handleSpeakerVoiceRequest(
       let enrollmentSourceRevision = sourceRevision as string | undefined;
       let enrollmentCandidateDigest = candidateDigest as string | undefined;
       let builtCandidate: SpeakerCandidateEvidence | null = null;
+      let candidateTimings:
+        | {
+            candidateConstructionMs: number;
+            initialInferenceMs: number;
+            representativeInferencesMs: number[];
+          }
+        | undefined = undefined;
 
       if (suppliedCandidateIdentity) {
         const candidate = getMeetingSpeakerCandidates(
@@ -640,10 +654,34 @@ export async function handleSpeakerVoiceRequest(
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
-        const built = await deps?.buildEnrollmentCandidate?.({
-          meetingId: String(sourceMeetingId ?? ''),
-          speaker: String(speaker ?? ''),
-        });
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => {
+          abortController.abort();
+        }, timeoutMs);
+        let built:
+          | Awaited<
+              ReturnType<
+                NonNullable<
+                  SpeakerVoiceDependencies['buildEnrollmentCandidate']
+                >
+              >
+            >
+          | undefined = null;
+        try {
+          built = await deps?.buildEnrollmentCandidate?.({
+            meetingId: String(sourceMeetingId ?? ''),
+            speaker: String(speaker ?? ''),
+            signal: abortController.signal,
+          });
+        } catch (err) {
+          if (abortController.signal.aborted) {
+            throw new Error('speaker_enrollment_timeout');
+          }
+          throw err;
+        } finally {
+          clearTimeout(timeout);
+        }
+
         if (
           !built ||
           !isCurrentEligibleCandidate(
@@ -667,6 +705,7 @@ export async function handleSpeakerVoiceRequest(
         builtCandidate = built.candidate;
         enrollmentSourceRevision = built.sourceRevision;
         enrollmentCandidateDigest = built.candidate.candidateDigest;
+        candidateTimings = built.timings;
       }
 
       if (!enrollmentSourceRevision || !enrollmentCandidateDigest) {
@@ -727,7 +766,19 @@ export async function handleSpeakerVoiceRequest(
         );
       })();
 
-      return { success: true, enrollmentId: enrollment.id };
+      console.log('[Pluto][SpeakerVoice] speaker voice enrolled', {
+        meetingId: String(sourceMeetingId),
+        speaker: String(speaker),
+        personId: canonicalPersonId,
+        isFastPath: suppliedCandidateIdentity,
+        timings: candidateTimings,
+      });
+
+      return {
+        success: true,
+        enrollmentId: enrollment.id,
+        ...(candidateTimings ? { timings: candidateTimings } : {}),
+      };
     }
 
     case 'SPEAKER_VOICE_REJECT': {
