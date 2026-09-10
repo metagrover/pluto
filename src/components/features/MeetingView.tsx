@@ -1196,7 +1196,8 @@ export const MeetingView = ({
                   <span>Maybe {suggestion.suggestedPersonName}</span>
                 </button>
               ))}
-              {unidentifiedWithoutSuggestionCount > 0 ? (
+              {tentativeVoiceMatches.length === 0 &&
+              unidentifiedWithoutSuggestionCount > 0 ? (
                 <button
                   type="button"
                   id="meeting-header-speaker-review-trigger"
