@@ -160,7 +160,7 @@ interface PendingMicChunk {
 }
 
 type JournalManifestState = {
-  schemaVersion: 3;
+  schemaVersion: 3 | 4;
   generation: string;
   revision: number;
 };
@@ -452,7 +452,9 @@ export const AudioManager = ({
       'AUDIO_CAPTURE_JOURNAL_READ',
       { meetingId },
     )) as JournalManifestState;
-    if (manifest?.schemaVersion !== 3) return null;
+    if (manifest?.schemaVersion !== 3 && manifest?.schemaVersion !== 4) {
+      return null;
+    }
     captureJournalStateRef.current = manifest;
     return manifest;
   };
@@ -673,7 +675,9 @@ export const AudioManager = ({
           },
         )) as JournalManifestState;
         captureJournalStateRef.current =
-          manifest?.schemaVersion === 3 ? manifest : null;
+          manifest?.schemaVersion === 3 || manifest?.schemaVersion === 4
+            ? manifest
+            : null;
         captureJournalRawChunksRef.current.clear();
         captureJournalReceiptsRef.current.clear();
         captureJournalCheckpointsRef.current.clear();
@@ -2308,7 +2312,12 @@ export const AudioManager = ({
       } catch (e) {
         console.warn('[Pluto] Sealed mic audio materialization failed:', e);
       }
-      if (!primaryAudioPath && micBlob && micBlob.size > 0) {
+      if (
+        !primaryAudioPath &&
+        captureJournalStateRef.current?.schemaVersion !== 4 &&
+        micBlob &&
+        micBlob.size > 0
+      ) {
         try {
           const buffer = await micBlob.arrayBuffer();
           const maybePath = await window.ipcRenderer.invoke(
@@ -2346,6 +2355,7 @@ export const AudioManager = ({
           const maybeMixed = await window.ipcRenderer.invoke('AUDIO_MIX_WAV', {
             inputPaths: [primaryAudioPath, systemAudioPath],
             outputTag: `${stopSnapshot.meetingId}-session-mix`,
+            meetingId: stopSnapshot.meetingId,
           });
           if (maybeMixed) mixedAudioPath = maybeMixed;
         } catch (e) {

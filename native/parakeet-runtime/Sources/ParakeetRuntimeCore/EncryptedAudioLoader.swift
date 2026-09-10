@@ -42,6 +42,7 @@ public enum EncryptedAudioLoader {
     private static let magic = Data([0x50, 0x45, 0x4E, 0x43]) // "PENC"
     private static let envelopeVersion: UInt8 = 1
     private static let algorithmAes256Gcm: UInt8 = 1
+    public static let maximumEnvelopeBytes = 512 * 1024 * 1024
 
     public static let validArtifactKinds: Set<String> = [
         "raw", "repair", "manifest", "mixed", "mic", "system", "chunk", "sidecar"
@@ -88,9 +89,44 @@ public enum EncryptedAudioLoader {
             throw EncryptedAudioLoaderError.fileNotFound(filePath)
         }
 
-        let fileData = try Data(contentsOf: URL(fileURLWithPath: filePath))
+        let attributes = try FileManager.default.attributesOfItem(atPath: filePath)
+        guard let fileSize = attributes[.size] as? NSNumber,
+              fileSize.intValue > 0,
+              fileSize.intValue <= maximumEnvelopeBytes else {
+            throw EncryptedAudioLoaderError.invalidEnvelope("Encrypted audio exceeds the allocation bound")
+        }
+
+        let fileData = try Data(contentsOf: URL(fileURLWithPath: filePath), options: .mappedIfSafe)
         let plaintext = try decrypt(fileData: fileData, keyData: keyData, capability: capability)
+        let artifactKind = try authenticatedArtifactKind(fileData)
+        let allowedKinds: Set<String>
+        switch expectedOperation {
+        case "transcribe":
+            allowedKinds = ["mic", "system", "mixed", "repair"]
+        case "speakerEvidence":
+            allowedKinds = ["mic", "system", "mixed"]
+        default:
+            throw EncryptedAudioLoaderError.capabilityMismatch("Unsupported encrypted audio operation")
+        }
+        guard allowedKinds.contains(artifactKind) else {
+            throw EncryptedAudioLoaderError.capabilityMismatch("Artifact kind is not permitted for this operation")
+        }
         return try parseAudio(plaintext: plaintext)
+    }
+
+    private static func authenticatedArtifactKind(_ fileData: Data) throws -> String {
+        guard fileData.count >= 8 else {
+            throw EncryptedAudioLoaderError.invalidEnvelope("File too small to contain an envelope header")
+        }
+        let headerLength = (Int(fileData[6]) << 8) | Int(fileData[7])
+        let headerEnd = 8 + headerLength
+        guard headerEnd <= fileData.count else {
+            throw EncryptedAudioLoaderError.invalidEnvelope("Envelope header is truncated")
+        }
+        return try JSONDecoder().decode(
+            EncryptedArtifactHeader.self,
+            from: fileData.subdata(in: 8..<headerEnd)
+        ).artifactKind
     }
 
     public static func decrypt(
@@ -151,6 +187,9 @@ public enum EncryptedAudioLoader {
         }
         guard header.plaintextLength >= 0 else {
             throw EncryptedAudioLoaderError.invalidEnvelope("Invalid plaintextLength in envelope header: must be non-negative integer")
+        }
+        guard header.plaintextLength <= maximumEnvelopeBytes else {
+            throw EncryptedAudioLoaderError.invalidEnvelope("Plaintext length exceeds the allocation bound")
         }
 
         let canonicalEncoder = JSONEncoder()

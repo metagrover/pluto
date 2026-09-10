@@ -13,7 +13,7 @@ export const hasCompleteSystemCapture = (
     intervals?: Array<{ sources?: { system?: { disposition?: unknown } } }>;
   };
   return (
-    journal.schemaVersion === 3 &&
+    (journal.schemaVersion === 3 || journal.schemaVersion === 4) &&
     Boolean(generation) &&
     journal.generation === generation &&
     journal.lifecycleState === 'sealed' &&

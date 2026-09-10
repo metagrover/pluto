@@ -30,12 +30,18 @@ import {
   appendCaptureTranscriptAcceptanceFrame,
   appendCaptureTranscriptCheckpoint,
   completeCaptureJournalCapturedChunk,
+  getCaptureJournalAudioKey,
   readCaptureJournalManifest,
   readCaptureJournalSidecar,
   replaceCaptureTranscriptCheckpoint,
   sealCaptureJournal,
   stopCaptureJournal,
 } from './captureJournal.ts';
+import { EncryptedArtifactStore } from './crypto/encryptedArtifactStore.ts';
+import {
+  materializeEncryptedJournalSource,
+  repairEncryptedJournalRawChunk,
+} from './crypto/encryptedAudioPipeline.ts';
 import type { PersistedMeeting } from './db.ts';
 import { normalizeCheckpointWords } from './recoveryTranscriptionAudio.ts';
 
@@ -75,6 +81,7 @@ type RecoveryDependencies = {
   mixWavSources?: (
     inputPaths: string[],
     outputTag: string,
+    meetingId?: string,
   ) => Promise<string | null>;
   nowMs?: number;
   repairRawChunk?: (inputPath: string) => Promise<Buffer | null>;
@@ -90,6 +97,13 @@ type RecoveryDependencies = {
       requestedLanguage: string | null;
     },
     journalDurationSeconds: number,
+    encryptedContext?: {
+      meetingId: string;
+      generation: string;
+      keyId: string;
+      meetingKey: Buffer;
+      source: CaptureJournalSource;
+    },
   ) => Promise<{
     detectedLanguage?: string | null;
     providerLabel?: string;
@@ -342,7 +356,7 @@ const buildSourceSegments = async (
 };
 
 const getRecoveredDurationSeconds = (manifest: CaptureJournalManifest) => {
-  if (manifest.schemaVersion === 3) {
+  if (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) {
     return manifest.intervals.reduce(
       (maxSeconds, interval) => Math.max(maxSeconds, interval.chunkEndSec),
       0,
@@ -405,6 +419,39 @@ const buildV3SourceSegments = async (
   return { segments, gaps };
 };
 
+const buildV4SourceSegments = (
+  rootDir: string,
+  manifest: CaptureJournalManifestV4,
+  source: CaptureJournalSource,
+): { segments: TimedSegment[]; gaps: RecoveryGap[] } => {
+  const segments: TimedSegment[] = [];
+  const gaps: RecoveryGap[] = [];
+  for (const interval of manifest.intervals) {
+    const disposition = interval.sources[source];
+    if (
+      disposition.disposition === 'verified_silence' ||
+      disposition.disposition === 'source_unavailable'
+    ) {
+      continue;
+    }
+    if (disposition.disposition !== 'captured') {
+      gaps.push({
+        source,
+        sequence: interval.sequence,
+        reason: 'missing_artifact',
+      });
+      continue;
+    }
+    segments.push({
+      path: join(rootDir, disposition.repairRelativePath),
+      startSec: interval.chunkStartSec,
+      endSec: interval.chunkEndSec,
+      chunkIndex: interval.sequence,
+    });
+  }
+  return { segments, gaps };
+};
+
 export const stitchSealedCaptureJournalSource = async (
   rootDir: string,
   meetingId: string,
@@ -413,8 +460,21 @@ export const stitchSealedCaptureJournalSource = async (
   outputTag: string,
 ): Promise<string | null> => {
   const manifest = await readCaptureJournalManifest(rootDir, meetingId);
-  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'sealed') {
+  if (
+    (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) ||
+    manifest.lifecycleState !== 'sealed'
+  ) {
     return null;
+  }
+  if (manifest.schemaVersion === 4) {
+    const meetingKey = await getCaptureJournalAudioKey(manifest.meetingId);
+    if (!meetingKey) throw new Error('audio_key_unavailable');
+    return await materializeEncryptedJournalSource({
+      rootDir,
+      manifest,
+      source,
+      meetingKey,
+    });
   }
   const recovery = await buildV3SourceSegments(rootDir, manifest, source);
   if (recovery.gaps.length > 0) {
@@ -429,6 +489,7 @@ const repairV3TranscriptGaps = async (
   initialManifest: CaptureJournalManifestV3 | CaptureJournalManifestV4,
   transcribeChunk: NonNullable<RecoveryDependencies['transcribeChunk']>,
   fallbackConfig?: RecoveryDependencies['transcriptionConfig'],
+  meetingKey?: Buffer,
 ): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> => {
   let manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4 =
     initialManifest;
@@ -441,6 +502,7 @@ const repairV3TranscriptGaps = async (
             manifest.meetingId,
             templateRef.relativePath,
             templateRef.transcriptChecksumSha256,
+            { meetingKey },
           )
         ).toString('utf8'),
       ) as { transcriptionConfig: NonNullable<typeof fallbackConfig> })
@@ -464,6 +526,7 @@ const repairV3TranscriptGaps = async (
       rootDir,
       manifest,
       interval,
+      meetingKey,
     );
     const inspections = new Map<
       CaptureJournalSource,
@@ -495,6 +558,7 @@ const repairV3TranscriptGaps = async (
             manifest.meetingId,
             existing.relativePath,
             existing.transcriptChecksumSha256,
+            { meetingKey },
           );
           const sidecar = JSON.parse(bytes.toString('utf8')) as {
             transcriptionConfig: Record<string, unknown>;
@@ -572,11 +636,28 @@ const repairV3TranscriptGaps = async (
           acceptedConfigKeys.has(existing.transcriptionConfigKey))
       )
         continue;
-      const result = await transcribeChunk(
-        join(rootDir, disposition.repairRelativePath),
-        targetConfig,
-        interval.chunkEndSec - interval.chunkStartSec,
-      );
+      const inputPath = join(rootDir, disposition.repairRelativePath);
+      const journalDurationSeconds =
+        interval.chunkEndSec - interval.chunkStartSec;
+      const result =
+        manifest.schemaVersion === 4 && meetingKey
+          ? await transcribeChunk(
+              inputPath,
+              targetConfig,
+              journalDurationSeconds,
+              {
+                meetingId: manifest.meetingId,
+                generation: manifest.generation,
+                keyId: manifest.keyId,
+                meetingKey,
+                source,
+              },
+            )
+          : await transcribeChunk(
+              inputPath,
+              targetConfig,
+              journalDurationSeconds,
+            );
       const normalizedSegments = normalizeCheckpointWords(
         result.segments,
         interval.chunkEndSec - interval.chunkStartSec,
@@ -611,6 +692,7 @@ const repairV3TranscriptGaps = async (
           },
           segments: normalizedSegments,
         },
+        meetingKey,
       };
       const saved = existing
         ? await replaceCaptureTranscriptCheckpoint(rootDir, {
@@ -670,6 +752,7 @@ const repairV3TranscriptGaps = async (
           manifest.meetingId,
           existingFrame.relativePath,
           existingFrame.acceptedChecksumSha256,
+          { meetingKey },
         );
         const existingFrameSidecar = JSON.parse(
           existingFrameBytes.toString('utf8'),
@@ -720,6 +803,7 @@ const repairV3TranscriptGaps = async (
         manifest.meetingId,
         checkpoint.relativePath,
         checkpoint.transcriptChecksumSha256,
+        { meetingKey },
       );
       const sidecar = JSON.parse(bytes.toString('utf8')) as {
         segments: Array<{
@@ -789,6 +873,7 @@ const repairV3TranscriptGaps = async (
         activityInputs,
         segments: frameSegments,
       },
+      meetingKey,
       ...(existingFrame
         ? {
             expectedPriorAcceptedChecksumSha256:
@@ -812,14 +897,25 @@ export const repairStoppingCaptureJournalTranscript = async (
   },
 ) => {
   const manifest = await readCaptureJournalManifest(rootDir, args.meetingId);
-  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'stopping') {
+  if (
+    (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) ||
+    manifest.lifecycleState !== 'stopping'
+  ) {
     throw new Error('capture_journal_not_stopping');
+  }
+  const meetingKey =
+    manifest.schemaVersion === 4
+      ? await getCaptureJournalAudioKey(manifest.meetingId)
+      : undefined;
+  if (manifest.schemaVersion === 4 && !meetingKey) {
+    throw new Error('audio_key_unavailable');
   }
   return await repairV3TranscriptGaps(
     rootDir,
     manifest,
     args.transcribeChunk,
     args.transcriptionConfig,
+    meetingKey ?? undefined,
   );
 };
 
@@ -880,6 +976,7 @@ async function readAcceptedSpeechSources(
     | CaptureJournalManifestV3
     | CaptureJournalManifestV4
   )['intervals'][number],
+  meetingKey?: Buffer,
 ): Promise<Set<CaptureJournalSource>> {
   const frame = manifest.acceptanceFrames.find(
     (candidate) => candidate.sequence === interval.sequence,
@@ -911,6 +1008,7 @@ async function readAcceptedSpeechSources(
       manifest.meetingId,
       frame.relativePath,
       frame.acceptedChecksumSha256,
+      { meetingKey },
     );
     const sidecar = JSON.parse(bytes.toString('utf8')) as {
       arbitrationVersion?: unknown;
@@ -943,9 +1041,9 @@ async function readAcceptedSpeechSources(
 
 const readV3AcceptedSegments = async (
   rootDir: string,
-  manifest: CaptureJournalManifestV3,
+  manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4,
   expectedConfigKeys?: string | string[],
-  options: { allowCaptureFailures?: boolean } = {},
+  options: { allowCaptureFailures?: boolean; meetingKey?: Buffer } = {},
 ) => {
   const configKeys = new Set(
     manifest.transcriptCheckpoints.map(
@@ -963,6 +1061,7 @@ const readV3AcceptedSegments = async (
       manifest.meetingId,
       reference.relativePath,
       reference.transcriptChecksumSha256,
+      { meetingKey: options.meetingKey },
     );
     const sidecar = JSON.parse(bytes.toString('utf8')) as {
       schemaVersion: number;
@@ -993,8 +1092,20 @@ const readV3AcceptedSegments = async (
         const audioBytes = await readFile(
           join(rootDir, disposition.repairRelativePath),
         );
+        const plaintext =
+          manifest.schemaVersion === 4
+            ? EncryptedArtifactStore.open(audioBytes, options.meetingKey!, {
+                meetingId: manifest.meetingId,
+                generation: manifest.generation,
+                keyId: manifest.keyId,
+                artifactKind: 'repair',
+                source: reference.source,
+                sequence: reference.sequence,
+              }).plaintext
+            : audioBytes;
         audioChecksumVerified =
-          computeChecksum(audioBytes) === disposition.repairChecksumSha256;
+          Boolean(options.meetingKey || manifest.schemaVersion === 3) &&
+          computeChecksum(plaintext) === disposition.repairChecksumSha256;
       } catch {
         audioChecksumVerified = false;
       }
@@ -1046,6 +1157,7 @@ const readV3AcceptedSegments = async (
       manifest.meetingId,
       frame.relativePath,
       frame.acceptedChecksumSha256,
+      { meetingKey: options.meetingKey },
     );
     const sidecar = JSON.parse(bytes.toString('utf8')) as {
       meetingId?: unknown;
@@ -1267,13 +1379,26 @@ export const verifySealedCaptureJournalTranscriptEvidence = async (
   }>;
 }> => {
   const manifest = await readCaptureJournalManifest(rootDir, meetingId);
-  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'sealed') {
-    throw new Error('Capture journal transcript evidence is not sealed v3');
+  if (
+    (manifest.schemaVersion !== 3 && manifest.schemaVersion !== 4) ||
+    manifest.lifecycleState !== 'sealed'
+  ) {
+    throw new Error(
+      'Capture journal transcript evidence is not sealed v3 or v4',
+    );
+  }
+  const meetingKey =
+    manifest.schemaVersion === 4
+      ? await getCaptureJournalAudioKey(manifest.meetingId)
+      : undefined;
+  if (manifest.schemaVersion === 4 && !meetingKey) {
+    throw new Error('audio_key_unavailable');
   }
   const evidence = await readV3AcceptedSegments(
     rootDir,
     manifest,
     expectedConfigKeys,
+    { meetingKey: meetingKey ?? undefined },
   );
   return {
     generation: manifest.generation,
@@ -1316,7 +1441,10 @@ const buildRecoveredMeeting = (params: {
     transcript_json: JSON.stringify(
       buildTranscriptJsonPayload(params.acceptedSegments ?? [], {
         canonicalSource:
-          params.manifest.schemaVersion === 3 ? 'recovered_channels' : 'mic',
+          params.manifest.schemaVersion === 3 ||
+          params.manifest.schemaVersion === 4
+            ? 'recovered_channels'
+            : 'mic',
         postHydrationBleedPass: false,
         lifecycleStatus: 'needs_attention',
       }),
@@ -1326,7 +1454,9 @@ const buildRecoveredMeeting = (params: {
     analysis_json: null,
     value_signals_json: null,
     capture_journal_generation:
-      params.manifest.schemaVersion === 3 ? params.manifest.generation : null,
+      params.manifest.schemaVersion === 3 || params.manifest.schemaVersion === 4
+        ? params.manifest.generation
+        : null,
     folder_id: null,
     is_favorite: false,
     end_reason: 'interrupted',
@@ -1380,7 +1510,7 @@ export const recoverInterruptedCaptureJournals = async (
     const isRecoveryRequiredMeeting =
       existingMeeting?.finalization_status === 'recovery_required';
     const isResumableSealedMeeting = Boolean(
-      manifest.schemaVersion === 3 &&
+      (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) &&
         manifest.lifecycleState === 'sealed' &&
         existingMeeting?.transcript_status === 'provisional' &&
         existingMeeting.capture_journal_generation === manifest.generation &&
@@ -1409,7 +1539,7 @@ export const recoverInterruptedCaptureJournals = async (
     }
 
     if (
-      manifest.schemaVersion === 3 &&
+      (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) &&
       !existingMeeting &&
       manifest.activityEvidence === undefined &&
       manifest.intervals.length === 0 &&
@@ -1422,18 +1552,42 @@ export const recoverInterruptedCaptureJournals = async (
     }
 
     try {
-      if (manifest.schemaVersion === 3) {
-        if (manifest.lifecycleState === 'recording' && deps.repairRawChunk) {
+      const meetingKey =
+        manifest.schemaVersion === 4
+          ? ((await getCaptureJournalAudioKey(manifest.meetingId)) ?? undefined)
+          : undefined;
+      if (manifest.schemaVersion === 4 && !meetingKey) {
+        throw new Error('audio_key_unavailable');
+      }
+      if (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) {
+        if (
+          manifest.lifecycleState === 'recording' &&
+          (manifest.schemaVersion === 4 || deps.repairRawChunk)
+        ) {
           for (const interval of manifest.intervals) {
             for (const source of ['mic', 'system'] as const) {
               const disposition = interval.sources[source];
               if (disposition.disposition !== 'raw_durable') continue;
               const rawPath = join(rootDir, disposition.rawRelativePath);
-              const rawBytes = await readFile(rawPath);
-              if (computeChecksum(rawBytes) !== disposition.rawChecksumSha256) {
-                continue;
+              let repairData: Buffer | null;
+              if (manifest.schemaVersion === 4) {
+                repairData = await repairEncryptedJournalRawChunk({
+                  filePath: rawPath,
+                  manifest,
+                  source,
+                  sequence: interval.sequence,
+                  expectedPlaintextSha256: disposition.rawChecksumSha256,
+                  meetingKey: meetingKey!,
+                });
+              } else {
+                const rawBytes = await readFile(rawPath);
+                if (
+                  computeChecksum(rawBytes) !== disposition.rawChecksumSha256
+                ) {
+                  continue;
+                }
+                repairData = await deps.repairRawChunk!(rawPath);
               }
-              const repairData = await deps.repairRawChunk(rawPath);
               if (!repairData) continue;
               const completed = await completeCaptureJournalCapturedChunk(
                 rootDir,
@@ -1445,6 +1599,7 @@ export const recoverInterruptedCaptureJournals = async (
                   sequence: interval.sequence,
                   rawChecksumSha256: disposition.rawChecksumSha256,
                   repairData,
+                  meetingKey,
                 },
               );
               manifest = completed.manifest;
@@ -1456,6 +1611,7 @@ export const recoverInterruptedCaptureJournals = async (
             meetingId: manifest.meetingId,
             generation: manifest.generation,
             expectedRevision: manifest.revision,
+            meetingKey,
           });
         }
         if (manifest.lifecycleState === 'stopping' && deps.transcribeChunk) {
@@ -1464,6 +1620,7 @@ export const recoverInterruptedCaptureJournals = async (
             manifest,
             deps.transcribeChunk,
             deps.transcriptionConfig,
+            meetingKey,
           );
         }
       }
@@ -1475,10 +1632,14 @@ export const recoverInterruptedCaptureJournals = async (
       );
 
       const [micRecovery, systemRecovery, acceptedEvidence] =
-        manifest.schemaVersion === 3
+        manifest.schemaVersion === 3 || manifest.schemaVersion === 4
           ? await Promise.all([
-              buildV3SourceSegments(rootDir, manifest, 'mic'),
-              buildV3SourceSegments(rootDir, manifest, 'system'),
+              manifest.schemaVersion === 4
+                ? buildV4SourceSegments(rootDir, manifest, 'mic')
+                : buildV3SourceSegments(rootDir, manifest, 'mic'),
+              manifest.schemaVersion === 4
+                ? buildV4SourceSegments(rootDir, manifest, 'system')
+                : buildV3SourceSegments(rootDir, manifest, 'system'),
               isResumableSealedMeeting
                 ? Promise.resolve({
                     segments: [],
@@ -1495,7 +1656,7 @@ export const recoverInterruptedCaptureJournals = async (
                           deps.transcriptionConfig,
                         )
                       : undefined,
-                    { allowCaptureFailures: true },
+                    { allowCaptureFailures: true, meetingKey },
                   ),
             ])
           : await Promise.all([
@@ -1504,7 +1665,7 @@ export const recoverInterruptedCaptureJournals = async (
               Promise.resolve({ segments: [], sourceCoverageSegments: [] }),
             ]);
       if (
-        manifest.schemaVersion === 3 &&
+        (manifest.schemaVersion === 3 || manifest.schemaVersion === 4) &&
         manifest.lifecycleState === 'stopping'
       ) {
         manifest = await sealCaptureJournal(rootDir, {
@@ -1513,6 +1674,7 @@ export const recoverInterruptedCaptureJournals = async (
             manifest.endedAtMs ??
             manifest.startedAtMs +
               Math.round(getRecoveredDurationSeconds(manifest) * 1000),
+          meetingKey,
         });
       }
       const activityEvidence = await getRecoveryActivityEvidence(manifest);
@@ -1535,10 +1697,17 @@ export const recoverInterruptedCaptureJournals = async (
       const micAudioPath =
         (isResumableSealedMeeting && resumableMeeting?.audio_path) ||
         (micRecovery.segments.length > 0
-          ? await deps.stitchWavSegments(
-              micRecovery.segments,
-              `${manifest.meetingId}-mic-recovered`,
-            )
+          ? manifest.schemaVersion === 4
+            ? await materializeEncryptedJournalSource({
+                rootDir,
+                manifest,
+                source: 'mic',
+                meetingKey: meetingKey!,
+              })
+            : await deps.stitchWavSegments(
+                micRecovery.segments,
+                `${manifest.meetingId}-mic-recovered`,
+              )
           : null);
       if (
         isResumableSealedMeeting &&
@@ -1550,10 +1719,17 @@ export const recoverInterruptedCaptureJournals = async (
       const systemAudioPath =
         (isResumableSealedMeeting && resumableMeeting?.system_audio_path) ||
         (systemRecovery.segments.length > 0
-          ? await deps.stitchWavSegments(
-              systemRecovery.segments,
-              `${manifest.meetingId}-system-recovered`,
-            )
+          ? manifest.schemaVersion === 4
+            ? await materializeEncryptedJournalSource({
+                rootDir,
+                manifest,
+                source: 'system',
+                meetingKey: meetingKey!,
+              })
+            : await deps.stitchWavSegments(
+                systemRecovery.segments,
+                `${manifest.meetingId}-system-recovered`,
+              )
           : null);
       if (
         isResumableSealedMeeting &&
@@ -1579,10 +1755,16 @@ export const recoverInterruptedCaptureJournals = async (
         }
         const mixedAudioPath =
           resumableMeeting.mixed_audio_path ||
-          (await deps.mixWavSources(
-            [micAudioPath, systemAudioPath],
-            `${manifest.meetingId}-mix-recovered`,
-          ));
+          (manifest.schemaVersion === 4
+            ? await deps.mixWavSources(
+                [micAudioPath, systemAudioPath],
+                `${manifest.meetingId}-mix-recovered`,
+                manifest.meetingId,
+              )
+            : await deps.mixWavSources(
+                [micAudioPath, systemAudioPath],
+                `${manifest.meetingId}-mix-recovered`,
+              ));
         if (!mixedAudioPath) {
           throw new Error('sealed_capture_mix_failed');
         }

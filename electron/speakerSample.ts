@@ -38,6 +38,12 @@ export interface SpeakerSampleDependencies {
   }) => Promise<boolean>;
   readFile: (path: string) => Promise<Uint8Array>;
   removeFile: (path: string) => Promise<void>;
+  readEncryptedSlice?: (input: {
+    meetingId: string;
+    inputPath: string;
+    startSec: number;
+    durationSec: number;
+  }) => Promise<Uint8Array | null>;
 }
 
 const validRequest = (value: unknown): value is SpeakerSampleRequest => {
@@ -81,6 +87,31 @@ export const loadSpeakerSample = async (
   );
   const interval = intervals[request.sampleIndex];
   if (!interval) return null;
+
+  if (inputPath.endsWith('.enc')) {
+    if (!dependencies.readEncryptedSlice) return null;
+    const bytes = await dependencies.readEncryptedSlice({
+      meetingId: request.meetingId,
+      inputPath,
+      startSec: interval.startSec,
+      durationSec: interval.endSec - interval.startSec,
+    });
+    if (
+      !bytes ||
+      bytes.byteLength === 0 ||
+      bytes.byteLength > MAX_SAMPLE_BYTES
+    ) {
+      return null;
+    }
+    return {
+      bytes,
+      mimeType: 'audio/wav',
+      durationSeconds: interval.endSec - interval.startSec,
+      excerpt: interval.excerpt,
+      sampleIndex: request.sampleIndex,
+      sampleCount: intervals.length,
+    };
+  }
 
   const outputPath = dependencies.createTemporaryPath();
   try {

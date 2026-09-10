@@ -732,7 +732,10 @@ export const retryMeetingTranscriptValidation = async (
           };
         },
       probeDuration: async (audioPath) =>
-        (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
+        (await invoke('AUDIO_PROBE_DURATION', {
+          audioPath,
+          meetingId,
+        })) as number | null,
     });
   try {
     validation = await runBeforeDeadline(validateTranscript(canonicalMode));

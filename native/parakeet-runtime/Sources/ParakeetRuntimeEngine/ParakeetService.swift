@@ -227,10 +227,21 @@ public actor ParakeetService {
                 path: audioPath,
                 kind: .regularFile
             )
+            let audioInput: AudioInput
+            if let capability = request.capability {
+                let loaded = try EncryptedAudioLoader.load(
+                    filePath: audioURL.path,
+                    capability: capability,
+                    expectedOperation: "transcribe"
+                )
+                audioInput = .pcmSamples(loaded.samples, sampleRate: loaded.sampleRate)
+            } else {
+                audioInput = .fileURL(audioURL)
+            }
             let vocabulary = normalizedVocabulary(request.vocabulary ?? [])
             let output = try await transcriber.transcribe(
                 modelURL: activeModelURL,
-                audioURL: audioURL,
+                audioInput: audioInput,
                 language: request.language,
                 vocabulary: vocabulary
             )
@@ -271,10 +282,37 @@ public actor ParakeetService {
             let mixedURL = try policy.approve(path: mixedAudioPath, kind: .regularFile)
             let micURL = try policy.approve(path: micAudioPath, kind: .regularFile)
             let systemURL = try policy.approve(path: systemAudioPath, kind: .regularFile)
+            let mixedInput: AudioInput
+            let micInput: AudioInput
+            let systemInput: AudioInput
+            if let capability = request.capability {
+                let mixed = try EncryptedAudioLoader.load(
+                    filePath: mixedURL.path,
+                    capability: capability,
+                    expectedOperation: "speakerEvidence"
+                )
+                let mic = try EncryptedAudioLoader.load(
+                    filePath: micURL.path,
+                    capability: capability,
+                    expectedOperation: "speakerEvidence"
+                )
+                let system = try EncryptedAudioLoader.load(
+                    filePath: systemURL.path,
+                    capability: capability,
+                    expectedOperation: "speakerEvidence"
+                )
+                mixedInput = .pcmSamples(mixed.samples, sampleRate: mixed.sampleRate)
+                micInput = .pcmSamples(mic.samples, sampleRate: mic.sampleRate)
+                systemInput = .pcmSamples(system.samples, sampleRate: system.sampleRate)
+            } else {
+                mixedInput = .fileURL(mixedURL)
+                micInput = .fileURL(micURL)
+                systemInput = .fileURL(systemURL)
+            }
             let output = try await speakerEvidenceDriver.analyze(
-                mixedURL: mixedURL,
-                micURL: micURL,
-                systemURL: systemURL
+                mixedInput: mixedInput,
+                micInput: micInput,
+                systemInput: systemInput
             )
             try Task.checkCancellation()
             return .speakerEvidence(id: request.id, output: output)

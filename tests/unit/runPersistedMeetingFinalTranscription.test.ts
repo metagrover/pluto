@@ -364,6 +364,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
       if (channel === 'AUDIO_MIX_WAV') {
         expect(args[0]).toEqual({
           inputPaths: ['/approved/mic.wav', '/repaired/system.wav'],
+          meetingId: 'meeting-mixed-rate-retry',
           outputTag: 'meeting-mixed-rate-retry-repaired-mix',
         });
         return '/repaired/mix.wav';
