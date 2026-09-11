@@ -13,14 +13,18 @@ describe('WindowDragRegion', () => {
     const html = renderToStaticMarkup(
       <WindowDragRegion className="recording-capture-drag" />,
     );
-    expect(html).toContain('recording-capture-drag drag-region pointer-events-auto');
+    expect(html).toContain(
+      'recording-capture-drag drag-region pointer-events-auto',
+    );
   });
 
   it('supports fixed and absolute placement classes', () => {
     const html = renderToStaticMarkup(
       <WindowDragRegion className="fixed inset-x-0 top-0 z-[60] h-9" />,
     );
-    expect(html).toContain('fixed inset-x-0 top-0 z-[60] h-9 drag-region pointer-events-auto');
+    expect(html).toContain(
+      'fixed inset-x-0 top-0 z-[60] h-9 drag-region pointer-events-auto',
+    );
   });
 
   it('passes through extra HTML attributes', () => {

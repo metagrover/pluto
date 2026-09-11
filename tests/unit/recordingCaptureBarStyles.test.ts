@@ -94,4 +94,3 @@ describe('recording capture bar styles', () => {
     expect(applyTokensFor(compactRule!)).toContain('hidden');
   });
 });
-
