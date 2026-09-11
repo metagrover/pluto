@@ -197,4 +197,30 @@ describe('candidate person commitments', () => {
       }),
     ).toEqual([]);
   });
+
+  it('accepts candidate actions when suggested_owner_name matches personNames even if assignee_name was generic', () => {
+    const result = selectCandidatePersonCommitments({
+      personNames: ['Ayush Grover'],
+      actions: [
+        {
+          ...base,
+          id: 'bound-speaker-action',
+          suggested_owner_name: 'Ayush Grover',
+          metadata: JSON.stringify({
+            assignee_name: 'Speaker 1',
+            commitment_state: 'possible',
+            source_meeting_id: 'meeting-1',
+          }),
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'bound-speaker-action',
+        suggestedOwnerName: 'Ayush Grover',
+        sourceMeetingId: 'meeting-1',
+      }),
+    ]);
+  });
 });

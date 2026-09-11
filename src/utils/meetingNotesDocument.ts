@@ -5,6 +5,10 @@ import type {
   UserEditsMap,
 } from '../types';
 import { applyUserEdit } from './analysisDocument';
+import {
+  getAnonymousSpeakerDisplayLabel,
+  isGenericSpeakerLabel,
+} from './speakerReview';
 
 export type MeetingNotesSectionKind =
   | 'outcomes'
@@ -67,12 +71,89 @@ const normalizeForComparison = (value: string): string =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const resolveSpeakerDisplayName = (
+  speaker: string | undefined | null,
+  displayNames?: Readonly<Record<string, string>>,
+): string | undefined => {
+  if (!speaker) return undefined;
+  if (!displayNames) return speaker;
+  const direct = displayNames[speaker]?.trim();
+  if (direct) return direct;
+  const anonLabel = getAnonymousSpeakerDisplayLabel(speaker);
+  const anonDirect = displayNames[anonLabel]?.trim();
+  if (anonDirect) return anonDirect;
+  const remoteMatch = speaker.match(/^Speaker\s+(\d+)$/i);
+  if (remoteMatch) {
+    const remoteKey = `Remote Speaker ${remoteMatch[1]}`;
+    const remoteDirect = displayNames[remoteKey]?.trim();
+    if (remoteDirect) return remoteDirect;
+  }
+  return speaker;
+};
+
+export const applySpeakerDisplayNamesToText = (
+  text: string,
+  displayNames?: Readonly<Record<string, string>>,
+): string => {
+  if (!text || !displayNames) return text;
+  let result = text;
+
+  for (const [rawSpeaker, rawDisplayName] of Object.entries(displayNames)) {
+    const displayName = rawDisplayName?.trim();
+    if (!displayName) continue;
+
+    // Handle numbered speakers: "Speaker 1", "Remote Speaker 1"
+    const numberMatch =
+      rawSpeaker.match(/^Speaker\s+(\d+)$/i) ||
+      rawSpeaker.match(/^Remote Speaker\s+(\d+)$/i);
+    if (numberMatch) {
+      const num = numberMatch[1];
+      const pattern = new RegExp(
+        `\\b(?:Remote\\s+)?Speaker\\s+${num}\\b`,
+        'gi',
+      );
+      result = result.replace(pattern, displayName);
+      continue;
+    }
+
+    // Handle "Them" — match when used as speaker label / subject,
+    // e.g. at start of sentence, before a colon, or capitalized.
+    if (rawSpeaker.trim().toLowerCase() === 'them') {
+      result = result
+        .replace(/(?:^|(?<=[.!?]\s+))Them\b/g, displayName)
+        .replace(/\bThem(?=\s*[:—])/g, displayName);
+      continue;
+    }
+
+    // Handle "Me" before colon / attribution
+    if (rawSpeaker.trim() === 'Me') {
+      result = result.replace(/\bMe(?=\s*[:—])/g, displayName);
+      continue;
+    }
+
+    // Direct whole-word replacement for other generic speaker labels
+    if (isGenericSpeakerLabel(rawSpeaker)) {
+      const pattern = new RegExp(
+        `\\b${escapeRegExp(rawSpeaker.trim())}\\b`,
+        'gi',
+      );
+      result = result.replace(pattern, displayName);
+    }
+  }
+
+  return result;
+};
+
 const toBlock = ({
   id,
   path,
   text,
   editsMap,
   authorship = 'ai',
+  displayNames,
   ...metadata
 }: {
   id: string;
@@ -80,6 +161,7 @@ const toBlock = ({
   text: string;
   editsMap: UserEditsMap;
   authorship?: MeetingNotesAuthorship;
+  displayNames?: Readonly<Record<string, string>>;
   speaker?: string;
   assignee?: string;
   due?: string;
@@ -87,15 +169,32 @@ const toBlock = ({
   transcriptRange?: [number, number];
   completed?: boolean;
   blockType?: 'decision' | 'action' | 'note' | 'paragraph';
-}): MeetingNotesBlock => ({
-  id,
-  path,
-  text: path ? applyUserEdit(text, path, editsMap) : text,
-  originalText: text,
-  authorship,
-  edited: Boolean(path && editsMap[path]),
-  ...metadata,
-});
+}): MeetingNotesBlock => {
+  const userEdited = Boolean(path && editsMap[path]);
+  let blockText = path ? applyUserEdit(text, path, editsMap) : text;
+  if (!userEdited && authorship === 'ai' && displayNames) {
+    blockText = applySpeakerDisplayNamesToText(blockText, displayNames);
+  }
+  const speaker = resolveSpeakerDisplayName(metadata.speaker, displayNames);
+  const assignee = resolveSpeakerDisplayName(metadata.assignee, displayNames);
+  const evidence =
+    metadata.evidence && displayNames
+      ? applySpeakerDisplayNamesToText(metadata.evidence, displayNames)
+      : metadata.evidence;
+
+  return {
+    id,
+    path,
+    text: blockText,
+    originalText: text,
+    authorship,
+    edited: userEdited,
+    ...metadata,
+    ...(speaker !== undefined ? { speaker } : {}),
+    ...(assignee !== undefined ? { assignee } : {}),
+    ...(evidence !== undefined ? { evidence } : {}),
+  };
+};
 
 const uniqueBlocks = (blocks: MeetingNotesBlock[]): MeetingNotesBlock[] => {
   const seen = new Set<string>();
@@ -200,6 +299,7 @@ const groupTopics = (topics: TopicSection[]): TopicGroup[] => {
 const buildV3Sections = (
   doc: AnalysisDocumentV3,
   editsMap: UserEditsMap,
+  displayNames?: Readonly<Record<string, string>>,
 ): MeetingNotesSection[] => {
   const sections: MeetingNotesSection[] = [];
 
@@ -220,6 +320,7 @@ const buildV3Sections = (
             completed:
               editsMap[`completion:all_decisions:${index}`]?.edited === 'true',
             blockType: 'decision',
+            displayNames,
           }),
         ),
         ...doc.all_action_items.map((item, index) =>
@@ -235,6 +336,7 @@ const buildV3Sections = (
               editsMap[`completion:all_action_items:${index}`]?.edited ===
               'true',
             blockType: 'action',
+            displayNames,
           }),
         ),
       ],
@@ -260,6 +362,7 @@ const buildV3Sections = (
           text: doc.overview,
           editsMap,
           blockType: 'paragraph',
+          displayNames,
         }),
       ],
     });
@@ -277,6 +380,7 @@ const buildV3Sections = (
                 text: topic.summary,
                 editsMap,
                 transcriptRange: topic.transcript_range,
+                displayNames,
               }),
             ]
           : []),
@@ -289,6 +393,7 @@ const buildV3Sections = (
             speaker: point.speaker,
             authorship: point.from_user_notes ? 'human' : 'ai',
             transcriptRange: topic.transcript_range,
+            displayNames,
           }),
         ),
       ]),
@@ -315,6 +420,7 @@ const buildV3Sections = (
             text: question,
             editsMap,
             transcriptRange: topic.transcript_range,
+            displayNames,
           }),
         );
       });
@@ -337,6 +443,7 @@ const buildV3Sections = (
 const buildV2Sections = (
   doc: AnalysisDocument,
   editsMap: UserEditsMap,
+  displayNames?: Readonly<Record<string, string>>,
 ): MeetingNotesSection[] => {
   const sections: MeetingNotesSection[] = [];
   if (doc.decisions.length > 0 || doc.action_items.length > 0) {
@@ -354,6 +461,7 @@ const buildV2Sections = (
             completed:
               editsMap[`completion:v2:decision:${index}`]?.edited === 'true',
             blockType: 'decision',
+            displayNames,
           }),
         ),
         ...doc.action_items.map((text, index) =>
@@ -365,6 +473,7 @@ const buildV2Sections = (
             completed:
               editsMap[`completion:v2:action:${index}`]?.edited === 'true',
             blockType: 'action',
+            displayNames,
           }),
         ),
       ],
@@ -389,6 +498,7 @@ const buildV2Sections = (
           path: `v2:summary:${index}`,
           text,
           editsMap,
+          displayNames,
         }),
       ),
     });
@@ -404,6 +514,7 @@ const buildV2Sections = (
           path: `v2:point:${index}`,
           text,
           editsMap,
+          displayNames,
         }),
       ),
     });
@@ -416,16 +527,18 @@ export const buildMeetingNotesDocument = ({
   v3,
   userNotes,
   editsMap,
+  displayNames,
 }: {
   v2: AnalysisDocument | null;
   v3: AnalysisDocumentV3 | null;
   userNotes: string;
   editsMap: UserEditsMap;
+  displayNames?: Readonly<Record<string, string>>;
 }): MeetingNotesDocumentModel => {
   const sections = v3
-    ? buildV3Sections(v3, editsMap)
+    ? buildV3Sections(v3, editsMap, displayNames)
     : v2
-      ? buildV2Sections(v2, editsMap)
+      ? buildV2Sections(v2, editsMap, displayNames)
       : [
           {
             id: 'scratchpad',

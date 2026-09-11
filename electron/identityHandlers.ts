@@ -288,6 +288,13 @@ export function handleIdentityRequest(
           },
           expectedRevision,
         );
+        if (personId) {
+          db.ensureMeetingEntity({
+            meeting_id: context.meetingId,
+            entity_id: personId,
+            context: 'Confirmed speaker in meeting',
+          });
+        }
         affectedPersonIds = [previousPersonId, personId]
           .filter((personId): personId is string => Boolean(personId))
           .map(db.resolvePersonIdentityId);

@@ -8073,8 +8073,63 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         SELECT identity.canonical_id AS person_id, name_alias.normalized_name
         FROM person_name_aliases name_alias
         JOIN person_identity identity ON identity.source_id = name_alias.person_id
-      ), candidate_commitments AS (
-        SELECT names.person_id, COUNT(DISTINCT action.id) AS candidate_commitment_count
+      ), bound_action_candidates AS (
+        SELECT
+          identity.canonical_id AS person_id,
+          action.id AS action_id
+        FROM identity_bindings binding
+        JOIN person_identity identity
+          ON identity.source_id = json_extract(binding.payload, '$.personId')
+        JOIN entities action
+          ON action.type = 'action_item'
+          AND action.assigned_to IS NULL
+          AND json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.source_meeting_id'
+          ) = binding.meeting_id
+          AND (
+            LOWER(TRIM(binding.speaker)) = LOWER(TRIM(json_extract(
+              CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+              '$.assignee_name'
+            )))
+            OR (
+              binding.speaker LIKE 'Remote Speaker %'
+              AND 'Speaker ' || SUBSTR(binding.speaker, 16) = json_extract(
+                CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+                '$.assignee_name'
+              )
+            )
+            OR (
+              json_extract(
+                CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+                '$.assignee_name'
+              ) LIKE 'Remote Speaker %'
+              AND 'Speaker ' || SUBSTR(json_extract(
+                CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+                '$.assignee_name'
+              ), 16) = binding.speaker
+            )
+          )
+        WHERE json_valid(binding.payload)
+          AND json_extract(binding.payload, '$.individual') = 1
+          AND json_type(binding.payload, '$.personId') = 'text'
+          AND action.status IN ('active', 'overdue')
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.owner_source'
+          ), '') != 'user'
+          AND COALESCE(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.commitment_state'
+          ), '') != 'rejected'
+          AND json_type(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.source_meeting_id'
+          ) = 'text'
+      ), named_action_candidates AS (
+        SELECT
+          names.person_id,
+          action.id AS action_id
         FROM person_names names
         JOIN entities action
           ON action.type = 'action_item'
@@ -8096,7 +8151,14 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
             CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.source_meeting_id'
           ) = 'text'
-        GROUP BY names.person_id
+      ), candidate_commitments AS (
+        SELECT person_id, COUNT(DISTINCT action_id) AS candidate_commitment_count
+        FROM (
+          SELECT person_id, action_id FROM named_action_candidates
+          UNION
+          SELECT person_id, action_id FROM bound_action_candidates
+        )
+        GROUP BY person_id
       )
       SELECT
         person.id,
@@ -8365,8 +8427,14 @@ export const getPersonBriefing = (
         UNION
         SELECT normalized_name FROM person_name_aliases
         WHERE person_id IN (SELECT id FROM family)
+      ), bound_speakers AS (
+        SELECT binding.meeting_id, binding.speaker
+        FROM identity_bindings binding
+        WHERE json_valid(binding.payload)
+          AND json_extract(binding.payload, '$.individual') = 1
+          AND json_extract(binding.payload, '$.personId') IN (SELECT id FROM family)
       )
-      SELECT
+      SELECT DISTINCT
         action.id,
         action.name,
         action.status,
@@ -8374,20 +8442,58 @@ export const getPersonBriefing = (
         action.assigned_to,
         action.metadata,
         action.updated_at,
-        source.title AS sourceMeetingTitle
+        source.title AS sourceMeetingTitle,
+        CASE
+          WHEN bs.speaker IS NOT NULL THEN ?
+          ELSE json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.assignee_name'
+          )
+        END AS suggested_owner_name
       FROM entities action
       LEFT JOIN meetings source ON source.id = json_extract(
         CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
         '$.source_meeting_id'
       )
+      LEFT JOIN bound_speakers bs
+        ON bs.meeting_id = json_extract(
+          CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.source_meeting_id'
+        )
+        AND (
+          LOWER(TRIM(bs.speaker)) = LOWER(TRIM(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.assignee_name'
+          )))
+          OR (
+            bs.speaker LIKE 'Remote Speaker %'
+            AND 'Speaker ' || SUBSTR(bs.speaker, 16) = json_extract(
+              CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+              '$.assignee_name'
+            )
+          )
+          OR (
+            json_extract(
+              CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+              '$.assignee_name'
+            ) LIKE 'Remote Speaker %'
+            AND 'Speaker ' || SUBSTR(json_extract(
+              CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+              '$.assignee_name'
+            ), 16) = bs.speaker
+          )
+        )
       WHERE action.type = 'action_item'
         AND action.assigned_to IS NULL
-        AND LOWER(TRIM(json_extract(
-          CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
-          '$.assignee_name'
-        ))) IN (SELECT normalized_name FROM names)
+        AND (
+          LOWER(TRIM(json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.assignee_name'
+          ))) IN (SELECT normalized_name FROM names)
+          OR bs.speaker IS NOT NULL
+        )
     `)
-    .all(canonicalId, canonicalId) as PersonCommitmentCandidate[];
+    .all(canonicalId, canonicalId, person.name) as PersonCommitmentCandidate[];
 
   const personNames = db
     .prepare(`

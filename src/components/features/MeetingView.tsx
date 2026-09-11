@@ -890,8 +890,13 @@ export const MeetingView = ({
   });
   const unidentifiedWithoutSuggestionCount =
     unidentifiedSpeakerCount - tentativeVoiceMatches.length;
+  const displayedTranscriptSegments = useMemo(
+    () =>
+      applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
+    [readableTranscriptSegments, displayNames],
+  );
   const transcriptTurns = buildMeetingTranscriptTurns(
-    applyMeetingSpeakerDisplayNames(readableTranscriptSegments, displayNames),
+    displayedTranscriptSegments,
   );
   const updateSpeakerDisplayNames = useCallback(
     (names: Record<string, string>) => {
@@ -994,6 +999,7 @@ export const MeetingView = ({
     v3,
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
+    displayNames,
   });
   const draftPreview = !notesDocument.hasAnalysis
     ? currentNotesPreview(selectedMeeting)
@@ -1362,7 +1368,7 @@ export const MeetingView = ({
                             meeting: selectedMeeting,
                             documentModel: notesDocument,
                             calendarContext,
-                            transcriptSegments,
+                            transcriptSegments: displayedTranscriptSegments,
                             includeTranscript: exportIncludeTranscript,
                           });
                           const filename = buildMeetingExportFilename(
@@ -1573,7 +1579,7 @@ export const MeetingView = ({
             <MeetingNotesDocument
               meeting={selectedMeeting}
               model={notesDocument}
-              transcriptSegments={transcriptSegments}
+              transcriptSegments={displayedTranscriptSegments}
               onDocumentChanged={fetchMeetings}
               onShowTranscript={() => setTranscriptVisible(true)}
               workspaceStatus={

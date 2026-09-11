@@ -88,6 +88,7 @@ export interface PersonCommitmentCandidate {
   metadata: string | null;
   updated_at: string;
   sourceMeetingTitle: string | null;
+  suggested_owner_name?: string | null;
 }
 
 export interface PersonBriefingCommitment {
@@ -202,9 +203,12 @@ export const selectCandidatePersonCommitments = (input: {
     .flatMap((action) => {
       const metadata = parseActionMetadata(action.metadata);
       const suggestedOwnerName =
-        typeof metadata.assignee_name === 'string'
-          ? metadata.assignee_name.trim()
-          : '';
+        typeof action.suggested_owner_name === 'string' &&
+        action.suggested_owner_name.trim()
+          ? action.suggested_owner_name.trim()
+          : typeof metadata.assignee_name === 'string'
+            ? metadata.assignee_name.trim()
+            : '';
       if (
         action.assigned_to !== null ||
         metadata.owner_source === 'user' ||

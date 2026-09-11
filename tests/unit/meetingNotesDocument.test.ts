@@ -261,4 +261,175 @@ describe('buildMeetingNotesDocument', () => {
       },
     ]);
   });
+
+  it('projects speaker display names onto note blocks, assignees, and AI text', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: 'Speaker 1 reviewed the launch timeline with the team.',
+      all_decisions: [
+        {
+          text: 'Speaker 1 decided to proceed with beta launch',
+          decided_by: 'Speaker 1',
+          evidence: 'Speaker 1: We are ready for beta launch.',
+        },
+      ],
+      all_action_items: [
+        {
+          text: 'Speaker 1 will prepare the rollout checklist',
+          assignee: 'Speaker 1',
+          due: 'Friday',
+          topic: 'Launch plan',
+          evidence: 'Speaker 1: I will prepare the checklist by Friday.',
+        },
+      ],
+      topics: [
+        {
+          title: 'Launch plan',
+          summary: 'The beta rollout is scheduled.',
+          key_points: [
+            {
+              text: 'Speaker 1 noted that latency is stable.',
+              speaker: 'Speaker 1',
+            },
+            {
+              text: 'Them proposed adding telemetry.',
+              speaker: 'Them',
+            },
+          ],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        },
+      ],
+      meeting_type: 'team_sync',
+      quality,
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {},
+      displayNames: {
+        'Speaker 1': 'Ayush',
+        Them: 'Rowan',
+      },
+    });
+
+    const outcomesSection = document.sections.find(
+      (s) => s.kind === 'outcomes',
+    );
+    expect(outcomesSection).toBeDefined();
+    // Decision block
+    expect(outcomesSection?.blocks[0]).toMatchObject({
+      text: 'Ayush decided to proceed with beta launch',
+      speaker: 'Ayush',
+      evidence: 'Ayush: We are ready for beta launch.',
+    });
+    // Action block
+    expect(outcomesSection?.blocks[1]).toMatchObject({
+      text: 'Ayush will prepare the rollout checklist',
+      assignee: 'Ayush',
+      evidence: 'Ayush: I will prepare the checklist by Friday.',
+    });
+
+    // Overview section
+    const currentReadSection = document.sections.find(
+      (s) => s.kind === 'current_read',
+    );
+    expect(currentReadSection?.blocks[0].text).toBe(
+      'Ayush reviewed the launch timeline with the team.',
+    );
+
+    // Discussion section
+    const discussionSection = document.sections.find(
+      (s) => s.kind === 'discussion',
+    );
+    expect(discussionSection?.blocks[1]).toMatchObject({
+      text: 'Ayush noted that latency is stable.',
+      speaker: 'Ayush',
+    });
+    expect(discussionSection?.blocks[2]).toMatchObject({
+      text: 'Rowan proposed adding telemetry.',
+      speaker: 'Rowan',
+    });
+  });
+
+  it('preserves manual user edits when speaker display names are provided', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: 'Overview',
+      all_decisions: [],
+      all_action_items: [
+        {
+          text: 'Speaker 1 will draft specs',
+          assignee: 'Speaker 1',
+          due: 'Monday',
+          topic: 'Specs',
+          evidence: 'Speaker 1: I will draft specs.',
+        },
+      ],
+      topics: [],
+      meeting_type: 'team_sync',
+      quality,
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {
+        'all_action_items:0': {
+          original: 'Speaker 1 will draft specs',
+          edited: 'Custom user text keeping Speaker 1 unchanged',
+          edited_at: '2026-08-22T18:00:00.000Z',
+        },
+      },
+      displayNames: {
+        'Speaker 1': 'Ayush',
+      },
+    });
+
+    const outcomesSection = document.sections.find(
+      (s) => s.kind === 'outcomes',
+    );
+    // Text was edited by user, so user edit is preserved verbatim:
+    expect(outcomesSection?.blocks[0].text).toBe(
+      'Custom user text keeping Speaker 1 unchanged',
+    );
+    // Assignee metadata is still projected for clarity:
+    expect(outcomesSection?.blocks[0].assignee).toBe('Ayush');
+  });
+
+  it('matches Remote Speaker X to Speaker X displayNames', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: 'Overview',
+      all_decisions: [],
+      all_action_items: [
+        {
+          text: 'Prepare the deck',
+          assignee: 'Speaker 2',
+          topic: 'Deck',
+          evidence: 'evidence',
+        },
+      ],
+      topics: [],
+      meeting_type: 'general',
+      quality,
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {},
+      displayNames: {
+        'Remote Speaker 2': 'Bianca',
+      },
+    });
+
+    const outcomes = document.sections.find((s) => s.kind === 'outcomes');
+    expect(outcomes?.blocks[0].assignee).toBe('Bianca');
+  });
 });

@@ -279,6 +279,89 @@ describe('person briefing database read model', () => {
     });
   });
 
+  it('surfaces candidate commitments from meetings where the speaker was bound to the person', () => {
+    const person = db.upsertEntity({ type: 'person', name: 'Ayush Grover' });
+    db.saveMeeting({
+      id: 'meeting-bound-speaker',
+      title: 'Roadmap Planning',
+      created_at: '2026-08-30T10:00:00.000Z',
+    });
+    db.upsertEntity({
+      id: 'action-speaker-1',
+      type: 'action_item',
+      name: 'Finalize quarterly roadmap',
+      status: 'active',
+      metadata: {
+        commitment_state: 'possible',
+        origin: 'extraction',
+        source_meeting_id: 'meeting-bound-speaker',
+        assignee_name: 'Speaker 1',
+      },
+    });
+
+    // Before binding: not recognized as Ayush's candidate
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id)
+        ?.candidateCommitmentCount ?? 0,
+    ).toBe(0);
+    expect(db.getPersonBriefing(person.id)?.commitments.candidates).toEqual([]);
+
+    // Bind Speaker 1 to Ayush for this meeting
+    db.identityStore.setBinding('meeting-bound-speaker', {
+      speaker: 'Speaker 1',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'rev-1',
+      evidence: [],
+    });
+
+    // After binding: candidate commitment count is 1 and appears in candidates list
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id),
+    ).toMatchObject({
+      candidateCommitmentCount: 1,
+    });
+
+    const briefing = db.getPersonBriefing(person.id);
+    expect(briefing?.commitments.candidates).toEqual([
+      expect.objectContaining({
+        id: 'action-speaker-1',
+        suggestedOwnerName: 'Ayush Grover',
+        sourceMeetingTitle: 'Roadmap Planning',
+      }),
+    ]);
+
+    // Clearing binding removes candidate
+    db.identityStore.clearBinding('meeting-bound-speaker', 'Speaker 1');
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id)
+        ?.candidateCommitmentCount ?? 0,
+    ).toBe(0);
+    expect(db.getPersonBriefing(person.id)?.commitments.candidates).toEqual([]);
+
+    // Re-bind and confirm candidate
+    db.identityStore.setBinding('meeting-bound-speaker', {
+      speaker: 'Speaker 1',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'rev-2',
+      evidence: [],
+    });
+    db.correctActionOwner('action-speaker-1', person.id);
+    expect(db.getPersonBriefing(person.id)?.commitments).toMatchObject({
+      open: [expect.objectContaining({ id: 'action-speaker-1' })],
+      candidates: [],
+    });
+  });
+
   it('returns undefined for a missing or non-person entity', () => {
     const topic = db.upsertEntity({ type: 'topic', name: 'Trust' });
     expect(db.getPersonBriefing('missing')).toBeUndefined();

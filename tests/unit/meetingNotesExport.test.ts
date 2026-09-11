@@ -345,5 +345,76 @@ describe('meetingNotesExport', () => {
 
       expect(markdown).not.toContain('## Transcript');
     });
+
+    it('renders projected speaker display names in outcomes, discussion, and transcript', () => {
+      const projectedDocumentModel: MeetingNotesDocumentModel = {
+        hasAnalysis: true,
+        sections: [
+          {
+            id: 'outcomes',
+            kind: 'outcomes',
+            title: 'Decisions & next steps',
+            blocks: [
+              {
+                id: 'd-1',
+                text: 'Ayush decided to adopt the new schema',
+                originalText: 'Speaker 1 decided to adopt the new schema',
+                authorship: 'ai',
+                edited: false,
+                speaker: 'Ayush',
+                completed: false,
+                blockType: 'decision',
+              },
+              {
+                id: 'a-1',
+                text: 'Ayush will complete documentation',
+                originalText: 'Speaker 1 will complete documentation',
+                authorship: 'ai',
+                edited: false,
+                assignee: 'Ayush',
+                due: 'Monday',
+                completed: false,
+                blockType: 'action',
+              },
+            ],
+          },
+          {
+            id: 'topic-0',
+            kind: 'discussion',
+            title: 'Architecture',
+            blocks: [
+              {
+                id: 'p-1',
+                text: 'Reviewed latency benchmarks.',
+                originalText: 'Reviewed latency benchmarks.',
+                authorship: 'ai',
+                edited: false,
+                speaker: 'Ayush',
+              },
+            ],
+          },
+        ],
+      };
+
+      const transcriptSegments: TranscriptSegment[] = [
+        { text: 'I will finish the docs.', speaker: 'Ayush', startTime: 10 },
+      ];
+
+      const markdown = formatMeetingNotesAsMarkdown({
+        meeting: baseMeeting,
+        documentModel: projectedDocumentModel,
+        transcriptSegments,
+        includeTranscript: true,
+      });
+
+      expect(markdown).toContain(
+        '- [ ] Ayush decided to adopt the new schema (Decided by: Ayush)',
+      );
+      expect(markdown).toContain(
+        '- [ ] Ayush will complete documentation (Assignee: Ayush, Due: Monday)',
+      );
+      expect(markdown).toContain('- Ayush: Reviewed latency benchmarks.');
+      expect(markdown).toContain('**Ayush** (0:10)');
+    });
   });
 });
