@@ -1747,6 +1747,74 @@ describe('capture journal recovery', () => {
     });
   });
 
+  it('recovers a sealed v3 meeting that has no database entry and missing acceptance frames', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-sealed-orphan';
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+      expectedSources: ['mic', 'system'],
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 4,
+    });
+    manifest = await persistCaptureJournalRawChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'mic',
+      sequence: 0,
+      format: 'wav',
+      data: Buffer.from('mic-raw'),
+    });
+    const raw = manifest.intervals[0].sources.mic;
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'mic',
+      sequence: 0,
+      rawChecksumSha256: raw.rawChecksumSha256,
+      repairData: Buffer.from('mic-repair'),
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+    await stopCaptureJournal(root, {
+      meetingId,
+      generation: completed.manifest.generation,
+      expectedRevision: completed.manifest.revision + 1,
+    });
+    await sealCaptureJournal(root, { meetingId, endedAtMs: 5_000 });
+
+    const saveMeeting = vi.fn();
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments: vi.fn(async () => join(root, 'mic-recovered.wav')),
+      nowMs: 6_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      failedRecoveryCount: 0,
+    });
+    expect(saveMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: meetingId,
+        transcript_status: 'needs_attention',
+      }),
+    );
+  });
+
   it('resumes a sealed provisional meeting whose materialized audio was never saved', async () => {
     const root = await makeRoot();
     const meetingId = 'meeting-resume';

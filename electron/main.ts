@@ -334,8 +334,32 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return;
+      console.warn(
+        `[Pluto] Main frame navigation failed: ${errorDescription} (${errorCode}) at ${validatedURL}`,
+      );
+      if (VITE_DEV_SERVER_URL && validatedURL.startsWith(VITE_DEV_SERVER_URL)) {
+        setTimeout(() => {
+          if (win && !win.isDestroyed()) {
+            console.info(
+              `[Pluto] Retrying navigation to ${VITE_DEV_SERVER_URL}...`,
+            );
+            win.loadURL(VITE_DEV_SERVER_URL).catch((err) => {
+              console.error('[Pluto] Retry loadURL failed:', err);
+            });
+          }
+        }, 1000);
+      }
+    },
+  );
+
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
+    win.loadURL(VITE_DEV_SERVER_URL).catch((err) => {
+      console.warn('[Pluto] Initial loadURL failed:', err);
+    });
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
   }

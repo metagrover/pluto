@@ -1640,7 +1640,9 @@ export const recoverInterruptedCaptureJournals = async (
               manifest.schemaVersion === 4
                 ? buildV4SourceSegments(rootDir, manifest, 'system')
                 : buildV3SourceSegments(rootDir, manifest, 'system'),
-              isResumableSealedMeeting
+              isResumableSealedMeeting ||
+              (manifest.lifecycleState === 'sealed' &&
+                manifest.acceptanceFrames.length !== manifest.intervals.length)
                 ? Promise.resolve({
                     segments: [],
                     sourceCoverageSegments: [],
