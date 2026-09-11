@@ -421,4 +421,3 @@ it('asks the writer for an overall meeting title in the draft schema', () => {
   expect(prompt).toContain('title: Text | null');
   expect(prompt).toContain('concise descriptive title for the overall meeting');
 });
-
