@@ -223,7 +223,46 @@ const buildCandidateWithTimeout = async (
   }
 };
 
-async function reconcileConfirmedSpeakerVoiceProfiles(
+const scheduledReconciliations = new WeakMap<
+  Database.Database,
+  NodeJS.Timeout
+>();
+
+export function cancelScheduledVoiceProfileReconciliation(
+  d: Database.Database = db.db,
+): void {
+  const existing = scheduledReconciliations.get(d);
+  if (existing) {
+    clearTimeout(existing);
+    scheduledReconciliations.delete(d);
+  }
+}
+
+export function scheduleBackgroundVoiceProfileReconciliation(
+  deps?: SpeakerVoiceDependencies,
+  d: Database.Database = db.db,
+  delayMs = 1000,
+): void {
+  const existing = scheduledReconciliations.get(d);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  const timer = setTimeout(() => {
+    scheduledReconciliations.delete(d);
+    void reconcileConfirmedSpeakerVoiceProfiles(deps, d).catch((err) => {
+      console.warn(
+        '[Pluto][SpeakerVoice] background reconciliation failed',
+        err,
+      );
+    });
+  }, delayMs);
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  scheduledReconciliations.set(d, timer);
+}
+
+export async function reconcileConfirmedSpeakerVoiceProfiles(
   deps: SpeakerVoiceDependencies | undefined,
   d: Database.Database,
   targetPersonId?: string,
@@ -377,13 +416,7 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
           const usesStoredCandidate = Boolean(
             storedCandidate &&
               usesCurrentEnrollmentExtraction(storedCandidate) &&
-              isCurrentEligibleCandidate(
-                binding.meetingId,
-                storedCandidate.sourceRevision,
-                storedCandidate,
-                deps,
-                d,
-              ),
+              storedCandidate.sourceRevision === binding.sourceRevision,
           );
           const built =
             storedCandidate && usesStoredCandidate
@@ -401,15 +434,29 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
                 );
           if (
             !built ||
+            built.candidate.speaker !== binding.speaker ||
+            !built.sourceRevision
+          ) {
+            continue;
+          }
+
+          if (!usesStoredCandidate) {
+            saveMeetingSpeakerCandidate(
+              binding.meetingId,
+              built.sourceRevision,
+              built.candidate,
+              d,
+            );
+          }
+
+          if (
             !isCurrentEligibleCandidate(
               binding.meetingId,
               built.sourceRevision,
               built.candidate,
               deps,
               d,
-            ) ||
-            built.candidate.speaker !== binding.speaker ||
-            !built.sourceRevision
+            )
           ) {
             continue;
           }
@@ -434,14 +481,6 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
               )
             ) {
               throw new Error('speaker_enrollment_no_longer_allowed');
-            }
-            if (!usesStoredCandidate) {
-              saveMeetingSpeakerCandidate(
-                binding.meetingId,
-                built.sourceRevision,
-                built.candidate,
-                d,
-              );
             }
             enrollSpeakerVoice(
               {
@@ -503,7 +542,11 @@ export async function handleSpeakerVoiceRequest(
         };
       }
 
-      await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
+      if (payload?.syncReconciliation) {
+        await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
+      } else {
+        scheduleBackgroundVoiceProfileReconciliation(deps, d);
+      }
 
       let candidates = getMeetingSpeakerCandidates(meetingId, d);
       if (deps?.buildEnrollmentCandidate) {
@@ -522,13 +565,7 @@ export async function handleSpeakerVoiceRequest(
               built &&
               built.candidate.speaker === candidate.speaker &&
               usesCurrentEnrollmentExtraction(built.candidate) &&
-              isCurrentEligibleCandidate(
-                meetingId,
-                built.sourceRevision,
-                built.candidate,
-                deps,
-                d,
-              )
+              built.sourceRevision
             ) {
               saveMeetingSpeakerCandidate(
                 meetingId,

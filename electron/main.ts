@@ -781,26 +781,46 @@ const stopParakeetLiveRecording = async (meetingId: string) => {
   void meetingId;
 };
 
+let transcriptionResumeTimer: NodeJS.Timeout | null = null;
+let isTranscriptionWorkPaused = false;
+
 function beginTranscriptionWork() {
+  if (transcriptionResumeTimer) {
+    clearTimeout(transcriptionResumeTimer);
+    transcriptionResumeTimer = null;
+  }
   activeTranscriptionCount += 1;
-  knowledgeSynthesisPause.acquire('transcription');
-  if (activeTranscriptionCount === 1) {
+  if (!isTranscriptionWorkPaused) {
+    isTranscriptionWorkPaused = true;
+    knowledgeSynthesisPause.acquire('transcription');
     plutoLog.info(
       'Pausing queued knowledge-doc synthesis during transcription',
     );
   }
 }
 
-function endTranscriptionWork() {
-  const hadActiveTranscription = activeTranscriptionCount > 0;
-  activeTranscriptionCount = Math.max(0, activeTranscriptionCount - 1);
-  if (hadActiveTranscription) {
-    knowledgeSynthesisPause.release('transcription');
-  }
+function endTranscriptionWork(delayMs = 1500) {
+  if (activeTranscriptionCount <= 0) return;
+  activeTranscriptionCount -= 1;
   if (activeTranscriptionCount === 0) {
-    plutoLog.info(
-      'Resuming queued knowledge-doc synthesis after transcription',
-    );
+    if (transcriptionResumeTimer) {
+      clearTimeout(transcriptionResumeTimer);
+    }
+    const release = () => {
+      transcriptionResumeTimer = null;
+      if (activeTranscriptionCount === 0 && isTranscriptionWorkPaused) {
+        isTranscriptionWorkPaused = false;
+        knowledgeSynthesisPause.release('transcription');
+        plutoLog.info(
+          'Resuming queued knowledge-doc synthesis after transcription',
+        );
+      }
+    };
+    if (delayMs > 0) {
+      transcriptionResumeTimer = setTimeout(release, delayMs);
+    } else {
+      release();
+    }
   }
 }
 
@@ -1111,44 +1131,49 @@ app.whenReady().then(async () => {
           const combinedSignal = input.signal
             ? AbortSignal.any([meetingSignal, input.signal])
             : meetingSignal;
-          return await buildSpeakerEnrollmentCandidate(input, {
-            getMeeting: (meetingId) =>
-              (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ??
-              null,
-            fileExists: (inputPath) => fs.existsSync(inputPath),
-            createWorkDir: () =>
-              fs.mkdtempSync(
-                path.join(getMeetingArtifactsRootDir(), '.speaker-profile-'),
-              ),
-            removeWorkDir: async (workDir) => {
-              await fs.promises.rm(workDir, { recursive: true, force: true });
-            },
-            createAudio: createSpeakerEnrollmentAudio,
-            signal: combinedSignal,
-            analyze: async (request) => {
-              const infStart = performance.now();
-              beginTranscriptionWork();
-              beginMeetingTranscription(input.meetingId);
-              try {
-                return await parakeetFinalClient!.speakerEvidence({
-                  ...request,
-                  signal: combinedSignal,
-                });
-              } finally {
-                const infDurationMs = Math.round(performance.now() - infStart);
-                console.log(
-                  '[Pluto][SpeakerVoice] parakeet inference completed',
-                  {
-                    meetingId: input.meetingId,
-                    speaker: input.speaker,
-                    durationMs: infDurationMs,
-                  },
-                );
-                endMeetingTranscription(input.meetingId);
-                endTranscriptionWork();
-              }
-            },
-          });
+          beginTranscriptionWork();
+          beginMeetingTranscription(input.meetingId);
+          try {
+            return await buildSpeakerEnrollmentCandidate(input, {
+              getMeeting: (meetingId) =>
+                (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ??
+                null,
+              fileExists: (inputPath) => fs.existsSync(inputPath),
+              createWorkDir: () =>
+                fs.mkdtempSync(
+                  path.join(getMeetingArtifactsRootDir(), '.speaker-profile-'),
+                ),
+              removeWorkDir: async (workDir) => {
+                await fs.promises.rm(workDir, { recursive: true, force: true });
+              },
+              createAudio: createSpeakerEnrollmentAudio,
+              signal: combinedSignal,
+              analyze: async (request) => {
+                const infStart = performance.now();
+                try {
+                  return await parakeetFinalClient!.speakerEvidence({
+                    ...request,
+                    signal: combinedSignal,
+                  });
+                } finally {
+                  const infDurationMs = Math.round(
+                    performance.now() - infStart,
+                  );
+                  console.log(
+                    '[Pluto][SpeakerVoice] parakeet inference completed',
+                    {
+                      meetingId: input.meetingId,
+                      speaker: input.speaker,
+                      durationMs: infDurationMs,
+                    },
+                  );
+                }
+              },
+            });
+          } finally {
+            endMeetingTranscription(input.meetingId);
+            endTranscriptionWork();
+          }
         },
       });
     });

@@ -11,6 +11,7 @@ vi.mock('electron', () => ({ app: { getPath: () => directory } }));
 import * as db from '../../electron/db';
 import {
   SPEAKER_VOICE_CHANNELS,
+  cancelScheduledVoiceProfileReconciliation,
   handleSpeakerVoiceRequest,
 } from '../../electron/speakerVoiceHandlers';
 import { saveMeetingSpeakerCandidates } from '../../electron/speakerVoiceStore';
@@ -43,6 +44,7 @@ describe('speaker voice IPC handlers', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    cancelScheduledVoiceProfileReconciliation(db.db);
     fixture++;
     meetingId = `voice-handler-meeting-${fixture}`;
     personId = `voice-handler-person-${fixture}`;
@@ -899,13 +901,68 @@ describe('speaker voice IPC handlers', () => {
 
     const result = (await handleSpeakerVoiceRequest(
       'SPEAKER_VOICE_GET_SUGGESTIONS',
-      { meetingId: futureMeetingId },
+      { meetingId: futureMeetingId, syncReconciliation: true },
       { buildEnrollmentCandidate, isFeatureFlagEnabled: () => false },
     )) as { suggestions: Record<string, { suggestedPersonId: string }> };
 
     expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
       personId,
     );
+  });
+
+  it('schedules reconciliation in background and does not block suggestion responses by default', async () => {
+    const historicalMeetingId = meetingId;
+    const futureMeetingId = `${meetingId}-future-async`;
+    db.saveMeeting({
+      id: futureMeetingId,
+      title: 'Future Voice Test Meeting Async',
+      capture_journal_generation: sourceRevision,
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'A future reviewed sample.' },
+      ]),
+    });
+    saveMeetingSpeakerCandidates(futureMeetingId, sourceRevision, [
+      { ...dummyCandidate, speaker: 'Remote Speaker 2' },
+    ]);
+    const buildEnrollmentCandidate = vi.fn(async (input) =>
+      input.meetingId === historicalMeetingId
+        ? { candidate: dummyCandidate, sourceRevision }
+        : null,
+    );
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId: futureMeetingId },
+      { buildEnrollmentCandidate, isFeatureFlagEnabled: () => false },
+    )) as { suggestions: Record<string, { suggestedPersonId: string }> };
+
+    expect(result.suggestions['Remote Speaker 2']).toBeUndefined();
+    expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
+  });
+
+  it('does not rebuild stored candidates during reconciliation even if ineligible', async () => {
+    const ineligibleCandidate: SpeakerCandidateEvidence = {
+      ...dummyCandidate,
+      isEligibleForEnrollment: false,
+      cleanDurationSeconds: 1.5,
+    };
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [
+      ineligibleCandidate,
+    ]);
+
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+
+    expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
   });
 
   it('upgrades a legacy query candidate before cross-meeting matching', async () => {
