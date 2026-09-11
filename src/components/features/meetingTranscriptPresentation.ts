@@ -11,10 +11,13 @@ export type MeetingTranscriptTurn<T extends TranscriptSegment> = {
 const MAX_TURN_CHARACTERS = 420;
 const MAX_TURN_DURATION_SECONDS = 45;
 
-const startSeconds = (segment: TranscriptSegment): number => {
-  const value = segment.startTime ?? segment.start ?? 0;
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+const segmentStartSeconds = (segment: TranscriptSegment): number | null => {
+  const value = segment.startTime ?? segment.start;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
+
+const startSeconds = (segment: TranscriptSegment): number =>
+  segmentStartSeconds(segment) ?? 0;
 
 export const extractSpeakerDisplayNames = (
   identity:
@@ -95,7 +98,22 @@ export const buildMeetingTranscriptTurns = <T extends TranscriptSegment>(
 ): MeetingTranscriptTurn<T>[] => {
   const turns: MeetingTranscriptTurn<T>[] = [];
 
-  for (const segment of segments) {
+  const ordered = segments
+    .map((segment, index) => ({
+      segment,
+      index,
+      startSeconds: segmentStartSeconds(segment),
+    }))
+    .sort((left, right) => {
+      if (left.startSeconds === null && right.startSeconds === null) {
+        return left.index - right.index;
+      }
+      if (left.startSeconds === null) return 1;
+      if (right.startSeconds === null) return -1;
+      return left.startSeconds - right.startSeconds || left.index - right.index;
+    });
+
+  for (const { segment } of ordered) {
     const current = turns.at(-1);
     const segmentStart = startSeconds(segment);
     const canContinue =

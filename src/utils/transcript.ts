@@ -3,6 +3,7 @@ import {
   type TranscriptReadingCandidate,
   assembleReadableTranscriptSentences,
   buildTranscriptReadingProjection,
+  projectTranscriptSpeakerContinuity,
 } from './transcriptReadingProjection.ts';
 
 interface TranscriptSegmentLike {
@@ -195,7 +196,8 @@ export const buildTranscriptSegmentsForPresentation = <
     transcriptJson,
     reading,
   );
-  return assembleReadableTranscriptSentences(attributed) as unknown as Array<
+  const continuous = projectTranscriptSpeakerContinuity(attributed);
+  return assembleReadableTranscriptSentences(continuous) as unknown as Array<
     T & { text: string }
   >;
 };

@@ -16,6 +16,26 @@ const segment = (
 });
 
 describe('live transcript presentation', () => {
+  it('uses capture source for stable roles without changing live-edge order', () => {
+    const remote = {
+      ...segment('remote', 'Me', 'Remote words.', 2_000),
+      source: 'system' as const,
+    };
+    const local = {
+      ...segment('local', 'Them', 'Local words.', 1_000),
+      source: 'mic' as const,
+    };
+
+    const turns = buildLiveTranscriptTurns([remote, local]);
+
+    expect(turns.map((turn) => [turn.speaker, turn.timestampMs])).toEqual([
+      ['Them', 2_000],
+      ['Me', 1_000],
+    ]);
+    expect(remote.speaker).toBe('Me');
+    expect(local.speaker).toBe('Them');
+  });
+
   it('omits a reconciled echo without mutating its evidence', () => {
     const echo = {
       ...segment('mic-echo', 'Me', 'The duplicated microphone row.', 1_000),
