@@ -22,6 +22,7 @@ export const countEditedBlocks = (
 ): number => {
   const signatures = (draft: NotesDraft) =>
     [
+      ...(draft.title ? [{ role: 'meetingTitle', ...draft.title }] : []),
       ...(draft.overview ? [{ role: 'overview', ...draft.overview }] : []),
       ...draft.sections.flatMap((section) => [
         { role: 'title', ...section.title },

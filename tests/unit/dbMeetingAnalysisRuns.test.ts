@@ -235,6 +235,27 @@ describe('meeting analysis run publication', () => {
     expect(publish(id, 'title-run', 'fp', revisions, next)).toBe(true);
     expect(getMeeting(id)?.title).toBe('Outline review');
   });
+
+  it('uses analysis.title directly when meeting title is generic', () => {
+    const id = 'model-title';
+    const revisions = fixture(id);
+    saveMeeting({ ...getMeeting(id), title: 'New Meeting' });
+    start(id, 'model-title-run', 'fp', revisions);
+    const next = analysis('Reviewed outline.');
+    next.title = 'Quarterly Strategy & Hiring';
+    next.topics = [
+      {
+        title: 'Outline review',
+        summary: 'Reviewed outline.',
+        key_points: [],
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+      },
+    ];
+    expect(publish(id, 'model-title-run', 'fp', revisions, next)).toBe(true);
+    expect(getMeeting(id)?.title).toBe('Quarterly Strategy & Hiring');
+  });
   it('snapshots the last published notes and edits, records repairs, and invalidates work on undo', () => {
     const id = 'atomic-undo';
     const prior = analysis('Old notes');

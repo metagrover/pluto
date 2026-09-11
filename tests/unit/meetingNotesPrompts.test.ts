@@ -409,3 +409,16 @@ it('requires the audit to inspect both recent-win claims', () => {
 
   expect(prompt).toContain('both the win and why it counts');
 });
+
+it('asks the writer for an overall meeting title in the draft schema', () => {
+  const prompt = buildNotesWriterPrompt({
+    sourceText: '[0] Me: We planned the quarterly roadmap.',
+    userNotes: '',
+    knownTerms: [],
+    template: 'auto',
+  });
+
+  expect(prompt).toContain('title: Text | null');
+  expect(prompt).toContain('concise descriptive title for the overall meeting');
+});
+

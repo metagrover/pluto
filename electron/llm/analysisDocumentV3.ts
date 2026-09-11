@@ -412,6 +412,7 @@ export const parseAnalysisDocumentV3 = (
 
   if (!parsed || typeof parsed !== 'object') return null;
 
+  const title = asString(parsed.title);
   const overview = asString(parsed.overview);
   if (!overview) return null;
 
@@ -451,6 +452,7 @@ export const parseAnalysisDocumentV3 = (
 
   return {
     analysis_schema_version: 3,
+    ...(title ? { title } : {}),
     overview,
     topics,
     all_action_items,

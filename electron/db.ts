@@ -2991,8 +2991,15 @@ export const publishMeetingNotesIfCurrent = (input: {
     const genericTitle =
       !current.title?.trim() ||
       ['New Meeting', 'Meeting', 'Meeting (Mic Only)'].includes(current.title);
+    const modelTitle =
+      typeof input.analysis.title === 'string' &&
+      input.analysis.title.trim().length > 0 &&
+      input.analysis.title.trim().length <= 120
+        ? input.analysis.title.trim()
+        : null;
     const nextTitle = genericTitle
-      ? (input.analysis.topics
+      ? (modelTitle ??
+        input.analysis.topics
           .map((topic) => topic.title.trim())
           .find((title) => title.length > 0 && title.length <= 120) ??
         current.title)

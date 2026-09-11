@@ -43,6 +43,7 @@ export type NotesSection = {
 
 export type NotesDraft = {
   meetingType: MeetingType;
+  title?: SupportedText | null;
   overview: SupportedText | null;
   sections: NotesSection[];
   recentWin?: { win: SupportedText; impact: SupportedText };

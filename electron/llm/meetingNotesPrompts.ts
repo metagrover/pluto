@@ -56,8 +56,8 @@ const notesBlockSchema = [
 export const notesDraftSchema = [
   'Field definitions (not output content):',
   notesBlockSchema,
-  'Document = {meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text} | null}. recentWin is optional; include only a completed positive event and its source-backed impact. When present, recentWin.win and recentWin.impact must be complete Text blocks, not null.',
-  'Use null for absent overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
+  'Document = {title: Text | null, meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text} | null}. title is a concise descriptive title for the overall meeting (max 5-7 words) citing the main topic source descriptor(s), or null if uncertain. recentWin is optional; include only a completed positive event and its source-backed impact. When present, recentWin.win and recentWin.impact must be complete Text blocks, not null.',
+  'Use null for absent title/overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
 ].join('\n');
 
 const compactNotesDraftSchema = [

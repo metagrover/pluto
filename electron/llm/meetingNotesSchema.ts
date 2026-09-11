@@ -159,6 +159,7 @@ export const buildNotesResponseSchema = (
     });
   return object(
     {
+      title: { anyOf: [text(false), { type: 'null' }] },
       meetingType: {
         type: 'string',
         enum: [

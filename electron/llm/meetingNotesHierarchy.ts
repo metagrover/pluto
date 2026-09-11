@@ -17,10 +17,13 @@ export type NotesLeaf = NotesSourceWindow & {
 export const splitNotesDraftForMerge = (draft: NotesDraft): NotesDraft[] => {
   const empty = (): NotesDraft => ({
     meetingType: draft.meetingType,
+    title: null,
     overview: null,
     sections: [],
   });
   const packets: NotesDraft[] = [];
+  if (draft.title)
+    packets.push({ ...empty(), title: structuredClone(draft.title) });
   if (draft.overview)
     packets.push({ ...empty(), overview: structuredClone(draft.overview) });
   if (draft.recentWin)

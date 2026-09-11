@@ -16,6 +16,7 @@ export const identifyEditedNotes = (
     sections?: Array<{ items?: Array<{ id?: unknown }> }>;
   };
   const used = new Set<string>();
+  if (next.title) next.title.id = `${prefix}:title`;
   if (next.overview) next.overview.id = `${prefix}:overview`;
   if (next.recentWin) {
     next.recentWin.win.id = `${prefix}:recent-win`;

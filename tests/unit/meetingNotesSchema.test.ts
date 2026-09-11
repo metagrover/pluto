@@ -164,6 +164,30 @@ describe('local notes wire schemas', () => {
     expect(validate('draft', { ...draft, recentWin: null })).toBe(true);
   });
 
+  it('accepts and parses draft with explicit title as SupportedText or string', () => {
+    const supportedTitle = { text: 'Quarterly Planning', sources: ['R0'] };
+    const withSupported = { ...draft, title: supportedTitle };
+    expect(validate('draft', withSupported)).toBe(true);
+    const parsedSupported = parseNotesDraft(
+      wire.decode(JSON.stringify(withSupported)),
+    );
+    expect(parsedSupported.title?.text).toBe('Quarterly Planning');
+    expect(parsedSupported.title?.sources).toEqual(
+      fixture.draft.sections[0]!.title.sources,
+    );
+
+    const withString = { ...draft, title: 'Roadmap Review' };
+    const parsedString = parseNotesDraft(
+      wire.decode(JSON.stringify(withString)),
+    );
+    expect(parsedString.title?.text).toBe('Roadmap Review');
+
+    const withNull = { ...draft, title: null };
+    expect(validate('draft', withNull)).toBe(true);
+    const parsedNull = parseNotesDraft(wire.decode(JSON.stringify(withNull)));
+    expect(parsedNull.title).toBeUndefined();
+  });
+
   it.each([
     { ...draft, meetingType: 'meeting' },
     { ...draft, overview: 'Outline' },

@@ -57,6 +57,23 @@ it('omits an empty section after its last claim is rejected', () => {
   ).toEqual([]);
 });
 
+it('projects draft title to analysis title when present', () => {
+  const fixture = makeDirectNotesFixture();
+  const span = fixture.draft.sections[0]!.title.sources[0]!;
+  fixture.draft.title = {
+    id: 'doc:title',
+    text: 'Executive Sync',
+    sources: [span],
+  };
+  fixture.audit.verdicts.push({
+    target: 'doc:title',
+    status: 'supported',
+    sources: [span],
+  });
+  const projected = projectAuditedNotes(applyNotesAudit(fixture));
+  expect(projected.title).toBe('Executive Sync');
+});
+
 it('does not let an unsupported heading silently discard supported child claims', () => {
   const fixture = makeDirectNotesFixture();
   fixture.audit.verdicts[0]!.status = 'unsupported';

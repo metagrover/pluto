@@ -369,6 +369,7 @@ const withOneRepair = async <T>(
 };
 
 const draftBlocks = (draft: NotesDraft) => [
+  ...(draft.title ? [draft.title] : []),
   ...(draft.overview ? [draft.overview] : []),
   ...draft.sections.flatMap((section) => [section.title, ...section.items]),
   ...(draft.recentWin ? [draft.recentWin.win, draft.recentWin.impact] : []),
@@ -502,6 +503,7 @@ const writeDraft = async (
 
 const remapDraftIds = (draft: NotesDraft, prefix: string): NotesDraft => {
   const next = structuredClone(draft);
+  if (next.title) next.title.id = `${prefix}:title`;
   if (next.overview) next.overview.id = `${prefix}:overview`;
   if (next.recentWin) {
     next.recentWin.win.id = `${prefix}:recent-win`;
@@ -1602,11 +1604,15 @@ const runBoundedCompactNotes = async (
   const overviews = reviewedDrafts.flatMap((draft) =>
     draft.overview ? [draft.overview] : [],
   );
+  const titles = reviewedDrafts.flatMap((draft) =>
+    draft.title ? [draft.title] : [],
+  );
   const recentWins = reviewedDrafts.flatMap((draft) =>
     draft.recentWin ? [draft.recentWin] : [],
   );
   const combined: NotesDraft = {
     meetingType,
+    title: titles[0] ? structuredClone(titles[0]) : null,
     overview: overviews.length
       ? {
           id: 'overview',

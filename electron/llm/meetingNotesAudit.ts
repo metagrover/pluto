@@ -176,11 +176,27 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
   ) {
     throw new MeetingNotesError('notes_writer_invalid');
   }
+  const sections = parsed.sections.map(parseWriterSection);
   const overview =
     parsed.overview === null
       ? null
       : parseSupportedText(parsed.overview, 'overview');
-  const sections = parsed.sections.map(parseWriterSection);
+  let title: SupportedText | null = null;
+  if (parsed.title !== undefined && parsed.title !== null) {
+    if (typeof parsed.title === 'string' && parsed.title.trim()) {
+      const fallbackSources =
+        overview?.sources ??
+        sections.find((s) => s?.title?.sources?.length)?.title.sources ??
+        [];
+      title = {
+        id: 'title',
+        text: parsed.title.trim(),
+        sources: fallbackSources,
+      };
+    } else {
+      title = parseSupportedText(parsed.title, 'title');
+    }
+  }
   const noRecentWin =
     parsed.recentWin === undefined ||
     parsed.recentWin === null ||
@@ -189,6 +205,7 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
       parsed.recentWin.impact === null);
   const recentWin = noRecentWin ? undefined : parseRecentWin(parsed.recentWin);
   if (
+    (parsed.title !== undefined && parsed.title !== null && !title) ||
     (parsed.overview !== null && !overview) ||
     (!noRecentWin && !recentWin) ||
     sections.some((section) => section === null) ||
@@ -198,6 +215,7 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
   }
   return {
     meetingType: meetingType as NotesDraft['meetingType'],
+    ...(title ? { title } : {}),
     overview,
     sections: sections as NotesSection[],
     ...(recentWin ? { recentWin } : {}),
@@ -363,6 +381,7 @@ export const parseNotesAudit = (raw: string): NotesAudit => {
 };
 
 const blocksForDraft = (draft: NotesDraft): Block[] => [
+  ...(draft.title ? [draft.title] : []),
   ...(draft.overview ? [draft.overview] : []),
   ...draft.sections.flatMap((section) => [section.title, ...section.items]),
   ...(draft.recentWin ? [draft.recentWin.win, draft.recentWin.impact] : []),
@@ -374,6 +393,10 @@ const validateSources = (source: NotesSource, spans: SourceSpan[]) => {
 };
 
 const removeBlock = (draft: NotesDraft, target: string): boolean => {
+  if (draft.title?.id === target) {
+    draft.title = null;
+    return true;
+  }
   if (draft.overview?.id === target) {
     draft.overview = null;
     return true;
@@ -404,6 +427,10 @@ const replaceBlock = (
   target: string,
   value: Block,
 ): boolean => {
+  if (draft.title?.id === target && !('kind' in value)) {
+    draft.title = value;
+    return true;
+  }
   if (draft.overview?.id === target && !('kind' in value)) {
     draft.overview = value;
     return true;
@@ -504,6 +531,7 @@ const sourceMetadata = (draft: NotesDraft) => {
   };
 
   const overview = overviewForDraft(draft);
+  if (draft.title) add('title', draft.title);
   if (overview) add('overview', overview);
   if (draft.recentWin) {
     add('recent_win:win', draft.recentWin.win);
@@ -712,6 +740,9 @@ const applyTerminologyToProse = (
   }));
   return {
     ...analysis,
+    ...(analysis.title
+      ? { title: replaceTerminologyAliases(analysis.title, aliases) }
+      : {}),
     overview: replaceTerminologyAliases(analysis.overview, aliases),
     topics,
     all_action_items: topics.flatMap((topic) =>
@@ -1187,8 +1218,10 @@ export const projectAuditedNotes = (
     });
   const overview =
     overviewForDraft(audited.draft)?.text ?? 'Conversation captured.';
+  const title = audited.draft.title?.text.trim() || undefined;
   const analysis: AnalysisDocumentV3 = {
     analysis_schema_version: 3,
+    ...(title ? { title } : {}),
     overview,
     topics,
     all_action_items: topics.flatMap((topic) =>
