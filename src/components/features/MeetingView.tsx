@@ -1185,7 +1185,7 @@ export const MeetingView = ({
                     : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
               ) : null}
-              {tentativeVoiceMatches.map(({ speaker, suggestion }) => (
+              {tentativeVoiceMatches.slice(0, 1).map(({ speaker, suggestion }) => (
                 <button
                   key={`${speaker}:${suggestion.candidateDigest}`}
                   type="button"

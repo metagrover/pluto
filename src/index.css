@@ -1122,9 +1122,8 @@
     @apply pt-0;
   }
   .meeting-status-card {
-    @apply mx-auto mt-7 flex items-center justify-between gap-4 rounded-lg border px-5 py-3 text-sm md:px-6;
+    @apply mx-auto mt-8 flex items-center justify-between gap-4 rounded-lg border px-5 py-3 text-sm md:px-6;
     width: calc(100% - 4rem);
-    margin-bottom: 2rem;
     border-color: var(--notes-rule);
     color: var(--notes-muted);
     background: color-mix(
@@ -1143,6 +1142,9 @@
     color: var(--notes-ink);
     background: var(--notes-wash);
     border-color: var(--notes-muted);
+  }
+  .meeting-notes-document > .meeting-notes-section:first-of-type {
+    @apply mt-8;
   }
   .meeting-failure-notice {
     @apply relative mx-auto flex w-full max-w-[760px] items-center gap-4 px-6 py-5 md:px-8;
