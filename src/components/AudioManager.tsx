@@ -2203,6 +2203,16 @@ export const AudioManager = ({
           diarizationAttempted: false,
           fallbackReason: 'diarization_disabled',
         });
+      const manualRemoteSpeakerCount = new Set(
+        participants.map((participant) => participant.trim()).filter(Boolean),
+      ).size;
+      const speakerCountHint =
+        manualRemoteSpeakerCount > 0
+          ? {
+              source: 'manual_participants' as const,
+              remoteSpeakerCount: manualRemoteSpeakerCount,
+            }
+          : undefined;
       const buildProvisionalTranscriptJson = (canonicalSource: 'mic' | 'mix') =>
         JSON.stringify(
           buildTranscriptJsonPayload(capturedSegments, {
@@ -2224,6 +2234,7 @@ export const AudioManager = ({
               vocabularyTerms: capturedVocabulary.terms,
             },
             speakerAttribution,
+            speakerCountHint,
             liveTranscriptResponsiveness: capturedResponsiveness,
             lifecycleStatus: 'provisional',
           }),

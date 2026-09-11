@@ -49,6 +49,10 @@ describe('transcriptSchema', () => {
           mappingApplied: true,
           confidence: 0.82,
         }),
+        speakerCountHint: {
+          source: 'manual_participants',
+          remoteSpeakerCount: 1,
+        },
         liveTranscriptResponsiveness: {
           schemaVersion: 1,
           status: 'available',
@@ -81,6 +85,10 @@ describe('transcriptSchema', () => {
       confidence: 0.82,
       diarizationAttempted: true,
       mappingApplied: true,
+    });
+    expect(payload.speakerCountHint).toEqual({
+      source: 'manual_participants',
+      remoteSpeakerCount: 1,
     });
     expect(payload.liveTranscriptResponsiveness).toEqual({
       schemaVersion: 1,

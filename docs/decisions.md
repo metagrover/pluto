@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-12 - Treat an explicit singleton roster as a remote-speaker topology bound
+
+- **Status:** Accepted by direct owner request after a two-person recording was acoustically over-segmented into several anonymous speakers.
+- **Extends:** “Automatically identify an explicitly added singleton participant.” Its reversible meeting-scoped identity binding, Undo suppression, local-capture restriction, and calendar exclusion remain in force.
+- **Decision:** When exactly one unique remote participant is manually entered during a local recording, persist that explicit count with transcript provenance and constrain final System-audio attribution to the aggregate `Them` channel. Acoustic clusters may not expand that channel into `Remote Speaker 1` through `Remote Speaker N`. The existing singleton identity reconciliation may then project the manually entered person into display and notes without rewriting canonical transcript evidence. No manual participant, multiple manual participants, imported recordings, and calendar-only attendees remain unconstrained.
+- **Rationale:** A diarizer can split one real voice because of channel or embedding variation. In this topology the user has explicitly asserted one remote attendee, while the separate System capture proves which channel contains remote speech; presenting several people is less truthful than retaining the aggregate channel. This supersedes only the prior requirement that the diarizer itself report exactly one cluster before singleton identity reconciliation.
+- **Consequences:** Two-person meetings require the remote participant to be entered before or during recording to activate the bound. `Me` and `Unknown` evidence remain unchanged. Multi-participant calls retain acoustic separation, and Pluto does not infer attendance from calendar rosters or force every listed participant to have spoken.
+
 ## 2026-09-12 - Automatically identify an explicitly added singleton participant
 
 - **Status:** Accepted
