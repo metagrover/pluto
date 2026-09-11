@@ -5677,13 +5677,12 @@ app.whenReady().then(async () => {
       `[Pluto] Released ${interruptedFinalTranscriptions} interrupted final transcription lease(s)`,
     );
   }
-  initializeKnowledgeDocs({ queue: false })
-    .catch((error) => {
-      console.error(
-        '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
-        error,
-      );
-    });
+  initializeKnowledgeDocs({ queue: false }).catch((error) => {
+    console.error(
+      '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
+      error,
+    );
+  });
   createWindow();
   await prepareFinalTranscriptionBeforeRecovery({
     shouldPrepare: db.getSetting('setup_complete') === 'true',
