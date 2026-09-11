@@ -31,6 +31,7 @@ export interface SpeakerEnrollmentCandidateDependencies {
     sourcePath: string;
     intervals: SpeakerSampleInterval[];
     outputDir: string;
+    signal?: AbortSignal;
   }) => Promise<{
     systemPath: string;
     micPath: string;
@@ -39,6 +40,13 @@ export interface SpeakerEnrollmentCandidateDependencies {
   analyze: (
     request: Omit<SpeakerEvidenceRequest, 'signal'>,
   ) => Promise<SpeakerEvidenceResult>;
+  signal?: AbortSignal;
+}
+
+export interface CandidateConstructionTimings {
+  candidateConstructionMs: number;
+  initialInferenceMs: number;
+  representativeInferencesMs: number[];
 }
 
 type SpeakerEnrollmentSourceDependencies = Pick<
@@ -229,7 +237,13 @@ export const buildSpeakerEnrollmentCandidate = async (
 ): Promise<{
   candidate: SpeakerCandidateEvidence;
   sourceRevision: string;
+  timings?: CandidateConstructionTimings;
 } | null> => {
+  const constructionStart = performance.now();
+  let initialInferenceMs = 0;
+  const representativeInferencesMs: number[] = [];
+
+  dependencies.signal?.throwIfAborted?.();
   const source = getSpeakerEnrollmentSource(input, dependencies);
   if (!source) return null;
   const { intervals, sourcePath, sourceRevision, transcriptFingerprint } =
@@ -237,17 +251,24 @@ export const buildSpeakerEnrollmentCandidate = async (
 
   const workDir = dependencies.createWorkDir();
   try {
+    dependencies.signal?.throwIfAborted?.();
     const audio = await dependencies.createAudio({
       sourcePath,
       intervals,
       outputDir: workDir,
+      signal: dependencies.signal,
     });
     if (!audio) return null;
+
+    dependencies.signal?.throwIfAborted?.();
+    const initInfStart = performance.now();
     const evidence = await dependencies.analyze({
       mixedAudioPath: audio.systemPath,
       micAudioPath: audio.micPath,
       systemAudioPath: audio.systemPath,
     });
+    initialInferenceMs = Math.round(performance.now() - initInfStart);
+
     const preliminaryCandidate = deriveReviewedSpeakerCandidate({
       speaker: input.speaker,
       clusterEvidence: evidence.clusterEvidence ?? [],
@@ -265,6 +286,7 @@ export const buildSpeakerEnrollmentCandidate = async (
 
     const representativeEmbeddings: number[][] = [];
     for (const interval of selectRepresentativeIntervals(intervals)) {
+      dependencies.signal?.throwIfAborted?.();
       const representativeAudio = await dependencies.createAudio({
         sourcePath,
         // Repeat only within this isolated embedding pass so FluidAudio gets
@@ -272,13 +294,21 @@ export const buildSpeakerEnrollmentCandidate = async (
         // duration remain grounded in the non-duplicated full selection above.
         intervals: [interval, interval],
         outputDir: workDir,
+        signal: dependencies.signal,
       });
       if (!representativeAudio) continue;
+
+      dependencies.signal?.throwIfAborted?.();
+      const repInfStart = performance.now();
       const representativeEvidence = await dependencies.analyze({
         mixedAudioPath: representativeAudio.systemPath,
         micAudioPath: representativeAudio.micPath,
         systemAudioPath: representativeAudio.systemPath,
       });
+      representativeInferencesMs.push(
+        Math.round(performance.now() - repInfStart),
+      );
+
       if (
         !sameEmbeddingProvenance(
           evidence.provenance,
@@ -307,7 +337,22 @@ export const buildSpeakerEnrollmentCandidate = async (
     ) {
       return null;
     }
-    return candidate ? { candidate, sourceRevision } : null;
+
+    const candidateConstructionMs = Math.round(
+      performance.now() - constructionStart,
+    );
+    const timings: CandidateConstructionTimings = {
+      candidateConstructionMs,
+      initialInferenceMs,
+      representativeInferencesMs,
+    };
+    console.log('[Pluto][SpeakerVoice] candidate construction completed', {
+      meetingId: input.meetingId,
+      speaker: input.speaker,
+      ...timings,
+    });
+
+    return candidate ? { candidate, sourceRevision, timings } : null;
   } finally {
     await dependencies.removeWorkDir(workDir);
   }

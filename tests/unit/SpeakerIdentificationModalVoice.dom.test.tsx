@@ -310,7 +310,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
   });
 
-  it('keeps the speaker in place and surfaces a failed voice enrollment', async () => {
+  it('persists identity and advances cleanly without noisy error when voice enrollment fails', async () => {
     enrollmentShouldFail = true;
     await act(async () => {
       root.render(
@@ -327,10 +327,18 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
     await act(async () => confirmButton?.click());
 
-    expect(document.body.textContent).toContain(
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-alex',
+      }),
+    );
+    expect(document.body.textContent).toContain('All speakers reviewed');
+    expect(document.body.textContent).toContain('is Alex Chen');
+    expect(document.body.textContent).not.toContain(
       'This person was identified, but Pluto could not remember their voice. Try again.',
     );
-    expect(document.body.textContent).toContain('Speaker 1');
   });
 
   it('does not require a separate per-person voice checkbox after reopening', async () => {
@@ -401,5 +409,466 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(document.body.textContent).not.toContain(
       'Speaker 1 may be Alex Chen',
     );
+  });
+
+  it('advances to the next speaker immediately without stalling on voice enrollment', async () => {
+    const multiMeeting: MeetingIdentityState = {
+      ...workspace,
+      meetingId: 'meeting-multi',
+      speakers: ['Remote Speaker 1', 'Remote Speaker 2'],
+      bindings: [],
+      capture: { origin: 'local', selfPersonId: 'person-aditya' },
+      job: null,
+    };
+
+    let resolveEnrollment: ((val: any) => void) | null = null;
+    const slowEnrollmentPromise = new Promise((resolve) => {
+      resolveEnrollment = resolve;
+    });
+
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') return multiMeeting;
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {},
+          candidates: {},
+          enrollmentAvailability: {
+            'Remote Speaker 1': true,
+            'Remote Speaker 2': true,
+          },
+        };
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        const next = { ...multiMeeting, bindings: [...multiMeeting.bindings] };
+        next.bindings.push({
+          speaker: payload.speaker,
+          source: 'user',
+          personId: payload.personId,
+          individual: true,
+        });
+        return next;
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return await slowEnrollmentPromise;
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-multi"
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain('Speaker 1 of 2');
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm & Next'),
+    );
+    await act(async () => confirmButton?.click());
+
+    // Immediately advanced to Speaker 2 of 2 without waiting for enrollment
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+
+    // Cleanly resolve the in-flight enrollment promise
+    await act(async () => {
+      resolveEnrollment?.({ success: true, enrollmentId: 'enroll-1' });
+    });
+  });
+
+  it('enrolls voice profile even when user confirms while voice suggestions are still loading', async () => {
+    let resolveSuggestions: ((val: any) => void) | null = null;
+    const pendingSuggestionsPromise = new Promise((resolve) => {
+      resolveSuggestions = resolve;
+    });
+
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY')
+        return meeting(payload?.meetingId ?? 'meeting-voice');
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return await pendingSuggestionsPromise;
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 11,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return { success: true, enrollmentId: 'enroll-late' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-alex',
+      }),
+    );
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.anything(),
+    );
+
+    await act(async () => {
+      resolveSuggestions?.({
+        suggestions: {},
+        candidates: {
+          'Remote Speaker 1': {
+            candidateDigest: 'cand-late-1',
+            sourceRevision: 'rev-1',
+            isEligibleForEnrollment: true,
+            cleanDurationSeconds: 5,
+          },
+        },
+        enrollmentAvailability: { 'Remote Speaker 1': true },
+      });
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({
+        personId: 'person-alex',
+        speaker: 'Remote Speaker 1',
+        candidateDigest: 'cand-late-1',
+      }),
+    );
+  });
+
+  it('retries voice enrollment when identity revision changes due to unrelated changes', async () => {
+    let enrollmentAttempt = 0;
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 12,
+          bindings: [
+            {
+              speaker: 'Remote Speaker 1',
+              source: 'user',
+              personId: 'person-alex',
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {
+            'Remote Speaker 1': {
+              speaker: 'Remote Speaker 1',
+              suggestedPersonId: 'person-alex',
+              suggestedPersonName: 'Alex Chen',
+              similarityScore: 0.95,
+              confidenceTier: 'high',
+              isCalendarAttendee: true,
+              candidateDigest: 'cand-digest-1',
+              sourceRevision,
+            },
+          },
+          candidates: {},
+          enrollmentAvailability: { 'Remote Speaker 1': true },
+        };
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 10,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        enrollmentAttempt++;
+        if (enrollmentAttempt === 1) {
+          throw new Error('identity_revision_stale');
+        }
+        return { success: true, enrollmentId: 'enroll-retried' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({ expectedRevision: 10 }),
+    );
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({ expectedRevision: 12 }),
+    );
+    expect(enrollmentAttempt).toBe(2);
+  });
+
+  it('enrolls without candidate metadata when voice suggestions request fails', async () => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY')
+        return meeting(payload?.meetingId ?? 'meeting-voice');
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        throw new Error('suggestions failed');
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 10,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return { success: true, enrollmentId: 'enroll-fallback' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({
+        personId: 'person-alex',
+        speaker: 'Remote Speaker 1',
+        expectedRevision: 10,
+      }),
+    );
+    const enrollCall = invoke.mock.calls.find(
+      ([channel]) => channel === 'SPEAKER_VOICE_ENROLL',
+    );
+    expect(enrollCall?.[1]?.candidateDigest).toBeUndefined();
+  });
+
+  it('falls back to enrollment when voice suggestions wait times out', async () => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY')
+        return meeting(payload?.meetingId ?? 'meeting-voice');
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return new Promise<never>(() => {});
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 10,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return { success: true, enrollmentId: 'enroll-timeout-fallback' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+          metadataWaitTimeoutMs={10}
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.anything(),
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({
+        personId: 'person-alex',
+        speaker: 'Remote Speaker 1',
+        expectedRevision: 10,
+      }),
+    );
+    const enrollCall = invoke.mock.calls.find(
+      ([channel]) => channel === 'SPEAKER_VOICE_ENROLL',
+    );
+    expect(enrollCall?.[1]?.candidateDigest).toBeUndefined();
   });
 });

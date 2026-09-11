@@ -60,12 +60,19 @@ export interface SpeakerVoiceDependencies {
     startSec: number;
     durationSec: number;
   }) => Promise<Buffer | null>;
+  reconciliationTimeoutMs?: number;
   buildEnrollmentCandidate?: (input: {
     meetingId: string;
     speaker: string;
+    signal?: AbortSignal;
   }) => Promise<{
     candidate: SpeakerCandidateEvidence;
     sourceRevision: string;
+    timings?: {
+      candidateConstructionMs: number;
+      initialInferenceMs: number;
+      representativeInferencesMs: number[];
+    };
   } | null>;
 }
 
@@ -134,7 +141,7 @@ const getCurrentConfirmedBinding = (
   speaker: string,
   canonicalPersonId: string,
   d: Database.Database,
-): { enrollmentPersonId: string } | null => {
+): { enrollmentPersonId: string; rawPayload: string } | null => {
   const row = d
     .prepare(
       'SELECT payload FROM identity_bindings WHERE meeting_id = ? AND speaker = ?',
@@ -154,7 +161,7 @@ const getCurrentConfirmedBinding = (
   ) {
     return null;
   }
-  return { enrollmentPersonId: payload.personId };
+  return { enrollmentPersonId: payload.personId, rawPayload: row.payload };
 };
 
 const isWorkspaceOwner = (
@@ -170,6 +177,50 @@ const isWorkspaceOwner = (
     row?.self_person_id &&
       resolvePersonId(row.self_person_id, d) === canonicalPersonId,
   );
+};
+
+const buildCandidateWithTimeout = async (
+  deps: SpeakerVoiceDependencies | undefined,
+  input: {
+    meetingId: string;
+    speaker: string;
+  },
+  timeoutMs = 30000,
+): Promise<{
+  candidate: SpeakerCandidateEvidence;
+  sourceRevision: string;
+  timings?: {
+    candidateConstructionMs: number;
+    initialInferenceMs: number;
+    representativeInferencesMs: number[];
+  };
+} | null> => {
+  if (!deps?.buildEnrollmentCandidate) return null;
+  const abortController = new AbortController();
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      abortController.abort();
+      reject(new Error('speaker_enrollment_timeout'));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      deps.buildEnrollmentCandidate({
+        meetingId: input.meetingId,
+        speaker: input.speaker,
+        signal: abortController.signal,
+      }),
+      timeoutPromise,
+    ]);
+  } catch (err) {
+    if (abortController.signal.aborted) {
+      throw new Error('speaker_enrollment_timeout');
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 };
 
 async function reconcileConfirmedSpeakerVoiceProfiles(
@@ -340,10 +391,14 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
                   candidate: storedCandidate,
                   sourceRevision: storedCandidate.sourceRevision,
                 }
-              : await buildEnrollmentCandidate({
-                  meetingId: binding.meetingId,
-                  speaker: binding.speaker,
-                });
+              : await buildCandidateWithTimeout(
+                  deps,
+                  {
+                    meetingId: binding.meetingId,
+                    speaker: binding.speaker,
+                  },
+                  deps?.reconciliationTimeoutMs ?? 15000,
+                );
           if (
             !built ||
             !isCurrentEligibleCandidate(
@@ -455,10 +510,14 @@ export async function handleSpeakerVoiceRequest(
         for (const candidate of candidates) {
           if (usesCurrentEnrollmentExtraction(candidate)) continue;
           try {
-            const built = await deps.buildEnrollmentCandidate({
-              meetingId,
-              speaker: candidate.speaker,
-            });
+            const built = await buildCandidateWithTimeout(
+              deps,
+              {
+                meetingId,
+                speaker: candidate.speaker,
+              },
+              deps?.reconciliationTimeoutMs ?? 15000,
+            );
             if (
               built &&
               built.candidate.speaker === candidate.speaker &&
@@ -573,11 +632,12 @@ export async function handleSpeakerVoiceRequest(
         speaker,
         candidateDigest,
         expectedRevision,
+        timeoutMs = 30000,
       } = payload ?? {};
 
       if (
         typeof expectedRevision !== 'number' ||
-        db.identityStore.getRevision() !== expectedRevision
+        expectedRevision > db.identityStore.getRevision()
       ) {
         throw new Error('identity_revision_stale');
       }
@@ -590,7 +650,8 @@ export async function handleSpeakerVoiceRequest(
           canonicalPersonId,
           d,
         );
-      if (!bindingMatches()) throw new Error('speaker_enrollment_unconfirmed');
+      const initialBinding = bindingMatches();
+      if (!initialBinding) throw new Error('speaker_enrollment_unconfirmed');
       if (isWorkspaceOwner(canonicalPersonId, d)) {
         throw new Error('speaker_enrollment_self_disallowed');
       }
@@ -613,6 +674,13 @@ export async function handleSpeakerVoiceRequest(
       let enrollmentSourceRevision = sourceRevision as string | undefined;
       let enrollmentCandidateDigest = candidateDigest as string | undefined;
       let builtCandidate: SpeakerCandidateEvidence | null = null;
+      let candidateTimings:
+        | {
+            candidateConstructionMs: number;
+            initialInferenceMs: number;
+            representativeInferencesMs: number[];
+          }
+        | undefined = undefined;
 
       if (suppliedCandidateIdentity) {
         const candidate = getMeetingSpeakerCandidates(
@@ -640,10 +708,15 @@ export async function handleSpeakerVoiceRequest(
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
-        const built = await deps?.buildEnrollmentCandidate?.({
-          meetingId: String(sourceMeetingId ?? ''),
-          speaker: String(speaker ?? ''),
-        });
+        const built = await buildCandidateWithTimeout(
+          deps,
+          {
+            meetingId: String(sourceMeetingId ?? ''),
+            speaker: String(speaker ?? ''),
+          },
+          timeoutMs,
+        );
+
         if (
           !built ||
           !isCurrentEligibleCandidate(
@@ -658,15 +731,17 @@ export async function handleSpeakerVoiceRequest(
         ) {
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
+        const currentBinding = bindingMatches();
         if (
-          db.identityStore.getRevision() !== expectedRevision ||
-          !bindingMatches()
+          !currentBinding ||
+          currentBinding.rawPayload !== initialBinding.rawPayload
         ) {
           throw new Error('identity_revision_stale');
         }
         builtCandidate = built.candidate;
         enrollmentSourceRevision = built.sourceRevision;
         enrollmentCandidateDigest = built.candidate.candidateDigest;
+        candidateTimings = built.timings;
       }
 
       if (!enrollmentSourceRevision || !enrollmentCandidateDigest) {
@@ -676,8 +751,8 @@ export async function handleSpeakerVoiceRequest(
       const enrollment = d.transaction(() => {
         const currentBinding = bindingMatches();
         if (
-          db.identityStore.getRevision() !== expectedRevision ||
-          !currentBinding
+          !currentBinding ||
+          currentBinding.rawPayload !== initialBinding.rawPayload
         ) {
           throw new Error('identity_revision_stale');
         }
@@ -727,7 +802,19 @@ export async function handleSpeakerVoiceRequest(
         );
       })();
 
-      return { success: true, enrollmentId: enrollment.id };
+      console.log('[Pluto][SpeakerVoice] speaker voice enrolled', {
+        meetingId: String(sourceMeetingId),
+        speaker: String(speaker),
+        personId: canonicalPersonId,
+        isFastPath: suppliedCandidateIdentity,
+        timings: candidateTimings,
+      });
+
+      return {
+        success: true,
+        enrollmentId: enrollment.id,
+        ...(candidateTimings ? { timings: candidateTimings } : {}),
+      };
     }
 
     case 'SPEAKER_VOICE_REJECT': {

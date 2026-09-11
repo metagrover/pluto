@@ -21,6 +21,7 @@ import {
 } from '../../api/identity';
 import {
   type ClientCandidateMetadata,
+  type SpeakerVoiceEnrollmentResult,
   type VoiceMatchSuggestion,
   enrollSpeakerVoice,
   getSpeakerVoiceSuggestions,
@@ -46,6 +47,7 @@ export interface SpeakerIdentificationModalProps {
   hasSystemAudio?: boolean;
   speakerSummaries?: Record<string, SpeakerReviewSummary>;
   onDisplayNamesChange?: (displayNames: Record<string, string>) => void;
+  metadataWaitTimeoutMs?: number;
 }
 
 export const SpeakerIdentificationModal = ({
@@ -57,6 +59,7 @@ export const SpeakerIdentificationModal = ({
   hasSystemAudio = true,
   speakerSummaries = {},
   onDisplayNamesChange,
+  metadataWaitTimeoutMs = 2000,
 }: SpeakerIdentificationModalProps) => {
   const dialogId = useId();
   const titleId = useId();
@@ -94,8 +97,21 @@ export const SpeakerIdentificationModal = ({
   >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
+  const voiceSuggestionsPromiseRef = useRef<Promise<void> | null>(null);
+  const speakerCandidatesRef = useRef<Record<string, ClientCandidateMetadata>>(
+    {},
+  );
+  const voiceEnrollmentAvailabilityRef = useRef<Record<string, boolean>>({});
+  const isMountedRef = useRef(true);
   const [refSampleLoading, setRefSampleLoading] = useState(false);
   const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const releaseSample = useCallback(() => {
     sampleAudio.current?.pause();
@@ -155,16 +171,38 @@ export const SpeakerIdentificationModal = ({
   attendeeNamesRef.current = attendeeNames;
 
   const loadVoiceSuggestions = useCallback(async () => {
+    const refreshStart = performance.now();
+    const currentPromise = (async () => {
+      try {
+        const res = await getSpeakerVoiceSuggestions(
+          meetingId,
+          attendeeNamesRef.current,
+        );
+        speakerCandidatesRef.current = res.candidates;
+        voiceEnrollmentAvailabilityRef.current = res.enrollmentAvailability;
+        if (!isMountedRef.current) return;
+        setVoiceSuggestions(res.suggestions);
+        setSpeakerCandidates(res.candidates);
+        setVoiceEnrollmentAvailability(res.enrollmentAvailability);
+        const refreshDurationMs = Math.round(performance.now() - refreshStart);
+        console.log(
+          '[Pluto][SpeakerVoice] post-confirmation refresh completed',
+          {
+            meetingId,
+            durationMs: refreshDurationMs,
+          },
+        );
+      } catch {
+        // non-fatal
+      }
+    })();
+    voiceSuggestionsPromiseRef.current = currentPromise;
     try {
-      const res = await getSpeakerVoiceSuggestions(
-        meetingId,
-        attendeeNamesRef.current,
-      );
-      setVoiceSuggestions(res.suggestions);
-      setSpeakerCandidates(res.candidates);
-      setVoiceEnrollmentAvailability(res.enrollmentAvailability);
-    } catch {
-      // non-fatal
+      await currentPromise;
+    } finally {
+      if (voiceSuggestionsPromiseRef.current === currentPromise) {
+        voiceSuggestionsPromiseRef.current = null;
+      }
     }
   }, [meetingId]);
 
@@ -423,6 +461,7 @@ export const SpeakerIdentificationModal = ({
     if (!state || busy) return;
     setBusy(true);
     setError('');
+    const bindingStart = performance.now();
     try {
       const next = await setMeetingIdentityBinding(
         meetingId,
@@ -430,53 +469,122 @@ export const SpeakerIdentificationModal = ({
         selection,
         state.revision,
       );
+      const bindingDurationMs = Math.round(performance.now() - bindingStart);
+      console.log('[Pluto][SpeakerVoice] binding persistence completed', {
+        meetingId,
+        speaker,
+        durationMs: bindingDurationMs,
+      });
       setState(next);
 
-      // A confirmed peer identity should become reusable voice evidence whenever
-      // this reviewed meeting has a clean, eligible system-audio source.
-      const candidate = speakerCandidates[speaker];
       const enrolledPersonId =
         next.bindings.find((binding) => binding.speaker === speaker)
           ?.personId ?? selection.personId;
-      const canEnrollVoice =
-        candidate?.isEligibleForEnrollment ||
-        voiceEnrollmentAvailability[speaker];
-      if (canEnrollVoice && enrolledPersonId) {
-        try {
-          await enrollSpeakerVoice({
-            personId: enrolledPersonId,
-            sourceMeetingId: meetingId,
-            speaker,
-            expectedRevision: next.revision,
-            ...(candidate?.isEligibleForEnrollment
-              ? {
-                  sourceRevision: candidate.sourceRevision,
-                  candidateDigest: candidate.candidateDigest,
-                }
-              : {}),
-          });
-        } catch {
-          const enrolledPerson = next.people.find(
-            (person) => person.id === enrolledPersonId,
-          );
-          setSelectedSelection({ personId: enrolledPersonId });
-          if (enrolledPerson) {
-            setSearchQuery(enrolledPerson.name);
-          }
-          await loadVoiceSuggestions();
-          setError(
-            'This person was identified, but Pluto could not remember their voice. Try again.',
-          );
-          return;
-        }
-      }
 
+      // Auto-advance immediately upon persistence so wizard is never stalled.
       if (autoAdvance) {
         if (stepIndex + 1 < totalSpeakers) {
           setStepIndex(stepIndex + 1);
         } else {
           setIsSummaryView(true);
         }
+      }
+
+      // Voice enrollment is a non-blocking follow-up.
+      if (enrolledPersonId) {
+        void (async () => {
+          try {
+            // Await in-flight metadata suggestions if still loading, but bound the wait
+            // so an unbounded or hung metadata reconciliation never stalls enrollment.
+            if (voiceSuggestionsPromiseRef.current) {
+              try {
+                await Promise.race([
+                  voiceSuggestionsPromiseRef.current,
+                  new Promise((resolve) =>
+                    setTimeout(resolve, metadataWaitTimeoutMs),
+                  ),
+                ]);
+              } catch {
+                // Non-fatal: fall back to enrollment without cached suggestions
+              }
+            }
+            const candidate = speakerCandidatesRef.current[speaker];
+            const availability = voiceEnrollmentAvailabilityRef.current;
+            const hasAvailabilityInfo = speaker in availability;
+            const isAvailable = availability[speaker];
+
+            // If metadata has loaded and explicitly determined that this speaker is unavailable
+            // and has no eligible candidate, skip enrollment.
+            if (
+              hasAvailabilityInfo &&
+              !isAvailable &&
+              !candidate?.isEligibleForEnrollment
+            ) {
+              return;
+            }
+
+            // Otherwise (metadata confirmed availability, OR metadata timed out/failed/not loaded),
+            // proceed to enroll (using cached candidate evidence if available, or falling back to
+            // backend candidate generation without cached metadata).
+            const attemptEnrollment = async (rev: number) => {
+              return await enrollSpeakerVoice({
+                personId: enrolledPersonId,
+                sourceMeetingId: meetingId,
+                speaker,
+                expectedRevision: rev,
+                ...(candidate?.isEligibleForEnrollment
+                  ? {
+                      sourceRevision: candidate.sourceRevision,
+                      candidateDigest: candidate.candidateDigest,
+                    }
+                  : {}),
+              });
+            };
+
+            let res: SpeakerVoiceEnrollmentResult;
+            try {
+              res = await attemptEnrollment(next.revision);
+            } catch (firstErr: any) {
+              // If revision changed due to unrelated identity changes (e.g. user confirmed next speaker),
+              // re-check if this speaker is still bound to enrolledPersonId and retry once.
+              if (isIdentityRevisionError(firstErr)) {
+                const latestIdentity = await getMeetingIdentity(meetingId);
+                const currentBinding = latestIdentity.bindings.find(
+                  (b) => b.speaker === speaker,
+                );
+                if (currentBinding?.personId === enrolledPersonId) {
+                  res = await attemptEnrollment(latestIdentity.revision);
+                } else {
+                  throw firstErr;
+                }
+              } else {
+                throw firstErr;
+              }
+            }
+
+            if (res?.timings) {
+              console.log('[Pluto][SpeakerVoice] voice enrollment timings', {
+                meetingId,
+                speaker,
+                personId: enrolledPersonId,
+                ...res.timings,
+              });
+            }
+            if (isMountedRef.current) {
+              void loadVoiceSuggestions();
+            }
+          } catch (err) {
+            console.warn(
+              '[Pluto][SpeakerVoice] background voice profile enrollment failed',
+              {
+                meetingId,
+                speaker,
+                personId: enrolledPersonId,
+                err,
+              },
+            );
+          }
+        })();
       }
     } catch (failure) {
       setError(identityErrorMessage(failure));

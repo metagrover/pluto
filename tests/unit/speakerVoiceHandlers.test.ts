@@ -590,6 +590,11 @@ describe('speaker voice IPC handlers', () => {
     const buildEnrollmentCandidate = vi.fn(async () => ({
       candidate: dummyCandidate,
       sourceRevision,
+      timings: {
+        candidateConstructionMs: 42,
+        initialInferenceMs: 12,
+        representativeInferencesMs: [10, 10],
+      },
     }));
 
     await expect(
@@ -603,12 +608,21 @@ describe('speaker voice IPC handlers', () => {
         },
         { buildEnrollmentCandidate },
       ),
-    ).resolves.toMatchObject({ success: true });
-
-    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
-      meetingId,
-      speaker: 'Remote Speaker 1',
+    ).resolves.toMatchObject({
+      success: true,
+      timings: {
+        candidateConstructionMs: 42,
+        initialInferenceMs: 12,
+        representativeInferencesMs: [10, 10],
+      },
     });
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId,
+        speaker: 'Remote Speaker 1',
+      }),
+    );
     expect(
       db.db
         .prepare(
@@ -624,6 +638,121 @@ describe('speaker voice IPC handlers', () => {
     expect(profiles).toEqual([
       expect.objectContaining({ canonicalPersonId: personId, sampleCount: 1 }),
     ]);
+  });
+
+  it('times out long-running candidate construction during enrollment', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async ({ signal }: { signal?: AbortSignal }) => {
+        return await new Promise<{
+          candidate: typeof dummyCandidate;
+          sourceRevision: string;
+        }>((resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        });
+      },
+    );
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+          timeoutMs: 10,
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).rejects.toThrow('speaker_enrollment_timeout');
+  });
+
+  it('times out even when buildEnrollmentCandidate hangs and ignores signal', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async () => new Promise<never>(() => {}),
+    );
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+          timeoutMs: 10,
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).rejects.toThrow('speaker_enrollment_timeout');
+  });
+
+  it('enrolls successfully when unrelated identity changes occur during candidate construction', async () => {
+    const rev = db.identityStore.getRevision();
+    const buildEnrollmentCandidate = vi.fn(async () => {
+      // An unrelated speaker identity binding is confirmed
+      db.saveMeeting({
+        id: 'unrelated-meeting',
+        title: 'Unrelated',
+        transcript_json: JSON.stringify([{ speaker: 'Other', text: 'Hi' }]),
+      });
+      db.upsertEntity({
+        id: 'unrelated-person',
+        type: 'person',
+        name: 'Unrelated Person',
+        dedupe_by_name: false,
+      });
+      db.identityStore.setBinding('unrelated-meeting', {
+        speaker: 'Other',
+        personId: 'unrelated-person',
+        individual: true,
+        source: 'user',
+        sourceRevision: 'gen-1',
+        evidence: [],
+      });
+      // Global revision has now bumped
+      expect(db.identityStore.getRevision()).toBeGreaterThan(rev);
+
+      return {
+        candidate: dummyCandidate,
+        sourceRevision,
+      };
+    });
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_ENROLL',
+      {
+        personId,
+        sourceMeetingId: meetingId,
+        speaker: 'Remote Speaker 1',
+        expectedRevision: rev,
+      },
+      { buildEnrollmentCandidate },
+    )) as { success: boolean };
+
+    expect(result.success).toBe(true);
+  });
+
+  it('bounds candidate extraction when buildEnrollmentCandidate hangs in suggestions', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async () => new Promise<never>(() => {}),
+    );
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { buildEnrollmentCandidate, reconciliationTimeoutMs: 10 },
+    )) as {
+      suggestions: Record<string, unknown>;
+      candidates: Record<string, unknown>;
+      enrollmentAvailability: Record<string, boolean>;
+    };
+
+    expect(result).toBeDefined();
+    expect(result.suggestions).toBeDefined();
+    expect(result.candidates).toBeDefined();
   });
 
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {
@@ -824,10 +953,12 @@ describe('speaker voice IPC handlers', () => {
       { buildEnrollmentCandidate, isFeatureFlagEnabled: () => true },
     )) as { suggestions: Record<string, { suggestedPersonId: string }> };
 
-    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
-      meetingId: queryMeetingId,
-      speaker: 'Remote Speaker 2',
-    });
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: queryMeetingId,
+        speaker: 'Remote Speaker 2',
+      }),
+    );
     expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
       personId,
     );
