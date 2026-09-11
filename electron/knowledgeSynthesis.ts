@@ -157,6 +157,15 @@ type QueueState = {
 
 const queueByDocId = new Map<string, QueueState>();
 let queuedSynthesisPaused = false;
+type KnowledgeDocBackgroundScheduler = (docId: string) => void;
+let knowledgeDocBackgroundScheduler: KnowledgeDocBackgroundScheduler | null =
+  null;
+
+export const configureKnowledgeDocBackgroundScheduler = (
+  scheduler: KnowledgeDocBackgroundScheduler | null,
+): void => {
+  knowledgeDocBackgroundScheduler = scheduler;
+};
 
 // Different documents run serially because local Ollama is capacity-bound.
 // Entity summaries use the same gate, so every local knowledge request respects
@@ -238,6 +247,10 @@ const getState = (docId: string): QueueState => {
 const flushPendingKnowledgeDocRefreshes = (delayMs = 250): void => {
   for (const [docId, state] of queueByDocId.entries()) {
     if (!state.pending || state.inFlight || state.timer) continue;
+    if (knowledgeDocBackgroundScheduler) {
+      knowledgeDocBackgroundScheduler(docId);
+      continue;
+    }
     state.timer = setTimeout(() => {
       state.timer = null;
       void runQueuedSynthesis(docId);
@@ -1955,6 +1968,11 @@ export const queueKnowledgeDocRefresh = (
     return;
   }
 
+  if (knowledgeDocBackgroundScheduler) {
+    knowledgeDocBackgroundScheduler(docId);
+    return;
+  }
+
   state.timer = setTimeout(() => {
     state.timer = null;
     void runQueuedSynthesis(docId);
@@ -2113,10 +2131,12 @@ export const initializeKnowledgeDocs = async (
     return [];
   }
   console.log(
-    `[KnowledgeDoc] Queuing ${needsWork.length} of ${docs.length} docs for synthesis`,
+    options.queue === false
+      ? `[KnowledgeDoc] Found ${needsWork.length} of ${docs.length} docs needing synthesis; deferring to background`
+      : `[KnowledgeDoc] Queuing ${needsWork.length} of ${docs.length} docs for synthesis`,
   );
-  // Stagger: each doc waits an extra 3 s so they enter the serial gate
-  // one at a time rather than flooding Ollama simultaneously.
+  // The production scheduler owns pacing; the stagger is only a fallback for
+  // callers that have not installed a background scheduler.
   const STAGGER_MS = 3000;
   if (options.queue !== false) {
     needsWork.forEach((doc, index) => {

@@ -13,6 +13,8 @@ vi.mock('electron', () => ({
 
 import { ensureGlobalKnowledgeDoc } from '../../electron/db';
 import {
+  configureKnowledgeDocBackgroundScheduler,
+  initializeKnowledgeDocs,
   queueKnowledgeDocRefresh,
   refreshKnowledgeDocNow,
   refreshKnowledgeDocsForMeetingNow,
@@ -20,12 +22,14 @@ import {
 } from '../../electron/knowledgeSynthesis';
 
 afterAll(() => {
+  configureKnowledgeDocBackgroundScheduler(null);
   setKnowledgeDocSynthesisPaused(false);
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
 });
 
 describe('knowledge synthesis pause behavior during capture', () => {
   beforeEach(() => {
+    configureKnowledgeDocBackgroundScheduler(null);
     setKnowledgeDocSynthesisPaused(false);
   });
 
@@ -58,5 +62,25 @@ describe('knowledge synthesis pause behavior during capture', () => {
 
     // Should remain safe and idempotent
     setKnowledgeDocSynthesisPaused(true);
+  });
+
+  it('routes queued refreshes through the configured background scheduler', () => {
+    const globalDoc = ensureGlobalKnowledgeDoc();
+    const scheduleInBackground = vi.fn();
+    configureKnowledgeDocBackgroundScheduler(scheduleInBackground);
+
+    queueKnowledgeDocRefresh(globalDoc.id);
+
+    expect(scheduleInBackground).toHaveBeenCalledWith(globalDoc.id);
+  });
+
+  it('does not schedule startup discovery when queueing is disabled', async () => {
+    ensureGlobalKnowledgeDoc();
+    const scheduleInBackground = vi.fn();
+    configureKnowledgeDocBackgroundScheduler(scheduleInBackground);
+
+    await initializeKnowledgeDocs({ queue: false });
+
+    expect(scheduleInBackground).not.toHaveBeenCalled();
   });
 });

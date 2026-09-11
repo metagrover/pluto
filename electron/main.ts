@@ -494,6 +494,7 @@ import {
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
 import {
+  configureKnowledgeDocBackgroundScheduler,
   initializeKnowledgeDocs,
   queueAllKnowledgeDocsRefresh,
   queueKnowledgeDocRefresh,
@@ -999,6 +1000,9 @@ app.whenReady().then(async () => {
         error,
       );
     },
+  });
+  configureKnowledgeDocBackgroundScheduler((docId) => {
+    backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
   });
   dreamingEntityQueue = createDirtyEntityQueue({
     getProjects: () => db.getEntitiesByType('project'),
@@ -5674,11 +5678,6 @@ app.whenReady().then(async () => {
     );
   }
   initializeKnowledgeDocs({ queue: false })
-    .then((docIds) => {
-      for (const docId of docIds) {
-        backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
-      }
-    })
     .catch((error) => {
       console.error(
         '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
