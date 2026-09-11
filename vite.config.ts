@@ -37,7 +37,6 @@ export default defineConfig({
                 'fluent-ffmpeg',
                 'ffmpeg-static',
                 '@ffprobe-installer/ffprobe',
-                'cross-spawn',
               ],
             },
           },

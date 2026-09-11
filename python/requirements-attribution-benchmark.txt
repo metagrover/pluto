@@ -1,6 +1,5 @@
 # Optional benchmark environment only. Do not merge these into production deps.
 pyannote.audio==4.0.0
-psutil==7.0.0
 sherpa-onnx==1.13.4
 
 # NVIDIA NeMo must remain in a separate isolated environment because its
