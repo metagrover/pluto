@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type {
-  SpeakerCandidateEvidence,
-  SpeakerCandidateProvenance,
+import {
+  type SpeakerCandidateEvidence,
+  type SpeakerCandidateProvenance,
+  isCandidateEligibleForEnrollment,
 } from '../src/services/speakerCandidateEvidence.ts';
 
 export interface SpeakerVoiceEnrollment {
@@ -248,7 +249,12 @@ export function getMeetingSpeakerCandidates(
         excerpt: r.reference_excerpt,
       },
       provenance,
-      isEligibleForEnrollment: true,
+      isEligibleForEnrollment: isCandidateEligibleForEnrollment({
+        cleanDurationSeconds: r.clean_duration_sec,
+        cleanSegmentCount: r.clean_segment_count,
+        cleanChunkCount: r.clean_chunk_count,
+        minimumChunkSimilarity: r.minimum_chunk_similarity,
+      }),
     };
   });
 }

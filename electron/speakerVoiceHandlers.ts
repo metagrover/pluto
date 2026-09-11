@@ -93,6 +93,27 @@ const usesCurrentEnrollmentExtraction = (
   candidate.provenance.enrollmentExtractionVersion ===
   ENROLLMENT_EXTRACTION_VERSION;
 
+const createIneligibleSpeakerCandidate = (
+  speaker: string,
+): SpeakerCandidateEvidence => ({
+  speaker,
+  nativeCluster: speaker,
+  candidateDigest: `ineligible:${speaker}`,
+  embedding: [],
+  representativeEmbeddings: [],
+  cleanDurationSeconds: 0,
+  cleanSegmentCount: 0,
+  cleanChunkCount: 0,
+  minimumChunkSimilarity: 0,
+  meanChunkSimilarity: 0,
+  referenceInterval: { startTime: 0, endTime: 0, excerpt: '' },
+  provenance: {
+    ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey,
+    enrollmentExtractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+  },
+  isEligibleForEnrollment: false,
+});
+
 type ReconciliationOutcome =
   | 'enrolled'
   | 'already_enrolled'
@@ -437,6 +458,12 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
             built.candidate.speaker !== binding.speaker ||
             !built.sourceRevision
           ) {
+            saveMeetingSpeakerCandidate(
+              binding.meetingId,
+              binding.sourceRevision,
+              createIneligibleSpeakerCandidate(binding.speaker),
+              d,
+            );
             continue;
           }
 
@@ -573,9 +600,23 @@ export async function handleSpeakerVoiceRequest(
                 built.candidate,
                 d,
               );
+            } else if (candidate.sourceRevision) {
+              saveMeetingSpeakerCandidate(
+                meetingId,
+                candidate.sourceRevision,
+                createIneligibleSpeakerCandidate(candidate.speaker),
+                d,
+              );
             }
           } catch {
-            // Keep the existing candidate available if representative extraction fails.
+            if (candidate.sourceRevision) {
+              saveMeetingSpeakerCandidate(
+                meetingId,
+                candidate.sourceRevision,
+                createIneligibleSpeakerCandidate(candidate.speaker),
+                d,
+              );
+            }
           }
         }
         candidates = getMeetingSpeakerCandidates(meetingId, d);
@@ -766,6 +807,19 @@ export async function handleSpeakerVoiceRequest(
           built.candidate.speaker !== speaker ||
           !built.sourceRevision
         ) {
+          const meetingGen = getMeetingDependency(
+            deps,
+            d,
+            String(sourceMeetingId),
+          )?.capture_journal_generation;
+          if (meetingGen) {
+            saveMeetingSpeakerCandidate(
+              String(sourceMeetingId),
+              meetingGen,
+              createIneligibleSpeakerCandidate(speaker),
+              d,
+            );
+          }
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
         const currentBinding = bindingMatches();

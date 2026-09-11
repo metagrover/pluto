@@ -11,9 +11,7 @@ vi.mock('electron', () => ({
   app: { getPath: () => testDatabase.directory },
 }));
 
-import {
-  ensureGlobalKnowledgeDoc,
-} from '../../electron/db';
+import { ensureGlobalKnowledgeDoc } from '../../electron/db';
 import {
   queueKnowledgeDocRefresh,
   refreshKnowledgeDocNow,

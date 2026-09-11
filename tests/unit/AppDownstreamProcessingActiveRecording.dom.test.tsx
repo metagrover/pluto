@@ -11,7 +11,9 @@ const recordingState = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/components/RuntimeReadinessGate', () => ({
-  RuntimeReadinessGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  RuntimeReadinessGate: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 vi.mock('../../src/components/AudioManager', () => ({
@@ -77,7 +79,11 @@ describe('App automatic downstream processing during active recording', () => {
           },
         };
       if (channel === 'GENERATE_MEETING_NOTES') {
-        return { meetingId: candidateMeeting.id, runId: 'run-1', status: 'published' };
+        return {
+          meetingId: candidateMeeting.id,
+          runId: 'run-1',
+          status: 'published',
+        };
       }
       return {};
     });

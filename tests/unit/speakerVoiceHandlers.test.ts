@@ -965,6 +965,24 @@ describe('speaker voice IPC handlers', () => {
     expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
   });
 
+  it('persists ineligible candidate tombstone when candidate build returns null during reconciliation to prevent re-extraction loops', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => null);
+
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      {},
+      { buildEnrollmentCandidate },
+    );
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+  });
+
   it('upgrades a legacy query candidate before cross-meeting matching', async () => {
     saveMeetingSpeakerCandidates(meetingId, sourceRevision, [dummyCandidate]);
     await handleSpeakerVoiceRequest('SPEAKER_VOICE_ENROLL', {
