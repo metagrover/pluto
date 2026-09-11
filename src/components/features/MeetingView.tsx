@@ -1185,22 +1185,24 @@ export const MeetingView = ({
                     : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
               ) : null}
-              {tentativeVoiceMatches.slice(0, 1).map(({ speaker, suggestion }) => (
-                <button
-                  key={`${speaker}:${suggestion.candidateDigest}`}
-                  type="button"
-                  data-tentative-speaker-match={speaker}
-                  aria-label={`Review tentative speaker match: maybe ${suggestion.suggestedPersonName}`}
-                  onClick={() => {
-                    setSelectedSpeakerForModal(speaker);
-                    setIsSpeakerModalOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1 rounded border border-pro-accent/25 bg-pro-accent/[0.06] px-1.5 py-0.5 text-xs text-pro-text-main transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                >
-                  <Sparkles size={11} className="text-pro-accent" />
-                  <span>Maybe {suggestion.suggestedPersonName}</span>
-                </button>
-              ))}
+              {tentativeVoiceMatches
+                .slice(0, 1)
+                .map(({ speaker, suggestion }) => (
+                  <button
+                    key={`${speaker}:${suggestion.candidateDigest}`}
+                    type="button"
+                    data-tentative-speaker-match={speaker}
+                    aria-label={`Review tentative speaker match: maybe ${suggestion.suggestedPersonName}`}
+                    onClick={() => {
+                      setSelectedSpeakerForModal(speaker);
+                      setIsSpeakerModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-pro-accent/25 bg-pro-accent/[0.06] px-1.5 py-0.5 text-xs text-pro-text-main transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                  >
+                    <Sparkles size={11} className="text-pro-accent" />
+                    <span>Maybe {suggestion.suggestedPersonName}</span>
+                  </button>
+                ))}
               {tentativeVoiceMatches.length === 0 &&
               unidentifiedWithoutSuggestionCount > 0 ? (
                 <button
