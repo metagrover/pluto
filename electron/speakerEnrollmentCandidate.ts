@@ -31,6 +31,7 @@ export interface SpeakerEnrollmentCandidateDependencies {
     sourcePath: string;
     intervals: SpeakerSampleInterval[];
     outputDir: string;
+    signal?: AbortSignal;
   }) => Promise<{
     systemPath: string;
     micPath: string;
@@ -255,6 +256,7 @@ export const buildSpeakerEnrollmentCandidate = async (
       sourcePath,
       intervals,
       outputDir: workDir,
+      signal: dependencies.signal,
     });
     if (!audio) return null;
 
@@ -292,6 +294,7 @@ export const buildSpeakerEnrollmentCandidate = async (
         // duration remain grounded in the non-duplicated full selection above.
         intervals: [interval, interval],
         outputDir: workDir,
+        signal: dependencies.signal,
       });
       if (!representativeAudio) continue;
 

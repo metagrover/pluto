@@ -61,16 +61,44 @@ export const planSpeakerEnrollmentAudio = (
   };
 };
 
-const saveWav = (command: ffmpeg.FfmpegCommand, outputPath: string) =>
+const saveWav = (
+  command: ffmpeg.FfmpegCommand,
+  outputPath: string,
+  signal?: AbortSignal,
+) =>
   new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('speaker_audio_aborted'));
+      return;
+    }
+    let finished = false;
+    const cleanup = () => {
+      finished = true;
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      if (finished) return;
+      cleanup();
+      try {
+        command.kill('SIGKILL');
+      } catch {}
+      reject(new Error('speaker_audio_aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     command
       .audioChannels(1)
       .audioFrequency(16000)
       .audioCodec('pcm_s16le')
       .outputOptions(['-xerror', '-threads 1', '-filter_complex_threads 1'])
       .toFormat('wav')
-      .on('end', () => resolve())
-      .on('error', reject)
+      .on('end', () => {
+        cleanup();
+        resolve();
+      })
+      .on('error', (err) => {
+        cleanup();
+        reject(err);
+      })
       .save(outputPath);
   });
 
@@ -78,11 +106,15 @@ export const createSpeakerEnrollmentAudio = async (input: {
   sourcePath: string;
   intervals: SpeakerSampleInterval[];
   outputDir: string;
+  signal?: AbortSignal;
 }): Promise<{
   systemPath: string;
   micPath: string;
   totalDurationSeconds: number;
 } | null> => {
+  if (input.signal?.aborted) {
+    throw new Error('speaker_audio_aborted');
+  }
   const plan = planSpeakerEnrollmentAudio(input.intervals);
   if (!plan || !fs.existsSync(input.sourcePath)) return null;
   fs.mkdirSync(input.outputDir, { recursive: true });
@@ -90,18 +122,25 @@ export const createSpeakerEnrollmentAudio = async (input: {
   const systemPath = path.join(input.outputDir, `system-${token}.wav`);
   const micPath = path.join(input.outputDir, `mic-${token}.wav`);
   try {
+    if (input.signal?.aborted) {
+      throw new Error('speaker_audio_aborted');
+    }
     const systemCommand = ffmpeg();
     for (const seek of plan.inputSeeks) {
       systemCommand.input(input.sourcePath).inputOptions([`-ss ${seek}`]);
     }
     systemCommand.complexFilter(plan.filter).outputOptions(['-map [out]']);
-    await saveWav(systemCommand, systemPath);
+    await saveWav(systemCommand, systemPath, input.signal);
+    if (input.signal?.aborted) {
+      throw new Error('speaker_audio_aborted');
+    }
     await saveWav(
       ffmpeg(input.sourcePath)
         .setStartTime(0)
         .duration(plan.totalDurationSeconds)
         .audioFilters(['volume=0']),
       micPath,
+      input.signal,
     );
     return {
       systemPath,

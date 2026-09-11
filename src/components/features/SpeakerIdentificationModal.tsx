@@ -21,6 +21,7 @@ import {
 } from '../../api/identity';
 import {
   type ClientCandidateMetadata,
+  type SpeakerVoiceEnrollmentResult,
   type VoiceMatchSuggestion,
   enrollSpeakerVoice,
   getSpeakerVoiceSuggestions,
@@ -94,6 +95,11 @@ export const SpeakerIdentificationModal = ({
   >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
+  const voiceSuggestionsPromiseRef = useRef<Promise<void> | null>(null);
+  const speakerCandidatesRef = useRef<Record<string, ClientCandidateMetadata>>(
+    {},
+  );
+  const voiceEnrollmentAvailabilityRef = useRef<Record<string, boolean>>({});
   const isMountedRef = useRef(true);
   const [refSampleLoading, setRefSampleLoading] = useState(false);
   const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
@@ -164,22 +170,37 @@ export const SpeakerIdentificationModal = ({
 
   const loadVoiceSuggestions = useCallback(async () => {
     const refreshStart = performance.now();
+    const currentPromise = (async () => {
+      try {
+        const res = await getSpeakerVoiceSuggestions(
+          meetingId,
+          attendeeNamesRef.current,
+        );
+        speakerCandidatesRef.current = res.candidates;
+        voiceEnrollmentAvailabilityRef.current = res.enrollmentAvailability;
+        if (!isMountedRef.current) return;
+        setVoiceSuggestions(res.suggestions);
+        setSpeakerCandidates(res.candidates);
+        setVoiceEnrollmentAvailability(res.enrollmentAvailability);
+        const refreshDurationMs = Math.round(performance.now() - refreshStart);
+        console.log(
+          '[Pluto][SpeakerVoice] post-confirmation refresh completed',
+          {
+            meetingId,
+            durationMs: refreshDurationMs,
+          },
+        );
+      } catch {
+        // non-fatal
+      }
+    })();
+    voiceSuggestionsPromiseRef.current = currentPromise;
     try {
-      const res = await getSpeakerVoiceSuggestions(
-        meetingId,
-        attendeeNamesRef.current,
-      );
-      if (!isMountedRef.current) return;
-      setVoiceSuggestions(res.suggestions);
-      setSpeakerCandidates(res.candidates);
-      setVoiceEnrollmentAvailability(res.enrollmentAvailability);
-      const refreshDurationMs = Math.round(performance.now() - refreshStart);
-      console.log('[Pluto][SpeakerVoice] post-confirmation refresh completed', {
-        meetingId,
-        durationMs: refreshDurationMs,
-      });
-    } catch {
-      // non-fatal
+      await currentPromise;
+    } finally {
+      if (voiceSuggestionsPromiseRef.current === currentPromise) {
+        voiceSuggestionsPromiseRef.current = null;
+      }
     }
   }, [meetingId]);
 
@@ -454,15 +475,9 @@ export const SpeakerIdentificationModal = ({
       });
       setState(next);
 
-      // A confirmed peer identity should become reusable voice evidence whenever
-      // this reviewed meeting has a clean, eligible system-audio source.
-      const candidate = speakerCandidates[speaker];
       const enrolledPersonId =
         next.bindings.find((binding) => binding.speaker === speaker)
           ?.personId ?? selection.personId;
-      const canEnrollVoice =
-        candidate?.isEligibleForEnrollment ||
-        voiceEnrollmentAvailability[speaker];
 
       // Auto-advance immediately upon persistence so wizard is never stalled.
       if (autoAdvance) {
@@ -474,21 +489,59 @@ export const SpeakerIdentificationModal = ({
       }
 
       // Voice enrollment is a non-blocking follow-up.
-      if (canEnrollVoice && enrolledPersonId) {
+      if (enrolledPersonId) {
         void (async () => {
           try {
-            const res = await enrollSpeakerVoice({
-              personId: enrolledPersonId,
-              sourceMeetingId: meetingId,
-              speaker,
-              expectedRevision: next.revision,
-              ...(candidate?.isEligibleForEnrollment
-                ? {
-                    sourceRevision: candidate.sourceRevision,
-                    candidateDigest: candidate.candidateDigest,
-                  }
-                : {}),
-            });
+            // Await in-flight metadata suggestions if still loading so enrollment is never skipped
+            if (voiceSuggestionsPromiseRef.current) {
+              await voiceSuggestionsPromiseRef.current;
+            }
+            const candidate = speakerCandidatesRef.current[speaker];
+            const isAvailable = voiceEnrollmentAvailabilityRef.current[speaker];
+            const canEnrollVoice = Boolean(
+              candidate?.isEligibleForEnrollment || isAvailable,
+            );
+            if (!canEnrollVoice) return;
+
+            const attemptEnrollment = async (rev: number) => {
+              return await enrollSpeakerVoice({
+                personId: enrolledPersonId,
+                sourceMeetingId: meetingId,
+                speaker,
+                expectedRevision: rev,
+                ...(candidate?.isEligibleForEnrollment
+                  ? {
+                      sourceRevision: candidate.sourceRevision,
+                      candidateDigest: candidate.candidateDigest,
+                    }
+                  : {}),
+              });
+            };
+
+            let res: SpeakerVoiceEnrollmentResult;
+            try {
+              res = await attemptEnrollment(next.revision);
+            } catch (firstErr: any) {
+              // If revision changed due to unrelated identity changes (e.g. user confirmed next speaker),
+              // re-check if this speaker is still bound to enrolledPersonId and retry once.
+              if (
+                firstErr?.message === 'identity_revision_stale' ||
+                String(firstErr).includes('identity_revision_stale')
+              ) {
+                const latestIdentity = await getMeetingIdentity(meetingId);
+                const currentBinding = latestIdentity.bindings.find(
+                  (b) => b.speaker === speaker,
+                );
+                if (currentBinding?.personId === enrolledPersonId) {
+                  res = await attemptEnrollment(latestIdentity.revision);
+                } else {
+                  throw firstErr;
+                }
+              } else {
+                throw firstErr;
+              }
+            }
+
             if (res?.timings) {
               console.log('[Pluto][SpeakerVoice] voice enrollment timings', {
                 meetingId,

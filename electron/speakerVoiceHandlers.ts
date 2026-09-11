@@ -140,7 +140,7 @@ const getCurrentConfirmedBinding = (
   speaker: string,
   canonicalPersonId: string,
   d: Database.Database,
-): { enrollmentPersonId: string } | null => {
+): { enrollmentPersonId: string; rawPayload: string } | null => {
   const row = d
     .prepare(
       'SELECT payload FROM identity_bindings WHERE meeting_id = ? AND speaker = ?',
@@ -160,7 +160,7 @@ const getCurrentConfirmedBinding = (
   ) {
     return null;
   }
-  return { enrollmentPersonId: payload.personId };
+  return { enrollmentPersonId: payload.personId, rawPayload: row.payload };
 };
 
 const isWorkspaceOwner = (
@@ -584,7 +584,7 @@ export async function handleSpeakerVoiceRequest(
 
       if (
         typeof expectedRevision !== 'number' ||
-        db.identityStore.getRevision() !== expectedRevision
+        expectedRevision > db.identityStore.getRevision()
       ) {
         throw new Error('identity_revision_stale');
       }
@@ -597,7 +597,8 @@ export async function handleSpeakerVoiceRequest(
           canonicalPersonId,
           d,
         );
-      if (!bindingMatches()) throw new Error('speaker_enrollment_unconfirmed');
+      const initialBinding = bindingMatches();
+      if (!initialBinding) throw new Error('speaker_enrollment_unconfirmed');
       if (isWorkspaceOwner(canonicalPersonId, d)) {
         throw new Error('speaker_enrollment_self_disallowed');
       }
@@ -655,9 +656,13 @@ export async function handleSpeakerVoiceRequest(
         }
       } else {
         const abortController = new AbortController();
-        const timeout = setTimeout(() => {
-          abortController.abort();
-        }, timeoutMs);
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            abortController.abort();
+            reject(new Error('speaker_enrollment_timeout'));
+          }, timeoutMs);
+        });
         let built:
           | Awaited<
               ReturnType<
@@ -668,18 +673,21 @@ export async function handleSpeakerVoiceRequest(
             >
           | undefined = null;
         try {
-          built = await deps?.buildEnrollmentCandidate?.({
-            meetingId: String(sourceMeetingId ?? ''),
-            speaker: String(speaker ?? ''),
-            signal: abortController.signal,
-          });
+          built = await Promise.race([
+            deps?.buildEnrollmentCandidate?.({
+              meetingId: String(sourceMeetingId ?? ''),
+              speaker: String(speaker ?? ''),
+              signal: abortController.signal,
+            }) ?? Promise.resolve(null),
+            timeoutPromise,
+          ]);
         } catch (err) {
           if (abortController.signal.aborted) {
             throw new Error('speaker_enrollment_timeout');
           }
           throw err;
         } finally {
-          clearTimeout(timeout);
+          if (timeoutId) clearTimeout(timeoutId);
         }
 
         if (
@@ -696,9 +704,10 @@ export async function handleSpeakerVoiceRequest(
         ) {
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
+        const currentBinding = bindingMatches();
         if (
-          db.identityStore.getRevision() !== expectedRevision ||
-          !bindingMatches()
+          !currentBinding ||
+          currentBinding.rawPayload !== initialBinding.rawPayload
         ) {
           throw new Error('identity_revision_stale');
         }
@@ -715,8 +724,8 @@ export async function handleSpeakerVoiceRequest(
       const enrollment = d.transaction(() => {
         const currentBinding = bindingMatches();
         if (
-          db.identityStore.getRevision() !== expectedRevision ||
-          !currentBinding
+          !currentBinding ||
+          currentBinding.rawPayload !== initialBinding.rawPayload
         ) {
           throw new Error('identity_revision_stale');
         }

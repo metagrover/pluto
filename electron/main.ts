@@ -1107,6 +1107,12 @@ app.whenReady().then(async () => {
         readEncryptedSlice: readEncryptedMeetingSlice,
         buildEnrollmentCandidate: async (input) => {
           if (!parakeetFinalClient) return null;
+          const meetingSignal = getAbortSignalForMeeting(input.meetingId);
+          const combinedSignal = input.signal
+            ? typeof AbortSignal.any === 'function'
+              ? AbortSignal.any([meetingSignal, input.signal])
+              : input.signal
+            : meetingSignal;
           return await buildSpeakerEnrollmentCandidate(input, {
             getMeeting: (meetingId) =>
               (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ??
@@ -1120,21 +1126,15 @@ app.whenReady().then(async () => {
               await fs.promises.rm(workDir, { recursive: true, force: true });
             },
             createAudio: createSpeakerEnrollmentAudio,
-            signal: input.signal,
+            signal: combinedSignal,
             analyze: async (request) => {
-              const meetingSignal = getAbortSignalForMeeting(input.meetingId);
-              const signal = input.signal
-                ? typeof AbortSignal.any === 'function'
-                  ? AbortSignal.any([meetingSignal, input.signal])
-                  : input.signal
-                : meetingSignal;
               const infStart = performance.now();
               beginTranscriptionWork();
               beginMeetingTranscription(input.meetingId);
               try {
                 return await parakeetFinalClient!.speakerEvidence({
                   ...request,
-                  signal,
+                  signal: combinedSignal,
                 });
               } finally {
                 const infDurationMs = Math.round(performance.now() - infStart);

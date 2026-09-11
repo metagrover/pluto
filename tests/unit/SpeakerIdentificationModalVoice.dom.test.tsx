@@ -498,4 +498,215 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       resolveEnrollment?.({ success: true, enrollmentId: 'enroll-1' });
     });
   });
+
+  it('enrolls voice profile even when user confirms while voice suggestions are still loading', async () => {
+    let resolveSuggestions: ((val: any) => void) | null = null;
+    const pendingSuggestionsPromise = new Promise((resolve) => {
+      resolveSuggestions = resolve;
+    });
+
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY')
+        return meeting(payload?.meetingId ?? 'meeting-voice');
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return await pendingSuggestionsPromise;
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 11,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        return { success: true, enrollmentId: 'enroll-late' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SET_MEETING_IDENTITY_BINDING',
+      expect.objectContaining({
+        speaker: 'Remote Speaker 1',
+        personId: 'person-alex',
+      }),
+    );
+
+    expect(invoke).not.toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.anything(),
+    );
+
+    await act(async () => {
+      resolveSuggestions?.({
+        suggestions: {},
+        candidates: {
+          'Remote Speaker 1': {
+            candidateDigest: 'cand-late-1',
+            sourceRevision: 'rev-1',
+            isEligibleForEnrollment: true,
+            cleanDurationSeconds: 5,
+          },
+        },
+        enrollmentAvailability: { 'Remote Speaker 1': true },
+      });
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({
+        personId: 'person-alex',
+        speaker: 'Remote Speaker 1',
+        candidateDigest: 'cand-late-1',
+      }),
+    );
+  });
+
+  it('retries voice enrollment when identity revision changes due to unrelated changes', async () => {
+    let enrollmentAttempt = 0;
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 12,
+          bindings: [
+            {
+              speaker: 'Remote Speaker 1',
+              source: 'user',
+              personId: 'person-alex',
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {
+            'Remote Speaker 1': {
+              speaker: 'Remote Speaker 1',
+              suggestedPersonId: 'person-alex',
+              suggestedPersonName: 'Alex Chen',
+              similarityScore: 0.95,
+              confidenceTier: 'high',
+              isCalendarAttendee: true,
+              candidateDigest: 'cand-digest-1',
+              sourceRevision,
+            },
+          },
+          candidates: {},
+          enrollmentAvailability: { 'Remote Speaker 1': true },
+        };
+      }
+      if (channel === 'SET_MEETING_IDENTITY_BINDING') {
+        return {
+          ...meeting(payload?.meetingId ?? 'meeting-voice'),
+          revision: 10,
+          bindings: [
+            {
+              speaker: payload.speaker,
+              source: 'user',
+              personId: payload.personId,
+              individual: true,
+            },
+          ],
+        };
+      }
+      if (channel === 'SPEAKER_VOICE_ENROLL') {
+        enrollmentAttempt++;
+        if (enrollmentAttempt === 1) {
+          throw new Error('identity_revision_stale');
+        }
+        return { success: true, enrollmentId: 'enroll-retried' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    const input = document.querySelector(
+      'input[placeholder="Search people or type a new name…"]',
+    ) as HTMLInputElement;
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Alex Chen');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const alexOption = Array.from(
+      document.querySelectorAll('[role="option"]'),
+    ).find((option) => option.textContent?.includes('Alex Chen')) as
+      | HTMLElement
+      | undefined;
+    await act(async () => alexOption?.click());
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Confirm Alex Chen'),
+    );
+    await act(async () => confirmButton?.click());
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({ expectedRevision: 10 }),
+    );
+
+    expect(invoke).toHaveBeenCalledWith(
+      'SPEAKER_VOICE_ENROLL',
+      expect.objectContaining({ expectedRevision: 12 }),
+    );
+    expect(enrollmentAttempt).toBe(2);
+  });
 });

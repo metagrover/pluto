@@ -669,6 +669,72 @@ describe('speaker voice IPC handlers', () => {
     ).rejects.toThrow('speaker_enrollment_timeout');
   });
 
+  it('times out even when buildEnrollmentCandidate hangs and ignores signal', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async () => new Promise<never>(() => {}),
+    );
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+          timeoutMs: 10,
+        },
+        { buildEnrollmentCandidate },
+      ),
+    ).rejects.toThrow('speaker_enrollment_timeout');
+  });
+
+  it('enrolls successfully when unrelated identity changes occur during candidate construction', async () => {
+    const rev = db.identityStore.getRevision();
+    const buildEnrollmentCandidate = vi.fn(async () => {
+      // An unrelated speaker identity binding is confirmed
+      db.saveMeeting({
+        id: 'unrelated-meeting',
+        title: 'Unrelated',
+        transcript_json: JSON.stringify([{ speaker: 'Other', text: 'Hi' }]),
+      });
+      db.upsertEntity({
+        id: 'unrelated-person',
+        type: 'person',
+        name: 'Unrelated Person',
+        dedupe_by_name: false,
+      });
+      db.identityStore.setBinding('unrelated-meeting', {
+        speaker: 'Other',
+        personId: 'unrelated-person',
+        individual: true,
+        source: 'user',
+        sourceRevision: 'gen-1',
+        evidence: [],
+      });
+      // Global revision has now bumped
+      expect(db.identityStore.getRevision()).toBeGreaterThan(rev);
+
+      return {
+        candidate: dummyCandidate,
+        sourceRevision,
+      };
+    });
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_ENROLL',
+      {
+        personId,
+        sourceMeetingId: meetingId,
+        speaker: 'Remote Speaker 1',
+        expectedRevision: rev,
+      },
+      { buildEnrollmentCandidate },
+    )) as { success: boolean };
+
+    expect(result.success).toBe(true);
+  });
+
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {
     const buildEnrollmentCandidate = vi.fn(async () => ({
       candidate: dummyCandidate,

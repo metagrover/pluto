@@ -112,14 +112,16 @@ describe('buildSpeakerEnrollmentCandidate', () => {
       },
     );
 
-    expect(createAudio).toHaveBeenCalledWith({
-      sourcePath: '/recordings/full.wav',
-      intervals: [
-        { startSec: 10, endSec: 15, excerpt: 'First sample' },
-        { startSec: 30, endSec: 34, excerpt: 'Second sample' },
-      ],
-      outputDir: '/recordings/work',
-    });
+    expect(createAudio).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: '/recordings/full.wav',
+        intervals: [
+          { startSec: 10, endSec: 15, excerpt: 'First sample' },
+          { startSec: 30, endSec: 34, excerpt: 'Second sample' },
+        ],
+        outputDir: '/recordings/work',
+      }),
+    );
     expect(analyze).toHaveBeenCalledWith({
       mixedAudioPath: '/recordings/work/system.wav',
       micAudioPath: '/recordings/work/mic.wav',
