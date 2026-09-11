@@ -1,18 +1,1 @@
-
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-# Scientific runtime used by local speaker attribution.
-numpy<2.0
-python-multipart
-tqdm
-regex
-requests
-packaging
-filelock
-tokenizers
-huggingface-hub
-more-itertools
-numba
-scipy
-tiktoken
 sherpa-onnx==1.13.4
