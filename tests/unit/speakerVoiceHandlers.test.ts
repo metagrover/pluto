@@ -735,6 +735,26 @@ describe('speaker voice IPC handlers', () => {
     expect(result.success).toBe(true);
   });
 
+  it('bounds candidate extraction when buildEnrollmentCandidate hangs in suggestions', async () => {
+    const buildEnrollmentCandidate = vi.fn(
+      async () => new Promise<never>(() => {}),
+    );
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { buildEnrollmentCandidate, reconciliationTimeoutMs: 10 },
+    )) as {
+      suggestions: Record<string, unknown>;
+      candidates: Record<string, unknown>;
+      enrollmentAvailability: Record<string, boolean>;
+    };
+
+    expect(result).toBeDefined();
+    expect(result.suggestions).toBeDefined();
+    expect(result.candidates).toBeDefined();
+  });
+
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {
     const buildEnrollmentCandidate = vi.fn(async () => ({
       candidate: dummyCandidate,
@@ -933,10 +953,12 @@ describe('speaker voice IPC handlers', () => {
       { buildEnrollmentCandidate, isFeatureFlagEnabled: () => true },
     )) as { suggestions: Record<string, { suggestedPersonId: string }> };
 
-    expect(buildEnrollmentCandidate).toHaveBeenCalledWith({
-      meetingId: queryMeetingId,
-      speaker: 'Remote Speaker 2',
-    });
+    expect(buildEnrollmentCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetingId: queryMeetingId,
+        speaker: 'Remote Speaker 2',
+      }),
+    );
     expect(result.suggestions['Remote Speaker 2']?.suggestedPersonId).toBe(
       personId,
     );

@@ -60,6 +60,7 @@ export interface SpeakerVoiceDependencies {
     startSec: number;
     durationSec: number;
   }) => Promise<Buffer | null>;
+  reconciliationTimeoutMs?: number;
   buildEnrollmentCandidate?: (input: {
     meetingId: string;
     speaker: string;
@@ -176,6 +177,50 @@ const isWorkspaceOwner = (
     row?.self_person_id &&
       resolvePersonId(row.self_person_id, d) === canonicalPersonId,
   );
+};
+
+const buildCandidateWithTimeout = async (
+  deps: SpeakerVoiceDependencies | undefined,
+  input: {
+    meetingId: string;
+    speaker: string;
+  },
+  timeoutMs = 30000,
+): Promise<{
+  candidate: SpeakerCandidateEvidence;
+  sourceRevision: string;
+  timings?: {
+    candidateConstructionMs: number;
+    initialInferenceMs: number;
+    representativeInferencesMs: number[];
+  };
+} | null> => {
+  if (!deps?.buildEnrollmentCandidate) return null;
+  const abortController = new AbortController();
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      abortController.abort();
+      reject(new Error('speaker_enrollment_timeout'));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      deps.buildEnrollmentCandidate({
+        meetingId: input.meetingId,
+        speaker: input.speaker,
+        signal: abortController.signal,
+      }),
+      timeoutPromise,
+    ]);
+  } catch (err) {
+    if (abortController.signal.aborted) {
+      throw new Error('speaker_enrollment_timeout');
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 };
 
 async function reconcileConfirmedSpeakerVoiceProfiles(
@@ -346,10 +391,14 @@ async function reconcileConfirmedSpeakerVoiceProfiles(
                   candidate: storedCandidate,
                   sourceRevision: storedCandidate.sourceRevision,
                 }
-              : await buildEnrollmentCandidate({
-                  meetingId: binding.meetingId,
-                  speaker: binding.speaker,
-                });
+              : await buildCandidateWithTimeout(
+                  deps,
+                  {
+                    meetingId: binding.meetingId,
+                    speaker: binding.speaker,
+                  },
+                  deps?.reconciliationTimeoutMs ?? 15000,
+                );
           if (
             !built ||
             !isCurrentEligibleCandidate(
@@ -461,10 +510,14 @@ export async function handleSpeakerVoiceRequest(
         for (const candidate of candidates) {
           if (usesCurrentEnrollmentExtraction(candidate)) continue;
           try {
-            const built = await deps.buildEnrollmentCandidate({
-              meetingId,
-              speaker: candidate.speaker,
-            });
+            const built = await buildCandidateWithTimeout(
+              deps,
+              {
+                meetingId,
+                speaker: candidate.speaker,
+              },
+              deps?.reconciliationTimeoutMs ?? 15000,
+            );
             if (
               built &&
               built.candidate.speaker === candidate.speaker &&
@@ -655,40 +708,14 @@ export async function handleSpeakerVoiceRequest(
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
-        const abortController = new AbortController();
-        let timeoutId: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            abortController.abort();
-            reject(new Error('speaker_enrollment_timeout'));
-          }, timeoutMs);
-        });
-        let built:
-          | Awaited<
-              ReturnType<
-                NonNullable<
-                  SpeakerVoiceDependencies['buildEnrollmentCandidate']
-                >
-              >
-            >
-          | undefined = null;
-        try {
-          built = await Promise.race([
-            deps?.buildEnrollmentCandidate?.({
-              meetingId: String(sourceMeetingId ?? ''),
-              speaker: String(speaker ?? ''),
-              signal: abortController.signal,
-            }) ?? Promise.resolve(null),
-            timeoutPromise,
-          ]);
-        } catch (err) {
-          if (abortController.signal.aborted) {
-            throw new Error('speaker_enrollment_timeout');
-          }
-          throw err;
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-        }
+        const built = await buildCandidateWithTimeout(
+          deps,
+          {
+            meetingId: String(sourceMeetingId ?? ''),
+            speaker: String(speaker ?? ''),
+          },
+          timeoutMs,
+        );
 
         if (
           !built ||

@@ -47,6 +47,7 @@ export interface SpeakerIdentificationModalProps {
   hasSystemAudio?: boolean;
   speakerSummaries?: Record<string, SpeakerReviewSummary>;
   onDisplayNamesChange?: (displayNames: Record<string, string>) => void;
+  metadataWaitTimeoutMs?: number;
 }
 
 export const SpeakerIdentificationModal = ({
@@ -58,6 +59,7 @@ export const SpeakerIdentificationModal = ({
   hasSystemAudio = true,
   speakerSummaries = {},
   onDisplayNamesChange,
+  metadataWaitTimeoutMs = 2000,
 }: SpeakerIdentificationModalProps) => {
   const dialogId = useId();
   const titleId = useId();
@@ -492,17 +494,38 @@ export const SpeakerIdentificationModal = ({
       if (enrolledPersonId) {
         void (async () => {
           try {
-            // Await in-flight metadata suggestions if still loading so enrollment is never skipped
+            // Await in-flight metadata suggestions if still loading, but bound the wait
+            // so an unbounded or hung metadata reconciliation never stalls enrollment.
             if (voiceSuggestionsPromiseRef.current) {
-              await voiceSuggestionsPromiseRef.current;
+              try {
+                await Promise.race([
+                  voiceSuggestionsPromiseRef.current,
+                  new Promise((resolve) =>
+                    setTimeout(resolve, metadataWaitTimeoutMs),
+                  ),
+                ]);
+              } catch {
+                // Non-fatal: fall back to enrollment without cached suggestions
+              }
             }
             const candidate = speakerCandidatesRef.current[speaker];
-            const isAvailable = voiceEnrollmentAvailabilityRef.current[speaker];
-            const canEnrollVoice = Boolean(
-              candidate?.isEligibleForEnrollment || isAvailable,
-            );
-            if (!canEnrollVoice) return;
+            const availability = voiceEnrollmentAvailabilityRef.current;
+            const hasAvailabilityInfo = speaker in availability;
+            const isAvailable = availability[speaker];
 
+            // If metadata has loaded and explicitly determined that this speaker is unavailable
+            // and has no eligible candidate, skip enrollment.
+            if (
+              hasAvailabilityInfo &&
+              !isAvailable &&
+              !candidate?.isEligibleForEnrollment
+            ) {
+              return;
+            }
+
+            // Otherwise (metadata confirmed availability, OR metadata timed out/failed/not loaded),
+            // proceed to enroll (using cached candidate evidence if available, or falling back to
+            // backend candidate generation without cached metadata).
             const attemptEnrollment = async (rev: number) => {
               return await enrollSpeakerVoice({
                 personId: enrolledPersonId,
@@ -524,10 +547,7 @@ export const SpeakerIdentificationModal = ({
             } catch (firstErr: any) {
               // If revision changed due to unrelated identity changes (e.g. user confirmed next speaker),
               // re-check if this speaker is still bound to enrolledPersonId and retry once.
-              if (
-                firstErr?.message === 'identity_revision_stale' ||
-                String(firstErr).includes('identity_revision_stale')
-              ) {
+              if (isIdentityRevisionError(firstErr)) {
                 const latestIdentity = await getMeetingIdentity(meetingId);
                 const currentBinding = latestIdentity.bindings.find(
                   (b) => b.speaker === speaker,

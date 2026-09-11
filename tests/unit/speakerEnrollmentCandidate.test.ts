@@ -387,7 +387,9 @@ describe('buildSpeakerEnrollmentCandidate', () => {
     );
 
     expect(result?.timings).toBeDefined();
+    expect(typeof result?.timings?.candidateConstructionMs).toBe('number');
     expect(result?.timings?.candidateConstructionMs).toBeGreaterThanOrEqual(0);
+    expect(typeof result?.timings?.initialInferenceMs).toBe('number');
     expect(result?.timings?.initialInferenceMs).toBeGreaterThanOrEqual(0);
     expect(result?.timings?.representativeInferencesMs.length).toBe(2);
   });

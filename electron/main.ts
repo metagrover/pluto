@@ -1109,9 +1109,7 @@ app.whenReady().then(async () => {
           if (!parakeetFinalClient) return null;
           const meetingSignal = getAbortSignalForMeeting(input.meetingId);
           const combinedSignal = input.signal
-            ? typeof AbortSignal.any === 'function'
-              ? AbortSignal.any([meetingSignal, input.signal])
-              : input.signal
+            ? AbortSignal.any([meetingSignal, input.signal])
             : meetingSignal;
           return await buildSpeakerEnrollmentCandidate(input, {
             getMeeting: (meetingId) =>
