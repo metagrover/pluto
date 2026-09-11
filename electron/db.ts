@@ -2998,11 +2998,7 @@ export const publishMeetingNotesIfCurrent = (input: {
         ? input.analysis.title.trim()
         : null;
     const nextTitle = genericTitle
-      ? (modelTitle ??
-        input.analysis.topics
-          .map((topic) => topic.title.trim())
-          .find((title) => title.length > 0 && title.length <= 120) ??
-        current.title)
+      ? (modelTitle ?? current.title)
       : current.title;
 
     const meetingUpdate = db

@@ -53,17 +53,26 @@ export const buildNotesResponseSchema = (
       },
       ['kind', 'text', 'owner', 'due', 'sources'],
     );
-    return object({
-      sections: {
-        ...array(
-          object({
-            title: { type: 'string', minLength: 1, maxLength: 12_000 },
-            items: { ...array(compactItem), minItems: 1 },
-          }),
-        ),
-        maxItems: 64,
+    return object(
+      {
+        title: {
+          anyOf: [
+            { type: 'string', minLength: 1, maxLength: 12_000 },
+            { type: 'null' },
+          ],
+        },
+        sections: {
+          ...array(
+            object({
+              title: { type: 'string', minLength: 1, maxLength: 12_000 },
+              items: { ...array(compactItem), minItems: 1 },
+            }),
+          ),
+          maxItems: 64,
+        },
       },
-    });
+      ['title', 'sections'],
+    );
   }
   const text = (requireId: boolean) =>
     object(textProperties, [...(requireId ? ['id'] : []), 'text', 'sources']);
@@ -180,6 +189,8 @@ export const buildNotesResponseSchema = (
       },
       ...(contract === 'editor' ? { dispositions, terminology } : {}),
     },
-    ['meetingType', 'overview', 'sections'],
+    contract === 'editor'
+      ? ['title', 'meetingType', 'overview', 'sections']
+      : ['meetingType', 'overview', 'sections'],
   );
 };

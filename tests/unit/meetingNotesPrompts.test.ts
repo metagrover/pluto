@@ -32,6 +32,7 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   const prompt = buildCompactNotesWriterPrompt(input);
 
   expect(prompt).toContain('title: nonempty string');
+  expect(prompt).toContain('overall meeting');
   expect(prompt).toContain('at most 3 copied source descriptors');
   expect(prompt).toContain('owner: string | null');
   expect(prompt).toContain('due: string | null');
@@ -44,6 +45,13 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).not.toContain('overview:');
   expect(prompt).not.toContain('recentWin:');
   expect(prompt).not.toContain('meetingType:');
+});
+
+it('distinguishes the compact overall title from the first section heading', () => {
+  const prompt = buildCompactNotesWriterPrompt(input);
+
+  expect(prompt).toContain('not the first section heading');
+  expect(prompt).toContain('title field is required');
 });
 
 it('requires the compact final editor to retain source rules and structured ownership', () => {

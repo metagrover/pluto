@@ -56,8 +56,8 @@ const notesBlockSchema = [
 export const notesDraftSchema = [
   'Field definitions (not output content):',
   notesBlockSchema,
-  'Document = {title: Text | null, meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text} | null}. title is a concise descriptive title for the overall meeting (max 5-7 words) citing the main topic source descriptor(s), or null if uncertain. recentWin is optional; include only a completed positive event and its source-backed impact. When present, recentWin.win and recentWin.impact must be complete Text blocks, not null.',
-  'Use null for absent title/overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
+  'Document = {title: Text | null, meetingType: one_on_one | team_sync | brainstorm | presentation | general, overview: Text | null, sections: Section[], recentWin: {win: Text, impact: Text} | null}. title is required and is a concise descriptive title for the overall meeting (max 5-7 words) citing the main topic source descriptor(s), or null only when no trustworthy overall title can be grounded. Do not use a single topic heading as the meeting title unless it represents the whole meeting. recentWin is optional; include only a completed positive event and its source-backed impact. When present, recentWin.win and recentWin.impact must be complete Text blocks, not null.',
+  'Use null for an uncertain title/overview/recentWin and [] for empty sections/items. The application assigns canonical block ids after parsing.',
 ].join('\n');
 
 const compactNotesDraftSchema = [
@@ -65,7 +65,8 @@ const compactNotesDraftSchema = [
   'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
   'Use kind: "point" for discussion.',
   'Section = {title: nonempty string, items: nonempty Item[]}.',
-  'Document = {sections: Section[]}. The final editor classifies the meeting.',
+  'Document = {title: nonempty string | null, sections: Section[]}. title is the concise 5-7 word title for the overall meeting, not the first section heading; use null only when no trustworthy overall title can be grounded. Code derives title evidence from the cited item source descriptors. The final editor classifies the meeting.',
+  'The title field is required even when its value is null.',
 ].join('\n');
 
 export const notesDispositionSchema =
@@ -138,7 +139,7 @@ export const buildCompactNotesWriterPrompt = ({
   [
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
-    'Return only useful note items. Code derives the overview and heading evidence.',
+    'Return the overall meeting title plus useful note items. Code derives the overview and section-heading evidence; do not substitute the first section heading for the overall title.',
     'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments; compact repetition, not facts.',
     'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Keep the task, recipient, condition and deadline clear in the text itself.',
     'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, use its speaker as owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',

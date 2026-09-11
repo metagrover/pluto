@@ -218,6 +218,7 @@ it('routes the compact product writer through the complete-document editor', asy
     .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: 'Dense Meeting',
         sections: [
           {
             title: 'Outline',
@@ -542,7 +543,7 @@ it('precomputes the compact product contract at background priority', async () =
       task: 'notesWriter',
       workClass: 'background',
       notesResponseSchema: expect.objectContaining({
-        properties: {
+        properties: expect.objectContaining({
           sections: expect.objectContaining({
             items: expect.objectContaining({
               properties: expect.objectContaining({
@@ -550,7 +551,7 @@ it('precomputes the compact product contract at background priority', async () =
               }),
             }),
           }),
-        },
+        }),
       }),
     }),
   );

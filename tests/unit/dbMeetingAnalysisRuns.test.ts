@@ -216,7 +216,7 @@ describe('meeting analysis run publication', () => {
     ).toBe(false);
   });
 
-  it('derives a placeholder title from reviewed notes without a separate model call', () => {
+  it('does not promote the first topic to the meeting title when the overall title is missing', () => {
     const id = 'placeholder-title';
     const revisions = fixture(id);
     saveMeeting({ ...getMeeting(id), title: 'New Meeting' });
@@ -233,7 +233,7 @@ describe('meeting analysis run publication', () => {
       },
     ];
     expect(publish(id, 'title-run', 'fp', revisions, next)).toBe(true);
-    expect(getMeeting(id)?.title).toBe('Outline review');
+    expect(getMeeting(id)?.title).toBe('New Meeting');
   });
 
   it('uses analysis.title directly when meeting title is generic', () => {

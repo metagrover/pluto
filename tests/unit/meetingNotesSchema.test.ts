@@ -50,6 +50,7 @@ const validate = (
 describe('local notes wire schemas', () => {
   it('expands a compact writer draft with derived title evidence and empty metadata', () => {
     const value = {
+      title: 'Quarterly Planning',
       sections: [
         {
           title: 'Outline',
@@ -70,12 +71,16 @@ describe('local notes wire schemas', () => {
     const expected = structuredClone(fixture.draft);
     expected.sections[0]!.items[0]!.owner = 'Ava';
     expect(parseCompactNotesDraft(wire.decode(JSON.stringify(value)))).toEqual(
-      expected,
+      expect.objectContaining({
+        title: expect.objectContaining({ text: 'Quarterly Planning' }),
+        sections: expected.sections,
+      }),
     );
   });
 
   it('ignores a leaked compact meeting type because the editor owns final classification', () => {
     const value = {
+      title: 'Interview Overview',
       meetingType: 'interview',
       sections: [
         {
@@ -100,6 +105,7 @@ describe('local notes wire schemas', () => {
 
   it('rejects compact writer items with more than three sources', () => {
     const value = {
+      title: 'Outline Review',
       sections: [
         {
           title: 'Outline',
@@ -304,11 +310,12 @@ describe('local notes wire schemas', () => {
     expect(() =>
       parseNotesAudit(wire.decode(JSON.stringify({ ...audit, ...extras }))),
     ).not.toThrow();
-    expect(validate('editor', { ...draft, ...extras })).toBe(true);
-    expect(validate('editor', draft)).toBe(true);
+    const editorDraft = { ...draft, title: text };
+    expect(validate('editor', { ...editorDraft, ...extras })).toBe(true);
+    expect(validate('editor', editorDraft)).toBe(true);
     expect(() =>
       parseEditedNotes({
-        raw: wire.decode(JSON.stringify({ ...draft, ...extras })),
+        raw: wire.decode(JSON.stringify({ ...editorDraft, ...extras })),
         source: fixture.source,
       }),
     ).not.toThrow();

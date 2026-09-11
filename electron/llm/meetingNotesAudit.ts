@@ -235,7 +235,7 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
   const compactKeys =
     isRecord(parsed) &&
     Object.keys(parsed).every((key) =>
-      ['meetingType', 'sections'].includes(key),
+      ['title', 'meetingType', 'sections'].includes(key),
     );
   if (
     !isRecord(parsed) ||
@@ -297,9 +297,33 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
       items,
     };
   });
+  const title =
+    parsed.title === undefined || parsed.title === null
+      ? null
+      : typeof parsed.title === 'string' && parsed.title.trim()
+        ? {
+            id: 'title',
+            text: parsed.title.trim(),
+            sources: [
+              ...new Map(
+                sections
+                  .flatMap((section) => section.items)
+                  .flatMap((item) => item.sources as SourceSpan[])
+                  .map((span) => [
+                    `${span.segment}:${span.start}:${span.end}`,
+                    span,
+                  ]),
+              ).values(),
+            ],
+          }
+        : null;
+  if (parsed.title !== undefined && parsed.title !== null && !title) {
+    throw new MeetingNotesError('notes_writer_invalid');
+  }
   return parseNotesDraft(
     JSON.stringify({
       meetingType: 'general',
+      title,
       overview: null,
       sections,
     }),

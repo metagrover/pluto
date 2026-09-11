@@ -64,6 +64,7 @@ export const buildNotesEditorPrompt = ({
   [
     'You are the final meeting-notes editor. Return the complete corrected document against the original source. The draft may contain mistakes or omissions; restore missing material topics and current commitments.',
     notesContentGuidance,
+    'The title field is required. It must describe the overall meeting rather than the first section; return null only when no trustworthy overall title can be grounded.',
     ...(compactDraft
       ? [
           'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons and final state changes in the overview or topic discussion, even when a related action or decision is also structured separately.',

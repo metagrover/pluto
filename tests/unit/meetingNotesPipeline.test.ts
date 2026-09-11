@@ -130,6 +130,7 @@ it('uses a compact writer and complete-document editor in exactly two calls with
   const generate = vi.fn(async (request: NotesRequest) => {
     if (request.task === 'notesWriter') {
       return JSON.stringify({
+        title: 'Executive Sync',
         sections: [
           {
             title: 'Outline',
@@ -146,7 +147,12 @@ it('uses a compact writer and complete-document editor in exactly two calls with
         ],
       });
     }
-    return auditFor(request.prompt, source);
+    const edited = JSON.parse(auditFor(request.prompt, source)) as Record<
+      string,
+      unknown
+    >;
+    edited.title = undefined;
+    return JSON.stringify(edited);
   });
   const onRepair = vi.fn();
 
@@ -173,6 +179,7 @@ it('uses a compact writer and complete-document editor in exactly two calls with
   expect(result.all_action_items).toEqual([
     expect.objectContaining(fixture.expectedAction),
   ]);
+  expect(result.title).toBe('Executive Sync');
 });
 
 it('routes a highly segmented meeting from the encoded provider payload', async () => {
@@ -1579,7 +1586,7 @@ it('strips unsupported owner and due fields in the deterministic-only benchmark'
 });
 
 it('plans leaves from leaf work without reserving capacity for a hypothetical merge', async () => {
-  const text = 'Agenda update. '.repeat(900);
+  const text = 'Agenda update. '.repeat(850);
   const source = makeSyntheticNotesSource([{ speaker: 'Milo', text }]);
   const span = { segment: 0, start: 0, end: text.length };
   let leafFit: boolean | undefined;

@@ -103,7 +103,7 @@ const planDirectCapacity = (
     safetyTokens: SAFETY_TOKENS,
   });
 const NOTES_COMPACT_RETRY_INSTRUCTION =
-  'COMPACT RETRY: Return the complete same JSON contract more concisely. Preserve every supported action, decision, condition, owner, due date, disposition, and exact source reference.';
+  'COMPACT RETRY: Return the complete same JSON contract more concisely. Preserve the overall meeting title, every supported action, decision, condition, owner, due date, disposition, and exact source reference.';
 export const NOTES_HIERARCHY_LIMITS = {
   maxDepth: 8,
   maxNodes: 128,
@@ -724,6 +724,11 @@ const auditDraft = async (
           },
           compactDraft: input.compactWriterContract === true,
         });
+        const editedPayload = JSON.parse(raw) as Record<string, unknown>;
+        if (!Object.hasOwn(editedPayload, 'title') && draft.title) {
+          result.draft.title = structuredClone(draft.title);
+          result.audited.draft = result.draft;
+        }
         assertAllowedSources(result.draft, evidenceSpans);
         assertAuditSourcesAllowed(result.audit, evidenceSpans);
         const preserved = identifyEditedNotes(
@@ -1612,7 +1617,9 @@ const runBoundedCompactNotes = async (
   );
   const combined: NotesDraft = {
     meetingType,
-    title: titles[0] ? structuredClone(titles[0]) : null,
+    // Each bounded leaf may cover only one part of the meeting. A local leaf
+    // title is not a safe meeting title once the notes span multiple leaves.
+    title: titles.length === 1 ? structuredClone(titles[0]!) : null,
     overview: overviews.length
       ? {
           id: 'overview',
