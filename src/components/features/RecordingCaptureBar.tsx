@@ -1,4 +1,5 @@
 import { ArrowLeft, CircleStop, Mic, MonitorSpeaker } from 'lucide-react';
+import { WindowDragRegion } from '../layout/WindowDragRegion';
 import type {
   CaptureHealth,
   LiveTranscriptIntegrity,
@@ -38,6 +39,7 @@ export const RecordingCaptureBar = ({
   onFinish,
 }: Props) => (
   <header className="recording-capture-bar">
+    <WindowDragRegion className="absolute inset-x-0 top-0 h-10" />
     <div
       className="recording-status no-drag"
       aria-live={liveTranscriptIntegrity === 'lagging' ? 'assertive' : 'polite'}
@@ -68,7 +70,7 @@ export const RecordingCaptureBar = ({
       <time>{elapsedLabel}</time>
       <span className="recording-status-message">{statusMessage}</span>
     </div>
-    <div className="recording-capture-drag drag-region" aria-hidden="true" />
+    <WindowDragRegion className="recording-capture-drag" />
     <div className="recording-actions no-drag">
       <Health icon={Mic} label="Microphone" state={microphone} />
       <Health icon={MonitorSpeaker} label="System audio" state={systemAudio} />

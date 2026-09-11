@@ -23,6 +23,7 @@ import {
 import { Logo } from '../Brand/Logo';
 import { ModelDownloadProgress } from '../ModelDownloadProgress';
 import { IdentityProfileForm } from '../features/IdentityProfileForm';
+import { WindowDragRegion } from '../layout/WindowDragRegion';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -210,10 +211,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   return (
     <main className="fixed inset-0 z-50 overflow-y-auto bg-[oklch(0.965_0.008_85)] text-[oklch(0.25_0.02_258)] selection:bg-[oklch(0.76_0.09_85/0.35)]">
-      <div
-        className="drag-region fixed inset-x-0 top-0 z-[60] h-9"
-        aria-hidden="true"
-      />
+      <WindowDragRegion className="fixed inset-x-0 top-0 z-[60] h-9" />
       {step === 1 ? (
         <div className="grid min-h-full lg:grid-cols-[minmax(22rem,0.78fr)_minmax(32rem,1.22fr)]">
           <ObservatoryPanel

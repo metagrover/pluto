@@ -12,6 +12,7 @@ import type { LiveConversationSnapshot } from './services/liveTranscription/live
 
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
+import { WindowDragRegion } from './components/layout/WindowDragRegion';
 
 import type {
   CalendarDescriptor,
@@ -1568,8 +1569,8 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
-          <div
-            className={`h-10 w-full shrink-0 drag-region z-50 pointer-events-auto ${
+          <WindowDragRegion
+            className={`h-10 w-full shrink-0 z-50 ${
               activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
             }`}
           />

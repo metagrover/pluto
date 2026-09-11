@@ -1858,6 +1858,9 @@
   .recording-capture-bar {
     @apply relative grid min-h-[104px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface pb-4 pt-12 px-6;
   }
+  .recording-capture-drag {
+    @apply h-full min-h-[40px] w-full self-stretch;
+  }
   .recording-status,
   .recording-actions,
   .recording-health,
@@ -2131,6 +2134,9 @@
   @media (max-width: 980px) {
     .recording-capture-bar {
       @apply h-auto min-h-[96px] grid-cols-[1fr_auto] gap-2 pb-3 pt-12 px-6;
+    }
+    .recording-capture-drag {
+      @apply hidden;
     }
     .recording-health {
       @apply hidden;

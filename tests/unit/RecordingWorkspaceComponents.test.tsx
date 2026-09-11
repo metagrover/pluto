@@ -26,6 +26,9 @@ describe('recording workspace components', () => {
     );
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain('recording-capture-bar drag-region');
+    expect(html).toContain(
+      'absolute inset-x-0 top-0 h-10 drag-region pointer-events-auto',
+    );
     expect(html).toContain('recording-capture-drag drag-region');
     expect(html).toContain('Back home');
     expect(html).toContain('aria-label="Back home"');

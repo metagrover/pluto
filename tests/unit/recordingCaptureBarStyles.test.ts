@@ -73,4 +73,25 @@ describe('recording capture bar styles', () => {
     expect(statusRule).toBeDefined();
     expect(applyTokensFor(statusRule!)).not.toContain('pl-10');
   });
+
+  it('styles the middle capture drag region to fill the column on desktop and hide on compact', () => {
+    const baseRule = baseRuleFor('.recording-capture-drag');
+    const compactRule = mediaRuleFor(
+      '.recording-capture-drag',
+      'max-width: 980px',
+    );
+
+    expect(baseRule).toBeDefined();
+    expect(applyTokensFor(baseRule!)).toEqual(
+      expect.arrayContaining([
+        'h-full',
+        'min-h-[40px]',
+        'w-full',
+        'self-stretch',
+      ]),
+    );
+    expect(compactRule).toBeDefined();
+    expect(applyTokensFor(compactRule!)).toContain('hidden');
+  });
 });
+
