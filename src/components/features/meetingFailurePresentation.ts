@@ -5,6 +5,7 @@ export type MeetingFailurePresentation = {
     | 'Improve labels'
     | 'Retry transcription'
     | 'Retry analysis'
+    | 'Generate notes'
     | null;
 };
 
@@ -171,7 +172,10 @@ export const resolveMeetingFailurePresentation = (
           : []),
         'Retrying transcription cannot restore missing audio.',
       ].join(' '),
-      actionLabel: null,
+      actionLabel:
+        input.hasExistingTranscript && !input.hasExistingAnalysis
+          ? 'Generate notes'
+          : null,
     };
   }
   if (input.retryableFinalTranscription && input.speakerAttributionFailure) {

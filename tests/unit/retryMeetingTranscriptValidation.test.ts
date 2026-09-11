@@ -354,6 +354,84 @@ describe('retryMeetingTranscriptValidation', () => {
     );
   });
 
+  it('proceeds with downstream processing for meetings with incomplete system capture and preserved transcript', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_status: 'needs_attention',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'needs_attention',
+        segments: [
+          { speaker: 'Me', text: 'Live meeting transcript preserved.' },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        reasons: ['system_capture_incomplete'],
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'needs_attention',
+          failure: 'required_source_failed',
+        },
+      }),
+      capture_journal_generation: 'journal-system-gap',
+    };
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'GENERATE_TITLE') return 'Meeting with Incomplete Audio';
+      if (channel === 'UPDATE_MEETING_TITLE_IF_CURRENT') {
+        const input = args[0] as { expectedTitle: string; title: string };
+        if (current.title !== input.expectedTitle) return 'conflict';
+        current = { ...current, title: input.title };
+        return 'updated';
+      }
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') {
+        const lease = args[1] as { source?: unknown };
+        current = {
+          ...current,
+          downstream_processing_json: JSON.stringify(lease),
+        };
+        return true;
+      }
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return {
+          meetingId: 'synthetic-id',
+          runId: 'system-incomplete-notes-run',
+          status: 'published',
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(args[0] as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).resolves.toEqual({ status: 'needs_attention' });
+    expect(current.transcript_status).toBe('needs_attention');
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({ reason: 'automatic', template: 'auto' }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'CLAIM_DOWNSTREAM_PROCESSING',
+      'synthetic-id',
+      expect.objectContaining({
+        schemaVersion: 2,
+        state: 'processing',
+        source: expect.objectContaining({
+          kind: 'partial_capture_gap',
+          captureJournalGeneration: 'journal-system-gap',
+        }),
+      }),
+    );
+  });
+
   it('requests coordinator publication after each eligible validation retry', async () => {
     const responsiveness = {
       schemaVersion: 1,

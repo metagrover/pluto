@@ -326,9 +326,11 @@ export const TranscriptIntegrityPanel = ({
   const actionLabel = panelCopy?.actionLabel ?? null;
   const retryKind: MeetingRetryKind = speakerAttributionFailure
     ? 'speaker_labels'
-    : canRetryFinalTranscription
-      ? 'transcript'
-      : 'analysis';
+    : actionLabel === 'Generate notes'
+      ? 'analysis'
+      : canRetryFinalTranscription
+        ? 'transcript'
+        : 'analysis';
 
   return (
     <section aria-live="polite" className="meeting-failure-notice">
@@ -357,7 +359,9 @@ export const TranscriptIntegrityPanel = ({
                   ? 'Improving labels'
                   : actionLabel === 'Retry transcription'
                     ? 'Retrying transcription'
-                    : 'Retrying analysis')}
+                    : actionLabel === 'Generate notes'
+                      ? 'Generating notes'
+                      : 'Retrying analysis')}
             </>
           ) : (
             actionLabel

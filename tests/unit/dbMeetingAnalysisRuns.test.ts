@@ -413,6 +413,88 @@ describe('meeting analysis run publication', () => {
     ]);
   });
 
+  it('publishes notes for a meeting with incomplete system capture when lease is claimed', async () => {
+    const meetingId = 'system-incomplete-retry-publication';
+    const transcriptJson = source('Preserved live meeting discussion.');
+    const integrityJson = JSON.stringify({
+      causes: [{ code: 'required_source_failed' }],
+      reasons: ['system_capture_incomplete'],
+    });
+    saveMeeting({
+      id: meetingId,
+      title: 'Meeting with Incomplete Audio',
+      transcript_status: 'needs_attention',
+      transcript_json: transcriptJson,
+      transcript_integrity_json: integrityJson,
+      capture_journal_generation: 'journal-system-gap',
+      finalization_status: 'finalized',
+    });
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting,
+        getMeetingAnalysisPublicationRevisions,
+        getMeetingAnalysisRun,
+        beginMeetingAnalysisRun,
+        updateMeetingAnalysisRunStatus,
+        updateMeetingAnalysisRunStatusIfCurrent,
+        isMeetingAnalysisRunCurrent: (input) => {
+          const current = getMeetingAnalysisRun(input.meetingId);
+          return Boolean(
+            current &&
+              current.run_id === input.runId &&
+              current.input_revision === input.inputRevision &&
+              current.notes_status ===
+                (input.requirePublished ? 'published' : 'running'),
+          );
+        },
+        publishMeetingNotesIfCurrent,
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async () =>
+          analysis('Published system-incomplete notes.'),
+      }),
+      createRunId: () => 'system-incomplete-notes-run',
+    });
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'GET_MEETING') return getMeeting(args[0] as string);
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') {
+        return claimMeetingDownstreamProcessing(
+          args[0] as string,
+          args[1] as Parameters<typeof claimMeetingDownstreamProcessing>[1],
+        );
+      }
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return coordinator.generateAndPublishMeetingNotes(
+          args[0] as Parameters<
+            typeof coordinator.generateAndPublishMeetingNotes
+          >[0],
+        );
+      }
+      throw new Error(`unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation(meetingId, invoke),
+    ).resolves.toEqual({ status: 'needs_attention' });
+    expect(getMeetingAnalysisRun(meetingId)).toMatchObject({
+      run_id: 'system-incomplete-notes-run',
+      notes_status: 'published',
+    });
+    expect(
+      JSON.parse(String(getMeeting(meetingId)?.analysis_json)),
+    ).toMatchObject({
+      overview: 'Published system-incomplete notes.',
+    });
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'GET_MEETING',
+      'CLAIM_DOWNSTREAM_PROCESSING',
+      'GENERATE_MEETING_NOTES',
+    ]);
+  });
+
   it('rejects a partial-gap lease after its capture generation changes', async () => {
     const meetingId = 'partial-gap-stale-generation';
     saveMeeting({

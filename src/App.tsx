@@ -141,7 +141,16 @@ export const resolveMeetingRetryRoute = (
   meeting: Partial<Meeting> | null | undefined,
 ): MeetingRetryRoute => {
   if (kind === 'analysis') {
-    return isParakeetValidatedMeeting(meeting) ? 'analysis' : 'unavailable';
+    if (isParakeetValidatedMeeting(meeting)) return 'analysis';
+    const hasTranscript = Boolean(
+      meeting?.has_transcript ||
+        meeting?.transcript_json ||
+        meeting?.has_transcript_text,
+    );
+    if (hasTranscript && meeting?.transcript_status === 'needs_attention') {
+      return 'transcript_validation';
+    }
+    return 'unavailable';
   }
   if (kind === 'speaker_labels') {
     return canRetryMeetingSpeakerLabels(meeting)

@@ -276,17 +276,23 @@ const hasAuthorizedPartialCaptureGap = (meeting: MeetingRecord): boolean => {
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
+      reasons?: unknown;
     };
     const hash = (value: string | null | undefined) =>
       createHash('sha256')
         .update(value || '', 'utf8')
         .digest('hex');
+    const hasGap = Boolean(
+      integrity.causes?.some(
+        (cause) =>
+          cause.code === 'capture_gap_detected' ||
+          cause.code === 'required_source_failed',
+      ) ||
+        (Array.isArray(integrity.reasons) &&
+          integrity.reasons.includes('system_capture_incomplete')),
+    );
     return (
-      Boolean(
-        integrity.causes?.some(
-          (cause) => cause.code === 'capture_gap_detected',
-        ),
-      ) &&
+      hasGap &&
       lease.source.captureJournalGeneration ===
         meeting.capture_journal_generation &&
       lease.source.transcriptSha256 === hash(meeting.transcript_json) &&

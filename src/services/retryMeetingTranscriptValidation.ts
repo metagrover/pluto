@@ -12,7 +12,10 @@ import {
   parseCaptureActivityEvidence,
   parseStoredTranscriptActivityEvidence,
 } from '../utils/transcriptActivityEvidence.ts';
-import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
+import {
+  SYSTEM_CAPTURE_INCOMPLETE_REASON,
+  type TranscriptIntegrityReason,
+} from '../utils/transcriptIntegrity.ts';
 import {
   buildTranscriptJsonPayload,
   withTranscriptLifecycleStatus,
@@ -223,10 +226,17 @@ export const shouldAutoProcessMeetingAnalysis = (
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
+      reasons?: unknown;
     };
     const hasCaptureGap =
       meeting.has_capture_gap === true ||
-      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected');
+      integrity.causes?.some(
+        (cause) =>
+          cause.code === 'capture_gap_detected' ||
+          cause.code === 'required_source_failed',
+      ) ||
+      (Array.isArray(integrity.reasons) &&
+        integrity.reasons.includes(SYSTEM_CAPTURE_INCOMPLETE_REASON));
     const partialCaptureGapEligible =
       (meeting.has_transcript_text === true ||
         hasTranscriptText(meeting.transcript_json)) &&
@@ -479,9 +489,16 @@ export const retryMeetingTranscriptValidation = async (
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
+      reasons?: unknown;
     };
     hasCaptureGap = Boolean(
-      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected'),
+      integrity.causes?.some(
+        (cause) =>
+          cause.code === 'capture_gap_detected' ||
+          cause.code === 'required_source_failed',
+      ) ||
+        (Array.isArray(integrity.reasons) &&
+          integrity.reasons.includes(SYSTEM_CAPTURE_INCOMPLETE_REASON)),
     );
   } catch {
     hasCaptureGap = false;

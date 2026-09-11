@@ -262,11 +262,10 @@ describe('MeetingView transcript integrity', () => {
   });
 
   it.each([
-    [false, null],
     [true, null],
     [true, 'transcript'],
   ] as const)(
-    'shows incomplete participant audio honestly with existing analysis=%s and retry=%s',
+    'shows incomplete participant audio honestly without retry button when analysis exists (%s, %s)',
     (hasExistingAnalysis, retryOperationKind) => {
       const markup = renderToStaticMarkup(
         <TranscriptIntegrityPanel
@@ -299,6 +298,39 @@ describe('MeetingView transcript integrity', () => {
       expect(markup).not.toContain('<button');
     },
   );
+
+  it('offers notes generation when participant audio is incomplete and analysis has not run', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          reasons: ['system_capture_incomplete'],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'required_source_failed',
+          },
+        })}
+        transcriptJson={JSON.stringify({
+          segments: [{ text: 'Preserved speech' }],
+        })}
+        hasExistingAnalysis={false}
+        retryOperationKind={null}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(markup).toContain('Participant audio could not be verified');
+    expect(markup).toContain('Your existing transcript has been kept.');
+    expect(markup).toContain(
+      'Retrying transcription cannot restore missing audio.',
+    );
+    expect(markup).not.toContain('Your recording is safe');
+    expect(markup).not.toContain('Transcript needs another pass');
+    expect(markup).toContain('<button');
+    expect(markup).toContain('Generate notes');
+  });
 
   it('renders the durable system-resource pause instead of repeating generic retry copy', () => {
     const markup = renderToStaticMarkup(

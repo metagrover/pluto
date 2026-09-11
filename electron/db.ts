@@ -1917,11 +1917,15 @@ export const claimMeetingDownstreamProcessing = (
       try {
         const integrity = JSON.parse(
           current.transcript_integrity_json || '{}',
-        ) as { causes?: Array<{ code?: unknown }> };
+        ) as { causes?: Array<{ code?: unknown }>; reasons?: unknown };
         hasCaptureGap = Boolean(
           integrity.causes?.some(
-            (cause) => cause.code === 'capture_gap_detected',
-          ),
+            (cause) =>
+              cause.code === 'capture_gap_detected' ||
+              cause.code === 'required_source_failed',
+          ) ||
+            (Array.isArray(integrity.reasons) &&
+              integrity.reasons.includes('system_capture_incomplete')),
         );
       } catch {
         return false;
