@@ -296,4 +296,19 @@ describe('ParakeetEouMeetingCoordinator', () => {
     await coordinator.cancel('meeting-1');
     expect(client.close).toHaveBeenCalledOnce();
   });
+
+  it('cancels the active meeting with a custom reason code when provided', async () => {
+    const { coordinator, client, onUnavailable } = makeCoordinator();
+    await coordinator.start(start);
+
+    await coordinator.cancel('meeting-1', 'parakeet_timeout');
+
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith({
+      meetingId: 'meeting-1',
+      owner: 'renderer-7',
+      code: 'parakeet_timeout',
+    });
+    expect(coordinator.isActive()).toBe(false);
+  });
 });

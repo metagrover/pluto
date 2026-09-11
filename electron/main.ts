@@ -1750,7 +1750,11 @@ app.whenReady().then(async () => {
     const meetingId = String(request.meetingId || '');
     requireParakeetEouOwner(event.sender, meetingId);
     const generation = parakeetEouGeneration;
-    await eouCoordinator.cancel(meetingId);
+    const code =
+      typeof request.code === 'string' && request.code.trim()
+        ? request.code.trim()
+        : 'parakeet_cancelled';
+    await eouCoordinator.cancel(meetingId, code);
     if (
       parakeetEouOwner?.id === event.sender.id &&
       parakeetEouGeneration === generation

@@ -1155,6 +1155,9 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   }> = [];
 
   for (const chunk of chunks) {
+    if (queuedSynthesisPaused) {
+      throw new DOMException('foreground_preempted', 'AbortError');
+    }
     const structuredDocs = await synthesizeKnowledgeChunkWithRetry({
       provider: params.provider,
       doc: params.doc,
@@ -1163,6 +1166,9 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       claimCorrections: params.claimCorrections,
       signal: params.signal,
     });
+    if (queuedSynthesisPaused) {
+      throw new DOMException('foreground_preempted', 'AbortError');
+    }
     for (const [index, structured] of structuredDocs.entries()) {
       chunkDocs.push({
         label:
@@ -1638,6 +1644,17 @@ const synthesizeKnowledgeDocNowInternal = async (
 ): Promise<db.KnowledgeDoc | undefined> => {
   const currentDoc = db.getKnowledgeDoc(request.doc.id);
   if (!currentDoc) return undefined;
+  if (queuedSynthesisPaused) {
+    const deferred = db.upsertKnowledgeDoc({
+      id: request.doc.id,
+      scope_type: request.doc.scope_type,
+      scope_key: request.doc.scope_key,
+      title: request.doc.title,
+      status: 'stale',
+    });
+    queueKnowledgeDocRefresh(request.doc.id, 750);
+    return deferred;
+  }
   const doc = request.doc;
   const knowledgeCorrections = request.corrections;
   const claimCorrections = parseAskPlutoCorrectionRecords(knowledgeCorrections);
@@ -1947,7 +1964,15 @@ export const queueKnowledgeDocRefresh = (
 export const setKnowledgeDocSynthesisPaused = (paused: boolean): void => {
   if (queuedSynthesisPaused === paused) return;
   queuedSynthesisPaused = paused;
-  if (!queuedSynthesisPaused) {
+  if (queuedSynthesisPaused) {
+    for (const state of queueByDocId.values()) {
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+        state.pending = true;
+      }
+    }
+  } else {
     flushPendingKnowledgeDocRefreshes();
   }
 };
@@ -1956,6 +1981,11 @@ export const refreshKnowledgeDocNow = async (
   docId: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<db.KnowledgeDoc | undefined> => {
+  if (queuedSynthesisPaused) {
+    const state = getState(docId);
+    state.pending = true;
+    return db.getKnowledgeDoc(docId);
+  }
   const baseRequest = buildKnowledgeSynthesisRequest(docId);
   if (!baseRequest) return undefined;
   const request = { ...baseRequest, signal: options.signal };
@@ -2154,9 +2184,21 @@ export const refreshKnowledgeDocsForMeetingNow = async (
   options: { canCommit?: () => boolean; signal?: AbortSignal } = {},
 ): Promise<{ requested: number; completed: number }> => {
   const docIds = [...getKnowledgeDocIdsForMeeting(meetingId)];
+  if (queuedSynthesisPaused) {
+    for (const docId of docIds) {
+      const state = getState(docId);
+      state.pending = true;
+    }
+    return { requested: docIds.length, completed: 0 };
+  }
   let completed = 0;
   for (const docId of docIds) {
     options.signal?.throwIfAborted();
+    if (queuedSynthesisPaused) {
+      const state = getState(docId);
+      state.pending = true;
+      continue;
+    }
     const satisfiesMeetingRefresh = (): boolean => {
       const doc = db.getKnowledgeDoc(docId);
       const currentRequest = buildKnowledgeSynthesisRequest(docId);

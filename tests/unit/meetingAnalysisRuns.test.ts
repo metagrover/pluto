@@ -168,7 +168,7 @@ describe('meeting analysis run coordinator', () => {
         compactWriterContract: true,
         stageCache: expect.anything(),
         cacheKey: expect.stringMatching(/^[a-f0-9]{64}$/),
-        workClass: 'background',
+        workClass: 'automatic_notes',
       }),
     );
   });

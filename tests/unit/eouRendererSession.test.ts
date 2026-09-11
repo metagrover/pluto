@@ -573,6 +573,7 @@ describe('EOU renderer session', () => {
     expect(transport.invoke).toHaveBeenCalledWith('PARAKEET_EOU_CANCEL', {
       meetingId: 'meeting-1',
       generation: 1,
+      code: 'parakeet_timeout',
     });
 
     // Late start resolution must not restore ready status
@@ -596,5 +597,21 @@ describe('EOU renderer session', () => {
       },
     });
     expect(onSegments).not.toHaveBeenCalled();
+  });
+
+  it('forwards code: parakeet_cancelled when session.cancel is invoked', async () => {
+    const transport = makeTransport();
+    const { session, onUnavailable } = makeSession(transport);
+    await session.start();
+
+    session.cancel();
+
+    expect(session.status()).toBe('unavailable');
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_cancelled');
+    expect(transport.invoke).toHaveBeenCalledWith('PARAKEET_EOU_CANCEL', {
+      meetingId: 'meeting-1',
+      generation: 1,
+      code: 'parakeet_cancelled',
+    });
   });
 });

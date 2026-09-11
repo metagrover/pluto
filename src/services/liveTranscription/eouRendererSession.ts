@@ -32,7 +32,7 @@ const SOURCES: readonly LiveSource[] = ['mic', 'system'];
 const DEFAULT_MAX_OUTSTANDING = 48;
 const DEFAULT_MAX_RETAINED_AUDIO_SECONDS_PER_SOURCE = 20;
 const DEFAULT_MAX_RETAINED_PCM_BYTES = 8 * 1024 * 1024; // 8 MiB
-const DEFAULT_FINISH_TIMEOUT_MS = 2_000;
+const DEFAULT_FINISH_TIMEOUT_MS = 8_000;
 const MEETING_ID_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 
@@ -165,6 +165,7 @@ export function createEouRendererSession(options: {
       .invoke('PARAKEET_EOU_CANCEL', {
         meetingId: options.meetingId,
         generation: options.generation,
+        code,
       })
       .catch(() => undefined);
   };

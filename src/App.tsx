@@ -1156,6 +1156,7 @@ function App() {
 
   useEffect(() => {
     if (
+      activeRecording ||
       transcriptValidationRetryOperation !== null ||
       finalTranscriptionAbortRef.current ||
       selectNextMeetingForFinalTranscription(safeMeetings)
@@ -1186,10 +1187,10 @@ function App() {
       .catch((error) => {
         console.error('[Pluto] Automatic meeting processing failed', error);
       });
-  }, [safeMeetings, transcriptValidationRetryOperation]);
+  }, [activeRecording, safeMeetings, transcriptValidationRetryOperation]);
 
   useEffect(() => {
-    if (transcriptValidationRetryOperation !== null) return;
+    if (activeRecording || transcriptValidationRetryOperation !== null) return;
     const candidate = safeMeetings.find(shouldAutoProcessMeetingAnalysis);
     if (!candidate?.id) return;
     const delay = nextMeetingProcessingWakeDelay(
@@ -1219,7 +1220,7 @@ function App() {
       }
     }, delay);
     return () => window.clearTimeout(timeout);
-  }, [safeMeetings, transcriptValidationRetryOperation]);
+  }, [activeRecording, safeMeetings, transcriptValidationRetryOperation]);
 
   const searchPlutoResults = buildSearchPlutoResults({
     query: searchQuery,

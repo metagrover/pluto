@@ -559,7 +559,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         compactWriterContract: true,
         stageCache,
         cacheKey,
-        workClass: 'background',
+        workClass: 'automatic_notes',
       },
     );
   };
