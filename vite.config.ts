@@ -39,6 +39,8 @@ export default defineConfig({
                 platform: process.platform,
                 homeDir: os.homedir(),
               }) ?? undefined,
+            allowProductionRecovery:
+              process.env.PLUTO_ALLOW_RECOVERY_PROFILE === '1',
           });
           return startup(['.', `--user-data-dir=${userDataDir}`]);
         },

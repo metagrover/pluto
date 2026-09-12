@@ -14,6 +14,7 @@ describe('Electron bootstrap boundary', () => {
     expect(source).not.toContain("from './db'");
     expect(source).toContain("app.setPath('userData'");
     expect(source).toContain('developmentTargetsProduction');
+    expect(source).toContain('hasValidRecoveryKeyFile');
     expect(source).toContain('database_key_identity_mismatch');
     expect(source.indexOf('requestSingleInstanceLock')).toBeGreaterThan(-1);
     expect(source.indexOf('initializeApplicationDatabase({')).toBeGreaterThan(

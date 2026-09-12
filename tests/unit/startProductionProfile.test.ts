@@ -1,11 +1,21 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  hasValidRecoveryKeyFile,
+  launchRecoveryDevelopmentApp,
   launchSignedPlutoApp,
   resolveInstalledPlutoApp,
   verifySignedPlutoApp,
 } from '../../scripts/start_production_profile.mjs';
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0))
+    fs.rmSync(root, { recursive: true, force: true });
+});
 
 describe('production Pluto launcher', () => {
   it('resolves the installed macOS app without touching its data profile', () => {
@@ -73,5 +83,41 @@ describe('production Pluto launcher', () => {
       ['/Applications/Pluto.app'],
       { stdio: 'inherit' },
     );
+  });
+
+  it('validates and launches the explicit owner-only recovery profile', () => {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-start-recovery-'),
+    );
+    roots.push(userDataDir);
+    const recoveryPath = path.join(userDataDir, 'app-recovery-key.json');
+    fs.writeFileSync(
+      recoveryPath,
+      JSON.stringify({
+        version: 1,
+        purpose: 'pluto-database-recovery',
+        keyId: '123e4567-e89b-42d3-a456-426614174000',
+        key: Buffer.alloc(32, 0x41).toString('base64'),
+        salt: Buffer.alloc(32, 0x42).toString('base64'),
+      }),
+      { mode: 0o600 },
+    );
+    fs.chmodSync(recoveryPath, 0o600);
+    expect(hasValidRecoveryKeyFile({ userDataDir })).toBe(true);
+
+    const spawn = vi.fn(() => ({ status: 0 }));
+    launchRecoveryDevelopmentApp({
+      userDataDir,
+      environment: { PATH: '/bin' },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith('pnpm', ['exec', 'vite'], {
+      env: {
+        PATH: '/bin',
+        PLUTO_ALLOW_RECOVERY_PROFILE: '1',
+        PLUTO_USER_DATA_DIR: userDataDir,
+      },
+      stdio: 'inherit',
+    });
   });
 });

@@ -40,6 +40,17 @@ describe('Pluto application runtime policy', () => {
     ).toThrow('Development Electron cannot open the Pluto production profile');
   });
 
+  it('allows the production profile only for explicit recovery startup', () => {
+    expect(
+      resolveDevelopmentUserDataDir({
+        explicit: '/Users/pluto/Library/Application Support/pluto',
+        tempDir: '/private/tmp',
+        productionDir: '/Users/pluto/Library/Application Support/pluto',
+        allowProductionRecovery: true,
+      }),
+    ).toBe('/Users/pluto/Library/Application Support/pluto');
+  });
+
   it('resolves the production profile only on macOS', () => {
     expect(
       resolveProductionUserDataDir({
@@ -62,6 +73,14 @@ describe('Pluto application runtime policy', () => {
         signedBuildValid: false,
       }),
     ).toBe(false);
+    expect(
+      canOpenProductionDatabase({
+        isPackaged: false,
+        signedBuildValid: false,
+        targetsProductionProfile: true,
+        recoveryKeyAvailable: true,
+      }),
+    ).toBe(true);
     expect(
       canOpenProductionDatabase({
         isPackaged: true,
