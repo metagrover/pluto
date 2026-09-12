@@ -24,6 +24,23 @@ extension CtcKeywordSpotter {
         return try await computeWithStagedModels(audioSamples: audioSamples)
     }
 
+    func computeLogProbs(for audioSource: AudioSampleSource) async throws -> CtcLogProbResult {
+        guard audioSource.sampleCount > 0 else {
+            return CtcLogProbResult(
+                logProbs: [], frameDuration: 0, totalFrames: 0, audioSamplesUsed: 0)
+        }
+        if audioSource.sampleCount > maxModelSamples {
+            return try await computeLogProbsChunked(audioSource: audioSource)
+        }
+        let sampleCount = audioSource.sampleCount
+        var samples = [Float](repeating: 0, count: sampleCount)
+        try samples.withUnsafeMutableBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            try audioSource.copySamples(into: baseAddress, offset: 0, count: sampleCount)
+        }
+        return try await computeWithStagedModels(audioSamples: samples)
+    }
+
     /// Process long audio in chunks with overlap, concatenating log-probs.
     ///
     /// Algorithm:
@@ -31,7 +48,13 @@ extension CtcKeywordSpotter {
     /// 2. Run CTC inference on each chunk
     /// 3. Concatenate log-probs, averaging overlapping frames
     private func computeLogProbsChunked(audioSamples: [Float]) async throws -> CtcLogProbResult {
-        let totalSamples = audioSamples.count
+        try await computeLogProbsChunked(
+            audioSource: ArrayAudioSampleSource(samples: audioSamples)
+        )
+    }
+
+    private func computeLogProbsChunked(audioSource: AudioSampleSource) async throws -> CtcLogProbResult {
+        let totalSamples = audioSource.sampleCount
         let chunkSize = maxModelSamples
         let overlap = chunkOverlapSamples
         let stride = chunkSize - overlap
@@ -58,7 +81,15 @@ extension CtcKeywordSpotter {
         // Process each chunk
         var chunkResults: [CtcLogProbResult] = []
         for (idx, chunk) in chunks.enumerated() {
-            let chunkAudio = Array(audioSamples[chunk.start..<chunk.end])
+            var chunkAudio = [Float](repeating: 0, count: chunk.end - chunk.start)
+            try chunkAudio.withUnsafeMutableBufferPointer { buffer in
+                guard let baseAddress = buffer.baseAddress else { return }
+                try audioSource.copySamples(
+                    into: baseAddress,
+                    offset: chunk.start,
+                    count: chunk.end - chunk.start
+                )
+            }
 
             if debugMode {
                 let startTime = Double(chunk.start) / Double(sampleRate)

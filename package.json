@@ -37,6 +37,7 @@
     "test": "vitest",
     "test:manual": "vitest run --config vitest.manual.config.ts",
     "benchmark:recording-quality": "node --experimental-strip-types scripts/run_recording_quality_benchmark.ts",
+    "benchmark:encrypted-storage": "node --expose-gc --experimental-strip-types scripts/benchmark_encrypted_storage.ts",
     "benchmark:private-transcription:validate": "node --experimental-strip-types scripts/validate_private_transcription_manifest.ts",
     "benchmark:private-parakeet-eou:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/validate_private_parakeet_eou_manifest.ts",
     "replay:parakeet-eou": "vitest run --disableConsoleIntercept --config vitest.manual.config.ts tests/manual/parakeetEouCausalReplay.test.ts",

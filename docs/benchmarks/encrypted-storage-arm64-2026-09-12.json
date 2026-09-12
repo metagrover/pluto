@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-12T20:10:52.339Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeVersion": "v24.11.1"
+  },
+  "budgets": {
+    "cryptoP95Ms": 0.25,
+    "captureAckRegressionPercent": 5,
+    "databaseWarmReadRegressionPercent": 10,
+    "criticalWriteP95Ms": 50,
+    "startupRegressionMs": 250,
+    "incrementalAudioRssBytes": 268435456
+  },
+  "results": {
+    "crypto": {
+      "iterations": 2000,
+      "sealP95Ms": 0.06112500000000409,
+      "openP95Ms": 0.05458400000000552,
+      "budgetMs": 0.25,
+      "passed": true
+    },
+    "capture": {
+      "trials": 9,
+      "iterationsPerTrial": 100,
+      "aggregation": "median of trial p95 values",
+      "plainTrialP95Ms": [
+        11.975167000000056, 16.034999999999854, 13.93487499999992,
+        16.040165999999772, 18.130207999998674, 14.077041000000463,
+        14.028707999999824, 15.896708000000217, 15.128875000002154
+      ],
+      "encryptedTrialP95Ms": [
+        12.018792000000076, 16.20970800000032, 15.047167000000627,
+        15.896833000000697, 19.15374999999949, 15.240041999999448,
+        14.790417000000161, 15.42291699999987, 16.95349999999962
+      ],
+      "plainP95Ms": 15.128875000002154,
+      "encryptedP95Ms": 15.42291699999987,
+      "regressionPercent": 1.9435813964863533,
+      "budgetPercent": 5,
+      "verifiedArtifacts": 990,
+      "droppedOrReordered": 0,
+      "passed": true
+    },
+    "database": {
+      "representativeRows": 20000,
+      "warmRead": {
+        "plainP95Ms": 5.162082999999257,
+        "encryptedP95Ms": 5.444833999998082,
+        "regressionPercent": 5.477459389918098,
+        "budgetPercent": 10,
+        "passed": true
+      },
+      "criticalWrite": {
+        "transaction": "one meeting plus 100 final transcript segments, synchronous FULL",
+        "encryptedP95Ms": 0.6942079999971611,
+        "budgetMs": 50,
+        "passed": true
+      },
+      "startup": {
+        "plainP95Ms": 0.30391600000075414,
+        "encryptedP95Ms": 0.4306669999969017,
+        "regressionMs": 0.12675099999614758,
+        "budgetMs": 250,
+        "passed": true
+      }
+    },
+    "electronAudioMemory": {
+      "fixtureMinutes": 60,
+      "totalFrames": 57600000,
+      "segmentSeconds": 60,
+      "baselineRssBytes": 157876224,
+      "peakRssBytes": 244580352,
+      "incrementalRssBytes": 86704128,
+      "budgetBytes": 268435456,
+      "passed": true
+    },
+    "nativeAudioMemory": {
+      "status": "measured",
+      "fixtureMinutes": 60,
+      "baselineRssBytes": 31588352,
+      "peakRssBytes": 64602112,
+      "incrementalRssBytes": 33013760,
+      "budgetBytes": 268435456,
+      "passed": true
+    }
+  },
+  "passed": true,
+  "limitations": [
+    "Synthetic benchmark; frozen real-meeting ASR and attribution parity remains a rollout acceptance gate.",
+    "This run covers only the current architecture and is not the slowest-supported-Mac Gate 4 result by itself."
+  ]
+}

@@ -6,6 +6,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { CaptureJournalManifestV4 } from '../../electron/captureJournal';
 import { EncryptedArtifactStore } from '../../electron/crypto/encryptedArtifactStore';
+import {
+  ENCRYPTED_AUDIO_SEGMENT_FRAMES,
+  openEncryptedAudioReader,
+  writeEncryptedAudioBundle,
+} from '../../electron/crypto/encryptedAudioBundle';
 import { createEncryptedAudioPipeline } from '../../electron/crypto/encryptedAudioPipeline';
 import * as original from '../../electron/crypto/encryptedAudioPipelineImpl';
 import { buildTestAudioWorker } from './helpers/encryptedAudioWorker';
@@ -178,6 +183,46 @@ describe('encrypted audio pipeline', () => {
     await expect(
       pipeline.probeEncryptedAudioDuration(mixedPath!, context),
     ).resolves.toBe(1800);
+
+    const retainedFiles = await readdir(rootDir);
+    const retained = new Set(retainedFiles);
+    const controller = new AbortController();
+    const cancelled = pipeline
+      .mixEncryptedAudioArtifacts({
+        rootDir,
+        inputPaths,
+        context,
+        signal: controller.signal,
+      })
+      .then(
+        () => null,
+        (error: Error) => error,
+      );
+    const deadline = performance.now() + 5_000;
+    let observedPartialOutput = false;
+    while (performance.now() < deadline) {
+      observedPartialOutput = (await readdir(rootDir)).some(
+        (name) => name.endsWith('.enc') && !retained.has(name),
+      );
+      if (observedPartialOutput) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    controller.abort();
+    expect(await cancelled).toMatchObject({ name: 'AbortError' });
+    expect(observedPartialOutput).toBe(true);
+    expect(await readdir(rootDir)).toEqual(retainedFiles);
+    await expect(
+      pipeline.probeEncryptedAudioDuration(inputPaths[0], context),
+    ).resolves.toBe(1800);
+    await expect(
+      pipeline.sliceEncryptedAudio({
+        filePath: inputPaths[0],
+        context,
+        startSec: 0,
+        durationSec: 1,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   }, 30_000);
 
   it('rejects worker startup failures and exits instead of hanging the caller', async () => {
@@ -307,25 +352,19 @@ describe('encrypted audio pipeline', () => {
     expect(slice.length).toBeGreaterThanOrEqual(44 + 3_200 * 2);
     expect(slice.length).toBeLessThanOrEqual(44 + 3_201 * 2);
 
-    const sourcePlaintext = EncryptedArtifactStore.open(
-      await readFile(sourcePath!),
-      meetingKey,
-      { artifactKind: 'mic', source: 'mic' },
-    ).plaintext;
-    const systemPath = join(rootDir, 'system.enc');
-    await EncryptedArtifactStore.writeEncryptedFile(
-      systemPath,
-      sourcePlaintext,
-      meetingKey,
-      {
-        artifactKind: 'system',
-        generation: manifest.generation,
-        keyId: manifest.keyId,
-        meetingId: manifest.meetingId,
-        sequence: 0,
-        source: 'system',
-      },
-    );
+    const sourceReader = await openEncryptedAudioReader({
+      filePath: sourcePath!,
+      context,
+      source: 'mic',
+    });
+    const systemPath = await writeEncryptedAudioBundle({
+      rootDir,
+      totalFrames: sourceReader.totalFrames,
+      source: 'system',
+      context,
+      produceWindow: (startFrame, frameCount) =>
+        sourceReader.readWindow(startFrame, frameCount),
+    });
     const mixedPath = await pipeline.mixEncryptedAudioArtifacts({
       rootDir,
       inputPaths: [sourcePath!, systemPath],
@@ -336,9 +375,10 @@ describe('encrypted audio pipeline', () => {
       inputPaths: [sourcePath!, systemPath],
       context,
     });
-    const decrypt = async (filePath: string) =>
-      EncryptedArtifactStore.open(await readFile(filePath), meetingKey, context)
-        .plaintext;
+    const decrypt = async (filePath: string) => {
+      const reader = await openEncryptedAudioReader({ filePath, context });
+      return reader.readWindow(0, reader.totalFrames);
+    };
     expect(await decrypt(mixedPath)).toEqual(await decrypt(referenceMixedPath));
     expect(slice).toEqual(
       await original.sliceEncryptedAudio({
@@ -354,5 +394,215 @@ describe('encrypted audio pipeline', () => {
     expect(
       (await readdir(rootDir)).every((name) => name.endsWith('.enc')),
     ).toBe(true);
+  });
+
+  it('reads only the requested windows from a multi-segment bundle', async () => {
+    const { rootDir, meetingKey, manifest } = await setup();
+    const context = {
+      meetingId: manifest.meetingId,
+      generation: manifest.generation,
+      keyId: manifest.keyId,
+      meetingKey,
+    };
+    const totalFrames = ENCRYPTED_AUDIO_SEGMENT_FRAMES + 20;
+    const bundlePath = await writeEncryptedAudioBundle({
+      rootDir,
+      totalFrames,
+      source: 'mic',
+      context,
+      produceWindow: async (startFrame, frameCount) => {
+        const samples = new Float32Array(frameCount);
+        samples.fill(startFrame === 0 ? 0.25 : -0.5);
+        return samples;
+      },
+    });
+
+    const reader = await openEncryptedAudioReader({
+      filePath: bundlePath,
+      context,
+      source: 'mic',
+    });
+    const boundary = await reader.readWindow(
+      ENCRYPTED_AUDIO_SEGMENT_FRAMES - 10,
+      20,
+    );
+
+    expect(reader.totalFrames).toBe(totalFrames);
+    expect([...boundary.slice(0, 10)]).toEqual(
+      Array.from({ length: 10 }, () => expect.closeTo(0.25, 4)),
+    );
+    expect([...boundary.slice(10)]).toEqual(
+      Array.from({ length: 10 }, () => expect.closeTo(-0.5, 4)),
+    );
+  });
+
+  it('preserves authenticated repair durations when journal intervals are contiguous', async () => {
+    const { rootDir, meetingKey, manifest } = await setup();
+    const repairs = [floatWav(0.25, 0.2), floatWav(0.5, -0.4)];
+    const dispositions = [];
+    for (let sequence = 0; sequence < repairs.length; sequence += 1) {
+      const relativePath = `repair-${sequence}.enc`;
+      const written = await EncryptedArtifactStore.writeEncryptedFile(
+        join(rootDir, relativePath),
+        repairs[sequence],
+        meetingKey,
+        {
+          artifactKind: 'repair',
+          generation: manifest.generation,
+          keyId: manifest.keyId,
+          meetingId: manifest.meetingId,
+          sequence,
+          source: 'mic',
+        },
+      );
+      dispositions.push({
+        disposition: 'captured' as const,
+        rawChecksumSha256: written.plaintextSha256,
+        rawRelativePath: 'unused.enc',
+        repairChecksumSha256: written.plaintextSha256,
+        repairRelativePath: relativePath,
+      });
+    }
+    manifest.intervals = dispositions.map((mic, sequence) => ({
+      sequence,
+      chunkStartSec: sequence,
+      chunkEndSec: sequence + 1,
+      sources: {
+        mic,
+        system: {
+          disposition: 'source_unavailable' as const,
+          reason: 'not_requested',
+        },
+      },
+    }));
+    const context = {
+      meetingId: manifest.meetingId,
+      generation: manifest.generation,
+      keyId: manifest.keyId,
+      meetingKey,
+    };
+
+    const bundlePath = await pipeline.materializeEncryptedJournalSource({
+      rootDir,
+      manifest,
+      source: 'mic',
+      meetingKey,
+    });
+    const reader = await openEncryptedAudioReader({
+      filePath: bundlePath!,
+      context,
+      source: 'mic',
+    });
+
+    const first = await reader.readWindow(12_400, 400);
+    const gap = await reader.readWindow(16_400, 400);
+    const second = await reader.readWindow(24_400, 400);
+    expect(first[0]).toBeCloseTo(0.2, 3);
+    expect(gap.every((sample) => sample === 0)).toBe(true);
+    expect(second[0]).toBeCloseTo(-0.4, 3);
+  });
+
+  it('rejects source mismatches and tampered bundle segments', async () => {
+    const { rootDir, meetingKey, manifest } = await setup();
+    const context = {
+      meetingId: manifest.meetingId,
+      generation: manifest.generation,
+      keyId: manifest.keyId,
+      meetingKey,
+    };
+    const bundlePath = await writeEncryptedAudioBundle({
+      rootDir,
+      totalFrames: 100,
+      source: 'mic',
+      context,
+      produceWindow: async (_startFrame, frameCount) =>
+        new Float32Array(frameCount),
+    });
+
+    await expect(
+      openEncryptedAudioReader({
+        filePath: bundlePath,
+        context,
+        source: 'system',
+      }),
+    ).rejects.toThrow(/source/i);
+
+    const indexEnvelope = await readFile(bundlePath);
+    const index = EncryptedArtifactStore.open(
+      indexEnvelope,
+      meetingKey,
+    ).plaintext;
+    const parsed = JSON.parse(index.toString('utf8')) as {
+      segments: Array<{ relativePath: string }>;
+    };
+    const segmentPath = join(rootDir, parsed.segments[0].relativePath);
+    const segmentEnvelope = await readFile(segmentPath);
+    segmentEnvelope[segmentEnvelope.length - 1] ^= 0xff;
+    await writeFile(segmentPath, segmentEnvelope);
+
+    const reader = await openEncryptedAudioReader({
+      filePath: bundlePath,
+      context,
+      source: 'mic',
+    });
+    await expect(reader.readWindow(0, 1)).rejects.toThrow(/authentication/i);
+  });
+
+  it('removes partial encrypted segments when bundle creation is cancelled', async () => {
+    const { rootDir, meetingKey, manifest } = await setup();
+    const controller = new AbortController();
+    let windows = 0;
+
+    await expect(
+      writeEncryptedAudioBundle({
+        rootDir,
+        totalFrames: ENCRYPTED_AUDIO_SEGMENT_FRAMES + 1,
+        source: 'mic',
+        context: {
+          meetingId: manifest.meetingId,
+          generation: manifest.generation,
+          keyId: manifest.keyId,
+          meetingKey,
+        },
+        signal: controller.signal,
+        produceWindow: async (_startFrame, frameCount) => {
+          windows += 1;
+          if (windows === 2) controller.abort();
+          return new Float32Array(frameCount);
+        },
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(await readdir(rootDir)).toEqual([]);
+  });
+
+  it('stops authenticated window reads after cancellation', async () => {
+    const { rootDir, meetingKey, manifest } = await setup();
+    const controller = new AbortController();
+    const context = {
+      meetingId: manifest.meetingId,
+      generation: manifest.generation,
+      keyId: manifest.keyId,
+      meetingKey,
+    };
+    const bundlePath = await writeEncryptedAudioBundle({
+      rootDir,
+      totalFrames: 100,
+      source: 'mic',
+      context,
+      produceWindow: async (_startFrame, frameCount) =>
+        new Float32Array(frameCount),
+    });
+    const reader = await openEncryptedAudioReader({
+      filePath: bundlePath,
+      context,
+      source: 'mic',
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(reader.readWindow(0, 1)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
   });
 });

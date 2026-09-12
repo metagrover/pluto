@@ -25,15 +25,29 @@ export function createEncryptedAudioPipeline(workerPath: string): Pipeline {
     operation: K,
     ...args: Parameters<Pipeline[K]>
   ): ReturnType<Pipeline[K]> => {
+    const options = typeof args[0] === 'object' ? args[0] : undefined;
+    const signal = options && 'signal' in options ? options.signal : undefined;
+    // AbortSignals are not structured-cloneable. Forward cancellation as a
+    // message so the worker can clean up partial bundles before it exits.
+    const workerArgs =
+      options && 'signal' in options
+        ? [{ ...options, signal: undefined }]
+        : args;
     const result = tail.then(async () => {
+      signal?.throwIfAborted();
       const worker = new Worker(workerPath, {
-        workerData: { operation, args } satisfies AudioRequest<K>,
+        workerData: { operation, args: workerArgs },
       });
+      const onAbort = () => worker.postMessage('abort');
+      signal?.addEventListener('abort', onAbort, { once: true });
       try {
         return await new Promise((resolve, reject) => {
           worker.once('message', (message) => {
-            if (!message.ok) reject(new Error(message.error));
-            else {
+            if (!message.ok) {
+              const error = new Error(message.error);
+              error.name = message.name ?? 'Error';
+              reject(error);
+            } else {
               const value = message.value;
               resolve(
                 value instanceof Uint8Array
@@ -52,6 +66,7 @@ export function createEncryptedAudioPipeline(workerPath: string): Pipeline {
           });
         });
       } finally {
+        signal?.removeEventListener('abort', onAbort);
         // Release plaintext and key copies before starting another job.
         await worker.terminate();
       }

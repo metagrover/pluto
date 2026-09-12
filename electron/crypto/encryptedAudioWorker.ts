@@ -5,6 +5,10 @@ import * as pipeline from './encryptedAudioPipelineImpl';
 // Structured clone turns Buffers into Uint8Arrays. Encrypted files are read and
 // authenticated here; only operation arguments and keys arrive from the app.
 const request = workerData as AudioRequest;
+const controller = new AbortController();
+parentPort!.on('message', (message) => {
+  if (message === 'abort') controller.abort();
+});
 const execute = async () => {
   switch (request.operation) {
     case 'materializeEncryptedJournalSource': {
@@ -13,6 +17,7 @@ const execute = async () => {
       >;
       return pipeline.materializeEncryptedJournalSource({
         ...args,
+        signal: controller.signal,
         meetingKey: Buffer.from(args.meetingKey),
       });
     }
@@ -22,6 +27,7 @@ const execute = async () => {
       >;
       return pipeline.repairEncryptedJournalRawChunk({
         ...args,
+        signal: controller.signal,
         meetingKey: Buffer.from(args.meetingKey),
       });
     }
@@ -40,6 +46,7 @@ const execute = async () => {
       >;
       return pipeline.mixEncryptedAudioArtifacts({
         ...args,
+        signal: controller.signal,
         context: {
           ...args.context,
           meetingKey: Buffer.from(args.context.meetingKey),
@@ -52,6 +59,7 @@ const execute = async () => {
       >;
       return pipeline.sliceEncryptedAudio({
         ...args,
+        signal: controller.signal,
         context: {
           ...args.context,
           meetingKey: Buffer.from(args.context.meetingKey),
@@ -75,6 +83,7 @@ void execute().then(
   (error) =>
     parentPort!.postMessage({
       ok: false,
+      name: error instanceof Error ? error.name : 'Error',
       error: error instanceof Error ? error.message : String(error),
     }),
 );

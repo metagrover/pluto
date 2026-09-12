@@ -21,10 +21,15 @@ public struct OfflineDiarizationResult: Sendable {
 public protocol OfflineSpeakerDiarizing: Sendable {
     func diarize(audioURL: URL) async throws -> OfflineDiarizationResult
     func diarize(samples: [Float]) async throws -> OfflineDiarizationResult
+    func diarize(audioSource: AudioSampleSource) async throws -> OfflineDiarizationResult
 }
 
 extension OfflineSpeakerDiarizing {
     public func diarize(samples _: [Float]) async throws -> OfflineDiarizationResult {
+        throw RuntimeFailure.diarizationFailed
+    }
+
+    public func diarize(audioSource _: AudioSampleSource) async throws -> OfflineDiarizationResult {
         throw RuntimeFailure.diarizationFailed
     }
 }
@@ -401,6 +406,50 @@ public struct SpeakerEvidenceCoordinator: SpeakerEvidenceDriving, Sendable {
            case .fileURL(let systemURL) = systemInput {
             return try await analyze(mixedURL: mixedURL, micURL: micURL, systemURL: systemURL)
         }
+        if case .encryptedReader(let micReader) = micInput,
+           case .encryptedReader(let systemReader) = systemInput {
+            let micSource = EncryptedAudioSampleSource(reader: micReader)
+            let systemSource = EncryptedAudioSampleSource(reader: systemReader)
+            let totalStart = ContinuousClock.now
+            try Task.checkCancellation()
+            let energyStart = ContinuousClock.now
+            let windows = try await energyAnalyzer.analyze(
+                micSource: micSource,
+                systemSource: systemSource,
+                sampleRate: micReader.sampleRate
+            )
+            let energyMs = elapsedMilliseconds(since: energyStart)
+            guard !windows.isEmpty else { throw RuntimeFailure.audioAnalysisFailed }
+            let diarizationStart = ContinuousClock.now
+            let systemIsSilent = windows.allSatisfy { $0.systemRms == 0 }
+            let diarizationResult = systemIsSilent
+                ? OfflineDiarizationResult(turns: [], chunkEmbeddings: [])
+                : try await diarizer.diarize(audioSource: systemSource)
+            let turns = diarizationResult.turns
+            let diarizationMs = systemIsSilent ? 0 : elapsedMilliseconds(since: diarizationStart)
+            try Task.checkCancellation()
+            return SpeakerEvidenceOutput(
+                turns: turns,
+                energyWindows: windows,
+                provenance: SpeakerEvidenceProvenance(
+                    modelIdentifier: manifest.identifier,
+                    modelRevision: manifest.revision,
+                    artifactDigest: manifest.artifactSHA256,
+                    runtimeVersion: runtimeVersion
+                ),
+                timings: SpeakerEvidenceTimings(
+                    diarizationMs: diarizationMs,
+                    energyAnalysisMs: energyMs,
+                    totalMs: elapsedMilliseconds(since: totalStart)
+                ),
+                windowSeconds: 0.1,
+                clusterEvidence: systemIsSilent ? [] : SpeakerClusterEvidenceAggregator.buildClusterEvidence(
+                    turns: turns,
+                    windows: windows,
+                    rawChunks: diarizationResult.chunkEmbeddings
+                )
+            )
+        }
         guard case .pcmSamples(let micSamples, let micRate) = micInput,
               case .pcmSamples(let systemSamples, let systemRate) = systemInput else {
             throw RuntimeFailure.audioAnalysisFailed
@@ -543,6 +592,12 @@ public actor FluidAudioOfflineDiarizer: OfflineSpeakerDiarizing {
         try await runDiarization { try await self.manager.process(audio: samples) }
     }
 
+    public func diarize(audioSource: AudioSampleSource) async throws -> OfflineDiarizationResult {
+        try await runDiarization {
+            try await self.manager.process(audioSource: audioSource, audioLoadingSeconds: 0)
+        }
+    }
+
     private func runDiarization(
         _ process: () async throws -> DiarizationResult
     ) async throws -> OfflineDiarizationResult {
@@ -615,6 +670,11 @@ public protocol SpeakerEnergyAnalyzing: Sendable {
         systemSamples: [Float],
         systemRate: Double
     ) async throws -> [SpeakerEnergyWindow]
+    func analyze(
+        micSource: AudioSampleSource,
+        systemSource: AudioSampleSource,
+        sampleRate: Double
+    ) async throws -> [SpeakerEnergyWindow]
 }
 
 extension SpeakerEnergyAnalyzing {
@@ -623,6 +683,14 @@ extension SpeakerEnergyAnalyzing {
         micRate _: Double,
         systemSamples _: [Float],
         systemRate _: Double
+    ) async throws -> [SpeakerEnergyWindow] {
+        throw RuntimeFailure.audioAnalysisFailed
+    }
+
+    public func analyze(
+        micSource _: AudioSampleSource,
+        systemSource _: AudioSampleSource,
+        sampleRate _: Double
     ) async throws -> [SpeakerEnergyWindow] {
         throw RuntimeFailure.audioAnalysisFailed
     }
@@ -686,6 +754,50 @@ public struct SpeakerEnergyAnalyzer: SpeakerEnergyAnalyzing, Sendable {
         }
     }
 
+    public func analyze(
+        micSource: AudioSampleSource,
+        systemSource: AudioSampleSource,
+        sampleRate: Double
+    ) async throws -> [SpeakerEnergyWindow] {
+        try Task.checkCancellation()
+        guard sampleRate.isFinite, sampleRate > 0 else {
+            throw RuntimeFailure.audioAnalysisFailed
+        }
+        let framesPerWindow = max(1, Int((sampleRate * windowSeconds).rounded()))
+        var windows: [SpeakerEnergyWindow] = []
+        var offset = 0
+        let totalFrames = max(micSource.sampleCount, systemSource.sampleCount)
+        while offset < totalFrames {
+            try Task.checkCancellation()
+            let count = min(framesPerWindow, totalFrames - offset)
+            var mic = [Float](repeating: 0, count: count)
+            var system = [Float](repeating: 0, count: count)
+            let micCount = min(count, max(0, micSource.sampleCount - offset))
+            if micCount > 0 {
+                try mic.withUnsafeMutableBufferPointer { buffer in
+                    guard let baseAddress = buffer.baseAddress else { return }
+                    try micSource.copySamples(into: baseAddress, offset: offset, count: micCount)
+                }
+            }
+            let systemCount = min(count, max(0, systemSource.sampleCount - offset))
+            if systemCount > 0 {
+                try system.withUnsafeMutableBufferPointer { buffer in
+                    guard let baseAddress = buffer.baseAddress else { return }
+                    try systemSource.copySamples(into: baseAddress, offset: offset, count: systemCount)
+                }
+            }
+            let start = Double(offset) / sampleRate
+            offset += count
+            windows.append(SpeakerEnergyWindow(
+                startTime: start,
+                endTime: Double(offset) / sampleRate,
+                micRms: rms(mic),
+                systemRms: rms(system)
+            ))
+        }
+        return windows
+    }
+
     private struct RmsWindow {
         let endTime: Double
         let rms: Double
@@ -709,6 +821,14 @@ public struct SpeakerEnergyAnalyzer: SpeakerEnergyAnalyzing, Sendable {
             ))
         }
         return result
+    }
+
+    private func rms(_ samples: [Float]) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        let sumSquares = samples.reduce(0.0) { partial, sample in
+            partial + Double(sample) * Double(sample)
+        }
+        return sqrt(sumSquares / Double(samples.count))
     }
 
     private func readWindows(from url: URL) throws -> [RmsWindow] {

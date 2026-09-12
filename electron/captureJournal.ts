@@ -784,6 +784,7 @@ const writeManifest = async (
         source: 'none',
         sequence: manifest.revision,
       },
+      { directoryReady: true },
     );
 
     const locator: CaptureJournalLocator = {
@@ -1139,6 +1140,7 @@ export const persistCaptureJournalRawChunk = async (
           source: args.source,
           sequence: args.sequence,
         },
+        { directoryReady: true },
       );
       rawCiphertextSha256 = writeResult.ciphertextSha256;
     } else {
@@ -1260,6 +1262,7 @@ export const completeCaptureJournalCapturedChunk = async (
           source: args.source,
           sequence: args.sequence,
         },
+        { directoryReady: true },
       );
       repairCiphertextSha256 = writeResult.ciphertextSha256;
     } else {
@@ -2231,6 +2234,7 @@ const appendCaptureJournalChunkUnlocked = async (
         source: args.source,
         sequence,
       },
+      { directoryReady: true },
     );
 
     const nextManifest: CaptureJournalManifestV4 = {
