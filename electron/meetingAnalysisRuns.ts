@@ -122,6 +122,10 @@ export type MeetingAnalysisRunCoordinatorDb = {
     analysis: AnalysisDocumentV3;
   }): boolean;
   getAllEntities(): EntityHint[];
+  getMeetingNotesIdentityProjection?(meetingId: string | number): {
+    speakerDisplayNames: Record<string, string>;
+    trustedUserTerms: string[];
+  };
   upsertMeetingAnalysisRunMetric?(input: {
     meetingId: string | number;
     runId: string;
@@ -253,6 +257,7 @@ const hashFingerprint = (value: unknown): string =>
 export const createMeetingNotesStageCacheKey = (input: {
   userNotesHash: string;
   terms: string[];
+  trustedUserTerms?: string[];
   template: MeetingNotesTemplate;
   provider: string;
   model: string | null;
@@ -568,6 +573,30 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     input: GenerateMeetingNotesInput,
   ): Promise<PublishedMeetingNotes> => {
     const meetingId = String(input.meetingId);
+    const identityProjection = () =>
+      dependencies.db.getMeetingNotesIdentityProjection?.(meetingId) ?? {
+        speakerDisplayNames: {},
+        trustedUserTerms: [],
+      };
+    const notesSource = (record: MeetingRecord) => {
+      if (!record.transcript_json)
+        throw new MeetingNotesError('meeting_notes_source_missing');
+      const projection = identityProjection();
+      return {
+        projection,
+        source: createNotesSource(
+          record.transcript_json,
+          projection.speakerDisplayNames,
+        ),
+      };
+    };
+    const analysisTranscript = (record: MeetingRecord) => {
+      const projection = identityProjection();
+      return buildAnalysisTranscriptFromJson(
+        record.transcript_json,
+        projection.speakerDisplayNames,
+      );
+    };
     let meeting = dependencies.db.getMeeting(meetingId);
     if (!meeting) throw new Error('meeting_not_found');
     if (!isEligibleMeetingSource(meeting)) {
@@ -578,7 +607,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
 
     let source: ReturnType<typeof createNotesSource>;
     try {
-      source = createNotesSource(meeting.transcript_json);
+      source = notesSource(meeting).source;
     } catch {
       throw new Error('meeting_notes_source_invalid');
     }
@@ -597,7 +626,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     if (!meeting.transcript_json)
       throw new Error('meeting_notes_source_missing');
     try {
-      source = createNotesSource(meeting.transcript_json);
+      source = notesSource(meeting).source;
     } catch {
       throw new Error('meeting_notes_source_invalid');
     }
@@ -625,9 +654,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         startSecondary(
           {
             ...identity,
-            transcript: buildAnalysisTranscriptFromJson(
-              meeting.transcript_json,
-            ),
+            transcript: analysisTranscript(meeting),
             analysis: JSON.parse(meeting.analysis_json) as AnalysisDocumentV3,
             provider,
             signal: controller.signal,
@@ -649,9 +676,13 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       .map((entity) => entity.name)
       .filter((name) => typeof name === 'string' && name.trim())
       .slice(0, 24);
+    const projection = identityProjection();
     const generationIdentity = {
       userNotesHash: revisions.userNotesHash,
       terms,
+      ...(projection.trustedUserTerms.length > 0
+        ? { trustedUserTerms: projection.trustedUserTerms }
+        : {}),
       template: input.template,
       provider: provider.name,
       model: configuredModel(settings),
@@ -708,9 +739,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         startSecondary(
           {
             ...identity,
-            transcript: buildAnalysisTranscriptFromJson(
-              meeting.transcript_json,
-            ),
+            transcript: analysisTranscript(meeting),
             analysis,
             provider,
             signal: controller.signal,
@@ -811,7 +840,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           ) {
             throw new Error('meeting_notes_superseded');
           }
-          source = createNotesSource(admittedMeeting.transcript_json);
+          const admittedNotesInput = notesSource(admittedMeeting);
+          source = admittedNotesInput.source;
           dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({
             meetingId,
             runId,
@@ -849,14 +879,19 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                 provider.generateStructuredAnalysis(
                   buildAnalysisTranscriptFromJson(
                     admittedMeeting.transcript_json!,
+                    admittedNotesInput.projection.speakerDisplayNames,
                   ),
                   admittedMeeting.user_notes ?? '',
                   input.template,
                   {
                     signal: controller.signal,
                     source,
-                    knownTerms: terms,
-                    trustedUserTerms: [],
+                    knownTerms: [
+                      ...admittedNotesInput.projection.trustedUserTerms,
+                      ...terms,
+                    ],
+                    trustedUserTerms:
+                      admittedNotesInput.projection.trustedUserTerms,
                     entityHints: terms,
                     contextTokens: NOTES_CONTEXT_TOKENS,
                     compactWriterContract: true,
@@ -938,6 +973,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                 ...secondaryInput,
                 transcript: buildAnalysisTranscriptFromJson(
                   admittedMeeting.transcript_json,
+                  admittedNotesInput.projection.speakerDisplayNames,
                 ),
                 analysis,
                 provider,

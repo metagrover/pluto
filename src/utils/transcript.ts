@@ -208,6 +208,7 @@ export const isTranscriptJsonEffectivelyEmpty = (
 
 export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
+  speakerDisplayNames: Readonly<Record<string, string>> = {},
 ): string => {
   return buildTranscriptSegmentsForPresentation(
     transcriptJson,
@@ -219,7 +220,11 @@ export const buildAnalysisTranscriptFromJson = (
         typeof segment.speaker === 'number'
           ? String(segment.speaker).trim()
           : '';
-      return speaker ? `${speaker}: ${segment.text}` : segment.text;
+      const projectedSpeaker =
+        (speaker ? speakerDisplayNames[speaker]?.trim() : '') || speaker;
+      return projectedSpeaker
+        ? `${projectedSpeaker}: ${segment.text}`
+        : segment.text;
     })
     .join('\n');
 };

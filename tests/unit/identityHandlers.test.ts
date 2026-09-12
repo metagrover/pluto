@@ -182,6 +182,47 @@ describe('identity IPC service', () => {
       db.identityStore.getBindings(meetingId)[0].sourceRevision,
     ).toHaveLength(64);
   });
+  it('remembers Undo for an automatic singleton participant mapping', () => {
+    db.identityStore.setBinding(meetingId, {
+      speaker: 'Them',
+      personId,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'source',
+      evidence: [],
+      assignment: { kind: 'manual_participant_singleton_v1' },
+    });
+
+    handleIdentityRequest('CLEAR_MEETING_IDENTITY_BINDING', {
+      meetingId,
+      speaker: 'Them',
+      expectedRevision: revision(),
+    });
+
+    expect(db.identityStore.getBindings(meetingId)).toEqual([]);
+    expect(
+      db.identityStore.isAutomaticBindingSuppressed(
+        meetingId,
+        'Them',
+        'manual_participant_singleton_v1',
+      ),
+    ).toBe(true);
+
+    handleIdentityRequest('SET_MEETING_IDENTITY_BINDING', {
+      meetingId,
+      speaker: 'Them',
+      personId,
+      individual: true,
+      expectedRevision: revision(),
+    });
+    expect(
+      db.identityStore.isAutomaticBindingSuppressed(
+        meetingId,
+        'Them',
+        'manual_participant_singleton_v1',
+      ),
+    ).toBe(false);
+  });
   it('reports affected people after commit and ignores refresh failures', () => {
     const onBindingChange = vi.fn(() => {
       throw new Error('refresh unavailable');

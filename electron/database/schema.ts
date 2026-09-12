@@ -990,6 +990,23 @@ export const identityBindings = sqliteTable(
   (table) => [primaryKey({ columns: [table.meetingId, table.speaker] })],
 );
 
+export const identityBindingSuppressions = sqliteTable(
+  'identity_binding_suppressions',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    speaker: text('speaker').notNull(),
+    assignment: text('assignment').notNull(),
+    createdAt: datetime('created_at').default(now),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.meetingId, table.speaker, table.assignment],
+    }),
+  ],
+);
+
 export const identityResolutions = sqliteTable(
   'identity_resolutions',
   {

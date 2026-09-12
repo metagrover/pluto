@@ -21,7 +21,7 @@ describe('meeting analysis run coordinator', () => {
         getMeeting: () => ({
           id: 'preview-meeting',
           transcript_json: JSON.stringify({
-            segments: [{ speaker: 1, text: 'We agreed to ship.' }],
+            segments: [{ speaker: 'Them', text: 'We agreed to ship.' }],
           }),
           transcript_status: 'validated',
           transcript_integrity_json: JSON.stringify({ verified: true }),
@@ -48,17 +48,24 @@ describe('meeting analysis run coordinator', () => {
         isMeetingAnalysisRunCurrent: () => current,
         publishMeetingNotesIfCurrent: publish,
         getAllEntities: () => [],
+        getMeetingNotesIdentityProjection: () => ({
+          speakerDisplayNames: { Them: 'Alex' },
+          trustedUserTerms: ['Alex'],
+        }),
       },
       getSettings: async () => ({ llm_provider: 'ollama' }),
       createRunId: () => 'preview-run',
       getProvider: async () => ({
         name: 'ollama',
         generateStructuredAnalysis: async (
-          _transcript,
+          transcript,
           _notes,
           _template,
           options,
         ) => {
+          expect(transcript).toBe('Alex: We agreed to ship.');
+          expect(options?.source?.segments[0]?.speaker).toBe('Alex');
+          expect(options?.trustedUserTerms).toEqual(['Alex']);
           const draft = {
             meetingType: 'general' as const,
             overview: null,
