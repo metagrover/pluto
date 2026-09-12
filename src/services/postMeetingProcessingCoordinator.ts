@@ -12,16 +12,22 @@ const PROCESSING_POLL_INTERVAL_MS = 2_000;
 export const needsRecoveredAudioRebuild = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
+  const hasDetailedAudioFields = Boolean(
+    meeting && ('audio_path' in meeting || 'transcript_json' in meeting),
+  );
+  const hasRequiredInputs = hasDetailedAudioFields
+    ? Boolean(meeting?.audio_path && meeting.transcript_json)
+    : Boolean(meeting?.has_audio && meeting.has_transcript);
   if (
     !meeting ||
     meeting.finalization_status === 'recovery_required' ||
     meeting.transcript_status !== 'needs_attention' ||
     !meeting.capture_journal_generation ||
-    !meeting.audio_path ||
-    !meeting.transcript_json
+    !hasRequiredInputs
   ) {
     return false;
   }
+  if (meeting.recovered_awaiting_validation === true) return true;
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;

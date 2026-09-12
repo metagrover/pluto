@@ -96,6 +96,23 @@ describe('post-meeting processing coordinator', () => {
     );
   });
 
+  it('selects recovered work from its content-free meeting summary', () => {
+    const summary = {
+      id: 'recovered-summary',
+      transcript_status: 'needs_attention' as const,
+      finalization_status: 'finalized' as const,
+      capture_journal_generation: 'generation-1',
+      has_transcript: true,
+      has_audio: true,
+      recovered_awaiting_validation: true,
+    };
+
+    expect(needsRecoveredAudioRebuild(summary)).toBe(true);
+    expect(selectNextMeetingForFinalTranscription([summary])?.id).toBe(
+      'recovered-summary',
+    );
+  });
+
   it('does not automatically retry a recovered capture with a gap', () => {
     expect(
       needsRecoveredAudioRebuild({

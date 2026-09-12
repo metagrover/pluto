@@ -244,6 +244,7 @@ export interface Meeting {
   has_audio?: boolean;
   has_analysis?: boolean;
   has_capture_gap?: boolean;
+  recovered_awaiting_validation?: boolean;
   final_transcription_policy?: string | null;
   final_transcription_state?: string | null;
   final_transcription_engine?: string | null;
@@ -277,6 +278,7 @@ export interface MeetingSummary
     | 'has_audio'
     | 'has_analysis'
     | 'has_capture_gap'
+    | 'recovered_awaiting_validation'
     | 'final_transcription_policy'
     | 'final_transcription_state'
     | 'final_transcription_engine'
