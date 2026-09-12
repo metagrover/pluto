@@ -1040,6 +1040,222 @@
   .meeting-analysis-skeleton__lines {
     @apply mt-5 space-y-4;
   }
+  .meeting-notes-draft {
+    @apply mx-auto w-full max-w-[760px] px-6 pb-20 pt-1 md:px-8;
+  }
+  .meeting-notes-draft__frame {
+    @apply relative overflow-hidden rounded-[18px] border;
+    border-color: var(--notes-rule);
+    background:
+      radial-gradient(
+        circle at 8% -10%,
+        oklch(88% 0.05 75 / 0.24),
+        transparent 34%
+      ),
+      var(--notes-paper-raised);
+    box-shadow:
+      0 1px 0 oklch(100% 0 0 / 0.7) inset,
+      0 18px 50px -38px oklch(30% 0.03 55 / 0.3);
+  }
+  .meeting-notes-draft__frame::before {
+    content: "";
+    @apply absolute inset-x-0 top-0 h-0.5;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(72% 0.09 62 / 0.35) 36%,
+      oklch(70% 0.12 52 / 0.9) 50%,
+      oklch(72% 0.09 62 / 0.35) 64%,
+      transparent 100%
+    );
+    background-size: 180% 100%;
+    animation: meeting-draft-scan 1.4s ease-in-out infinite;
+  }
+  .dark .meeting-notes-draft__frame {
+    background:
+      radial-gradient(
+        circle at 8% -10%,
+        oklch(52% 0.045 65 / 0.13),
+        transparent 36%
+      ),
+      var(--notes-paper-raised);
+    box-shadow:
+      0 1px 0 oklch(100% 0 0 / 0.04) inset,
+      0 18px 50px -38px oklch(0% 0 0 / 0.7);
+  }
+  .meeting-notes-draft__header {
+    @apply flex items-center gap-3 border-b px-5 py-4 md:px-6;
+    border-color: var(--notes-rule);
+    background: oklch(99% 0.008 82 / 0.72);
+  }
+  .dark .meeting-notes-draft__header {
+    background: oklch(20% 0.02 272 / 0.72);
+  }
+  .meeting-notes-draft__activity {
+    @apply relative grid h-9 w-9 shrink-0 place-items-center rounded-xl;
+    color: var(--notes-accent);
+    background: oklch(91% 0.035 75 / 0.72);
+  }
+  .dark .meeting-notes-draft__activity {
+    background: oklch(30% 0.035 62 / 0.7);
+  }
+  .meeting-notes-draft__activity::after {
+    content: "";
+    @apply absolute inset-0 rounded-xl border;
+    border-color: color-mix(in oklch, var(--notes-accent) 32%, transparent);
+    animation: meeting-draft-pulse 1.6s ease-out infinite;
+  }
+  .meeting-notes-draft__activity svg {
+    @apply h-4 w-4;
+  }
+  .meeting-notes-draft__status {
+    @apply min-w-0 flex-1;
+  }
+  .meeting-notes-draft__status p {
+    @apply flex items-center text-sm font-semibold;
+    color: var(--notes-ink);
+  }
+  .meeting-notes-draft__status > span {
+    @apply mt-0.5 block truncate text-xs;
+    color: var(--notes-muted);
+  }
+  .meeting-notes-draft__dots {
+    @apply ml-1.5 inline-flex items-center gap-1;
+  }
+  .meeting-notes-draft__dots span {
+    @apply h-1 w-1 rounded-full;
+    background: var(--notes-accent);
+    animation: meeting-draft-dot 1.05s ease-in-out infinite;
+  }
+  .meeting-notes-draft__dots span:nth-child(2) {
+    animation-delay: 0.13s;
+  }
+  .meeting-notes-draft__dots span:nth-child(3) {
+    animation-delay: 0.26s;
+  }
+  .meeting-notes-draft__readonly {
+    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium;
+    border-color: var(--notes-rule);
+    color: var(--notes-muted);
+    background: var(--notes-paper);
+  }
+  .meeting-notes-draft__readonly svg {
+    @apply h-3 w-3;
+  }
+  .meeting-notes-draft__document {
+    @apply px-5 pb-2 pt-6 md:px-7;
+  }
+  .meeting-notes-draft__section {
+    @apply mb-6;
+    animation: meeting-draft-enter 0.28s ease-out both;
+  }
+  .meeting-notes-draft__section h3 {
+    @apply mb-2.5 text-[15px] font-semibold tracking-[-0.01em];
+    color: var(--notes-ink);
+  }
+  .meeting-notes-draft__section ul {
+    @apply list-disc space-y-1.5 pl-5 text-[15px] leading-7;
+    color: var(--notes-ink);
+  }
+  .meeting-notes-draft__section li::marker {
+    color: var(--notes-faint);
+  }
+  .meeting-notes-draft__writing {
+    @apply border-t pb-5 pt-5;
+    border-color: var(--notes-rule);
+  }
+  .meeting-notes-draft__writing > span {
+    @apply text-[10px] font-semibold uppercase tracking-[0.12em];
+    color: var(--notes-faint);
+  }
+  .meeting-notes-draft__writing-lines {
+    @apply mt-3 space-y-2.5;
+  }
+  .meeting-notes-draft__writing-lines i {
+    @apply block h-2.5 rounded-full;
+    background: linear-gradient(
+      90deg,
+      var(--notes-wash) 18%,
+      color-mix(in oklch, var(--notes-wash) 58%, var(--notes-rule)) 42%,
+      var(--notes-wash) 66%
+    );
+    background-size: 240% 100%;
+    animation: meeting-draft-write 1.05s linear infinite;
+  }
+  .meeting-notes-draft__writing-lines i:nth-child(1) {
+    @apply w-[88%];
+  }
+  .meeting-notes-draft__writing-lines i:nth-child(2) {
+    @apply w-[72%];
+    animation-delay: 0.12s;
+  }
+  .meeting-notes-draft__writing-lines i:nth-child(3) {
+    @apply w-[42%];
+    animation-delay: 0.24s;
+  }
+  .meeting-notes-draft__footer {
+    @apply border-t px-5 py-3 text-center text-[11px] md:px-6;
+    border-color: var(--notes-rule);
+    color: var(--notes-faint);
+    background: color-mix(in oklch, var(--notes-paper) 72%, transparent);
+  }
+  @keyframes meeting-draft-scan {
+    from {
+      background-position: 180% 0;
+    }
+    to {
+      background-position: -80% 0;
+    }
+  }
+  @keyframes meeting-draft-pulse {
+    0% {
+      opacity: 0.6;
+      transform: scale(0.92);
+    }
+    75%,
+    100% {
+      opacity: 0;
+      transform: scale(1.28);
+    }
+  }
+  @keyframes meeting-draft-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 0.28;
+      transform: translateY(0);
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  @keyframes meeting-draft-enter {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes meeting-draft-write {
+    from {
+      background-position: 120% 0;
+    }
+    to {
+      background-position: -120% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .meeting-notes-draft *,
+    .meeting-notes-draft__frame::before,
+    .meeting-notes-draft__activity::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+  }
   .meeting-analysis-queue {
     @apply mx-auto block w-full max-w-[760px] px-6 pb-16 pt-8 md:px-8;
   }
