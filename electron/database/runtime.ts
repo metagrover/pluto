@@ -3,7 +3,10 @@ import path from 'node:path';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import type { ApplicationKeyStore } from '../crypto/applicationKeyStore';
+import {
+  ApplicationKeyBindingMismatchError,
+  type ApplicationKeyStore,
+} from '../crypto/applicationKeyStore';
 import { deriveDatabaseKey } from '../crypto/keyDerivation';
 import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 import {
@@ -267,6 +270,14 @@ export const createDatabaseRuntime = (
         return deriveDatabaseKey(master.key, master.salt).toString('hex');
       } catch (error) {
         if (error instanceof DatabaseLifecycleError) throw error;
+        if (error instanceof ApplicationKeyBindingMismatchError) {
+          throw new DatabaseLifecycleError(
+            'database_key_identity_mismatch',
+            'Database key belongs to a legacy or differently signed application identity.',
+            {},
+            { cause: error },
+          );
+        }
         throw new DatabaseLifecycleError(
           'database_key_unavailable',
           'Database encryption key is unavailable or locked in macOS Keychain.',

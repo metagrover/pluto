@@ -131,5 +131,13 @@ describe('database migration history', () => {
     expect(describeDatabaseStartupError(new Error('PRIVATE'))).toBe(
       'Database startup failed.',
     );
+    expect(
+      describeDatabaseStartupError(
+        new DatabaseLifecycleError(
+          'database_key_identity_mismatch',
+          'PRIVATE key metadata',
+        ),
+      ),
+    ).toContain('stopped before requesting Keychain access');
   });
 });

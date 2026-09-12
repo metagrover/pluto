@@ -18,15 +18,22 @@ export type EncryptionRolloutPolicy = {
 export type SignedBuildProbe = {
   valid: boolean;
   reason: string;
+  identifier?: string;
+  teamIdentifier?: string;
 };
 
 export const probeSignedMacBuild = (
   executablePath: string,
+  options: {
+    expectedIdentifier?: string;
+    spawn?: typeof spawnSync;
+  } = {},
 ): SignedBuildProbe => {
   if (process.platform !== 'darwin') {
     return { valid: false, reason: 'platform_unsupported' };
   }
-  const verified = spawnSync(
+  const spawn = options.spawn ?? spawnSync;
+  const verified = spawn(
     '/usr/bin/codesign',
     ['--verify', '--deep', '--strict', executablePath],
     { encoding: 'utf8' },
@@ -34,20 +41,37 @@ export const probeSignedMacBuild = (
   if (verified.status !== 0) {
     return { valid: false, reason: 'signature_invalid' };
   }
-  const details = spawnSync(
+  const details = spawn(
     '/usr/bin/codesign',
     ['--display', '--verbose=4', executablePath],
     { encoding: 'utf8' },
   );
   const output = `${details.stdout || ''}\n${details.stderr || ''}`;
+  const identifier = /^Identifier=(.+)$/m.exec(output)?.[1]?.trim();
+  const teamIdentifier = /^TeamIdentifier=(.+)$/m.exec(output)?.[1]?.trim();
   if (
     details.status !== 0 ||
     /Signature=adhoc/i.test(output) ||
-    !/^Authority=.+$/m.test(output)
+    !/^Authority=.+$/m.test(output) ||
+    !teamIdentifier ||
+    teamIdentifier === 'not set'
   ) {
     return { valid: false, reason: 'signature_not_distribution_bound' };
   }
-  return { valid: true, reason: 'signed_distribution_build' };
+  if (options.expectedIdentifier && identifier !== options.expectedIdentifier) {
+    return {
+      valid: false,
+      reason: 'signature_identifier_mismatch',
+      identifier,
+      teamIdentifier,
+    };
+  }
+  return {
+    valid: true,
+    reason: 'signed_distribution_build',
+    identifier,
+    teamIdentifier,
+  };
 };
 
 export const resolveEncryptionRolloutPolicy = (input: {

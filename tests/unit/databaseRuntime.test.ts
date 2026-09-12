@@ -542,6 +542,50 @@ describe('createDatabaseRuntime with encryption', () => {
     );
   });
 
+  it('rejects a legacy production key binding before Keychain access', () => {
+    const plaintext = new Database(dbPath);
+    plaintext.exec('CREATE TABLE preserved (id TEXT);');
+    plaintext.close();
+    fs.writeFileSync(
+      path.join(tempDir, 'app-key-envelope.json'),
+      JSON.stringify({
+        version: 1,
+        keyId: 'legacy',
+        kdfVersion: 1,
+        salt: Buffer.alloc(32).toString('base64'),
+        wrappedKey: Buffer.alloc(32).toString('base64'),
+        createdAtMs: 1,
+      }),
+    );
+    let decryptCalls = 0;
+    const keyStore = new ApplicationKeyStore({
+      storageDir: tempDir,
+      expectedStorageBinding: {
+        provider: 'electron_safe_storage',
+        bundleIdentifier: 'com.pluto.app',
+        teamIdentifier: 'PLUTOTEAM1',
+      },
+      backend: {
+        isEncryptionAvailable: () => true,
+        encryptString: () => Buffer.alloc(0),
+        decryptString: () => {
+          decryptCalls++;
+          return '';
+        },
+      },
+    });
+    const runtime = createDatabaseRuntime({
+      databasePath: dbPath,
+      migrationsFolder,
+      keyStore,
+    });
+
+    expect(() => runtime.initialize()).toThrowError(
+      expect.objectContaining({ code: 'database_key_identity_mismatch' }),
+    );
+    expect(decryptCalls).toBe(0);
+  });
+
   it('allows retry after database_key_rejected and consults keyStore again', () => {
     const salt = Buffer.alloc(16, 0x12);
     const validMasterKey = Buffer.alloc(32, 0xaa);

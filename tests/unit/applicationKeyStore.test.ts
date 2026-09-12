@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationKeyStore } from '../../electron/crypto/applicationKeyStore';
 import type { SafeStorageBackend } from '../../electron/crypto/keyCustodyProbe';
 
@@ -100,6 +100,65 @@ describe('ApplicationKeyStore', () => {
     });
 
     expect(() => store.getMasterKey()).toThrow(/unsupported version/);
+  });
+
+  it('binds a production envelope to the signed Pluto identity', () => {
+    const binding = {
+      provider: 'electron_safe_storage' as const,
+      bundleIdentifier: 'com.pluto.app',
+      teamIdentifier: 'PLUTOTEAM1',
+    };
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: mockBackend,
+      expectedStorageBinding: binding,
+    });
+
+    store.getOrCreateMasterKey();
+
+    const envelope = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, 'app-key-envelope.json'), 'utf8'),
+    );
+    expect(envelope).toMatchObject({
+      version: 2,
+      storageBinding: binding,
+    });
+  });
+
+  it('rejects a legacy or mismatched binding before Keychain decryption', () => {
+    const decryptString = vi.fn(() => {
+      throw new Error('must not reach Keychain');
+    });
+    const backend: SafeStorageBackend = {
+      isEncryptionAvailable: () => true,
+      encryptString: mockBackend.encryptString,
+      decryptString,
+    };
+    fs.writeFileSync(
+      path.join(tmpDir, 'app-key-envelope.json'),
+      JSON.stringify({
+        version: 1,
+        keyId: 'legacy',
+        kdfVersion: 1,
+        salt: Buffer.alloc(32).toString('base64'),
+        wrappedKey: Buffer.alloc(32).toString('base64'),
+        createdAtMs: 1,
+      }),
+    );
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend,
+      expectedStorageBinding: {
+        provider: 'electron_safe_storage',
+        bundleIdentifier: 'com.pluto.app',
+        teamIdentifier: 'PLUTOTEAM1',
+      },
+    });
+
+    expect(() => store.getMasterKey()).toThrow(
+      'Application key envelope is not bound to this signed Pluto identity',
+    );
+    expect(decryptString).not.toHaveBeenCalled();
   });
 
   it('durably fsyncs key envelope file and parent directory on creation', () => {

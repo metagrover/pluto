@@ -3,7 +3,10 @@ import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import electron from 'vite-plugin-electron/simple';
-import { resolveDevelopmentUserDataDir } from './electron/appRuntimePolicy';
+import {
+  resolveDevelopmentUserDataDir,
+  resolveProductionUserDataDir,
+} from './electron/appRuntimePolicy';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -31,6 +34,11 @@ export default defineConfig({
           const userDataDir = resolveDevelopmentUserDataDir({
             explicit: process.env.PLUTO_USER_DATA_DIR,
             tempDir: os.tmpdir(),
+            productionDir:
+              resolveProductionUserDataDir({
+                platform: process.platform,
+                homeDir: os.homedir(),
+              }) ?? undefined,
           });
           return startup(['.', `--user-data-dir=${userDataDir}`]);
         },

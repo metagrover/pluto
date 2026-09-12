@@ -2,89 +2,76 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createProductionBackup,
-  launchDevelopmentApp,
-  resolveProductionProfile,
+  launchSignedPlutoApp,
+  resolveInstalledPlutoApp,
+  verifySignedPlutoApp,
 } from '../../scripts/start_production_profile.mjs';
 
-describe('production-profile development launcher', () => {
-  it('resolves Pluto production data on macOS', () => {
+describe('production Pluto launcher', () => {
+  it('resolves the installed macOS app without touching its data profile', () => {
     expect(
-      resolveProductionProfile({
+      resolveInstalledPlutoApp({
         platform: 'darwin',
-        homeDir: '/Users/pluto',
+        applicationsDir: '/Applications',
       }),
-    ).toBe(
-      path.join('/Users/pluto', 'Library', 'Application Support', 'pluto'),
-    );
+    ).toBe(path.join('/Applications', 'Pluto.app'));
+    expect(
+      resolveInstalledPlutoApp({
+        platform: 'darwin',
+        override: '/tmp/Signed Pluto.app',
+      }),
+    ).toBe('/tmp/Signed Pluto.app');
   });
 
-  it('creates one recovery snapshot without overwriting it', () => {
+  it('requires the Pluto bundle identifier and a distribution signing team', () => {
     const spawn = vi
       .fn()
       .mockReturnValueOnce({ status: 0 })
-      .mockReturnValueOnce({ status: 0, stdout: 'ok\n' });
-    const rename = vi.fn();
-    const exists = vi.fn((candidate: string) => candidate.endsWith('pluto.db'));
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: '',
+        stderr:
+          'Identifier=com.pluto.app\nAuthority=Developer ID Application: Pluto\nTeamIdentifier=PLUTOTEAM1\n',
+      });
 
     expect(
-      createProductionBackup({
-        userDataDir: '/profile',
-        exists,
-        spawn,
-        rename,
-        processId: 42,
-      }),
-    ).toBe('created');
-    expect(spawn).toHaveBeenCalledTimes(2);
-    expect(spawn.mock.calls[0]?.[0]).toBe('sqlite3');
-    expect(spawn.mock.calls[0]?.[1]?.[0]).toBe('/profile/pluto.db');
-    expect(spawn.mock.calls[0]?.[1]?.[1]).toContain(
-      '/profile/pluto.db.before-pnpm-start.backup.in-progress-42',
-    );
-    expect(rename).toHaveBeenCalledWith(
-      '/profile/pluto.db.before-pnpm-start.backup.in-progress-42',
-      '/profile/pluto.db.before-pnpm-start.backup',
-    );
-
-    spawn.mockReturnValueOnce({ status: 0, stdout: 'ok\n' });
-    expect(
-      createProductionBackup({
-        userDataDir: '/profile',
+      verifySignedPlutoApp({
+        appPath: '/Applications/Pluto.app',
         exists: () => true,
         spawn,
-        rename,
       }),
-    ).toBe('existing');
-    expect(spawn).toHaveBeenCalledTimes(3);
-    expect(rename).toHaveBeenCalledOnce();
+    ).toEqual({
+      identifier: 'com.pluto.app',
+      teamIdentifier: 'PLUTOTEAM1',
+    });
   });
 
-  it('fails closed when an existing recovery snapshot is corrupt', () => {
+  it.each([
+    'Signature=adhoc\nIdentifier=com.pluto.app\nTeamIdentifier=not set\n',
+    'Identifier=com.someone.else\nAuthority=Developer ID Application: Other\nTeamIdentifier=OTHERTEAM1\n',
+  ])('rejects an unsafe app identity before launch', (details) => {
     expect(() =>
-      createProductionBackup({
-        userDataDir: '/profile',
+      verifySignedPlutoApp({
+        appPath: '/Applications/Pluto.app',
         exists: () => true,
-        spawn: () => ({
-          status: 0,
-          stdout: 'database disk image is malformed',
-        }),
+        spawn: vi
+          .fn()
+          .mockReturnValueOnce({ status: 0 })
+          .mockReturnValueOnce({ status: 0, stdout: '', stderr: details }),
       }),
-    ).toThrow('Production-profile recovery snapshot failed integrity check');
+    ).toThrow('Refusing to open production data');
   });
 
-  it('starts Vite with only the explicit production profile override', () => {
+  it('launches the verified app through Launch Services', () => {
     const spawn = vi.fn(() => ({ status: 0 }));
-
-    launchDevelopmentApp({
-      userDataDir: '/profile',
-      environment: { PATH: '/bin' },
+    launchSignedPlutoApp({
+      appPath: '/Applications/Pluto.app',
       spawn,
     });
-
-    expect(spawn).toHaveBeenCalledWith('pnpm', ['exec', 'vite'], {
-      env: { PATH: '/bin', PLUTO_USER_DATA_DIR: '/profile' },
-      stdio: 'inherit',
-    });
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/bin/open',
+      ['/Applications/Pluto.app'],
+      { stdio: 'inherit' },
+    );
   });
 });

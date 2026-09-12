@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, renameSync } from 'node:fs';
-import os from 'node:os';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const run = (spawn, command, args, options) => {
+const EXPECTED_IDENTIFIER = 'com.pluto.app';
+
+const run = (spawn, command, args, options = {}) => {
   const result = spawn(command, args, options);
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -14,91 +15,63 @@ const run = (spawn, command, args, options) => {
   return result;
 };
 
-const verifyBackup = (backupPath, spawn) => {
-  const result = run(
-    spawn,
-    'sqlite3',
-    ['-readonly', backupPath, 'PRAGMA quick_check;'],
-    { encoding: 'utf8' },
-  );
-  if (result.stdout?.trim() !== 'ok') {
-    throw new Error(
-      `Production-profile recovery snapshot failed integrity check: ${backupPath}`,
-    );
-  }
-};
-
-export const resolveProductionProfile = ({ platform, homeDir }) => {
+export const resolveInstalledPlutoApp = ({
+  platform,
+  applicationsDir = '/Applications',
+  override,
+}) => {
   if (platform !== 'darwin') {
     throw new Error('pnpm start currently supports macOS only.');
   }
-  return path.join(homeDir, 'Library', 'Application Support', 'pluto');
+  return override?.trim()
+    ? path.resolve(override.trim())
+    : path.join(applicationsDir, 'Pluto.app');
 };
 
-export const createProductionBackup = ({
-  userDataDir,
+export const verifySignedPlutoApp = ({
+  appPath,
   exists = existsSync,
   spawn = spawnSync,
-  rename = renameSync,
-  processId = process.pid,
 }) => {
-  const databasePath = path.join(userDataDir, 'pluto.db');
-  const backupPath = path.join(
-    userDataDir,
-    'pluto.db.before-pnpm-start.backup',
+  if (!exists(appPath)) {
+    throw new Error(`Signed Pluto app not found: ${appPath}`);
+  }
+  run(spawn, '/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath]);
+  const details = run(
+    spawn,
+    '/usr/bin/codesign',
+    ['--display', '--verbose=4', appPath],
+    { encoding: 'utf8' },
   );
-  if (!exists(databasePath)) {
-    throw new Error(`Pluto production database not found: ${databasePath}`);
-  }
-  if (exists(backupPath)) {
-    verifyBackup(backupPath, spawn);
-    return 'existing';
-  }
-
-  const temporaryPath = `${backupPath}.in-progress-${processId}`;
-  if (exists(temporaryPath)) {
+  const output = `${details.stdout || ''}\n${details.stderr || ''}`;
+  const identifier = /^Identifier=(.+)$/m.exec(output)?.[1]?.trim();
+  const teamIdentifier = /^TeamIdentifier=(.+)$/m.exec(output)?.[1]?.trim();
+  if (
+    /Signature=adhoc/i.test(output) ||
+    !/^Authority=.+$/m.test(output) ||
+    !teamIdentifier ||
+    teamIdentifier === 'not set' ||
+    identifier !== EXPECTED_IDENTIFIER
+  ) {
     throw new Error(
-      `Incomplete recovery snapshot already exists: ${temporaryPath}`,
+      'Refusing to open production data with an unsigned or incorrectly identified Pluto app.',
     );
   }
-  const escapedTemporaryPath = temporaryPath.replaceAll("'", "''");
-  run(
-    spawn,
-    'sqlite3',
-    [databasePath, `VACUUM INTO '${escapedTemporaryPath}'`],
-    { stdio: 'inherit' },
-  );
-  verifyBackup(temporaryPath, spawn);
-  rename(temporaryPath, backupPath);
-  return 'created';
+  return { identifier, teamIdentifier };
 };
 
-export const launchDevelopmentApp = ({
-  userDataDir,
-  environment = process.env,
-  spawn = spawnSync,
-}) => {
-  run(spawn, 'pnpm', ['exec', 'vite'], {
-    env: { ...environment, PLUTO_USER_DATA_DIR: userDataDir },
-    stdio: 'inherit',
-  });
+export const launchSignedPlutoApp = ({ appPath, spawn = spawnSync }) => {
+  run(spawn, '/usr/bin/open', [appPath], { stdio: 'inherit' });
 };
 
 export const main = () => {
-  const userDataDir = resolveProductionProfile({
+  const appPath = resolveInstalledPlutoApp({
     platform: process.platform,
-    homeDir: os.homedir(),
+    override: process.env.PLUTO_SIGNED_APP_PATH,
   });
-  const backup = createProductionBackup({ userDataDir });
-  console.log(
-    backup === 'created'
-      ? `Created recovery snapshot before development access: ${path.join(userDataDir, 'pluto.db.before-pnpm-start.backup')}`
-      : 'Production-profile recovery snapshot already exists.',
-  );
-  console.log(
-    `Starting Pluto development with production profile: ${userDataDir}`,
-  );
-  launchDevelopmentApp({ userDataDir });
+  verifySignedPlutoApp({ appPath });
+  console.log(`Opening signed Pluto: ${appPath}`);
+  launchSignedPlutoApp({ appPath });
 };
 
 if (
