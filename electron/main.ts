@@ -771,6 +771,7 @@ const waitForMeetingAskPlutoCancellation = async (
 const activeAskPlutoSessionOwners = new Set<number>();
 let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
+const activeAudioDeletions = new Set<string>();
 let parakeetFinalClient: ParakeetFinalClient | null = null;
 let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
 let parakeetEouCoordinator: ParakeetEouMeetingCoordinator | null = null;
@@ -857,6 +858,9 @@ function endTranscriptionWork(delayMs = 1500) {
 
 function beginMeetingTranscription(meetingId: string | null) {
   if (!meetingId) return;
+  if (activeAudioDeletions.has(meetingId)) {
+    throw new Error('audio_deletion_in_progress');
+  }
   activeTranscriptionMeetings.set(
     meetingId,
     (activeTranscriptionMeetings.get(meetingId) || 0) + 1,
@@ -981,6 +985,17 @@ app.whenReady().then(async () => {
     isMeetingActive: (meetingId) =>
       activeTranscriptionMeetings.has(meetingId) ||
       activeAnalysisGenerations.has(meetingId),
+    acquireDeletionLease: (meetingId) => {
+      if (
+        activeAudioDeletions.has(meetingId) ||
+        activeTranscriptionMeetings.has(meetingId) ||
+        activeAnalysisGenerations.has(meetingId)
+      ) {
+        return null;
+      }
+      activeAudioDeletions.add(meetingId);
+      return () => activeAudioDeletions.delete(meetingId);
+    },
   });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
     getPolicy: () => ({
@@ -1208,8 +1223,8 @@ app.whenReady().then(async () => {
             const combinedSignal = input.signal
               ? AbortSignal.any([meetingSignal, input.signal])
               : meetingSignal;
-            beginTranscriptionWork();
             beginMeetingTranscription(input.meetingId);
+            beginTranscriptionWork();
             try {
               return await buildSpeakerEnrollmentCandidate(input, {
                 getMeeting: (id) =>
@@ -1421,8 +1436,8 @@ app.whenReady().then(async () => {
         'invalid_capability: Capability generation must not be empty',
       );
     }
-    beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
+    beginTranscriptionWork();
     try {
       return await parakeetFinalClient.transcribe({
         ...request,
@@ -1474,8 +1489,8 @@ app.whenReady().then(async () => {
         'invalid_capability: Capability generation must not be empty',
       );
     }
-    beginTranscriptionWork();
     beginMeetingTranscription(meetingId || null);
+    beginTranscriptionWork();
     try {
       return await parakeetFinalClient.speakerEvidence({
         meetingId,

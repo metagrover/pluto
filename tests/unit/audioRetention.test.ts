@@ -345,4 +345,35 @@ describe('audio retention', () => {
     expect(deleteMeetingAudioKey).toHaveBeenCalledWith('legacy');
     sqlite.close();
   });
+
+  it('holds an exclusive audio deletion lease across artifact removal', async () => {
+    const root = makeRoot();
+    const sqlite = makeDatabase();
+    const audioPath = path.join(root, 'leased.wav');
+    fs.writeFileSync(audioPath, 'audio');
+    sqlite
+      .prepare('INSERT INTO meetings (id, audio_path) VALUES (?, ?)')
+      .run('leased', audioPath);
+    const release = vi.fn();
+    const acquireDeletionLease = vi.fn(() => release);
+    const meeting = eligibleMeeting('leased', audioPath);
+    const manager = createAudioRetentionManager({
+      rootDir: root,
+      sqlite,
+      listMeetings: () => [meeting],
+      getSetting: () => '10',
+      audioKeyStore: {
+        getMeetingAudioKey: vi.fn(() => null),
+        deleteMeetingAudioKey: vi.fn(() => true),
+      },
+      acquireDeletionLease,
+    });
+
+    await expect(manager.deleteMeetingAudio(meeting)).resolves.toMatchObject({
+      status: 'deleted',
+    });
+    expect(acquireDeletionLease).toHaveBeenCalledWith('leased');
+    expect(release).toHaveBeenCalledOnce();
+    sqlite.close();
+  });
 });

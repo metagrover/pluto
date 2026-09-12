@@ -114,6 +114,7 @@ export const createAudioRetentionManager = (options: {
     'getMeetingAudioKey' | 'deleteMeetingAudioKey'
   > | null;
   isMeetingActive?: (meetingId: string) => boolean;
+  acquireDeletionLease?: (meetingId: string) => (() => void) | null;
 }) => {
   const rootDir = path.resolve(options.rootDir);
   const writeStatus = (
@@ -245,6 +246,15 @@ export const createAudioRetentionManager = (options: {
       writeStatus(meetingId, 'blocked', 0, reason);
       return { status: 'blocked' as const, reason, deletedBytes: 0 };
     }
+    const releaseDeletion = options.acquireDeletionLease?.(meetingId);
+    if (options.acquireDeletionLease && !releaseDeletion) {
+      writeStatus(meetingId, 'blocked', 0, 'active_recording');
+      return {
+        status: 'blocked' as const,
+        reason: 'active_recording',
+        deletedBytes: 0,
+      };
+    }
     let artifacts: ArtifactSet = { paths: [], bytes: 0 };
     try {
       artifacts = await resolveArtifacts(meeting);
@@ -269,6 +279,8 @@ export const createAudioRetentionManager = (options: {
       const code = retentionFailureCode(error);
       writeStatus(meetingId, 'failed', artifacts.bytes, code);
       return { status: 'failed' as const, reason: code, deletedBytes: 0 };
+    } finally {
+      releaseDeletion?.();
     }
   };
 
