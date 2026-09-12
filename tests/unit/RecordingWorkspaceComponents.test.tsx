@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { LiveTranscript } from '../../src/components/features/LiveTranscript';
 import { RecordingCaptureBar } from '../../src/components/features/RecordingCaptureBar';
 import { RecordingMeetingRail } from '../../src/components/features/RecordingMeetingRail';
-import { RecordingNamePopover } from '../../src/components/features/RecordingNamePopover';
 import { ZenMode } from '../../src/components/features/ZenMode';
 
 describe('recording workspace components', () => {
@@ -87,62 +86,6 @@ describe('recording workspace components', () => {
     backHome?.click();
 
     expect(onBackHome).toHaveBeenCalledTimes(1);
-    act(() => root.unmount());
-  });
-
-  it('renders the active name popover with meeting fallback and status dot', () => {
-    const html = renderToStaticMarkup(
-      <RecordingNamePopover
-        title=""
-        voiceActivity="active"
-        onExpand={() => {}}
-      />,
-    );
-
-    expect(html).toContain('Active recording');
-    expect(html).toContain('Voice input active');
-    expect(html).toContain('recording-name-status-dot--active');
-    expect(html).toContain('Meeting');
-    expect(html).toContain('Expand note');
-  });
-
-  it('uses the current meeting title before falling back to Meeting', () => {
-    const html = renderToStaticMarkup(
-      <RecordingNamePopover
-        title="Launch review"
-        voiceActivity="idle"
-        onExpand={() => {}}
-      />,
-    );
-
-    expect(html).toContain('Launch review');
-    expect(html).toContain('title="Launch review"');
-    expect(html).not.toContain('<input');
-  });
-
-  it('calls the expand handler from the active name popover', () => {
-    const container = document.createElement('div');
-    const root = createRoot(container);
-    const onExpand = vi.fn();
-
-    act(() => {
-      root.render(
-        <RecordingNamePopover
-          title="Launch review"
-          voiceActivity="idle"
-          onExpand={onExpand}
-        />,
-      );
-    });
-
-    const expand = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Expand note"]',
-    );
-    expect(expand).not.toBeNull();
-    expect(expand?.className).toContain('no-drag');
-    expand?.click();
-
-    expect(onExpand).toHaveBeenCalledTimes(1);
     act(() => root.unmount());
   });
 

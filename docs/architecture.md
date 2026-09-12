@@ -43,7 +43,7 @@ This document describes the high-level architecture of Pluto's local meeting cap
 ## 🧩 Component Responsibilities & Boundaries
 
 ### 1. Swift Native Core (`resources/swift/`)
-- **Binaries:** `resources/bin/audiocap`, `resources/bin/recorder`
+- **Binary:** `resources/bin/audiocap`
 - **Purpose:** Direct interaction with macOS hardware audio subsystems.
 - **Why Swift?**
   - **ScreenCaptureKit:** Required on macOS 13+ to capture internal desktop/app audio (Zoom, Google Meet, Slack, Teams) without virtual audio cables.

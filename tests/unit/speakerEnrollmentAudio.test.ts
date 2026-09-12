@@ -1,5 +1,14 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import ffprobeStatic from '@ffprobe-installer/ffprobe';
+import ffmpegStatic from 'ffmpeg-static';
 import { describe, expect, it } from 'vitest';
-import { planSpeakerEnrollmentAudio } from '../../electron/speakerEnrollmentAudio';
+import {
+  createSpeakerEnrollmentAudio,
+  planSpeakerEnrollmentAudio,
+} from '../../electron/speakerEnrollmentAudio';
 
 describe('speakerEnrollmentAudio', () => {
   it('builds a bounded two-sample clip separated by silence', () => {
@@ -52,5 +61,50 @@ describe('speakerEnrollmentAudio', () => {
       inputSeeks: [1, 20, 40],
       totalDurationSeconds: 14,
     });
+  });
+
+  it('creates bounded system and silent microphone WAVs with the bundled FFmpeg', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'pluto-enrollment-'));
+    const sourcePath = path.join(directory, 'source.wav');
+    try {
+      execFileSync(ffmpegStatic!, [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:sample_rate=16000:duration=3',
+        sourcePath,
+      ]);
+      const result = await createSpeakerEnrollmentAudio({
+        sourcePath,
+        intervals: [
+          { startSec: 0.2, endSec: 0.7, excerpt: 'First' },
+          { startSec: 1, endSec: 1.5, excerpt: 'Second' },
+        ],
+        outputDir: directory,
+      });
+
+      expect(result).not.toBeNull();
+      expect(existsSync(result!.systemPath)).toBe(true);
+      expect(existsSync(result!.micPath)).toBe(true);
+      for (const outputPath of [result!.systemPath, result!.micPath]) {
+        const duration = Number(
+          execFileSync(ffprobeStatic.path, [
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=noprint_wrappers=1:nokey=1',
+            outputPath,
+          ]).toString(),
+        );
+        expect(duration).toBeCloseTo(2, 2);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

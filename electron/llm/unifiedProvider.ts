@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
@@ -67,6 +67,13 @@ const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
+
+const resolveGeminiModelName = (configured?: string): string => {
+  const model = (configured || '').trim();
+  return !model || model === 'gemini-1.5-flash' || model === 'gemini-2.0-flash'
+    ? 'gemini-3.8-flash'
+    : model;
+};
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
   /context_length_exceeded|context[_ ](?:window|length|size).*(?:exceed|overflow|too (?:large|long))|(?:exceed|overflow).*(?:context|input.*tokens)|(?:prompt|input) (?:is )?too long/i.test(
@@ -473,7 +480,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private openAIBaseUrl = 'https://api.openai.com/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
-  private geminiClient: GoogleGenerativeAI | null = null;
+  private geminiClient: GoogleGenAI | null = null;
   private activeOllamaModel: string | null = null;
 
   constructor(
@@ -715,7 +722,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       case 'claude':
         return this.settings.claude_model || 'claude-3-haiku-20240307';
       case 'gemini':
-        return this.settings.gemini_model || 'gemini-1.5-flash';
+        return resolveGeminiModelName(this.settings.gemini_model);
     }
   }
 
@@ -1316,31 +1323,31 @@ export class UnifiedLLMProvider implements LLMProvider {
     signal,
   }: TextGenerationOptions): Promise<string> {
     const client = this.getGeminiClient();
-    const modelName = this.settings.gemini_model || 'gemini-1.5-flash';
+    const modelName = resolveGeminiModelName(this.settings.gemini_model);
 
-    const model = client.getGenerativeModel(
-      jsonMode
+    const response = await client.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      ...(jsonMode || signal
         ? {
-            model: modelName,
-            generationConfig: {
-              responseMimeType: 'application/json',
-              // The installed SDK forwards generationConfig unchanged. Use the
-              // API's JSON Schema field, not its narrower OpenAPI responseSchema.
-              ...(responseSchema ? { responseJsonSchema: responseSchema } : {}),
-              ...(notesBudget
-                ? { maxOutputTokens: notesBudget.outputTokens }
+            config: {
+              ...(jsonMode
+                ? {
+                    responseMimeType: 'application/json',
+                    ...(responseSchema
+                      ? { responseJsonSchema: responseSchema }
+                      : {}),
+                    ...(notesBudget
+                      ? { maxOutputTokens: notesBudget.outputTokens }
+                      : {}),
+                  }
                 : {}),
+              ...(signal ? { abortSignal: signal } : {}),
             },
           }
-        : { model: modelName },
-    );
-
-    const result = await model.generateContent(
-      prompt,
-      signal ? { signal } : undefined,
-    );
+        : {}),
+    });
     signal?.throwIfAborted();
-    const response = await result.response;
     if (
       notesBudget &&
       response.candidates?.some(
@@ -1355,7 +1362,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       )
     )
       throw new Error('commitment_response_incomplete');
-    return response.text();
+    return response.text ?? '';
   }
 
   private async generateWithOllama({
@@ -1746,12 +1753,14 @@ export class UnifiedLLMProvider implements LLMProvider {
       throw new Error(`Ollama API error: ${response.statusText}`);
   }
 
-  private getGeminiClient(): GoogleGenerativeAI {
+  private getGeminiClient(): GoogleGenAI {
     if (!this.settings.gemini_api_key) {
       throw new Error('Gemini API key not configured');
     }
     if (!this.geminiClient) {
-      this.geminiClient = new GoogleGenerativeAI(this.settings.gemini_api_key);
+      this.geminiClient = new GoogleGenAI({
+        apiKey: this.settings.gemini_api_key,
+      });
     }
     return this.geminiClient;
   }

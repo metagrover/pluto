@@ -25,7 +25,7 @@ describe('Parakeet EOU recording IPC boundary', () => {
     const handlers = sliceBetween(
       main,
       "ipcMain.handle('PARAKEET_EOU_START'",
-      "ipcMain.handle('AUDIO_RECORDER_START'",
+      "ipcMain.handle('RECORDING_READINESS_STATUS'",
     );
 
     expect(handlers).toContain('captureSessionLease.requireRecordingOwner(');
@@ -39,7 +39,7 @@ describe('Parakeet EOU recording IPC boundary', () => {
     const ownerWatch = sliceBetween(
       main,
       'const watchCaptureOwner',
-      "ipcMain.handle('AUDIO_RECORDER_START'",
+      "ipcMain.handle('RECORDING_READINESS_STATUS'",
     );
     expect(ownerWatch).toContain(
       "parakeetEouCoordinator?.fail('parakeet_owner_destroyed')",

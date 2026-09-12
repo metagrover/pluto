@@ -3,21 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const geminiGetGenerativeModelMock = vi.fn();
 const geminiGenerateContentMock = vi.fn();
 
-vi.mock('@google/generative-ai', () => {
-  class MockGoogleGenerativeAI {
-    constructor(apiKey: string) {
-      void apiKey;
-    }
+vi.mock('@google/genai', () => {
+  class MockGoogleGenAI {
+    models = {
+      generateContent: (request: unknown) => {
+        geminiGetGenerativeModelMock(request);
+        return geminiGenerateContentMock(request);
+      },
+    };
 
-    getGenerativeModel(config: unknown) {
-      geminiGetGenerativeModelMock(config);
-      return {
-        generateContent: (prompt: string) => geminiGenerateContentMock(prompt),
-      };
+    constructor(config: unknown) {
+      void config;
     }
   }
 
-  return { GoogleGenerativeAI: MockGoogleGenerativeAI };
+  return { GoogleGenAI: MockGoogleGenAI };
 });
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
@@ -1239,16 +1239,13 @@ describe('UnifiedLLMProvider', () => {
 
   it('routes gemini entities extraction in JSON mode', async () => {
     geminiGenerateContentMock.mockResolvedValue({
-      response: Promise.resolve({
-        text: () =>
-          JSON.stringify({
-            people: [{ name: 'Sarah Chen' }],
-            topics: [],
-            action_items: [],
-            decisions: [],
-            projects: [],
-            relationships: [],
-          }),
+      text: JSON.stringify({
+        people: [{ name: 'Sarah Chen' }],
+        topics: [],
+        action_items: [],
+        decisions: [],
+        projects: [],
+        relationships: [],
       }),
     });
 
@@ -1263,8 +1260,9 @@ describe('UnifiedLLMProvider', () => {
 
     expect(entities.people.map((p) => p.name)).toEqual(['Sarah Chen']);
     expect(geminiGetGenerativeModelMock).toHaveBeenCalledWith({
-      model: 'gemini-2.0-flash',
-      generationConfig: { responseMimeType: 'application/json' },
+      model: 'gemini-3.8-flash',
+      contents: expect.any(String),
+      config: { responseMimeType: 'application/json' },
     });
   });
 });

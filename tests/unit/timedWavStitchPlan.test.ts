@@ -56,7 +56,8 @@ describe('timed WAV stitch planning', () => {
     expect(main).toContain('await stitchTimedWavSegments({');
     const source = readFileSync('electron/timedWavStitch.ts', 'utf8');
     expect(source).toContain('planTimedWavStitch(');
-    expect(source).toContain("'-f concat'");
+    expect(source).toContain("'-f'");
+    expect(source).toContain("'concat'");
     expect(source).toContain("plan.mode === 'sequential'");
   });
 });

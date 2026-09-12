@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import ffmpeg from 'fluent-ffmpeg';
 import type { SpeakerSampleInterval } from '../src/utils/speakerReview';
+import { runFfmpeg } from './ffmpegRunner';
 
 const SAMPLE_GAP_SECONDS = 1;
 
@@ -61,46 +61,37 @@ export const planSpeakerEnrollmentAudio = (
   };
 };
 
-const saveWav = (
-  command: ffmpeg.FfmpegCommand,
+const saveWav = async (
+  args: string[],
   outputPath: string,
   signal?: AbortSignal,
-) =>
-  new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error('speaker_audio_aborted'));
-      return;
-    }
-    let finished = false;
-    const cleanup = () => {
-      finished = true;
-      signal?.removeEventListener('abort', onAbort);
-    };
-    const onAbort = () => {
-      if (finished) return;
-      cleanup();
-      try {
-        command.kill('SIGKILL');
-      } catch {}
-      reject(new Error('speaker_audio_aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    command
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .audioCodec('pcm_s16le')
-      .outputOptions(['-xerror', '-threads 1', '-filter_complex_threads 1'])
-      .toFormat('wav')
-      .on('end', () => {
-        cleanup();
-        resolve();
-      })
-      .on('error', (err) => {
-        cleanup();
-        reject(err);
-      })
-      .save(outputPath);
-  });
+) => {
+  try {
+    await runFfmpeg(
+      [
+        ...args,
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-c:a',
+        'pcm_s16le',
+        '-xerror',
+        '-threads',
+        '1',
+        '-filter_complex_threads',
+        '1',
+        '-f',
+        'wav',
+        outputPath,
+      ],
+      signal,
+    );
+  } catch (error) {
+    if (signal?.aborted) throw new Error('speaker_audio_aborted');
+    throw error;
+  }
+};
 
 export const createSpeakerEnrollmentAudio = async (input: {
   sourcePath: string;
@@ -125,20 +116,29 @@ export const createSpeakerEnrollmentAudio = async (input: {
     if (input.signal?.aborted) {
       throw new Error('speaker_audio_aborted');
     }
-    const systemCommand = ffmpeg();
-    for (const seek of plan.inputSeeks) {
-      systemCommand.input(input.sourcePath).inputOptions([`-ss ${seek}`]);
-    }
-    systemCommand.complexFilter(plan.filter).outputOptions(['-map [out]']);
-    await saveWav(systemCommand, systemPath, input.signal);
+    const systemInputs = plan.inputSeeks.flatMap((seek) => [
+      '-ss',
+      String(seek),
+      '-i',
+      input.sourcePath,
+    ]);
+    await saveWav(
+      [...systemInputs, '-filter_complex', plan.filter, '-map', '[out]'],
+      systemPath,
+      input.signal,
+    );
     if (input.signal?.aborted) {
       throw new Error('speaker_audio_aborted');
     }
     await saveWav(
-      ffmpeg(input.sourcePath)
-        .setStartTime(0)
-        .duration(plan.totalDurationSeconds)
-        .audioFilters(['volume=0']),
+      [
+        '-i',
+        input.sourcePath,
+        '-t',
+        String(plan.totalDurationSeconds),
+        '-af',
+        'volume=0',
+      ],
       micPath,
       input.signal,
     );

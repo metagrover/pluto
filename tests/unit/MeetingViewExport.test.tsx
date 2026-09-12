@@ -24,10 +24,6 @@ vi.mock('../../src/api/knowledgeGraph', () => ({
   updateEntityStatus: vi.fn(),
 }));
 
-vi.mock('../../src/components/KnowledgeGraph/EntitySidebar', () => ({
-  EntitySidebar: () => null,
-}));
-
 const mockMeeting: Meeting = {
   id: 'meeting-export-1',
   title: 'Export Feature Sync',

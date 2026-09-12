@@ -67,8 +67,9 @@ describe('packaged runtime resources', () => {
     );
 
     expect(config).toMatch(
-      /"from": "resources\/bin"[^}]*"to": "bin"[^}]*"filter": \["\*\*\/\*"\]/,
+      /"from": "resources\/bin"[^}]*"to": "bin"[^}]*"filter": \["\*\*\/\*", "!recorder"\]/,
     );
+    expect(config).toContain('"!recorder"');
   });
 
   it('provides a packaged artifact verifier', () => {
@@ -78,7 +79,6 @@ describe('packaged runtime resources', () => {
     );
 
     for (const runtime of [
-      'recorder',
       'audiocap',
       'parakeet-runtime',
       'parakeet-resource-probe',
@@ -96,7 +96,6 @@ describe('packaged runtime resources', () => {
       const appPath = path.join(temporaryRoot, 'Pluto.app');
       const binPath = path.join(appPath, 'Contents', 'Resources', 'bin');
       for (const relativePath of [
-        'recorder',
         'audiocap',
         'parakeet-runtime',
         'parakeet-resource-probe',
@@ -165,7 +164,7 @@ describe('packaged runtime resources', () => {
         ]);
         if (mediaToolState === 'valid')
           await expect(verification).resolves.toMatchObject({
-            stdout: 'Verified 7 packaged runtimes.\n',
+            stdout: 'Verified 6 packaged runtimes.\n',
           });
         else if (mediaToolState === 'intel')
           await expect(verification).rejects.toThrow('architecture mismatch');

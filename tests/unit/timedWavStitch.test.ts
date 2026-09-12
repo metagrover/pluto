@@ -4,11 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import ffmpegStatic from 'ffmpeg-static';
-import ffmpeg from 'fluent-ffmpeg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stitchTimedWavSegments } from '../../electron/timedWavStitch';
 
-ffmpeg.setFfmpegPath(ffmpegStatic!);
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(path.join(os.tmpdir(), 'pluto-stitch-test-'));

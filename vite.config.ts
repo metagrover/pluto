@@ -38,9 +38,11 @@ export default defineConfig({
           build: {
             rollupOptions: {
               external: [
+                // Keep ws optional native imports inside its runtime try/catch fallback.
+                'bufferutil',
+                'utf-8-validate',
                 'better-sqlite3',
                 'better-sqlite3-multiple-ciphers',
-                'fluent-ffmpeg',
                 'ffmpeg-static',
                 '@ffprobe-installer/ffprobe',
               ],

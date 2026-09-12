@@ -24,10 +24,6 @@ vi.mock('../../src/api/knowledgeGraph', () => ({
   updateEntityStatus: vi.fn(),
 }));
 
-vi.mock('../../src/components/KnowledgeGraph/EntitySidebar', () => ({
-  EntitySidebar: () => null,
-}));
-
 const baseMeeting: Meeting = {
   id: 'meeting-progressive-dom',
   title: 'Design review',

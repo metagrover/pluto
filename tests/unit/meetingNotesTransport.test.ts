@@ -2,12 +2,14 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 const gemini = vi.hoisted(() => ({ model: vi.fn(), generate: vi.fn() }));
-vi.mock('@google/generative-ai', () => ({
-  GoogleGenerativeAI: class {
-    getGenerativeModel(config: unknown) {
-      gemini.model(config);
-      return { generateContent: gemini.generate };
-    }
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class {
+    models = {
+      generateContent: (config: unknown) => {
+        gemini.model(config);
+        return gemini.generate(config);
+      },
+    };
   },
 }));
 
@@ -49,10 +51,8 @@ it('bounds Claude output and rejects max-token termination', async () => {
 it('passes cancellation to Gemini transport and bounds/rejects its truncated output', async () => {
   const controller = new AbortController();
   gemini.generate.mockResolvedValueOnce({
-    response: {
-      text: () => '{}',
-      candidates: [{ finishReason: 'MAX_TOKENS' }],
-    },
+    text: '{}',
+    candidates: [{ finishReason: 'MAX_TOKENS' }],
   });
   const provider = new UnifiedLLMProvider('gemini', {
     gemini_api_key: 'test',
@@ -60,14 +60,13 @@ it('passes cancellation to Gemini transport and bounds/rejects its truncated out
   await expect(
     provider.generateText({ ...request, signal: controller.signal }),
   ).rejects.toThrow('notes_output_truncated');
-  expect(gemini.generate).toHaveBeenCalledWith('Return JSON', {
-    signal: controller.signal,
-  });
-  expect(gemini.model).toHaveBeenCalledWith(
+  expect(gemini.generate).toHaveBeenCalledWith(
     expect.objectContaining({
-      generationConfig: {
+      contents: 'Return JSON',
+      config: {
         responseMimeType: 'application/json',
         maxOutputTokens: 2048,
+        abortSignal: controller.signal,
       },
     }),
   );

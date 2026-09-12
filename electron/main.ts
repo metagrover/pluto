@@ -18,8 +18,6 @@ import {
   shell,
   systemPreferences,
 } from 'electron';
-import ffmpegStatic from 'ffmpeg-static';
-import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type { ScopedMeetingCapability } from '../src/services/transcription/contracts';
 import type {
@@ -83,6 +81,7 @@ import {
   probeSignedMacBuild,
   resolveEncryptionRolloutPolicy,
 } from './encryptionRollout';
+import { runFfmpeg } from './ffmpegRunner';
 import { createHistoricalAudioMigrationManager } from './historicalAudioMigration';
 import {
   type IncrementalMeetingNotesOffer,
@@ -129,14 +128,39 @@ import { createActiveCallAlertController } from './windows/activeCallAlertWindow
 const plutoLog = createLogger('Pluto');
 const captureLog = createLogger('Capture');
 const audioCapLog = createLogger('AudioCap');
-const recorderLog = createLogger('Recorder');
 const llmLog = createLogger('LLM');
 
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(resolveUnpackedExecutablePath(ffmpegStatic));
-}
 const ffprobePath = resolveUnpackedExecutablePath(ffprobeStatic.path);
-ffmpeg.setFfprobePath(ffprobePath);
+
+const convertAudioToMonoWav = async (input: {
+  inputPath: string;
+  outputPath: string;
+  startSec?: number;
+  durationSec?: number;
+  rawPcm?: boolean;
+}): Promise<boolean> => {
+  try {
+    await runFfmpeg([
+      ...(input.rawPcm ? ['-f', 's16le', '-ar', '16000', '-ac', '1'] : []),
+      ...(input.startSec === undefined ? [] : ['-ss', String(input.startSec)]),
+      '-i',
+      input.inputPath,
+      ...(input.durationSec === undefined
+        ? []
+        : ['-t', String(input.durationSec)]),
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-f',
+      'wav',
+      input.outputPath,
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const probeAudioDuration = async (inputPath: string) =>
   await new Promise<number | null>((resolve) => {
@@ -1236,16 +1260,11 @@ app.whenReady().then(async () => {
               `speaker-sample-${randomUUID()}.wav`,
             ),
           sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
-            await new Promise<boolean>((resolve) => {
-              ffmpeg(inputPath)
-                .setStartTime(startSec)
-                .setDuration(durationSec)
-                .audioChannels(1)
-                .audioFrequency(16000)
-                .toFormat('wav')
-                .on('end', () => resolve(true))
-                .on('error', () => resolve(false))
-                .save(outputPath);
+            await convertAudioToMonoWav({
+              inputPath,
+              outputPath,
+              startSec,
+              durationSec,
             }),
           readFile: async (outputPath) =>
             await fs.promises.readFile(outputPath),
@@ -1576,7 +1595,6 @@ app.whenReady().then(async () => {
   });
 
   // Audio recording handlers
-  let recorderProcess: ChildProcess | null = null;
   let nativeAudioProcess: ChildProcess | null = null;
   let nativeAudioOwner: WebContents | null = null;
   let nativeAudioReadiness: Promise<boolean> | null = null;
@@ -1900,75 +1918,6 @@ app.whenReady().then(async () => {
       parakeetEouGeneration = null;
     }
     return {};
-  });
-
-  ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
-    recorderLog.info('Request to start native recorder...');
-
-    if (recorderProcess) {
-      recorderLog.info('Recorder already running, killing old instance.');
-      recorderProcess.kill();
-      recorderProcess = null;
-    }
-
-    const recorderPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'bin', 'recorder')
-      : path.join(__dirname, '..', 'resources', 'bin', 'recorder');
-
-    if (!fs.existsSync(recorderPath)) {
-      recorderLog.error('Recorder binary not found at:', recorderPath);
-      throw new Error('Recorder binary not found');
-    }
-
-    recorderLog.info('Spawning recorder:', recorderPath);
-
-    // Spawn without arguments to stream to stdout (default)
-    // Pass exclude bundle ID to prevent echo
-    recorderProcess = spawn(recorderPath, ['stdout', 'com.github.electron']); // Assuming arg 1 is output (optional) and 2 is exclude
-
-    recorderProcess.stdout?.on('data', (chunk: Buffer) => {
-      // Check for JSON status messages
-      const text = chunk.toString('utf-8');
-      if (text.startsWith('{')) {
-        try {
-          const json = JSON.parse(text);
-          if (json.status === 'started') {
-            recorderLog.info('Native recorder started successfully.');
-          } else if (json.error) {
-            recorderLog.error('Native recorder error:', json.error);
-          }
-          return; // Don't forward JSON as audio
-        } catch (e) {
-          // Not JSON, probably audio data
-        }
-      }
-
-      // Forward raw audio chunk to renderer
-      // We convert Buffer to Uint8Array for IPC
-      if (win) {
-        win.webContents.send('AUDIO_RECORDER_DATA', chunk);
-      }
-    });
-
-    recorderProcess.stderr?.on('data', (data: Buffer | string) => {
-      recorderLog.warn(`Recorder stderr: ${data}`);
-    });
-
-    recorderProcess.on('close', (code: number | null) => {
-      recorderLog.info(`Recorder exited with code ${code}`);
-      recorderProcess = null;
-    });
-
-    return true;
-  });
-
-  ipcMain.handle('AUDIO_RECORDER_STOP', async () => {
-    recorderLog.info('Request to stop native recorder...');
-    if (recorderProcess) {
-      recorderProcess.kill();
-      recorderProcess = null;
-    }
-    return true;
   });
 
   ipcMain.handle('RECORDING_READINESS_STATUS', async () => {
@@ -2558,37 +2507,24 @@ app.whenReady().then(async () => {
           return resolve(null);
         }
         console.log(`[Pluto] Converting ${sourceTag} to WAV: ${wavPath}`);
-        let command = ffmpeg(rawPath);
-
-        if (format === 'pcm') {
-          // Explicit input options for Raw PCM 16-bit 16kHz Mono
-          command = command.inputOptions(['-f s16le', '-ar 16000', '-ac 1']);
-        } else if (format === 'wav') {
-          // It's already a WAV file (with header). No explicit input options needed usually.
-          // But ffmpeg is robust.
-        }
-
-        command
-          .toFormat('wav')
-          .audioChannels(1)
-          .audioFrequency(16000)
-          .on('end', () => {
+        void convertAudioToMonoWav({
+          inputPath: rawPath,
+          outputPath: wavPath,
+          rawPcm: format === 'pcm',
+        }).then((converted) => {
+          if (converted) {
             console.log(
               `[Pluto] Conversion complete (${Date.now() - start}ms)`,
             );
             if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
             resolve(wavPath);
-          })
-          .on('error', (err) => {
-            console.warn(
-              '[Pluto] Conversion failed, skipping chunk:',
-              err instanceof Error ? err.message : err,
-            );
+          } else {
+            console.warn('[Pluto] Conversion failed, skipping chunk');
             if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
             if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
             resolve(null);
-          })
-          .save(wavPath);
+          }
+        });
       });
     },
   );
@@ -2635,25 +2571,13 @@ app.whenReady().then(async () => {
           `slice_${tag}_${i}_${Date.now()}_${randomUUID()}.wav`,
         );
 
-        const ok = await new Promise<boolean>((resolve) => {
-          ffmpeg(inputPath)
-            .setStartTime(startSec)
-            .setDuration(durationSec)
-            .audioChannels(1)
-            .audioFrequency(16000)
-            .toFormat('wav')
-            .on('end', () => {
-              resolve(true);
-            })
-            .on('error', (err) => {
-              console.warn(
-                '[Pluto] Slice failed:',
-                err instanceof Error ? err.message : err,
-              );
-              resolve(false);
-            })
-            .save(outputPath);
+        const ok = await convertAudioToMonoWav({
+          inputPath,
+          outputPath,
+          startSec,
+          durationSec,
         });
+        if (!ok) console.warn('[Pluto] Slice failed');
 
         if (!ok) {
           if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
@@ -2678,16 +2602,11 @@ app.whenReady().then(async () => {
         createTemporaryPath: () =>
           path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
         sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
-          await new Promise<boolean>((resolve) => {
-            ffmpeg(inputPath)
-              .setStartTime(startSec)
-              .setDuration(durationSec)
-              .audioChannels(1)
-              .audioFrequency(16000)
-              .toFormat('wav')
-              .on('end', () => resolve(true))
-              .on('error', () => resolve(false))
-              .save(outputPath);
+          await convertAudioToMonoWav({
+            inputPath,
+            outputPath,
+            startSec,
+            durationSec,
           }),
         readFile: async (outputPath) => await fs.promises.readFile(outputPath),
         removeFile: async (outputPath) => {
@@ -2761,32 +2680,29 @@ app.whenReady().then(async () => {
       `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
     );
 
-    return await new Promise<string | null>((resolve) => {
-      const command = ffmpeg();
-      for (const inputPath of validPaths) {
-        command.input(inputPath);
-      }
-      command
-        .complexFilter(
-          `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
-        )
-        .audioChannels(1)
-        .audioFrequency(16000)
-        .toFormat('wav')
-        .on('end', () => {
-          console.log(`[Pluto] Mixed audio created: ${outputPath}`);
-          resolve(outputPath);
-        })
-        .on('error', (err) => {
-          console.warn(
-            '[Pluto] Mixed audio failed:',
-            err instanceof Error ? err.message : err,
-          );
-          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-          resolve(null);
-        })
-        .save(outputPath);
-    });
+    try {
+      await runFfmpeg([
+        ...validPaths.flatMap((inputPath) => ['-i', inputPath]),
+        '-filter_complex',
+        `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-f',
+        'wav',
+        outputPath,
+      ]);
+      console.log(`[Pluto] Mixed audio created: ${outputPath}`);
+      return outputPath;
+    } catch (error) {
+      console.warn(
+        '[Pluto] Mixed audio failed:',
+        error instanceof Error ? error.message : error,
+      );
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+      return null;
+    }
   };
 
   ipcMain.handle(
@@ -5895,14 +5811,9 @@ app.whenReady().then(async () => {
             app.getPath('temp'),
             `capture-repair-${randomUUID()}.wav`,
           );
-          const converted = await new Promise<boolean>((resolve) => {
-            ffmpeg(inputPath)
-              .audioChannels(1)
-              .audioFrequency(16000)
-              .toFormat('wav')
-              .on('end', () => resolve(true))
-              .on('error', () => resolve(false))
-              .save(outputPath);
+          const converted = await convertAudioToMonoWav({
+            inputPath,
+            outputPath,
           });
           if (!converted || !fs.existsSync(outputPath)) {
             if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
@@ -5964,16 +5875,11 @@ app.whenReady().then(async () => {
                 startSec,
                 durationSec,
               }) =>
-                await new Promise<boolean>((resolve) => {
-                  ffmpeg(trimInputPath)
-                    .seekInput(startSec)
-                    .duration(durationSec)
-                    .audioChannels(1)
-                    .audioFrequency(16000)
-                    .toFormat('wav')
-                    .on('end', () => resolve(true))
-                    .on('error', () => resolve(false))
-                    .save(outputPath);
+                await convertAudioToMonoWav({
+                  inputPath: trimInputPath,
+                  outputPath,
+                  startSec,
+                  durationSec,
                 }),
               removeTemporaryFile: (temporaryPath) => {
                 if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import ffmpeg from 'fluent-ffmpeg';
+import { runFfmpeg } from './ffmpegRunner';
 import { type TimedWavSegment, planTimedWavStitch } from './timedWavStitchPlan';
 
 export type TimedWavStitchOptions = {
@@ -19,22 +19,24 @@ export type TimedWavStitchOptions = {
 
 const MIX_BATCH_SIZE = 16;
 
-const saveWav = (
-  command: ffmpeg.FfmpegCommand,
-  outputPath: string,
-  intermediate = false,
-) =>
-  new Promise<void>((resolve, reject) => {
-    command
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .audioCodec(intermediate ? 'pcm_f32le' : 'pcm_s16le')
-      .outputOptions(['-xerror', '-threads 1', '-filter_complex_threads 1'])
-      .toFormat('wav')
-      .on('end', () => resolve())
-      .on('error', reject)
-      .save(outputPath);
-  });
+const saveWav = (args: string[], outputPath: string, intermediate = false) =>
+  runFfmpeg([
+    ...args,
+    '-ac',
+    '1',
+    '-ar',
+    '16000',
+    '-c:a',
+    intermediate ? 'pcm_f32le' : 'pcm_s16le',
+    '-xerror',
+    '-threads',
+    '1',
+    '-filter_complex_threads',
+    '1',
+    '-f',
+    'wav',
+    outputPath,
+  ]);
 
 export const stitchTimedWavSegments = async ({
   segments,
@@ -84,7 +86,7 @@ export const stitchTimedWavSegments = async ({
     const durations: number[] = [];
     for (let index = 0; index < validSegments.length; index += 1) {
       const normalizedPath = path.join(workDir, `chunk-${index}.wav`);
-      await saveWav(ffmpeg(validSegments[index].path), normalizedPath, true);
+      await saveWav(['-i', validSegments[index].path], normalizedPath, true);
       normalizedPaths.push(normalizedPath);
       const duration = await probeAudioDuration(normalizedPath);
       if (duration === null || !Number.isFinite(duration) || duration <= 0)
@@ -126,16 +128,22 @@ export const stitchTimedWavSegments = async ({
         ].join('\n'),
       );
       await saveWav(
-        ffmpeg()
-          .input(concatPath)
-          .inputOptions(['-f concat', '-safe 0'])
-          .audioFilters([
+        [
+          '-f',
+          'concat',
+          '-safe',
+          '0',
+          '-i',
+          concatPath,
+          '-af',
+          [
             ...(plan.initialDelayMs > 0
               ? [`adelay=${plan.initialDelayMs}:all=1`]
               : []),
             'apad',
             `atrim=0:${plan.targetDurationSeconds}`,
-          ]),
+          ].join(','),
+        ],
         outputPath,
       );
     } else {
@@ -160,8 +168,7 @@ export const stitchTimedWavSegments = async ({
           const mixedPath = isFinal
             ? outputPath
             : path.join(workDir, `mix-${level}-${offset}.wav`);
-          const command = ffmpeg();
-          batch.forEach((input) => command.input(input.path));
+          const commandInputs = batch.flatMap((input) => ['-i', input.path]);
           const filters = [
             ...batch.map(
               (input, index) =>
@@ -172,8 +179,11 @@ export const stitchTimedWavSegments = async ({
           if (isFinal && plan.mode === 'sequential')
             filters[filters.length - 1] +=
               `,apad,atrim=0:${plan.targetDurationSeconds}`;
-          command.complexFilter(filters);
-          await saveWav(command, mixedPath, !isFinal);
+          await saveWav(
+            [...commandInputs, '-filter_complex', filters.join(';')],
+            mixedPath,
+            !isFinal,
+          );
           if (isFinal) break;
           next.push({ path: mixedPath, delayMs: groupDelayMs });
         }

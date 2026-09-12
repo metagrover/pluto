@@ -1,4 +1,4 @@
-import { constants, readFileSync, statSync } from 'node:fs';
+import { constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
@@ -13,12 +13,28 @@ const appPath = path.resolve(
 const resourcesRoot = path.join(appPath, 'Contents', 'Resources');
 const resourcesPath = path.join(resourcesRoot, 'bin');
 const requiredExecutables = [
-  'recorder',
   'audiocap',
   'parakeet-runtime',
   'parakeet-resource-probe',
   'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
 ];
+
+for (const retiredPath of [
+  path.join(resourcesPath, 'recorder'),
+  path.join(resourcesRoot, 'app.asar.unpacked', 'dist-electron', 'python'),
+  path.join(
+    resourcesRoot,
+    'app.asar.unpacked',
+    'dist-electron',
+    'resources',
+    'bin',
+    'whisperx_server',
+  ),
+]) {
+  if (existsSync(retiredPath)) {
+    throw new Error(`Packaged app contains retired runtime: ${retiredPath}`);
+  }
+}
 
 for (const relativePath of requiredExecutables) {
   const executablePath = path.join(resourcesPath, relativePath);
