@@ -72,11 +72,17 @@ describe('SettingsTab', () => {
         return {
           budgetGb: 10,
           retainedBytes: 3 * 1024 ** 3,
+          measurementComplete: true,
           overBudget: false,
         };
       }
       if (channel === 'AUDIO_RETENTION_SET_BUDGET') {
-        return { budgetGb: Number(value), retainedBytes: 0, overBudget: false };
+        return {
+          budgetGb: Number(value),
+          retainedBytes: 0,
+          measurementComplete: true,
+          overBudget: false,
+        };
       }
       if (channel === 'GET_SETTING') return '';
       return null;

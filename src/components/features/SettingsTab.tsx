@@ -76,6 +76,7 @@ export type SettingsTabId = (typeof settingsTabs)[number]['id'];
 type AudioRetentionSnapshot = {
   budgetGb: 2 | 10 | 20 | null;
   retainedBytes: number;
+  measurementComplete: boolean;
   overBudget: boolean;
 };
 
@@ -509,7 +510,7 @@ export const SettingsTab = ({
               helper={
                 audioRetentionError
                   ? 'Storage usage is temporarily unavailable. Your recordings were not changed.'
-                  : `${audioRetention ? `${formatStorageBytes(audioRetention.retainedBytes)} currently used. ` : ''}When the limit is exceeded, Pluto removes the oldest eligible recording audio first. Transcripts and notes stay available.`
+                  : `${audioRetention ? `${audioRetention.measurementComplete ? '' : 'At least '}${formatStorageBytes(audioRetention.retainedBytes)} currently used. ` : ''}${audioRetention && !audioRetention.measurementComplete ? 'Some recording storage could not be measured or safely cleaned. ' : ''}When the limit is exceeded, Pluto removes the oldest eligible recording audio first. Transcripts and notes stay available.`
               }
               actionControl={false}
             >

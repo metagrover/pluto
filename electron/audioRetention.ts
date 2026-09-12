@@ -37,6 +37,7 @@ export type AudioRetentionSnapshot = {
   deletedBytes: number;
   deletedMeetings: number;
   blockedMeetings: number;
+  measurementComplete: boolean;
   overBudget: boolean;
 };
 
@@ -284,6 +285,7 @@ export const createAudioRetentionManager = (options: {
     }> = [];
     let retainedBytes = 0;
     let blockedMeetings = 0;
+    let measurementComplete = true;
     for (const meeting of options.listMeetings()) {
       try {
         const artifacts = await resolveArtifacts(meeting);
@@ -312,6 +314,7 @@ export const createAudioRetentionManager = (options: {
         }
       } catch (error) {
         blockedMeetings += 1;
+        measurementComplete = false;
         writeStatus(
           String(meeting.id),
           'failed',
@@ -344,8 +347,10 @@ export const createAudioRetentionManager = (options: {
       deletedBytes,
       deletedMeetings,
       blockedMeetings,
+      measurementComplete,
       overBudget:
-        budgetBytes !== null && retainedBytes - deletedBytes > budgetBytes,
+        budgetBytes !== null &&
+        (!measurementComplete || retainedBytes - deletedBytes > budgetBytes),
     };
   };
 

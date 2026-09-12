@@ -178,6 +178,10 @@ describe('audio retention', () => {
         )
         .get('unsafe'),
     ).toEqual({ status: 'failed', last_failure_code: 'artifact_path_invalid' });
+    await expect(manager.inspect()).resolves.toMatchObject({
+      measurementComplete: false,
+      overBudget: true,
+    });
     sqlite.close();
   });
 
