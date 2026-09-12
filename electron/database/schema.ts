@@ -109,6 +109,16 @@ export const settings = sqliteTable('settings', {
   value: text('value'),
 });
 
+export const meetingAudioRetention = sqliteTable('meeting_audio_retention', {
+  meetingId: text('meeting_id')
+    .primaryKey()
+    .references(() => meetings.id, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  retainedBytes: integer('retained_bytes').notNull().default(0),
+  lastFailureCode: text('last_failure_code'),
+  updatedAt: datetime('updated_at').notNull(),
+});
+
 export const entities = sqliteTable(
   'entities',
   {

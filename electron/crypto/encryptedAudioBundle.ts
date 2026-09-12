@@ -10,6 +10,7 @@ export const ENCRYPTED_AUDIO_SEGMENT_FRAMES =
   ENCRYPTED_AUDIO_SAMPLE_RATE * ENCRYPTED_AUDIO_SEGMENT_SECONDS;
 export const MAX_AUDIO_INDEX_BYTES = 1024 * 1024;
 export const MAX_LEGACY_AUDIO_BYTES = 512 * 1024 * 1024;
+const MAX_AUDIO_INDEX_ENVELOPE_BYTES = MAX_AUDIO_INDEX_BYTES + 65_571;
 const WAV_HEADER_BYTES = 44;
 const MAX_SEGMENT_WAV_BYTES =
   WAV_HEADER_BYTES + ENCRYPTED_AUDIO_SEGMENT_FRAMES * 2;
@@ -42,6 +43,47 @@ type AudioIndex = {
 export type EncryptedAudioReader = {
   totalFrames: number;
   readWindow: (startFrame: number, frameCount: number) => Promise<Float32Array>;
+};
+
+export const listEncryptedAudioBundleFiles = async (args: {
+  filePath: string;
+  context: EncryptedAudioContext;
+  source?: EncryptedAudioSource;
+}): Promise<string[]> => {
+  const file = await fs.promises.stat(args.filePath);
+  if (!file.isFile() || file.size <= 0) {
+    throw new Error('encrypted_audio_size_invalid');
+  }
+  // Segmented indexes have a strict 1 MiB plaintext cap plus the maximum
+  // envelope overhead. Larger artifacts are legacy single-file recordings,
+  // so retention never buffers a process-sized recording just to list it.
+  if (file.size > MAX_AUDIO_INDEX_ENVELOPE_BYTES) return [args.filePath];
+  const initial = await readBounded(
+    args.filePath,
+    MAX_AUDIO_INDEX_ENVELOPE_BYTES,
+  );
+  const opened = EncryptedArtifactStore.open(initial, args.context.meetingKey, {
+    meetingId: args.context.meetingId,
+    generation: args.context.generation,
+    keyId: args.context.keyId,
+    ...(args.source ? { source: args.source } : {}),
+  });
+  if (opened.header.artifactKind !== 'audio_index') return [args.filePath];
+  if (opened.plaintext.length > MAX_AUDIO_INDEX_BYTES) {
+    throw new Error('encrypted_audio_index_size_exceeded');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(opened.plaintext.toString('utf8'));
+  } catch {
+    throw new Error('encrypted_audio_index_invalid');
+  }
+  const index = validateIndex(parsed);
+  const parent = path.dirname(args.filePath);
+  return [
+    args.filePath,
+    ...index.segments.map((segment) => path.join(parent, segment.relativePath)),
+  ];
 };
 
 const abortIfRequested = (signal?: AbortSignal) => {

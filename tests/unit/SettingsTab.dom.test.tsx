@@ -66,6 +66,52 @@ afterEach(() => {
 });
 
 describe('SettingsTab', () => {
+  it('shows current recording usage and applies the selected storage budget', async () => {
+    const invoke = vi.fn(async (channel: string, value?: string) => {
+      if (channel === 'AUDIO_RETENTION_GET_STATUS') {
+        return {
+          budgetGb: 10,
+          retainedBytes: 3 * 1024 ** 3,
+          measurementComplete: true,
+          overBudget: false,
+        };
+      }
+      if (channel === 'AUDIO_RETENTION_SET_BUDGET') {
+        return {
+          budgetGb: Number(value),
+          retainedBytes: 0,
+          measurementComplete: true,
+          overBudget: false,
+        };
+      }
+      if (channel === 'GET_SETTING') return '';
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
+    );
+
+    expect(container.textContent).toContain('3.0 GB currently used');
+    const selector = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Recording storage limit"]',
+    )!;
+    await act(async () => selector.click());
+    const option = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((item) => item.dataset.value === '2')!;
+    await act(async () => option.click());
+
+    expect(invoke).toHaveBeenCalledWith('AUDIO_RETENTION_SET_BUDGET', '2');
+    act(() => root.unmount());
+  });
+
   it('persists the silence duration selected from the themed menu', async () => {
     const container = document.createElement('div');
     document.body.append(container);
