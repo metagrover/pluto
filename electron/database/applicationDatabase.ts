@@ -23,6 +23,10 @@ interface ApplicationDatabaseOptions extends DatabaseRuntimeOptions {
   createRuntime?: (options: DatabaseRuntimeOptions) => DatabaseRuntime;
 }
 
+interface InitializeApplicationDatabaseOptions {
+  keyStore?: ApplicationKeyStore;
+}
+
 export const createApplicationDatabase = (
   options: ApplicationDatabaseOptions,
 ): ApplicationDatabase => {
@@ -63,7 +67,7 @@ export const resolveMigrationsFolder = (input: {
 }): string =>
   path.join(input.isPackaged ? input.resourcesPath : input.appRoot, 'drizzle');
 
-const getOwner = () => {
+const getOwner = (options: InitializeApplicationDatabaseOptions = {}) => {
   if (!applicationDatabase) {
     const appRoot =
       typeof app.getAppPath === 'function' ? app.getAppPath() : process.cwd();
@@ -76,14 +80,16 @@ const getOwner = () => {
         appRoot,
         resourcesPath: process.resourcesPath ?? appRoot,
       }),
-      keyStore: new ApplicationKeyStore(),
+      keyStore: options.keyStore ?? new ApplicationKeyStore(),
     });
   }
   return applicationDatabase;
 };
 
-export const initializeApplicationDatabase = (): Database.Database => {
-  return getOwner().initialize();
+export const initializeApplicationDatabase = (
+  options: InitializeApplicationDatabaseOptions = {},
+): Database.Database => {
+  return getOwner(options).initialize();
 };
 
 export const getApplicationDatabase = (): Database.Database =>

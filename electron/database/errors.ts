@@ -10,6 +10,7 @@ export type DatabaseErrorCode =
   | 'database_cleanup_failed'
   | 'database_closed'
   | 'database_key_unavailable'
+  | 'database_key_identity_mismatch'
   | 'database_key_rejected'
   | 'database_cipher_unsupported'
   | 'database_encryption_migration_failed'
@@ -68,6 +69,8 @@ export const describeDatabaseStartupError = (error: unknown): string => {
       return 'Database is closed.';
     case 'database_key_unavailable':
       return 'Database encryption key is unavailable or locked in macOS Keychain.';
+    case 'database_key_identity_mismatch':
+      return 'Database encryption key belongs to a legacy or differently signed application identity. Pluto stopped before requesting Keychain access.';
     case 'database_key_rejected':
       return 'Database encryption key was rejected or database is corrupted.';
     case 'database_cipher_unsupported':

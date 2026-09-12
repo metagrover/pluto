@@ -5,12 +5,28 @@ import * as electron from 'electron';
 import type { SafeStorageBackend } from './keyCustodyProbe';
 
 export interface ApplicationKeyEnvelope {
-  version: 1;
+  version: 1 | 2;
   keyId: string;
   kdfVersion: 1;
   salt: string; // base64 encoded
   wrappedKey: string; // base64 encoded safeStorage ciphertext
   createdAtMs: number;
+  storageBinding?: ApplicationKeyStorageBinding;
+}
+
+export interface ApplicationKeyStorageBinding {
+  provider: 'electron_safe_storage';
+  bundleIdentifier: string;
+  teamIdentifier: string;
+}
+
+export class ApplicationKeyBindingMismatchError extends Error {
+  constructor() {
+    super(
+      'Application key envelope is not bound to this signed Pluto identity',
+    );
+    this.name = 'ApplicationKeyBindingMismatchError';
+  }
 }
 
 export interface MasterKeyResult {
@@ -23,12 +39,14 @@ export interface ApplicationKeyStoreOptions {
   storageDir?: string;
   backend?: SafeStorageBackend;
   envelopeFileName?: string;
+  expectedStorageBinding?: ApplicationKeyStorageBinding;
 }
 
 export class ApplicationKeyStore {
   private readonly storageDir: string;
   private readonly backend: SafeStorageBackend;
   private readonly envelopePath: string;
+  private readonly expectedStorageBinding?: ApplicationKeyStorageBinding;
 
   constructor(options: ApplicationKeyStoreOptions = {}) {
     const defaultStorageDir =
@@ -73,6 +91,7 @@ export class ApplicationKeyStore {
       this.storageDir,
       options.envelopeFileName ?? 'app-key-envelope.json',
     );
+    this.expectedStorageBinding = options.expectedStorageBinding;
   }
 
   hasMasterKey(): boolean {
@@ -98,7 +117,7 @@ export class ApplicationKeyStore {
 
     const envelope = parsed as Partial<ApplicationKeyEnvelope>;
     if (
-      envelope.version !== 1 ||
+      (envelope.version !== 1 && envelope.version !== 2) ||
       !envelope.keyId ||
       !envelope.salt ||
       !envelope.wrappedKey
@@ -106,6 +125,18 @@ export class ApplicationKeyStore {
       throw new Error(
         'Key envelope contains invalid or unsupported version metadata',
       );
+    }
+    if (this.expectedStorageBinding) {
+      const binding = envelope.storageBinding;
+      if (
+        envelope.version !== 2 ||
+        binding?.provider !== this.expectedStorageBinding.provider ||
+        binding.bundleIdentifier !==
+          this.expectedStorageBinding.bundleIdentifier ||
+        binding.teamIdentifier !== this.expectedStorageBinding.teamIdentifier
+      ) {
+        throw new ApplicationKeyBindingMismatchError();
+      }
     }
 
     let keyBuffer: Buffer;
@@ -155,12 +186,15 @@ export class ApplicationKeyStore {
 
     const wrapped = this.backend.encryptString(key.toString('base64'));
     const envelope: ApplicationKeyEnvelope = {
-      version: 1,
+      version: this.expectedStorageBinding ? 2 : 1,
       keyId,
       kdfVersion: 1,
       salt: salt.toString('base64'),
       wrappedKey: wrapped.toString('base64'),
       createdAtMs,
+      ...(this.expectedStorageBinding
+        ? { storageBinding: this.expectedStorageBinding }
+        : {}),
     };
 
     this.writeEnvelope(envelope);

@@ -13,12 +13,14 @@ describe('Electron bootstrap boundary', () => {
 
     expect(source).not.toContain("from './db'");
     expect(source).toContain("app.setPath('userData'");
+    expect(source).toContain('developmentTargetsProduction');
+    expect(source).toContain('database_key_identity_mismatch');
     expect(source.indexOf('requestSingleInstanceLock')).toBeGreaterThan(-1);
-    expect(source.indexOf('initializeApplicationDatabase()')).toBeGreaterThan(
+    expect(source.indexOf('initializeApplicationDatabase({')).toBeGreaterThan(
       source.indexOf('requestSingleInstanceLock'),
     );
     expect(source.indexOf("import('./main')")).toBeGreaterThan(
-      source.indexOf('initializeApplicationDatabase()'),
+      source.indexOf('initializeApplicationDatabase({'),
     );
     expect(source).toContain('describeDatabaseStartupError');
   });
@@ -29,7 +31,7 @@ describe('Electron bootstrap boundary', () => {
       fs.readFileSync(path.join(root, 'package.json'), 'utf8'),
     ) as { main?: string };
 
-    expect(source).toContain("entry: 'electron/bootstrap.ts'");
+    expect(source).toContain("bootstrap: 'electron/bootstrap.ts'");
     expect(source).toContain('resolveDevelopmentUserDataDir');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
     expect(packageJson.main).toBe('dist-electron/bootstrap.js');

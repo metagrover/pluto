@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { resolveEncryptionRolloutPolicy } from '../../electron/encryptionRollout';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  probeSignedMacBuild,
+  resolveEncryptionRolloutPolicy,
+} from '../../electron/encryptionRollout';
 
 describe('encryption rollout policy', () => {
   it('keeps every write and cleanup gate dark by default', () => {
@@ -75,3 +78,52 @@ describe('encryption rollout policy', () => {
     });
   });
 });
+
+describe.runIf(process.platform === 'darwin')(
+  'signed Pluto identity probe',
+  () => {
+    it('returns the verified identifier and signing team', () => {
+      const spawn = vi
+        .fn()
+        .mockReturnValueOnce({ status: 0 })
+        .mockReturnValueOnce({
+          status: 0,
+          stdout: '',
+          stderr:
+            'Identifier=com.pluto.app\nAuthority=Developer ID Application: Pluto\nTeamIdentifier=PLUTOTEAM1\n',
+        });
+      expect(
+        probeSignedMacBuild('/Applications/Pluto.app/Contents/MacOS/Pluto', {
+          expectedIdentifier: 'com.pluto.app',
+          spawn: spawn as never,
+        }),
+      ).toEqual({
+        valid: true,
+        reason: 'signed_distribution_build',
+        identifier: 'com.pluto.app',
+        teamIdentifier: 'PLUTOTEAM1',
+      });
+    });
+
+    it('rejects a differently identified signed app', () => {
+      const spawn = vi
+        .fn()
+        .mockReturnValueOnce({ status: 0 })
+        .mockReturnValueOnce({
+          status: 0,
+          stdout: '',
+          stderr:
+            'Identifier=com.other.app\nAuthority=Developer ID Application: Other\nTeamIdentifier=OTHERTEAM1\n',
+        });
+      expect(
+        probeSignedMacBuild('/Applications/Other.app/Contents/MacOS/Other', {
+          expectedIdentifier: 'com.pluto.app',
+          spawn: spawn as never,
+        }),
+      ).toMatchObject({
+        valid: false,
+        reason: 'signature_identifier_mismatch',
+      });
+    });
+  },
+);
