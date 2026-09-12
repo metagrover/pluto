@@ -279,10 +279,7 @@ export const createAudioRetentionManager = (options: {
       options.getSetting(AUDIO_STORAGE_BUDGET_SETTING),
     );
     const budgetBytes = budgetGb === null ? null : budgetGb * GIB;
-    const candidates: Array<{
-      meeting: AudioRetentionMeeting;
-      artifacts: ArtifactSet;
-    }> = [];
+    const candidates: AudioRetentionMeeting[] = [];
     let retainedBytes = 0;
     let blockedMeetings = 0;
     let measurementComplete = true;
@@ -310,7 +307,7 @@ export const createAudioRetentionManager = (options: {
           writeStatus(String(meeting.id), 'blocked', artifacts.bytes, reason);
         } else {
           writeStatus(String(meeting.id), 'retained', artifacts.bytes, null);
-          candidates.push({ meeting, artifacts });
+          candidates.push(meeting);
         }
       } catch (error) {
         blockedMeetings += 1;
@@ -329,11 +326,11 @@ export const createAudioRetentionManager = (options: {
       candidates.sort((left, right) => {
         const timestamp = (meeting: AudioRetentionMeeting) =>
           Date.parse(meeting.started_at || meeting.created_at || '') || 0;
-        return timestamp(left.meeting) - timestamp(right.meeting);
+        return timestamp(left) - timestamp(right);
       });
       for (const candidate of candidates) {
         if (retainedBytes - deletedBytes <= budgetBytes) break;
-        const result = await runDeleteMeetingAudio(candidate.meeting);
+        const result = await runDeleteMeetingAudio(candidate);
         if (result.status === 'deleted') {
           deletedBytes += result.deletedBytes;
           deletedMeetings += 1;
