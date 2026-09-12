@@ -280,6 +280,214 @@ export const writeEncryptedAudioBundle = async (args: {
   }
 };
 
+export const migrateCanonicalPlaintextWavToEncryptedBundle = async (args: {
+  filePath: string;
+  rootDir: string;
+  source: EncryptedAudioSource;
+  context: EncryptedAudioContext;
+  signal?: AbortSignal;
+}): Promise<string> => {
+  const handle = await fs.promises.open(args.filePath, 'r');
+  try {
+    const file = await handle.stat();
+    if (!file.isFile() || file.size <= 44 || (file.size - 44) % 2 !== 0) {
+      throw new Error('historical_audio_wav_invalid');
+    }
+    const header = Buffer.alloc(44);
+    const headerRead = await handle.read(header, 0, header.length, 0);
+    if (
+      headerRead.bytesRead !== header.length ||
+      header.toString('ascii', 0, 4) !== 'RIFF' ||
+      header.readUInt32LE(4) !== file.size - 8 ||
+      header.toString('ascii', 8, 16) !== 'WAVEfmt ' ||
+      header.readUInt32LE(16) !== 16 ||
+      header.readUInt16LE(20) !== 1 ||
+      header.readUInt16LE(22) !== 1 ||
+      header.readUInt32LE(24) !== ENCRYPTED_AUDIO_SAMPLE_RATE ||
+      header.readUInt32LE(28) !== ENCRYPTED_AUDIO_SAMPLE_RATE * 2 ||
+      header.readUInt16LE(32) !== 2 ||
+      header.readUInt16LE(34) !== 16 ||
+      header.toString('ascii', 36, 40) !== 'data' ||
+      header.readUInt32LE(40) !== file.size - 44
+    ) {
+      throw new Error('historical_audio_wav_not_canonical');
+    }
+    const totalFrames = (file.size - 44) / 2;
+    const readPlaintextWindow = async (
+      startFrame: number,
+      frameCount: number,
+    ) => {
+      abortIfRequested(args.signal);
+      const bytes = Buffer.allocUnsafe(frameCount * 2);
+      const result = await handle.read(
+        bytes,
+        0,
+        bytes.length,
+        44 + startFrame * 2,
+      );
+      if (result.bytesRead !== bytes.length) {
+        throw new Error('historical_audio_wav_truncated');
+      }
+      return bytes;
+    };
+    const encryptedPath = await writeEncryptedAudioBundle({
+      rootDir: args.rootDir,
+      totalFrames,
+      source: args.source,
+      context: args.context,
+      signal: args.signal,
+      produceWindow: async (startFrame, frameCount) => {
+        const bytes = await readPlaintextWindow(startFrame, frameCount);
+        const samples = new Float32Array(frameCount);
+        for (let index = 0; index < frameCount; index += 1) {
+          const sample = bytes.readInt16LE(index * 2);
+          samples[index] = sample < 0 ? sample / 32_768 : sample / 32_767;
+        }
+        return samples;
+      },
+    });
+    try {
+      const reader = await openEncryptedAudioReader({
+        filePath: encryptedPath,
+        context: args.context,
+        source: args.source,
+        signal: args.signal,
+      });
+      if (reader.totalFrames !== totalFrames) {
+        throw new Error('historical_audio_verification_failed');
+      }
+      for (
+        let startFrame = 0;
+        startFrame < totalFrames;
+        startFrame += ENCRYPTED_AUDIO_SEGMENT_FRAMES
+      ) {
+        const frameCount = Math.min(
+          ENCRYPTED_AUDIO_SEGMENT_FRAMES,
+          totalFrames - startFrame,
+        );
+        const [plain, opened] = await Promise.all([
+          readPlaintextWindow(startFrame, frameCount),
+          reader.readWindow(startFrame, frameCount),
+        ]);
+        for (let index = 0; index < frameCount; index += 1) {
+          const expected = plain.readInt16LE(index * 2);
+          const actual = Math.round(opened[index] * 32_768);
+          if (actual !== expected) {
+            throw new Error('historical_audio_verification_failed');
+          }
+        }
+      }
+      return encryptedPath;
+    } catch (error) {
+      for (const managedPath of await listEncryptedAudioBundleFiles({
+        filePath: encryptedPath,
+        context: args.context,
+        source: args.source,
+      }).catch(() => [encryptedPath])) {
+        await fs.promises.unlink(managedPath).catch(() => {});
+      }
+      throw error;
+    }
+  } finally {
+    await handle.close();
+  }
+};
+
+export const verifyEncryptedBundleMatchesCanonicalPlaintextWav = async (args: {
+  plaintextPath: string;
+  encryptedPath: string;
+  source: EncryptedAudioSource;
+  context: EncryptedAudioContext;
+  signal?: AbortSignal;
+}): Promise<void> => {
+  const handle = await fs.promises.open(args.plaintextPath, 'r');
+  try {
+    const file = await handle.stat();
+    const header = Buffer.alloc(44);
+    const headerRead = await handle.read(header, 0, header.length, 0);
+    if (
+      !file.isFile() ||
+      file.size <= 44 ||
+      (file.size - 44) % 2 !== 0 ||
+      headerRead.bytesRead !== header.length ||
+      header.toString('ascii', 0, 4) !== 'RIFF' ||
+      header.readUInt32LE(4) !== file.size - 8 ||
+      header.toString('ascii', 8, 16) !== 'WAVEfmt ' ||
+      header.readUInt16LE(20) !== 1 ||
+      header.readUInt16LE(22) !== 1 ||
+      header.readUInt32LE(24) !== ENCRYPTED_AUDIO_SAMPLE_RATE ||
+      header.readUInt16LE(34) !== 16 ||
+      header.toString('ascii', 36, 40) !== 'data' ||
+      header.readUInt32LE(40) !== file.size - 44
+    ) {
+      throw new Error('historical_audio_wav_not_canonical');
+    }
+    const totalFrames = (file.size - 44) / 2;
+    const reader = await openEncryptedAudioReader({
+      filePath: args.encryptedPath,
+      context: args.context,
+      source: args.source,
+      signal: args.signal,
+    });
+    if (reader.totalFrames !== totalFrames) {
+      throw new Error('historical_audio_verification_failed');
+    }
+    for (
+      let startFrame = 0;
+      startFrame < totalFrames;
+      startFrame += ENCRYPTED_AUDIO_SEGMENT_FRAMES
+    ) {
+      abortIfRequested(args.signal);
+      const frameCount = Math.min(
+        ENCRYPTED_AUDIO_SEGMENT_FRAMES,
+        totalFrames - startFrame,
+      );
+      const plain = Buffer.allocUnsafe(frameCount * 2);
+      const [read, opened] = await Promise.all([
+        handle.read(plain, 0, plain.length, 44 + startFrame * 2),
+        reader.readWindow(startFrame, frameCount),
+      ]);
+      if (read.bytesRead !== plain.length) {
+        throw new Error('historical_audio_wav_truncated');
+      }
+      for (let index = 0; index < frameCount; index += 1) {
+        if (
+          Math.round(opened[index] * 32_768) !== plain.readInt16LE(index * 2)
+        ) {
+          throw new Error('historical_audio_verification_failed');
+        }
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+};
+
+export const verifyEncryptedAudioBundle = async (args: {
+  encryptedPath: string;
+  source: EncryptedAudioSource;
+  context: EncryptedAudioContext;
+  signal?: AbortSignal;
+}): Promise<void> => {
+  const reader = await openEncryptedAudioReader({
+    filePath: args.encryptedPath,
+    context: args.context,
+    source: args.source,
+    signal: args.signal,
+  });
+  for (
+    let startFrame = 0;
+    startFrame < reader.totalFrames;
+    startFrame += ENCRYPTED_AUDIO_SEGMENT_FRAMES
+  ) {
+    abortIfRequested(args.signal);
+    await reader.readWindow(
+      startFrame,
+      Math.min(ENCRYPTED_AUDIO_SEGMENT_FRAMES, reader.totalFrames - startFrame),
+    );
+  }
+};
+
 export const openEncryptedAudioReader = async (args: {
   filePath: string;
   context: EncryptedAudioContext;

@@ -11,6 +11,7 @@ import { EncryptedArtifactStore } from '../electron/crypto/encryptedArtifactStor
 import {
   ENCRYPTED_AUDIO_SAMPLE_RATE,
   ENCRYPTED_AUDIO_SEGMENT_FRAMES,
+  migrateCanonicalPlaintextWavToEncryptedBundle,
   openEncryptedAudioReader,
   writeEncryptedAudioBundle,
 } from '../electron/crypto/encryptedAudioBundle.ts';
@@ -23,6 +24,7 @@ const BUDGETS = {
   criticalWriteP95Ms: 50,
   startupRegressionMs: 250,
   incrementalAudioRssBytes: 256 * MIB,
+  historicalMigrationRssBytes: 64 * MIB,
 } as const;
 
 const percentile = (values: number[], fraction: number) => {
@@ -525,6 +527,87 @@ const benchmarkNativeAudioMemory = (audioMinutes: number) => {
   };
 };
 
+const benchmarkHistoricalMigrationMemory = async (
+  root: string,
+  audioMinutes: number,
+) => {
+  const migrationRoot = path.join(root, 'historical-migration');
+  fs.mkdirSync(migrationRoot, { recursive: true });
+  const plaintextPath = path.join(migrationRoot, 'legacy.wav');
+  const totalFrames = audioMinutes * 60 * ENCRYPTED_AUDIO_SAMPLE_RATE;
+  const totalBytes = 44 + totalFrames * 2;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(totalBytes - 8, 4);
+  header.write('WAVEfmt ', 8, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(ENCRYPTED_AUDIO_SAMPLE_RATE, 24);
+  header.writeUInt32LE(ENCRYPTED_AUDIO_SAMPLE_RATE * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(totalFrames * 2, 40);
+  const descriptor = fs.openSync(plaintextPath, 'w', 0o600);
+  try {
+    fs.writeSync(descriptor, header);
+    const segment = Buffer.alloc(ENCRYPTED_AUDIO_SEGMENT_FRAMES * 2);
+    for (let offset = 0; offset < segment.length; offset += 2) {
+      segment.writeInt16LE(offset % 4 === 0 ? 4096 : -8192, offset);
+    }
+    for (
+      let startFrame = 0;
+      startFrame < totalFrames;
+      startFrame += ENCRYPTED_AUDIO_SEGMENT_FRAMES
+    ) {
+      fs.writeSync(
+        descriptor,
+        segment,
+        0,
+        Math.min(ENCRYPTED_AUDIO_SEGMENT_FRAMES, totalFrames - startFrame) * 2,
+      );
+    }
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  globalThis.gc?.();
+  const baselineRssBytes = process.memoryUsage().rss;
+  let peakRssBytes = baselineRssBytes;
+  const sampler = setInterval(() => {
+    peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+  }, 2);
+  const started = performance.now();
+  try {
+    await migrateCanonicalPlaintextWavToEncryptedBundle({
+      filePath: plaintextPath,
+      rootDir: migrationRoot,
+      source: 'mic',
+      context: {
+        meetingId: 'historical-benchmark',
+        generation: 'historical-benchmark-generation',
+        keyId: 'historical-benchmark-key',
+        meetingKey: randomBytes(32),
+      },
+    });
+  } finally {
+    clearInterval(sampler);
+    peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+  }
+  const incrementalRssBytes = Math.max(0, peakRssBytes - baselineRssBytes);
+  return {
+    fixtureMinutes: audioMinutes,
+    sourceBytes: totalBytes,
+    elapsedMs: performance.now() - started,
+    baselineRssBytes,
+    peakRssBytes,
+    incrementalRssBytes,
+    budgetBytes: BUDGETS.historicalMigrationRssBytes,
+    passed: incrementalRssBytes < BUDGETS.historicalMigrationRssBytes,
+  };
+};
+
 const main = async () => {
   const options = parseArgs();
   const root = fs.mkdtempSync(
@@ -539,6 +622,10 @@ const main = async () => {
       options.audioMinutes,
     );
     const nativeAudioMemory = benchmarkNativeAudioMemory(options.audioMinutes);
+    const historicalMigrationMemory = await benchmarkHistoricalMigrationMemory(
+      root,
+      options.audioMinutes,
+    );
     const checks = [
       crypto.passed,
       capture.passed,
@@ -547,6 +634,7 @@ const main = async () => {
       database.startup.passed,
       electronAudioMemory.passed,
       nativeAudioMemory.passed,
+      historicalMigrationMemory.passed,
     ];
     const report = {
       schemaVersion: 1,
@@ -563,6 +651,7 @@ const main = async () => {
         database,
         electronAudioMemory,
         nativeAudioMemory,
+        historicalMigrationMemory,
       },
       passed: checks.every(Boolean),
       limitations: [

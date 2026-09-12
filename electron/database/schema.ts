@@ -119,6 +119,18 @@ export const meetingAudioRetention = sqliteTable('meeting_audio_retention', {
   updatedAt: datetime('updated_at').notNull(),
 });
 
+export const meetingAudioMigrations = sqliteTable('meeting_audio_migrations', {
+  meetingId: text('meeting_id')
+    .primaryKey()
+    .references(() => meetings.id, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  migratedBytes: integer('migrated_bytes').notNull().default(0),
+  lastFailureCode: text('last_failure_code'),
+  startedAt: datetime('started_at'),
+  completedAt: datetime('completed_at'),
+  updatedAt: datetime('updated_at').notNull(),
+});
+
 export const entities = sqliteTable(
   'entities',
   {

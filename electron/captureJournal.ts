@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  lstat,
   mkdir,
   open,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -201,6 +203,12 @@ export type CaptureJournalManifest =
   | CaptureJournalManifestV3
   | CaptureJournalManifestV4;
 
+export type CaptureJournalV4MigrationResult = {
+  status: 'migrated' | 'already_encrypted';
+  encryptedArtifacts: number;
+  deletedPlaintextArtifacts: number;
+};
+
 export type AudioKeyProvider = (
   meetingId: string,
 ) => Buffer | null | Promise<Buffer | null>;
@@ -377,6 +385,7 @@ export type CaptureJournalDurability = {
 };
 
 const MANIFEST_FILE = 'manifest.json';
+const JOURNAL_MIGRATION_PLAN_FILE = '.historical-audio-migration.enc';
 
 const getArtifactRootRelativePath = (meetingId: string) =>
   `${meetingId}/capture-journal`;
@@ -386,6 +395,15 @@ const getArtifactRootPath = (rootDir: string, meetingId: string) =>
 
 const getManifestPath = (rootDir: string, meetingId: string) =>
   join(getArtifactRootPath(rootDir, meetingId), MANIFEST_FILE);
+
+type CaptureJournalMigrationPlan = {
+  schemaVersion: 1;
+  meetingId: string;
+  generation: string;
+  keyId: string;
+  plaintextRelativePaths: string[];
+  encryptedRelativePaths: string[];
+};
 
 const normalizeMeetingId = (meetingId: string) => {
   const normalized = String(meetingId || '').trim();
@@ -854,6 +872,336 @@ export const readCaptureJournalManifest = async (
 
   return await validateCaptureJournalManifest(parsed, normalizedMeetingId);
 };
+
+/**
+ * Converts one sealed v3 journal without ever making plaintext the fallback for
+ * a v4 journal. A small encrypted transition plan makes the destructive half
+ * resumable if the process exits after the v4 locator is committed.
+ */
+export const migrateSealedCaptureJournalToV4 = async (
+  rootDir: string,
+  args: { meetingId: string; keyId: string; meetingKey: Buffer },
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalV4MigrationResult> =>
+  serializeJournalMutation(rootDir, args.meetingId, async () => {
+    const meetingId = normalizeMeetingId(args.meetingId);
+    const artifactRootPath = getArtifactRootPath(rootDir, meetingId);
+    const planPath = join(artifactRootPath, JOURNAL_MIGRATION_PLAN_FILE);
+    const planHeader = {
+      keyId: args.keyId,
+      meetingId,
+      artifactKind: 'sidecar' as const,
+      source: 'none' as const,
+      sequence: 0,
+    };
+    const resolveManagedPath = (relativePath: string) => {
+      const candidate = resolve(rootDir, relativePath);
+      const root = resolve(artifactRootPath);
+      if (candidate === root || !candidate.startsWith(`${root}${sep}`)) {
+        throw new Error('historical_audio_path_invalid');
+      }
+      return candidate;
+    };
+    const assertManagedFile = async (relativePath: string) => {
+      const candidate = resolveManagedPath(relativePath);
+      const [candidateStat, realRoot, realCandidate] = await Promise.all([
+        lstat(candidate),
+        realpath(artifactRootPath),
+        realpath(candidate),
+      ]);
+      if (
+        candidateStat.isSymbolicLink() ||
+        !candidateStat.isFile() ||
+        (realCandidate !== realRoot &&
+          !realCandidate.startsWith(`${realRoot}${sep}`))
+      ) {
+        throw new Error('historical_audio_path_invalid');
+      }
+      return candidate;
+    };
+    const readPlan = async (generation: string) => {
+      try {
+        const envelope = await readFile(planPath);
+        const opened = EncryptedArtifactStore.open(envelope, args.meetingKey, {
+          ...planHeader,
+          generation,
+        });
+        const parsed = JSON.parse(
+          opened.plaintext.toString('utf8'),
+        ) as CaptureJournalMigrationPlan;
+        if (
+          parsed.schemaVersion !== 1 ||
+          parsed.meetingId !== meetingId ||
+          parsed.generation !== generation ||
+          parsed.keyId !== args.keyId ||
+          !Array.isArray(parsed.plaintextRelativePaths) ||
+          !Array.isArray(parsed.encryptedRelativePaths)
+        ) {
+          throw new Error('historical_audio_plan_invalid');
+        }
+        return parsed;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const removePaths = async (relativePaths: string[]) => {
+      let removed = 0;
+      for (const relativePath of new Set(relativePaths)) {
+        const fullPath = resolveManagedPath(relativePath);
+        try {
+          await rm(fullPath, { force: true });
+          removed += 1;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      return removed;
+    };
+
+    const current = await readCaptureJournalManifest(rootDir, meetingId, {
+      meetingKey: args.meetingKey,
+    });
+    if (current.schemaVersion === 4) {
+      if (current.keyId !== args.keyId) {
+        throw new Error('historical_audio_key_mismatch');
+      }
+      const plan = await readPlan(current.generation);
+      const deletedPlaintextArtifacts = plan
+        ? await removePaths(plan.plaintextRelativePaths)
+        : 0;
+      if (plan) await rm(planPath, { force: true });
+      return {
+        status: 'already_encrypted',
+        encryptedArtifacts: plan?.encryptedRelativePaths.length ?? 0,
+        deletedPlaintextArtifacts,
+      };
+    }
+    if (current.schemaVersion !== 3 || current.lifecycleState !== 'sealed') {
+      throw new Error('historical_audio_journal_ineligible');
+    }
+
+    const stalePlan = await readPlan(current.generation);
+    if (stalePlan) {
+      // A v3 locator proves the encrypted set was never committed. Plaintext is
+      // still authoritative, so only abandoned ciphertext may be removed.
+      await removePaths(stalePlan.encryptedRelativePaths);
+      await rm(planPath, { force: true });
+    }
+
+    const plaintextPaths: string[] = [];
+    const encryptedPaths: string[] = [];
+    const verifications: Array<{
+      path: string;
+      plaintextSha256: string;
+      expected: Omit<EncryptedArtifactHeader, 'plaintextLength'>;
+    }> = [];
+    const encryptReference = async (
+      relativePath: string,
+      expectedPlaintextSha256: string,
+      expected: Pick<
+        EncryptedArtifactHeader,
+        'artifactKind' | 'source' | 'sequence'
+      >,
+    ) => {
+      const plaintextPath = await assertManagedFile(relativePath);
+      const plaintext = await readFile(plaintextPath);
+      if (computeChecksum(plaintext) !== expectedPlaintextSha256) {
+        throw new Error('historical_audio_plaintext_checksum_mismatch');
+      }
+      const encryptedRelativePath = `${posix.dirname(relativePath)}/.migration-${randomUUID()}.enc`;
+      const encryptedPath = resolveManagedPath(encryptedRelativePath);
+      const header = {
+        ...planHeader,
+        generation: current.generation,
+        ...expected,
+      };
+      const written = await EncryptedArtifactStore.writeEncryptedFile(
+        encryptedPath,
+        plaintext,
+        args.meetingKey,
+        header,
+        { directoryReady: true },
+      );
+      const opened = await EncryptedArtifactStore.readEncryptedFile(
+        encryptedPath,
+        args.meetingKey,
+        header,
+      );
+      if (!opened.plaintext.equals(plaintext)) {
+        throw new Error('historical_audio_verification_failed');
+      }
+      plaintextPaths.push(relativePath);
+      encryptedPaths.push(encryptedRelativePath);
+      verifications.push({
+        path: encryptedPath,
+        plaintextSha256: expectedPlaintextSha256,
+        expected: header,
+      });
+      return {
+        relativePath: encryptedRelativePath,
+        ciphertextSha256: written.ciphertextSha256,
+        envelopeSha256: computeChecksum(await readFile(encryptedPath)),
+      };
+    };
+
+    let committed = false;
+    try {
+      const entries: CaptureJournalEntry[] = [];
+      for (const entry of current.entries) {
+        const migrated = await encryptReference(
+          entry.relativePath,
+          entry.checksumSha256,
+          {
+            artifactKind: 'chunk',
+            source: entry.source,
+            sequence: entry.sequence,
+          },
+        );
+        entries.push({
+          ...entry,
+          relativePath: migrated.relativePath,
+          ciphertextSha256: migrated.ciphertextSha256,
+        });
+      }
+      const intervals: CaptureIntervalLedgerEntry[] = [];
+      for (const interval of current.intervals) {
+        const sources = { ...interval.sources };
+        for (const source of ['mic', 'system'] as const) {
+          const disposition = interval.sources[source];
+          if (
+            disposition.disposition !== 'raw_durable' &&
+            disposition.disposition !== 'captured'
+          ) {
+            continue;
+          }
+          const raw = await encryptReference(
+            disposition.rawRelativePath,
+            disposition.rawChecksumSha256,
+            { artifactKind: 'raw', source, sequence: interval.sequence },
+          );
+          if (disposition.disposition === 'raw_durable') {
+            sources[source] = {
+              ...disposition,
+              rawRelativePath: raw.relativePath,
+              rawCiphertextSha256: raw.ciphertextSha256,
+            };
+            continue;
+          }
+          const repair = await encryptReference(
+            disposition.repairRelativePath,
+            disposition.repairChecksumSha256,
+            { artifactKind: 'repair', source, sequence: interval.sequence },
+          );
+          sources[source] = {
+            ...disposition,
+            rawRelativePath: raw.relativePath,
+            rawCiphertextSha256: raw.ciphertextSha256,
+            repairRelativePath: repair.relativePath,
+            repairCiphertextSha256: repair.ciphertextSha256,
+          };
+        }
+        intervals.push({ ...interval, sources });
+      }
+      const transcriptCheckpoints: CaptureTranscriptCheckpointRef[] = [];
+      for (const checkpoint of current.transcriptCheckpoints) {
+        const migrated = await encryptReference(
+          checkpoint.relativePath,
+          checkpoint.transcriptChecksumSha256,
+          {
+            artifactKind: 'sidecar',
+            source: checkpoint.source,
+            sequence: checkpoint.sequence,
+          },
+        );
+        transcriptCheckpoints.push({
+          ...checkpoint,
+          relativePath: migrated.relativePath,
+          transcriptChecksumSha256: migrated.envelopeSha256,
+        });
+      }
+      const acceptanceFrames: CaptureTranscriptAcceptanceFrame[] = [];
+      for (const frame of current.acceptanceFrames) {
+        const migrated = await encryptReference(
+          frame.relativePath,
+          frame.acceptedChecksumSha256,
+          {
+            artifactKind: 'sidecar',
+            source: 'none',
+            sequence: frame.sequence,
+          },
+        );
+        acceptanceFrames.push({
+          ...frame,
+          relativePath: migrated.relativePath,
+          acceptedChecksumSha256: migrated.envelopeSha256,
+        });
+      }
+      const next: CaptureJournalManifestV4 = {
+        ...current,
+        schemaVersion: 4,
+        keyId: args.keyId,
+        envelopeVersion: 1,
+        revision: current.revision + 1,
+        entries,
+        intervals,
+        transcriptCheckpoints,
+        acceptanceFrames,
+      };
+      const plan: CaptureJournalMigrationPlan = {
+        schemaVersion: 1,
+        meetingId,
+        generation: current.generation,
+        keyId: args.keyId,
+        plaintextRelativePaths: [...new Set(plaintextPaths)],
+        encryptedRelativePaths: [...new Set(encryptedPaths)],
+      };
+      await EncryptedArtifactStore.writeEncryptedFile(
+        planPath,
+        Buffer.from(JSON.stringify(plan), 'utf8'),
+        args.meetingKey,
+        { ...planHeader, generation: current.generation },
+        { directoryReady: true },
+      );
+      await writeManifest(rootDir, next, durability, args.meetingKey);
+      committed = true;
+      const verified = await readCaptureJournalManifest(rootDir, meetingId, {
+        meetingKey: args.meetingKey,
+      });
+      if (
+        verified.schemaVersion !== 4 ||
+        verified.keyId !== args.keyId ||
+        verified.generation !== current.generation
+      ) {
+        throw new Error('historical_audio_manifest_verification_failed');
+      }
+      for (const verification of verifications) {
+        const opened = await EncryptedArtifactStore.readEncryptedFile(
+          verification.path,
+          args.meetingKey,
+          verification.expected,
+        );
+        if (
+          computeChecksum(opened.plaintext) !== verification.plaintextSha256
+        ) {
+          throw new Error('historical_audio_verification_failed');
+        }
+      }
+      const deletedPlaintextArtifacts = await removePaths(plaintextPaths);
+      await rm(planPath, { force: true });
+      return {
+        status: 'migrated',
+        encryptedArtifacts: encryptedPaths.length,
+        deletedPlaintextArtifacts,
+      };
+    } catch (error) {
+      if (!committed) {
+        await removePaths(encryptedPaths).catch(() => {});
+        await rm(planPath, { force: true }).catch(() => {});
+      }
+      throw error;
+    }
+  });
 
 export const createCaptureJournal = async (
   rootDir: string,

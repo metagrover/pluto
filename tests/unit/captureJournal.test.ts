@@ -21,6 +21,7 @@ import {
   createCaptureJournal,
   deleteCaptureJournal,
   markCaptureJournalSourceFailed,
+  migrateSealedCaptureJournalToV4,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
   readCaptureJournalChunk,
@@ -333,6 +334,7 @@ describe('capture journal', () => {
         segments: [],
       },
     });
+
     expect(frame.manifest.acceptanceFrames).toEqual([frame.frame]);
     const promotedSidecar = {
       ...sidecar,
@@ -417,6 +419,98 @@ describe('capture journal', () => {
       micCheckpointChecksumSha256:
         promotion.checkpoint.transcriptChecksumSha256,
     });
+  });
+
+  it('migrates sealed v3 audio to authenticated v4 before deleting plaintext', async () => {
+    const root = await makeRoot();
+    const meetingKey = randomBytes(32);
+    const created = await createCaptureJournal(root, {
+      meetingId: 'historical',
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const raw = await persistCaptureJournalRawChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+      source: 'mic',
+      sequence: 0,
+      format: 'webm',
+      data: Buffer.from('historical-raw'),
+    });
+    const rawDisposition = raw.intervals[0].sources.mic;
+    if (rawDisposition.disposition !== 'raw_durable') throw new Error();
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: raw.revision,
+      source: 'mic',
+      sequence: 0,
+      rawChecksumSha256: rawDisposition.rawChecksumSha256,
+      repairData: Buffer.from('historical-repair'),
+    });
+    const evidence = await updateCaptureJournalActivityEvidence(root, {
+      meetingId: created.meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+    if (evidence.schemaVersion !== 3) throw new Error('expected v3');
+    const stopped = await stopCaptureJournal(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: evidence.revision,
+    });
+    const sealed = await sealCaptureJournal(root, {
+      meetingId: created.meetingId,
+      endedAtMs: 6_000,
+    });
+    if (sealed.schemaVersion !== 3) throw new Error('expected v3');
+    const oldMic = completed.manifest.intervals[0].sources.mic;
+    if (oldMic.disposition !== 'captured') throw new Error();
+    const oldRawPath = join(root, oldMic.rawRelativePath);
+    const oldRepairPath = join(root, oldMic.repairRelativePath);
+
+    const result = await migrateSealedCaptureJournalToV4(root, {
+      meetingId: created.meetingId,
+      keyId: 'historical-key',
+      meetingKey,
+    });
+
+    expect(result.status).toBe('migrated');
+    expect(result.encryptedArtifacts).toBe(2);
+    await expect(stat(oldRawPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(oldRepairPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    const migrated = await readCaptureJournalManifest(root, 'historical', {
+      meetingKey,
+    });
+    expect(migrated).toMatchObject({
+      schemaVersion: 4,
+      keyId: 'historical-key',
+      generation: created.generation,
+      lifecycleState: 'sealed',
+    });
+    if (migrated.schemaVersion !== 4) throw new Error('expected v4');
+    const migratedMic = migrated.intervals[0].sources.mic;
+    if (migratedMic.disposition !== 'captured') throw new Error();
+    expect(
+      await readCaptureJournalChunk(
+        root,
+        'historical',
+        migratedMic.repairRelativePath,
+        { meetingKey },
+      ),
+    ).toEqual(Buffer.from('historical-repair'));
+    expect(stopped.lifecycleState).toBe('stopping');
   });
 
   it('rejects acceptance frames that are not linked to the current checkpoints or interval', async () => {

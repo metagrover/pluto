@@ -30,6 +30,7 @@ export async function handleAudioCaptureJournalStart(options: {
   /** Freeze profile state synchronously; the returned write runs only for a new successful journal. */
   prepareCaptureIdentity?: (meetingId: string) => () => void;
   audioKeyStore?: Pick<AudioKeyStore, 'getOrCreateMeetingAudioKey'> | null;
+  encryptedCaptureRequired?: boolean;
 }) {
   const normalizedMeetingId = String(options.meetingId || '');
   const commitCaptureIdentity =
@@ -72,6 +73,11 @@ export async function handleAudioCaptureJournalStart(options: {
     let meetingKey: Buffer | undefined;
     let schemaVersion: 3 | 4 = 3;
 
+    if (options.encryptedCaptureRequired && !options.audioKeyStore) {
+      throw new Error(
+        'audio_key_failure: Encrypted capture is enabled but the meeting key store is unavailable',
+      );
+    }
     if (options.audioKeyStore) {
       try {
         const keyResult =

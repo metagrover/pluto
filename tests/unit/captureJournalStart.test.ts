@@ -96,6 +96,41 @@ describe('handleAudioCaptureJournalStart', () => {
     );
     expect(captureJournal.createCaptureJournal).toHaveBeenCalled();
   });
+  it('fails closed when encrypted capture is enabled without a key store', async () => {
+    await expect(
+      handleAudioCaptureJournalStart({
+        ...defaultOptions,
+        encryptedCaptureRequired: true,
+        audioKeyStore: null,
+      }),
+    ).rejects.toThrow('audio_key_failure');
+    expect(captureJournal.createCaptureJournal).not.toHaveBeenCalled();
+    expect(defaultOptions.captureSessionLease.release).toHaveBeenCalledWith(
+      'test-meeting',
+      1,
+    );
+  });
+  it('creates v4 only when the rollout supplies a durable meeting key', async () => {
+    const meetingKey = Buffer.alloc(32, 7);
+    await handleAudioCaptureJournalStart({
+      ...defaultOptions,
+      encryptedCaptureRequired: true,
+      audioKeyStore: {
+        getOrCreateMeetingAudioKey: vi.fn().mockReturnValue({
+          keyId: 'key-1',
+          meetingKey,
+        }),
+      },
+    });
+    expect(captureJournal.createCaptureJournal).toHaveBeenCalledWith(
+      '/test',
+      expect.objectContaining({
+        schemaVersion: 4,
+        keyId: 'key-1',
+        meetingKey,
+      }),
+    );
+  });
   it('uses fresh readiness rather than a stale renderer permission label for source availability', async () => {
     await handleAudioCaptureJournalStart({
       ...defaultOptions,
