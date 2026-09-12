@@ -62,6 +62,7 @@ native/**/.build/
 
 # Build Artifacts
 dist-electron/
+dist-electron-package/
 scripts/replay.local-fixtures.json
 scripts/replay.local-expected.json
 scripts/recording-quality/private-*.json

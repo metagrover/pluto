@@ -1,10 +1,50 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createBrowserIpcFallback } from '../../src/utils/browserIpcFallback';
+import {
+  createBrowserIpcFallback,
+  installBrowserIpcFallback,
+} from '../../src/utils/browserIpcFallback';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('browser IPC capture journal fallback', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('still provides preview data in a real browser', () => {
+    const browserWindow: Record<string, unknown> = { location: { search: '' } };
+    vi.stubGlobal('window', browserWindow);
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 Chrome/140.0.0.0',
+      platform: 'MacIntel',
+    });
+    installBrowserIpcFallback();
+    expect(browserWindow.__PLUTO_BROWSER_PREVIEW__).toBe(true);
+    expect(browserWindow.ipcRenderer).toBeDefined();
+  });
+
+  it('does not show preview data when the Electron preload bridge is missing', () => {
+    const desktopWindow = {};
+    vi.stubGlobal('window', desktopWindow);
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 Electron/40.8.0',
+      platform: 'MacIntel',
+    });
+    expect(() => installBrowserIpcFallback()).toThrow('preload did not load');
+    expect(desktopWindow).not.toHaveProperty('ipcRenderer');
+    expect(desktopWindow).not.toHaveProperty('__PLUTO_BROWSER_PREVIEW__');
+  });
+
+  it('keeps the real desktop bridge when it is available', () => {
+    const bridge = { invoke: vi.fn() };
+    const desktopWindow = {
+      ipcRenderer: bridge,
+      plutoRuntimePlatform: { platform: 'darwin', arch: 'arm64' },
+    };
+    vi.stubGlobal('window', desktopWindow);
+    vi.stubGlobal('navigator', { userAgent: 'Electron/40.8.0' });
+    installBrowserIpcFallback();
+    expect(desktopWindow.ipcRenderer).toBe(bridge);
+    expect(desktopWindow).not.toHaveProperty('__PLUTO_BROWSER_PREVIEW__');
+  });
 
   it('keeps preview meeting lists summary-only and detail explicit', async () => {
     vi.stubGlobal('window', { location: { search: '?preview=meeting' } });

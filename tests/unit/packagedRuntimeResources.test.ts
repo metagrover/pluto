@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   chmod,
   copyFile,
@@ -20,6 +20,34 @@ const projectRoot = path.resolve(import.meta.dirname, '../..');
 const execFileAsync = promisify(execFile);
 
 describe('packaged runtime resources', () => {
+  it('cleans packaging output without removing a running development preload', async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'pluto-build-'));
+    try {
+      for (const directory of ['dist-electron', 'dist-electron-package']) {
+        await mkdir(path.join(temporaryRoot, directory));
+        await writeFile(
+          path.join(temporaryRoot, directory, 'preload.js'),
+          directory,
+        );
+      }
+      await execFileAsync(
+        process.execPath,
+        [path.join(projectRoot, 'scripts/clean_generated_electron_output.mjs')],
+        { cwd: temporaryRoot },
+      );
+      expect(
+        readFileSync(
+          path.join(temporaryRoot, 'dist-electron/preload.js'),
+          'utf8',
+        ),
+      ).toBe('dist-electron');
+      expect(
+        existsSync(path.join(temporaryRoot, 'dist-electron-package')),
+      ).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
   it('builds the calendar helper in native and distributable builds', () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),

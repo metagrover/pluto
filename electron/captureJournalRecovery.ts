@@ -72,6 +72,7 @@ type TimedSegment = {
 };
 
 type RecoveryDependencies = {
+  minimumStartedAtMs?: number;
   getMeeting: (meetingId: string) => PersistedMeeting | null | undefined;
   saveMeeting: (meeting: PersistedMeeting) => unknown | Promise<unknown>;
   stitchWavSegments: (
@@ -159,6 +160,7 @@ export const isLegacyPreviewCheckpointConfig = (
   config.computeType === 'float16';
 
 export type CaptureJournalRecoveryResult = {
+  skippedBeforeCutoffCount?: number;
   recoveredCount: number;
   failedRecoveryCount: number;
   skippedExistingCount: number;
@@ -1505,6 +1507,15 @@ export const recoverInterruptedCaptureJournals = async (
       manifest = await readManifestForRecovery(rootDir, meetingId);
     } catch {
       result.skippedInvalidManifestCount += 1;
+      continue;
+    }
+
+    if (
+      deps.minimumStartedAtMs !== undefined &&
+      manifest.startedAtMs < deps.minimumStartedAtMs
+    ) {
+      result.skippedBeforeCutoffCount =
+        (result.skippedBeforeCutoffCount ?? 0) + 1;
       continue;
     }
 
