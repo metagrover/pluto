@@ -47,6 +47,8 @@ interface DashboardProps {
   setAskPlutoVisible?: (visible: boolean) => void;
   updatingTaskIds: Set<string>;
   actionError: string | null;
+  dashboardError?: Error | null;
+  onRetryDashboard?: () => Promise<void>;
   handleCompleteTask: (id: string) => Promise<void>;
   handleReviewCommitment?: (
     id: string,
@@ -408,6 +410,8 @@ export const Dashboard = ({
   setSelectedMeetingId,
   updatingTaskIds,
   actionError,
+  dashboardError = null,
+  onRetryDashboard = async () => {},
   handleCompleteTask,
   handleReviewCommitment = async () => {},
   handleCreateCommitment = async () => undefined,
@@ -762,6 +766,29 @@ export const Dashboard = ({
             </form>
           ) : null}
 
+          {dashboardError ? (
+            <div
+              role="alert"
+              data-testid="dashboard-commitments-unavailable"
+              className="mt-4 rounded-lg border border-pro-border/70 bg-pro-surface/45 px-5 py-6"
+            >
+              <h3 className="text-[15px] font-medium text-pro-text-main">
+                Commitments unavailable
+              </h3>
+              <p className="mt-1 max-w-[48ch] text-[12px] leading-5 text-pro-text-muted">
+                Pluto couldn&apos;t safely refresh your commitments. Your last
+                loaded view is preserved when available.
+              </p>
+              <button
+                type="button"
+                onClick={() => void onRetryDashboard().catch(() => {})}
+                className="mt-3 min-h-9 rounded-md border border-pro-border px-3 text-[11px] font-semibold text-pro-text-main transition-colors hover:bg-pro-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+
           {commitmentItems.length ? (
             <div className="divide-y divide-pro-border/60">
               {commitmentItems.map((item) => {
@@ -1012,7 +1039,7 @@ export const Dashboard = ({
                 );
               })}
             </div>
-          ) : (
+          ) : dashboardError ? null : (
             <div
               data-testid="daily-three-empty"
               className="flex min-h-[390px] flex-col items-center justify-center px-6 py-10 text-center"

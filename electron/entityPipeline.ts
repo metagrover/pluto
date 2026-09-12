@@ -9,7 +9,6 @@ import { createHash } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
 import {
   type ActionCommitmentMetadata,
-  areActionsEquivalent,
   canonicalizeActionText,
 } from '../src/utils/actionCommitment';
 import { isUsablePersonName } from '../src/utils/personBriefing';
@@ -523,11 +522,6 @@ function persistExtractedEntities(
   }
 
   // 3. Process Action Items
-  const existingMeetingActions = db
-    .getMeetingEntities(meetingId)
-    .filter((e) => e.type === 'action_item');
-  const matchedExistingActionIds = new Set<string>();
-
   for (const [actionIndex, actionItem] of extracted.action_items.entries()) {
     ensureCurrent();
     if (!actionItem?.description || typeof actionItem.description !== 'string')
@@ -536,23 +530,9 @@ function persistExtractedEntities(
     const actionId =
       options.actionIds?.get(actionIndex) ??
       getExtractedActionId(meetingId, actionItem.description);
-    let existingAction = db.resolveCommitmentIdentity(
+    const existingAction = db.resolveCommitmentIdentity(
       options.actionMatches?.get(actionId) ?? actionId,
     );
-    if (!existingAction) {
-      existingAction = existingMeetingActions.find(
-        (existing) =>
-          !matchedExistingActionIds.has(existing.id) &&
-          areActionsEquivalent(existing, {
-            title: actionItem.description,
-            assigneeName: actionItem.assignee,
-            sourceMeetingId: meetingId,
-          }),
-      );
-    }
-    if (existingAction) {
-      matchedExistingActionIds.add(existingAction.id);
-    }
 
     const canonicalName = canonicalizeActionText(
       actionItem.description,

@@ -171,7 +171,7 @@ describe('extracted action idempotency', () => {
     ).rejects.toThrow('commitment_generator_required');
   });
 
-  it('reuses existing action item when phrasing varies slightly between runs', async () => {
+  it('keeps separately extracted actions distinct when only their wording overlaps', async () => {
     const meetingId = 'meeting-rephrased-action';
     saveMeeting({ id: meetingId, title: 'Sync with Arnold' });
 
@@ -217,10 +217,10 @@ describe('extracted action idempotency', () => {
       return metadata.source_meeting_id === meetingId;
     });
 
-    expect(actions).toHaveLength(1);
-    expect(actions[0].id).toBe(first.entities[0].id);
-    expect(replay.updated).toBe(1);
-    expect(replay.created).toBe(0);
+    expect(actions).toHaveLength(2);
+    expect(actions.map((action) => action.id)).toContain(first.entities[0].id);
+    expect(replay.updated).toBe(0);
+    expect(replay.created).toBe(1);
   });
 
   it('keeps action entity identity stable when meeting summary changes', async () => {

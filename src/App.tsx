@@ -1642,6 +1642,8 @@ function App() {
                   setActiveTab={setActiveTab}
                   updatingTaskIds={updatingDashboardTaskIds}
                   actionError={dashboardActionError}
+                  dashboardError={dashboardHome.error}
+                  onRetryDashboard={dashboardHome.refresh}
                   handleCompleteTask={handleCompleteTask}
                   handleReviewCommitment={handleReviewDashboardCommitment}
                   handleCreateCommitment={handleCreateDashboardCommitment}

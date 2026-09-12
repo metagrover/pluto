@@ -25,6 +25,7 @@ const makeLoaders = () => ({
   getKnowledgeWorkspace: vi.fn(async () => null),
   listWorkingMemorySnapshots: vi.fn(async () => []),
   getKnowledgeGraphStats: vi.fn(async () => null),
+  getIdentityState: vi.fn(async () => null),
 });
 
 describe('millisecondsUntilNextLocalDay', () => {
@@ -145,5 +146,16 @@ describe('loadDashboardHomeData', () => {
       staleActions: [],
       activeActions: [],
     });
+  });
+
+  it('rejects when identity cannot be loaded', async () => {
+    const loaders = makeLoaders();
+    loaders.getIdentityState.mockRejectedValueOnce(
+      new Error('identity unavailable'),
+    );
+
+    await expect(loadDashboardHomeData(loaders)).rejects.toThrow(
+      'identity unavailable',
+    );
   });
 });

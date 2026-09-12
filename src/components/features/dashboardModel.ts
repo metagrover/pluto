@@ -8,13 +8,11 @@ import type {
 } from '../../api/knowledgeWorkspace';
 import type { Meeting } from '../../types';
 import {
-  areActionsEquivalent,
+  type ThirdPartyAssigneeOptions,
   canonicalizeActionText,
   getCommitmentState,
   isThirdPartyAction,
-  isThirdPartyAssignee,
   parseActionMetadata,
-  type ThirdPartyAssigneeOptions,
 } from '../../utils/actionCommitment';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
@@ -235,7 +233,6 @@ export interface DashboardHomeModelInput {
   overdueActions: Entity[];
   staleActions: Entity[];
   activeActions: Entity[];
-  rejectedActions?: Entity[];
   attentionAlerts?: AttentionItem[];
   workspace: KnowledgeWorkspacePayload | null;
   workingMemorySnapshot?: WorkingMemorySnapshot | null;
@@ -1136,22 +1133,11 @@ const buildTopOfMind = (
 
 export const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
-  rejectedActions: Entity[] = [],
-  options?: ThirdPartyAssigneeOptions,
 ): DashboardCommitments => {
   const confirmedItems =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
-          .filter(
-            (item) =>
-              item.commitmentState === 'confirmed' &&
-              !isThirdPartyAssignee(item.assigneeName, item.title, options) &&
-              !(
-                item.assignedTo &&
-                options?.selfPersonId &&
-                item.assignedTo !== options.selfPersonId
-              ),
-          )
+          .filter((item) => item.commitmentState === 'confirmed')
           .sort((a, b) => {
             if (a.dailyPriorityRank !== null || b.dailyPriorityRank !== null) {
               if (a.dailyPriorityRank === null) return 1;
@@ -1173,43 +1159,13 @@ export const buildDashboardCommitments = (
         )
       : [];
 
-  const deduplicatedNeedsConfirmation: DashboardActionInsightItem[] = [];
+  const needsConfirmation: DashboardActionInsightItem[] = [];
   for (const candidate of candidateItems) {
-    if (
-      isThirdPartyAssignee(candidate.assigneeName, candidate.title, options) ||
-      (candidate.assignedTo &&
-        options?.selfPersonId &&
-        candidate.assignedTo !== options.selfPersonId)
-    ) {
-      continue;
-    }
-    if (
-      confirmedItems.some((confirmed) =>
-        areActionsEquivalent(confirmed, candidate),
-      )
-    ) {
-      continue;
-    }
-    if (
-      rejectedActions.some((rejected) =>
-        areActionsEquivalent(rejected, candidate),
-      )
-    ) {
-      continue;
-    }
-    if (
-      deduplicatedNeedsConfirmation.some((existing) =>
-        areActionsEquivalent(existing, candidate),
-      )
-    ) {
-      continue;
-    }
-    deduplicatedNeedsConfirmation.push(candidate);
-    if (deduplicatedNeedsConfirmation.length >= MAX_DASHBOARD_BRIEFING_ITEMS) {
+    needsConfirmation.push(candidate);
+    if (needsConfirmation.length >= MAX_DASHBOARD_BRIEFING_ITEMS) {
       break;
     }
   }
-  const needsConfirmation = deduplicatedNeedsConfirmation;
 
   if (items.length === 0) {
     return {
@@ -1918,18 +1874,6 @@ export const buildDashboardHomeModel = (
   const rawStale = input.staleActions.filter(isPersonalAction);
   const rawActive = input.activeActions.filter(isPersonalAction);
 
-  const rejectedActions = [
-    ...(input.rejectedActions ?? []).filter(isPersonalAction),
-    ...rawOverdue.filter(
-      (action) => getCommitmentState(action.metadata) === 'rejected',
-    ),
-    ...rawStale.filter(
-      (action) => getCommitmentState(action.metadata) === 'rejected',
-    ),
-    ...rawActive.filter(
-      (action) => getCommitmentState(action.metadata) === 'rejected',
-    ),
-  ];
   const overdueActions = filterSuppressedDashboardActions(
     filterRejectedDashboardActions(rawOverdue),
     attentionAlerts,
@@ -1956,11 +1900,7 @@ export const buildDashboardHomeModel = (
     input.dateKey ?? getDashboardDateKey(),
   );
   const topOfMind = buildTopOfMind(actionInsights);
-  const commitments = buildDashboardCommitments(
-    actionInsights,
-    rejectedActions,
-    selfOptions,
-  );
+  const commitments = buildDashboardCommitments(actionInsights);
   const recentWin = buildRecentWin(input.meetings);
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,

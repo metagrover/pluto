@@ -149,7 +149,7 @@ const makeWorkspace = (
 
 const renderDashboard = (
   model: DashboardHomeModel,
-  options: { loading?: boolean } = {},
+  options: { loading?: boolean; dashboardError?: Error | null } = {},
 ) =>
   renderToStaticMarkup(
     <Dashboard
@@ -160,6 +160,7 @@ const renderDashboard = (
       setActiveTab={vi.fn()}
       updatingTaskIds={new Set()}
       actionError={null}
+      dashboardError={options.dashboardError}
       handleCompleteTask={vi.fn(async () => {})}
       handleReviewCommitment={vi.fn(async () => {})}
       handleUpdateAttentionStatus={vi.fn(async () => {})}
@@ -192,6 +193,34 @@ const makeMeetingWithSupportedWin = (): Meeting =>
   });
 
 describe('Dashboard', () => {
+  it('shows a retryable commitments error instead of a trustworthy empty state', () => {
+    const markup = renderDashboard(makeEmptyDashboardModel(), {
+      dashboardError: new Error('identity unavailable'),
+    });
+
+    expect(markup).toContain('Commitments unavailable');
+    expect(markup).toContain('Retry');
+    expect(markup).not.toContain('Nothing needs your attention');
+  });
+
+  it('preserves the last loaded commitments during a refresh failure', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [makeAction({ name: 'Preserve the rollout checklist' })],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderDashboard(model, {
+      dashboardError: new Error('identity unavailable'),
+    });
+
+    expect(markup).toContain('Commitments unavailable');
+    expect(markup).toContain('Preserve the rollout checklist');
+  });
   it('detects current-read overflow from measured geometry', () => {
     expect(
       isCurrentReadClaimClipped({ scrollHeight: 91, clientHeight: 90 }),

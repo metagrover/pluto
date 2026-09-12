@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
+import { type IdentityState, getIdentityState } from '../../api/identity';
 import { getAttentionAlerts } from '../../api/intelligence';
 import {
   type Entity,
@@ -17,7 +18,6 @@ import {
   type WorkingMemorySnapshot,
   listWorkingMemorySnapshots,
 } from '../../api/workingMemory';
-import { type IdentityState, getIdentityState } from '../../api/identity';
 import type { Meeting } from '../../types';
 import {
   type DashboardHomeModel,
@@ -168,11 +168,7 @@ export const loadDashboardHomeData = async (
       loaders.getMeetingPreviews ?? (async () => []),
       [],
     ),
-    loadOptional<IdentityState | null>(
-      'identity state',
-      loaders.getIdentityState ?? getIdentityState,
-      null,
-    ),
+    (loaders.getIdentityState ?? getIdentityState)(),
   ]);
 
   return {

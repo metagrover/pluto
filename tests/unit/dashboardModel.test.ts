@@ -2905,7 +2905,7 @@ describe('buildDashboardHomeModel', () => {
       expect(model.commitments.needsConfirmation[0].assigneeName).toBe('Me');
     });
 
-    it('does not surface suggestions that match an already confirmed commitment', () => {
+    it('does not treat wording overlap as canonical identity with a confirmed commitment', () => {
       const confirmedAction = makeAction({
         id: 'confirmed-1',
         name: 'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
@@ -2937,11 +2937,12 @@ describe('buildDashboardHomeModel', () => {
 
       expect(model.commitments.items).toHaveLength(1);
       expect(model.commitments.items[0].id).toBe('confirmed-1');
-      // The duplicate should NOT be in needsConfirmation!
-      expect(model.commitments.needsConfirmation).toHaveLength(0);
+      expect(
+        model.commitments.needsConfirmation.map((item) => item.id),
+      ).toEqual(['possible-dup']);
     });
 
-    it('does not surface suggestions that match a rejected action', () => {
+    it('does not apply one rejected lifecycle decision to a different canonical action', () => {
       const rejectedAction = makeAction({
         id: 'rejected-1',
         name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
@@ -2970,7 +2971,9 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(model.commitments.needsConfirmation).toHaveLength(0);
+      expect(
+        model.commitments.needsConfirmation.map((item) => item.id),
+      ).toEqual(['possible-candidate']);
     });
 
     it('filters out suggestions assigned to third parties', () => {
@@ -3017,7 +3020,7 @@ describe('buildDashboardHomeModel', () => {
       expect(model.commitments.needsConfirmation[0].id).toBe('possible-me');
     });
 
-    it('deduplicates multiple equivalent possible suggestions against each other', () => {
+    it('keeps distinct canonical suggestions even when their wording overlaps', () => {
       const candidate1 = makeAction({
         id: 'cand-1',
         name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
@@ -3054,12 +3057,80 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      // candidate1 and candidate2 are duplicates, so needsConfirmation has only 2 items (cand-3 and one of the duplicates)
-      expect(model.commitments.needsConfirmation).toHaveLength(2);
+      expect(model.commitments.needsConfirmation).toHaveLength(3);
       expect(model.commitments.needsConfirmation.map((c) => c.id)).toEqual([
         'cand-3',
         'cand-2',
+        'cand-1',
       ]);
+    });
+
+    it('keeps a new canonical suggestion when an older confirmed commitment has the same wording', () => {
+      const confirmed = makeAction({
+        id: 'confirmed-old',
+        name: 'Send revised rollout plan',
+        due_date: '2026-09-01T12:00:00.000Z',
+        metadata: JSON.stringify({
+          commitment_state: 'confirmed',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-old',
+        }),
+      });
+      const candidate = makeAction({
+        id: 'candidate-new',
+        name: 'Send revised rollout plan',
+        due_date: '2026-09-20T12:00:00.000Z',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+          source_meeting_id: 'meeting-new',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [confirmed, candidate],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(
+        model.commitments.needsConfirmation.map((item) => item.id),
+      ).toEqual(['candidate-new']);
+    });
+
+    it('trusts an explicit self assignment over stale assignee text', () => {
+      const candidate = makeAction({
+        id: 'self-with-stale-name',
+        name: 'Send revised rollout plan',
+        assigned_to: 'person-me',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Alex',
+          source_meeting_id: 'meeting-new',
+        }),
+      });
+
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [candidate],
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+        selfPersonId: 'person-me',
+        selfNames: ['Alex Morgan'],
+      });
+
+      expect(
+        model.commitments.needsConfirmation.map((item) => item.id),
+      ).toEqual(['self-with-stale-name']);
     });
 
     it('excludes commitments assigned to other individuals from Daily Briefing suggestions and focus', () => {
@@ -3081,6 +3152,16 @@ describe('buildDashboardHomeModel', () => {
           commitment_state: 'confirmed',
           assignee_name: 'Taylor',
           owner_source: 'user',
+          source_meeting_id: 'meeting-1',
+        }),
+      });
+      const contradictoryOtherCandidate = makeAction({
+        id: 'other-candidate-with-self-text',
+        name: 'Send updated benchmark numbers',
+        assigned_to: 'person-taylor',
+        metadata: JSON.stringify({
+          commitment_state: 'possible',
+          assignee_name: 'Me',
           source_meeting_id: 'meeting-1',
         }),
       });
@@ -3113,6 +3194,7 @@ describe('buildDashboardHomeModel', () => {
         activeActions: [
           arnoldCandidateAction,
           taylorConfirmedAction,
+          contradictoryOtherCandidate,
           myCandidateAction,
           myConfirmedAction,
         ],
