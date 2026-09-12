@@ -11,6 +11,7 @@ import {
   shouldAcquireProductionInstanceLock,
 } from './appRuntimePolicy';
 import { ApplicationKeyStore } from './crypto/applicationKeyStore';
+import { hasValidRecoveryKeyFile } from './crypto/recoveryKeyFile';
 import { initializeApplicationDatabase } from './database/applicationDatabase';
 import {
   DatabaseLifecycleError,
@@ -43,6 +44,9 @@ const developmentTargetsProduction = Boolean(
     path.resolve(developmentUserDataDir) ===
       path.resolve(productionUserDataDir),
 );
+const recoveryKeyAvailable = Boolean(
+  productionUserDataDir && hasValidRecoveryKeyFile(productionUserDataDir),
+);
 if (!app.isPackaged && developmentUserDataDir) {
   app.setPath('userData', developmentUserDataDir);
 }
@@ -56,6 +60,7 @@ const canOpenDatabase = canOpenProductionDatabase({
   isPackaged: app.isPackaged,
   signedBuildValid: productionSignature.valid,
   targetsProductionProfile: developmentTargetsProduction,
+  recoveryKeyAvailable,
 });
 const productionKeyStore =
   app.isPackaged &&

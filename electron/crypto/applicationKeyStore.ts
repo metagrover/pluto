@@ -3,6 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as electron from 'electron';
 import type { SafeStorageBackend } from './keyCustodyProbe';
+import {
+  RECOVERY_KEY_FILE_NAME,
+  readRecoveryKeyFile,
+  resolveRecoveryKeyPath,
+} from './recoveryKeyFile';
 
 export interface ApplicationKeyEnvelope {
   version: 1 | 2;
@@ -39,6 +44,7 @@ export interface ApplicationKeyStoreOptions {
   storageDir?: string;
   backend?: SafeStorageBackend;
   envelopeFileName?: string;
+  recoveryFileName?: string;
   expectedStorageBinding?: ApplicationKeyStorageBinding;
 }
 
@@ -46,6 +52,7 @@ export class ApplicationKeyStore {
   private readonly storageDir: string;
   private readonly backend: SafeStorageBackend;
   private readonly envelopePath: string;
+  private readonly recoveryFileName: string;
   private readonly expectedStorageBinding?: ApplicationKeyStorageBinding;
 
   constructor(options: ApplicationKeyStoreOptions = {}) {
@@ -91,14 +98,24 @@ export class ApplicationKeyStore {
       this.storageDir,
       options.envelopeFileName ?? 'app-key-envelope.json',
     );
+    this.recoveryFileName = options.recoveryFileName ?? RECOVERY_KEY_FILE_NAME;
     this.expectedStorageBinding = options.expectedStorageBinding;
   }
 
   hasMasterKey(): boolean {
-    return fs.existsSync(this.envelopePath);
+    return (
+      fs.existsSync(
+        resolveRecoveryKeyPath(this.storageDir, this.recoveryFileName),
+      ) || fs.existsSync(this.envelopePath)
+    );
   }
 
   getMasterKey(): MasterKeyResult | null {
+    const recoveryKey = readRecoveryKeyFile({
+      storageDir: this.storageDir,
+      fileName: this.recoveryFileName,
+    });
+    if (recoveryKey) return recoveryKey;
     if (!this.hasMasterKey()) return null;
 
     if (!this.backend || !this.backend.isEncryptionAvailable()) {

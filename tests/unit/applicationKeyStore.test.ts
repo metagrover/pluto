@@ -161,6 +161,51 @@ describe('ApplicationKeyStore', () => {
     expect(decryptString).not.toHaveBeenCalled();
   });
 
+  it('uses an explicit recovery key before a legacy Keychain envelope', () => {
+    const decryptString = vi.fn(() => {
+      throw new Error('must not reach Keychain');
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, 'app-key-envelope.json'),
+      JSON.stringify({ version: 1 }),
+    );
+    const recoveryKey = Buffer.alloc(32, 0x31);
+    const recoverySalt = Buffer.alloc(32, 0x32);
+    const recoveryPath = path.join(tmpDir, 'app-recovery-key.json');
+    fs.writeFileSync(
+      recoveryPath,
+      JSON.stringify({
+        version: 1,
+        purpose: 'pluto-database-recovery',
+        keyId: '123e4567-e89b-42d3-a456-426614174000',
+        key: recoveryKey.toString('base64'),
+        salt: recoverySalt.toString('base64'),
+      }),
+      { mode: 0o600 },
+    );
+    fs.chmodSync(recoveryPath, 0o600);
+    const store = new ApplicationKeyStore({
+      storageDir: tmpDir,
+      backend: {
+        isEncryptionAvailable: () => true,
+        encryptString: mockBackend.encryptString,
+        decryptString,
+      },
+      expectedStorageBinding: {
+        provider: 'electron_safe_storage',
+        bundleIdentifier: 'com.pluto.app',
+        teamIdentifier: 'PLUTOTEAM1',
+      },
+    });
+
+    expect(store.getMasterKey()).toEqual({
+      key: recoveryKey,
+      keyId: '123e4567-e89b-42d3-a456-426614174000',
+      salt: recoverySalt,
+    });
+    expect(decryptString).not.toHaveBeenCalled();
+  });
+
   it('durably fsyncs key envelope file and parent directory on creation', () => {
     let fsyncCount = 0;
     const originalFsyncSync = fs.fsyncSync;
