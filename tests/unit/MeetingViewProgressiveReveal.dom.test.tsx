@@ -168,12 +168,17 @@ describe('MeetingView progressive reveal', () => {
       },
     };
     await act(async () => renderMeeting(drafting));
-    expect(container.textContent).toContain('Draft preview');
-    expect(container.textContent).toContain('not saved yet');
+    expect(container.textContent).toContain('Drafting your notes');
+    expect(container.textContent).toContain('View only');
+    expect(container.textContent).toContain(
+      'Editing unlocks automatically when your notes are ready.',
+    );
     expect(container.textContent).toContain('A draft fact.');
-    expect(
-      container.querySelector('[data-meeting-artifact="analysis"]'),
-    ).toBeNull();
+    const draft = container.querySelector(
+      '[data-meeting-artifact="analysis"][data-state="drafting"]',
+    );
+    expect(draft?.getAttribute('aria-busy')).toBe('true');
+    expect(draft?.querySelector('button, input, textarea')).toBeNull();
     await act(async () =>
       renderMeeting({
         ...drafting,
@@ -196,7 +201,7 @@ describe('MeetingView progressive reveal', () => {
       }),
     );
     expect(container.textContent).toContain('The analysis arrived in place.');
-    expect(container.textContent).not.toContain('Draft preview');
+    expect(container.textContent).not.toContain('Drafting your notes');
     expect(container.textContent).not.toContain('A draft fact.');
     await act(async () =>
       renderMeeting({
