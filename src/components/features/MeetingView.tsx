@@ -677,7 +677,14 @@ export const MeetingActionCards = ({
   </>
 );
 
-export const MeetingView = ({
+export const MeetingView = (props: MeetingViewProps) => {
+  if (!props.selectedMeeting) return null;
+  return (
+    <SelectedMeetingView {...props} selectedMeeting={props.selectedMeeting} />
+  );
+};
+
+const SelectedMeetingView = ({
   selectedMeeting,
   editingTitle,
   setEditingTitle,
@@ -693,8 +700,9 @@ export const MeetingView = ({
   transcriptValidationRetryOperation = null,
   calendarContext = null,
   exportIncludeTranscript = false,
-}: MeetingViewProps) => {
-  if (!selectedMeeting) return null;
+}: Omit<MeetingViewProps, 'selectedMeeting'> & {
+  selectedMeeting: Meeting;
+}) => {
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
   const [isRestoringNotes, setIsRestoringNotes] = useState(false);
   const [isDeletingAudio, setIsDeletingAudio] = useState(false);

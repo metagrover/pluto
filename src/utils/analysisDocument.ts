@@ -265,8 +265,21 @@ export const parseAnalysisDocumentV3Json = (
     if (parsed.analysis_schema_version !== 3) return null;
     if (typeof parsed.overview !== 'string' || !parsed.overview.trim())
       return null;
-    // Return as-is (backend already validated)
-    return parsed as unknown as AnalysisDocumentV3;
+    // Older saved notes omit empty topic arrays. Normalize only the read
+    // projection so rendering and editing retain all persisted content/paths.
+    const topics = Array.isArray(parsed.topics)
+      ? parsed.topics.map((topic) => ({
+          ...topic,
+          key_points: topic.key_points ?? [],
+          decisions: topic.decisions ?? [],
+          action_items: topic.action_items ?? [],
+          open_questions: (topic.open_questions ?? []).map(
+            (question: string | { text: string }) =>
+              typeof question === 'string' ? question : question.text,
+          ),
+        }))
+      : [];
+    return { ...parsed, topics } as unknown as AnalysisDocumentV3;
   } catch {
     return null;
   }

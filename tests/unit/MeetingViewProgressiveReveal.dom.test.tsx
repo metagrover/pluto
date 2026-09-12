@@ -131,13 +131,16 @@ describe('MeetingView progressive reveal', () => {
     container.remove();
   });
 
-  const renderMeeting = (meeting: Meeting, transcriptVisible = false) =>
+  const renderMeeting = (
+    meeting: Meeting | undefined,
+    transcriptVisible = false,
+  ) =>
     root.render(
       <MeetingView
         selectedMeeting={meeting}
         editingTitle={false}
         setEditingTitle={vi.fn()}
-        titleValue={meeting.title}
+        titleValue={meeting?.title ?? ''}
         setTitleValue={vi.fn()}
         fetchMeetings={vi.fn()}
         handleCopySummary={vi.fn()}
@@ -148,6 +151,53 @@ describe('MeetingView progressive reveal', () => {
         setTranscriptVisible={vi.fn()}
       />,
     );
+
+  it('renders legacy saved topics with omitted optional arrays', async () => {
+    const savedAnalysis = JSON.parse(analyzedMeeting.analysis_json!);
+    savedAnalysis.topics = [
+      {
+        title: 'Legacy topic',
+        summary: 'Saved topic summary',
+        key_points: [{ text: 'Saved topic point' }],
+        decisions: [],
+        action_items: [],
+      },
+      {
+        title: 'Summary only',
+        summary: 'Another saved summary',
+        open_questions: [{ text: 'A saved open question', speaker: 'Them' }],
+      },
+    ];
+    const meeting = {
+      ...analyzedMeeting,
+      analysis_json: JSON.stringify(savedAnalysis),
+    };
+    await act(async () => renderMeeting(meeting));
+    expect(container.textContent).toContain('Saved topic summary');
+    expect(container.textContent).toContain('Saved topic point');
+    expect(container.textContent).toContain('Another saved summary');
+    expect(container.textContent).toContain('A saved open question');
+    expect(JSON.parse(meeting.analysis_json)).toEqual(savedAnalysis);
+  });
+
+  it('opens saved notes after an empty selection and after switching meetings', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await act(async () => renderMeeting(undefined));
+      await act(async () => renderMeeting(analyzedMeeting));
+      expect(container.textContent).toContain('The analysis arrived in place.');
+      await act(async () => renderMeeting(undefined));
+      await act(async () =>
+        renderMeeting({ ...analyzedMeeting, id: 'another-meeting' }),
+      );
+      expect(container.textContent).toContain('The analysis arrived in place.');
+      expect(errors.mock.calls.flat().join(' ')).not.toMatch(
+        /static flag|Rendered (?:more|fewer) hooks|change in the order of Hooks/,
+      );
+    } finally {
+      errors.mockRestore();
+    }
+  });
 
   it('progressively reveals an unsaved draft without replacing reviewed notes', async () => {
     const drafting: Meeting = {
