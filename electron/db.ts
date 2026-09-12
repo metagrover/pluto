@@ -292,6 +292,7 @@ export interface MeetingSummary {
 export interface MeetingProcessingStatus {
   id: string | number;
   has_capture_gap: boolean;
+  recovered_awaiting_validation: boolean;
   final_transcription_policy: string | null;
   final_transcription_state: string | null;
   final_transcription_engine: string | null;
@@ -2350,6 +2351,15 @@ const readMeetingProcessingStatus = (row: {
             cause &&
             typeof cause === 'object' &&
             (cause as { code?: unknown }).code === 'capture_gap_detected',
+        )
+      : false,
+    recovered_awaiting_validation: Array.isArray(integrity.causes)
+      ? integrity.causes.some(
+          (cause) =>
+            cause &&
+            typeof cause === 'object' &&
+            (cause as { code?: unknown }).code ===
+              'recovered_awaiting_validation',
         )
       : false,
     final_transcription_policy:
