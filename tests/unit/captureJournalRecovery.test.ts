@@ -136,6 +136,33 @@ describe('capture journal recovery', () => {
     return wav;
   };
 
+  it('does not resurrect journals older than an explicit incident recovery cutoff', async () => {
+    const root = await makeRoot();
+    for (const [meetingId, startedAtMs] of [
+      ['old', 1000],
+      ['new', 3000],
+    ] as const) {
+      await createCaptureJournal(root, {
+        meetingId,
+        startedAtMs,
+        schemaVersion: 3,
+        expectedSources: ['mic'],
+      });
+    }
+    const getMeeting = vi.fn(() => null);
+    const saveMeeting = vi.fn();
+    const result = await recoverInterruptedCaptureJournals(root, {
+      minimumStartedAtMs: 2000,
+      getMeeting,
+      saveMeeting,
+      stitchWavSegments: vi.fn(),
+    });
+    expect(getMeeting).toHaveBeenCalledWith('new');
+    expect(getMeeting).not.toHaveBeenCalledWith('old');
+    expect(result.skippedBeforeCutoffCount).toBe(1);
+    expect(saveMeeting).not.toHaveBeenCalled();
+  });
+
   it('stitches a verified source directly from a sealed v3 journal', async () => {
     const root = await makeRoot();
     const meetingId = 'meeting-live-stop';

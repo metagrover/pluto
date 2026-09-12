@@ -9,9 +9,12 @@ import {
 } from './electron/appRuntimePolicy';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   server: {
     host: '127.0.0.1',
+    watch: {
+      ignored: ['**/release/**', '**/dist-electron-package/**'],
+    },
   },
   build: {
     rollupOptions: {
@@ -46,6 +49,8 @@ export default defineConfig({
         },
         vite: {
           build: {
+            outDir:
+              command === 'build' ? 'dist-electron-package' : 'dist-electron',
             rollupOptions: {
               external: [
                 // Keep ws optional native imports inside its runtime try/catch fallback.
@@ -61,6 +66,12 @@ export default defineConfig({
         },
       },
       preload: {
+        vite: {
+          build: {
+            outDir:
+              command === 'build' ? 'dist-electron-package' : 'dist-electron',
+          },
+        },
         // Shortcut of `build.rollupOptions.input`.
         // Preload scripts may contain Web assets, so use the `build.rollupOptions.input` instead `build.lib.entry`.
         input: path.join(__dirname, 'electron/preload.ts'),
@@ -75,4 +86,4 @@ export default defineConfig({
           : {},
     }),
   ],
-});
+}));

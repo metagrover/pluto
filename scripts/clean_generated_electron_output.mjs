@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises';
 import path from 'node:path';
 
 const generatedPaths = [
-  path.resolve('dist-electron'),
+  path.resolve('dist-electron-package'),
   path.resolve('resources/bin/recorder'),
 ];
 

@@ -1025,6 +1025,11 @@ export const createBrowserIpcFallback = (): IpcRendererLike => {
 };
 
 export const installBrowserIpcFallback = () => {
+  if (!window.ipcRenderer && /\bElectron\//.test(navigator.userAgent)) {
+    throw new Error(
+      'Pluto desktop connection is unavailable: preload did not load.',
+    );
+  }
   if (!window.plutoRuntimePlatform) {
     const browserPlatform = navigator.platform.toLowerCase();
     window.plutoRuntimePlatform = Object.freeze({

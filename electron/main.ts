@@ -5793,6 +5793,9 @@ app.whenReady().then(async () => {
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
+        minimumStartedAtMs:
+          Number(db.getSetting('incident_recovery_completed_at_ms')) ||
+          undefined,
         getMeeting: (meetingId) =>
           (db.getMeeting(meetingId) as db.PersistedMeeting | null) ?? null,
         saveMeeting: (meeting) => {
