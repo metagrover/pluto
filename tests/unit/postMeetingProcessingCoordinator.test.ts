@@ -7,6 +7,7 @@ import {
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
+  needsRecoveredAudioRebuild,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
@@ -64,6 +65,71 @@ describe('post-meeting processing coordinator', () => {
     ).toBe(false);
   });
 
+  it('rebuilds sealed no-gap recovery audio before automatic final transcription', () => {
+    const meeting = {
+      id: 'recovered-meeting',
+      transcript_status: 'needs_attention' as const,
+      finalization_status: 'finalized' as const,
+      capture_journal_generation: 'generation-1',
+      transcript_json: '{"segments":[]}',
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'recovered_awaiting_validation' }],
+        recovery: {
+          source: 'capture_journal',
+          gapDetected: false,
+        },
+      }),
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/approved/system.wav',
+      mixed_audio_path: null,
+    };
+
+    expect(needsRecoveredAudioRebuild(meeting)).toBe(true);
+    expect(shouldRunMeetingFinalTranscription(meeting)).toBe(true);
+    expect(shouldStartMeetingFinalTranscription(meeting, 'automatic')).toBe(
+      true,
+    );
+    expect(selectNextMeetingForFinalTranscription([meeting])?.id).toBe(
+      'recovered-meeting',
+    );
+  });
+
+  it('selects recovered work from its content-free meeting summary', () => {
+    const summary = {
+      id: 'recovered-summary',
+      transcript_status: 'needs_attention' as const,
+      finalization_status: 'finalized' as const,
+      capture_journal_generation: 'generation-1',
+      has_transcript: true,
+      has_audio: true,
+      recovered_awaiting_validation: true,
+    };
+
+    expect(needsRecoveredAudioRebuild(summary)).toBe(true);
+    expect(selectNextMeetingForFinalTranscription([summary])?.id).toBe(
+      'recovered-summary',
+    );
+  });
+
+  it('does not automatically retry a recovered capture with a gap', () => {
+    expect(
+      needsRecoveredAudioRebuild({
+        id: 'partial-recovery',
+        transcript_status: 'needs_attention',
+        finalization_status: 'finalized',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{"segments":[]}',
+        transcript_integrity_json: JSON.stringify({
+          causes: [{ code: 'capture_gap_detected' }],
+          recovery: { source: 'capture_journal', gapDetected: true },
+        }),
+        audio_path: '/approved/mic.wav',
+      }),
+    ).toBe(false);
+  });
+
   it('rechecks full meeting detail using the initiating retry reason', () => {
     const appSource = readFileSync('src/App.tsx', 'utf8');
     expect(appSource).toContain(
@@ -73,7 +139,7 @@ describe('post-meeting processing coordinator', () => {
       "kind === 'speaker_labels' ? 'speaker_labels' : 'manual'",
     );
     expect(appSource).toContain(
-      "rebuildSealedAudio: reason === 'speaker_labels'",
+      "reason === 'speaker_labels' || needsRecoveredAudioRebuild(detail)",
     );
   });
 

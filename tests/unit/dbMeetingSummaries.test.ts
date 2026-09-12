@@ -115,12 +115,35 @@ describe('meeting summary read model', () => {
     expect(getMeetingProcessingStatuses()).toContainEqual({
       id: 'processing-status',
       has_capture_gap: true,
+      recovered_awaiting_validation: false,
       final_transcription_policy: 'parakeet_final_v1',
       final_transcription_state: 'needs_attention',
       final_transcription_engine: null,
       speaker_attribution_verified: null,
       automatic_attempts_exhausted: false,
     });
+  });
+
+  it('projects recovery eligibility without exposing transcript detail', () => {
+    saveMeeting({
+      id: 'recovered-status',
+      title: 'Recovered recording',
+      started_at: '2026-09-01T12:31:00.000Z',
+      transcript_status: 'needs_attention',
+      transcript_integrity_json: JSON.stringify({
+        causes: [{ code: 'recovered_awaiting_validation' }],
+      }),
+    });
+
+    expect(getMeetingProcessingStatuses('recovered-status')).toEqual([
+      expect.objectContaining({
+        id: 'recovered-status',
+        recovered_awaiting_validation: true,
+      }),
+    ]);
+    expect(
+      JSON.stringify(getMeetingProcessingStatuses('recovered-status')),
+    ).not.toContain('transcript_json');
   });
 
   it('projects speaker trust as a content-free processing flag', () => {

@@ -9,9 +9,46 @@ import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValida
 const PROCESSING_WAKE_GRACE_MS = 50;
 const PROCESSING_POLL_INTERVAL_MS = 2_000;
 
+export const needsRecoveredAudioRebuild = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean => {
+  const hasDetailedAudioFields = Boolean(
+    meeting && ('audio_path' in meeting || 'transcript_json' in meeting),
+  );
+  const hasRequiredInputs = hasDetailedAudioFields
+    ? Boolean(meeting?.audio_path && meeting.transcript_json)
+    : Boolean(meeting?.has_audio && meeting.has_transcript);
+  if (
+    !meeting ||
+    meeting.finalization_status === 'recovery_required' ||
+    meeting.transcript_status !== 'needs_attention' ||
+    !meeting.capture_journal_generation ||
+    !hasRequiredInputs
+  ) {
+    return false;
+  }
+  if (meeting.recovered_awaiting_validation === true) return true;
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      causes?: Array<{ code?: unknown }>;
+      recovery?: { source?: unknown; gapDetected?: unknown };
+    };
+    return Boolean(
+      integrity.recovery?.source === 'capture_journal' &&
+        integrity.recovery.gapDetected === false &&
+        integrity.causes?.some(
+          (cause) => cause.code === 'recovered_awaiting_validation',
+        ),
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const shouldRunMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
+  if (needsRecoveredAudioRebuild(meeting)) return true;
   const hasDetailedAudioFields = Boolean(
     meeting &&
       ('audio_path' in meeting ||
@@ -38,6 +75,7 @@ export const shouldRunMeetingFinalTranscription = (
 export const canRetryMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
+  if (needsRecoveredAudioRebuild(meeting)) return true;
   if (
     !meeting ||
     !['needs_attention', 'validated'].includes(

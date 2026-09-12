@@ -75,6 +75,7 @@ import {
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
+  needsRecoveredAudioRebuild,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
@@ -1121,7 +1122,8 @@ function App() {
         {
           signal: controller.signal,
           manualRetry: reason !== 'automatic',
-          rebuildSealedAudio: reason === 'speaker_labels',
+          rebuildSealedAudio:
+            reason === 'speaker_labels' || needsRecoveredAudioRebuild(detail),
           onTranscriptCommitted: refreshSelectedMeetingState,
         },
       );
