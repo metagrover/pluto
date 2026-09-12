@@ -19,6 +19,22 @@ describe('meeting Ask Pluto visible stream', () => {
     );
   });
 
+  it('removes a meeting-evidence preamble split at every chunk boundary', () => {
+    const answer =
+      'Based on the meeting evidence provided, the main issue was pricing.';
+    for (let index = 1; index < answer.length; index += 1) {
+      expect(streamChunks([answer.slice(0, index), answer.slice(index)])).toBe(
+        'The main issue was pricing.',
+      );
+    }
+  });
+
+  it('does not remove a substantive opening that happens to start with based on', () => {
+    expect(streamChunks(['Based on pricing, the launch date changed.'])).toBe(
+      'Based on pricing, the launch date changed.',
+    );
+  });
+
   it('removes complete internal evidence references', () => {
     expect(streamChunks(['Isha [Evidence 2] owns the review.'])).toBe(
       'Isha  owns the review.',

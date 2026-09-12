@@ -109,6 +109,13 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('Make every point self-contained');
     expect(prompt).toContain('"an application"');
     expect(prompt).toContain('smallest set of directly supporting sources');
+    expect(prompt).toContain('Meeting grounding is implicit');
+    expect(prompt).toContain(
+      'Never begin with “Based on the meeting evidence provided”',
+    );
+    expect(prompt).toContain("“The meetings didn't establish that.”");
+    expect(prompt).toContain('“My interpretation is…”');
+    expect(prompt).toContain("“This wasn't discussed, but generally…”");
   });
 
   it('asks for a useful per-meeting breakdown when several meetings are in scope', () => {

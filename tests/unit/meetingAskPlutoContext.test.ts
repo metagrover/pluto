@@ -395,6 +395,13 @@ describe('meeting-scoped Ask Pluto context', () => {
 
     expect(prompt).toContain('Synthesize across the relevant evidence');
     expect(prompt).toContain('Answer conversationally and directly');
+    expect(prompt).toContain('Meeting grounding is implicit');
+    expect(prompt).toContain(
+      'Never begin with “Based on the meeting evidence provided”',
+    );
+    expect(prompt).toContain("“The meeting didn't establish that.”");
+    expect(prompt).toContain('“My interpretation is…”');
+    expect(prompt).toContain("“This wasn't discussed, but generally…”");
     expect(prompt).toContain('Do not merely repeat transcript lines');
     expect(prompt).toContain(
       '“Call audio” is the combined remote audio stream',
@@ -621,6 +628,25 @@ describe('meeting-scoped Ask Pluto context', () => {
         citationIds: [],
       },
     ]);
+  });
+
+  it('removes evidence-policy narration from the completed answer', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What did we decide?',
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw:
+        'Based on the meeting evidence provided, the team chose GraphQL. [Evidence 1]',
+      context,
+    });
+
+    expect(response.answer).toBe('The team chose GraphQL.');
+    expect(response.claims[0]?.text).toBe('The team chose GraphQL.');
+    expect(response.citations).toHaveLength(1);
   });
 
   it('rejects out-of-range evidence references instead of citing the first item', () => {

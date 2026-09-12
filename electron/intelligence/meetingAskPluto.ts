@@ -11,6 +11,7 @@ import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
 import type { MeetingAskPlutoConversationResolution } from './meetingAskPlutoConversation';
+import { stripMeetingAskPlutoPreamble } from './meetingAskPlutoStream';
 import {
   buildMeetingNotesEvidenceDocument,
   resolveSavedMeetingEvidencePolicy,
@@ -677,15 +678,18 @@ Scope boundary: ${context.boundary}
 Trust note: ${context.statusNote}
 
 Rules:
-1. Answer only from the meeting evidence below.
-2. If the evidence does not support the answer, say what is missing.
+1. Ground every meeting-specific factual claim only in the meeting evidence below. Never invent meeting facts.
+2. For a meeting-fact question the evidence does not support, say: “The meeting didn't establish that.” State the specific missing detail only when useful.
 3. Cite factual claims with [Evidence N].
 4. Treat live or provisional transcript as partial evidence.
 5. Synthesize across the relevant evidence instead of treating each transcript line as a separate answer.
-6. Answer conversationally and directly, matching the depth requested by the user.
-7. Do not merely repeat transcript lines. Explain the situation, decisions, open questions, and next steps when relevant.
-8. Keep the answer concise unless the user asks for detail.
-9. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
+6. Start with the answer. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”, “Based on the evidence”, “According to the meeting evidence”, or similar evidence-policy narration.
+7. Use uncertainty language only when it changes the answer: “From what I heard in the meeting…” for materially incomplete or noisy live evidence, and “My interpretation is…” for an inference rather than an explicit statement.
+8. If the user explicitly asks for useful general guidance beyond meeting facts, separate it from meeting claims with “This wasn't discussed, but generally…”. Do not cite general guidance as meeting evidence.
+9. Answer conversationally and directly, matching the depth requested by the user.
+10. Do not merely repeat transcript lines. Explain the situation, decisions, open questions, and next steps when relevant.
+11. Keep the answer concise unless the user asks for detail.
+12. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
 
 ${assistancePolicy}
 ${conversationPolicy}
@@ -736,7 +740,9 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
       };
     },
   );
-  const cleanAnswer = answerRaw.replace(/\[Evidence\s+\d+\]/gi, '').trim();
+  const cleanAnswer = stripMeetingAskPlutoPreamble(answerRaw)
+    .replace(/\[Evidence\s+\d+\]/gi, '')
+    .trim();
   const responseTrustStatus = 'needs_review';
 
   return {
