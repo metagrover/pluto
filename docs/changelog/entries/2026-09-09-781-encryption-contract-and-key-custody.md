@@ -1,7 +1,7 @@
 ### Privacy-first encrypted storage and staged rollout
 
 - **Issue:** `#781`
-- **PR:** `#800`
+- **PR:** `#800`, `#801`, `#810`, `#813`, `#814`
 - **Changed:** Introduced the cross-language encrypted binary envelope contract (`PENC` v1, AES-256-GCM), crash-safe encrypted database migration, scoped native audio capabilities, bounded encrypted audio segments, configurable storage budgets, and default-off distribution-signature-bound rollout gates. Historical migration now converts the newest eligible sealed meeting one at a time, authenticates and compares every replacement with its original bytes, and persists content-free progress through migration `0005_audio_encryption_rollout`.
 - **Why:** Pluto's database, capture journals, materialized recordings, transcript sidecars, and voice evidence require one fail-closed encryption lifecycle rather than isolated encryption helpers. The staged rollout prevents ordinary or ad-hoc builds from activating new encrypted writes, historical mutation, or automatic retention before the signed real-meeting acceptance gates pass.
 - **Replaced:** Discrepant TS and Swift envelope specifications, hardcoded capability generations, broad capability grants, whole-meeting plaintext buffers, unconditional automatic retention scheduling, and non-resumable plaintext-to-ciphertext transitions.
