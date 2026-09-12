@@ -60,43 +60,71 @@ describe('App final transcription retry boundary', () => {
       retryKind: 'transcript' as const,
       manualRetry: true,
       rebuildSealedAudio: false,
+      recovered: false,
     },
     {
       reason: 'speaker labels',
       retryKind: 'speaker_labels' as const,
       manualRetry: true,
       rebuildSealedAudio: true,
+      recovered: false,
     },
     {
       reason: 'automatic',
       retryKind: 'transcript' as const,
       manualRetry: false,
       rebuildSealedAudio: false,
+      recovered: false,
+    },
+    {
+      reason: 'automatic recovered recording',
+      retryKind: 'transcript' as const,
+      manualRetry: false,
+      rebuildSealedAudio: true,
+      recovered: true,
     },
   ])(
     'forwards $reason admission to the persisted worker',
-    async ({ reason, retryKind, manualRetry, rebuildSealedAudio }) => {
+    async ({
+      reason,
+      retryKind,
+      manualRetry,
+      rebuildSealedAudio,
+      recovered,
+    }) => {
       requestedRetry.kind = retryKind;
       const meeting = {
         id: 'retry-meeting',
-        title: 'Retry meeting',
+        title: recovered ? 'Recovered recording' : 'Retry meeting',
         created_at: '2026-09-04T00:00:00Z',
         transcript_status:
-          reason === 'automatic' ? 'provisional' : 'needs_attention',
+          reason === 'automatic' && !recovered
+            ? 'provisional'
+            : 'needs_attention',
         finalization_status: 'finalized',
         capture_journal_generation: 'generation-1',
         audio_path: '/fixture/mic.wav',
         system_audio_path: '/fixture/system.wav',
-        mixed_audio_path: '/fixture/mix.wav',
+        mixed_audio_path: recovered ? null : '/fixture/mix.wav',
         transcript_json: JSON.stringify({
           segments: [{ text: 'retained words', startTime: 0, endTime: 1 }],
         }),
-        transcript_integrity_json: JSON.stringify({
-          finalTranscription: {
-            policy: 'parakeet_final_v1',
-            state: 'needs_attention',
-          },
-        }),
+        transcript_integrity_json: JSON.stringify(
+          recovered
+            ? {
+                causes: [{ code: 'recovered_awaiting_validation' }],
+                recovery: {
+                  source: 'capture_journal',
+                  gapDetected: false,
+                },
+              }
+            : {
+                finalTranscription: {
+                  policy: 'parakeet_final_v1',
+                  state: 'needs_attention',
+                },
+              },
+        ),
       };
       runFinal.mockImplementation(async () => {
         meeting.transcript_status = 'validating';
@@ -140,7 +168,7 @@ describe('App final transcription retry boundary', () => {
           root.render(<App />);
           await flush();
         });
-        if (reason !== 'automatic') {
+        if (manualRetry) {
           expect(runFinal).not.toHaveBeenCalled();
           await act(async () => {
             Array.from(container.querySelectorAll('button'))
