@@ -91,6 +91,7 @@ export async function inspectLiveNotesReuse(
       const span = request.sourceSpans?.[0];
       if (!span) throw new Error('planning_source_span_missing');
       return JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Diagnostic placeholder',

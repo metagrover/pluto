@@ -240,6 +240,7 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
   if (
     !isRecord(parsed) ||
     !compactKeys ||
+    !Object.hasOwn(parsed, 'title') ||
     !Object.hasOwn(parsed, 'sections') ||
     !Array.isArray(parsed.sections) ||
     parsed.sections.length > 64
@@ -298,26 +299,24 @@ export const parseCompactNotesDraft = (raw: string): NotesDraft => {
     };
   });
   const title =
-    parsed.title === undefined || parsed.title === null
+    parsed.title === null
       ? null
-      : typeof parsed.title === 'string' && parsed.title.trim()
+      : isRecord(parsed.title) &&
+          exactKeys(parsed.title, ['text', 'sources']) &&
+          typeof parsed.title.text === 'string' &&
+          Boolean(parsed.title.text.trim()) &&
+          parsed.title.text.length <= 120 &&
+          Array.isArray(parsed.title.sources) &&
+          parsed.title.sources.length > 0 &&
+          parsed.title.sources.length <= 3 &&
+          parsed.title.sources.every((source) => parseSpan(source) !== null)
         ? {
             id: 'title',
-            text: parsed.title.trim(),
-            sources: [
-              ...new Map(
-                sections
-                  .flatMap((section) => section.items)
-                  .flatMap((item) => item.sources as SourceSpan[])
-                  .map((span) => [
-                    `${span.segment}:${span.start}:${span.end}`,
-                    span,
-                  ]),
-              ).values(),
-            ],
+            text: parsed.title.text.trim(),
+            sources: parsed.title.sources,
           }
         : null;
-  if (parsed.title !== undefined && parsed.title !== null && !title) {
+  if (parsed.title !== null && !title) {
     throw new MeetingNotesError('notes_writer_invalid');
   }
   return parseNotesDraft(

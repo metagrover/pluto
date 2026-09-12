@@ -46,7 +46,7 @@ describe('ephemeral notes previews', () => {
         store.set('meeting', 'run', value, () => !controller.signal.aborted),
     });
     const prefix =
-      '{"sections":[{"title":"Next step","items":[{"kind":"point","text":"Wait for approval.","owner":null,"due":null,"sources":["R0"]}';
+      '{"title":null,"sections":[{"title":"Next step","items":[{"kind":"point","text":"Wait for approval.","owner":null,"due":null,"sources":["R0"]}';
     push(prefix.slice(0, -1));
     expect(store.get('meeting')).toBeNull();
     push(prefix);
@@ -54,7 +54,7 @@ describe('ephemeral notes previews', () => {
       <MeetingNotesDraftPreview preview={store.get('meeting')!} />,
     );
     expect(html).toContain('Wait for approval.');
-    expect(html).toContain('not final');
+    expect(html).toContain('Editing unlocks automatically');
     expect(html).not.toContain('<button');
     controller.abort();
     push(`${prefix}]}]}`);
@@ -124,7 +124,7 @@ describe('ephemeral notes previews', () => {
     );
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>');
-    expect(html).toContain('not saved yet');
+    expect(html).toContain('Editing unlocks automatically');
     expect(html).not.toContain('<button');
   });
 });

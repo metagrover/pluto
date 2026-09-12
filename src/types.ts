@@ -170,6 +170,7 @@ export interface AnalysisGenerationMetadata {
 
 export interface AnalysisDocumentV3 {
   analysis_schema_version: 3;
+  title?: string;
   overview: string;
   topics: TopicSection[];
   all_action_items: ActionItemV3[];

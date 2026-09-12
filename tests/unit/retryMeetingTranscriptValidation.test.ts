@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  meetingTitleFromAnalysis,
   meetingTitleNeedsGeneration,
   retryMeetingTranscriptValidation,
   shouldAutoProcessMeetingAnalysis,
@@ -99,6 +100,7 @@ describe('meetingTitleNeedsGeneration', () => {
     'Meeting (Mic Only)',
     'Recovered recording',
     'Untitled Meeting',
+    'Untitled Session',
     '  ',
   ])('recognizes the generic title %j', (title) => {
     expect(meetingTitleNeedsGeneration(title)).toBe(true);
@@ -108,6 +110,22 @@ describe('meetingTitleNeedsGeneration', () => {
     expect(meetingTitleNeedsGeneration('Quarterly Planning Review')).toBe(
       false,
     );
+  });
+});
+
+describe('meetingTitleFromAnalysis', () => {
+  it('uses only the overall analysis title', () => {
+    expect(
+      meetingTitleFromAnalysis({
+        title: 'Quarterly Strategy Review',
+        topics: [{ title: 'Opening Introductions' }],
+      }),
+    ).toBe('Quarterly Strategy Review');
+    expect(
+      meetingTitleFromAnalysis({
+        topics: [{ title: 'Opening Introductions' }],
+      }),
+    ).toBeNull();
   });
 });
 

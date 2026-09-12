@@ -567,14 +567,18 @@ const deterministicallyCheckedDraft = (
   evidenceSpans: SourceSpan[],
   inherited: NotesItem[] = [],
 ): Awaited<ReturnType<typeof auditDraft>> => {
-  assertAllowedSources(draft, evidenceSpans);
-  assertSourceGuardrails(input, draft, evidenceSpans, false);
+  const checkedDraft =
+    input.compactWriterContract && draft.title
+      ? { ...structuredClone(draft), title: null }
+      : draft;
+  assertAllowedSources(checkedDraft, evidenceSpans);
+  assertSourceGuardrails(input, checkedDraft, evidenceSpans, false);
   validateInheritedItems(
     inherited.filter(
       (item): item is NotesItem & { kind: 'action' | 'decision' } =>
         item.kind === 'action' || item.kind === 'decision',
     ),
-    commitmentsFor(draft),
+    commitmentsFor(checkedDraft),
     [],
   );
   const audit: NotesAudit = {
@@ -584,12 +588,12 @@ const deterministicallyCheckedDraft = (
     terminology: [],
   };
   return {
-    draft,
+    draft: checkedDraft,
     audit,
     changeCount: 0,
     audited: {
       source: input.source,
-      draft,
+      draft: checkedDraft,
       verdicts: new Map(),
       acceptedTerminology: [],
       issues: [],
@@ -725,9 +729,11 @@ const auditDraft = async (
           compactDraft: input.compactWriterContract === true,
         });
         const editedPayload = JSON.parse(raw) as Record<string, unknown>;
-        if (!Object.hasOwn(editedPayload, 'title') && draft.title) {
-          result.draft.title = structuredClone(draft.title);
-          result.audited.draft = result.draft;
+        if (
+          input.compactWriterContract &&
+          !Object.hasOwn(editedPayload, 'title')
+        ) {
+          throw new MeetingNotesError('notes_audit_invalid', 'schema');
         }
         assertAllowedSources(result.draft, evidenceSpans);
         assertAuditSourcesAllowed(result.audit, evidenceSpans);
@@ -1619,7 +1625,10 @@ const runBoundedCompactNotes = async (
     meetingType,
     // Each bounded leaf may cover only one part of the meeting. A local leaf
     // title is not a safe meeting title once the notes span multiple leaves.
-    title: titles.length === 1 ? structuredClone(titles[0]!) : null,
+    title:
+      writtenLeaves.length === 1 && titles.length === 1
+        ? structuredClone(titles[0]!)
+        : null,
     overview: overviews.length
       ? {
           id: 'overview',

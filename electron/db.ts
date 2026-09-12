@@ -52,6 +52,7 @@ import {
   createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../src/utils/meetingNotesHistory';
+import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import {
   type PersonBriefingCommitment,
   type PersonBriefingCommitmentCandidate,
@@ -2383,7 +2384,14 @@ export const getMeetingProcessingStatuses = (
             OR (m.transcript_status = 'validated' AND (
               (m.analysis_json IS NULL AND m.enhanced_notes IS NULL)
               OR m.downstream_processing_json IS NOT NULL
-              OR lower(trim(m.title)) IN ('meeting', 'new meeting', 'untitled meeting')
+              OR lower(trim(m.title)) IN (
+                'meeting',
+                'new meeting',
+                'meeting (mic only)',
+                'recovered recording',
+                'untitled meeting',
+                'untitled session'
+              )
             )))`
          : 'm.id = ?'
      }`,
@@ -2988,16 +2996,29 @@ export const publishMeetingNotesIfCurrent = (input: {
       rebased.edits[ANALYSIS_SNAPSHOT_PATH] =
         createAnalysisSnapshot(current)[ANALYSIS_SNAPSHOT_PATH];
 
-    const genericTitle =
-      !current.title?.trim() ||
-      ['New Meeting', 'Meeting', 'Meeting (Mic Only)'].includes(current.title);
+    const previousAnalysis = parseAnalysisDocumentV3Json(current.analysis_json);
+    const previousModelTitle =
+      typeof previousAnalysis?.title === 'string'
+        ? previousAnalysis.title.trim()
+        : '';
+    const previousFirstTopicTitle = previousAnalysis?.topics
+      ?.map((topic) =>
+        typeof topic?.title === 'string' ? topic.title.trim() : '',
+      )
+      .find((title) => title.length > 0 && title.length <= 120);
+    const legacyTopicFallbackTitle =
+      !previousModelTitle &&
+      Boolean(previousFirstTopicTitle) &&
+      previousFirstTopicTitle === current.title?.trim();
+    const replaceableTitle =
+      meetingTitleNeedsGeneration(current.title) || legacyTopicFallbackTitle;
     const modelTitle =
       typeof input.analysis.title === 'string' &&
       input.analysis.title.trim().length > 0 &&
       input.analysis.title.trim().length <= 120
         ? input.analysis.title.trim()
         : null;
-    const nextTitle = genericTitle
+    const nextTitle = replaceableTitle
       ? (modelTitle ?? current.title)
       : current.title;
 
@@ -4501,7 +4522,14 @@ export const getTeamTrackerDocsForPerson = (
  */
 const MEETING_QUALITY_FILTER = `(
   COALESCE(m.duration_seconds, 0) >= 120
-  AND m.title NOT IN ('New Meeting', 'Meeting', 'Meeting (Mic Only)')
+  AND lower(trim(m.title)) NOT IN (
+    'meeting',
+    'new meeting',
+    'meeting (mic only)',
+    'recovered recording',
+    'untitled meeting',
+    'untitled session'
+  )
   AND lower(trim(m.title)) NOT IN (
     'test',
     'testing',

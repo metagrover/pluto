@@ -1084,3 +1084,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** Only the standalone CLI recovery-script portion of “2026-09-05 - In-place adoption and preservation of legacy SQLite databases into Drizzle lifecycle.” Its non-destructive startup adoption, backup, integrity-check, and migration-lifecycle protections remain in force.
 - **Decision:** Remove `scripts/migrate_legacy_db.ts`. The known user databases have already entered the Drizzle lifecycle, so keeping a separate manual entry point adds maintenance surface without serving an active migration path.
 - **Recovery boundary:** Git history preserves the retired one-off tool. Application startup remains responsible for safely adopting any unmanaged pre-Drizzle database it encounters; this cleanup does not weaken source-recording, transcript, settings, or meeting-history preservation.
+
+## 2026-09-12 - Ground whole-meeting titles and retire topic fallback
+
+- **Status:** Accepted and implemented by direct owner request.
+- **Supersedes:** The compact title contract and prompt identity in “Reuse compatible live notes work and reduce wire overhead” advance from `notes-v30` to `notes-v31`. Source partitioning, model routing, bounded calls, and publication deadlines remain unchanged.
+- **Decision:** Compact writers return an explicit whole-meeting title with its own bounded source descriptors, or `null`. Complete-document editors must return the title field. Deterministic fallback discards unreviewed compact titles, and mechanically combined multi-leaf notes never promote one leaf's local title to the meeting title.
+- **Publication boundary:** Generic titles are recognized through one normalized shared policy. A prior non-generic title is replaceable only when persisted analysis has no overall title and proves that the current value exactly matches the retired first-topic fallback; unrelated and user-edited titles remain unchanged.
+- **Recovery:** Historical topic-derived titles are corrected on the next explicit notes regeneration. Pluto does not start an unbounded corpus rewrite or overwrite titles without the persisted legacy match.

@@ -256,6 +256,75 @@ describe('meeting analysis run publication', () => {
     expect(publish(id, 'model-title-run', 'fp', revisions, next)).toBe(true);
     expect(getMeeting(id)?.title).toBe('Quarterly Strategy & Hiring');
   });
+
+  it.each([
+    'Untitled Meeting',
+    'Recovered Recording',
+    'untitled session',
+    '  new meeting  ',
+  ])('uses analysis.title for the generic title %j', (currentTitle) => {
+    const id = `generic-model-title-${currentTitle.trim().replaceAll(' ', '-')}`;
+    const revisions = fixture(id);
+    saveMeeting({ ...getMeeting(id), title: currentTitle });
+    start(id, 'generic-model-title-run', 'fp', revisions);
+    const next = analysis('Reviewed the quarterly strategy.');
+    next.title = 'Quarterly Strategy Review';
+
+    expect(publish(id, 'generic-model-title-run', 'fp', revisions, next)).toBe(
+      true,
+    );
+    expect(getMeeting(id)?.title).toBe('Quarterly Strategy Review');
+  });
+
+  it('replaces a legacy first-topic fallback title on regeneration', () => {
+    const id = 'legacy-topic-title';
+    const prior = analysis('Reviewed the outline.');
+    prior.topics = [
+      {
+        title: 'Outline review',
+        summary: 'Reviewed the outline.',
+        key_points: [],
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+      },
+    ];
+    const revisions = fixture(id, { analysis: prior });
+    saveMeeting({ ...getMeeting(id), title: 'Outline review' });
+    start(id, 'legacy-topic-title-run', 'fp', revisions);
+    const next = analysis('Reviewed quarterly strategy and hiring.');
+    next.title = 'Quarterly Strategy and Hiring';
+
+    expect(publish(id, 'legacy-topic-title-run', 'fp', revisions, next)).toBe(
+      true,
+    );
+    expect(getMeeting(id)?.title).toBe('Quarterly Strategy and Hiring');
+  });
+
+  it('preserves a user title that differs from the legacy first topic', () => {
+    const id = 'user-title-over-legacy-topic';
+    const prior = analysis('Reviewed the outline.');
+    prior.topics = [
+      {
+        title: 'Outline review',
+        summary: 'Reviewed the outline.',
+        key_points: [],
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+      },
+    ];
+    const revisions = fixture(id, { analysis: prior });
+    saveMeeting({ ...getMeeting(id), title: 'Milo and Nira Planning' });
+    start(id, 'preserve-user-title-run', 'fp', revisions);
+    const next = analysis('Reviewed quarterly strategy and hiring.');
+    next.title = 'Quarterly Strategy and Hiring';
+
+    expect(publish(id, 'preserve-user-title-run', 'fp', revisions, next)).toBe(
+      true,
+    );
+    expect(getMeeting(id)?.title).toBe('Milo and Nira Planning');
+  });
   it('snapshots the last published notes and edits, records repairs, and invalidates work on undo', () => {
     const id = 'atomic-undo';
     const prior = analysis('Old notes');

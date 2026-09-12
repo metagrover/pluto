@@ -25,6 +25,7 @@ const descriptors = (prompt: string) =>
     );
 
 const draftFor = (prompt: string): NotesDraft => ({
+  title: null,
   meetingType: 'general',
   overview: null,
   sections: [
@@ -85,6 +86,7 @@ it('reuses compact live work in the real bounded final plan, without skipping fi
       request.prompt.split('BEGIN SOURCE DATA\n')[1].split('\n')[0],
     );
     return JSON.stringify({
+      title: null,
       sections: [
         {
           title: 'Context',

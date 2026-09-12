@@ -62,10 +62,11 @@ export const notesDraftSchema = [
 
 const compactNotesDraftSchema = [
   'Field definitions (not output content):',
+  'Title = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}.',
   'Item = {kind: "point" | "action" | "decision" | "question", text: nonempty string, owner: string | null, due: string | null, sources: 1 to at most 3 copied source descriptors}.',
   'Use kind: "point" for discussion.',
   'Section = {title: nonempty string, items: nonempty Item[]}.',
-  'Document = {title: nonempty string | null, sections: Section[]}. title is the concise 5-7 word title for the overall meeting, not the first section heading; use null only when no trustworthy overall title can be grounded. Code derives title evidence from the cited item source descriptors. The final editor classifies the meeting.',
+  'Document = {title: Title | null, sections: Section[]}. title is the concise 5-7 word title for the overall meeting, not the first section heading; cite only the source descriptors needed to support the whole-meeting title, and use null when no trustworthy overall title can be grounded. The final editor classifies the meeting.',
   'The title field is required even when its value is null.',
 ].join('\n');
 

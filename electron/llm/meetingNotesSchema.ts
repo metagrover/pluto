@@ -40,6 +40,13 @@ export const buildNotesResponseSchema = (
   };
   if (contract === 'compact_draft') {
     const compactSources = { ...sources, maxItems: 3 };
+    const compactTitle = object(
+      {
+        text: { type: 'string', minLength: 1, maxLength: 120 },
+        sources: compactSources,
+      },
+      ['text', 'sources'],
+    );
     const compactItem = object(
       {
         kind: {
@@ -56,10 +63,7 @@ export const buildNotesResponseSchema = (
     return object(
       {
         title: {
-          anyOf: [
-            { type: 'string', minLength: 1, maxLength: 12_000 },
-            { type: 'null' },
-          ],
+          anyOf: [compactTitle, { type: 'null' }],
         },
         sections: {
           ...array(

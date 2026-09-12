@@ -48,9 +48,9 @@ const validate = (
 ) => validator.validate(buildNotesResponseSchema(contract, ['R0']), value);
 
 describe('local notes wire schemas', () => {
-  it('expands a compact writer draft with derived title evidence and empty metadata', () => {
+  it('expands a compact writer draft with title-specific evidence and empty metadata', () => {
     const value = {
-      title: 'Quarterly Planning',
+      title: { text: 'Quarterly Planning', sources: ['R0'] },
       sections: [
         {
           title: 'Outline',
@@ -80,7 +80,7 @@ describe('local notes wire schemas', () => {
 
   it('ignores a leaked compact meeting type because the editor owns final classification', () => {
     const value = {
-      title: 'Interview Overview',
+      title: { text: 'Interview Overview', sources: ['R0'] },
       meetingType: 'interview',
       sections: [
         {
@@ -105,7 +105,7 @@ describe('local notes wire schemas', () => {
 
   it('rejects compact writer items with more than three sources', () => {
     const value = {
-      title: 'Outline Review',
+      title: { text: 'Outline Review', sources: ['R0'] },
       sections: [
         {
           title: 'Outline',
@@ -126,6 +126,42 @@ describe('local notes wire schemas', () => {
     expect(() =>
       parseCompactNotesDraft(wire.decode(JSON.stringify(value))),
     ).toThrow('notes_writer_invalid');
+  });
+
+  it('requires an explicit compact title and accepts null when unsupported', () => {
+    const sections = [
+      {
+        title: 'Outline',
+        items: [
+          {
+            kind: 'point',
+            text: 'The outline was reviewed.',
+            sources: ['R0'],
+            owner: null,
+            due: null,
+          },
+        ],
+      },
+    ];
+
+    expect(validate('compact_draft', { sections })).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify({ sections }))),
+    ).toThrow('notes_writer_invalid');
+    expect(
+      validate('compact_draft', { title: 'Legacy topic title', sections }),
+    ).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(
+        wire.decode(JSON.stringify({ title: 'Legacy topic title', sections })),
+      ),
+    ).toThrow('notes_writer_invalid');
+    expect(validate('compact_draft', { title: null, sections })).toBe(true);
+    expect(
+      parseCompactNotesDraft(
+        wire.decode(JSON.stringify({ title: null, sections })),
+      ).title,
+    ).toBeUndefined();
   });
 
   it('accepts compact drafts without invented ids and round trips exact source spans', () => {

@@ -31,7 +31,9 @@ const stagePrompts = () => [
 it('asks the compact writer for complete items and bounded evidence', () => {
   const prompt = buildCompactNotesWriterPrompt(input);
 
-  expect(prompt).toContain('title: nonempty string');
+  expect(prompt).toContain(
+    'Title = {text: nonempty string, sources: 1 to at most 3 copied source descriptors}',
+  );
   expect(prompt).toContain('overall meeting');
   expect(prompt).toContain('at most 3 copied source descriptors');
   expect(prompt).toContain('owner: string | null');

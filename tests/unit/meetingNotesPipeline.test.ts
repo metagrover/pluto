@@ -85,6 +85,7 @@ const auditFor = (
   }
   return JSON.stringify({
     ...draft,
+    title: draft.title ?? null,
     dispositions: options.dispositions ?? [],
     terminology: [],
   });
@@ -118,7 +119,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v30',
+    prompt_version: 'notes-v31',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -130,7 +131,7 @@ it('uses a compact writer and complete-document editor in exactly two calls with
   const generate = vi.fn(async (request: NotesRequest) => {
     if (request.task === 'notesWriter') {
       return JSON.stringify({
-        title: 'Executive Sync',
+        title: { text: 'Executive Sync', sources: [source] },
         sections: [
           {
             title: 'Outline',
@@ -147,12 +148,7 @@ it('uses a compact writer and complete-document editor in exactly two calls with
         ],
       });
     }
-    const edited = JSON.parse(auditFor(request.prompt, source)) as Record<
-      string,
-      unknown
-    >;
-    edited.title = undefined;
-    return JSON.stringify(edited);
+    return auditFor(request.prompt, source);
   });
   const onRepair = vi.fn();
 
@@ -235,6 +231,7 @@ it('routes a highly segmented meeting from the encoded provider payload', async 
   const generate = vi.fn(async (request: NotesRequest) => {
     if (request.task === 'notesWriter') {
       return JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Product',
@@ -302,6 +299,7 @@ it('publishes a deterministically accepted direct draft after a malformed compac
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: { text: 'Outline Only', sources: [source] },
         sections: [
           {
             title: 'Outline',
@@ -339,6 +337,7 @@ it('publishes a deterministically accepted direct draft after a malformed compac
     expect.objectContaining({ text: 'Send the outline' }),
   ]);
   expect(result.quality.issues).toContain('notes_direct_audit_fallback:schema');
+  expect(result.title).toBeUndefined();
   expect(result.generation_metadata.audit_status).toBe(
     'complete_with_warnings',
   );
@@ -351,6 +350,7 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Outline',
@@ -369,6 +369,7 @@ it('publishes a deterministically accepted direct draft after an editor guardrai
     )
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         meetingType: 'general',
         overview: null,
         sections: [],
@@ -403,6 +404,7 @@ it('publishes a deterministically accepted direct draft after an editor semantic
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Outline',
@@ -421,6 +423,7 @@ it('publishes a deterministically accepted direct draft after an editor semantic
     )
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         meetingType: 'general',
         overview: null,
         sections: [
@@ -466,6 +469,7 @@ it('retries a truncated direct compact writer once with the concise contract', a
     .mockRejectedValueOnce(new MeetingNotesError('notes_output_truncated'))
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Outline',
@@ -515,6 +519,7 @@ it('publishes a deterministically accepted direct draft when the editor output t
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: { text: 'Outline Only', sources: [source] },
         sections: [
           {
             title: 'Outline',
@@ -550,6 +555,7 @@ it('publishes a deterministically accepted direct draft when the editor output t
   expect(result.quality.issues).toContain(
     'notes_direct_audit_fallback:notes_output_truncated',
   );
+  expect(result.title).toBeUndefined();
   expect(generate).toHaveBeenCalledTimes(2);
 });
 
@@ -560,6 +566,7 @@ it('keeps malformed direct cloud editors fail-closed with a sanitized category',
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Outline',
@@ -603,6 +610,7 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
     .fn()
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         sections: [
           {
             title: 'Outline',
@@ -621,6 +629,7 @@ it('keeps an unknown direct editor source fail-closed with a sanitized category'
     )
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: null,
         meetingType: 'general',
         overview: null,
         sections: [
@@ -691,7 +700,7 @@ it('splits a truncated compact leaf instead of retrying the same packet', async 
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
-      return JSON.stringify({ sections: [] });
+      return JSON.stringify({ title: null, sections: [] });
     }
     return auditFor(
       request.prompt,
@@ -752,7 +761,7 @@ it('allows only one compact-leaf recovery split per run', async () => {
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
-      return JSON.stringify({ sections: [] });
+      return JSON.stringify({ title: null, sections: [] });
     }
     return auditFor(
       request.prompt,
@@ -816,7 +825,7 @@ it('repartitions a truncated leaf when the original compact plan has two leaves'
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
-      return JSON.stringify({ sections: [] });
+      return JSON.stringify({ title: null, sections: [] });
     }
     return auditFor(request.prompt, descriptor);
   });
@@ -978,6 +987,7 @@ it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
         return '{';
       }
       return JSON.stringify({
+        title: { text: 'Outline Review', sources: [span] },
         sections: [
           {
             title: 'Outline',
@@ -1118,9 +1128,18 @@ it('reviews at most two calls per compact leaf and combines them without a model
         text: `Overview ${span.segment + 1}`,
         sources: [span],
       };
-      return JSON.stringify({ ...draft, dispositions: [], terminology: [] });
+      return JSON.stringify({
+        ...draft,
+        title: draft.title ?? null,
+        dispositions: [],
+        terminology: [],
+      });
     }
     return JSON.stringify({
+      title:
+        span.segment === spans[0]!.segment
+          ? { text: 'First Leaf Topic', sources: [span] }
+          : null,
       sections: [
         {
           title: `Leaf ${span.segment + 1}`,
@@ -1161,6 +1180,7 @@ it('reviews at most two calls per compact leaf and combines them without a model
       'Leaf 2',
     ]);
     expect(result.overview).toBe('Overview 1 Overview 2');
+    expect(result.title).toBeUndefined();
     expect(result.generation_metadata.hierarchy).toEqual({
       depth: 1,
       nodes: 4,
@@ -1198,6 +1218,7 @@ it('uses deterministic leaf checks when the optional review start budget is exha
     if (request.task === 'notesAudit') throw new Error('unexpected-audit');
     const span = sourceDescriptors(request.prompt)[0]!.descriptor;
     return JSON.stringify({
+      title: { text: `Leaf ${span.segment + 1} Topic`, sources: [span] },
       sections: [
         {
           title: `Leaf ${span.segment + 1}`,
@@ -1236,6 +1257,7 @@ it('uses deterministic leaf checks when the optional review start budget is exha
     expect(result.quality.issues).toContain(
       'notes_leaf_audit_fallback:deadline_budget',
     );
+    expect(result.title).toBeUndefined();
   } finally {
     plan.mockRestore();
   }
@@ -1248,6 +1270,7 @@ it('falls back from an in-flight optional review before the publication reserve 
   const generate = vi.fn(async (request: NotesRequest) => {
     if (request.task === 'notesWriter') {
       return JSON.stringify({
+        title: { text: 'Outline Only', sources: [sourceSpan] },
         sections: [
           {
             title: 'Outline',
@@ -1298,6 +1321,7 @@ it('falls back from an in-flight optional review before the publication reserve 
     expect(result.quality.issues).toContain(
       'notes_direct_audit_fallback:deadline_budget',
     );
+    expect(result.title).toBeUndefined();
   } finally {
     vi.useRealTimers();
   }
@@ -1335,7 +1359,7 @@ it('preserves writer capacity when the final planned compact leaf splits', async
       throw new MeetingNotesError('notes_output_truncated');
     }
     if (request.task === 'notesWriter') {
-      return JSON.stringify({ sections: [] });
+      return JSON.stringify({ title: null, sections: [] });
     }
     return auditFor(
       request.prompt,
@@ -1459,6 +1483,7 @@ it('can benchmark oversized compact leaves with deterministic checks and no mode
   const generate = vi.fn(async (request: NotesRequest) => {
     const span = sourceDescriptors(request.prompt)[0]!.descriptor;
     return JSON.stringify({
+      title: { text: `Leaf ${span.segment + 1} Topic`, sources: [span] },
       sections: [
         {
           title: `Leaf ${span.segment + 1}`,
@@ -1515,6 +1540,7 @@ it('can benchmark the compact writer contract in one bounded call', async () => 
   const span = fixture.draft.sections[0]!.items[0]!.sources[0]!;
   const generate = vi.fn().mockResolvedValue(
     JSON.stringify({
+      title: { text: 'Outline Review', sources: [span] },
       sections: [
         {
           title: 'Outline',

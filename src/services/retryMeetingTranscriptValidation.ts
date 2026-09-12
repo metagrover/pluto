@@ -1,5 +1,6 @@
 import type { Meeting } from '../types.ts';
 import { parseLiveTranscriptResponsivenessSummary } from '../utils/liveTranscriptResponsiveness.ts';
+import { meetingTitleNeedsGeneration } from '../utils/meetingTitle.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
@@ -79,34 +80,19 @@ const readDownstreamAttempt = (value: string | null | undefined): number => {
   }
 };
 
-const GENERIC_MEETING_TITLES = new Set([
-  '',
-  'meeting',
-  'new meeting',
-  'meeting (mic only)',
-  'recovered recording',
-  'untitled meeting',
-]);
-
-export const meetingTitleNeedsGeneration = (
-  title: string | null | undefined,
-): boolean => GENERIC_MEETING_TITLES.has((title || '').trim().toLowerCase());
+export { meetingTitleNeedsGeneration } from '../utils/meetingTitle.ts';
 
 export const meetingTitleFromAnalysis = (analysis: unknown): string | null => {
   if (!analysis || typeof analysis !== 'object') return null;
-  const topics = (analysis as { topics?: unknown }).topics;
-  if (!Array.isArray(topics)) return null;
-  for (const topic of topics) {
-    if (!topic || typeof topic !== 'object') continue;
-    const rawTitle = (topic as { title?: unknown }).title;
-    if (typeof rawTitle !== 'string') continue;
-    const title = rawTitle.trim();
+  const rawOverallTitle = (analysis as { title?: unknown }).title;
+  if (typeof rawOverallTitle === 'string') {
+    const overallTitle = rawOverallTitle.trim();
     if (
-      title.length > 0 &&
-      title.length < 100 &&
-      !meetingTitleNeedsGeneration(title)
+      overallTitle.length > 0 &&
+      overallTitle.length < 100 &&
+      !meetingTitleNeedsGeneration(overallTitle)
     ) {
-      return title;
+      return overallTitle;
     }
   }
   return null;

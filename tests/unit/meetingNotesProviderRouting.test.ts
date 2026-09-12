@@ -201,7 +201,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v30');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v31');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -218,7 +218,7 @@ it('routes the compact product writer through the complete-document editor', asy
     .mockRejectedValue(new Error('unexpected_notes_request'))
     .mockResolvedValueOnce(
       JSON.stringify({
-        title: 'Dense Meeting',
+        title: { text: 'Dense Meeting', sources: [source] },
         sections: [
           {
             title: 'Outline',
@@ -253,7 +253,7 @@ it('routes the compact product writer through the complete-document editor', asy
     ),
   ).toEqual([false, true]);
   expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
-  expect(result.generation_metadata?.prompt_version).toBe('notes-v30');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v31');
 });
 
 it('emits a complete provisional bullet on actual streamed transport before writer completion', async () => {
@@ -267,7 +267,7 @@ it('emits a complete provisional bullet on actual streamed transport before writ
     due: null,
     sources: ['R0'],
   };
-  const prefix = `{"sections":[{"title":"Outline","items":[${JSON.stringify(item)}`;
+  const prefix = `{"title":{"text":"Outline Review","sources":["R0"]},"sections":[{"title":"Outline","items":[${JSON.stringify(item)}`;
   let calls = 0;
   let writerFinished = false;
   let release: () => void = () => {};
@@ -511,6 +511,10 @@ it('precomputes the compact product contract at background priority', async () =
     .spyOn(provider as never, 'generateText')
     .mockResolvedValueOnce(
       JSON.stringify({
+        title: {
+          text: 'Meeting Context',
+          sources: ['R0'],
+        },
         sections: [
           {
             title: 'Context',

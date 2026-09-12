@@ -27,7 +27,7 @@ const item = (index: number) => ({
   due: null,
   sources: [`R${index}`],
 });
-const first = `{"sections":[{"title":"Context","items":[${JSON.stringify(item(0))}`;
+const first = `{"title":null,"sections":[{"title":"Context","items":[${JSON.stringify(item(0))}`;
 const full = `${first},${JSON.stringify(item(1))}]}]}`;
 const setup = (signal?: AbortSignal, suppliedSpans = spans) => {
   const onDraft = vi.fn();
@@ -79,9 +79,9 @@ it('does not expose leaf-only source or emit after cancellation', () => {
 it.each([
   first.replace('R0', 'R999'),
   first.replace('"point"', '"invented"'),
-  '{"sections":[{"title":"Context","items":[{"text":"unfinished',
+  '{"title":null,"sections":[{"title":"Context","items":[{"text":"unfinished',
   'x'.repeat(64001),
-  '{"sections":]}',
+  '{"title":null,"sections":]}',
 ])('rejects unsafe or incomplete prefixes without model repair', (raw) => {
   const { onDraft, push } = setup();
   push(raw);
