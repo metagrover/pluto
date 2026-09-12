@@ -31,12 +31,17 @@ Pluto requires application-layer encryption whose root key access is mediated by
      - Establishes fail-closed `ScopedMeetingCapability` with mandatory generation, allowedOperations, and expiresAtMs.
      - Implements sidecar encryption for v4 capture journal artifacts, rejecting unencrypted sidecars in schema 4.
      - Implements HKDF-SHA-256 key derivation and key custody probing with explicit guarantees and limitations.
-   - **PR B (Database Safety & Cipher Migration - Current):**
+   - **PR B (Database Safety & Cipher Migration - Completed):**
      - Adopts `better-sqlite3-multiple-ciphers` pinned at `13.0.3` with SQLCipher profile (`PRAGMA cipher = 'sqlcipher'`, raw 256-bit hex keys).
      - Implements SQLite header inspection (`"SQLite format 3\000"` vs encrypted pages), downgrade guard, and typed `DatabaseLifecycleError`.
      - Implements crash-safe, resumable migration state machine with durable fsync and deep structural verification, and non-destructive recovery overlay when Keychain access is denied or locked.
-   - **PR C through F (Upcoming):**
-     - Encrypted capture pipeline and native decryption (PR C), performance budgets (PR D), storage quotas (PR E), and staged rollout (PR F).
+   - **PR C (Encrypted Recording Path - Completed):**
+     - Implements schema-v4 encrypted capture, bounded repair, playback, stitching, and scoped native decryption while leaving new schema-v4 capture creation disabled.
+   - **PR D (Performance Hardening - Current):**
+     - Stores materialized mic, System, and mixed recordings as an encrypted index plus independently authenticated 60-second PCM16 segments. Electron and Swift readers decrypt only requested segments; native ASR, vocabulary rescoring, diarization, and channel-energy analysis consume the same random-access source.
+     - Enforces crypto, durable capture, representative database, startup, and one-hour RSS budgets through `benchmark:encrypted-storage`; committed raw evidence is architecture-specific and does not replace the signed, slowest-supported-Mac or frozen real-meeting acceptance required before rollout.
+   - **PR E and F (Upcoming):**
+     - Add user-configurable storage quotas and staged rollout, including signed canary and historical migration acceptance.
 
 ## Alternatives Considered
 
@@ -47,5 +52,7 @@ Pluto requires application-layer encryption whose root key access is mediated by
 ## Consequences
 
 - PR A establishes the cryptographic envelope contract, cross-language test vectors, fail-closed scoped capabilities, sidecar encryption, and key custody probe.
-- PR B will introduce `better-sqlite3-multiple-ciphers`, database migration, and startup recovery overlay.
+- PR B introduced `better-sqlite3-multiple-ciphers`, database migration, and the startup recovery overlay.
 - Audio and transcript artifacts in journal schema 4 are authenticated and encrypted at rest.
+- Materialized encrypted audio has a one-segment random-access working set instead of one process-sized plaintext float array. The index and every segment remain independently authenticated PENC artifacts.
+- New schema-v4 capture creation remains disabled until the rollout gate; read and recovery compatibility land ahead of activation.

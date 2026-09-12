@@ -178,6 +178,22 @@ public struct CtcKeywordSpotter: Sendable {
         )
     }
 
+    /// Source-backed variant used by encrypted recordings so long audio does
+    /// not need to be copied into one process-sized float array.
+    public func spotKeywordsWithLogProbs(
+        audioSource: AudioSampleSource,
+        customVocabulary: CustomVocabularyContext,
+        minScore: Float? = nil
+    ) async throws -> SpotKeywordsResult {
+        let result = try await computeLogProbs(for: audioSource)
+        return spotKeywordsFromLogProbs(
+            logProbs: result.logProbs,
+            frameDuration: result.frameDuration,
+            customVocabulary: customVocabulary,
+            minScore: minScore
+        )
+    }
+
     /// Spot keywords using pre-computed log-probabilities (no CTC inference).
     /// Use this when CTC logProbs are already available (e.g. from a unified Preprocessor
     /// that exports CTC logits alongside encoder features).

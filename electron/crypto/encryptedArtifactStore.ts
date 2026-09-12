@@ -21,7 +21,9 @@ export interface EncryptedArtifactHeader {
     | 'mic'
     | 'system'
     | 'chunk'
-    | 'sidecar';
+    | 'sidecar'
+    | 'audio_index'
+    | 'audio_segment';
   generation: string;
   keyId: string;
   meetingId: string;
@@ -32,7 +34,18 @@ export interface EncryptedArtifactHeader {
 
 export const VALID_ARTIFACT_KINDS = new Set<
   EncryptedArtifactHeader['artifactKind']
->(['raw', 'repair', 'manifest', 'mixed', 'mic', 'system', 'chunk', 'sidecar']);
+>([
+  'raw',
+  'repair',
+  'manifest',
+  'mixed',
+  'mic',
+  'system',
+  'chunk',
+  'sidecar',
+  'audio_index',
+  'audio_segment',
+]);
 
 export const VALID_ARTIFACT_SOURCES = new Set<
   EncryptedArtifactHeader['source']
@@ -379,28 +392,36 @@ export const EncryptedArtifactStore = {
     plaintext: Buffer,
     key: Buffer,
     headerInput: Omit<EncryptedArtifactHeader, 'plaintextLength'>,
+    options: { directoryReady?: boolean } = {},
   ): Promise<EncryptedEnvelope> {
     const envelope = this.seal(plaintext, key, headerInput);
     const dir = path.dirname(filePath);
-    await fs.promises.mkdir(dir, { recursive: true });
-
-    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-    const fd = await fs.promises.open(tmpPath, 'w', 0o600);
-    try {
-      await fd.writeFile(envelope.fullBuffer);
-      await fd.sync();
-    } finally {
-      await fd.close();
+    if (!options.directoryReady) {
+      await fs.promises.mkdir(dir, { recursive: true });
     }
 
-    await fs.promises.rename(tmpPath, filePath);
-
-    // Sync parent directory
-    const dirFd = await fs.promises.open(dir, 'r');
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
     try {
-      await dirFd.sync();
-    } finally {
-      await dirFd.close();
+      const fd = await fs.promises.open(tmpPath, 'w', 0o600);
+      try {
+        await fd.writeFile(envelope.fullBuffer);
+        await fd.sync();
+      } finally {
+        await fd.close();
+      }
+
+      await fs.promises.rename(tmpPath, filePath);
+
+      // Sync parent directory
+      const dirFd = await fs.promises.open(dir, 'r');
+      try {
+        await dirFd.sync();
+      } finally {
+        await dirFd.close();
+      }
+    } catch (error) {
+      await fs.promises.unlink(tmpPath).catch(() => {});
+      throw error;
     }
 
     return envelope;

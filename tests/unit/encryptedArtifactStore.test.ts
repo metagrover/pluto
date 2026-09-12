@@ -7,7 +7,7 @@ import {
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type EncryptedArtifactHeader,
   EncryptedArtifactStore,
@@ -320,6 +320,34 @@ describe('EncryptedArtifactStore', () => {
 
     expect(decrypted.plaintext.equals(plaintext)).toBe(true);
     expect(decrypted.header.artifactKind).toBe('chunk');
+  });
+
+  it('removes its temporary ciphertext if an atomic rename fails', async () => {
+    const filePath = path.join(tmpDir, 'failed.enc');
+    const rename = vi
+      .spyOn(fs.promises, 'rename')
+      .mockRejectedValueOnce(new Error('simulated rename failure'));
+    try {
+      await expect(
+        EncryptedArtifactStore.writeEncryptedFile(
+          filePath,
+          Buffer.from('private bytes'),
+          key,
+          {
+            artifactKind: 'chunk',
+            generation: 'gen-1',
+            keyId: 'k1',
+            meetingId: 'm1',
+            sequence: 1,
+            source: 'mic',
+          },
+        ),
+      ).rejects.toThrow('simulated rename failure');
+    } finally {
+      rename.mockRestore();
+    }
+
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 
   describe('cross-language vector suite', () => {

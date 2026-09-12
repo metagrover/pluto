@@ -956,6 +956,7 @@ app.whenReady().then(async () => {
       filePath: inputPath,
       startSec,
       durationSec,
+      signal: getAbortSignalForMeeting(meetingId),
       context: {
         meetingId,
         generation: manifest.generation,
@@ -2624,6 +2625,7 @@ app.whenReady().then(async () => {
           keyId: manifest.keyId,
           meetingKey: keyResult.meetingKey,
         },
+        signal: getAbortSignalForMeeting(meetingId),
       });
     }
 
@@ -2713,6 +2715,7 @@ app.whenReady().then(async () => {
         async (segments, tag) =>
           await stitchWavSegments({ segments, outputTag: tag }),
         String(outputTag || `session-${source}`),
+        getAbortSignalForMeeting(String(meetingId || '')),
       );
     },
   );

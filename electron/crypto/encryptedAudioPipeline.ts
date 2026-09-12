@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import ffmpegStatic from 'ffmpeg-static';
@@ -11,23 +11,29 @@ import type {
 import { resolveUnpackedExecutablePath } from '../packagedExecutablePath.ts';
 import { planTimedWavStitch } from '../timedWavStitchPlan.ts';
 import { EncryptedArtifactStore } from './encryptedArtifactStore.ts';
+import {
+  ENCRYPTED_AUDIO_SAMPLE_RATE,
+  type EncryptedAudioContext,
+  encodeCanonicalPcm16Wav,
+  openEncryptedAudioReader,
+  writeEncryptedAudioBundle,
+} from './encryptedAudioBundle.ts';
 
-const SAMPLE_RATE = 16_000;
-const WAV_HEADER_BYTES = 44;
 const MAX_REPAIR_ENVELOPE_BYTES = 64 * 1024 * 1024;
-export const MAX_ENCRYPTED_AUDIO_BYTES = 512 * 1024 * 1024;
+const MAX_NORMALIZED_REPAIR_BYTES = 8 * 1024 * 1024;
 
-type EncryptionContext = {
-  meetingId: string;
-  generation: string;
-  keyId: string;
-  meetingKey: Buffer;
-};
-
-type NormalizedSegment = {
-  samples: Buffer;
+type SegmentDescriptor = {
+  filePath: string;
+  checksumSha256: string;
+  sequence: number;
   startSec: number;
   endSec: number;
+  durationSeconds: number;
+};
+
+const abortIfRequested = (signal?: AbortSignal) => {
+  if (signal?.aborted)
+    throw new DOMException('Operation aborted', 'AbortError');
 };
 
 const readBounded = async (filePath: string, maximumBytes: number) => {
@@ -38,7 +44,12 @@ const readBounded = async (filePath: string, maximumBytes: number) => {
   return await fs.promises.readFile(filePath);
 };
 
-const runFfmpeg = async (input: Buffer, maximumOutputBytes: number) => {
+const runFfmpeg = async (
+  input: Buffer,
+  maximumOutputBytes: number,
+  signal?: AbortSignal,
+) => {
+  abortIfRequested(signal);
   const ffmpegPath = ffmpegStatic;
   if (!ffmpegPath) throw new Error('ffmpeg_unavailable');
   return await new Promise<Buffer>((resolve, reject) => {
@@ -52,7 +63,7 @@ const runFfmpeg = async (input: Buffer, maximumOutputBytes: number) => {
       '-ac',
       '1',
       '-ar',
-      String(SAMPLE_RATE),
+      String(ENCRYPTED_AUDIO_SAMPLE_RATE),
       '-f',
       'f32le',
       '-c:a',
@@ -63,12 +74,17 @@ const runFfmpeg = async (input: Buffer, maximumOutputBytes: number) => {
     let outputBytes = 0;
     let stderr = '';
     let settled = false;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       child.kill('SIGKILL');
       reject(error);
     };
+    const onAbort = () =>
+      fail(new DOMException('Operation aborted', 'AbortError'));
+    signal?.addEventListener('abort', onAbort, { once: true });
     child.stdout.on('data', (chunk: Buffer) => {
       outputBytes += chunk.length;
       if (outputBytes > maximumOutputBytes) {
@@ -82,6 +98,7 @@ const runFfmpeg = async (input: Buffer, maximumOutputBytes: number) => {
     });
     child.on('error', fail);
     child.on('close', (code) => {
+      cleanup();
       if (settled) return;
       settled = true;
       if (code !== 0) {
@@ -95,60 +112,11 @@ const runFfmpeg = async (input: Buffer, maximumOutputBytes: number) => {
   });
 };
 
-const encodePcm16Wav = (samples: Float32Array): Buffer => {
-  const dataBytes = samples.length * 2;
-  if (dataBytes + WAV_HEADER_BYTES > MAX_ENCRYPTED_AUDIO_BYTES) {
-    throw new Error('encrypted_audio_output_size_exceeded');
-  }
-  const wav = Buffer.allocUnsafe(WAV_HEADER_BYTES + dataBytes);
-  wav.write('RIFF', 0, 'ascii');
-  wav.writeUInt32LE(wav.length - 8, 4);
-  wav.write('WAVEfmt ', 8, 'ascii');
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(SAMPLE_RATE, 24);
-  wav.writeUInt32LE(SAMPLE_RATE * 2, 28);
-  wav.writeUInt16LE(2, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write('data', 36, 'ascii');
-  wav.writeUInt32LE(dataBytes, 40);
-  for (let index = 0; index < samples.length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, samples[index]));
-    wav.writeInt16LE(
-      sample < 0 ? Math.round(sample * 32_768) : Math.round(sample * 32_767),
-      WAV_HEADER_BYTES + index * 2,
-    );
-  }
-  return wav;
-};
-
-const parseCanonicalPcm16Wav = (wav: Buffer): Int16Array => {
-  if (
-    wav.length < WAV_HEADER_BYTES ||
-    wav.toString('ascii', 0, 4) !== 'RIFF' ||
-    wav.toString('ascii', 8, 12) !== 'WAVE' ||
-    wav.readUInt16LE(20) !== 1 ||
-    wav.readUInt16LE(22) !== 1 ||
-    wav.readUInt32LE(24) !== SAMPLE_RATE ||
-    wav.readUInt16LE(34) !== 16 ||
-    wav.toString('ascii', 36, 40) !== 'data' ||
-    wav.readUInt32LE(40) !== wav.length - WAV_HEADER_BYTES
-  ) {
-    throw new Error('encrypted_audio_wav_invalid');
-  }
-  return new Int16Array(
-    wav.buffer,
-    wav.byteOffset + WAV_HEADER_BYTES,
-    (wav.length - WAV_HEADER_BYTES) / 2,
-  );
-};
-
 const openArtifact = async (
   filePath: string,
-  context: EncryptionContext,
+  context: EncryptedAudioContext,
   expected: { artifactKind?: string; source?: string; sequence?: number },
-  maximumBytes = MAX_ENCRYPTED_AUDIO_BYTES,
+  maximumBytes: number,
 ) => {
   const envelope = await readBounded(filePath, maximumBytes);
   return EncryptedArtifactStore.open(envelope, context.meetingKey, {
@@ -159,88 +127,86 @@ const openArtifact = async (
   }).plaintext;
 };
 
-const writeArtifact = async (
-  rootDir: string,
-  plaintext: Buffer,
-  context: EncryptionContext,
-  artifactKind: 'mic' | 'system' | 'mixed',
+const loadNormalizedRepair = async (
+  descriptor: SegmentDescriptor,
+  source: CaptureJournalSource,
+  context: EncryptedAudioContext,
+  signal?: AbortSignal,
 ) => {
-  const outputPath = path.join(rootDir, `${randomUUID()}.enc`);
-  await EncryptedArtifactStore.writeEncryptedFile(
-    outputPath,
-    plaintext,
-    context.meetingKey,
+  abortIfRequested(signal);
+  const plaintext = await openArtifact(
+    descriptor.filePath,
+    context,
     {
-      meetingId: context.meetingId,
-      generation: context.generation,
-      keyId: context.keyId,
-      artifactKind,
-      source: artifactKind,
-      sequence: 0,
+      artifactKind: 'repair',
+      source,
+      sequence: descriptor.sequence,
     },
-  );
-  return outputPath;
-};
-
-const stitchNormalizedSegments = (
-  segments: NormalizedSegment[],
-  timelineEndSeconds: number,
-) => {
-  if (segments.length === 0) return null;
-  const durations = segments.map(
-    (segment) => segment.samples.length / 4 / SAMPLE_RATE,
-  );
-  const plan = planTimedWavStitch(
-    segments.map((segment) => ({
-      path: 'authenticated-memory',
-      startSec: segment.startSec,
-      endSec: segment.endSec,
-    })),
-    durations[0],
-  );
-  const starts = segments.map((segment, index) =>
-    plan.mode === 'sequential'
-      ? Math.max(segment.startSec, segment.endSec - durations[index])
-      : segment.startSec,
-  );
-  const contentEndSeconds =
-    plan.mode === 'sequential'
-      ? plan.targetDurationSeconds
-      : Math.max(
-          ...segments.map(
-            (_segment, index) => starts[index] + durations[index],
-          ),
-        );
-  const targetFrames = Math.ceil(
-    Math.max(contentEndSeconds, timelineEndSeconds) * SAMPLE_RATE,
+    MAX_REPAIR_ENVELOPE_BYTES,
   );
   if (
-    targetFrames <= 0 ||
-    targetFrames * Float32Array.BYTES_PER_ELEMENT > MAX_ENCRYPTED_AUDIO_BYTES
+    createHash('sha256').update(plaintext).digest('hex') !==
+    descriptor.checksumSha256
   ) {
-    throw new Error('encrypted_audio_timeline_size_exceeded');
+    throw new Error(`sealed_capture_${source}_checksum_mismatch`);
   }
-  const mixed = new Float32Array(targetFrames);
-  for (
-    let segmentIndex = 0;
-    segmentIndex < segments.length;
-    segmentIndex += 1
+  const bytes = await runFfmpeg(plaintext, MAX_NORMALIZED_REPAIR_BYTES, signal);
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4);
+};
+
+const probeWaveDuration = (wav: Buffer) => {
+  if (
+    wav.length < 12 ||
+    wav.toString('ascii', 0, 4) !== 'RIFF' ||
+    wav.toString('ascii', 8, 12) !== 'WAVE'
   ) {
-    const input = new Float32Array(
-      segments[segmentIndex].samples.buffer,
-      segments[segmentIndex].samples.byteOffset,
-      segments[segmentIndex].samples.length / 4,
-    );
-    const startFrame = Math.max(
-      0,
-      Math.round(starts[segmentIndex] * SAMPLE_RATE),
-    );
-    const frames = Math.min(input.length, mixed.length - startFrame);
-    for (let frame = 0; frame < frames; frame += 1) {
-      mixed[startFrame + frame] += input[frame];
+    throw new Error('encrypted_audio_repair_wav_invalid');
+  }
+  let byteRate = 0;
+  let dataBytes = -1;
+  for (let offset = 12; offset + 8 <= wav.length; ) {
+    const chunkId = wav.toString('ascii', offset, offset + 4);
+    const chunkBytes = wav.readUInt32LE(offset + 4);
+    const contentStart = offset + 8;
+    const contentEnd = contentStart + chunkBytes;
+    if (contentEnd > wav.length) {
+      throw new Error('encrypted_audio_repair_wav_invalid');
     }
+    if (chunkId === 'fmt ' && chunkBytes >= 16) {
+      byteRate = wav.readUInt32LE(contentStart + 8);
+    } else if (chunkId === 'data') {
+      dataBytes = chunkBytes;
+    }
+    offset = contentEnd + (chunkBytes % 2);
   }
-  return encodePcm16Wav(mixed);
+  if (byteRate <= 0 || dataBytes < 0) {
+    throw new Error('encrypted_audio_repair_wav_invalid');
+  }
+  return dataBytes / byteRate;
+};
+
+const probeAuthenticatedRepairDuration = async (
+  descriptor: Omit<SegmentDescriptor, 'durationSeconds'>,
+  source: CaptureJournalSource,
+  context: EncryptedAudioContext,
+) => {
+  const plaintext = await openArtifact(
+    descriptor.filePath,
+    context,
+    {
+      artifactKind: 'repair',
+      source,
+      sequence: descriptor.sequence,
+    },
+    MAX_REPAIR_ENVELOPE_BYTES,
+  );
+  if (
+    createHash('sha256').update(plaintext).digest('hex') !==
+    descriptor.checksumSha256
+  ) {
+    throw new Error(`sealed_capture_${source}_checksum_mismatch`);
+  }
+  return probeWaveDuration(plaintext);
 };
 
 export const materializeEncryptedJournalSource = async (args: {
@@ -248,14 +214,15 @@ export const materializeEncryptedJournalSource = async (args: {
   manifest: CaptureJournalManifestV4;
   source: CaptureJournalSource;
   meetingKey: Buffer;
+  signal?: AbortSignal;
 }): Promise<string | null> => {
-  const context: EncryptionContext = {
+  const context: EncryptedAudioContext = {
     meetingId: args.manifest.meetingId,
     generation: args.manifest.generation,
     keyId: args.manifest.keyId,
     meetingKey: args.meetingKey,
   };
-  const segments: NormalizedSegment[] = [];
+  const descriptors: SegmentDescriptor[] = [];
   let timelineEndSeconds = 0;
   for (const interval of [...args.manifest.intervals].sort(
     (left, right) => left.sequence - right.sequence,
@@ -271,29 +238,96 @@ export const materializeEncryptedJournalSource = async (args: {
     if (disposition.disposition !== 'captured') {
       throw new Error(`sealed_capture_${args.source}_artifact_gap`);
     }
-    const plaintext = await openArtifact(
-      path.join(args.rootDir, disposition.repairRelativePath),
-      context,
-      {
-        artifactKind: 'repair',
-        source: args.source,
-        sequence: interval.sequence,
-      },
-      MAX_REPAIR_ENVELOPE_BYTES,
-    );
-    const checksum = createHash('sha256').update(plaintext).digest('hex');
-    if (checksum !== disposition.repairChecksumSha256) {
-      throw new Error(`sealed_capture_${args.source}_checksum_mismatch`);
-    }
-    segments.push({
-      samples: await runFfmpeg(plaintext, MAX_REPAIR_ENVELOPE_BYTES),
+    const descriptor = {
+      filePath: path.join(args.rootDir, disposition.repairRelativePath),
+      checksumSha256: disposition.repairChecksumSha256,
+      sequence: interval.sequence,
       startSec: interval.chunkStartSec,
       endSec: interval.chunkEndSec,
+    };
+    descriptors.push({
+      ...descriptor,
+      durationSeconds: await probeAuthenticatedRepairDuration(
+        descriptor,
+        args.source,
+        context,
+      ),
     });
   }
-  const wav = stitchNormalizedSegments(segments, timelineEndSeconds);
-  if (!wav) return null;
-  return await writeArtifact(args.rootDir, wav, context, args.source);
+  if (descriptors.length === 0) return null;
+
+  const firstSamples = await loadNormalizedRepair(
+    descriptors[0],
+    args.source,
+    context,
+    args.signal,
+  );
+  const plan = planTimedWavStitch(
+    descriptors.map((segment) => ({
+      path: segment.filePath,
+      startSec: segment.startSec,
+      endSec: segment.endSec,
+    })),
+    firstSamples.length / ENCRYPTED_AUDIO_SAMPLE_RATE,
+  );
+  const starts = descriptors.map((segment) => {
+    if (plan.mode !== 'sequential') return segment.startSec;
+    return Math.max(segment.startSec, segment.endSec - segment.durationSeconds);
+  });
+  const contentEndSeconds =
+    plan.mode === 'sequential'
+      ? plan.targetDurationSeconds
+      : Math.max(
+          ...descriptors.map(
+            (segment, index) => starts[index] + segment.durationSeconds,
+          ),
+        );
+  const totalFrames = Math.ceil(
+    Math.max(contentEndSeconds, timelineEndSeconds) *
+      ENCRYPTED_AUDIO_SAMPLE_RATE,
+  );
+
+  let firstPending = true;
+  return await writeEncryptedAudioBundle({
+    rootDir: args.rootDir,
+    totalFrames,
+    source: args.source,
+    context,
+    signal: args.signal,
+    produceWindow: async (windowStart, frameCount) => {
+      abortIfRequested(args.signal);
+      const output = new Float32Array(frameCount);
+      const windowEnd = windowStart + frameCount;
+      for (let index = 0; index < descriptors.length; index += 1) {
+        const segmentStart = Math.max(
+          0,
+          Math.round(starts[index] * ENCRYPTED_AUDIO_SAMPLE_RATE),
+        );
+        const segmentEnd =
+          segmentStart +
+          Math.round(
+            descriptors[index].durationSeconds * ENCRYPTED_AUDIO_SAMPLE_RATE,
+          );
+        if (segmentEnd <= windowStart || segmentStart >= windowEnd) continue;
+        const samples =
+          index === 0 && firstPending
+            ? firstSamples
+            : await loadNormalizedRepair(
+                descriptors[index],
+                args.source,
+                context,
+                args.signal,
+              );
+        if (index === 0) firstPending = false;
+        const overlapStart = Math.max(windowStart, segmentStart);
+        const overlapEnd = Math.min(windowEnd, segmentStart + samples.length);
+        for (let frame = overlapStart; frame < overlapEnd; frame += 1) {
+          output[frame - windowStart] += samples[frame - segmentStart];
+        }
+      }
+      return output;
+    },
+  });
 };
 
 export const repairEncryptedJournalRawChunk = async (args: {
@@ -303,8 +337,9 @@ export const repairEncryptedJournalRawChunk = async (args: {
   sequence: number;
   expectedPlaintextSha256: string;
   meetingKey: Buffer;
+  signal?: AbortSignal;
 }): Promise<Buffer> => {
-  const context: EncryptionContext = {
+  const context: EncryptedAudioContext = {
     meetingId: args.manifest.meetingId,
     generation: args.manifest.generation,
     keyId: args.manifest.keyId,
@@ -326,8 +361,12 @@ export const repairEncryptedJournalRawChunk = async (args: {
   ) {
     throw new Error('encrypted_audio_raw_checksum_mismatch');
   }
-  const samples = await runFfmpeg(plaintext, MAX_REPAIR_ENVELOPE_BYTES);
-  return encodePcm16Wav(
+  const samples = await runFfmpeg(
+    plaintext,
+    MAX_NORMALIZED_REPAIR_BYTES,
+    args.signal,
+  );
+  return encodeCanonicalPcm16Wav(
     new Float32Array(samples.buffer, samples.byteOffset, samples.length / 4),
   );
 };
@@ -335,57 +374,73 @@ export const repairEncryptedJournalRawChunk = async (args: {
 export const mixEncryptedAudioArtifacts = async (args: {
   rootDir: string;
   inputPaths: [string, string];
-  context: EncryptionContext;
+  context: EncryptedAudioContext;
+  signal?: AbortSignal;
 }): Promise<string> => {
-  const [leftWav, rightWav] = await Promise.all([
-    openArtifact(args.inputPaths[0], args.context, {
-      artifactKind: 'mic',
+  const [left, right] = await Promise.all([
+    openEncryptedAudioReader({
+      filePath: args.inputPaths[0],
+      context: args.context,
       source: 'mic',
+      signal: args.signal,
     }),
-    openArtifact(args.inputPaths[1], args.context, {
-      artifactKind: 'system',
+    openEncryptedAudioReader({
+      filePath: args.inputPaths[1],
+      context: args.context,
       source: 'system',
+      signal: args.signal,
     }),
   ]);
-  const left = parseCanonicalPcm16Wav(leftWav);
-  const right = parseCanonicalPcm16Wav(rightWav);
-  const frameCount = Math.max(left.length, right.length);
-  const mixed = new Float32Array(frameCount);
-  for (let index = 0; index < frameCount; index += 1) {
-    mixed[index] = (left[index] ?? 0) / 32_768 + (right[index] ?? 0) / 32_768;
-  }
-  return await writeArtifact(
-    args.rootDir,
-    encodePcm16Wav(mixed),
-    args.context,
-    'mixed',
-  );
+  return await writeEncryptedAudioBundle({
+    rootDir: args.rootDir,
+    totalFrames: Math.max(left.totalFrames, right.totalFrames),
+    source: 'mixed',
+    context: args.context,
+    signal: args.signal,
+    produceWindow: async (startFrame, frameCount) => {
+      abortIfRequested(args.signal);
+      const [leftSamples, rightSamples] = await Promise.all([
+        left.readWindow(startFrame, frameCount),
+        right.readWindow(startFrame, frameCount),
+      ]);
+      for (let index = 0; index < frameCount; index += 1) {
+        leftSamples[index] += rightSamples[index];
+      }
+      return leftSamples;
+    },
+  });
 };
 
 export const probeEncryptedAudioDuration = async (
   filePath: string,
-  context: EncryptionContext,
+  context: EncryptedAudioContext,
 ) => {
-  const wav = await openArtifact(filePath, context, {});
-  return parseCanonicalPcm16Wav(wav).length / SAMPLE_RATE;
+  const reader = await openEncryptedAudioReader({ filePath, context });
+  return reader.totalFrames / ENCRYPTED_AUDIO_SAMPLE_RATE;
 };
 
 export const sliceEncryptedAudio = async (args: {
   filePath: string;
-  context: EncryptionContext;
+  context: EncryptedAudioContext;
   startSec: number;
   durationSec: number;
+  signal?: AbortSignal;
 }) => {
-  const wav = await openArtifact(args.filePath, args.context, {});
-  const samples = parseCanonicalPcm16Wav(wav);
-  const start = Math.max(0, Math.floor(args.startSec * SAMPLE_RATE));
-  const end = Math.min(
-    samples.length,
-    Math.ceil((args.startSec + args.durationSec) * SAMPLE_RATE),
+  const reader = await openEncryptedAudioReader({
+    filePath: args.filePath,
+    context: args.context,
+    signal: args.signal,
+  });
+  abortIfRequested(args.signal);
+  const start = Math.max(
+    0,
+    Math.floor(args.startSec * ENCRYPTED_AUDIO_SAMPLE_RATE),
   );
-  const sliced = new Float32Array(Math.max(0, end - start));
-  for (let index = start; index < end; index += 1) {
-    sliced[index - start] = samples[index] / 32_768;
-  }
-  return encodePcm16Wav(sliced);
+  const end = Math.min(
+    reader.totalFrames,
+    Math.ceil((args.startSec + args.durationSec) * ENCRYPTED_AUDIO_SAMPLE_RATE),
+  );
+  return encodeCanonicalPcm16Wav(
+    await reader.readWindow(start, Math.max(0, end - start)),
+  );
 };

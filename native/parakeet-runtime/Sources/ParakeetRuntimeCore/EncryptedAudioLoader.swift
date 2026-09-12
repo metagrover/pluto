@@ -45,7 +45,8 @@ public enum EncryptedAudioLoader {
     public static let maximumEnvelopeBytes = 512 * 1024 * 1024
 
     public static let validArtifactKinds: Set<String> = [
-        "raw", "repair", "manifest", "mixed", "mic", "system", "chunk", "sidecar"
+        "raw", "repair", "manifest", "mixed", "mic", "system", "chunk", "sidecar",
+        "audio_index", "audio_segment"
     ]
     public static let validSources: Set<String> = [
         "mic", "system", "mixed", "none"
@@ -54,8 +55,39 @@ public enum EncryptedAudioLoader {
     public static func load(
         filePath: String,
         capability: ScopedMeetingCapability,
-        expectedOperation: String
+        expectedOperation: String,
+        expectedSource: String? = nil,
+        expectedSequence: Int? = nil
     ) throws -> (samples: [Float], sampleRate: Double) {
+        let keyData = try validateCapability(capability, expectedOperation: expectedOperation)
+        let fileData = try readBoundedData(filePath: filePath, maximumBytes: maximumEnvelopeBytes)
+        let plaintext = try decrypt(fileData: fileData, keyData: keyData, capability: capability)
+        let header = try authenticatedHeader(fileData)
+        if let expectedSource, header.source != expectedSource {
+            throw EncryptedAudioLoaderError.capabilityMismatch("Encrypted audio source mismatch")
+        }
+        if let expectedSequence, header.sequence != expectedSequence {
+            throw EncryptedAudioLoaderError.capabilityMismatch("Encrypted audio sequence mismatch")
+        }
+        let allowedKinds: Set<String>
+        switch expectedOperation {
+        case "transcribe":
+            allowedKinds = ["mic", "system", "mixed", "repair", "audio_segment"]
+        case "speakerEvidence":
+            allowedKinds = ["mic", "system", "mixed", "audio_segment"]
+        default:
+            throw EncryptedAudioLoaderError.capabilityMismatch("Unsupported encrypted audio operation")
+        }
+        guard allowedKinds.contains(header.artifactKind) else {
+            throw EncryptedAudioLoaderError.capabilityMismatch("Artifact kind is not permitted for this operation")
+        }
+        return try parseAudio(plaintext: plaintext)
+    }
+
+    static func validateCapability(
+        _ capability: ScopedMeetingCapability,
+        expectedOperation: String
+    ) throws -> Data {
         guard capability.version == 1 else {
             throw EncryptedAudioLoaderError.capabilityMismatch("Unsupported capability version: \(capability.version)")
         }
@@ -84,7 +116,10 @@ public enum EncryptedAudioLoader {
         guard let keyData = Data(base64Encoded: capability.meetingKeyBase64), keyData.count == 32 else {
             throw EncryptedAudioLoaderError.capabilityMismatch("Invalid 32-byte meeting key base64")
         }
+        return keyData
+    }
 
+    static func readBoundedData(filePath: String, maximumBytes: Int) throws -> Data {
         guard FileManager.default.fileExists(atPath: filePath) else {
             throw EncryptedAudioLoaderError.fileNotFound(filePath)
         }
@@ -92,29 +127,13 @@ public enum EncryptedAudioLoader {
         let attributes = try FileManager.default.attributesOfItem(atPath: filePath)
         guard let fileSize = attributes[.size] as? NSNumber,
               fileSize.intValue > 0,
-              fileSize.intValue <= maximumEnvelopeBytes else {
+              fileSize.intValue <= maximumBytes else {
             throw EncryptedAudioLoaderError.invalidEnvelope("Encrypted audio exceeds the allocation bound")
         }
-
-        let fileData = try Data(contentsOf: URL(fileURLWithPath: filePath), options: .mappedIfSafe)
-        let plaintext = try decrypt(fileData: fileData, keyData: keyData, capability: capability)
-        let artifactKind = try authenticatedArtifactKind(fileData)
-        let allowedKinds: Set<String>
-        switch expectedOperation {
-        case "transcribe":
-            allowedKinds = ["mic", "system", "mixed", "repair"]
-        case "speakerEvidence":
-            allowedKinds = ["mic", "system", "mixed"]
-        default:
-            throw EncryptedAudioLoaderError.capabilityMismatch("Unsupported encrypted audio operation")
-        }
-        guard allowedKinds.contains(artifactKind) else {
-            throw EncryptedAudioLoaderError.capabilityMismatch("Artifact kind is not permitted for this operation")
-        }
-        return try parseAudio(plaintext: plaintext)
+        return try Data(contentsOf: URL(fileURLWithPath: filePath), options: .mappedIfSafe)
     }
 
-    private static func authenticatedArtifactKind(_ fileData: Data) throws -> String {
+    static func authenticatedHeader(_ fileData: Data) throws -> EncryptedArtifactHeader {
         guard fileData.count >= 8 else {
             throw EncryptedAudioLoaderError.invalidEnvelope("File too small to contain an envelope header")
         }
@@ -126,7 +145,7 @@ public enum EncryptedAudioLoader {
         return try JSONDecoder().decode(
             EncryptedArtifactHeader.self,
             from: fileData.subdata(in: 8..<headerEnd)
-        ).artifactKind
+        )
     }
 
     public static func decrypt(

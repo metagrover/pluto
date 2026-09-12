@@ -458,6 +458,7 @@ export const stitchSealedCaptureJournalSource = async (
   source: CaptureJournalSource,
   stitchWavSegments: RecoveryDependencies['stitchWavSegments'],
   outputTag: string,
+  signal?: AbortSignal,
 ): Promise<string | null> => {
   const manifest = await readCaptureJournalManifest(rootDir, meetingId);
   if (
@@ -474,6 +475,7 @@ export const stitchSealedCaptureJournalSource = async (
       manifest,
       source,
       meetingKey,
+      signal,
     });
   }
   const recovery = await buildV3SourceSegments(rootDir, manifest, source);
