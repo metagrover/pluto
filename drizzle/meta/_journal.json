@@ -29,6 +29,13 @@
       "when": 1789244099234,
       "tag": "0003_singleton_participant_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789245770636,
+      "tag": "0004_audio_retention",
+      "breakpoints": true
     }
   ]
 }
