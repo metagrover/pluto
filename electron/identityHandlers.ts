@@ -5,6 +5,7 @@ import type {
 import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
 import { getMeetingIdentityContext } from './commitmentIdentity';
 import * as db from './db';
+import { MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT } from './meetingParticipantIdentity';
 
 export const IDENTITY_CHANNELS = [
   'GET_IDENTITY_STATE',
@@ -299,6 +300,19 @@ export function handleIdentityRequest(
           .filter((personId): personId is string => Boolean(personId))
           .map(db.resolvePersonIdentityId);
       } else {
+        const previousBinding = context.bindings.find(
+          (binding) => binding.speaker === speaker,
+        );
+        if (
+          previousBinding?.assignment?.kind ===
+          MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT
+        ) {
+          db.identityStore.suppressAutomaticBinding(
+            context.meetingId,
+            speaker,
+            MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT,
+          );
+        }
         db.identityStore.clearBinding(
           context.meetingId,
           speaker,

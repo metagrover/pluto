@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-12 - Automatically identify an explicitly added singleton participant
+
+- **Status:** Accepted
+- **Source:** Owner direction on 2026-09-12 after diagnosing anonymous participant names in generated notes
+- **Decision:** A participant manually added during a local recording is explicit attendance evidence. After final transcription, Pluto automatically creates a reversible meeting-scoped identity binding only when there is exactly one unique non-self manual participant and System-audio diarization establishes exactly one remote voice (`Them` with one supported cluster). Existing bindings, prior Undo, calendar-only invitees, multiple participants or speakers, imported recordings, missing diarization, and inconclusive or low-coverage evidence all force abstention. Confirmed bindings are projected into notes inputs and their revision identity without rewriting the canonical transcript.
+- **Rationale:** The manual participant control already records an intentional, in-meeting assertion, but previously affected only vocabulary and People linkage. Notes still received anonymous speaker labels. The singleton topology makes the mapping deterministic while retaining Pluto's evidence and reversibility boundaries.
+- **Consequences:** One-on-one meetings entered manually identify the remote participant before automatic notes run. Undo is durable across retranscription. Speaker corrections invalidate stale notes runs and stage-cache reuse. Calendar attendees remain `Invited` suggestions and never become confirmed People or speaker evidence by schedule alone. This narrowly supersedes the explicit-confirmation requirement in the 2026-09-05 speaker-review decisions for the manually entered, acoustically supported singleton case; all other identity boundaries remain accepted.
+
 ## 2026-09-07 - Preserve evidence-backed partial remote labels and echo-aware voice samples
 
 - **Status:** Accepted

@@ -140,6 +140,7 @@ import {
 import { createNotesSource } from './llm/meetingNotesSource';
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
+import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
 import { preserveOmittedTranscriptOwnedFields } from './meetingTranscriptOwnedFields';
 import { createSecureSettingsManager } from './secureSettings';
 import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
@@ -2782,6 +2783,39 @@ export type MeetingAnalysisPublicationRevisions = {
   userNotesHash: string;
 };
 
+export const getMeetingNotesIdentityProjection = (
+  meetingId: string | number,
+): {
+  speakerDisplayNames: Record<string, string>;
+  trustedUserTerms: string[];
+} => {
+  const meeting = getMeeting(meetingId) as PersistedMeeting | undefined;
+  if (!meeting?.transcript_json) {
+    return { speakerDisplayNames: {}, trustedUserTerms: [] };
+  }
+  const bindings = identityStore
+    .getBindings(String(meetingId))
+    .map((binding) => ({
+      ...binding,
+      personId: binding.personId
+        ? resolvePersonIdentityId(binding.personId)
+        : null,
+    }));
+  const people = [
+    ...new Set(
+      getEntitiesByType('person').map(({ id }) => resolvePersonIdentityId(id)),
+    ),
+  ].flatMap((id) => {
+    const person = getEntity(id);
+    return person?.type === 'person' ? [{ id, name: person.name }] : [];
+  });
+  return buildMeetingNotesIdentityProjection({
+    transcriptJson: meeting.transcript_json,
+    bindings,
+    people,
+  });
+};
+
 const meetingEditConflictKey = (conflict: PreservedEditConflict): string =>
   JSON.stringify([
     conflict.path,
@@ -2814,7 +2848,11 @@ export const getMeetingAnalysisPublicationRevisions = (
 ): MeetingAnalysisPublicationRevisions | null => {
   if (!meeting?.transcript_json) return null;
   try {
-    const source = createNotesSource(meeting.transcript_json);
+    const projection = getMeetingNotesIdentityProjection(meeting.id);
+    const source = createNotesSource(
+      meeting.transcript_json,
+      projection.speakerDisplayNames,
+    );
     const partialLease = readDownstreamProcessingLease(
       meeting.downstream_processing_json,
     );
@@ -8835,6 +8873,7 @@ export const resetKnowledge = () => {
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',
+    'identity_binding_suppressions',
     'identity_bindings',
     'identity_jobs',
     'auto_end_log',

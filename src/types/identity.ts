@@ -49,6 +49,9 @@ export interface IdentityBinding {
   sourceRevision: string;
   evidence: IdentityEvidence[];
   captureEvidence?: IdentityCaptureEvidence;
+  assignment?: {
+    kind: 'manual_participant_singleton_v1';
+  };
 }
 export interface IdentityContext {
   meetingId: string;

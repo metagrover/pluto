@@ -21,6 +21,7 @@ const expectedTables = [
   'entity_dreaming_proposals',
   'entity_dreaming_runs',
   'entity_links',
+  'identity_binding_suppressions',
   'identity_bindings',
   'identity_captures',
   'identity_input_revision',

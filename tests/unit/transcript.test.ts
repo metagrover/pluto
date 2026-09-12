@@ -6,6 +6,15 @@ import {
 } from '../../src/utils/transcript';
 
 describe('buildAnalysisTranscriptFromJson', () => {
+  it('projects confirmed display names only in the analysis copy', () => {
+    const raw = JSON.stringify({
+      segments: [{ speaker: 'Them', text: 'I will review it.' }],
+    });
+    expect(buildAnalysisTranscriptFromJson(raw, { Them: 'Alex' })).toBe(
+      'Alex: I will review it.',
+    );
+    expect(JSON.parse(raw).segments[0].speaker).toBe('Them');
+  });
   it.each(['validated', 'validating', 'needs_attention'])(
     'keeps finalized recovered text and speakers authoritative during %s',
     (lifecycleStatus) => {

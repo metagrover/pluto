@@ -16,6 +16,8 @@ import {
   getMeeting,
   getMeetingAnalysisPublicationRevisions,
   getMeetingAnalysisRun,
+  getMeetingNotesIdentityProjection,
+  identityStore,
   isMeetingAnalysisAutomaticRetryExhausted,
   listMeetingAnalysisRunMetrics,
   publishMeetingNotesIfCurrent,
@@ -27,6 +29,7 @@ import {
   updateMeetingAnalysisQueueSnapshot,
   updateMeetingAnalysisRunStatus,
   updateMeetingAnalysisRunStatusIfCurrent,
+  upsertEntity,
   upsertMeetingAnalysisRunMetric,
 } from '../../electron/db';
 import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
@@ -168,6 +171,48 @@ const publish = (
   });
 
 describe('meeting analysis run publication', () => {
+  it('invalidates notes revisions when a confirmed speaker projection changes', () => {
+    const meetingId = 'identity-projected-notes';
+    saveMeeting({
+      id: meetingId,
+      title: 'Identity projection',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Them', text: 'I will review it.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({ trust: 'eligible' }),
+      user_notes: '',
+    });
+    const person = upsertEntity({
+      id: 'identity-projected-person',
+      type: 'person',
+      name: 'Alex',
+      dedupe_by_name: false,
+    });
+    const before = getMeetingAnalysisPublicationRevisions(
+      getMeeting(meetingId),
+    );
+
+    identityStore.setBinding(meetingId, {
+      speaker: 'Them',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'user-binding',
+      evidence: [],
+    });
+
+    expect(getMeetingNotesIdentityProjection(meetingId)).toEqual({
+      speakerDisplayNames: { Them: 'Alex' },
+      trustedUserTerms: ['Alex'],
+    });
+    expect(
+      getMeetingAnalysisPublicationRevisions(getMeeting(meetingId))
+        ?.sourceRevision,
+    ).not.toBe(before?.sourceRevision);
+    expect(getMeeting(meetingId)?.transcript_json).toContain(
+      '"speaker":"Them"',
+    );
+  });
   it('counts automatic attempts for one input revision and resets for changed input', () => {
     const meetingId = 'automatic-attempt-count';
     const revisions = fixture(meetingId);

@@ -4,6 +4,19 @@ import {
   resolveSourceSpan,
 } from '../../electron/llm/meetingNotesSource';
 
+it('projects confirmed speaker names without mutating canonical input', () => {
+  const raw = JSON.stringify({
+    segments: [{ speaker: 'Them', text: 'I will review it.' }],
+  });
+  const canonical = createNotesSource(raw);
+  const projected = createNotesSource(raw, { Them: 'Alex' });
+
+  expect(canonical.segments[0].speaker).toBe('Them');
+  expect(projected.segments[0].speaker).toBe('Alex');
+  expect(projected.revision).not.toBe(canonical.revision);
+  expect(JSON.parse(raw).segments[0].speaker).toBe('Them');
+});
+
 it('resolves original words without mutating source or borrowing live text', () => {
   const raw = JSON.stringify({
     segments: [{ speaker: 'Me', text: "Um, I'll send the outline." }],

@@ -22,6 +22,13 @@
       "when": 1789043416934,
       "tag": "0002_live_meeting_context_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789244099234,
+      "tag": "0003_singleton_participant_identity",
+      "breakpoints": true
     }
   ]
 }

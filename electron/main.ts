@@ -521,6 +521,7 @@ import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
 } from './meetingAnalysisRuns';
+import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
 import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
@@ -1113,10 +1114,32 @@ app.whenReady().then(async () => {
     ipcMain.handle(channel, (_event, payload) => {
       const result = handleIdentityRequest(channel, payload, {
         onBindingChange: ({ meetingId, personIds }) => {
+          meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
           queueKnowledgeDocsRefreshForMeeting(meetingId);
           for (const personId of personIds) {
             const doc = db.getKnowledgeDocByScope('person_context', personId);
             if (doc) queueKnowledgeDocRefresh(doc.id);
+          }
+          const meeting = db.getMeeting(meetingId) as
+            | db.PersistedMeeting
+            | undefined;
+          if (
+            meeting?.transcript_status === 'validated' &&
+            meeting.transcript_validated_at
+          ) {
+            void meetingNotesRunCoordinator
+              .generateAndPublishMeetingNotes({
+                meetingId,
+                requestId: randomUUID(),
+                template: 'auto',
+                reason: 'automatic',
+              })
+              .catch((error) => {
+                console.warn(
+                  '[Identity] Notes refresh after speaker correction failed',
+                  error,
+                );
+              });
           }
         },
       });
@@ -3027,9 +3050,41 @@ app.whenReady().then(async () => {
     (_event, meetingId, runId, stage) =>
       db.updateMeetingFinalTranscriptionStage(meetingId, runId, stage),
   );
-  ipcMain.handle('COMMIT_FINAL_TRANSCRIPTION', (_event, input) =>
-    db.commitMeetingFinalTranscription(input),
-  );
+  ipcMain.handle('COMMIT_FINAL_TRANSCRIPTION', (_event, input) => {
+    const committed = db.commitMeetingFinalTranscription(input);
+    if (!committed) return committed;
+    try {
+      const reconciliation = reconcileSingletonManualParticipantIdentity({
+        meetingId: String(input.meetingId),
+        getMeeting: (meetingId) =>
+          db.getMeeting(meetingId) as
+            | { transcript_json?: string | null }
+            | undefined,
+        getMeetingEntities: db.getMeetingEntities,
+        getCapture: db.identityStore.getCapture,
+        getSelfPersonId: db.identityStore.getSelfPersonId,
+        getBindings: db.identityStore.getBindings,
+        isAutomaticBindingSuppressed:
+          db.identityStore.isAutomaticBindingSuppressed,
+        setBinding: db.identityStore.setBinding,
+      });
+      if (reconciliation.status === 'bind') {
+        queueKnowledgeDocsRefreshForMeeting(String(input.meetingId));
+        const personDoc = db.getKnowledgeDocByScope(
+          'person_context',
+          reconciliation.personId,
+        );
+        if (personDoc) queueKnowledgeDocRefresh(personDoc.id);
+        invalidateDreamingCatalog();
+      }
+    } catch (error) {
+      console.warn(
+        '[Identity] Singleton participant mapping was skipped',
+        error,
+      );
+    }
+    return committed;
+  });
   ipcMain.handle(
     'FAIL_FINAL_TRANSCRIPTION',
     (_event, meetingId, runId, failure, reasons, attributionDiagnostics) =>

@@ -233,12 +233,44 @@ export function createIdentityStore(sql: Database.Database) {
           throw new Error('identity_binding_invalid');
         sql
           .prepare(
+            'DELETE FROM identity_binding_suppressions WHERE meeting_id = ? AND speaker = ?',
+          )
+          .run(meetingId, binding.speaker);
+        sql
+          .prepare(
             'INSERT INTO identity_bindings(meeting_id, speaker, payload) VALUES (?, ?, ?) ON CONFLICT(meeting_id, speaker) DO UPDATE SET payload = excluded.payload',
           )
           .run(meetingId, binding.speaker, JSON.stringify(binding));
         bump();
         enqueue(meetingId, `identity:${getRevision()}`);
       })(),
+    suppressAutomaticBinding: (
+      meetingId: string,
+      speaker: string,
+      assignment: string,
+    ) => {
+      validateMeeting(meetingId);
+      if (!speaker.trim() || !assignment.trim()) {
+        throw new Error('identity_binding_suppression_invalid');
+      }
+      sql
+        .prepare(
+          'INSERT OR IGNORE INTO identity_binding_suppressions(meeting_id, speaker, assignment) VALUES (?, ?, ?)',
+        )
+        .run(meetingId, speaker, assignment);
+    },
+    isAutomaticBindingSuppressed: (
+      meetingId: string,
+      speaker: string,
+      assignment: string,
+    ): boolean =>
+      Boolean(
+        sql
+          .prepare(
+            'SELECT 1 FROM identity_binding_suppressions WHERE meeting_id = ? AND speaker = ? AND assignment = ?',
+          )
+          .get(meetingId, speaker, assignment),
+      ),
     clearBinding: (
       meetingId: string,
       speaker: string,

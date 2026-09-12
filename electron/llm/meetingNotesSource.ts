@@ -39,7 +39,10 @@ const parseCanonicalSegments = (raw: string): RawSegment[] => {
   return segments as RawSegment[];
 };
 
-export const createNotesSource = (raw: string): NotesSource => {
+export const createNotesSource = (
+  raw: string,
+  speakerDisplayNames: Readonly<Record<string, string>> = {},
+): NotesSource => {
   const sourceSegments = parseCanonicalSegments(raw);
   const segments: SourceSegment[] = sourceSegments.map((segment, index) => {
     if (
@@ -57,13 +60,16 @@ export const createNotesSource = (raw: string): NotesSource => {
     ) {
       throw new MeetingNotesError('invalid_notes_source');
     }
+    const canonicalSpeaker =
+      typeof segment.speaker === 'string' || typeof segment.speaker === 'number'
+        ? String(segment.speaker)
+        : null;
+    const projectedSpeaker = canonicalSpeaker
+      ? speakerDisplayNames[canonicalSpeaker]?.trim() || canonicalSpeaker
+      : null;
     return Object.freeze({
       index,
-      speaker:
-        typeof segment.speaker === 'string' ||
-        typeof segment.speaker === 'number'
-          ? String(segment.speaker)
-          : null,
+      speaker: projectedSpeaker,
       text: segment.text,
     });
   });
