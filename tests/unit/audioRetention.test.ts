@@ -97,6 +97,14 @@ describe('audio retention', () => {
     expect(
       audioRetentionBlockReason(eligibleMeeting('analysis'), false, true),
     ).toBe('downstream_processing');
+    expect(
+      audioRetentionBlockReason(
+        eligibleMeeting('historical-migration'),
+        false,
+        false,
+        true,
+      ),
+    ).toBe('historical_migration');
   });
 
   it('deletes the oldest eligible audio until usage is within the selected budget', async () => {

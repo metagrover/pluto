@@ -41,6 +41,7 @@ const expectedTables = [
   'live_meeting_context_checkpoints',
   'meeting_analysis_run_history',
   'meeting_analysis_runs',
+  'meeting_audio_migrations',
   'meeting_audio_retention',
   'meeting_calendar_context',
   'meeting_context_events',

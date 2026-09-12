@@ -68,8 +68,10 @@ export const audioRetentionBlockReason = (
   meeting: AudioRetentionMeeting,
   isMeetingActive = false,
   hasActiveAnalysis = false,
+  hasHistoricalMigration = false,
 ): string | null => {
   if (isMeetingActive) return 'active_recording';
+  if (hasHistoricalMigration) return 'historical_migration';
   if (meeting.finalization_status !== 'finalized')
     return 'finalization_incomplete';
   if (meeting.transcript_status !== 'validated')
@@ -114,6 +116,7 @@ export const createAudioRetentionManager = (options: {
     'getMeetingAudioKey' | 'deleteMeetingAudioKey'
   > | null;
   isMeetingActive?: (meetingId: string) => boolean;
+  isHistoricalMigrationBlocked?: (meetingId: string) => boolean;
   acquireDeletionLease?: (meetingId: string) => (() => void) | null;
 }) => {
   const rootDir = path.resolve(options.rootDir);
@@ -241,6 +244,7 @@ export const createAudioRetentionManager = (options: {
       meeting,
       options.isMeetingActive?.(meetingId) ?? false,
       hasActiveAnalysis,
+      options.isHistoricalMigrationBlocked?.(meetingId) ?? false,
     );
     if (reason) {
       writeStatus(meetingId, 'blocked', 0, reason);
@@ -313,6 +317,7 @@ export const createAudioRetentionManager = (options: {
               )
               .get(String(meeting.id)),
           ),
+          options.isHistoricalMigrationBlocked?.(String(meeting.id)) ?? false,
         );
         if (reason) {
           blockedMeetings += 1;

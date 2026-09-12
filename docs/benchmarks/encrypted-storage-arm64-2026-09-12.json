@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-12T20:10:52.339Z",
+  "generatedAt": "2026-09-12T21:26:24.658Z",
   "environment": {
     "platform": "darwin",
     "arch": "arm64",
@@ -12,13 +12,14 @@
     "databaseWarmReadRegressionPercent": 10,
     "criticalWriteP95Ms": 50,
     "startupRegressionMs": 250,
-    "incrementalAudioRssBytes": 268435456
+    "incrementalAudioRssBytes": 268435456,
+    "historicalMigrationRssBytes": 67108864
   },
   "results": {
     "crypto": {
       "iterations": 2000,
-      "sealP95Ms": 0.06112500000000409,
-      "openP95Ms": 0.05458400000000552,
+      "sealP95Ms": 0.05662499999999682,
+      "openP95Ms": 0.04983300000000668,
       "budgetMs": 0.25,
       "passed": true
     },
@@ -27,18 +28,18 @@
       "iterationsPerTrial": 100,
       "aggregation": "median of trial p95 values",
       "plainTrialP95Ms": [
-        11.975167000000056, 16.034999999999854, 13.93487499999992,
-        16.040165999999772, 18.130207999998674, 14.077041000000463,
-        14.028707999999824, 15.896708000000217, 15.128875000002154
+        12.203666999999996, 13.018624999999702, 12.863666999999623,
+        13.220999999999549, 13.95641699999942, 12.876749999999447,
+        13.068624999999884, 12.649792000000161, 14.593417000000045
       ],
       "encryptedTrialP95Ms": [
-        12.018792000000076, 16.20970800000032, 15.047167000000627,
-        15.896833000000697, 19.15374999999949, 15.240041999999448,
-        14.790417000000161, 15.42291699999987, 16.95349999999962
+        13.381875000000036, 13.643917000000329, 12.965000000000146,
+        13.635958999999275, 14.22833399999945, 12.93670899999961,
+        13.611875000002328, 13.041000000001077, 15.472416999997222
       ],
-      "plainP95Ms": 15.128875000002154,
-      "encryptedP95Ms": 15.42291699999987,
-      "regressionPercent": 1.9435813964863533,
+      "plainP95Ms": 13.018624999999702,
+      "encryptedP95Ms": 13.611875000002328,
+      "regressionPercent": 4.556932855832626,
       "budgetPercent": 5,
       "verifiedArtifacts": 990,
       "droppedOrReordered": 0,
@@ -47,22 +48,22 @@
     "database": {
       "representativeRows": 20000,
       "warmRead": {
-        "plainP95Ms": 5.162082999999257,
-        "encryptedP95Ms": 5.444833999998082,
-        "regressionPercent": 5.477459389918098,
+        "plainP95Ms": 4.923833000000741,
+        "encryptedP95Ms": 4.8940829999992275,
+        "regressionPercent": -0.6042040825005421,
         "budgetPercent": 10,
         "passed": true
       },
       "criticalWrite": {
         "transaction": "one meeting plus 100 final transcript segments, synchronous FULL",
-        "encryptedP95Ms": 0.6942079999971611,
+        "encryptedP95Ms": 0.7049589999987802,
         "budgetMs": 50,
         "passed": true
       },
       "startup": {
-        "plainP95Ms": 0.30391600000075414,
-        "encryptedP95Ms": 0.4306669999969017,
-        "regressionMs": 0.12675099999614758,
+        "plainP95Ms": 0.31929200000013225,
+        "encryptedP95Ms": 0.4125419999982114,
+        "regressionMs": 0.09324999999807915,
         "budgetMs": 250,
         "passed": true
       }
@@ -71,19 +72,29 @@
       "fixtureMinutes": 60,
       "totalFrames": 57600000,
       "segmentSeconds": 60,
-      "baselineRssBytes": 157876224,
-      "peakRssBytes": 244580352,
-      "incrementalRssBytes": 86704128,
+      "baselineRssBytes": 153862144,
+      "peakRssBytes": 241385472,
+      "incrementalRssBytes": 87523328,
       "budgetBytes": 268435456,
       "passed": true
     },
     "nativeAudioMemory": {
       "status": "measured",
       "fixtureMinutes": 60,
-      "baselineRssBytes": 31588352,
-      "peakRssBytes": 64602112,
-      "incrementalRssBytes": 33013760,
+      "baselineRssBytes": 31440896,
+      "peakRssBytes": 56721408,
+      "incrementalRssBytes": 25280512,
       "budgetBytes": 268435456,
+      "passed": true
+    },
+    "historicalMigrationMemory": {
+      "fixtureMinutes": 60,
+      "sourceBytes": 115200044,
+      "elapsedMs": 1646.039499999999,
+      "baselineRssBytes": 233766912,
+      "peakRssBytes": 259866624,
+      "incrementalRssBytes": 26099712,
+      "budgetBytes": 67108864,
       "passed": true
     }
   },

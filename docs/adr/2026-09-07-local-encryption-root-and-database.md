@@ -40,11 +40,14 @@ Pluto requires application-layer encryption whose root key access is mediated by
    - **PR D (Performance Hardening - Completed):**
      - Stores materialized mic, System, and mixed recordings as an encrypted index plus independently authenticated 60-second PCM16 segments. Electron and Swift readers decrypt only requested segments; native ASR, vocabulary rescoring, diarization, and channel-energy analysis consume the same random-access source.
      - Enforces crypto, durable capture, representative database, startup, and one-hour RSS budgets through `benchmark:encrypted-storage`; committed raw evidence is architecture-specific and does not replace the signed, slowest-supported-Mac or frozen real-meeting acceptance required before rollout.
-   - **PR E (Storage Budget and Cleanup - Current):**
+   - **PR E (Storage Budget and Cleanup - Completed):**
      - Adds a user-configurable 2 GB, 10 GB (default), 20 GB, or unlimited audio budget. A serialized sweeper removes the oldest eligible audio while preserving transcripts, notes, identity consent, and wrapped keys whenever deletion is incomplete.
      - Eligibility requires finalized, validated meetings with no active capture, recovery, retry, or analysis work. Manual per-meeting deletion uses the same fail-closed path and requires capability-loss confirmation.
-   - **PR F (Upcoming):**
-     - Adds staged rollout, including signed canary and historical migration acceptance.
+   - **PR F (Rollout and Historical Migration - Current):**
+     - Keeps all mutating rollout gates off by default. Schema-v4 capture can be enabled only in a packaged, distribution-signed macOS build through the `PLUTO_ENCRYPTION_ROLLOUT=signed_canary` gate; ad-hoc signatures and development builds fail closed.
+     - Keeps historical migration and automatic retention enforcement as separate, later canary gates (`PLUTO_HISTORICAL_AUDIO_MIGRATION=1` and `PLUTO_AUDIO_RETENTION_ENFORCEMENT=1`). Encrypted read compatibility remains enabled for rollback builds.
+     - Migrates the newest eligible sealed meeting one at a time while foreground audio and inference work is idle. Plaintext materialized WAVs are converted into bounded encrypted segments, capture-journal artifacts and sidecars are converted to schema v4, and every replacement is authenticated and compared with the original bytes before plaintext deletion.
+     - Uses encrypted transition plans and content-free SQLite states to resume cleanup after interruption. Failed verification preserves legacy evidence and prevents retention cleanup for that meeting.
 
 ## Alternatives Considered
 
@@ -59,4 +62,14 @@ Pluto requires application-layer encryption whose root key access is mediated by
 - Audio and transcript artifacts in journal schema 4 are authenticated and encrypted at rest.
 - Materialized encrypted audio has a one-segment random-access working set instead of one process-sized plaintext float array. The index and every segment remain independently authenticated PENC artifacts.
 - Retained audio is governed by a user-selected size budget rather than a fixed age. Cleanup is oldest-first among durably eligible meetings and never treats time alone as proof that deletion is safe.
-- New schema-v4 capture creation remains disabled until the rollout gate; read and recovery compatibility land ahead of activation.
+- New schema-v4 capture creation and all automatic historical mutation remain disabled by default; read and recovery compatibility stay enabled in rollback builds. A signed-canary build must still pass the real-meeting acceptance matrix before these gates become release defaults.
+
+## Rollout and rollback
+
+The gates are deliberately ordered and independent:
+
+1. Set `PLUTO_ENCRYPTION_ROLLOUT=signed_canary` only for a packaged, distribution-signed internal build. This enables new schema-v4 capture but does not touch historical audio or automatically enforce retention.
+2. After transcription, diarization, speaker sample playback, manual retry, interrupted-finalization recovery, and frozen output parity pass on v4 recordings, set `PLUTO_HISTORICAL_AUDIO_MIGRATION=1` for the canary cohort. One newest eligible meeting is migrated per idle scheduling turn.
+3. After historical migration convergence and rollback recovery pass, set `PLUTO_AUDIO_RETENTION_ENFORCEMENT=1`. Explicit user budget changes and confirmed per-meeting deletion remain user-directed operations independent of automatic enforcement.
+
+Rollback is to remove the mutating environment gates. Existing v4 data remains readable and is never downgraded to plaintext. A failed or interrupted migration retains its wrapped meeting key, ciphertext, and any plaintext not yet positively replaced.

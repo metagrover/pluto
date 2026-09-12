@@ -77,6 +77,14 @@ import {
 } from './database/applicationDatabase';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
+  AUDIO_RETENTION_ENFORCEMENT_ENV,
+  ENCRYPTION_ROLLOUT_ENV,
+  HISTORICAL_AUDIO_MIGRATION_ENV,
+  probeSignedMacBuild,
+  resolveEncryptionRolloutPolicy,
+} from './encryptionRollout';
+import { createHistoricalAudioMigrationManager } from './historicalAudioMigration';
+import {
   type IncrementalMeetingNotesOffer,
   createIncrementalMeetingNotesCoordinator,
   evaluateIncrementalMeetingNotesAdmission,
@@ -935,6 +943,24 @@ app.on(
 );
 
 app.whenReady().then(async () => {
+  const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
+  const encryptionRollout = resolveEncryptionRolloutPolicy({
+    isPackaged: app.isPackaged,
+    requestedMode: requestedEncryptionRollout,
+    historicalMigrationRequested: process.env[HISTORICAL_AUDIO_MIGRATION_ENV],
+    retentionEnforcementRequested: process.env[AUDIO_RETENTION_ENFORCEMENT_ENV],
+    signedBuild:
+      app.isPackaged && requestedEncryptionRollout === 'signed_canary'
+        ? probeSignedMacBuild(process.execPath)
+        : { valid: false, reason: 'packaged_build_required' },
+  });
+  plutoLog.info('Encryption rollout:', {
+    mode: encryptionRollout.mode,
+    encryptedCaptureWrites: encryptionRollout.encryptedCaptureWrites,
+    historicalAudioMigration: encryptionRollout.historicalAudioMigration,
+    retentionEnforcement: encryptionRollout.retentionEnforcement,
+    reason: encryptionRollout.reason,
+  });
   setCaptureJournalAudioKeyProvider((meetingId) => {
     const result = getAudioKeyStore()?.getMeetingAudioKey(meetingId);
     return result?.meetingKey ?? null;
@@ -985,6 +1011,16 @@ app.whenReady().then(async () => {
     isMeetingActive: (meetingId) =>
       activeTranscriptionMeetings.has(meetingId) ||
       activeAnalysisGenerations.has(meetingId),
+    isHistoricalMigrationBlocked: (meetingId) =>
+      Boolean(
+        getApplicationDatabase()
+          .prepare(
+            `SELECT 1 FROM meeting_audio_migrations
+             WHERE meeting_id = ? AND status != 'complete'
+             LIMIT 1`,
+          )
+          .get(meetingId),
+      ),
     acquireDeletionLease: (meetingId) => {
       if (
         activeAudioDeletions.has(meetingId) ||
@@ -1984,6 +2020,10 @@ app.whenReady().then(async () => {
           const self = db.identityStore.getSelfPersonId();
           return () => db.identityStore.recordCapture(id, 'local', self);
         },
+        audioKeyStore: encryptionRollout.encryptedCaptureWrites
+          ? getAudioKeyStore()
+          : null,
+        encryptedCaptureRequired: encryptionRollout.encryptedCaptureWrites,
       });
     },
   );
@@ -5999,13 +6039,58 @@ app.whenReady().then(async () => {
       console.warn('[Pluto] Audio retention sweep failed');
     });
   };
-  const audioRetentionTimer = setTimeout(runAutomaticAudioRetention, 30_000);
-  audioRetentionTimer.unref();
-  const audioRetentionInterval = setInterval(
-    runAutomaticAudioRetention,
-    6 * 60 * 60_000,
-  );
-  audioRetentionInterval.unref();
+  if (encryptionRollout.retentionEnforcement) {
+    const audioRetentionTimer = setTimeout(runAutomaticAudioRetention, 30_000);
+    audioRetentionTimer.unref();
+    const audioRetentionInterval = setInterval(
+      runAutomaticAudioRetention,
+      6 * 60 * 60_000,
+    );
+    audioRetentionInterval.unref();
+  }
+
+  const historicalMigrationKeyStore = getAudioKeyStore();
+  if (
+    encryptionRollout.historicalAudioMigration &&
+    historicalMigrationKeyStore
+  ) {
+    const historicalAudioMigration = createHistoricalAudioMigrationManager({
+      rootDir: getMeetingArtifactsRootDir(),
+      sqlite: getApplicationDatabase(),
+      listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+      audioKeyStore: historicalMigrationKeyStore,
+      isMeetingActive: (meetingId) =>
+        activeTranscriptionMeetings.has(meetingId) ||
+        activeAnalysisGenerations.has(meetingId),
+      acquireMigrationLease: (meetingId) => {
+        if (
+          activeAudioDeletions.has(meetingId) ||
+          activeTranscriptionMeetings.has(meetingId) ||
+          activeAnalysisGenerations.has(meetingId)
+        ) {
+          return null;
+        }
+        activeAudioDeletions.add(meetingId);
+        return () => activeAudioDeletions.delete(meetingId);
+      },
+    });
+    const runHistoricalAudioMigration = () => {
+      const foregroundWorkActive = Object.values(
+        knowledgeSynthesisPause.snapshot(),
+      ).some((count) => Number(count) > 0);
+      if (foregroundWorkActive) return;
+      void historicalAudioMigration.sweepOne().catch(() => {
+        console.warn('[Pluto] Historical audio migration failed');
+      });
+    };
+    const migrationTimer = setTimeout(runHistoricalAudioMigration, 60_000);
+    migrationTimer.unref();
+    const migrationInterval = setInterval(
+      runHistoricalAudioMigration,
+      5 * 60_000,
+    );
+    migrationInterval.unref();
+  }
 
   // Create Tray Icon
   const dockIconPath = path.join(process.env.VITE_PUBLIC, 'dock-icon.png');
