@@ -8,6 +8,72 @@ import {
 } from '../../src/utils/speakerReview';
 
 describe('speaker review', () => {
+  it('retains long nested blockers and excludes speech inside a join gap', () => {
+    const intervals = selectSpeakerEnrollmentIntervals(
+      [
+        {
+          speaker: 'Remote Speaker 2',
+          start: 0,
+          end: 100,
+          text: 'long overlap',
+        },
+        {
+          speaker: 'Remote Speaker 2',
+          start: 10,
+          end: 11,
+          text: 'nested overlap',
+        },
+        {
+          speaker: 'Remote Speaker 1',
+          start: 70,
+          end: 73,
+          text: 'blocked by the long interval',
+        },
+        {
+          speaker: 'Remote Speaker 1',
+          start: 100,
+          end: 103,
+          text: 'touching the boundary is clean',
+        },
+        {
+          speaker: 'Unknown',
+          start: 103.1,
+          end: 103.2,
+          text: 'blocks joining',
+        },
+        {
+          speaker: 'Remote Speaker 1',
+          start: 103.4,
+          end: 106,
+          text: 'separate clean interval',
+        },
+      ],
+      'Remote Speaker 1',
+    );
+    expect(intervals).toEqual([
+      { startSec: 100, endSec: 103, excerpt: 'touching the boundary is clean' },
+      { startSec: 103.4, endSec: 106, excerpt: 'separate clean interval' },
+    ]);
+  });
+
+  it('selects evidence from a long word-level transcript without quadratic scans', () => {
+    const segments = Array.from({ length: 24_000 }, (_, index) => ({
+      speaker: index % 40 < 20 ? 'Remote Speaker 1' : 'Remote Speaker 2',
+      start: index * 0.15,
+      end: (index + 1) * 0.15,
+      text: 'word',
+    }));
+    const started = performance.now();
+    const intervals = selectSpeakerEnrollmentIntervals(
+      segments,
+      'Remote Speaker 1',
+    );
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(intervals).toHaveLength(12);
+    expect(intervals[0].startSec).toBe(0);
+    expect(intervals.at(-1)?.startSec).toBe(3594);
+  });
+
   it('projects canonical remote labels without changing unrelated speakers', () => {
     expect(getAnonymousSpeakerDisplayLabel('Remote Speaker 2')).toBe(
       'Speaker 2',

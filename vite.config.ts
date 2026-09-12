@@ -23,7 +23,10 @@ export default defineConfig({
     electron({
       main: {
         // Shortcut of `build.lib.entry`.
-        entry: 'electron/bootstrap.ts',
+        entry: {
+          bootstrap: 'electron/bootstrap.ts',
+          encryptedAudioWorker: 'electron/crypto/encryptedAudioWorker.ts',
+        },
         onstart({ startup }) {
           const userDataDir = resolveDevelopmentUserDataDir({
             explicit: process.env.PLUTO_USER_DATA_DIR,

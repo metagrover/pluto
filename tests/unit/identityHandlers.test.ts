@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import Database from 'better-sqlite3';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const directory = vi.hoisted(() => {
@@ -75,21 +73,17 @@ describe('identity IPC service', () => {
     ]);
   });
   it('filters out generic speaker placeholders from global identity state people', () => {
-    const rawDb = new Database(path.join(directory, 'pluto.db'));
-    try {
-      rawDb
-        .prepare(
-          "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-rs-99', 'person', 'Remote Speaker 99', 'remote speaker 99', datetime('now'), datetime('now'))",
-        )
-        .run();
-      rawDb
-        .prepare(
-          "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-spk-5', 'person', 'Speaker 5', 'speaker 5', datetime('now'), datetime('now'))",
-        )
-        .run();
-    } finally {
-      rawDb.close();
-    }
+    // Use the application's keyed connection; this fixture database is encrypted.
+    db.db
+      .prepare(
+        "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-rs-99', 'person', 'Remote Speaker 99', 'remote speaker 99', datetime('now'), datetime('now'))",
+      )
+      .run();
+    db.db
+      .prepare(
+        "INSERT INTO entities (id, type, name, normalized_name, created_at, updated_at) VALUES ('legacy-spk-5', 'person', 'Speaker 5', 'speaker 5', datetime('now'), datetime('now'))",
+      )
+      .run();
     const state = handleIdentityRequest('GET_IDENTITY_STATE', {});
     expect(
       state.people.some(

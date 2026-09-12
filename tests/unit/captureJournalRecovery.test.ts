@@ -11,7 +11,16 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import { buildTestAudioWorker } from './helpers/encryptedAudioWorker';
 
 import {
   appendCaptureJournalChunk,
@@ -34,12 +43,46 @@ import {
   stitchSealedCaptureJournalSource,
   verifySealedCaptureJournalTranscriptEvidence,
 } from '../../electron/captureJournalRecovery';
+import type { createEncryptedAudioPipeline } from '../../electron/crypto/encryptedAudioPipeline';
 import type { PersistedMeeting } from '../../electron/db';
 import { buildRecoverableSealFailureMeeting } from '../../src/utils/recordingFinalization';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 import { canonicalizeTranscriptCheckpointConfig } from '../../src/utils/transcriptCheckpointConfig';
 
+const audioWorker = vi.hoisted(() => ({
+  pipeline: null as ReturnType<typeof createEncryptedAudioPipeline> | null,
+}));
+vi.mock(
+  '../../electron/crypto/encryptedAudioPipeline',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('../../electron/crypto/encryptedAudioPipeline')
+      >();
+    return {
+      ...actual,
+      materializeEncryptedJournalSource: (
+        ...args: Parameters<typeof actual.materializeEncryptedJournalSource>
+      ) => audioWorker.pipeline!.materializeEncryptedJournalSource(...args),
+      repairEncryptedJournalRawChunk: (
+        ...args: Parameters<typeof actual.repairEncryptedJournalRawChunk>
+      ) => audioWorker.pipeline!.repairEncryptedJournalRawChunk(...args),
+    };
+  },
+);
+
 describe('capture journal recovery', () => {
+  let worker: Awaited<ReturnType<typeof buildTestAudioWorker>>;
+  beforeAll(async () => {
+    worker = await buildTestAudioWorker();
+    const { createEncryptedAudioPipeline } = await import(
+      '../../electron/crypto/encryptedAudioPipeline'
+    );
+    audioWorker.pipeline = createEncryptedAudioPipeline(worker.path);
+  }, 30_000);
+  afterAll(async () => {
+    await worker?.close();
+  });
   const tempRoots: string[] = [];
 
   afterEach(async () => {

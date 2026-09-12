@@ -51,9 +51,6 @@ const timedSegment = (segment: SpeakerSegment): TimedSpeakerSegment | null => {
   };
 };
 
-const overlaps = (left: TimedSpeakerSegment, right: TimedSpeakerSegment) =>
-  Math.min(left.end, right.end) > Math.max(left.start, right.start);
-
 export const getAnonymousSpeakerDisplayLabel = (speaker: string): string => {
   const match = REMOTE_SPEAKER_PATTERN.exec(speaker.trim());
   return match ? `Speaker ${match[1]}` : speaker;
@@ -104,10 +101,27 @@ const selectCleanSpeakerIntervals = (
       // is exempt; every other label may contain another system-audio voice.
       (!numberedRemoteSpeaker || segment.speaker !== 'Me'),
   );
+  // The blockers are sorted by start. Prefix maxima retain long/nested
+  // intervals, so each overlap check is logarithmic rather than a full scan.
+  const latestEnds: number[] = [];
+  for (const other of otherSpeakers) {
+    latestEnds.push(
+      Math.max(latestEnds.at(-1) ?? Number.NEGATIVE_INFINITY, other.end),
+    );
+  }
+  const hasBlocker = (startBefore: number, endAfter: number): boolean => {
+    let low = 0;
+    let high = otherSpeakers.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (otherSpeakers[middle].start < startBefore) low = middle + 1;
+      else high = middle;
+    }
+    return low > 0 && latestEnds[low - 1] > endAfter;
+  };
   const clean = timed.filter(
     (segment) =>
-      segment.speaker === speaker &&
-      !otherSpeakers.some((other) => overlaps(segment, other)),
+      segment.speaker === speaker && !hasBlocker(segment.end, segment.start),
   );
 
   const groups: TimedSpeakerSegment[][] = [];
@@ -117,9 +131,7 @@ const selectCleanSpeakerIntervals = (
     if (
       current &&
       segment.start - currentEnd <= SAMPLE_JOIN_GAP_SECONDS &&
-      !otherSpeakers.some(
-        (other) => other.start < segment.start && other.end > currentEnd,
-      )
+      !hasBlocker(segment.start, currentEnd)
     ) {
       current.push(segment);
       currentEnd = Math.max(currentEnd, segment.end);
