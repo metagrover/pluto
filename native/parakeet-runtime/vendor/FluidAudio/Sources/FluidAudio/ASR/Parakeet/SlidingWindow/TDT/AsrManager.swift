@@ -461,6 +461,53 @@ public actor AsrManager {
         }
     }
 
+    /// Transcribe a random-access sample source without materializing the full
+    /// recording. The chunk processor and merge behavior are identical to the
+    /// existing in-memory and disk-backed long-form paths.
+    public func transcribe(
+        _ sampleSource: AudioSampleSource,
+        decoderState: inout TdtDecoderState,
+        language: Language? = nil
+    ) async throws -> ASRResult {
+        guard isAvailable else { throw ASRError.notInitialized }
+        let minimumRequiredSamples = ASRConstants.minimumRequiredSamples(forSampleRate: config.sampleRate)
+        guard sampleSource.sampleCount >= minimumRequiredSamples else {
+            throw ASRError.invalidAudioData
+        }
+        if sampleSource.sampleCount <= ASRConstants.maxModelSamples {
+            var samples = [Float](repeating: 0, count: sampleSource.sampleCount)
+            try samples.withUnsafeMutableBufferPointer { buffer in
+                guard let baseAddress = buffer.baseAddress else { return }
+                try sampleSource.copySamples(
+                    into: baseAddress,
+                    offset: 0,
+                    count: sampleSource.sampleCount
+                )
+            }
+            return try await transcribe(samples, decoderState: &decoderState, language: language)
+        }
+
+        let shouldEmitProgress = sampleSource.sampleCount > 240_000
+        if shouldEmitProgress { _ = await progressEmitter.ensureSession() }
+        do {
+            let processor = ChunkProcessor(sampleSource: sampleSource)
+            let result = try await processor.process(
+                using: self,
+                startTime: Date(),
+                progressHandler: { [weak self] progress in
+                    guard let self else { return }
+                    await self.progressEmitter.report(progress: progress)
+                },
+                language: language
+            )
+            if shouldEmitProgress { await progressEmitter.finishSession() }
+            return result
+        } catch {
+            if shouldEmitProgress { await progressEmitter.failSession(error) }
+            throw error
+        }
+    }
+
     /// Transcribe audio from raw float samples.
     ///
     /// Performs speech-to-text transcription on raw audio samples at 16kHz.

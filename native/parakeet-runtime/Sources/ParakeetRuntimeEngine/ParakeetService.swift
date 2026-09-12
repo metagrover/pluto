@@ -229,12 +229,12 @@ public actor ParakeetService {
             )
             let audioInput: AudioInput
             if let capability = request.capability {
-                let loaded = try EncryptedAudioLoader.load(
+                let reader = try EncryptedAudioLoader.makeReader(
                     filePath: audioURL.path,
                     capability: capability,
                     expectedOperation: "transcribe"
                 )
-                audioInput = .pcmSamples(loaded.samples, sampleRate: loaded.sampleRate)
+                audioInput = .encryptedReader(reader)
             } else {
                 audioInput = .fileURL(audioURL)
             }
@@ -286,24 +286,27 @@ public actor ParakeetService {
             let micInput: AudioInput
             let systemInput: AudioInput
             if let capability = request.capability {
-                let mixed = try EncryptedAudioLoader.load(
+                let mixed = try EncryptedAudioLoader.makeReader(
                     filePath: mixedURL.path,
                     capability: capability,
-                    expectedOperation: "speakerEvidence"
+                    expectedOperation: "speakerEvidence",
+                    expectedSource: "mixed"
                 )
-                let mic = try EncryptedAudioLoader.load(
+                let mic = try EncryptedAudioLoader.makeReader(
                     filePath: micURL.path,
                     capability: capability,
-                    expectedOperation: "speakerEvidence"
+                    expectedOperation: "speakerEvidence",
+                    expectedSource: "mic"
                 )
-                let system = try EncryptedAudioLoader.load(
+                let system = try EncryptedAudioLoader.makeReader(
                     filePath: systemURL.path,
                     capability: capability,
-                    expectedOperation: "speakerEvidence"
+                    expectedOperation: "speakerEvidence",
+                    expectedSource: "system"
                 )
-                mixedInput = .pcmSamples(mixed.samples, sampleRate: mixed.sampleRate)
-                micInput = .pcmSamples(mic.samples, sampleRate: mic.sampleRate)
-                systemInput = .pcmSamples(system.samples, sampleRate: system.sampleRate)
+                mixedInput = .encryptedReader(mixed)
+                micInput = .encryptedReader(mic)
+                systemInput = .encryptedReader(system)
             } else {
                 mixedInput = .fileURL(mixedURL)
                 micInput = .fileURL(micURL)

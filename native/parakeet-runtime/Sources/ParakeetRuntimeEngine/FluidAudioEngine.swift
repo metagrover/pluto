@@ -373,7 +373,7 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         guard let manager else { throw RuntimeFailure.transcriptionFailed }
         let languageHint = language.flatMap(Language.init(rawValue:))
         var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-        let resultAndDuration: (ASRResult, Double, [Float]?)
+        let resultAndDuration: (ASRResult, Double, [Float]?, (any AudioSampleSource)?)
         switch audioInput {
         case .fileURL(let audioURL):
             let result = try await manager.transcribe(
@@ -385,7 +385,7 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             let duration = audioFile.processingFormat.sampleRate > 0
                 ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
                 : 0
-            resultAndDuration = (result, duration, nil)
+            resultAndDuration = (result, duration, nil, nil)
         case .pcmSamples(let samples, let sampleRate):
             let normalized = sampleRate == 16_000
                 ? samples
@@ -395,7 +395,23 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
                 decoderState: &decoderState,
                 language: languageHint
             )
-            resultAndDuration = (result, Double(normalized.count) / 16_000, normalized)
+            resultAndDuration = (result, Double(normalized.count) / 16_000, normalized, nil)
+        case .encryptedReader(let reader):
+            guard reader.sampleRate == 16_000 else {
+                throw RuntimeFailure.transcriptionFailed
+            }
+            let source = EncryptedAudioSampleSource(reader: reader)
+            let result = try await manager.transcribe(
+                source,
+                decoderState: &decoderState,
+                language: languageHint
+            )
+            resultAndDuration = (
+                result,
+                Double(source.sampleCount) / 16_000,
+                nil,
+                source
+            )
         }
 
         var result = resultAndDuration.0
@@ -413,6 +429,15 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
                 (result, replacements) = try await rescore(
                     result,
                     samples: resultAndDuration.2 ?? [],
+                    vocabulary: vocabulary
+                )
+            case .encryptedReader:
+                guard let source = resultAndDuration.3 else {
+                    throw RuntimeFailure.transcriptionFailed
+                }
+                (result, replacements) = try await rescore(
+                    result,
+                    sampleSource: source,
                     vocabulary: vocabulary
                 )
             }
@@ -446,7 +471,8 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
 
     private func rescore(
         _ result: ASRResult,
-        samples: [Float],
+        samples: [Float] = [],
+        sampleSource: (any AudioSampleSource)? = nil,
         vocabulary: [String]
     ) async throws -> (ASRResult, [VocabularyReplacement]) {
         guard
@@ -466,10 +492,17 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
 
         let context = CustomVocabularyContext(terms: terms)
         let spotter = CtcKeywordSpotter(models: ctcModels, blankId: ctcModels.vocabulary.count)
-        let spotted = try await spotter.spotKeywordsWithLogProbs(
-            audioSamples: samples,
-            customVocabulary: context
-        )
+        let spotted = if let sampleSource {
+            try await spotter.spotKeywordsWithLogProbs(
+                audioSource: sampleSource,
+                customVocabulary: context
+            )
+        } else {
+            try await spotter.spotKeywordsWithLogProbs(
+                audioSamples: samples,
+                customVocabulary: context
+            )
+        }
         guard !spotted.logProbs.isEmpty else { return (result, []) }
         let rescorer = try await VocabularyRescorer.create(
             spotter: spotter,

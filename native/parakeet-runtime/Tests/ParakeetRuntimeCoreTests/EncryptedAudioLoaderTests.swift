@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import XCTest
 @testable import ParakeetRuntimeCore
@@ -51,6 +52,17 @@ final class EncryptedAudioLoaderTests: XCTestCase {
                 data.append(contentsOf: withUnsafeBytes(of: val.littleEndian) { Data($0) })
             }
         }
+        return data
+    }
+
+    private func makeSilentPcmWav(sampleCount: Int) -> Data {
+        var data = makePcmWav(sampleCount: 0)
+        let dataBytes = sampleCount * 2
+        var riffBytes = Int32(36 + dataBytes).littleEndian
+        var payloadBytes = Int32(dataBytes).littleEndian
+        withUnsafeBytes(of: &riffBytes) { data.replaceSubrange(4..<8, with: $0) }
+        withUnsafeBytes(of: &payloadBytes) { data.replaceSubrange(40..<44, with: $0) }
+        data.append(Data(count: dataBytes))
         return data
     }
 
@@ -637,5 +649,196 @@ final class EncryptedAudioLoaderTests: XCTestCase {
                 "Tampered vector \(name) should fail closed"
             )
         }
+    }
+
+    func testSegmentedReaderCopiesAcrossAuthenticatedBundleBoundary() throws {
+        let keyData = Data(repeating: 4, count: 32)
+        let capability = ScopedMeetingCapability(
+            meetingId: "meeting-bundle",
+            keyId: "key-bundle",
+            meetingKeyBase64: keyData.base64EncodedString(),
+            generation: "generation-bundle",
+            allowedOperations: ["transcribe"],
+            expiresAtMs: Int64((Date().timeIntervalSince1970 + 60) * 1000)
+        )
+        var indexSegments: [[String: Any]] = []
+        for sequence in 0..<2 {
+            let wav = makePcmWav(sampleCount: 16)
+            let relativePath = sequence == 0
+                ? "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.enc"
+                : "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.enc"
+            let sealed = try EncryptedAudioLoader.seal(
+                plaintext: wav,
+                keyData: keyData,
+                keyId: capability.keyId,
+                meetingId: capability.meetingId,
+                generation: capability.generation,
+                artifactKind: "audio_segment",
+                source: "mic",
+                sequence: sequence
+            )
+            try sealed.write(to: tempDirectory.appendingPathComponent(relativePath))
+            indexSegments.append([
+                "relativePath": relativePath,
+                "sequence": sequence,
+                "startFrame": sequence * 16,
+                "frameCount": 16,
+                "plaintextSha256": Self.sha256Hex(wav),
+            ])
+        }
+        let index = try JSONSerialization.data(withJSONObject: [
+            "schemaVersion": 1,
+            "sampleRate": 16_000,
+            "totalFrames": 32,
+            "segments": indexSegments,
+        ], options: [.sortedKeys])
+        let sealedIndex = try EncryptedAudioLoader.seal(
+            plaintext: index,
+            keyData: keyData,
+            keyId: capability.keyId,
+            meetingId: capability.meetingId,
+            generation: capability.generation,
+            artifactKind: "audio_index",
+            source: "mic"
+        )
+        let indexURL = tempDirectory.appendingPathComponent("bundle.enc")
+        try sealedIndex.write(to: indexURL)
+
+        let reader = try EncryptedAudioLoader.makeReader(
+            filePath: indexURL.path,
+            capability: capability,
+            expectedOperation: "transcribe",
+            expectedSource: "mic"
+        )
+        var boundary = [Float](repeating: 0, count: 8)
+        try boundary.withUnsafeMutableBufferPointer { buffer in
+            try reader.copySamples(into: buffer.baseAddress!, offset: 12, count: 8)
+        }
+
+        XCTAssertEqual(reader.sampleCount, 32)
+        XCTAssertEqual(reader.sampleRate, 16_000)
+        let expected = try EncryptedAudioLoader.parseAudio(
+            plaintext: makePcmWav(sampleCount: 16)
+        ).samples
+        XCTAssertEqual(Array(boundary.prefix(4)), Array(expected[12..<16]))
+        XCTAssertEqual(Array(boundary.suffix(4)), Array(expected[0..<4]))
+
+        XCTAssertThrowsError(
+            try EncryptedAudioLoader.makeReader(
+                filePath: indexURL.path,
+                capability: capability,
+                expectedOperation: "transcribe",
+                expectedSource: "system"
+            )
+        )
+
+        let firstSegmentURL = tempDirectory.appendingPathComponent(
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.enc"
+        )
+        var tampered = try Data(contentsOf: firstSegmentURL)
+        tampered[tampered.count - 1] ^= 0xff
+        try tampered.write(to: firstSegmentURL)
+        let tamperedReader = try EncryptedAudioLoader.makeReader(
+            filePath: indexURL.path,
+            capability: capability,
+            expectedOperation: "transcribe",
+            expectedSource: "mic"
+        )
+        var sample: Float = 0
+        XCTAssertThrowsError(
+            try tamperedReader.copySamples(into: &sample, offset: 0, count: 1)
+        )
+    }
+
+    func testOneHourSegmentedReaderStaysWithinResidentMemoryBudget() throws {
+        guard ProcessInfo.processInfo.environment["PLUTO_RUN_ENCRYPTED_AUDIO_MEMORY_BENCHMARK"] == "1" else {
+            throw XCTSkip("one-hour encrypted audio memory benchmark is opt-in")
+        }
+        let segmentFrames = 16_000 * 60
+        let segmentCount = 60
+        let keyData = Data(repeating: 7, count: 32)
+        let capability = ScopedMeetingCapability(
+            meetingId: "meeting-memory-benchmark",
+            keyId: "key-memory-benchmark",
+            meetingKeyBase64: keyData.base64EncodedString(),
+            generation: "generation-memory-benchmark",
+            allowedOperations: ["transcribe"],
+            expiresAtMs: Int64((Date().timeIntervalSince1970 + 600) * 1000)
+        )
+        var indexSegments: [[String: Any]] = []
+        for sequence in 0..<segmentCount {
+            try autoreleasepool {
+                let wav = makeSilentPcmWav(sampleCount: segmentFrames)
+                let relativePath = String(format: "%08x-0000-0000-0000-000000000000.enc", sequence)
+                let sealed = try EncryptedAudioLoader.seal(
+                    plaintext: wav,
+                    keyData: keyData,
+                    keyId: capability.keyId,
+                    meetingId: capability.meetingId,
+                    generation: capability.generation,
+                    artifactKind: "audio_segment",
+                    source: "mic",
+                    sequence: sequence
+                )
+                try sealed.write(to: tempDirectory.appendingPathComponent(relativePath))
+                indexSegments.append([
+                    "relativePath": relativePath,
+                    "sequence": sequence,
+                    "startFrame": sequence * segmentFrames,
+                    "frameCount": segmentFrames,
+                    "plaintextSha256": Self.sha256Hex(wav),
+                ])
+            }
+        }
+        let totalFrames = segmentFrames * segmentCount
+        let index = try JSONSerialization.data(withJSONObject: [
+            "schemaVersion": 1,
+            "sampleRate": 16_000,
+            "totalFrames": totalFrames,
+            "segments": indexSegments,
+        ], options: [.sortedKeys])
+        let sealedIndex = try EncryptedAudioLoader.seal(
+            plaintext: index,
+            keyData: keyData,
+            keyId: capability.keyId,
+            meetingId: capability.meetingId,
+            generation: capability.generation,
+            artifactKind: "audio_index",
+            source: "mic"
+        )
+        let indexURL = tempDirectory.appendingPathComponent("memory-benchmark.enc")
+        try sealedIndex.write(to: indexURL)
+        let reader = try EncryptedAudioLoader.makeReader(
+            filePath: indexURL.path,
+            capability: capability,
+            expectedOperation: "transcribe",
+            expectedSource: "mic"
+        )
+        let baseline = try XCTUnwrap(currentResidentMemoryBytes())
+        var peak = baseline
+        var destination = [Float](repeating: 0, count: segmentFrames)
+        for sequence in 0..<segmentCount {
+            try destination.withUnsafeMutableBufferPointer { buffer in
+                try reader.copySamples(
+                    into: buffer.baseAddress!,
+                    offset: sequence * segmentFrames,
+                    count: segmentFrames
+                )
+            }
+            peak = max(peak, try XCTUnwrap(currentResidentMemoryBytes()))
+        }
+        let incremental = peak - baseline
+        print("NATIVE_ENCRYPTED_AUDIO_RSS baseline_bytes=\(baseline) peak_bytes=\(peak) incremental_bytes=\(incremental)")
+        XCTAssertLessThan(incremental, UInt64(256 * 1024 * 1024))
+    }
+
+    private func currentResidentMemoryBytes() -> UInt64? {
+        var info = proc_taskinfo()
+        let size = Int32(MemoryLayout<proc_taskinfo>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(getpid(), PROC_PIDTASKINFO, 0, pointer, size)
+        }
+        guard result == size else { return nil }
+        return info.pti_resident_size
     }
 }

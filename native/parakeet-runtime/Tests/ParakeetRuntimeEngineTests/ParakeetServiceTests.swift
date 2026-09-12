@@ -57,14 +57,23 @@ private actor EncryptedServiceInferenceDriver: ParakeetInferenceDriving {
         vocabulary _: [String],
         decoderIdentifier _: UUID
     ) async throws -> TranscriptionOutput {
-        guard case .pcmSamples(let samples, let sampleRate) = audioInput else {
+        let sampleCount: Int
+        let sampleRate: Double
+        switch audioInput {
+        case .encryptedReader(let reader):
+            sampleCount = reader.sampleCount
+            sampleRate = reader.sampleRate
+        case .pcmSamples(let samples, let rate):
+            sampleCount = samples.count
+            sampleRate = rate
+        case .fileURL:
             throw RuntimeFailure.transcriptionFailed
         }
-        receivedSampleCount = samples.count
+        receivedSampleCount = sampleCount
         return TranscriptionOutput(
             text: "encrypted",
             confidence: 0.9,
-            durationSeconds: Double(samples.count) / sampleRate,
+            durationSeconds: Double(sampleCount) / sampleRate,
             words: [],
             noSpeech: false
         )
@@ -203,10 +212,14 @@ private actor EncryptedSpeakerEvidenceDriver: SpeakerEvidenceDriving {
     ) async throws -> SpeakerEvidenceOutput {
         let inputs = [mixedInput, micInput, systemInput]
         receivedSampleCounts = try inputs.map { input in
-            guard case .pcmSamples(let samples, _) = input else {
+            switch input {
+            case .encryptedReader(let reader):
+                return reader.sampleCount
+            case .pcmSamples(let samples, _):
+                return samples.count
+            case .fileURL:
                 throw RuntimeFailure.diarizationFailed
             }
-            return samples.count
         }
         return SpeakerEvidenceOutput(
             turns: [],
