@@ -77,22 +77,58 @@ const buildBoundedLiveContext = (
 
 const toTurns = (
   messages: MeetingAskPlutoConversationMessage[],
-): MeetingAskPlutoTurn[] =>
-  messages.reduce<MeetingAskPlutoTurn[]>((turns, message) => {
-    if (message.role === 'user') {
-      turns.push({ role: 'user', content: message.content });
-      return turns;
+): MeetingAskPlutoTurn[] => {
+  let latestCompletedAssistantIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === 'assistant' && !message.interrupted) {
+      latestCompletedAssistantIndex = index;
+      break;
     }
+  }
 
-    if (message.interrupted) return turns;
+  const turns = messages.reduce<MeetingAskPlutoTurn[]>(
+    (turns, message, index) => {
+      if (message.role === 'user') {
+        turns.push({
+          role: 'user',
+          content: trimToLimit(
+            message.content,
+            MEETING_ASK_PLUTO_LIMITS.turnChars,
+          ),
+        });
+        return turns;
+      }
 
-    turns.push({
-      role: 'assistant',
-      content: message.content,
-      citationIds: message.packet?.citations.map((citation) => citation.id),
-    });
-    return turns;
-  }, []);
+      if (message.interrupted) return turns;
+
+      turns.push({
+        role: 'assistant',
+        content: trimToLimit(
+          message.content,
+          MEETING_ASK_PLUTO_LIMITS.turnChars,
+        ),
+        citationIds: message.packet?.citations
+          .map((citation) => citation.id)
+          .slice(0, MEETING_ASK_PLUTO_LIMITS.citationIds),
+        ...(index === latestCompletedAssistantIndex
+          ? {
+              evidenceHints: message.packet?.citations
+                .map((citation) => citation.evidence_span || citation.claim)
+                .filter((hint): hint is string => Boolean(hint?.trim()))
+                .slice(0, MEETING_ASK_PLUTO_LIMITS.evidenceHints)
+                .map((hint) =>
+                  trimToLimit(hint, MEETING_ASK_PLUTO_LIMITS.evidenceHintChars),
+                ),
+            }
+          : {}),
+      });
+      return turns;
+    },
+    [],
+  );
+  return turns.slice(-MEETING_ASK_PLUTO_LIMITS.turns);
+};
 
 export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
   meeting,

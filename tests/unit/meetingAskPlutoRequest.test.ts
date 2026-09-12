@@ -34,6 +34,35 @@ describe('meeting Ask Pluto request validation', () => {
     });
   });
 
+  it('accepts bounded evidence hints and rejects oversized hints', () => {
+    expect(
+      parseMeetingAskPlutoRequest({
+        ...validLiveRequest(),
+        turns: [
+          {
+            role: 'assistant',
+            content: 'The rollout risk is timing.',
+            evidenceHints: ['Chris said the timeline is not confirmed.'],
+          },
+        ],
+      }).ok,
+    ).toBe(true);
+    expect(
+      parseMeetingAskPlutoRequest({
+        ...validLiveRequest(),
+        turns: [
+          {
+            role: 'assistant',
+            content: 'The rollout risk is timing.',
+            evidenceHints: [
+              'x'.repeat(MEETING_ASK_PLUTO_LIMITS.evidenceHintChars + 1),
+            ],
+          },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
   it('rejects a malformed optional live meeting ID', () => {
     expect(
       parseMeetingAskPlutoRequest({

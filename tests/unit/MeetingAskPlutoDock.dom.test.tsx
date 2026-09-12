@@ -13,6 +13,7 @@ import type {
   MeetingAskPlutoLiveContext,
   MeetingAskPlutoResponse,
 } from '../../src/types/askPluto';
+import { MEETING_ASK_PLUTO_LIMITS } from '../../src/utils/meetingAskPlutoRequest';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1040,9 +1041,66 @@ describe('MeetingAskPlutoDock', () => {
           role: 'assistant',
           content: 'The team decided to use GraphQL for the API layer.',
           citationIds: ['citation-1'],
+          evidenceHints: ['We decided to use GraphQL.'],
         },
       ],
     });
+
+    await act(async () => root.unmount());
+  });
+
+  it('bounds long conversation history before crossing IPC', async () => {
+    const root = createRoot(container);
+    const conversation: MeetingAskPlutoConversationMessage[] = Array.from(
+      { length: 8 },
+      (_, index) =>
+        index % 2 === 0
+          ? {
+              id: `user-${index}`,
+              role: 'user' as const,
+              content: `question-${index}`,
+            }
+          : {
+              id: `assistant-${index}`,
+              role: 'assistant' as const,
+              content: `answer-${index}`,
+              packet: response,
+            },
+    );
+
+    await act(async () => {
+      root.render(
+        <MeetingAskPlutoDock
+          meeting={makeMeeting()}
+          conversation={conversation}
+          onConversationChange={() => {}}
+          onOpenMeeting={() => {}}
+        />,
+      );
+      await flushPromises();
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Ask about this meeting"]',
+    );
+    await typeInto(input!, 'Why?');
+    await act(async () => {
+      input!.form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await flushPromises();
+    });
+
+    const request = invoke.mock.calls
+      .filter(([channel]) => channel === 'intelligence:meeting-chat')
+      .at(-1)?.[1];
+    expect(request.turns).toHaveLength(MEETING_ASK_PLUTO_LIMITS.turns);
+    expect(request.turns[0]).toMatchObject({ content: 'question-2' });
+    expect(request.turns.at(-1)).toMatchObject({
+      content: 'answer-7',
+      evidenceHints: ['We decided to use GraphQL.'],
+    });
+    expect(request.turns[1]).not.toHaveProperty('evidenceHints');
 
     await act(async () => root.unmount());
   });

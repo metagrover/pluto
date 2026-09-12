@@ -10,6 +10,7 @@ import type { TrustStatus } from '../../src/utils/trustStatus';
 import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
+import type { MeetingAskPlutoConversationResolution } from './meetingAskPlutoConversation';
 import {
   buildMeetingNotesEvidenceDocument,
   resolveSavedMeetingEvidencePolicy,
@@ -168,6 +169,14 @@ export const normalizeMeetingAskPlutoTurns = (
       content: turn.content.trim().slice(0, MEETING_ASK_PLUTO_TURN_CHAR_LIMIT),
       ...(turn.citationIds?.length
         ? { citationIds: turn.citationIds.slice(0, 8) }
+        : {}),
+      ...(turn.evidenceHints?.length
+        ? {
+            evidenceHints: turn.evidenceHints
+              .filter((hint) => hint.trim())
+              .slice(0, 4)
+              .map((hint) => hint.trim().slice(0, 500)),
+          }
         : {}),
     }));
 };
@@ -609,11 +618,13 @@ export const buildMeetingAskPlutoPrompt = ({
   context,
   turns,
   assistanceRoute = { mode: 'general' },
+  conversation,
 }: {
   query: string;
   context: MeetingAskPlutoContext;
   turns?: MeetingAskPlutoTurn[];
   assistanceRoute?: MeetingAskPlutoAssistanceRoute;
+  conversation?: MeetingAskPlutoConversationResolution;
 }) => {
   const evidence = context.evidenceItems
     .map(
@@ -652,6 +663,12 @@ export const buildMeetingAskPlutoPrompt = ({
         : assistanceRoute.mode === 'clarification'
           ? "Assistance mode: Understanding check\nSeparate explicit confusion or clarification requests from your inference. Describe the exchange and evidence; do not claim to know a speaker's internal understanding. If the transcript only suggests uncertainty, say so."
           : 'Assistance mode: General conversation';
+  const conversationPolicy =
+    conversation?.relation === 'follow_up'
+      ? "Conversation relationship: Follow-up to the prior exchange. Resolve references in the user's question from Recent turns, but verify every factual claim against Meeting evidence."
+      : conversation?.relation === 'ambiguous'
+        ? 'Conversation relationship: Potentially ambiguous follow-up. Use Recent turns to identify the likely referent. If multiple referents would materially change the answer, ask one concise clarification instead of guessing.'
+        : 'Conversation relationship: New topic. Do not let the prior answer override the current question.';
 
   return `You are Pluto, answering inside a single meeting note.
 
@@ -671,6 +688,7 @@ Rules:
 9. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
 
 ${assistancePolicy}
+${conversationPolicy}
 
 Recent turns:
 ${recentTurns || 'None'}

@@ -28,6 +28,7 @@ export interface MeetingAskPlutoTurn {
   role: 'user' | 'assistant';
   content: string;
   citationIds?: string[];
+  evidenceHints?: string[];
 }
 
 export interface MeetingAskPlutoRequest {

@@ -692,4 +692,37 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('[Evidence 1]');
     expect(prompt).toContain('Recent turns');
   });
+
+  it('marks a resolved follow-up while keeping prior answers non-authoritative', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What should I do about the timeline risk?',
+      entities: [],
+      attentionItems: [],
+    });
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'What should I do about that?',
+      context,
+      turns: [
+        { role: 'user', content: 'What is the main risk?' },
+        {
+          role: 'assistant',
+          content: 'The timeline is not confirmed.',
+        },
+      ],
+      conversation: {
+        relation: 'follow_up',
+        retrievalQuery: 'What should I do about the timeline risk?',
+        routingQuery: 'What is the main risk?\nWhat should I do about that?',
+        priorQuestion: 'What is the main risk?',
+        priorEvidenceHintCount: 1,
+      },
+    });
+
+    expect(prompt).toContain('Conversation relationship: Follow-up');
+    expect(prompt).toContain(
+      'verify every factual claim against Meeting evidence',
+    );
+    expect(prompt).toContain('Question:\nWhat should I do about that?');
+  });
 });

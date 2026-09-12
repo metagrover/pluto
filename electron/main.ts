@@ -475,6 +475,7 @@ import {
   normalizeMeetingAskPlutoTurns,
 } from './intelligence/meetingAskPluto';
 import { routeMeetingAskPlutoAssistance } from './intelligence/meetingAskPlutoAssistance';
+import { resolveMeetingAskPlutoConversation } from './intelligence/meetingAskPlutoConversation';
 import { createMeetingAskPlutoVisibleStream } from './intelligence/meetingAskPlutoStream';
 import { createMeetingContextProducer } from './intelligence/meetingContextProducer';
 import { generateMid } from './intelligence/midGenerator';
@@ -5390,6 +5391,14 @@ app.whenReady().then(async () => {
       const request = parsedRequest.request;
       const query = request.query.trim();
       const requestId = request.requestId;
+      const turns = normalizeMeetingAskPlutoTurns(request.turns);
+      const conversationResolutionStartedAt = performance.now();
+      const conversation = resolveMeetingAskPlutoConversation({
+        query,
+        turns,
+      });
+      const conversationResolutionMs =
+        performance.now() - conversationResolutionStartedAt;
 
       if (
         request.scope.type === 'live_meeting' &&
@@ -5463,7 +5472,7 @@ app.whenReady().then(async () => {
                 }
                 const selection = liveMeetingContextIndex.select(
                   activeMeeting.meetingId,
-                  query,
+                  conversation.retrievalQuery,
                 );
                 console.info('[Pluto][Live context] selected', {
                   meetingId: activeMeeting.meetingId,
@@ -5512,7 +5521,7 @@ app.whenReady().then(async () => {
                 });
                 return buildMeetingAskPlutoContext({
                   meeting,
-                  query,
+                  query: conversation.retrievalQuery,
                   entities,
                   attentionItems,
                 });
@@ -5523,6 +5532,9 @@ app.whenReady().then(async () => {
           status: context.status,
           trustStatus: context.trustStatus,
           evidenceItems: context.evidenceItems.length,
+          conversationRelation: conversation.relation,
+          conversationResolutionMs: Number(conversationResolutionMs.toFixed(2)),
+          reusedEvidenceHints: conversation.priorEvidenceHintCount,
           elapsedMs: Date.now() - startTime,
         });
 
@@ -5552,13 +5564,18 @@ app.whenReady().then(async () => {
 
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
-        const turns = normalizeMeetingAskPlutoTurns(request.turns);
-        const assistanceRoute = routeMeetingAskPlutoAssistance(query);
+        const directAssistanceRoute = routeMeetingAskPlutoAssistance(query);
+        const assistanceRoute =
+          conversation.relation !== 'new_topic' &&
+          directAssistanceRoute.mode === 'general'
+            ? routeMeetingAskPlutoAssistance(conversation.routingQuery)
+            : directAssistanceRoute;
         const prompt = buildMeetingAskPlutoPrompt({
           query,
           context,
           turns,
           assistanceRoute,
+          conversation,
         });
         console.info('[Pluto][Ask Pluto][main] provider-request', {
           requestId,
@@ -5578,6 +5595,7 @@ app.whenReady().then(async () => {
           elapsedMs: Date.now() - startTime,
         });
         let answerRaw = '';
+        let firstTokenAt: number | undefined;
         const visibleStream = createMeetingAskPlutoVisibleStream((delta) => {
           if (event.sender.isDestroyed()) return;
           event.sender.send('intelligence:meeting-chat:delta', {
@@ -5589,7 +5607,11 @@ app.whenReady().then(async () => {
           answerRaw = await provider.answerAskPluto(prompt, {
             signal: controller.signal,
             live: context.scope.type === 'live_meeting',
-            onToken: (delta) => visibleStream.push(delta),
+            onToken: (delta) => {
+              if (delta && firstTokenAt === undefined)
+                firstTokenAt = Date.now();
+              visibleStream.push(delta);
+            },
           });
         } catch (providerError) {
           if (controller.signal.aborted) throw providerError;
@@ -5618,6 +5640,7 @@ app.whenReady().then(async () => {
         console.info('[Pluto][Ask Pluto][main] provider-response', {
           requestId,
           answerChars: answerRaw.length,
+          firstTokenMs: firstTokenAt ? firstTokenAt - startTime : null,
           elapsedMs: Date.now() - startTime,
         });
 
