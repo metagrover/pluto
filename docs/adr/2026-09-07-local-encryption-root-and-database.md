@@ -37,11 +37,14 @@ Pluto requires application-layer encryption whose root key access is mediated by
      - Implements crash-safe, resumable migration state machine with durable fsync and deep structural verification, and non-destructive recovery overlay when Keychain access is denied or locked.
    - **PR C (Encrypted Recording Path - Completed):**
      - Implements schema-v4 encrypted capture, bounded repair, playback, stitching, and scoped native decryption while leaving new schema-v4 capture creation disabled.
-   - **PR D (Performance Hardening - Current):**
+   - **PR D (Performance Hardening - Completed):**
      - Stores materialized mic, System, and mixed recordings as an encrypted index plus independently authenticated 60-second PCM16 segments. Electron and Swift readers decrypt only requested segments; native ASR, vocabulary rescoring, diarization, and channel-energy analysis consume the same random-access source.
      - Enforces crypto, durable capture, representative database, startup, and one-hour RSS budgets through `benchmark:encrypted-storage`; committed raw evidence is architecture-specific and does not replace the signed, slowest-supported-Mac or frozen real-meeting acceptance required before rollout.
-   - **PR E and F (Upcoming):**
-     - Add user-configurable storage quotas and staged rollout, including signed canary and historical migration acceptance.
+   - **PR E (Storage Budget and Cleanup - Current):**
+     - Adds a user-configurable 2 GB, 10 GB (default), 20 GB, or unlimited audio budget. A serialized sweeper removes the oldest eligible audio while preserving transcripts, notes, identity consent, and wrapped keys whenever deletion is incomplete.
+     - Eligibility requires finalized, validated meetings with no active capture, recovery, retry, or analysis work. Manual per-meeting deletion uses the same fail-closed path and requires capability-loss confirmation.
+   - **PR F (Upcoming):**
+     - Adds staged rollout, including signed canary and historical migration acceptance.
 
 ## Alternatives Considered
 
@@ -55,4 +58,5 @@ Pluto requires application-layer encryption whose root key access is mediated by
 - PR B introduced `better-sqlite3-multiple-ciphers`, database migration, and the startup recovery overlay.
 - Audio and transcript artifacts in journal schema 4 are authenticated and encrypted at rest.
 - Materialized encrypted audio has a one-segment random-access working set instead of one process-sized plaintext float array. The index and every segment remain independently authenticated PENC artifacts.
+- Retained audio is governed by a user-selected size budget rather than a fixed age. Cleanup is oldest-first among durably eligible meetings and never treats time alone as proof that deletion is safe.
 - New schema-v4 capture creation remains disabled until the rollout gate; read and recovery compatibility land ahead of activation.

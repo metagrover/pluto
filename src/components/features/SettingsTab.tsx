@@ -73,6 +73,19 @@ const settingsTabs = [
 
 export type SettingsTabId = (typeof settingsTabs)[number]['id'];
 
+type AudioRetentionSnapshot = {
+  budgetGb: 2 | 10 | 20 | null;
+  retainedBytes: number;
+  overBudget: boolean;
+};
+
+const formatStorageBytes = (bytes: number) => {
+  const gib = bytes / 1024 ** 3;
+  return gib >= 0.1
+    ? `${gib.toFixed(1)} GB`
+    : `${Math.round(bytes / 1024 ** 2)} MB`;
+};
+
 const Section = ({
   title,
   children,
@@ -193,6 +206,9 @@ export const SettingsTab = ({
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
+  const [audioRetention, setAudioRetention] =
+    useState<AudioRetentionSnapshot | null>(null);
+  const [audioRetentionError, setAudioRetentionError] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
@@ -201,6 +217,16 @@ export const SettingsTab = ({
       .then((value) => {
         if (typeof value === 'string') setOllamaFastModel(value);
       });
+  }, []);
+
+  useEffect(() => {
+    void window.ipcRenderer
+      .invoke('AUDIO_RETENTION_GET_STATUS')
+      .then((snapshot: AudioRetentionSnapshot) => {
+        setAudioRetention(snapshot);
+        setAudioRetentionError(false);
+      })
+      .catch(() => setAudioRetentionError(true));
   }, []);
 
   useEffect(() => {
@@ -474,6 +500,41 @@ export const SettingsTab = ({
                   const val = value as '3' | '5' | '10' | 'disabled';
                   setSilenceAutoStopDuration?.(val);
                   persistSetting('silence_auto_stop_duration', val);
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Recording storage limit"
+              helper={
+                audioRetentionError
+                  ? 'Storage usage is temporarily unavailable. Your recordings were not changed.'
+                  : `${audioRetention ? `${formatStorageBytes(audioRetention.retainedBytes)} currently used. ` : ''}When the limit is exceeded, Pluto removes the oldest eligible recording audio first. Transcripts and notes stay available.`
+              }
+              actionControl={false}
+            >
+              <SearchSelect
+                ariaLabel="Recording storage limit"
+                value={
+                  audioRetention?.budgetGb === null
+                    ? 'unlimited'
+                    : String(audioRetention?.budgetGb ?? 10)
+                }
+                searchable={false}
+                options={[
+                  { value: '2', label: '2 GB' },
+                  { value: '10', label: '10 GB (Default)' },
+                  { value: '20', label: '20 GB' },
+                  { value: 'unlimited', label: 'Unlimited' },
+                ]}
+                onValueChange={(value) => {
+                  setAudioRetentionError(false);
+                  void window.ipcRenderer
+                    .invoke('AUDIO_RETENTION_SET_BUDGET', value)
+                    .then((snapshot: AudioRetentionSnapshot) =>
+                      setAudioRetention(snapshot),
+                    )
+                    .catch(() => setAudioRetentionError(true));
                 }}
               />
             </SettingsRow>

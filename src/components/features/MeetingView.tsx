@@ -10,6 +10,7 @@ import {
   Sparkles,
   Undo2,
   Users,
+  VolumeX,
   X,
 } from 'lucide-react';
 import {
@@ -696,6 +697,7 @@ export const MeetingView = ({
   if (!selectedMeeting) return null;
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
   const [isRestoringNotes, setIsRestoringNotes] = useState(false);
+  const [isDeletingAudio, setIsDeletingAudio] = useState(false);
   const [notesTemplate, setNotesTemplate] =
     useState<MeetingNotesTemplate>('auto');
   const [regenerateNotesError, setRegenerateNotesError] =
@@ -717,6 +719,38 @@ export const MeetingView = ({
     meetingId: string;
     suggestions: Record<string, VoiceMatchSuggestion>;
   } | null>(null);
+
+  const deleteRecordingAudio = async () => {
+    if (
+      !window.confirm(
+        'Permanently delete this meeting’s recording audio? You will no longer be able to replay or retranscribe it, create new speaker-enrollment evidence from it, or use audio-based repair. The transcript, notes, and identity consent records will remain.',
+      )
+    ) {
+      return;
+    }
+    setIsDeletingAudio(true);
+    try {
+      const result = (await window.ipcRenderer.invoke(
+        'AUDIO_RETENTION_DELETE_MEETING',
+        selectedMeeting.id,
+      )) as { status: 'deleted' | 'blocked' | 'failed'; reason?: string };
+      if (result.status !== 'deleted') {
+        const message =
+          result.status === 'blocked'
+            ? 'Audio cannot be deleted while recording, transcript recovery, or meeting analysis is still in progress.'
+            : 'Pluto could not safely delete every audio artifact. Nothing was marked deleted, and the encryption key was retained.';
+        window.alert(message);
+        return;
+      }
+      await fetchMeetings();
+    } catch {
+      window.alert(
+        'Pluto could not safely delete this recording audio. Please try again.',
+      );
+    } finally {
+      setIsDeletingAudio(false);
+    }
+  };
 
   const calendarAttendeeNames = useMemo(
     () =>
@@ -1410,6 +1444,32 @@ export const MeetingView = ({
                   {selectedMeeting.finalization_status !==
                   'recovery_required' ? (
                     <div className="meeting-document-menu__section meeting-document-menu__section--danger">
+                      {selectedMeeting.audio_path ||
+                      selectedMeeting.system_audio_path ||
+                      selectedMeeting.mixed_audio_path ||
+                      selectedMeeting.has_audio ? (
+                        <button
+                          type="button"
+                          onClick={() => void deleteRecordingAudio()}
+                          disabled={isDeletingAudio}
+                          className="meeting-toolbar-button meeting-toolbar-button--danger disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Delete recording audio"
+                        >
+                          {isDeletingAudio ? (
+                            <Loader2
+                              aria-hidden="true"
+                              className="h-4 w-4 animate-spin"
+                            />
+                          ) : (
+                            <VolumeX aria-hidden="true" className="h-4 w-4" />
+                          )}
+                          <span>
+                            {isDeletingAudio
+                              ? 'Deleting audio…'
+                              : 'Delete recording audio'}
+                          </span>
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => handleDeleteMeeting(selectedMeeting.id)}

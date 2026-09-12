@@ -1205,6 +1205,55 @@ describe('MeetingView progressive reveal', () => {
     ]);
   });
 
+  it('confirms capability loss before deleting only the recording audio', async () => {
+    const fetchMeetings = vi.fn(async () => undefined);
+    const invoke = vi.fn(async (channel: string) =>
+      channel === 'AUDIO_RETENTION_DELETE_MEETING'
+        ? { status: 'deleted', deletedBytes: 1024 }
+        : null,
+    );
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+    const confirm = vi.fn(() => true);
+    Object.defineProperty(window, 'confirm', {
+      configurable: true,
+      value: confirm,
+    });
+    await act(async () =>
+      root.render(
+        <MeetingView
+          selectedMeeting={analyzedMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={analyzedMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={fetchMeetings}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      ),
+    );
+    const button = Array.from(container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === 'Delete recording audio',
+    )!;
+    await act(async () => button.click());
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining('no longer be able to replay or retranscribe'),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'AUDIO_RETENTION_DELETE_MEETING',
+      analyzedMeeting.id,
+    );
+    expect(fetchMeetings).toHaveBeenCalledOnce();
+  });
+
   it('keeps existing notes visible and offers recovery when regeneration fails', async () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'GENERATE_MEETING_NOTES')

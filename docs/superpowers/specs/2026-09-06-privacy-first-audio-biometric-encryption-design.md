@@ -328,15 +328,15 @@ preflight → wal_checkpointed → source_closed → encrypted_exported
 
 **Outcome:** users can minimize retained audio without silently losing recovery capabilities.
 
-1. Add `audioRetentionPolicy` with explicit values:
-   - `after_finalization`
-   - `7_days` (default)
-   - `30_days`
-   - `keep_indefinitely`
-2. Define eligibility from durable evidence, not elapsed time alone.
+1. Add a user-configurable audio storage budget with explicit values:
+   - `2 GB`
+   - `10 GB` (default)
+   - `20 GB`
+   - `unlimited`
+2. When retained audio exceeds the selected budget, delete the oldest eligible meeting audio first until usage is within budget. Define eligibility from durable evidence, not age alone.
    - Exclude active, provisional, recovery-required, incomplete, retrying, enrollment-analysis, and historical-migration meetings.
-   - `after_finalization` becomes eligible only after canonical final transcript commit and all in-flight speaker evidence work ends.
-3. Before saving `after_finalization`, explain that deleting audio disables retranscription, speaker sample playback, new enrollment evidence, and audio-based repair for that meeting.
+   - Audio becomes eligible only after canonical final transcript commit and all in-flight speaker evidence work ends.
+3. Explain that automatic cleanup and manual deletion disable retranscription, speaker sample playback, new enrollment evidence, and audio-based repair for affected meetings. Transcripts, notes, and identity consent records remain.
 4. Run cleanup through a serialized, idempotent sweeper. Delete the meeting's wrapped audio key only after all managed artifacts are deleted or positively absent; otherwise retain the key and retry.
 5. Record content-free retention status and last failure in the encrypted database. Do not log meeting titles, paths, transcripts, embeddings, or keys.
 6. Provide per-meeting “Delete audio now” and retention status. Destructive deletion requires explicit confirmation and does not delete transcripts, notes, or voice-profile consent records.

@@ -33,6 +33,11 @@ import type {
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
+  AUDIO_STORAGE_BUDGET_SETTING,
+  createAudioRetentionManager,
+  parseAudioStorageBudgetGb,
+} from './audioRetention';
+import {
   CalendarHelperClient,
   resolveCalendarHelperPath,
 } from './calendar/client';
@@ -967,6 +972,16 @@ app.whenReady().then(async () => {
     });
   };
   db.recoverInterruptedMeetingAnalysisRuns();
+  const audioRetention = createAudioRetentionManager({
+    rootDir: getMeetingArtifactsRootDir(),
+    sqlite: getApplicationDatabase(),
+    listMeetings: () => db.getMeetings() as db.PersistedMeeting[],
+    getSetting: db.getSetting,
+    audioKeyStore: getAudioKeyStore(),
+    isMeetingActive: (meetingId) =>
+      activeTranscriptionMeetings.has(meetingId) ||
+      activeAnalysisGenerations.has(meetingId),
+  });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
     getPolicy: () => ({
       systemIdleSeconds: powerMonitor.getSystemIdleTime(),
@@ -1154,80 +1169,99 @@ app.whenReady().then(async () => {
   }
   for (const channel of SPEAKER_VOICE_CHANNELS) {
     ipcMain.handle(channel, async (_event, payload) => {
-      return await handleSpeakerVoiceRequest(channel, payload, {
-        getMeeting: (meetingId) =>
-          (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
-        fileExists: (inputPath) => fs.existsSync(inputPath),
-        createTemporaryPath: () =>
-          path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
-        sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
-          await new Promise<boolean>((resolve) => {
-            ffmpeg(inputPath)
-              .setStartTime(startSec)
-              .setDuration(durationSec)
-              .audioChannels(1)
-              .audioFrequency(16000)
-              .toFormat('wav')
-              .on('end', () => resolve(true))
-              .on('error', () => resolve(false))
-              .save(outputPath);
-          }),
-        readFile: async (outputPath) => await fs.promises.readFile(outputPath),
-        removeFile: async (outputPath) => {
-          await fs.promises.unlink(outputPath);
-        },
-        readEncryptedSlice: readEncryptedMeetingSlice,
-        buildEnrollmentCandidate: async (input) => {
-          if (!parakeetFinalClient) return null;
-          const meetingSignal = getAbortSignalForMeeting(input.meetingId);
-          const combinedSignal = input.signal
-            ? AbortSignal.any([meetingSignal, input.signal])
-            : meetingSignal;
-          beginTranscriptionWork();
-          beginMeetingTranscription(input.meetingId);
-          try {
-            return await buildSpeakerEnrollmentCandidate(input, {
-              getMeeting: (meetingId) =>
-                (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ??
-                null,
-              fileExists: (inputPath) => fs.existsSync(inputPath),
-              createWorkDir: () =>
-                fs.mkdtempSync(
-                  path.join(getMeetingArtifactsRootDir(), '.speaker-profile-'),
-                ),
-              removeWorkDir: async (workDir) => {
-                await fs.promises.rm(workDir, { recursive: true, force: true });
-              },
-              createAudio: createSpeakerEnrollmentAudio,
-              signal: combinedSignal,
-              analyze: async (request) => {
-                const infStart = performance.now();
-                try {
-                  return await parakeetFinalClient!.speakerEvidence({
-                    ...request,
-                    signal: combinedSignal,
+      const meetingId =
+        payload && typeof payload === 'object' && 'meetingId' in payload
+          ? String(payload.meetingId || '')
+          : '';
+      beginMeetingTranscription(meetingId || null);
+      try {
+        return await handleSpeakerVoiceRequest(channel, payload, {
+          getMeeting: (id) =>
+            (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null,
+          fileExists: (inputPath) => fs.existsSync(inputPath),
+          createTemporaryPath: () =>
+            path.join(
+              app.getPath('temp'),
+              `speaker-sample-${randomUUID()}.wav`,
+            ),
+          sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+            await new Promise<boolean>((resolve) => {
+              ffmpeg(inputPath)
+                .setStartTime(startSec)
+                .setDuration(durationSec)
+                .audioChannels(1)
+                .audioFrequency(16000)
+                .toFormat('wav')
+                .on('end', () => resolve(true))
+                .on('error', () => resolve(false))
+                .save(outputPath);
+            }),
+          readFile: async (outputPath) =>
+            await fs.promises.readFile(outputPath),
+          removeFile: async (outputPath) => {
+            await fs.promises.unlink(outputPath);
+          },
+          readEncryptedSlice: readEncryptedMeetingSlice,
+          buildEnrollmentCandidate: async (input) => {
+            if (!parakeetFinalClient) return null;
+            const meetingSignal = getAbortSignalForMeeting(input.meetingId);
+            const combinedSignal = input.signal
+              ? AbortSignal.any([meetingSignal, input.signal])
+              : meetingSignal;
+            beginTranscriptionWork();
+            beginMeetingTranscription(input.meetingId);
+            try {
+              return await buildSpeakerEnrollmentCandidate(input, {
+                getMeeting: (id) =>
+                  (db.getMeeting(id) as db.PersistedMeeting | undefined) ??
+                  null,
+                fileExists: (inputPath) => fs.existsSync(inputPath),
+                createWorkDir: () =>
+                  fs.mkdtempSync(
+                    path.join(
+                      getMeetingArtifactsRootDir(),
+                      '.speaker-profile-',
+                    ),
+                  ),
+                removeWorkDir: async (workDir) => {
+                  await fs.promises.rm(workDir, {
+                    recursive: true,
+                    force: true,
                   });
-                } finally {
-                  const infDurationMs = Math.round(
-                    performance.now() - infStart,
-                  );
-                  console.log(
-                    '[Pluto][SpeakerVoice] parakeet inference completed',
-                    {
-                      meetingId: input.meetingId,
-                      speaker: input.speaker,
-                      durationMs: infDurationMs,
-                    },
-                  );
-                }
-              },
-            });
-          } finally {
-            endMeetingTranscription(input.meetingId);
-            endTranscriptionWork();
-          }
-        },
-      });
+                },
+                createAudio: createSpeakerEnrollmentAudio,
+                signal: combinedSignal,
+                analyze: async (request) => {
+                  const infStart = performance.now();
+                  try {
+                    return await parakeetFinalClient!.speakerEvidence({
+                      ...request,
+                      signal: combinedSignal,
+                    });
+                  } finally {
+                    const infDurationMs = Math.round(
+                      performance.now() - infStart,
+                    );
+                    console.log(
+                      '[Pluto][SpeakerVoice] parakeet inference completed',
+                      {
+                        meetingId: input.meetingId,
+                        speaker: input.speaker,
+                        durationMs: infDurationMs,
+                      },
+                    );
+                  }
+                },
+              });
+            } finally {
+              endMeetingTranscription(input.meetingId);
+              endTranscriptionWork();
+            }
+          },
+        });
+      } finally {
+        endMeetingTranscription(meetingId || null);
+      }
     });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
@@ -2578,32 +2612,38 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE', async (_event, request) =>
-    loadSpeakerSample(request, {
-      getMeeting: (meetingId) =>
-        (db.getMeeting(meetingId) as db.PersistedMeeting | undefined) ?? null,
-      fileExists: (inputPath) => fs.existsSync(inputPath),
-      createTemporaryPath: () =>
-        path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
-      sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
-        await new Promise<boolean>((resolve) => {
-          ffmpeg(inputPath)
-            .setStartTime(startSec)
-            .setDuration(durationSec)
-            .audioChannels(1)
-            .audioFrequency(16000)
-            .toFormat('wav')
-            .on('end', () => resolve(true))
-            .on('error', () => resolve(false))
-            .save(outputPath);
-        }),
-      readFile: async (outputPath) => await fs.promises.readFile(outputPath),
-      removeFile: async (outputPath) => {
-        await fs.promises.unlink(outputPath);
-      },
-      readEncryptedSlice: readEncryptedMeetingSlice,
-    }),
-  );
+  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE', async (_event, request) => {
+    const meetingId = String(request?.meetingId || '');
+    beginMeetingTranscription(meetingId || null);
+    try {
+      return await loadSpeakerSample(request, {
+        getMeeting: (id) =>
+          (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null,
+        fileExists: (inputPath) => fs.existsSync(inputPath),
+        createTemporaryPath: () =>
+          path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
+        sliceWav: async ({ inputPath, outputPath, startSec, durationSec }) =>
+          await new Promise<boolean>((resolve) => {
+            ffmpeg(inputPath)
+              .setStartTime(startSec)
+              .setDuration(durationSec)
+              .audioChannels(1)
+              .audioFrequency(16000)
+              .toFormat('wav')
+              .on('end', () => resolve(true))
+              .on('error', () => resolve(false))
+              .save(outputPath);
+          }),
+        readFile: async (outputPath) => await fs.promises.readFile(outputPath),
+        removeFile: async (outputPath) => {
+          await fs.promises.unlink(outputPath);
+        },
+        readEncryptedSlice: readEncryptedMeetingSlice,
+      });
+    } finally {
+      endMeetingTranscription(meetingId || null);
+    }
+  });
 
   const mixWavSources = async ({
     inputPaths,
@@ -3967,6 +4007,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('SET_SETTING', (_event, { key, value }) =>
     db.setSetting(key, value),
   );
+  ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
+  ipcMain.handle('AUDIO_RETENTION_SET_BUDGET', async (_event, value) => {
+    const parsed = parseAudioStorageBudgetGb(value);
+    const normalized = parsed === null ? 'unlimited' : String(parsed);
+    if (String(value) !== normalized) {
+      throw new Error('invalid_audio_storage_budget');
+    }
+    db.setSetting(AUDIO_STORAGE_BUDGET_SETTING, normalized);
+    return await audioRetention.sweep();
+  });
+  ipcMain.handle('AUDIO_RETENTION_DELETE_MEETING', async (_event, id) => {
+    if (typeof id !== 'string' && typeof id !== 'number') {
+      throw new Error('invalid_audio_retention_meeting');
+    }
+    const meeting = db.getMeeting(id) as db.PersistedMeeting | undefined;
+    if (!meeting) throw new Error('meeting_not_found');
+    return await audioRetention.deleteMeetingAudio(meeting);
+  });
 
   // LLM handlers
   const emptyValueSignals = (): InternalSignalDocument => ({
@@ -5916,6 +5974,23 @@ app.whenReady().then(async () => {
       error,
     );
   }
+
+  const runAutomaticAudioRetention = () => {
+    const foregroundWorkActive = Object.values(
+      knowledgeSynthesisPause.snapshot(),
+    ).some((count) => Number(count) > 0);
+    if (foregroundWorkActive) return;
+    void audioRetention.sweep().catch(() => {
+      console.warn('[Pluto] Audio retention sweep failed');
+    });
+  };
+  const audioRetentionTimer = setTimeout(runAutomaticAudioRetention, 30_000);
+  audioRetentionTimer.unref();
+  const audioRetentionInterval = setInterval(
+    runAutomaticAudioRetention,
+    6 * 60 * 60_000,
+  );
+  audioRetentionInterval.unref();
 
   // Create Tray Icon
   const dockIconPath = path.join(process.env.VITE_PUBLIC, 'dock-icon.png');
