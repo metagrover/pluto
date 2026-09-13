@@ -954,6 +954,23 @@ describe('speaker voice IPC handlers', () => {
     expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
   });
 
+  it('reports and schedules pending enrollment without running voice analysis', async () => {
+    const scheduleCandidateBackfill = vi.fn();
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_PROFILES',
+      { personId },
+      { allowCandidateBuild: false, scheduleCandidateBackfill },
+    )) as {
+      profiles: unknown[];
+      reconciliation: Record<string, string>;
+    };
+
+    expect(result.profiles).toEqual([]);
+    expect(result.reconciliation[personId]).toBe('queued');
+    expect(scheduleCandidateBackfill).toHaveBeenCalledWith(meetingId);
+  });
+
   it('replaces legacy evidence from the same source instead of double-counting it', async () => {
     const legacyCandidate = {
       ...dummyCandidate,

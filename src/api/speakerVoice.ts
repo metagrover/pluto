@@ -97,6 +97,7 @@ export async function getSpeakerVoiceProfiles(): Promise<ClientVoiceProfile[]> {
 export type VoiceProfileReconciliationStatus =
   | 'enrolled'
   | 'already_enrolled'
+  | 'queued'
   | 'evidence_unavailable'
   | 'failed'
   | 'opted_out'
@@ -130,6 +131,7 @@ export async function getSpeakerVoiceProfileOverview(
     reconciliationStatus:
       status === 'enrolled' ||
       status === 'already_enrolled' ||
+      status === 'queued' ||
       status === 'evidence_unavailable' ||
       status === 'failed' ||
       status === 'opted_out' ||

@@ -300,4 +300,29 @@ describe('PeopleTab Voice Profile integration', () => {
       'No voice profile enrolled for this person.',
     );
   });
+
+  it('shows when voice enrollment is waiting for idle processing', async () => {
+    vi.useFakeTimers();
+    voiceApi.getSpeakerVoiceProfileOverview.mockResolvedValueOnce({
+      profiles: [],
+      optedOutPersonIds: [],
+      reconciliationStatus: 'queued',
+    });
+
+    await renderTab();
+
+    expect(host.textContent).toContain(
+      'Voice enrollment pending. Pluto will finish it when your Mac is idle.',
+    );
+    expect(host.textContent).not.toContain(
+      'No voice profile enrolled for this person.',
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(host.textContent).toContain('Remembered voice (Active)');
+    expect(host.textContent).not.toContain('Voice enrollment pending.');
+    vi.useRealTimers();
+  });
 });

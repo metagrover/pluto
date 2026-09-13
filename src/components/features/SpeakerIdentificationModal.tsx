@@ -97,6 +97,9 @@ export const SpeakerIdentificationModal = ({
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
   const [voiceSuggestionsLoading, setVoiceSuggestionsLoading] = useState(false);
+  const [pendingVoiceSpeakers, setPendingVoiceSpeakers] = useState<Set<string>>(
+    new Set(),
+  );
   const voiceSuggestionsPromiseRef = useRef<Promise<void> | null>(null);
   const speakerCandidatesRef = useRef<Record<string, ClientCandidateMetadata>>(
     {},
@@ -530,6 +533,11 @@ export const SpeakerIdentificationModal = ({
                 ...res.timings,
               });
             }
+            if (res?.queued && isMountedRef.current) {
+              setPendingVoiceSpeakers((current) =>
+                new Set(current).add(speaker),
+              );
+            }
             if (isMountedRef.current) {
               void loadVoiceSuggestions();
             }
@@ -748,6 +756,11 @@ export const SpeakerIdentificationModal = ({
                             ? `is ${boundPerson.name}`
                             : 'Unassigned'}
                         </span>
+                        {boundPerson && pendingVoiceSpeakers.has(speaker) ? (
+                          <p className="mt-1 text-[11px] text-pro-text-muted">
+                            Voice enrollment pending until your Mac is idle.
+                          </p>
+                        ) : null}
                       </div>
                       {boundPerson ? (
                         <button

@@ -579,6 +579,14 @@ export const PersonDossier = ({
   }, [loadVoiceProfile, releaseVoiceAudio]);
 
   useEffect(() => {
+    if (voiceReconciliationStatus !== 'queued') return;
+    const timer = window.setInterval(() => {
+      void loadVoiceProfile();
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [loadVoiceProfile, voiceReconciliationStatus]);
+
+  useEffect(() => {
     return () => {
       releaseVoiceAudio();
     };
@@ -1279,6 +1287,11 @@ export const PersonDossier = ({
               Allow voice enrollment
             </button>
           </div>
+        ) : voiceReconciliationStatus === 'queued' ? (
+          <p className="mt-4 text-sm text-pro-text-muted">
+            Voice enrollment pending. Pluto will finish it when your Mac is
+            idle.
+          </p>
         ) : voiceReconciliationStatus === 'evidence_unavailable' ? (
           <p className="mt-4 text-sm text-pro-text-muted">
             No eligible voice profile could be created from retained meeting

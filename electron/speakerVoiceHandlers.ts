@@ -106,6 +106,7 @@ const usesCurrentEnrollmentExtraction = (
 type ReconciliationOutcome =
   | 'enrolled'
   | 'already_enrolled'
+  | 'queued'
   | 'evidence_unavailable'
   | 'failed'
   | 'opted_out'
@@ -1248,14 +1249,72 @@ export async function handleSpeakerVoiceRequest(
         typeof payload?.personId === 'string' && payload.personId
           ? payload.personId
           : undefined;
-      const reconciliation =
-        deps?.allowCandidateBuild === false
-          ? new Map<string, ReconciliationOutcome>()
-          : await reconcileConfirmedSpeakerVoiceProfiles(
-              deps,
-              d,
-              requestedPersonId,
-            );
+      let reconciliation: Map<string, ReconciliationOutcome>;
+      if (deps?.allowCandidateBuild === false) {
+        reconciliation = new Map();
+        if (requestedPersonId) {
+          const canonicalPersonId = resolvePersonId(requestedPersonId, d);
+          const hasProfile = getCanonicalVoiceProfiles({ dbInstance: d }).some(
+            (profile) => profile.canonicalPersonId === canonicalPersonId,
+          );
+          if (
+            !hasProfile &&
+            !isWorkspaceOwner(canonicalPersonId, d) &&
+            !isVoiceProfileOptedOut(canonicalPersonId, d)
+          ) {
+            const bindingRows = d
+              .prepare(
+                `SELECT binding.meeting_id, binding.speaker, binding.payload,
+                        meeting.capture_journal_generation AS source_revision
+                 FROM identity_bindings binding
+                 LEFT JOIN meetings meeting ON meeting.id = binding.meeting_id
+                 WHERE json_valid(binding.payload)
+                   AND json_extract(binding.payload, '$.source') = 'user'
+                   AND json_extract(binding.payload, '$.individual') = 1
+                   AND json_type(binding.payload, '$.personId') = 'text'
+                 ORDER BY datetime(COALESCE(meeting.started_at, meeting.created_at)) DESC`,
+              )
+              .all() as Array<{
+              meeting_id: string;
+              speaker: string;
+              payload: string;
+              source_revision: string | null;
+            }>;
+            const pendingBinding = bindingRows.find((row) => {
+              const binding = JSON.parse(row.payload) as { personId?: unknown };
+              return (
+                typeof binding.personId === 'string' &&
+                resolvePersonId(binding.personId, d) === canonicalPersonId
+              );
+            });
+            if (pendingBinding?.source_revision) {
+              const previousAttempt = getVoiceCandidateAttempt(
+                {
+                  meetingId: pendingBinding.meeting_id,
+                  speaker: pendingBinding.speaker,
+                  sourceRevision: pendingBinding.source_revision,
+                  extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                },
+                d,
+              );
+              if (previousAttempt?.status === 'abstained') {
+                reconciliation.set(canonicalPersonId, 'evidence_unavailable');
+              } else if (previousAttempt?.status === 'retryable_failure') {
+                reconciliation.set(canonicalPersonId, 'failed');
+              } else if (deps.scheduleCandidateBackfill) {
+                deps.scheduleCandidateBackfill(pendingBinding.meeting_id);
+                reconciliation.set(canonicalPersonId, 'queued');
+              }
+            }
+          }
+        }
+      } else {
+        reconciliation = await reconcileConfirmedSpeakerVoiceProfiles(
+          deps,
+          d,
+          requestedPersonId,
+        );
+      }
       const profiles = getCanonicalVoiceProfiles({ dbInstance: d });
       // Strip raw embeddings so biometric data never enters renderer IPC
       const sanitized = profiles.map((p) => ({
