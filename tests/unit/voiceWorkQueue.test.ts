@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { runWithLocalInferenceCoordinator } from '../../electron/llm/inferenceCoordinator';
 import {
   canRunVoiceWork,
   createVoiceWorkQueue,
 } from '../../electron/voiceWorkQueue';
-import { runWithLocalInferenceCoordinator } from '../../electron/llm/inferenceCoordinator';
 
 describe('voice work admission', () => {
   afterEach(() => vi.useRealTimers());

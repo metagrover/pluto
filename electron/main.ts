@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import {
   BrowserWindow,
@@ -124,6 +123,7 @@ import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
+import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 const plutoLog = createLogger('Pluto');
