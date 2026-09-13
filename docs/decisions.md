@@ -15,6 +15,12 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-12 - Admit automatic identity reconciliation only while idle
+
+- **Status:** Accepted following repeated speaker-confirmation responsiveness reports.
+- **Extends:** “Defer notes regeneration after speaker confirmation.” The separate identity reconciliation worker also requires 15 minutes of app and system idle, AC power, and nominal/fair thermals before source discovery or inference. Its existing cancellation/checkpoint path suspends work when these conditions stop holding. Binding persistence and display updates remain immediate.
+- **Evidence:** A read-only production check loaded approximately 19.6 MB across 90 meetings; source loading and serialization/hashing took approximately 273 ms. This identifies avoidable synchronous work, not proof of the entire reported multi-second hang.
+
 ## 2026-09-12 - Require available acoustic evidence for additional remote labels
 
 - **Status:** Accepted after owner review of a false extra speaker.

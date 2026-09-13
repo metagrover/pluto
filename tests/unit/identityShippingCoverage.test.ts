@@ -254,6 +254,24 @@ describe('identity shipping lifecycle coverage', () => {
     expect(discovery.mock.calls.length).toBeGreaterThan(completedReads);
   });
 
+  it('defers source discovery and inference until idle admission allows work', async () => {
+    let idle = false;
+    const discovery = vi.spyOn(db, 'getIdentityReconciliationInputs');
+    const generate = vi.fn(async () => same());
+    stop = startIdentityReconciliation({
+      generate,
+      pauseReasons: () => ({}),
+      canRun: () => idle,
+    });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(discovery).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+    idle = true;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(discovery).toHaveBeenCalled();
+    expect(db.identityStore.getStatus(meetingId)?.state).toBe('complete');
+  });
+
   it('notifies its caller after automatic publication so the renderer can refresh', async () => {
     const onChange = vi.fn();
     stop = startIdentityReconciliation({
@@ -283,6 +301,36 @@ describe('identity shipping lifecycle coverage', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(observed).toBeDefined();
     capture = 1;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(observed?.aborted).toBe(true);
+    expect(db.identityStore.getStatus(meetingId)).toMatchObject({
+      state: 'pending',
+      attempts: 0,
+    });
+    expect(db.isRetiredCommitment(candidateId)).toBe(false);
+  });
+
+  it('cancels an idle reconciliation when user activity resumes without consuming retries', async () => {
+    let idle = true;
+    let observed: AbortSignal | undefined;
+    const generate: SemanticGenerate = (_prompt, _schema, signal) => {
+      observed = signal;
+      return new Promise((_resolve, reject) =>
+        signal?.addEventListener(
+          'abort',
+          () => reject(new Error('cancelled')),
+          { once: true },
+        ),
+      );
+    };
+    stop = startIdentityReconciliation({
+      generate,
+      pauseReasons: () => ({}),
+      canRun: () => idle,
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(observed).toBeDefined();
+    idle = false;
     await vi.advanceTimersByTimeAsync(250);
     expect(observed?.aborted).toBe(true);
     expect(db.identityStore.getStatus(meetingId)).toMatchObject({

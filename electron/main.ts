@@ -430,6 +430,7 @@ import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabul
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
 import {
+  BACKGROUND_KNOWLEDGE_QUIET_MS,
   type BackgroundKnowledgeRefreshCoordinator,
   createBackgroundKnowledgeRefreshCoordinator,
 } from './backgroundKnowledgeRefresh';
@@ -1392,6 +1393,12 @@ app.whenReady().then(async () => {
     });
   }
   stopIdentityReconciliation = startIdentityReconciliation({
+    canRun: () =>
+      Date.now() - lastRendererActivityAt >= BACKGROUND_KNOWLEDGE_QUIET_MS &&
+      powerMonitor.getSystemIdleTime() * 1000 >=
+        BACKGROUND_KNOWLEDGE_QUIET_MS &&
+      !powerMonitor.isOnBatteryPower() &&
+      ['nominal', 'fair'].includes(powerMonitor.getCurrentThermalState()),
     pauseReasons: () => knowledgeSynthesisPause.snapshot(),
     onChange: () => {
       invalidateDreamingCatalog();

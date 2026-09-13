@@ -320,17 +320,21 @@ export function createIdentityReconciler(options: {
 export function startIdentityReconciliation(options: {
   generate: SemanticGenerate;
   pauseReasons: () => Record<string, number>;
+  canRun?: () => boolean;
   onChange?: () => void;
 }) {
   let controller: AbortController | null = null;
   let nextDiscovery = 0;
   const worker = createIdentityReconciler({
     ...options,
-    isPaused: () => Object.values(options.pauseReasons()).some(Boolean),
+    isPaused: () =>
+      options.canRun?.() === false ||
+      Object.values(options.pauseReasons()).some(Boolean),
   });
   const tick = () => {
     if (controller) {
       if (
+        options.canRun?.() === false ||
         Object.entries(options.pauseReasons()).some(
           ([reason, count]) => reason !== 'llm_active' && count > 0,
         )
@@ -339,6 +343,7 @@ export function startIdentityReconciliation(options: {
       return;
     }
     try {
+      if (options.canRun?.() === false) return;
       if (Object.values(options.pauseReasons()).some(Boolean)) return;
       if (Date.now() >= nextDiscovery) {
         discoverIdentityReconciliation();
