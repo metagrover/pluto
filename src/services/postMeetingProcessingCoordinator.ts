@@ -212,6 +212,106 @@ export const selectNextMeetingForFinalTranscription = (
 ): Partial<Meeting> | null =>
   meetings.find(shouldRunMeetingFinalTranscription) ?? null;
 
+export const shouldGenerateRecoveredMeetingTitle = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean => {
+  if (
+    !meeting ||
+    meeting.title?.trim().toLowerCase() !== 'recovered recording' ||
+    meeting.transcript_status !== 'validated' ||
+    !meeting.capture_journal_generation ||
+    !(meeting.transcript_json || meeting.has_transcript_text)
+  ) {
+    return false;
+  }
+  if (
+    meeting.final_transcription_policy === 'parakeet_final_v1' &&
+    meeting.final_transcription_state === 'complete' &&
+    meeting.speaker_attribution_verified === true
+  ) {
+    return true;
+  }
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+      speakerAttributionVerified?: unknown;
+    };
+    return Boolean(
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+        integrity.finalTranscription.state === 'complete' &&
+        integrity.speakerAttributionVerified === true,
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const selectNextRecoveredMeetingForTitleGeneration = (
+  meetings: Array<Partial<Meeting>>,
+  attemptedMeetingIds: ReadonlySet<string>,
+): Partial<Meeting> | null =>
+  meetings.find(
+    (meeting) =>
+      shouldGenerateRecoveredMeetingTitle(meeting) &&
+      !attemptedMeetingIds.has(String(meeting.id)),
+  ) ?? null;
+
+export const buildRecoveredMeetingTitleInput = (
+  meeting: Pick<Meeting, 'analysis_json' | 'transcript_json'>,
+  maxCharacters = 6_000,
+): string | null => {
+  try {
+    const analysis = JSON.parse(meeting.analysis_json || '{}') as {
+      overview?: unknown;
+      topics?: Array<{ title?: unknown }>;
+    };
+    const analysisText = [
+      typeof analysis.overview === 'string' ? analysis.overview : '',
+      ...(Array.isArray(analysis.topics)
+        ? analysis.topics.map((topic) =>
+            typeof topic?.title === 'string' ? topic.title : '',
+          )
+        : []),
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (analysisText) return analysisText.slice(0, maxCharacters);
+  } catch {
+    // Fall through to a bounded transcript sample.
+  }
+  try {
+    const transcript = JSON.parse(meeting.transcript_json || '{}') as {
+      segments?: Array<{ speaker?: unknown; text?: unknown }>;
+    };
+    const segments = (
+      Array.isArray(transcript.segments) ? transcript.segments : []
+    ).filter(
+      (segment) =>
+        segment &&
+        typeof segment.text === 'string' &&
+        segment.text.trim().length > 0,
+    );
+    if (segments.length === 0) return null;
+    const sampleCount = Math.min(32, segments.length);
+    const sampled = Array.from({ length: sampleCount }, (_, index) => {
+      const sourceIndex =
+        sampleCount === 1
+          ? 0
+          : Math.round((index * (segments.length - 1)) / (sampleCount - 1));
+      const segment = segments[sourceIndex];
+      const speaker =
+        typeof segment.speaker === 'string' && segment.speaker.trim()
+          ? `${segment.speaker.trim()}: `
+          : '';
+      return `${speaker}${String(segment.text).trim()}`;
+    });
+    return sampled.join('\n').slice(0, maxCharacters);
+  } catch {
+    return null;
+  }
+};
+
 export const meetingProcessingFingerprint = (
   meeting: Partial<Meeting>,
 ): string =>

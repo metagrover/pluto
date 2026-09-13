@@ -70,6 +70,7 @@ import type {
 } from './services/captureLifecycle';
 import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
 import {
+  buildRecoveredMeetingTitleInput,
   canRetryMeetingFinalTranscription,
   canRetryMeetingSpeakerLabels,
   forgetExpiredMeetingProcessingAttempts,
@@ -80,6 +81,8 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
+  selectNextRecoveredMeetingForTitleGeneration,
+  shouldGenerateRecoveredMeetingTitle,
   shouldStartMeetingFinalTranscription,
 } from './services/postMeetingProcessingCoordinator';
 import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
@@ -94,6 +97,7 @@ import {
   getCalendarRosterNames,
   isMatchedActiveCalendarResult,
 } from './utils/calendarRoster';
+import { meetingTitleNeedsGeneration } from './utils/meetingTitle';
 
 import {
   getEntity,
@@ -179,6 +183,10 @@ function App() {
   const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
     useState<string | number | null>(null);
   const autoAnalysisAttemptsRef = useRef(new Set<string>());
+  const recoveredTitleAttemptsRef = useRef(new Set<string>());
+  const [titleGenerationMeetingId, setTitleGenerationMeetingId] = useState<
+    string | number | null
+  >(null);
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
@@ -1146,6 +1154,57 @@ function App() {
   }, [activeRecording, safeMeetings, finalTranscriptionMeetingId]);
 
   useEffect(() => {
+    if (
+      activeRecording ||
+      finalTranscriptionAbortRef.current ||
+      titleGenerationMeetingId !== null
+    )
+      return;
+    const candidate = selectNextRecoveredMeetingForTitleGeneration(
+      safeMeetings,
+      recoveredTitleAttemptsRef.current,
+    );
+    if (!candidate?.id) return;
+    const meetingId = candidate.id;
+    recoveredTitleAttemptsRef.current.add(String(meetingId));
+    setTitleGenerationMeetingId(meetingId);
+    void (async () => {
+      try {
+        const detail = (await window.ipcRenderer.invoke(
+          'GET_MEETING',
+          meetingId,
+        )) as Meeting | null;
+        if (!detail || !shouldGenerateRecoveredMeetingTitle(detail)) return;
+        const transcript = buildRecoveredMeetingTitleInput(detail);
+        if (!transcript) return;
+        const generatedTitle = await window.ipcRenderer.invoke(
+          'GENERATE_TITLE',
+          { transcript },
+        );
+        if (
+          typeof generatedTitle !== 'string' ||
+          generatedTitle.trim().length > 120 ||
+          meetingTitleNeedsGeneration(generatedTitle)
+        )
+          return;
+        await window.ipcRenderer.invoke('UPDATE_MEETING_TITLE_IF_CURRENT', {
+          meetingId,
+          expectedTitle: detail.title,
+          title: generatedTitle.trim(),
+        });
+      } catch (error) {
+        console.error(
+          '[Pluto] Recovered meeting title generation failed',
+          error,
+        );
+      } finally {
+        setTitleGenerationMeetingId(null);
+        await fetchMeetings();
+      }
+    })();
+  }, [activeRecording, safeMeetings, titleGenerationMeetingId]);
+
+  useEffect(() => {
     if (!activeRecording) return;
     finalTranscriptionAbortRef.current?.abort();
     if (finalTranscriptionMeetingId) {
@@ -1161,6 +1220,11 @@ function App() {
       activeRecording ||
       transcriptValidationRetryOperation !== null ||
       finalTranscriptionAbortRef.current ||
+      titleGenerationMeetingId !== null ||
+      selectNextRecoveredMeetingForTitleGeneration(
+        safeMeetings,
+        recoveredTitleAttemptsRef.current,
+      ) ||
       selectNextMeetingForFinalTranscription(safeMeetings)
     )
       return;
@@ -1189,7 +1253,12 @@ function App() {
       .catch((error) => {
         console.error('[Pluto] Automatic meeting processing failed', error);
       });
-  }, [activeRecording, safeMeetings, transcriptValidationRetryOperation]);
+  }, [
+    activeRecording,
+    safeMeetings,
+    titleGenerationMeetingId,
+    transcriptValidationRetryOperation,
+  ]);
 
   useEffect(() => {
     if (activeRecording || transcriptValidationRetryOperation !== null) return;

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  buildRecoveredMeetingTitleInput,
   canImproveHistoricalSpeakerLabels,
   canRetryMeetingFinalTranscription,
   canRetryMeetingSpeakerLabels,
@@ -12,6 +13,8 @@ import {
   rememberMeetingProcessingOutcome,
   selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
+  selectNextRecoveredMeetingForTitleGeneration,
+  shouldGenerateRecoveredMeetingTitle,
   shouldRunMeetingFinalTranscription,
   shouldStartMeetingFinalTranscription,
 } from '../../src/services/postMeetingProcessingCoordinator';
@@ -111,6 +114,67 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForFinalTranscription([summary])?.id).toBe(
       'recovered-summary',
     );
+  });
+
+  it('selects validated recovered meetings for bounded title repair', () => {
+    const summary = {
+      id: 'recovered-summary',
+      title: 'Recovered recording',
+      transcript_status: 'validated' as const,
+      capture_journal_generation: 'generation-1',
+      has_transcript_text: true,
+      final_transcription_policy: 'parakeet_final_v1',
+      final_transcription_state: 'complete',
+      speaker_attribution_verified: true,
+    };
+
+    expect(shouldGenerateRecoveredMeetingTitle(summary)).toBe(true);
+    expect(
+      selectNextRecoveredMeetingForTitleGeneration([summary], new Set())?.id,
+    ).toBe('recovered-summary');
+    expect(
+      selectNextRecoveredMeetingForTitleGeneration(
+        [summary],
+        new Set(['recovered-summary']),
+      ),
+    ).toBeNull();
+    expect(
+      shouldGenerateRecoveredMeetingTitle({
+        ...summary,
+        title: 'Quarterly planning',
+      }),
+    ).toBe(false);
+    expect(
+      shouldGenerateRecoveredMeetingTitle({
+        id: 'recovered-detail',
+        title: 'Recovered recording',
+        transcript_status: 'validated',
+        capture_journal_generation: 'generation-1',
+        transcript_json: '{"segments":[{"text":"Synthetic"}]}',
+        transcript_integrity_json: JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'complete',
+          },
+          speakerAttributionVerified: true,
+        }),
+      }),
+    ).toBe(true);
+  });
+
+  it('builds a bounded title input across the recovered transcript timeline', () => {
+    const segments = Array.from({ length: 100 }, (_, index) => ({
+      speaker: index % 2 === 0 ? 'Me' : 'Them',
+      text: `segment-${index}`,
+    }));
+    const input = buildRecoveredMeetingTitleInput({
+      analysis_json: null,
+      transcript_json: JSON.stringify({ segments }),
+    });
+
+    expect(input).toContain('segment-0');
+    expect(input).toContain('segment-99');
+    expect(input?.length).toBeLessThanOrEqual(6_000);
   });
 
   it('does not automatically retry a recovered capture with a gap', () => {
