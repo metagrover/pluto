@@ -2073,24 +2073,16 @@
     @apply text-[10px] font-medium uppercase tracking-[0.08em] text-pro-text-muted/70;
   }
   .live-conversation-draft {
-    @apply mt-4 rounded-xl border border-pro-accent/20 bg-pro-surface/70 px-5 py-4;
     overflow-anchor: auto;
   }
+  .live-conversation-draft__control {
+    @apply mt-2 rounded-xl border border-pro-accent/20 bg-pro-surface/70 px-5 py-3;
+  }
   .live-conversation-draft__heading {
-    @apply mb-3 flex items-center justify-between gap-3 text-xs text-pro-text-muted;
+    @apply flex items-center justify-between gap-3 text-xs text-pro-text-muted;
   }
   .live-conversation-draft__heading button {
     @apply min-h-8 rounded-full px-3 font-medium text-pro-accent hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .live-conversation-draft__parts {
-    @apply flex flex-col gap-2;
-  }
-  .live-conversation-draft__parts p {
-    @apply text-[15px] leading-[1.7] text-pro-text-main/70;
-    overflow-wrap: anywhere;
-  }
-  .live-conversation-draft__parts span {
-    @apply mr-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-pro-text-muted;
   }
   .live-conversation-warning {
     @apply mt-4 rounded-lg border border-pro-warning/25 bg-pro-warning/5 px-4 py-3 text-xs text-pro-text-muted;

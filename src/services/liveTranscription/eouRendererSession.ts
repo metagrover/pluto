@@ -191,24 +191,6 @@ export function createEouRendererSession(options: {
           const frame = q.frames[0];
           q.inFlight = frame;
 
-          const sourceOffset = sourceOffsetsSeconds[frame.source];
-          if (sourceOffset !== null) {
-            const evidenceChanged = echoEvidence.append({
-              source: frame.source,
-              sampleRate: frame.sampleRate,
-              samples: frame.samples,
-              startTimeMs: (sourceOffset + frame.audioStartSeconds) * 1_000,
-              endTimeMs: (sourceOffset + frame.audioEndSeconds) * 1_000,
-            });
-            if (evidenceChanged && lastProjectedSegments.length > 0) {
-              options.onSegments(
-                lastProjectedSegments,
-                echoEvidence.snapshot(),
-                'echo_evidence',
-              );
-            }
-          }
-
           try {
             await options.transport.invoke('PARAKEET_EOU_APPEND', {
               meetingId: options.meetingId,
@@ -251,6 +233,23 @@ export function createEouRendererSession(options: {
       source,
       sampleRate,
       onFrame: (frame) => {
+        const sourceOffset = sourceOffsetsSeconds[frame.source];
+        if (sourceOffset !== null) {
+          const evidenceChanged = echoEvidence.append({
+            source: frame.source,
+            sampleRate: frame.sampleRate,
+            samples: frame.samples,
+            startTimeMs: (sourceOffset + frame.audioStartSeconds) * 1_000,
+            endTimeMs: (sourceOffset + frame.audioEndSeconds) * 1_000,
+          });
+          if (evidenceChanged && lastProjectedSegments.length > 0) {
+            options.onSegments(
+              lastProjectedSegments,
+              echoEvidence.snapshot(),
+              'echo_evidence',
+            );
+          }
+        }
         queues[frame.source].frames.push(frame);
         if (currentStatus === 'ready' || currentStatus === 'finishing') {
           wakePump(frame.source);

@@ -68,6 +68,66 @@ const makeSession = (
 };
 
 describe('EOU renderer session', () => {
+  it('builds echo evidence while native recognition is still backlogged', async () => {
+    const blockedAppend = deferred<unknown>();
+    const transport = makeTransport();
+    vi.mocked(transport.invoke).mockImplementation((channel) =>
+      channel === 'PARAKEET_EOU_APPEND'
+        ? blockedAppend.promise
+        : Promise.resolve({}),
+    );
+    const { session, onSegments } = makeSession(transport, {
+      nowSeconds: () => 0.32,
+    });
+    await session.start();
+    transport.emitUpdate({
+      meetingId: 'meeting-1',
+      generation: 1,
+      event: {
+        streamId: 'eou-meeting-1-system',
+        source: 'system',
+        generation: 1,
+        revision: 1,
+        processedAudioSeconds: 0.32,
+        committedText: 'reference',
+        tentativeText: '',
+        tokens: [
+          {
+            text: 'reference',
+            startSeconds: 0,
+            endSeconds: 0.2,
+            committed: true,
+          },
+        ],
+      },
+    });
+    const waveform = Float32Array.from({ length: 8_000 * 3 }, (_, sample) => {
+      const bin = Math.floor(sample / 80);
+      const amplitude =
+        0.03 + ((Math.imul(bin + 7, 1_103_515_245) >>> 8) % 100) / 500;
+      return amplitude * Math.sin((2 * Math.PI * 500 * sample) / 8_000);
+    });
+
+    session.append('system', waveform);
+    session.append(
+      'mic',
+      waveform.map((sample) => sample * 0.6),
+    );
+
+    expect(
+      onSegments.mock.calls.some((call) => call[2] === 'echo_evidence'),
+    ).toBe(true);
+    expect(
+      vi
+        .mocked(transport.invoke)
+        .mock.calls.filter(([channel]) => channel === 'PARAKEET_EOU_APPEND'),
+    ).toHaveLength(2);
+
+    blockedAppend.resolve({});
+    await session.drain();
+    session.cancel();
+  });
+
   it('publishes acoustic echo evidence on the same meeting clock as its tokens', async () => {
     const transport = makeTransport();
     const onSegments = vi.fn();

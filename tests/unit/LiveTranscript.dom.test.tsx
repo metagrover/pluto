@@ -1381,7 +1381,7 @@ describe('LiveTranscript reading experience', () => {
       ),
     );
     expect(container.querySelectorAll('.live-conversation-draft')).toHaveLength(
-      1,
+      2,
     );
     expect(container.textContent).toContain('Mic');
     expect(container.textContent).toContain('Call');
@@ -1399,6 +1399,109 @@ describe('LiveTranscript reading experience', () => {
     expect(container.textContent).toContain('call17');
     expect(document.activeElement).toBe(toggle);
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    act(() => root.unmount());
+  });
+
+  it('places tentative speech before later committed speech in the live timeline', () => {
+    const committed = {
+      ...otherSpeakerSegment,
+      id: 'later-committed',
+      text: 'This was committed later.',
+      timestampMs: 12_000,
+    };
+    const tentative = {
+      ...liveSegment,
+      id: 'earlier-tentative',
+      text: 'This is still being recognized',
+      timestampMs: 2_000,
+      confirmed: false,
+    };
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const conversation = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: [committed, tentative],
+        activityWindows: [],
+      }),
+      reason: 'recognition',
+    });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={conversation}
+        />,
+      ),
+    );
+
+    expect(
+      [...container.querySelectorAll<HTMLElement>('.transcript-turn')].map(
+        (element) =>
+          element.dataset.conversationDraft
+            ? 'earlier-tentative'
+            : element.querySelector<HTMLElement>('[data-conversation-row]')
+                ?.dataset.conversationRow,
+      ),
+    ).toEqual(['earlier-tentative', 'later-committed']);
+
+    act(() => root.unmount());
+  });
+
+  it('does not group committed rows across intervening tentative speech', () => {
+    const before = {
+      ...liveSegment,
+      id: 'committed-before',
+      text: 'Before the interruption.',
+      timestampMs: 1_000,
+      endTimestampMs: 1_500,
+    };
+    const tentative = {
+      ...otherSpeakerSegment,
+      id: 'tentative-between',
+      text: 'An intervening reply',
+      timestampMs: 2_000,
+      endTimestampMs: 2_500,
+      confirmed: false,
+    };
+    const after = {
+      ...liveSegment,
+      id: 'committed-after',
+      text: 'After the interruption.',
+      timestampMs: 3_000,
+      endTimestampMs: 3_500,
+    };
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const conversation = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: [before, tentative, after],
+        activityWindows: [],
+      }),
+      reason: 'recognition',
+    });
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={conversation}
+        />,
+      ),
+    );
+
+    expect(
+      [...container.querySelectorAll('.transcript-turn')].map((element) =>
+        element.textContent?.replace(/\s+/gu, ' ').trim(),
+      ),
+    ).toEqual([
+      expect.stringContaining('Before the interruption.'),
+      expect.stringContaining('An intervening reply'),
+      expect.stringContaining('After the interruption.'),
+    ]);
+
     act(() => root.unmount());
   });
 
