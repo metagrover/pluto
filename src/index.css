@@ -1339,7 +1339,8 @@
   }
   .meeting-status-card {
     @apply mx-auto mt-8 flex items-center justify-between gap-4 rounded-lg border px-5 py-3 text-sm md:px-6;
-    width: calc(100% - 4rem);
+    width: calc(100% - 3rem);
+    max-width: calc(760px - 4rem);
     border-color: var(--notes-rule);
     color: var(--notes-muted);
     background: color-mix(
@@ -1347,6 +1348,11 @@
       var(--notes-paper) 92%,
       var(--notes-muted) 8%
     );
+  }
+  @media (min-width: 768px) {
+    .meeting-status-card {
+      width: calc(100% - 4rem);
+    }
   }
   .meeting-status-card__action {
     @apply inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
