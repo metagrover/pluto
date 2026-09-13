@@ -814,6 +814,7 @@ const NoteBlock = ({
   onUpdateNativeContinuation,
   onDeleteNativeContinuation,
   onSaveStateChange,
+  onSelectSource,
   autoFocus,
   selected,
 }: {
@@ -827,6 +828,7 @@ const NoteBlock = ({
   ) => Promise<void>;
   onDeleteNativeContinuation?: () => Promise<void>;
   onSaveStateChange: (state: SaveState, retry?: () => void) => void;
+  onSelectSource?: () => void;
   autoFocus: boolean;
   selected: boolean;
 }) => {
@@ -889,24 +891,37 @@ const NoteBlock = ({
         <span className="meeting-note-block__marker" aria-hidden="true" />
       ) : null}
       <div className="meeting-note-block__body">
-        <InlineEditableText
-          meetingId={meetingId}
-          path={block.path}
-          originalText={block.originalText}
-          text={block.text}
-          onCreateNativeContinuation={onCreateNativeContinuation}
-          onSaveNativeContinuation={
-            block.nativeContinuation
-              ? async (text) => onUpdateNativeContinuation?.({ text })
-              : undefined
-          }
-          onDeleteNativeContinuation={onDeleteNativeContinuation}
-          onSaveStateChange={onSaveStateChange}
-          autoFocus={autoFocus}
-          onSaved={onSaved}
-        />
+        {block.blockType === 'review' ? (
+          <button
+            type="button"
+            className="meeting-note-review-link"
+            onClick={onSelectSource}
+          >
+            <FileText aria-hidden="true" size={14} />
+            {block.text}
+          </button>
+        ) : (
+          <InlineEditableText
+            meetingId={meetingId}
+            path={block.path}
+            originalText={block.originalText}
+            text={block.text}
+            onCreateNativeContinuation={onCreateNativeContinuation}
+            onSaveNativeContinuation={
+              block.nativeContinuation
+                ? async (text) => onUpdateNativeContinuation?.({ text })
+                : undefined
+            }
+            onDeleteNativeContinuation={onDeleteNativeContinuation}
+            onSaveStateChange={onSaveStateChange}
+            autoFocus={autoFocus}
+            onSaved={onSaved}
+          />
+        )}
         <div className="meeting-note-block__meta">
-          {block.authorship === 'human' ? (
+          {block.blockType === 'review' ? (
+            <span>Not included in finished notes</span>
+          ) : block.authorship === 'human' ? (
             <span className="meeting-authorship meeting-authorship--human">
               Written by you
             </span>
@@ -1297,6 +1312,16 @@ export const MeetingNotesDocument = ({
                           : undefined
                       }
                       onSaveStateChange={handleSaveStateChange}
+                      onSelectSource={
+                        block.blockType === 'review'
+                          ? () =>
+                              setSourceSelection({
+                                label: block.text,
+                                evidence: block.evidence,
+                                transcriptRange: block.transcriptRange,
+                              })
+                          : undefined
+                      }
                       autoFocus={
                         block.nativeContinuation?.id ===
                         pendingNativeContinuationId

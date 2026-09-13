@@ -201,7 +201,7 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
       if (kind === 'ollama') expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v31');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v32');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -253,7 +253,7 @@ it('routes the compact product writer through the complete-document editor', asy
     ),
   ).toEqual([false, true]);
   expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
-  expect(result.generation_metadata?.prompt_version).toBe('notes-v31');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v32');
 });
 
 it('emits a complete provisional bullet on actual streamed transport before writer completion', async () => {

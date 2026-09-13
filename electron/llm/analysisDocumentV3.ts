@@ -15,6 +15,7 @@ import type {
   DecisionV3,
   MeetingTerminologyArtifactV1,
   MeetingType,
+  NotesProseReview,
   NotesSourceProvenance,
   RecentWinV3,
   TopicPoint,
@@ -181,6 +182,83 @@ const parseSourceProvenance = (
     : undefined;
 };
 
+const parseProseReview = (raw: unknown): NotesProseReview | undefined => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (record.schema_version !== 1 || !Array.isArray(record.items)) {
+    return undefined;
+  }
+  const allowedSignals = new Set([
+    'first_person',
+    'repeated_word',
+    'speech_filler',
+    'long_unpunctuated_fragment',
+  ]);
+  const items = record.items.slice(0, 128).flatMap((rawItem) => {
+    if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
+      return [];
+    }
+    const item = rawItem as Record<string, unknown>;
+    const id = asString(item.id);
+    const sectionTitle = asString(item.section_title);
+    const originalText = asString(item.original_text);
+    const evidence = asString(item.evidence);
+    const signals = asStringArray(item.signals).filter((signal) =>
+      allowedSignals.has(signal),
+    ) as NotesProseReview['items'][number]['signals'];
+    const sources = Array.isArray(item.sources)
+      ? item.sources.flatMap((rawSource) => {
+          if (
+            !rawSource ||
+            typeof rawSource !== 'object' ||
+            Array.isArray(rawSource)
+          ) {
+            return [];
+          }
+          const source = rawSource as Record<string, unknown>;
+          return Number.isInteger(source.segment) &&
+            Number.isInteger(source.start) &&
+            Number.isInteger(source.end) &&
+            (source.start as number) >= 0 &&
+            (source.end as number) > (source.start as number)
+            ? [
+                {
+                  segment: source.segment as number,
+                  start: source.start as number,
+                  end: source.end as number,
+                },
+              ]
+            : [];
+        })
+      : [];
+    if (
+      !id ||
+      !sectionTitle ||
+      !originalText ||
+      !evidence ||
+      item.reason !== 'raw_transcript_like' ||
+      signals.length < 3 ||
+      sources.length !== (item.sources as unknown[])?.length
+    ) {
+      return [];
+    }
+    return [
+      {
+        id,
+        section_title: sectionTitle,
+        original_text: originalText,
+        evidence,
+        reason: 'raw_transcript_like' as const,
+        signals,
+        sources,
+      },
+    ];
+  });
+  return items.length === record.items.length
+    ? { schema_version: 1, items }
+    : undefined;
+};
+
 const parseGenerationMetadata = (
   raw: unknown,
 ): AnalysisGenerationMetadata | undefined => {
@@ -203,6 +281,7 @@ const parseGenerationMetadata = (
 
   const terminology = parseTerminologyArtifact(record.terminology);
   const sourceProvenance = parseSourceProvenance(record.source_provenance);
+  const proseReview = parseProseReview(record.prose_review);
   const rawHierarchy =
     record.hierarchy && typeof record.hierarchy === 'object'
       ? (record.hierarchy as Record<string, unknown>)
@@ -259,14 +338,16 @@ const parseGenerationMetadata = (
     ...(record.mode === 'direct' || record.mode === 'hierarchical'
       ? { mode: record.mode }
       : {}),
-    ...(record.audit_status === 'complete'
-      ? { audit_status: 'complete' as const }
+    ...(record.audit_status === 'complete' ||
+    record.audit_status === 'complete_with_warnings'
+      ? { audit_status: record.audit_status }
       : {}),
     ...(Number.isSafeInteger(record.audit_change_count) &&
     (record.audit_change_count as number) >= 0
       ? { audit_change_count: record.audit_change_count as number }
       : {}),
     ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
+    ...(proseReview ? { prose_review: proseReview } : {}),
     ...(hierarchy ? { hierarchy } : {}),
   };
 };

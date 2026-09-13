@@ -134,6 +134,54 @@ describe('buildMeetingNotesEvidenceDocument', () => {
     expect(document.decisionsText).toBe('Use SQLite.');
   });
 
+  it('does not index held prose or its review label as settled evidence', () => {
+    const heldText = 'I can kind of review it if if needed';
+    const document = buildMeetingNotesEvidenceDocument({
+      id: 'meeting-review',
+      title: 'Pipeline review',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The pipeline was reviewed.',
+        topics: [],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: ['deterministic_review_unclear_prose:p1'],
+        },
+        generation_metadata: {
+          provider: 'ollama',
+          model: 'gemma4:12b',
+          generation_path: 'single_pass',
+          prompt_version: 'notes-v32',
+          generated_at: '2026-09-13T00:00:00.000Z',
+          error_categories: ['notes_quality_warning'],
+          prose_review: {
+            schema_version: 1,
+            items: [
+              {
+                id: 'p1',
+                section_title: 'Next steps',
+                original_text: heldText,
+                evidence: heldText,
+                reason: 'raw_transcript_like',
+                signals: ['first_person', 'repeated_word', 'speech_filler'],
+                sources: [{ segment: 0, start: 0, end: heldText.length }],
+              },
+            ],
+          },
+        },
+      }),
+    });
+
+    expect(document.notesText).toBe('The pipeline was reviewed.');
+    expect(JSON.stringify(document)).not.toContain(heldText);
+    expect(JSON.stringify(document)).not.toContain('Review unclear wording');
+  });
+
   it('ignores malformed structured note values instead of crashing retrieval', () => {
     const document = buildMeetingNotesEvidenceDocument({
       id: 'meeting-malformed',

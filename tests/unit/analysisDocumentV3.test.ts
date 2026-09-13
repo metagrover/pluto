@@ -76,6 +76,42 @@ it('round-trips bounded hierarchy measurements and rejects malformed counters', 
   ).toBeUndefined();
 });
 
+it('round-trips warning status and versioned prose-review evidence', () => {
+  const proseReview = {
+    schema_version: 1 as const,
+    items: [
+      {
+        id: 'p1',
+        section_title: 'Next steps',
+        original_text: 'I can kind of do it if if needed',
+        evidence: 'I can kind of do it if if needed',
+        reason: 'raw_transcript_like' as const,
+        signals: [
+          'first_person' as const,
+          'repeated_word' as const,
+          'speech_filler' as const,
+        ],
+        sources: [{ segment: 1, start: 0, end: 32 }],
+      },
+    ],
+  };
+  const result = parseAnalysisDocumentV3(
+    JSON.stringify({
+      ...validV3,
+      generation_metadata: {
+        ...validV3.generation_metadata,
+        audit_status: 'complete_with_warnings',
+        prose_review: proseReview,
+      },
+    }),
+  );
+
+  expect(result?.generation_metadata?.audit_status).toBe(
+    'complete_with_warnings',
+  );
+  expect(result?.generation_metadata?.prose_review).toEqual(proseReview);
+});
+
 describe('parseAnalysisDocumentV3', () => {
   it('preserves a structured recent win with verbatim evidence', () => {
     const result = parseAnalysisDocumentV3(

@@ -1740,6 +1740,22 @@
   .meeting-note-block__body {
     @apply min-w-0 flex-1;
   }
+
+  .meeting-note-review-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: hsl(var(--foreground));
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-color: hsl(var(--border));
+    text-underline-offset: 0.2em;
+  }
+
+  .meeting-note-review-link:hover {
+    text-decoration-color: currentColor;
+  }
   .meeting-note-block__body > .meeting-editable-copy > p,
   .meeting-note-block__body > .meeting-editable-copy > p,
   .meeting-note-block__body > p {

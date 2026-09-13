@@ -14,6 +14,7 @@ export type MeetingNotesSectionKind =
   | 'outcomes'
   | 'scratchpad'
   | 'current_read'
+  | 'review'
   | 'discussion'
   | 'open_questions';
 
@@ -32,7 +33,7 @@ export interface MeetingNotesBlock {
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
-  blockType?: 'decision' | 'action' | 'note' | 'paragraph';
+  blockType?: 'decision' | 'action' | 'note' | 'paragraph' | 'review';
   nativeContinuation?: {
     parentPath: string;
     id: string;
@@ -168,7 +169,7 @@ const toBlock = ({
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
-  blockType?: 'decision' | 'action' | 'note' | 'paragraph';
+  blockType?: 'decision' | 'action' | 'note' | 'paragraph' | 'review';
 }): MeetingNotesBlock => {
   const userEdited = Boolean(path && editsMap[path]);
   let blockText = path ? applyUserEdit(text, path, editsMap) : text;
@@ -365,6 +366,25 @@ const buildV3Sections = (
           displayNames,
         }),
       ],
+    });
+  }
+
+  const proseReviewItems = doc.generation_metadata?.prose_review?.items ?? [];
+  if (proseReviewItems.length > 0) {
+    sections.push({
+      id: 'prose-review',
+      kind: 'review',
+      title: 'Needs review',
+      blocks: proseReviewItems.map((item, index) =>
+        toBlock({
+          id: `prose-review-${index}`,
+          text: `Review unclear wording from “${item.section_title}”`,
+          editsMap,
+          evidence: item.evidence,
+          blockType: 'review',
+          displayNames,
+        }),
+      ),
     });
   }
 

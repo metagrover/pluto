@@ -7,8 +7,10 @@ import {
 import type {
   AnalysisDocumentV3,
   MeetingTerminologyArtifactV1,
+  NotesProseReviewItem,
 } from './analysisTypes';
 import { createEditorTerminologyArtifact } from './meetingNotesEditorTerminology';
+import { classifySuspectNotesProse } from './meetingNotesProseQuality';
 import { resolveSourceSpan } from './meetingNotesSource';
 import {
   type AuditVerdict,
@@ -36,6 +38,7 @@ export type AuditedNotes = {
   acceptedTerminology: NotesAudit['terminology'];
   terminologyArtifact?: MeetingTerminologyArtifactV1;
   issues?: string[];
+  proseReviewItems?: NotesProseReviewItem[];
 };
 
 type Block = SupportedText | NotesItem;
@@ -491,6 +494,37 @@ const sourceText = (source: NotesSource, spans: SourceSpan[]): string => {
     })
     .map((span) => resolveSourceSpan(source, span))
     .join(' ');
+};
+
+const extractSuspectProse = (
+  source: NotesSource,
+  draft: NotesDraft,
+  issues: string[],
+): NotesProseReviewItem[] => {
+  const reviewItems: NotesProseReviewItem[] = [];
+  for (const section of draft.sections) {
+    section.items = section.items.flatMap((item) => {
+      if (item.kind !== 'point') return [item];
+      const evidence = sourceText(source, item.sources);
+      const classification = classifySuspectNotesProse({
+        text: item.text,
+        evidence,
+      });
+      if (!classification) return [item];
+      issues.push(`deterministic_review_unclear_prose:${item.id}`);
+      reviewItems.push({
+        id: item.id,
+        section_title: section.title.text,
+        original_text: item.text,
+        evidence,
+        reason: classification.reason,
+        signals: classification.signals,
+        sources: structuredClone(item.sources),
+      });
+      return [];
+    });
+  }
+  return reviewItems;
 };
 
 const transcriptForSource = (source: NotesSource): string =>
@@ -1022,12 +1056,15 @@ export const applyNotesAudit = ({
     });
   }
 
+  const proseReviewItems = extractSuspectProse(source, next, issues);
+
   const result: AuditedNotes = {
     source,
     draft: next,
     verdicts,
     acceptedTerminology: structuredClone(audit.terminology),
     issues,
+    ...(proseReviewItems.length ? { proseReviewItems } : {}),
     ...(terminology
       ? {
           terminologyArtifact: terminologyArtifactFor(
@@ -1183,12 +1220,14 @@ export const acceptEditedNotes = ({
       return [{ ...item, ...checked }];
     });
   }
+  const proseReviewItems = extractSuspectProse(source, next, issues);
   const result: AuditedNotes = {
     source,
     draft: next,
     verdicts: new Map(),
     acceptedTerminology: structuredClone(proposals),
     ...(issues.length ? { issues } : {}),
+    ...(proseReviewItems.length ? { proseReviewItems } : {}),
     ...(terminology
       ? {
           terminologyArtifact: createEditorTerminologyArtifact({
@@ -1293,6 +1332,14 @@ export const projectAuditedNotes = (
           ),
         }),
       },
+      ...(audited.proseReviewItems?.length
+        ? {
+            prose_review: {
+              schema_version: 1,
+              items: structuredClone(audited.proseReviewItems),
+            },
+          }
+        : {}),
     },
   };
   analysis.recent_win = groundRecentWin(

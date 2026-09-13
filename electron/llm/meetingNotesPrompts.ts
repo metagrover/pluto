@@ -1,5 +1,6 @@
 import {
   notesContentGuidance,
+  notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import type { SourceSpan } from './meetingNotesTypes';
@@ -117,6 +118,7 @@ export const buildNotesWriterPrompt = ({
   [
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
+    notesProseGuidance,
     'Every still-valid commitment belongs in a kind:action item. An overview mention is not a substitute for an action. Do not emit document rollups; code derives them from retained items.',
     notesSourceGuidance,
     '',
@@ -140,6 +142,7 @@ export const buildCompactNotesWriterPrompt = ({
   [
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
+    notesProseGuidance,
     'Return the overall meeting title plus useful note items. Code derives the overview and section-heading evidence; do not substitute the first section heading for the overall title.',
     'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments; compact repetition, not facts.',
     'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Keep the task, recipient, condition and deadline clear in the text itself.',

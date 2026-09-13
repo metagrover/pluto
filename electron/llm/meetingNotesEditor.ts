@@ -5,6 +5,7 @@ import {
 } from './meetingNotesAudit';
 import {
   notesContentGuidance,
+  notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
 import {
@@ -72,7 +73,7 @@ export const buildNotesEditorPrompt = ({
           'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, the speaker who states the settled choice is the decision owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
         ]
       : []),
-    'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not copy unattributed "I" or "we" statements. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.',
+    notesProseGuidance,
     notesSourceGuidance,
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',
     notesTerminologySchema,

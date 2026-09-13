@@ -165,6 +165,97 @@ it('conservatively preserves conditional willingness as source text instead of a
   );
 });
 
+it('holds a copied disfluent writer point for source review', () => {
+  const text =
+    'as a homework just on each face I can review the kind of work that would have done and if if word change changes';
+  const source = makeSyntheticNotesSource([{ speaker: 'Ben', text }]);
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const { draft } = makeDirectNotesFixture();
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'point',
+      text,
+      sources,
+      owner: null,
+      due: null,
+    },
+  ];
+
+  const projected = projectAuditedNotes(
+    acceptEditedNotes({ source, draft, acceptancePolicy: 'conservative' }),
+  );
+
+  expect(projected.topics).toEqual([]);
+  expect(projected.quality.issues).toContain(
+    'deterministic_review_unclear_prose:s0:item:0',
+  );
+  expect(projected.generation_metadata?.prose_review?.items[0]).toMatchObject({
+    original_text: text,
+    evidence: text,
+    reason: 'raw_transcript_like',
+  });
+});
+
+it('holds transcript-like prose introduced by conservative action reclassification', () => {
+  const text =
+    'I can review the kind of work that would have done and if if word change changes after the meeting without a deadline';
+  const source = makeSyntheticNotesSource([{ speaker: 'Ben', text }]);
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const { draft } = makeDirectNotesFixture();
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'action',
+      text: 'Ben will review the work after the meeting.',
+      sources,
+      owner: 'Ben',
+      due: null,
+    },
+  ];
+
+  const reviewed = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+
+  expect(reviewed.draft.sections[0]!.items).toEqual([]);
+  expect(reviewed.issues).toEqual(
+    expect.arrayContaining([
+      'deterministic_reclassified_conditional_willingness:s0:item:0',
+      'deterministic_review_unclear_prose:s0:item:0',
+    ]),
+  );
+  expect(reviewed.proseReviewItems?.[0]?.original_text).toBe(text);
+});
+
+it('does not hold a coherent first-person source excerpt without repeated words', () => {
+  const text =
+    'If legal approves the final version, I can draft the announcement for the launch team tomorrow morning.';
+  const source = makeSyntheticNotesSource([{ speaker: 'Ben', text }]);
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const { draft } = makeDirectNotesFixture();
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'point',
+      text,
+      sources,
+      owner: null,
+      due: null,
+    },
+  ];
+
+  const reviewed = acceptEditedNotes({ source, draft });
+
+  expect(reviewed.draft.sections[0]!.items[0]?.text).toBe(text);
+  expect(reviewed.proseReviewItems).toBeUndefined();
+});
+
 it('rejects fabricated source references', () => {
   const { source, draft } = makeDirectNotesFixture();
   draft.sections[0]!.items[0]!.sources = [{ segment: 99, start: 0, end: 12 }];

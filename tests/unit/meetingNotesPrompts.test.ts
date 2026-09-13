@@ -70,6 +70,20 @@ it('requires the compact final editor to retain source rules and structured owne
   expect(prompt).toContain('speaker who states the settled choice');
 });
 
+it('gives the compact writer and final editor the same finished-prose rules', () => {
+  const writer = buildCompactNotesWriterPrompt(input);
+  const editor = buildNotesEditorPrompt({ ...input, compactDraft: true });
+  for (const prompt of [writer, editor]) {
+    expect(prompt).toContain('concise, readable third person notes');
+    expect(prompt).toContain(
+      'Do not paste raw first-person transcript fragments',
+    );
+    expect(prompt).toContain(
+      'Repair false starts, repeated words and speech fillers',
+    );
+  }
+});
+
 it('spells out flat item and reconciliation fields without Text inheritance notation', () => {
   for (const prompt of stagePrompts().slice(0, 4)) {
     expect(prompt).toContain(

@@ -119,7 +119,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v31',
+    prompt_version: 'notes-v32',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -1032,6 +1032,67 @@ it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
     }
   },
 );
+
+it('preserves conservative acceptance issues alongside leaf review fallback warnings', async () => {
+  const text = 'If legal approves, I can draft the announcement.';
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: `${text} ${'Context '.repeat(3_000)}` },
+  ]);
+  const span = { segment: 0, start: 0, end: text.length };
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
+    {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: text,
+      sourceText: text,
+      sourceRevision: source.revision,
+    },
+  ]);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesAudit') return '{';
+    return JSON.stringify({
+      title: { text: 'Announcement Review', sources: [span] },
+      sections: [
+        {
+          title: 'Announcement',
+          items: [
+            {
+              kind: 'action',
+              text: 'Milo will draft the announcement if legal approves.',
+              owner: 'Milo',
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 8_192,
+    });
+
+    expect(result.all_action_items).toEqual([]);
+    expect(result.topics[0]?.summary).toBe(text);
+    expect(result.quality.issues).toEqual(
+      expect.arrayContaining([
+        'notes_leaf_audit_fallback:notes_audit_invalid',
+        'deterministic_reclassified_conditional_willingness:leaf0:s0:item:0',
+      ]),
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
 
 it('records repaired Ollama editor guardrail findings as advisory', async () => {
   const fixture = makeDirectNotesFixture();

@@ -1672,7 +1672,7 @@ const runBoundedCompactNotes = async (
     draft: combined,
     acceptancePolicy: 'conservative',
   });
-  accepted.issues = [...new Set(issues)];
+  accepted.issues = [...new Set([...(accepted.issues ?? []), ...issues])];
   return metadataFor(
     input,
     projectAuditedNotes(accepted),

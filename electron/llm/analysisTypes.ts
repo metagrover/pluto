@@ -90,6 +90,26 @@ export interface NotesSourceProvenance {
   >;
 }
 
+export interface NotesProseReviewItem {
+  id: string;
+  section_title: string;
+  original_text: string;
+  evidence: string;
+  reason: 'raw_transcript_like';
+  signals: Array<
+    | 'first_person'
+    | 'repeated_word'
+    | 'speech_filler'
+    | 'long_unpunctuated_fragment'
+  >;
+  sources: Array<{ segment: number; start: number; end: number }>;
+}
+
+export interface NotesProseReview {
+  schema_version: 1;
+  items: NotesProseReviewItem[];
+}
+
 export interface NotesPipelineMetadata {
   pipeline_version:
     | 'writer-audit-v1'
@@ -118,6 +138,7 @@ export interface AnalysisGenerationMetadata {
   audit_status?: NotesPipelineMetadata['audit_status'];
   audit_change_count?: number;
   source_provenance?: NotesPipelineMetadata['source_provenance'];
+  prose_review?: NotesProseReview;
   hierarchy?: {
     depth: number;
     nodes: number;

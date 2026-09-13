@@ -13,3 +13,6 @@ export const notesContentGuidance = [
 
 export const notesSourceGuidance =
   'Every text block needs sources: copied source descriptor[]. Copy each descriptor exactly from SOURCE DATA. Never calculate offsets, invent references or use object paths. Source labels belong only in sources arrays, never visible text.';
+
+export const notesProseGuidance =
+  'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not paste raw first-person transcript fragments into finished prose. Repair false starts, repeated words and speech fillers without changing the supported meaning. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.';

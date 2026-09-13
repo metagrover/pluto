@@ -166,6 +166,23 @@ export interface AnalysisGenerationMetadata {
       }
     >;
   };
+  prose_review?: {
+    schema_version: 1;
+    items: Array<{
+      id: string;
+      section_title: string;
+      original_text: string;
+      evidence: string;
+      reason: 'raw_transcript_like';
+      signals: Array<
+        | 'first_person'
+        | 'repeated_word'
+        | 'speech_filler'
+        | 'long_unpunctuated_fragment'
+      >;
+      sources: Array<{ segment: number; start: number; end: number }>;
+    }>;
+  };
 }
 
 export interface AnalysisDocumentV3 {

@@ -105,6 +105,65 @@ describe('buildMeetingNotesDocument', () => {
     ).toBe('What was discussed');
   });
 
+  it('renders held prose as a source-review row instead of a settled note', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: 'The client persona pipeline was reviewed.',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [],
+      meeting_type: 'general',
+      quality: {
+        ...quality,
+        issues: ['deterministic_review_unclear_prose:p1'],
+      },
+      generation_metadata: {
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        generation_path: 'single_pass',
+        prompt_version: 'notes-v32',
+        generated_at: '2026-09-13T00:00:00.000Z',
+        error_categories: ['notes_quality_warning'],
+        prose_review: {
+          schema_version: 1,
+          items: [
+            {
+              id: 'p1',
+              section_title: 'Action Items and Next Steps',
+              original_text: 'I can kind of review it if if needed',
+              evidence: 'I can kind of review it if if needed',
+              reason: 'raw_transcript_like',
+              signals: ['first_person', 'repeated_word', 'speech_filler'],
+              sources: [{ segment: 1, start: 0, end: 37 }],
+            },
+          ],
+        },
+      },
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {},
+    });
+    const review = document.sections.find(
+      (section) => section.kind === 'review',
+    );
+
+    expect(review?.blocks[0]).toMatchObject({
+      blockType: 'review',
+      text: 'Review unclear wording from “Action Items and Next Steps”',
+      evidence: 'I can kind of review it if if needed',
+      path: undefined,
+    });
+    expect(
+      document.sections.flatMap((section) =>
+        section.blocks.map((block) => block.text),
+      ),
+    ).not.toContain('I can kind of review it if if needed');
+  });
+
   it('applies saved edits to every generated block type', () => {
     const v3: AnalysisDocumentV3 = {
       analysis_schema_version: 3,

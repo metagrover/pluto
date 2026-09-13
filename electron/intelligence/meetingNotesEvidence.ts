@@ -143,22 +143,25 @@ export const buildMeetingNotesEvidenceDocument = (
       })
     : null;
   const blocks = notesDocument?.sections.flatMap((section) => section.blocks);
+  const settledBlocks = blocks?.filter((block) => block.blockType !== 'review');
 
   const notesText = notesDocument
     ? uniqueText(
         notesDocument.sections.flatMap((section) =>
           section.blocks.flatMap((block) => [
-            block.text,
-            ...(block.nativeContinuations || []).map(
-              (continuation) => continuation.text,
-            ),
+            ...(block.blockType === 'review' ? [] : [block.text]),
+            ...(block.blockType === 'review'
+              ? []
+              : (block.nativeContinuations || []).map(
+                  (continuation) => continuation.text,
+                )),
           ]),
         ),
       )
     : uniqueText([clean(meeting.enhanced_notes), clean(meeting.user_notes)]);
   const decisionsText = uniqueText(
-    blocks
-      ? blocks
+    settledBlocks
+      ? settledBlocks
           .filter((block) => block.blockType === 'decision')
           .flatMap((block) => [
             block.text,
@@ -169,8 +172,8 @@ export const buildMeetingNotesEvidenceDocument = (
       : (mid.decisions || []).map((decision) => clean(decision.description)),
   );
   const actionItemsText = uniqueText(
-    blocks
-      ? blocks
+    settledBlocks
+      ? settledBlocks
           .filter((block) => block.blockType === 'action')
           .flatMap((block) => [
             block.text,
