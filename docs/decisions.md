@@ -1167,3 +1167,11 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** After the existing minimum three-word exact alignment establishes that microphone and System ASR decoded the same time-aligned speech, and neither primary nor fallback activity evidence distinguishes ownership, retain the direct System copy and remove the microphone copy. This selects between duplicate source recordings; it does not identify a person or relabel distinct speech.
 - **Safety:** Stronger local evidence still retains the microphone words. Short matches, different wording, timing disagreement, numeric or polarity differences, and genuine interruptions remain visible. Raw recordings and source transcripts remain available for guarded retranscription.
 - **Live behavior:** Retained pieces created by echo suppression are ordered independently by word time. Proven later corrections may update compacted display history without retaining detailed evidence for the full meeting.
+
+## 2026-09-12 - Admit compact notes from the existing call budget
+
+- **Status:** Accepted and implemented.
+- **Supersedes:** The fixed three-leaf admission rule in “2026-09-04 - Attribute recovered mic speech to the user and bound production notes.” Its per-request context checks, source grounding, six-call ceiling, recovery bound, and twelve-minute deadline remain in force.
+- **Decision:** Derive compact-plan admission from the existing six-call budget. Reserve two calls for the single supported writer recovery split, which admits up to four required writer leaves. Writers still complete before optional editors; editor reviews use only the calls left in the same budget and deterministic source checks handle unavailable optional reviews.
+- **Performance boundary:** Direct and existing one-to-three-leaf runs add no calls or stages. Four-leaf runs use at most the same six model calls already allowed. Context size, per-leaf source limit, model routing, inference serialization, and deadline do not change.
+- **Consequence:** A five-or-more-leaf plan still fails before inference because it cannot preserve the bounded writer recovery allowance. The stable failure remains visible in run metrics rather than starting work that cannot complete within the declared resource envelope.

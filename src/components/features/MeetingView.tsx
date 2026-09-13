@@ -174,6 +174,7 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
   downstreamFailed = false,
+  downstreamFailureCode,
   speakerLabelsRequired = false,
   onRetry,
   retrying = false,
@@ -191,6 +192,7 @@ export const TranscriptIntegrityPanel = ({
   activityEvidenceAvailable?: boolean;
   hasExistingAnalysis?: boolean;
   downstreamFailed?: boolean;
+  downstreamFailureCode?: string;
   speakerLabelsRequired?: boolean;
   onRetry?: (kind: MeetingRetryKind) => void;
   retrying?: boolean;
@@ -308,6 +310,7 @@ export const TranscriptIntegrityPanel = ({
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,
     downstreamFailed,
+    downstreamFailureCode,
   });
 
   // Final transcription also regenerates notes. Once speaker attribution has
@@ -1538,6 +1541,11 @@ const SelectedMeetingView = ({
             selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
           )}
           downstreamFailed={downstreamPresentation.state === 'failed'}
+          downstreamFailureCode={
+            downstreamPresentation.state === 'failed'
+              ? downstreamPresentation.failureCode
+              : undefined
+          }
           speakerLabelsRequired={inlineSpeakerLabelRepairRequired}
           onRetry={onRetryTranscriptValidation}
           retrying={transcriptValidationRetrying}

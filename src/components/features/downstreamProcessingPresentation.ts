@@ -12,6 +12,7 @@ export type DownstreamProcessingPresentation =
       state: 'failed';
       title: string;
       detail: string;
+      failureCode?: string;
     }
   | {
       state: 'ready';
@@ -28,6 +29,7 @@ export const getDownstreamProcessingPresentation = (
     secondary_status?: string;
     stage?: unknown;
     queue_position?: unknown;
+    error_code?: unknown;
   } = {};
   try {
     run = JSON.parse(meeting.analysis_run_json || '{}') || {};
@@ -117,6 +119,9 @@ export const getDownstreamProcessingPresentation = (
       state: 'failed',
       title: 'Notes need another pass',
       detail: 'Your transcript is ready. Try again to continue.',
+      ...(typeof run.error_code === 'string'
+        ? { failureCode: run.error_code }
+        : {}),
     };
 
   if (queuePosition !== null) {

@@ -176,6 +176,26 @@ describe('meeting failure presentation', () => {
       actionLabel: 'Retry analysis',
     });
   });
+
+  it('does not offer an unchanged retry for a stable capacity rejection', () => {
+    expect(
+      resolveMeetingFailurePresentation({
+        retryableFinalTranscription: false,
+        speakerAttributionFailure: false,
+        resourcePolicyDenied: false,
+        captureRecoveryRequired: false,
+        captureGap: false,
+        hasExistingAnalysis: false,
+        downstreamFailed: true,
+        downstreamFailureCode: 'notes_bounded_plan_exceeded',
+      }),
+    ).toEqual({
+      title: "Notes couldn't be generated",
+      detail:
+        "This transcript exceeds Pluto's current analysis capacity. Retrying it unchanged won't help.",
+      actionLabel: null,
+    });
+  });
 });
 
 describe('meeting retry progress presentation', () => {

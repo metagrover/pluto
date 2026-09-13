@@ -113,7 +113,7 @@ export async function inspectLiveNotesReuse(
     },
   };
   try {
-    // A bounded plan has at most three leaves; the last is not precomputed.
+    // Precompute at most three closed leaves; the growing final leaf is not cached.
     for (let attempt = 0; attempt < 3; attempt++) {
       liveDisposition = await precomputeNextMeetingNotesLeaf(input);
       if (liveDisposition !== 'generated') break;

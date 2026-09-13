@@ -671,6 +671,22 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).toContain('meeting-failure-notice__action');
   });
 
+  it('does not offer an identical retry after a stable capacity rejection', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        downstreamFailed
+        downstreamFailureCode="notes_bounded_plan_exceeded"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Notes couldn&#x27;t be generated');
+    expect(markup).toContain('Retrying it unchanged won&#x27;t help.');
+    expect(markup).not.toContain('Retry analysis');
+    expect(markup).not.toContain('meeting-failure-notice__action');
+  });
+
   it('does not offer deletion for a recovery-required meeting', () => {
     expect(canDeleteMeeting('recovery_required')).toBe(false);
     expect(canDeleteMeeting('processing')).toBe(false);
