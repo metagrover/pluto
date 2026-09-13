@@ -963,15 +963,18 @@ export const SpeakerIdentificationModal = ({
                   {voiceSuggestionsLoading
                     ? 'Checking saved voice profiles…'
                     : speakerCandidates[currentSpeaker]?.analysisStatus ===
-                        'retryable_failure'
-                      ? 'Voice analysis was interrupted. Pluto will retry automatically.'
+                        'queued'
+                      ? 'Voice analysis will run later when your Mac is idle.'
                       : speakerCandidates[currentSpeaker]?.analysisStatus ===
-                          'abstained'
-                        ? 'There was not enough reliable isolated speech for voice identification.'
+                          'retryable_failure'
+                        ? 'Voice analysis was interrupted. Pluto will retry automatically.'
                         : speakerCandidates[currentSpeaker]?.analysisStatus ===
-                            'eligible'
-                          ? 'No saved voice profile matched with enough confidence.'
-                          : null}
+                            'abstained'
+                          ? 'There was not enough reliable isolated speech for voice identification.'
+                          : speakerCandidates[currentSpeaker]
+                                ?.analysisStatus === 'eligible'
+                            ? 'No saved voice profile matched with enough confidence.'
+                            : null}
                 </p>
               ) : null}
 

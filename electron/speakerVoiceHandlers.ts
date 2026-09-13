@@ -63,6 +63,8 @@ export interface SpeakerVoiceDependencies {
     durationSec: number;
   }) => Promise<Buffer | null>;
   reconciliationTimeoutMs?: number;
+  allowCandidateBuild?: boolean;
+  scheduleCandidateBackfill?: (meetingId: string) => void;
   buildEnrollmentCandidate?: (input: {
     meetingId: string;
     speaker: string;
@@ -665,10 +667,8 @@ export async function handleSpeakerVoiceRequest(
         };
       }
 
-      if (payload?.syncReconciliation) {
+      if (deps?.allowCandidateBuild !== false && payload?.syncReconciliation) {
         await reconcileConfirmedSpeakerVoiceProfiles(deps, d);
-      } else {
-        scheduleBackgroundVoiceProfileReconciliation(deps, d);
       }
 
       const getMeeting =
@@ -689,19 +689,84 @@ export async function handleSpeakerVoiceRequest(
       const candidateAttempts: Record<
         string,
         {
-          status: 'eligible' | 'abstained' | 'retryable_failure';
+          status: 'eligible' | 'queued' | 'abstained' | 'retryable_failure';
           reason?: string;
           retryAfter?: number;
         }
       > = {};
-      if (deps?.buildEnrollmentCandidate) {
-        const candidatesBySpeaker = new Map(
-          candidates.map((candidate) => [candidate.speaker, candidate]),
-        );
-        const speakers = new Set([
-          ...candidatesBySpeaker.keys(),
-          ...Object.keys(enrollmentAvailability),
-        ]);
+      const candidatesBySpeaker = new Map(
+        candidates.map((candidate) => [candidate.speaker, candidate]),
+      );
+      const speakers = new Set([
+        ...candidatesBySpeaker.keys(),
+        ...Object.keys(enrollmentAvailability),
+      ]);
+      if (
+        deps?.buildEnrollmentCandidate &&
+        deps.allowCandidateBuild === false
+      ) {
+        let needsBackfill = false;
+        for (const speaker of speakers) {
+          const candidate = candidatesBySpeaker.get(speaker);
+          const sourceRevision =
+            candidate?.sourceRevision ?? meeting?.capture_journal_generation;
+          if (!candidate && !enrollmentAvailability[speaker]) {
+            candidateAttempts[speaker] = {
+              status: 'abstained',
+              reason: 'insufficient_clean_speech',
+            };
+            continue;
+          }
+          if (!sourceRevision) {
+            candidateAttempts[speaker] = {
+              status: 'abstained',
+              reason: 'evidence_unavailable',
+            };
+            continue;
+          }
+          if (candidate && usesCurrentEnrollmentExtraction(candidate)) {
+            candidateAttempts[speaker] = candidate.isEligibleForEnrollment
+              ? { status: 'eligible' }
+              : {
+                  status: 'abstained',
+                  reason: 'insufficient_clean_speech',
+                };
+            continue;
+          }
+          const previousAttempt = getVoiceCandidateAttempt(
+            {
+              meetingId,
+              speaker,
+              sourceRevision,
+              extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+            },
+            d,
+          );
+          if (
+            previousAttempt?.status === 'abstained' ||
+            (previousAttempt?.status === 'retryable_failure' &&
+              (previousAttempt.retryAfter ?? 0) > Date.now())
+          ) {
+            candidateAttempts[speaker] = {
+              status: previousAttempt.status,
+              ...(previousAttempt.reason
+                ? { reason: previousAttempt.reason }
+                : {}),
+              ...(previousAttempt.retryAfter
+                ? { retryAfter: previousAttempt.retryAfter }
+                : {}),
+            };
+            continue;
+          }
+          candidateAttempts[speaker] = { status: 'queued' };
+          needsBackfill = true;
+        }
+        if (needsBackfill) deps.scheduleCandidateBackfill?.(meetingId);
+      }
+      if (
+        deps?.buildEnrollmentCandidate &&
+        deps.allowCandidateBuild !== false
+      ) {
         for (const speaker of speakers) {
           const candidate = candidatesBySpeaker.get(speaker);
           const sourceRevision =
@@ -1003,6 +1068,10 @@ export async function handleSpeakerVoiceRequest(
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
+        if (deps?.allowCandidateBuild === false) {
+          deps.scheduleCandidateBackfill?.(String(sourceMeetingId));
+          return { success: true, queued: true };
+        }
         let built:
           | Awaited<ReturnType<typeof buildCandidateWithTimeout>>
           | undefined;
@@ -1179,11 +1248,14 @@ export async function handleSpeakerVoiceRequest(
         typeof payload?.personId === 'string' && payload.personId
           ? payload.personId
           : undefined;
-      const reconciliation = await reconcileConfirmedSpeakerVoiceProfiles(
-        deps,
-        d,
-        requestedPersonId,
-      );
+      const reconciliation =
+        deps?.allowCandidateBuild === false
+          ? new Map<string, ReconciliationOutcome>()
+          : await reconcileConfirmedSpeakerVoiceProfiles(
+              deps,
+              d,
+              requestedPersonId,
+            );
       const profiles = getCanonicalVoiceProfiles({ dbInstance: d });
       // Strip raw embeddings so biometric data never enters renderer IPC
       const sanitized = profiles.map((p) => ({

@@ -1029,6 +1029,14 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Outcome boundary:** Candidate-analysis attempts are stored separately from biometric candidates as `eligible`, `abstained`, or `retryable_failure`, with a stable reason and optional retry time. Missing evidence no longer overwrites an earlier candidate with an unexplained zero-vector tombstone, and the UI distinguishes analysis interruption, insufficient clean speech, and a completed analysis with no confident match.
 - **Safety:** Representatives remain bounded 256-dimensional native evidence in dedicated local biometric tables and never enter transcript JSON, logs, analytics, or renderer IPC. Suggestions still require the existing provenance, purity, absolute-similarity, and runner-up-margin gates and remain tentative until explicit confirmation.
 
+## 2026-09-12 - Admit legacy voice backfill only while the Mac is idle
+
+- **Status:** Accepted and implemented.
+- **Supersedes:** The interactive lazy-backfill clause in “2026-09-12 - Derive voice-profile representatives in one native pass.” Single-pass extraction and source-revision caching remain in force.
+- **Decision:** Suggestion and profile read APIs are read-only with respect to native voice analysis. When they encounter missing or legacy evidence, they return cached state immediately and enqueue a deduplicated meeting backfill through Pluto's existing background-work coordinator instead of awaiting CoreML work.
+- **Admission boundary:** Deferred backfill requires at least fifteen minutes of both app and system idleness, AC power, nominal or fair thermals, and no foreground pause. It is cancelled when foreground activity or resource conditions return. No voice work runs at boot, and normal finalized meetings continue to receive representative evidence from their already-required final diarization pass.
+- **UI:** A queued legacy analysis is explained as deferred until the Mac is idle. Closing speaker review performs no persistence, IPC, or native work.
+
 ## 2026-09-06 - Settings selection controls share the speaker picker language
 
 - **Status:** Accepted and implemented under [Issue #764](https://github.com/metagrover/pluto/issues/764).

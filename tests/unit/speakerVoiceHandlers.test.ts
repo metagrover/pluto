@@ -700,6 +700,41 @@ describe('speaker voice IPC handlers', () => {
     ]);
   });
 
+  it('queues missing enrollment evidence instead of analyzing during confirmation', async () => {
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+    const scheduleCandidateBackfill = vi.fn();
+
+    await expect(
+      handleSpeakerVoiceRequest(
+        'SPEAKER_VOICE_ENROLL',
+        {
+          personId,
+          sourceMeetingId: meetingId,
+          speaker: 'Remote Speaker 1',
+          expectedRevision: db.identityStore.getRevision(),
+        },
+        {
+          buildEnrollmentCandidate,
+          allowCandidateBuild: false,
+          scheduleCandidateBackfill,
+        },
+      ),
+    ).resolves.toEqual({ success: true, queued: true });
+
+    expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
+    expect(scheduleCandidateBackfill).toHaveBeenCalledWith(meetingId);
+    expect(
+      db.db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM speaker_voice_enrollments WHERE source_meeting_id = ?',
+        )
+        .get(meetingId),
+    ).toEqual({ count: 0 });
+  });
+
   it('times out long-running candidate construction during enrollment', async () => {
     const buildEnrollmentCandidate = vi.fn(
       async ({ signal }: { signal?: AbortSignal }) => {
@@ -857,6 +892,39 @@ describe('speaker voice IPC handlers', () => {
     await Promise.all([first, second]);
 
     expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers legacy candidate backfill instead of running it on an interactive read', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [
+      {
+        ...dummyCandidate,
+        provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+      },
+    ]);
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+    const scheduleCandidateBackfill = vi.fn();
+
+    const result = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        buildEnrollmentCandidate,
+        allowCandidateBuild: false,
+        scheduleCandidateBackfill,
+      },
+    )) as {
+      candidates: Record<string, { analysisStatus: string }>;
+    };
+
+    expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
+    expect(scheduleCandidateBackfill).toHaveBeenCalledOnce();
+    expect(scheduleCandidateBackfill).toHaveBeenCalledWith(meetingId);
+    expect(result.candidates['Remote Speaker 1']).toMatchObject({
+      analysisStatus: 'queued',
+    });
   });
 
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {

@@ -156,6 +156,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
   });
 
   it.each([
+    ['queued', 'Voice analysis will run later when your Mac is idle.'],
     [
       'retryable_failure',
       'Voice analysis was interrupted. Pluto will retry automatically.',

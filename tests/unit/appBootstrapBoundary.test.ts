@@ -44,4 +44,14 @@ describe('Electron bootstrap boundary', () => {
     expect(source).toContain('shutdownConsumers: shutdownMainProcessConsumers');
     expect(source).toContain('closeDatabase: closeApplicationDatabase');
   });
+
+  it('keeps legacy voice analysis out of interactive IPC work', () => {
+    const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
+
+    expect(source).toContain('speakerVoiceDependencies(false)');
+    expect(source).toContain(
+      'backgroundKnowledgeRefresh?.enqueue(`voice:${meetingId}`)',
+    );
+    expect(source).toContain('speakerVoiceDependencies(true, signal)');
+  });
 });

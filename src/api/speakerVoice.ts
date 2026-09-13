@@ -22,7 +22,7 @@ export interface ClientCandidateMetadata {
   sourceRevision: string;
   isEligibleForEnrollment: boolean;
   cleanDurationSeconds: number;
-  analysisStatus?: 'eligible' | 'abstained' | 'retryable_failure';
+  analysisStatus?: 'eligible' | 'queued' | 'abstained' | 'retryable_failure';
   analysisReason?:
     | 'insufficient_clean_speech'
     | 'evidence_unavailable'
@@ -59,7 +59,8 @@ export async function getSpeakerVoiceSuggestions(
 
 export interface SpeakerVoiceEnrollmentResult {
   success: boolean;
-  enrollmentId: string;
+  enrollmentId?: string;
+  queued?: boolean;
   timings?: {
     candidateConstructionMs?: number;
     initialInferenceMs?: number;
