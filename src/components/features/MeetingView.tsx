@@ -1545,7 +1545,12 @@ const SelectedMeetingView = ({
             ),
           )}
           hasExistingAnalysis={Boolean(
-            selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
+            selectedMeeting.analysis_json ||
+              selectedMeeting.enhanced_notes ||
+              draftPreview ||
+              isMeetingProcessing ||
+              (selectedMeetingRetryOperation &&
+                transcriptValidationRetryOperation?.kind === 'analysis'),
           )}
           downstreamFailed={downstreamPresentation.state === 'failed'}
           downstreamFailureCode={
@@ -1628,16 +1633,17 @@ const SelectedMeetingView = ({
           />
         ) : null}
         {downstreamPresentation.state === 'failed' &&
-        !notesDocument.hasAnalysis ? (
+        !notesDocument.hasAnalysis &&
+        !draftPreview ? (
           <MeetingAnalysisUnavailable />
         ) : null}
         {draftPreview ? (
           <MeetingNotesDraftPreview
             preview={draftPreview}
             isRetry={
-              (selectedMeetingRetryOperation
-                ? transcriptValidationRetryOperation?.kind === 'analysis'
-                : false) || downstreamPresentation.state === 'failed'
+              notesDocument.hasAnalysis ||
+              Boolean(selectedMeeting.analysis_json) ||
+              Boolean(selectedMeeting.enhanced_notes)
             }
           />
         ) : null}
