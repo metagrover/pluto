@@ -109,11 +109,16 @@ export const NOTES_HIERARCHY_LIMITS = {
   maxNodes: 128,
 } as const;
 export const NOTES_BOUNDED_LIMITS = {
-  maxLeaves: 3,
   maxModelCalls: 6,
   maxRecoverySplits: 1,
   maxSourceCharactersPerLeaf: 8_000,
 } as const;
+// One failed writer plus its two replacement writers consumes two calls beyond
+// the call already planned for that leaf. Reserve that recovery capacity before
+// admitting a compact plan; any remaining calls are optional editor reviews.
+const MAX_BOUNDED_COMPACT_LEAVES =
+  NOTES_BOUNDED_LIMITS.maxModelCalls -
+  NOTES_BOUNDED_LIMITS.maxRecoverySplits * 2;
 
 const uniqueSpans = (spans: SourceSpan[]): SourceSpan[] => {
   const seen = new Set<string>();
@@ -950,7 +955,7 @@ export const precomputeNextMeetingNotesLeaf = async (
             input.contextTokens
         );
       });
-  if (compactEditor && leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves)
+  if (compactEditor && leaves.length > MAX_BOUNDED_COMPACT_LEAVES)
     return 'discarded';
   // The final leaf is still growing. Cache only closed leaves whose exact
   // source packet can recur unchanged in the canonical final hierarchy.
@@ -1507,7 +1512,7 @@ const runBoundedCompactNotes = async (
 ): Promise<AnalysisDocumentV3> => {
   const leaves = planBoundedCompactLeaves(input, knownTerms);
   input.onPlan?.({ plannedLeafCount: leaves.length });
-  if (leaves.length > NOTES_BOUNDED_LIMITS.maxLeaves) {
+  if (leaves.length > MAX_BOUNDED_COMPACT_LEAVES) {
     throw new MeetingNotesError('notes_bounded_plan_exceeded');
   }
 

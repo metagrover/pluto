@@ -33,6 +33,22 @@ it('reports an interrupted notes run rather than preparing forever', () => {
   ).toMatchObject({ state: 'failed' });
 });
 
+it('retains the stable capacity failure for truthful retry presentation', () => {
+  expect(
+    getDownstreamProcessingPresentation({
+      analysis_run_json: JSON.stringify({
+        notes_status: 'failed',
+        error_code: 'notes_bounded_plan_exceeded',
+      }),
+    }),
+  ).toEqual({
+    state: 'failed',
+    title: 'Notes need another pass',
+    detail: 'Your transcript is ready. Try again to continue.',
+    failureCode: 'notes_bounded_plan_exceeded',
+  });
+});
+
 it('presents a valid persisted local queue position without claiming generation started', () => {
   expect(
     getDownstreamProcessingPresentation({

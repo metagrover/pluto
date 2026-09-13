@@ -157,6 +157,7 @@ type MeetingFailurePresentationInput = {
   captureGap: boolean;
   hasExistingAnalysis: boolean;
   downstreamFailed: boolean;
+  downstreamFailureCode?: string;
 };
 
 export const resolveMeetingFailurePresentation = (
@@ -225,6 +226,14 @@ export const resolveMeetingFailurePresentation = (
     };
   }
   if (input.downstreamFailed) {
+    if (input.downstreamFailureCode === 'notes_bounded_plan_exceeded') {
+      return {
+        title: "Notes couldn't be generated",
+        detail:
+          "This transcript exceeds Pluto's current analysis capacity. Retrying it unchanged won't help.",
+        actionLabel: null,
+      };
+    }
     return {
       title: 'Analysis needs another pass',
       detail: 'Your transcript is ready.',

@@ -1334,7 +1334,7 @@ it('preserves writer capacity when the final planned compact leaf splits', async
       text: `Product fact ${index}. ${'Context '.repeat(500)}`,
     })),
   );
-  const spans = source.segments.slice(0, 3).map((segment) => ({
+  const spans = source.segments.slice(0, 4).map((segment) => ({
     segment: segment.index,
     start: 0,
     end: 20,
@@ -1352,9 +1352,9 @@ it('preserves writer capacity when the final planned compact leaf splits', async
     const descriptor = sourceDescriptors(request.prompt)[0]!.descriptor;
     if (
       request.task === 'notesWriter' &&
-      descriptor.segment === spans[2]!.segment &&
-      descriptor.start === spans[2]!.start &&
-      descriptor.end === spans[2]!.end
+      descriptor.segment === spans[3]!.segment &&
+      descriptor.start === spans[3]!.start &&
+      descriptor.end === spans[3]!.end
     ) {
       throw new MeetingNotesError('notes_output_truncated');
     }
@@ -1387,7 +1387,7 @@ it('preserves writer capacity when the final planned compact leaf splits', async
       'notesWriter',
       'notesWriter',
       'notesWriter',
-      'notesAudit',
+      'notesWriter',
     ]);
     expect(onRepartition).toHaveBeenCalledOnce();
     expect(result.quality.issues).toContain(
@@ -1398,13 +1398,69 @@ it('preserves writer capacity when the final planned compact leaf splits', async
   }
 });
 
-it('rejects a compact plan above three leaves before making a model call', async () => {
+it('admits four compact leaves within the existing six-call budget', async () => {
   const source = makeSyntheticNotesSource([
-    { speaker: 'Milo', text: 'A' },
-    { speaker: 'Nira', text: 'B' },
-    { speaker: 'Milo', text: 'C' },
-    { speaker: 'Nira', text: 'D' },
+    { speaker: 'Milo', text: 'First fact. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'Second fact. '.repeat(2_000) },
+    { speaker: 'Milo', text: 'Third fact. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'Fourth fact. '.repeat(2_000) },
   ]);
+  const leaves = source.segments.map((segment) => {
+    const span = { segment: segment.index, start: 0, end: 20 };
+    return {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: segment.text.slice(0, span.end),
+      sourceText: segment.text.slice(0, span.end),
+      sourceRevision: source.revision,
+    };
+  });
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(leaves);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({ title: null, sections: [] });
+    }
+    return auditFor(
+      request.prompt,
+      sourceDescriptors(request.prompt)[0]!.descriptor,
+    );
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      contextTokens: 8_192,
+    });
+
+    expect(generate.mock.calls.map(([request]) => request.task)).toEqual([
+      'notesWriter',
+      'notesWriter',
+      'notesWriter',
+      'notesWriter',
+      'notesAudit',
+      'notesAudit',
+    ]);
+    expect(result.quality.issues).toContain(
+      'notes_leaf_audit_fallback:notes_model_call_limit',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('rejects a compact plan that would consume the writer recovery reserve', async () => {
+  const source = makeSyntheticNotesSource(
+    Array.from({ length: 5 }, (_, index) => ({
+      speaker: index % 2 ? 'Nira' : 'Milo',
+      text: `Fact ${index}`,
+    })),
+  );
   const leaves = source.segments.map((segment) => {
     const span = { segment: segment.index, start: 0, end: segment.text.length };
     return {
