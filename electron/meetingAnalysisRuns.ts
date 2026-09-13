@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readDownstreamProcessingLease } from '../src/services/downstreamProcessingLease';
+import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import {
@@ -20,6 +21,7 @@ import { createMeetingNotesScheduler } from './meetingNotesScheduler';
 
 type MeetingRecord = {
   id: string | number;
+  title?: string | null;
   transcript_json?: string | null;
   transcript_status?: string | null;
   transcript_integrity_json?: string | null;
@@ -140,6 +142,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
 
 type NotesProvider = {
   name: string;
+  generateTitle?: LLMProvider['generateTitle'];
   synthesizeKnowledgeDocument?: LLMProvider['synthesizeKnowledgeDocument'];
   generateStructuredAnalysis(
     transcript: string,
@@ -950,6 +953,28 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             }
           })();
           if (controller.signal.aborted) throw controller.signal.reason;
+          if (
+            !analysis.title &&
+            meetingTitleNeedsGeneration(admittedMeeting.title) &&
+            provider.generateTitle
+          ) {
+            const generatedTitle = (
+              await provider.generateTitle(
+                [
+                  analysis.overview,
+                  ...analysis.topics.map((topic) => topic.title),
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              )
+            ).trim();
+            if (
+              generatedTitle.length <= 120 &&
+              !meetingTitleNeedsGeneration(generatedTitle)
+            ) {
+              analysis.title = generatedTitle;
+            }
+          }
           const published = dependencies.db.publishMeetingNotesIfCurrent({
             meetingId,
             runId,

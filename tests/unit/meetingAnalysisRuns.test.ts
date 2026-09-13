@@ -112,6 +112,93 @@ describe('meeting analysis run coordinator', () => {
     expect(publish).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(publish.mock.calls)).not.toContain('Preview only');
   });
+
+  it('generates a bounded fallback title when published notes omit a generic meeting title', async () => {
+    let running = false;
+    const publish = vi.fn().mockImplementation(() => {
+      running = false;
+      return true;
+    });
+    const generateTitle = vi.fn().mockResolvedValue('Quarterly Roadmap Review');
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'recovered-meeting',
+          title: 'Recovered recording',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 'Them', text: 'We reviewed the roadmap.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'source',
+          eligibilityRevision: 'eligibility',
+          userNotesHash: 'notes',
+        }),
+        getMeetingAnalysisRun: () =>
+          running
+            ? {
+                run_id: 'title-run',
+                input_revision: 'revision',
+                notes_status: 'running',
+              }
+            : null,
+        beginMeetingAnalysisRun: () => {
+          running = true;
+        },
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: () => true,
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: publish,
+        getAllEntities: () => [],
+        getMeetingNotesIdentityProjection: () => ({
+          speakerDisplayNames: {},
+          trustedUserTerms: [],
+        }),
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      createRunId: () => 'title-run',
+      getProvider: async () => ({
+        name: 'ollama',
+        generateTitle,
+        generateStructuredAnalysis: async () => ({
+          analysis_schema_version: 3,
+          overview: 'The quarterly roadmap was reviewed.',
+          topics: [],
+          all_action_items: [],
+          all_decisions: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        }),
+      }),
+    });
+
+    await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'recovered-meeting',
+      requestId: 'title-request',
+      template: 'auto',
+      reason: 'automatic',
+    });
+
+    expect(generateTitle).toHaveBeenCalledWith(
+      'The quarterly roadmap was reviewed.',
+    );
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analysis: expect.objectContaining({
+          title: 'Quarterly Roadmap Review',
+        }),
+      }),
+    );
+  });
+
   it('applies the optional review budget only to the local Ollama provider', () => {
     expect(shouldUseMeetingNotesOptionalReviewBudget('Ollama (Local)')).toBe(
       true,
