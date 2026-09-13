@@ -226,10 +226,7 @@ export const ActiveCallAlertWindow = () => {
       </div>
       <div className="left-block">
         <div className="meta">
-          <p
-            className="title"
-            title={isCalendar ? alertData.title : undefined}
-          >
+          <p className="title" title={isCalendar ? alertData.title : undefined}>
             {isCalendar ? alertData.title : 'Call detected'}
           </p>
           {isCalendar ? (
