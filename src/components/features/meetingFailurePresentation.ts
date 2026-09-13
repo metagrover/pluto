@@ -227,11 +227,13 @@ export const resolveMeetingFailurePresentation = (
   }
   if (input.downstreamFailed) {
     if (input.downstreamFailureCode === 'notes_bounded_plan_exceeded') {
+      // A saved failure describes the previous run, whose planner or model may
+      // differ from the current one. It cannot establish present capacity.
       return {
         title: "Notes couldn't be generated",
         detail:
-          "This transcript exceeds Pluto's current analysis capacity. Retrying it unchanged won't help.",
-        actionLabel: null,
+          'The previous analysis reached its processing limit. Your transcript is ready.',
+        actionLabel: 'Retry analysis',
       };
     }
     return {
