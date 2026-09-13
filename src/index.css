@@ -1040,89 +1040,22 @@
   .meeting-analysis-skeleton__lines {
     @apply mt-5 space-y-4;
   }
-  .meeting-notes-draft {
-    @apply mx-auto w-full max-w-[760px] px-6 pb-20 pt-6 md:px-8;
-  }
-  .meeting-notes-draft__frame {
-    @apply relative overflow-hidden rounded-2xl border;
-    border-color: var(--notes-rule);
-    background: var(--notes-paper-raised);
-    box-shadow: 0 1px 3px 0 color-mix(in oklch, var(--notes-ink) 4%, transparent);
-  }
-  .dark .meeting-notes-draft__frame {
-    background: var(--notes-paper-raised);
-    box-shadow: 0 1px 3px 0 color-mix(in oklch, black 40%, transparent);
-  }
-  .meeting-notes-draft__header {
-    @apply flex items-center justify-between gap-3 border-b px-5 py-3.5 md:px-6;
-    border-color: var(--notes-rule);
-    background: color-mix(in oklch, var(--notes-paper-raised) 70%, var(--notes-wash));
-  }
-  .dark .meeting-notes-draft__header {
-    background: color-mix(in oklch, var(--notes-paper-raised) 70%, var(--notes-wash));
-  }
-  .meeting-notes-draft__activity {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg;
-    color: var(--notes-accent);
-    background: color-mix(in oklch, var(--notes-accent) 12%, transparent);
-  }
-  .meeting-notes-draft__activity svg {
-    @apply h-4 w-4;
-  }
-  .meeting-notes-draft__status {
-    @apply min-w-0 flex-1;
-  }
-  .meeting-notes-draft__status p {
-    @apply flex items-center text-sm font-semibold;
-    color: var(--notes-ink);
-  }
-  .meeting-notes-draft__status > span {
-    @apply mt-0.5 block truncate text-xs;
-    color: var(--notes-muted);
-  }
-  .meeting-notes-draft__dots {
-    @apply ml-1.5 inline-flex items-center gap-1;
-  }
-  .meeting-notes-draft__dots span {
-    @apply h-1 w-1 rounded-full;
-    background: var(--notes-accent);
-    animation: meeting-draft-dot 1.05s ease-in-out infinite;
-  }
-  .meeting-notes-draft__dots span:nth-child(2) {
-    animation-delay: 0.13s;
-  }
-  .meeting-notes-draft__dots span:nth-child(3) {
-    animation-delay: 0.26s;
-  }
-  .meeting-notes-draft__readonly {
-    @apply inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium;
+  .meeting-notes-draft-status {
+    @apply mb-8 flex flex-wrap items-center justify-between gap-3 border-b pb-4 pt-1 text-xs;
     border-color: var(--notes-rule);
     color: var(--notes-muted);
-    background: var(--notes-paper);
   }
-  .meeting-notes-draft__readonly svg {
-    @apply h-3 w-3;
+  .meeting-notes-draft-status__indicator {
+    @apply flex items-center gap-2.5;
   }
-  .meeting-notes-draft__document {
-    @apply px-5 pb-6 pt-6 md:px-7;
-  }
-  .meeting-notes-draft__footer {
-    @apply border-t px-5 py-3 text-center text-[11px] md:px-6;
+  .meeting-notes-draft-status__badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium;
     border-color: var(--notes-rule);
-    color: var(--notes-faint);
-    background: color-mix(in oklch, var(--notes-paper-raised) 70%, var(--notes-wash));
+    color: var(--notes-muted);
+    background: var(--notes-wash);
   }
-  @keyframes meeting-draft-dot {
-    0%,
-    60%,
-    100% {
-      opacity: 0.28;
-      transform: translateY(0);
-    }
-    30% {
-      opacity: 1;
-      transform: translateY(-2px);
-    }
+  .meeting-notes-draft-status__unlock {
+    @apply text-xs text-pro-text-muted/70;
   }
   @media (prefers-reduced-motion: reduce) {
     .meeting-notes-draft *,

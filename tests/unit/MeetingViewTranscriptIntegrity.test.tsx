@@ -875,4 +875,72 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Regenerate Enhanced Notes');
     expect(markup).not.toMatch(/validat|needs attention|retry transcript/i);
   });
+
+  it('keeps Generate notes button visible with spinner and shows skeleton during analysis retry', () => {
+    const meetingWithIncompleteSystemAudio = {
+      id: 'meeting-incomplete-sys-audio',
+      title: 'Design review',
+      meeting_type: 'Recording',
+      created_at: '2026-08-17T18:00:00.000Z',
+      started_at: '2026-08-17T18:00:00.000Z',
+      transcript_status: 'needs_attention' as const,
+      finalization_status: 'finalized' as const,
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'needs_attention',
+        segments: [
+          {
+            speaker: 'Me',
+            text: 'Existing transcript from mic.',
+            startTime: 0,
+            endTime: 2,
+          },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        reasons: ['system_capture_incomplete'],
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'needs_attention',
+          failure: 'required_source_failed',
+        },
+      }),
+    };
+
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={meetingWithIncompleteSystemAudio}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Design review"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+        onRetryTranscriptValidation={vi.fn()}
+        transcriptValidationRetryOperation={{
+          meetingId: 'meeting-incomplete-sys-audio',
+          kind: 'analysis',
+        }}
+      />,
+    );
+
+    // Button remains in banner with loading spinner and disabled state
+    expect(markup).toContain('Generating notes');
+    expect(markup).toContain('disabled=""');
+    // Canvas displays skeleton, NOT the "They will appear here when analysis completes" placeholder
+    expect(markup).toContain('data-meeting-skeleton="analysis"');
+    expect(markup).toContain('Preparing notes');
+    expect(markup).toContain(
+      'Pluto is preparing your notes from the transcript…',
+    );
+    expect(markup).not.toContain(
+      'They will appear here when analysis completes',
+    );
+  });
 });

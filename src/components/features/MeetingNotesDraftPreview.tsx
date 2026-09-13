@@ -1,4 +1,4 @@
-import { LockKeyhole, Sparkles } from 'lucide-react';
+import { Loader2, LockKeyhole } from 'lucide-react';
 import type { Meeting, MeetingNotesPreview } from '../../types';
 
 export function currentNotesPreview(
@@ -27,50 +27,50 @@ export function MeetingNotesDraftPreview({
   isRetry = false,
 }: MeetingNotesDraftPreviewProps) {
   return (
-    <section
-      aria-busy="true"
-      aria-label="Notes are being drafted"
-      className="meeting-notes-draft"
-      data-meeting-artifact="analysis"
-      data-state="drafting"
-    >
-      <div className="meeting-notes-draft__frame">
-        <header className="meeting-notes-draft__header">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="meeting-notes-draft__activity" aria-hidden="true">
-              <Sparkles className="h-4 w-4" />
-            </span>
-            <div className="meeting-notes-draft__status">
-              <p aria-live="polite" role="status">
-                <span>
-                  {isRetry ? 'Taking another pass' : 'Drafting your notes'}
-                </span>
-                <span className="meeting-notes-draft__dots" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              </p>
-              <span>
-                {isRetry
-                  ? 'Pluto is taking another pass to produce a clear, useful summary.'
-                  : 'Pluto is shaping the discussion into a clear, useful summary.'}
-              </span>
-            </div>
-          </div>
-          <span className="meeting-notes-draft__readonly">
-            <LockKeyhole className="h-3 w-3" aria-hidden="true" />
-            <span>View only</span>
+    <div className="meeting-document-workspace">
+      <article
+        aria-busy="true"
+        aria-label="Notes are being drafted"
+        className="meeting-notes-document meeting-notes-document--drafting"
+        data-reading-surface="meeting-notes"
+        data-meeting-artifact="analysis"
+        data-state="drafting"
+      >
+        <output className="meeting-document-save-row" aria-live="polite">
+          <span className="meeting-save-state meeting-save-state--saving">
+            <Loader2 aria-hidden="true" size={13} className="animate-spin" />
+            <span>Drafting notes</span>
           </span>
+        </output>
+
+        <header className="meeting-notes-draft-status">
+          <div className="meeting-notes-draft-status__indicator">
+            <Loader2
+              aria-hidden="true"
+              size={14}
+              className="animate-spin text-pro-accent shrink-0"
+            />
+            <span className="font-semibold text-pro-text-main">
+              {isRetry ? 'Taking another pass' : 'Drafting your notes'}
+            </span>
+            <span className="meeting-notes-draft-status__badge">
+              <LockKeyhole aria-hidden="true" size={11} />
+              View only
+            </span>
+          </div>
+          <p className="meeting-notes-draft-status__unlock">
+            Editing unlocks automatically when your notes are ready.
+          </p>
         </header>
 
-        <div className="meeting-notes-draft__document">
+        <div className="meeting-notes-draft__content">
           {preview.sections.map((section, index) => {
             const isLatestSection = index === preview.sections.length - 1;
             return (
               <section
                 key={`${index}-${section.title}`}
                 className="meeting-notes-section"
+                data-notes-section="preview"
               >
                 <h2>
                   {section.title}
@@ -113,25 +113,27 @@ export function MeetingNotesDraftPreview({
             );
           })}
 
-          {/* Trailing skeleton loader showing more notes are actively being written */}
+          {/* Trailing skeleton loader utilizing existing meeting-analysis-skeleton styling */}
           <div
-            className="meeting-draft-skeleton mt-6 pl-1 space-y-3"
+            className="meeting-analysis-skeleton__lines mt-8 space-y-4"
             aria-hidden="true"
           >
             <div className="flex items-start gap-3">
-              <span className="meeting-note-block__marker mt-[0.75rem] opacity-40 animate-pulse" />
-              <div className="w-full space-y-2.5 pt-0.5">
+              <span className="meeting-note-block__marker mt-[0.75rem] opacity-30 animate-pulse" />
+              <div className="w-full space-y-2 pt-0.5">
                 <div className="h-3.5 w-4/5 rounded bg-pro-text-muted/10 animate-pulse motion-reduce:animate-none" />
                 <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10 animate-pulse motion-reduce:animate-none" />
               </div>
             </div>
+            <div className="flex items-start gap-3">
+              <span className="meeting-note-block__marker mt-[0.75rem] opacity-20 animate-pulse" />
+              <div className="w-full space-y-2 pt-0.5">
+                <div className="h-3.5 w-2/3 rounded bg-pro-text-muted/10 animate-pulse motion-reduce:animate-none" />
+              </div>
+            </div>
           </div>
         </div>
-
-        <footer className="meeting-notes-draft__footer">
-          Editing unlocks automatically when your notes are ready.
-        </footer>
-      </div>
-    </section>
+      </article>
+    </div>
   );
 }

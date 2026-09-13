@@ -365,14 +365,14 @@ export const TranscriptIntegrityPanel = ({
                 aria-hidden="true"
                 className="h-3.5 w-3.5 animate-spin"
               />
-              {progressCopy?.loadingLabel ??
-                (actionLabel === 'Improve labels'
-                  ? 'Improving labels'
-                  : actionLabel === 'Retry transcription'
-                    ? 'Retrying transcription'
-                    : actionLabel === 'Generate notes'
-                      ? 'Generating notes'
-                      : 'Retrying analysis')}
+              {actionLabel === 'Generate notes'
+                ? 'Generating notes'
+                : (progressCopy?.loadingLabel ??
+                  (actionLabel === 'Improve labels'
+                    ? 'Improving labels'
+                    : actionLabel === 'Retry transcription'
+                      ? 'Retrying transcription'
+                      : null))}
             </>
           ) : (
             actionLabel
@@ -1063,10 +1063,15 @@ const SelectedMeetingView = ({
   const pendingUserNotes = !notesDocument.hasAnalysis
     ? selectedMeeting.user_notes?.trim()
     : '';
+  const isAnalysisRetrying = Boolean(
+    selectedMeetingRetryOperation &&
+      transcriptValidationRetryOperation?.kind === 'analysis',
+  );
   const isMeetingProcessing =
-    (downstreamPresentation.state === 'loading' ||
+    ((downstreamPresentation.state === 'loading' ||
       downstreamPresentation.state === 'queued') &&
-    !notesDocument.hasAnalysis;
+      !notesDocument.hasAnalysis) ||
+    isAnalysisRetrying;
 
   const regenerateEnhancedNotes = async (
     reason: 'manual' | 'secondary' = 'manual',
@@ -1547,10 +1552,7 @@ const SelectedMeetingView = ({
           hasExistingAnalysis={Boolean(
             selectedMeeting.analysis_json ||
               selectedMeeting.enhanced_notes ||
-              draftPreview ||
-              isMeetingProcessing ||
-              (selectedMeetingRetryOperation &&
-                transcriptValidationRetryOperation?.kind === 'analysis'),
+              draftPreview,
           )}
           downstreamFailed={downstreamPresentation.state === 'failed'}
           downstreamFailureCode={
@@ -1618,12 +1620,21 @@ const SelectedMeetingView = ({
           </section>
         ) : null}
 
-        {isMeetingProcessing &&
-        downstreamPresentation.state === 'loading' &&
-        !draftPreview ? (
+        {(isMeetingProcessing &&
+          downstreamPresentation.state === 'loading' &&
+          !draftPreview) ||
+        (isAnalysisRetrying && !draftPreview) ? (
           <MeetingAnalysisSkeleton
-            title={downstreamPresentation.title}
-            detail={downstreamPresentation.detail}
+            title={
+              downstreamPresentation.state === 'loading'
+                ? downstreamPresentation.title
+                : 'Preparing notes'
+            }
+            detail={
+              downstreamPresentation.state === 'loading'
+                ? downstreamPresentation.detail
+                : 'Pluto is preparing your notes from the transcript…'
+            }
           />
         ) : null}
         {isMeetingProcessing && downstreamPresentation.state === 'queued' ? (
@@ -1634,7 +1645,8 @@ const SelectedMeetingView = ({
         ) : null}
         {downstreamPresentation.state === 'failed' &&
         !notesDocument.hasAnalysis &&
-        !draftPreview ? (
+        !draftPreview &&
+        !isAnalysisRetrying ? (
           <MeetingAnalysisUnavailable />
         ) : null}
         {draftPreview ? (
