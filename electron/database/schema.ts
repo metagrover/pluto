@@ -162,6 +162,55 @@ export const entities = sqliteTable(
   ],
 );
 
+export const personChatThreads = sqliteTable(
+  'person_chat_threads',
+  {
+    id: text('id').primaryKey(),
+    personId: text('person_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    createdAt: datetime('created_at').notNull().default(now),
+    updatedAt: datetime('updated_at').notNull().default(now),
+    archivedAt: datetime('archived_at'),
+  },
+  (table) => [
+    index('idx_person_chat_threads_person_updated').on(
+      table.personId,
+      desc(table.updatedAt),
+    ),
+  ],
+);
+
+export const personChatMessages = sqliteTable(
+  'person_chat_messages',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => personChatThreads.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    status: text('status').notNull().default('complete'),
+    citationsJson: text('citations_json').notNull().default('[]'),
+    createdAt: datetime('created_at').notNull().default(now),
+  },
+  (table) => [
+    check(
+      'person_chat_messages_role_check',
+      sql`${table.role} IN ('user', 'assistant')`,
+    ),
+    check(
+      'person_chat_messages_status_check',
+      sql`${table.status} IN ('complete', 'interrupted')`,
+    ),
+    index('idx_person_chat_messages_thread_created').on(
+      table.threadId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const commitmentAliases = sqliteTable('commitment_aliases', {
   extractionId: text('extraction_id').primaryKey(),
   canonicalId: text('canonical_id')

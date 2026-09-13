@@ -52,6 +52,7 @@ import type {
   PersonMeetingEvidence,
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
+import { PersonChatDock } from '../features/PersonChatDock';
 import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
@@ -1552,6 +1553,11 @@ export const PersonDossier = ({
           </p>
         ) : null}
       </details>
+      <PersonChatDock
+        personId={currentDetail.person.id}
+        personName={currentDetail.person.name}
+        onOpenMeeting={onOpenMeeting}
+      />
     </article>
   );
 };

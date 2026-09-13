@@ -28,6 +28,10 @@ import type {
   AskPlutoRetrievalSummary,
   ResolvedAskPlutoScope,
 } from '../src/types/askPlutoQuery';
+import type {
+  PersonChatResponse,
+  PersonChatSendRequest,
+} from '../src/types/personChat';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
@@ -519,6 +523,10 @@ import { createMeetingContextProducer } from './intelligence/meetingContextProdu
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
+  buildPersonChatContext,
+  buildPersonChatPrompt,
+} from './intelligence/personChat';
+import {
   clearAlertsForMeeting,
   getAlerts,
   runPostMeetingTriggers,
@@ -566,6 +574,7 @@ import {
   createMeetingAnalysisRunCoordinator,
 } from './meetingAnalysisRuns';
 import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
+import { createPersonChatStore } from './personChatStore';
 import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
@@ -775,6 +784,7 @@ const calendarService = createCalendarService({
   client: calendarClient,
   store: db.calendarStore,
 });
+const personChatStore = createPersonChatStore(getApplicationDatabase());
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -787,6 +797,10 @@ const activeAskPlutoQueries = new Map<
   { controller: AbortController; settled: Promise<void> }
 >();
 const activeMeetingAskPlutoQueries = new Map<
+  string,
+  { controller: AbortController; ownerId: number; settled: Promise<void> }
+>();
+const activePersonChatQueries = new Map<
   string,
   { controller: AbortController; ownerId: number; settled: Promise<void> }
 >();
@@ -949,6 +963,7 @@ const shutdownMainProcessConsumers = async () => {
   for (const task of activeAskPlutoQueries.values()) task.controller.abort();
   for (const task of activeMeetingAskPlutoQueries.values())
     task.controller.abort();
+  for (const task of activePersonChatQueries.values()) task.controller.abort();
   backgroundKnowledgeRefresh?.close();
   backgroundKnowledgeRefresh = null;
   stopVoiceCandidateBackfill?.();
@@ -4011,6 +4026,247 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('GET_PERSON_BRIEFING', (_event, personId) =>
     db.getPersonBriefing(String(personId)),
+  );
+  const personChatEnabled = process.env.PERSON_CHAT_V1 !== 'false';
+  const personChatBoundSpeakers = (personId: string, meetingId: string) => {
+    const canonicalId = db.resolvePersonIdentityId(personId);
+    return (
+      getApplicationDatabase()
+        .prepare(`
+          WITH family(id) AS (
+            SELECT ? UNION SELECT person_id FROM person_aliases
+            WHERE canonical_id = ? AND active = 1
+          )
+          SELECT DISTINCT speaker
+          FROM identity_bindings
+          WHERE meeting_id = ?
+            AND json_valid(payload)
+            AND json_extract(payload, '$.individual') = 1
+            AND json_extract(payload, '$.personId') IN (SELECT id FROM family)
+        `)
+        .all(canonicalId, canonicalId, meetingId) as Array<{ speaker: string }>
+    ).map((row) => row.speaker);
+  };
+  const readPersonChatMeeting = getApplicationDatabase().prepare(`
+    SELECT id, title, started_at, created_at, transcript_json, user_notes,
+           enhanced_notes, transcript_status, transcript_validated_at
+    FROM meetings WHERE id = ?
+  `);
+
+  ipcMain.handle('intelligence:person-chat:capability', () => ({
+    enabled: personChatEnabled,
+  }));
+  ipcMain.handle(
+    'intelligence:person-chat:list-threads',
+    (_event, payload: { personId?: unknown; includeArchived?: unknown }) =>
+      personChatEnabled
+        ? personChatStore.listThreads(
+            String(payload?.personId ?? ''),
+            payload?.includeArchived === true,
+          )
+        : [],
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:create-thread',
+    (_event, personId) => {
+      if (!personChatEnabled) throw new Error('Person Chat is disabled');
+      return personChatStore.createThread(String(personId));
+    },
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:archive-thread',
+    (_event, payload: { personId?: unknown; threadId?: unknown }) => {
+      if (!personChatEnabled) throw new Error('Person Chat is disabled');
+      return personChatStore.archiveThread(
+        String(payload?.threadId ?? ''),
+        String(payload?.personId ?? ''),
+      );
+    },
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:resume-thread',
+    (_event, payload: { personId?: unknown; threadId?: unknown }) => {
+      if (!personChatEnabled) throw new Error('Person Chat is disabled');
+      return personChatStore.resumeThread(
+        String(payload?.threadId ?? ''),
+        String(payload?.personId ?? ''),
+      );
+    },
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:list-messages',
+    (_event, payload: { personId?: unknown; threadId?: unknown }) =>
+      personChatStore.listMessages(
+        String(payload?.threadId ?? ''),
+        String(payload?.personId ?? ''),
+      ),
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:send',
+    async (event, rawRequest: Partial<PersonChatSendRequest>) => {
+      const startedAt = Date.now();
+      const requestId = String(rawRequest?.requestId ?? '').trim();
+      const personId = String(rawRequest?.personId ?? '').trim();
+      const threadId = String(rawRequest?.threadId ?? '').trim();
+      const query = String(rawRequest?.query ?? '')
+        .trim()
+        .slice(0, 4_000);
+      if (
+        !personChatEnabled ||
+        !requestId ||
+        !personId ||
+        !threadId ||
+        !query
+      ) {
+        return {
+          status: 'unavailable',
+          message: null,
+          rationale: 'The person chat request was invalid.',
+        } satisfies PersonChatResponse;
+      }
+
+      for (const active of activePersonChatQueries.values()) {
+        if (active.ownerId === event.sender.id) {
+          active.controller.abort(
+            new DOMException('Person chat request replaced', 'AbortError'),
+          );
+        }
+      }
+      const controller = new AbortController();
+      let settle = () => {};
+      const settled = new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+      const activeKey = `${event.sender.id}:${requestId}`;
+      activePersonChatQueries.set(activeKey, {
+        controller,
+        ownerId: event.sender.id,
+        settled,
+      });
+      const sendStatus = (status: 'reading_person' | 'answering') => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('intelligence:person-chat:status', {
+            requestId,
+            status,
+          });
+        }
+      };
+      let streamedAnswer = '';
+      let firstTokenAt: number | null = null;
+      try {
+        personChatStore.appendMessage({
+          threadId,
+          personId,
+          role: 'user',
+          content: query,
+        });
+        sendStatus('reading_person');
+        const detail = db.getPersonBriefing(personId);
+        if (!detail) throw new Error('Person not found');
+        const context = buildPersonChatContext({
+          detail,
+          query,
+          getMeeting: (meetingId) =>
+            readPersonChatMeeting.get(meetingId) as
+              | db.PersistedMeeting
+              | undefined,
+          getBoundSpeakers: personChatBoundSpeakers,
+        });
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        const messages = personChatStore
+          .listMessages(threadId, personId)
+          .slice(0, -1);
+        const prompt = buildPersonChatPrompt({
+          query,
+          context,
+          messages,
+        });
+        sendStatus('answering');
+        const returnedAnswer = await provider.answerAskPluto(prompt, {
+          signal: controller.signal,
+          mode: 'fast',
+          onToken: (delta) => {
+            if (delta && firstTokenAt === null) firstTokenAt = Date.now();
+            streamedAnswer += delta;
+            if (!event.sender.isDestroyed() && delta) {
+              event.sender.send('intelligence:person-chat:delta', {
+                requestId,
+                delta,
+              });
+            }
+          },
+        });
+        const content = (returnedAnswer || streamedAnswer).trim();
+        if (!content)
+          throw new Error('Person Chat provider returned no answer');
+        console.info('[Pluto][Person Chat] provider-response', {
+          requestId,
+          firstTokenMs: firstTokenAt ? firstTokenAt - startedAt : null,
+          totalMs: Date.now() - startedAt,
+          promptChars: prompt.length,
+          evidenceChars: context.evidence.length,
+          meetingSourceCount: context.citations.length,
+        });
+        const message = personChatStore.appendMessage({
+          threadId,
+          personId,
+          role: 'assistant',
+          content,
+          citations: context.citations,
+        });
+        return {
+          status: 'answered',
+          message,
+        } satisfies PersonChatResponse;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          const partial = streamedAnswer.trim();
+          const message = partial
+            ? personChatStore.appendMessage({
+                threadId,
+                personId,
+                role: 'assistant',
+                content: partial,
+                status: 'interrupted',
+              })
+            : null;
+          return {
+            status: 'cancelled',
+            message,
+          } satisfies PersonChatResponse;
+        }
+        console.error('[Pluto][Person Chat] failed:', error);
+        return {
+          status: 'unavailable',
+          message: null,
+          rationale: 'Pluto could not answer about this person right now.',
+        } satisfies PersonChatResponse;
+      } finally {
+        settle();
+        if (activePersonChatQueries.get(activeKey)?.controller === controller) {
+          activePersonChatQueries.delete(activeKey);
+        }
+      }
+    },
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:cancel',
+    async (event, rawRequestId: unknown) => {
+      const requestId = String(rawRequestId ?? '');
+      const active = activePersonChatQueries.get(
+        `${event.sender.id}:${requestId}`,
+      );
+      if (!active) return { cancelled: false };
+      active.controller.abort(
+        new DOMException('Person chat request cancelled', 'AbortError'),
+      );
+      await Promise.race([
+        active.settled,
+        new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+      ]);
+      return { cancelled: true };
+    },
   );
   ipcMain.handle(
     'RESOLVE_PERSON_COMMITMENT_OWNER',

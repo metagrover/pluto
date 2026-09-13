@@ -50,6 +50,13 @@
       "when": 1789265747447,
       "tag": "0006_voice_candidate_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789320739869,
+      "tag": "0007_person_chat",
+      "breakpoints": true
     }
   ]
 }
