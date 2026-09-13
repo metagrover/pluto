@@ -62,6 +62,10 @@ describe('RuntimeReadinessGate', () => {
       ),
     );
     expect(container.textContent).toContain('Checking local transcription');
+    expect(container.querySelector('img[alt="Pluto Logo"]')).not.toBeNull();
+    expect(
+      container.querySelector('img[alt="Pluto Logo"]')?.getAttribute('src'),
+    ).toMatch(/^data:image\/svg\+xml/);
 
     await act(async () => await Promise.resolve());
 

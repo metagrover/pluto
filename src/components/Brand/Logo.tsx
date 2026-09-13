@@ -1,6 +1,6 @@
 import type React from 'react';
-import logoSvg from '../../assets/brand/pluto_logo.svg';
-import logoDarkSvg from '../../assets/brand/pluto_logo_dark_mode.svg';
+import logoSvg from '../../assets/brand/pluto_logo.svg?inline';
+import logoDarkSvg from '../../assets/brand/pluto_logo_dark_mode.svg?inline';
 
 interface LogoProps {
   className?: string;
