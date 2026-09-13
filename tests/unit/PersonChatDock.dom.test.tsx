@@ -80,7 +80,7 @@ describe('PersonChatDock', () => {
     host.remove();
   });
 
-  it('opens conversational starters and persists a sourced response', async () => {
+  it('opens from a floating launcher and persists a sourced response', async () => {
     const onOpenMeeting = vi.fn();
     await act(async () => {
       root.render(
@@ -93,8 +93,12 @@ describe('PersonChatDock', () => {
       await Promise.resolve();
     });
 
-    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
-    await act(async () => textarea.focus());
+    expect(host.querySelector('textarea')).toBeNull();
+    const launcher = host.querySelector(
+      'button[aria-label="Open chat about Maya"]',
+    ) as HTMLButtonElement;
+    await act(async () => launcher.click());
+    expect(host.querySelector('textarea')).not.toBeNull();
     expect(host.textContent).toContain('What would you like to think through?');
     const starter = [...host.querySelectorAll('button')].find(
       (button) => button.textContent === 'Catch me up on Maya',

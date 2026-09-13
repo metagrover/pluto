@@ -2,7 +2,6 @@ import {
   Archive,
   ArchiveRestore,
   ChevronDown,
-  ChevronUp,
   Loader2,
   MessageCircle,
   Plus,
@@ -283,184 +282,189 @@ export const PersonChatDock: React.FC<{
   const hasConversation = messages.length > 0 || asking;
   const starters = useMemo(() => starterPrompts(personName), [personName]);
   if (!enabled) return null;
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="person-chat-launcher"
+        aria-label={`Open chat about ${personName}`}
+        onClick={() => setExpanded(true)}
+      >
+        <MessageCircle size={17} aria-hidden="true" />
+        <span>Chat about {personName}</span>
+      </button>
+    );
+  }
 
   return (
     <aside
-      className={`person-chat ${expanded ? 'person-chat--expanded' : ''}`}
+      className="person-chat person-chat--expanded"
       aria-label={`Chat about ${personName}`}
     >
-      {expanded ? (
-        <>
-          <header className="person-chat__header">
-            <div>
-              <Logo size={20} variant="default" />
-              <span>
-                <strong>Chat about {personName}</strong>
-                <small>{status || 'Private, person-scoped conversation'}</small>
-              </span>
-            </div>
-            <div>
-              <button
-                type="button"
-                title="New chat"
-                aria-label="New chat"
-                onClick={() => {
-                  cancelActive();
-                  setThreadId(null);
-                  setMessages([]);
-                  setError('');
-                }}
-              >
-                <Plus size={16} />
-              </button>
-              {threadId ? (
-                threads.find((thread) => thread.id === threadId)?.archivedAt ? (
-                  <button
-                    type="button"
-                    title="Resume chat"
-                    aria-label="Resume chat"
-                    onClick={() => {
-                      void resumePersonChatThread(personId, threadId).then(
-                        async () => {
-                          await refreshThreads();
-                        },
-                      );
-                    }}
-                  >
-                    <ArchiveRestore size={15} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    title="Archive chat"
-                    aria-label="Archive chat"
-                    onClick={() => {
-                      cancelActive();
-                      void archivePersonChatThread(personId, threadId).then(
-                        async () => {
-                          const next = await refreshThreads();
-                          setThreadId(
-                            next.find((thread) => thread.archivedAt === null)
-                              ?.id ?? null,
-                          );
-                        },
-                      );
-                    }}
-                  >
-                    <Archive size={15} />
-                  </button>
-                )
-              ) : null}
-              <button
-                type="button"
-                title="Minimize"
-                aria-label="Minimize person chat"
-                onClick={() => {
-                  cancelActive();
-                  setExpanded(false);
-                }}
-              >
-                <ChevronDown size={16} />
-              </button>
-            </div>
-          </header>
-
-          {threads.length ? (
-            <label className="person-chat__thread-picker">
-              <span>Conversation</span>
-              <select
-                value={threadId ?? ''}
-                onChange={(event) => {
-                  cancelActive();
-                  setThreadId(event.target.value || null);
-                }}
-              >
-                <option value="">New conversation</option>
-                {threads.map((thread) => (
-                  <option key={thread.id} value={thread.id}>
-                    {thread.title}
-                    {thread.archivedAt ? ' (Archived)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <div
-            className="person-chat__conversation"
-            role="log"
-            aria-live="polite"
+      <header className="person-chat__header">
+        <div>
+          <Logo size={20} variant="default" />
+          <span>
+            <strong>Chat about {personName}</strong>
+            <small>{status || 'Private, person-scoped conversation'}</small>
+          </span>
+        </div>
+        <div>
+          <button
+            type="button"
+            title="New chat"
+            aria-label="New chat"
+            onClick={() => {
+              cancelActive();
+              setThreadId(null);
+              setMessages([]);
+              setError('');
+            }}
           >
-            {!hasConversation ? (
-              <div className="person-chat__welcome">
-                <strong>What would you like to think through?</strong>
-                <p>
-                  Ask for a catch-up, prepare a conversation, explore an
-                  approach, or draft something together.
-                </p>
-                <div>
-                  {starters.map((starter) => (
-                    <button
-                      type="button"
-                      key={starter}
-                      onClick={() => void submit(starter)}
-                    >
-                      {starter}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {messages.map((message) =>
-              message.role === 'user' ? (
-                <div
-                  key={message.id}
-                  className="person-chat__message person-chat__message--user"
-                >
-                  {message.content}
-                </div>
-              ) : (
-                <div key={message.id} className="person-chat__assistant">
-                  <Logo size={18} variant="default" />
-                  <div className="person-chat__message person-chat__message--assistant">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {message.content}
-                    </ReactMarkdown>
-                    {message.status === 'interrupted' ? (
-                      <small>Stopped</small>
-                    ) : null}
-                    <SourceList
-                      citations={message.citations}
-                      onOpenMeeting={onOpenMeeting}
-                    />
-                  </div>
-                </div>
-              ),
-            )}
-            {streaming ? (
-              <div className="person-chat__assistant">
-                <Logo size={18} variant="default" />
-                <div className="person-chat__message person-chat__message--assistant">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {streaming}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            ) : null}
-            {asking && !streaming ? (
-              <output className="person-chat__loading">
-                <Loader2 className="animate-spin" size={15} /> {status}
-              </output>
-            ) : null}
-            {error ? (
-              <p className="person-chat__error" role="alert">
-                {error}
-              </p>
-            ) : null}
-            <div ref={endRef} />
-          </div>
-        </>
+            <Plus size={16} />
+          </button>
+          {threadId ? (
+            threads.find((thread) => thread.id === threadId)?.archivedAt ? (
+              <button
+                type="button"
+                title="Resume chat"
+                aria-label="Resume chat"
+                onClick={() => {
+                  void resumePersonChatThread(personId, threadId).then(
+                    async () => {
+                      await refreshThreads();
+                    },
+                  );
+                }}
+              >
+                <ArchiveRestore size={15} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                title="Archive chat"
+                aria-label="Archive chat"
+                onClick={() => {
+                  cancelActive();
+                  void archivePersonChatThread(personId, threadId).then(
+                    async () => {
+                      const next = await refreshThreads();
+                      setThreadId(
+                        next.find((thread) => thread.archivedAt === null)?.id ??
+                          null,
+                      );
+                    },
+                  );
+                }}
+              >
+                <Archive size={15} />
+              </button>
+            )
+          ) : null}
+          <button
+            type="button"
+            title="Minimize"
+            aria-label="Minimize person chat"
+            onClick={() => {
+              cancelActive();
+              setExpanded(false);
+            }}
+          >
+            <ChevronDown size={16} />
+          </button>
+        </div>
+      </header>
+
+      {threads.length ? (
+        <label className="person-chat__thread-picker">
+          <span>Conversation</span>
+          <select
+            value={threadId ?? ''}
+            onChange={(event) => {
+              cancelActive();
+              setThreadId(event.target.value || null);
+            }}
+          >
+            <option value="">New conversation</option>
+            {threads.map((thread) => (
+              <option key={thread.id} value={thread.id}>
+                {thread.title}
+                {thread.archivedAt ? ' (Archived)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
       ) : null}
+
+      <div className="person-chat__conversation" role="log" aria-live="polite">
+        {!hasConversation ? (
+          <div className="person-chat__welcome">
+            <strong>What would you like to think through?</strong>
+            <p>
+              Ask for a catch-up, prepare a conversation, explore an approach,
+              or draft something together.
+            </p>
+            <div>
+              {starters.map((starter) => (
+                <button
+                  type="button"
+                  key={starter}
+                  onClick={() => void submit(starter)}
+                >
+                  {starter}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {messages.map((message) =>
+          message.role === 'user' ? (
+            <div
+              key={message.id}
+              className="person-chat__message person-chat__message--user"
+            >
+              {message.content}
+            </div>
+          ) : (
+            <div key={message.id} className="person-chat__assistant">
+              <Logo size={18} variant="default" />
+              <div className="person-chat__message person-chat__message--assistant">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+                {message.status === 'interrupted' ? (
+                  <small>Stopped</small>
+                ) : null}
+                <SourceList
+                  citations={message.citations}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </div>
+            </div>
+          ),
+        )}
+        {streaming ? (
+          <div className="person-chat__assistant">
+            <Logo size={18} variant="default" />
+            <div className="person-chat__message person-chat__message--assistant">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streaming}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ) : null}
+        {asking && !streaming ? (
+          <output className="person-chat__loading">
+            <Loader2 className="animate-spin" size={15} /> {status}
+          </output>
+        ) : null}
+        {error ? (
+          <p className="person-chat__error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div ref={endRef} />
+      </div>
 
       <form
         className="person-chat__composer"
@@ -469,13 +473,11 @@ export const PersonChatDock: React.FC<{
           void submit(query);
         }}
       >
-        {!expanded ? <MessageCircle size={17} aria-hidden="true" /> : null}
         <textarea
           value={query}
           rows={1}
           maxLength={4_000}
           placeholder={`Chat about ${personName}`}
-          onFocus={() => setExpanded(true)}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -492,10 +494,8 @@ export const PersonChatDock: React.FC<{
         >
           {asking ? (
             <Square size={14} fill="currentColor" />
-          ) : expanded ? (
-            <Send size={16} />
           ) : (
-            <ChevronUp size={16} />
+            <Send size={16} />
           )}
         </button>
       </form>
