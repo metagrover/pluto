@@ -50,8 +50,12 @@ describe('activeCallAlertWindow', () => {
 
   it('shows calendar prompt outside the app at top-right corner with macOS banner dimensions', async () => {
     const { BrowserWindow } = await import('electron');
-    const { createActiveCallAlertController, ALERT_WIDTH, ALERT_HEIGHT, ALERT_MARGIN } =
-      await import('../../electron/windows/activeCallAlertWindow');
+    const {
+      createActiveCallAlertController,
+      ALERT_WIDTH,
+      ALERT_HEIGHT,
+      ALERT_MARGIN,
+    } = await import('../../electron/windows/activeCallAlertWindow');
 
     const controller = createActiveCallAlertController({
       preloadPath: '/preload.js',

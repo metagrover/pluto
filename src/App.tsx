@@ -34,7 +34,6 @@ import {
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
 import { CalendarStartPromptBanner } from './components/alerts/CalendarStartPromptBanner';
-import { hasConferenceLink } from './utils/conferenceUrl';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -98,6 +97,7 @@ import {
   getCalendarRosterNames,
   isMatchedActiveCalendarResult,
 } from './utils/calendarRoster';
+import { hasConferenceLink } from './utils/conferenceUrl';
 import { meetingTitleNeedsGeneration } from './utils/meetingTitle';
 
 import {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { BrowserWindow, screen } from 'electron';
 import type { Rectangle } from 'electron';
 
-export const ALERT_WIDTH = 360;
+export const ALERT_WIDTH = 380;
 export const ALERT_HEIGHT = 80;
 export const ALERT_MARGIN = 14;
 

@@ -79,7 +79,9 @@ describe('ActiveCallAlertWindow component', () => {
     const iconContainer = container.querySelector('.status-icon');
     expect(iconContainer).not.toBeNull();
 
-    const recordButton = container.querySelector('.take-notes') as HTMLButtonElement;
+    const recordButton = container.querySelector(
+      '.take-notes',
+    ) as HTMLButtonElement;
     expect(recordButton).not.toBeNull();
 
     await act(async () => {
@@ -105,7 +107,9 @@ describe('ActiveCallAlertWindow component', () => {
       root.render(<ActiveCallAlertWindow />);
     });
 
-    const closeButton = container.querySelector('.close-alert') as HTMLButtonElement;
+    const closeButton = container.querySelector(
+      '.close-alert',
+    ) as HTMLButtonElement;
     expect(closeButton).not.toBeNull();
 
     await act(async () => {

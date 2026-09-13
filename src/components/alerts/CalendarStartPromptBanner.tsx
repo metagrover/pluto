@@ -45,7 +45,7 @@ export const CalendarStartPromptBanner: React.FC<
   return (
     <section
       aria-label="Upcoming meeting prompt"
-      className="fixed top-4 right-6 z-50 flex items-center gap-2.5 bg-pro-surface/95 backdrop-blur-md border border-pro-border shadow-lg shadow-black/10 text-pro-text-main px-3 py-2.5 rounded-lg animate-in fade-in slide-in-from-top-3 duration-300 w-[360px] box-border"
+      className="fixed top-4 right-6 z-50 flex items-center gap-2.5 bg-pro-surface/95 backdrop-blur-md border border-pro-border shadow-lg shadow-black/10 text-pro-text-main px-3 py-2.5 rounded-lg animate-in fade-in slide-in-from-top-3 duration-300 w-[380px] box-border"
     >
       <div className="flex items-center justify-center w-[34px] h-[34px] rounded-[7px] bg-pro-accent/15 text-pro-accent shrink-0">
         <Icon className="w-[18px] h-[18px]" />
