@@ -37,21 +37,19 @@ export function MeetingNotesDraftPreview({
         data-state="drafting"
       >
         <div className="meeting-draft-status-row" aria-live="polite">
-          <span className="meeting-draft-status-badge">
+          <div className="meeting-draft-status-badge">
             <Sparkles className="h-3 w-3 animate-pulse text-pro-accent" />
             <span>
-              {isRetry
-                ? 'Drafting your notes (taking another pass)'
-                : 'Drafting your notes'}
+              {isRetry ? 'Taking another pass…' : 'Drafting your notes…'}
             </span>
-          </span>
-          <span className="meeting-draft-readonly-badge">
-            <LockKeyhole
-              className="h-3 w-3 text-pro-text-muted"
-              aria-hidden="true"
-            />
-            <span>View only</span>
-          </span>
+            <span className="text-pro-text-muted/40" aria-hidden="true">
+              ·
+            </span>
+            <span className="inline-flex items-center gap-1 font-normal text-pro-text-muted">
+              <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+              <span>View only</span>
+            </span>
+          </div>
         </div>
 
         {preview.sections.map((section, index) => {

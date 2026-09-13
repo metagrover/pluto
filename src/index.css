@@ -1046,16 +1046,13 @@
   .meeting-notes-draft__frame {
     @apply relative overflow-hidden rounded-[18px] border;
     border-color: var(--notes-rule);
-    background:
-      radial-gradient(
+    background: radial-gradient(
         circle at 8% -10%,
         oklch(88% 0.05 75 / 0.24),
         transparent 34%
-      ),
-      var(--notes-paper-raised);
-    box-shadow:
-      0 1px 0 oklch(100% 0 0 / 0.7) inset,
-      0 18px 50px -38px oklch(30% 0.03 55 / 0.3);
+      ), var(--notes-paper-raised);
+    box-shadow: 0 1px 0 oklch(100% 0 0 / 0.7) inset, 0 18px 50px -38px
+      oklch(30% 0.03 55 / 0.3);
   }
   .meeting-notes-draft__frame::before {
     content: "";
@@ -1072,16 +1069,13 @@
     animation: meeting-draft-scan 1.4s ease-in-out infinite;
   }
   .dark .meeting-notes-draft__frame {
-    background:
-      radial-gradient(
+    background: radial-gradient(
         circle at 8% -10%,
         oklch(52% 0.045 65 / 0.13),
         transparent 36%
-      ),
-      var(--notes-paper-raised);
-    box-shadow:
-      0 1px 0 oklch(100% 0 0 / 0.04) inset,
-      0 18px 50px -38px oklch(0% 0 0 / 0.7);
+      ), var(--notes-paper-raised);
+    box-shadow: 0 1px 0 oklch(100% 0 0 / 0.04) inset, 0 18px 50px -38px
+      oklch(0% 0 0 / 0.7);
   }
   .meeting-notes-draft__header {
     @apply flex items-center gap-3 border-b px-5 py-4 md:px-6;
@@ -1269,7 +1263,8 @@
     animation: meeting-caret-blink 0.75s ease-in-out infinite;
   }
   @keyframes meeting-caret-blink {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 1;
     }
     50% {
@@ -1293,7 +1288,7 @@
     @apply mb-5 flex items-center;
   }
   .meeting-draft-status-badge {
-    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors;
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors;
     border-color: var(--notes-rule);
     color: var(--notes-ink);
     background: var(--notes-wash);
