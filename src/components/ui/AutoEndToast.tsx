@@ -8,7 +8,7 @@ interface AutoEndToastProps {
 const getEndReasonDetail = (
   reason: string | null,
   appName: string | null,
-): string | null => {
+): string => {
   if (reason === 'call_app_exited') {
     return appName ? `${appName} closed` : 'Call app closed';
   }
@@ -16,9 +16,9 @@ const getEndReasonDetail = (
     return 'No audio detected';
   }
   if (reason) {
-    return appName ? `${appName} closed` : reason;
+    return appName ? `${appName} closed` : 'Meeting concluded';
   }
-  return appName ? `${appName} closed` : null;
+  return appName ? `${appName} closed` : 'Call ended';
 };
 
 export const AutoEndToast = ({
@@ -30,8 +30,8 @@ export const AutoEndToast = ({
   const detail = getEndReasonDetail(reason, appName);
 
   return (
-    <div className="fixed top-8 right-8 z-[2000] animate-in slide-in-from-top-4">
-      <div className="flex items-center gap-3 px-3.5 py-2.5 bg-pro-surface/95 backdrop-blur-md rounded-lg border border-pro-border shadow-lg shadow-black/10 text-pro-text-main">
+    <div className="fixed top-4 right-6 z-[2000] animate-in fade-in slide-in-from-top-3 duration-300">
+      <div className="w-[380px] h-[80px] box-border rounded-lg border border-pro-border bg-pro-surface/95 backdrop-blur-md shadow-lg shadow-black/10 flex items-center gap-2.5 px-3 py-2.5 text-pro-text-main">
         <div className="w-[34px] h-[34px] rounded-[7px] bg-pro-accent/15 text-pro-accent flex items-center justify-center shrink-0">
           <svg
             className="w-[18px] h-[18px]"
@@ -48,24 +48,19 @@ export const AutoEndToast = ({
             />
           </svg>
         </div>
-        <div className="flex items-center gap-2 whitespace-nowrap min-w-0 pr-1">
-          <span className="text-[13px] font-semibold text-pro-text-main">
+        <div className="flex flex-col min-w-0 pr-1 text-left flex-1">
+          <p className="text-[13px] font-semibold text-pro-text-main truncate m-0 leading-[1.2]">
             Meeting ended
-          </span>
-          {detail && (
-            <>
-              <span className="text-pro-text-muted opacity-40 text-[11px]">•</span>
-              <span className="text-[12px] font-medium text-pro-text-muted">
-                {detail}
-              </span>
-            </>
-          )}
+          </p>
+          <p className="text-[11px] text-pro-text-muted font-medium truncate m-0 leading-[1.2] mt-0.5">
+            {detail}
+          </p>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0 pl-1 border-l border-pro-border">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={onReopen}
-            className="h-[30px] px-3 rounded-md bg-pro-accent text-white text-[11px] font-semibold hover:bg-pro-accent/90 transition-all cursor-pointer flex items-center justify-center shadow-sm"
+            className="h-[34px] px-3.5 rounded-md bg-pro-accent text-white text-[11px] font-semibold hover:bg-pro-accent/90 active:scale-95 transition-all shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent flex items-center justify-center cursor-pointer"
           >
             Reopen
           </button>
@@ -73,11 +68,16 @@ export const AutoEndToast = ({
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss meeting ended notification"
-            className="w-7 h-7 rounded-md border border-pro-border bg-pro-surface hover:bg-pro-border/20 text-pro-text-muted hover:text-pro-text-main flex items-center justify-center transition-all cursor-pointer"
+            className="w-7 h-7 rounded-md border border-pro-border bg-pro-surface hover:bg-pro-border/20 text-pro-text-muted hover:text-pro-text-main flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent cursor-pointer"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none">
+            <svg
+              className="w-4 h-4"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
               <path
-                d="m6 6 8 8m0-8-8 8"
+                d="m6.5 6.5 7 7m0-7-7 7"
                 stroke="currentColor"
                 strokeWidth="1.6"
                 strokeLinecap="round"
