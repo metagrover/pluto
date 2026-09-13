@@ -155,6 +155,50 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
   });
 
+  it.each([
+    [
+      'retryable_failure',
+      'Voice analysis was interrupted. Pluto will retry automatically.',
+    ],
+    [
+      'abstained',
+      'There was not enough reliable isolated speech for voice identification.',
+    ],
+    ['eligible', 'No saved voice profile matched with enough confidence.'],
+  ])('explains the %s voice-analysis outcome', async (analysisStatus, copy) => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {},
+          candidates: {
+            'Remote Speaker 1': {
+              sourceRevision,
+              isEligibleForEnrollment: analysisStatus === 'eligible',
+              cleanDurationSeconds: 0,
+              analysisStatus,
+            },
+          },
+          enrollmentAvailability: { 'Remote Speaker 1': true },
+        };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain(copy);
+  });
+
   it('confirms suggestion and enrolls the voice profile automatically', async () => {
     await act(async () => {
       root.render(

@@ -19,9 +19,11 @@ import {
   enrollSpeakerVoice,
   getCanonicalVoiceProfiles,
   getMeetingSpeakerCandidates,
+  getVoiceCandidateAttempt,
   getVoiceProfileOptOuts,
   getVoiceRejections,
   isVoiceProfileOptedOut,
+  recordVoiceCandidateAttempt,
   recordVoiceRejection,
   resolvePersonId,
   saveMeetingSpeakerCandidate,
@@ -83,6 +85,12 @@ type ConfirmedSpeakerBinding = {
 };
 
 const MAX_RECONCILIATION_SOURCES_PER_PERSON = 3;
+const CANDIDATE_RETRY_DELAY_MS = 5 * 60 * 1000;
+
+const candidateFailureReason = (error: unknown): string =>
+  error instanceof Error && error.message === 'speaker_enrollment_timeout'
+    ? 'timed_out'
+    : 'native_runtime_failed';
 
 const enrollmentSourceKey = (input: ConfirmedSpeakerBinding): string =>
   `${input.meetingId}\u0000${input.speaker}\u0000${input.sourceRevision}`;
@@ -92,27 +100,6 @@ const usesCurrentEnrollmentExtraction = (
 ): boolean =>
   candidate.provenance.enrollmentExtractionVersion ===
   ENROLLMENT_EXTRACTION_VERSION;
-
-const createIneligibleSpeakerCandidate = (
-  speaker: string,
-): SpeakerCandidateEvidence => ({
-  speaker,
-  nativeCluster: speaker,
-  candidateDigest: `ineligible:${speaker}`,
-  embedding: [],
-  representativeEmbeddings: [],
-  cleanDurationSeconds: 0,
-  cleanSegmentCount: 0,
-  cleanChunkCount: 0,
-  minimumChunkSimilarity: 0,
-  meanChunkSimilarity: 0,
-  referenceInterval: { startTime: 0, endTime: 0, excerpt: '' },
-  provenance: {
-    ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey,
-    enrollmentExtractionVersion: ENROLLMENT_EXTRACTION_VERSION,
-  },
-  isEligibleForEnrollment: false,
-});
 
 type ReconciliationOutcome =
   | 'enrolled'
@@ -241,6 +228,35 @@ const buildCandidateWithTimeout = async (
     throw err;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
+const candidateBuildRuns = new WeakMap<
+  Database.Database,
+  Map<string, ReturnType<typeof buildCandidateWithTimeout>>
+>();
+
+const buildCandidateOnce = async (
+  deps: SpeakerVoiceDependencies | undefined,
+  d: Database.Database,
+  input: { meetingId: string; speaker: string },
+  timeoutMs: number,
+): ReturnType<typeof buildCandidateWithTimeout> => {
+  let runs = candidateBuildRuns.get(d);
+  if (!runs) {
+    runs = new Map();
+    candidateBuildRuns.set(d, runs);
+  }
+  const key = `${input.meetingId}\u0000${input.speaker}`;
+  const existing = runs.get(key);
+  if (existing) return await existing;
+  const run = buildCandidateWithTimeout(deps, input, timeoutMs);
+  runs.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (runs.get(key) === run) runs.delete(key);
+    if (runs.size === 0) candidateBuildRuns.delete(d);
   }
 };
 
@@ -439,29 +455,81 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
               usesCurrentEnrollmentExtraction(storedCandidate) &&
               storedCandidate.sourceRevision === binding.sourceRevision,
           );
-          const built =
-            storedCandidate && usesStoredCandidate
-              ? {
-                  candidate: storedCandidate,
-                  sourceRevision: storedCandidate.sourceRevision,
-                }
-              : await buildCandidateWithTimeout(
-                  deps,
-                  {
-                    meetingId: binding.meetingId,
-                    speaker: binding.speaker,
-                  },
-                  deps?.reconciliationTimeoutMs ?? 15000,
-                );
+          const previousAttempt = getVoiceCandidateAttempt(
+            {
+              meetingId: binding.meetingId,
+              speaker: binding.speaker,
+              sourceRevision: binding.sourceRevision,
+              extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+            },
+            d,
+          );
+          if (
+            !usesStoredCandidate &&
+            (previousAttempt?.status === 'abstained' ||
+              (previousAttempt?.status === 'retryable_failure' &&
+                (previousAttempt.retryAfter ?? 0) > Date.now()))
+          ) {
+            continue;
+          }
+          let built: {
+            candidate: SpeakerCandidateEvidence;
+            sourceRevision: string;
+            timings?: {
+              candidateConstructionMs: number;
+              initialInferenceMs: number;
+              representativeInferencesMs: number[];
+            };
+          } | null;
+          if (storedCandidate && usesStoredCandidate) {
+            built = {
+              candidate: storedCandidate,
+              sourceRevision: storedCandidate.sourceRevision,
+            };
+          } else {
+            try {
+              built = await buildCandidateOnce(
+                deps,
+                d,
+                {
+                  meetingId: binding.meetingId,
+                  speaker: binding.speaker,
+                },
+                deps?.reconciliationTimeoutMs ?? 15000,
+              );
+            } catch (error) {
+              sawFailure = true;
+              recordVoiceCandidateAttempt(
+                {
+                  meetingId: binding.meetingId,
+                  speaker: binding.speaker,
+                  sourceRevision: binding.sourceRevision,
+                  extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                  status: 'retryable_failure',
+                  reason: candidateFailureReason(error),
+                  retryAfter: Date.now() + CANDIDATE_RETRY_DELAY_MS,
+                },
+                d,
+              );
+              continue;
+            }
+          }
           if (
             !built ||
             built.candidate.speaker !== binding.speaker ||
-            !built.sourceRevision
+            !built.sourceRevision ||
+            !usesCurrentEnrollmentExtraction(built.candidate)
           ) {
-            saveMeetingSpeakerCandidate(
-              binding.meetingId,
-              binding.sourceRevision,
-              createIneligibleSpeakerCandidate(binding.speaker),
+            recordVoiceCandidateAttempt(
+              {
+                meetingId: binding.meetingId,
+                speaker: binding.speaker,
+                sourceRevision: binding.sourceRevision,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'abstained',
+                reason: 'evidence_unavailable',
+                retryAfter: null,
+              },
               d,
             );
             continue;
@@ -472,6 +540,18 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
               binding.meetingId,
               built.sourceRevision,
               built.candidate,
+              d,
+            );
+            recordVoiceCandidateAttempt(
+              {
+                meetingId: binding.meetingId,
+                speaker: binding.speaker,
+                sourceRevision: built.sourceRevision,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'eligible',
+                reason: null,
+                retryAfter: null,
+              },
               d,
             );
           }
@@ -485,6 +565,18 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
               d,
             )
           ) {
+            recordVoiceCandidateAttempt(
+              {
+                meetingId: binding.meetingId,
+                speaker: binding.speaker,
+                sourceRevision: built.sourceRevision,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'abstained',
+                reason: 'insufficient_clean_speech',
+                retryAfter: null,
+              },
+              d,
+            );
             continue;
           }
 
@@ -522,8 +614,12 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
           })();
           profiledPeople.add(personId);
           enrolledSources += 1;
-        } catch {
+        } catch (error) {
           sawFailure = true;
+          console.warn(
+            '[Pluto][SpeakerVoice] confirmed profile reconciliation failed',
+            error,
+          );
         }
       }
       if (enrolledSources > 0) {
@@ -575,62 +671,6 @@ export async function handleSpeakerVoiceRequest(
         scheduleBackgroundVoiceProfileReconciliation(deps, d);
       }
 
-      let candidates = getMeetingSpeakerCandidates(meetingId, d);
-      if (deps?.buildEnrollmentCandidate) {
-        for (const candidate of candidates) {
-          if (usesCurrentEnrollmentExtraction(candidate)) continue;
-          try {
-            const built = await buildCandidateWithTimeout(
-              deps,
-              {
-                meetingId,
-                speaker: candidate.speaker,
-              },
-              deps?.reconciliationTimeoutMs ?? 15000,
-            );
-            if (
-              built &&
-              built.candidate.speaker === candidate.speaker &&
-              usesCurrentEnrollmentExtraction(built.candidate) &&
-              built.sourceRevision
-            ) {
-              saveMeetingSpeakerCandidate(
-                meetingId,
-                built.sourceRevision,
-                built.candidate,
-                d,
-              );
-            } else if (candidate.sourceRevision) {
-              saveMeetingSpeakerCandidate(
-                meetingId,
-                candidate.sourceRevision,
-                createIneligibleSpeakerCandidate(candidate.speaker),
-                d,
-              );
-            }
-          } catch {
-            if (candidate.sourceRevision) {
-              saveMeetingSpeakerCandidate(
-                meetingId,
-                candidate.sourceRevision,
-                createIneligibleSpeakerCandidate(candidate.speaker),
-                d,
-              );
-            }
-          }
-        }
-        candidates = getMeetingSpeakerCandidates(meetingId, d);
-      }
-      const clientCandidates: Record<string, unknown> = {};
-      for (const candidate of candidates) {
-        clientCandidates[candidate.speaker] = {
-          candidateDigest: candidate.candidateDigest,
-          sourceRevision: candidate.sourceRevision,
-          isEligibleForEnrollment: candidate.isEligibleForEnrollment,
-          cleanDurationSeconds: candidate.cleanDurationSeconds,
-        };
-      }
-
       const getMeeting =
         deps?.getMeeting ??
         ((id: string) =>
@@ -644,6 +684,182 @@ export async function handleSpeakerVoiceRequest(
           fileExists,
         },
       );
+
+      let candidates = getMeetingSpeakerCandidates(meetingId, d);
+      const candidateAttempts: Record<
+        string,
+        {
+          status: 'eligible' | 'abstained' | 'retryable_failure';
+          reason?: string;
+          retryAfter?: number;
+        }
+      > = {};
+      if (deps?.buildEnrollmentCandidate) {
+        const candidatesBySpeaker = new Map(
+          candidates.map((candidate) => [candidate.speaker, candidate]),
+        );
+        const speakers = new Set([
+          ...candidatesBySpeaker.keys(),
+          ...Object.keys(enrollmentAvailability),
+        ]);
+        for (const speaker of speakers) {
+          const candidate = candidatesBySpeaker.get(speaker);
+          const sourceRevision =
+            candidate?.sourceRevision ?? meeting?.capture_journal_generation;
+          if (!candidate && !enrollmentAvailability[speaker]) {
+            candidateAttempts[speaker] = {
+              status: 'abstained',
+              reason: 'insufficient_clean_speech',
+            };
+            continue;
+          }
+          if (!sourceRevision) {
+            candidateAttempts[speaker] = {
+              status: 'abstained',
+              reason: 'evidence_unavailable',
+            };
+            continue;
+          }
+          if (candidate && usesCurrentEnrollmentExtraction(candidate)) {
+            candidateAttempts[speaker] = candidate.isEligibleForEnrollment
+              ? { status: 'eligible' }
+              : {
+                  status: 'abstained',
+                  reason: 'insufficient_clean_speech',
+                };
+            continue;
+          }
+          const previousAttempt = getVoiceCandidateAttempt(
+            {
+              meetingId,
+              speaker,
+              sourceRevision,
+              extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+            },
+            d,
+          );
+          if (
+            previousAttempt?.status === 'abstained' ||
+            (previousAttempt?.status === 'retryable_failure' &&
+              (previousAttempt.retryAfter ?? 0) > Date.now())
+          ) {
+            candidateAttempts[speaker] = {
+              status: previousAttempt.status,
+              ...(previousAttempt.reason
+                ? { reason: previousAttempt.reason }
+                : {}),
+              ...(previousAttempt.retryAfter
+                ? { retryAfter: previousAttempt.retryAfter }
+                : {}),
+            };
+            continue;
+          }
+          try {
+            const built = await buildCandidateOnce(
+              deps,
+              d,
+              {
+                meetingId,
+                speaker,
+              },
+              deps?.reconciliationTimeoutMs ?? 15000,
+            );
+            if (
+              built &&
+              built.candidate.speaker === speaker &&
+              usesCurrentEnrollmentExtraction(built.candidate) &&
+              built.sourceRevision
+            ) {
+              saveMeetingSpeakerCandidate(
+                meetingId,
+                built.sourceRevision,
+                built.candidate,
+                d,
+              );
+              recordVoiceCandidateAttempt(
+                {
+                  meetingId,
+                  speaker,
+                  sourceRevision: built.sourceRevision,
+                  extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                  status: 'eligible',
+                  reason: null,
+                  retryAfter: null,
+                },
+                d,
+              );
+              candidateAttempts[speaker] = { status: 'eligible' };
+            } else {
+              recordVoiceCandidateAttempt(
+                {
+                  meetingId,
+                  speaker,
+                  sourceRevision,
+                  extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                  status: 'abstained',
+                  reason: 'evidence_unavailable',
+                  retryAfter: null,
+                },
+                d,
+              );
+              candidateAttempts[speaker] = {
+                status: 'abstained',
+                reason: 'evidence_unavailable',
+              };
+            }
+          } catch (error) {
+            const reason = candidateFailureReason(error);
+            const retryAfter = Date.now() + CANDIDATE_RETRY_DELAY_MS;
+            recordVoiceCandidateAttempt(
+              {
+                meetingId,
+                speaker,
+                sourceRevision,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'retryable_failure',
+                reason,
+                retryAfter,
+              },
+              d,
+            );
+            candidateAttempts[speaker] = {
+              status: 'retryable_failure',
+              reason,
+              retryAfter,
+            };
+          }
+        }
+        candidates = getMeetingSpeakerCandidates(meetingId, d);
+      }
+      const clientCandidates: Record<string, unknown> = {};
+      for (const candidate of candidates) {
+        const current = usesCurrentEnrollmentExtraction(candidate);
+        const attempt = candidateAttempts[candidate.speaker];
+        clientCandidates[candidate.speaker] = {
+          candidateDigest: candidate.candidateDigest,
+          sourceRevision: candidate.sourceRevision,
+          isEligibleForEnrollment: current && candidate.isEligibleForEnrollment,
+          cleanDurationSeconds: current ? candidate.cleanDurationSeconds : 0,
+          analysisStatus:
+            attempt?.status ??
+            (current && candidate.isEligibleForEnrollment
+              ? 'eligible'
+              : 'abstained'),
+          ...(attempt?.reason ? { analysisReason: attempt.reason } : {}),
+          ...(attempt?.retryAfter ? { retryAfter: attempt.retryAfter } : {}),
+        };
+      }
+      for (const [speaker, attempt] of Object.entries(candidateAttempts)) {
+        if (clientCandidates[speaker]) continue;
+        clientCandidates[speaker] = {
+          sourceRevision: meeting?.capture_journal_generation ?? '',
+          isEligibleForEnrollment: false,
+          cleanDurationSeconds: 0,
+          analysisStatus: attempt.status,
+          ...(attempt.reason ? { analysisReason: attempt.reason } : {}),
+          ...(attempt.retryAfter ? { retryAfter: attempt.retryAfter } : {}),
+        };
+      }
 
       const profiles = getCanonicalVoiceProfiles({
         dbInstance: d,
@@ -669,6 +885,7 @@ export async function handleSpeakerVoiceRequest(
       const suggestions: Record<string, unknown> = {};
 
       for (const candidate of candidates) {
+        if (!usesCurrentEnrollmentExtraction(candidate)) continue;
         const match = matchSpeakerVoice({
           meetingId,
           sourceRevision: candidate.sourceRevision,
@@ -786,14 +1003,41 @@ export async function handleSpeakerVoiceRequest(
           throw new Error('speaker_enrollment_evidence_unavailable');
         }
       } else {
-        const built = await buildCandidateWithTimeout(
-          deps,
-          {
-            meetingId: String(sourceMeetingId ?? ''),
-            speaker: String(speaker ?? ''),
-          },
-          timeoutMs,
-        );
+        let built:
+          | Awaited<ReturnType<typeof buildCandidateWithTimeout>>
+          | undefined;
+        try {
+          built = await buildCandidateOnce(
+            deps,
+            d,
+            {
+              meetingId: String(sourceMeetingId ?? ''),
+              speaker: String(speaker ?? ''),
+            },
+            timeoutMs,
+          );
+        } catch (error) {
+          const meetingGen = getMeetingDependency(
+            deps,
+            d,
+            String(sourceMeetingId),
+          )?.capture_journal_generation;
+          if (meetingGen) {
+            recordVoiceCandidateAttempt(
+              {
+                meetingId: String(sourceMeetingId),
+                speaker: String(speaker),
+                sourceRevision: meetingGen,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'retryable_failure',
+                reason: candidateFailureReason(error),
+                retryAfter: Date.now() + CANDIDATE_RETRY_DELAY_MS,
+              },
+              d,
+            );
+          }
+          throw error;
+        }
 
         if (
           !built ||
@@ -813,10 +1057,16 @@ export async function handleSpeakerVoiceRequest(
             String(sourceMeetingId),
           )?.capture_journal_generation;
           if (meetingGen) {
-            saveMeetingSpeakerCandidate(
-              String(sourceMeetingId),
-              meetingGen,
-              createIneligibleSpeakerCandidate(speaker),
+            recordVoiceCandidateAttempt(
+              {
+                meetingId: String(sourceMeetingId),
+                speaker: String(speaker),
+                sourceRevision: meetingGen,
+                extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+                status: 'abstained',
+                reason: 'evidence_unavailable',
+                retryAfter: null,
+              },
               d,
             );
           }

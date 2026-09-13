@@ -59,6 +59,22 @@ export interface StoredSpeakerCandidateEvidence
   sourceRevision: string;
 }
 
+export type VoiceCandidateAttemptStatus =
+  | 'eligible'
+  | 'abstained'
+  | 'retryable_failure';
+
+export interface VoiceCandidateAttempt {
+  meetingId: string;
+  speaker: string;
+  sourceRevision: string;
+  extractionVersion: string;
+  status: VoiceCandidateAttemptStatus;
+  reason: string | null;
+  retryAfter: number | null;
+  attemptedAt: number;
+}
+
 import * as dbModule from './db';
 
 const MAX_PROFILE_REPRESENTATIVES = 12;
@@ -195,6 +211,85 @@ export function saveMeetingSpeakerCandidate(
     candidate,
     getDb(dbInstance),
   );
+}
+
+export function recordVoiceCandidateAttempt(
+  input: Omit<VoiceCandidateAttempt, 'attemptedAt'> & {
+    attemptedAt?: number;
+  },
+  dbInstance?: Database.Database,
+): void {
+  getDb(dbInstance)
+    .prepare(
+      `INSERT INTO speaker_voice_candidate_attempts (
+         meeting_id, speaker, source_revision, extraction_version,
+         status, reason, retry_after, attempted_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(meeting_id, speaker, source_revision, extraction_version)
+       DO UPDATE SET
+         status = excluded.status,
+         reason = excluded.reason,
+         retry_after = excluded.retry_after,
+         attempted_at = excluded.attempted_at`,
+    )
+    .run(
+      input.meetingId,
+      input.speaker,
+      input.sourceRevision,
+      input.extractionVersion,
+      input.status,
+      input.reason,
+      input.retryAfter,
+      input.attemptedAt ?? Date.now(),
+    );
+}
+
+export function getVoiceCandidateAttempt(
+  input: {
+    meetingId: string;
+    speaker: string;
+    sourceRevision: string;
+    extractionVersion: string;
+  },
+  dbInstance?: Database.Database,
+): VoiceCandidateAttempt | null {
+  const row = getDb(dbInstance)
+    .prepare(
+      `SELECT meeting_id, speaker, source_revision, extraction_version,
+              status, reason, retry_after, attempted_at
+       FROM speaker_voice_candidate_attempts
+       WHERE meeting_id = ? AND speaker = ? AND source_revision = ?
+         AND extraction_version = ?`,
+    )
+    .get(
+      input.meetingId,
+      input.speaker,
+      input.sourceRevision,
+      input.extractionVersion,
+    ) as
+    | {
+        meeting_id: string;
+        speaker: string;
+        source_revision: string;
+        extraction_version: string;
+        status: VoiceCandidateAttemptStatus;
+        reason: string | null;
+        retry_after: number | null;
+        attempted_at: number;
+      }
+    | undefined;
+  return row
+    ? {
+        meetingId: row.meeting_id,
+        speaker: row.speaker,
+        sourceRevision: row.source_revision,
+        extractionVersion: row.extraction_version,
+        status: row.status,
+        reason: row.reason,
+        retryAfter: row.retry_after,
+        attemptedAt: row.attempted_at,
+      }
+    : null;
 }
 
 export function getMeetingSpeakerCandidates(

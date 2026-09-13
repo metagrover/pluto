@@ -169,6 +169,7 @@ final class ProtocolTests: XCTestCase {
             SpeakerClusterEvidence(
                 cluster: "S1",
                 embedding: embedding,
+                representativeEmbeddings: [embedding, embedding],
                 cleanChunkCount: 3,
                 cleanSegmentCount: 2,
                 cleanDurationSeconds: 4.5,
@@ -214,6 +215,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(evidence.count, 1)
         XCTAssertEqual(evidence[0].cluster, "S1")
         XCTAssertEqual(evidence[0].embedding.count, 256)
+        XCTAssertEqual(evidence[0].representativeEmbeddings?.count, 2)
         XCTAssertEqual(evidence[0].cleanChunkCount, 3)
         XCTAssertEqual(evidence[0].cleanSegmentCount, 2)
         XCTAssertEqual(evidence[0].cleanDurationSeconds, 4.5, accuracy: 1e-4)

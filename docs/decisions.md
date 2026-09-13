@@ -1020,6 +1020,15 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Cross-session matching:** Enrollment and query candidates retain a bounded set of interval-level representatives in the dedicated biometric tables. A representative-based score is eligible only when at least two independently selected enrollment intervals support the query; profile representatives are capped at twelve so profile growth cannot create an unbounded maximum-similarity search.
 - **Safety:** Transcript trust, capture generation, current explicit binding, owner exclusion, profile opt-out, and deletion intent are rechecked before persistence. Tentative matches never self-enroll. The calibrated absolute and runner-up thresholds are unchanged pending independent real-audio evaluation.
 
+## 2026-09-12 - Derive voice-profile representatives in one native pass
+
+- **Status:** Accepted and implemented.
+- **Supersedes:** The repeated interval-level inference mechanism in “2026-09-08 - Strengthen confirmed voice profiles with source-level evidence.” Its source diversity, bounded profile growth, privacy, explicit-confirmation, deletion, and calibrated matching boundaries remain in force.
+- **Decision:** The native diarization pass retains timing for stable clean chunk embeddings and emits the cluster centroid plus at most four representative embeddings selected across distinct clean segments. Enrollment and query-candidate construction consume that bounded evidence directly instead of assembling and diarizing each representative interval again.
+- **Performance boundary:** A normal finalized meeting performs no additional model pass for voice-profile representatives. A legacy meeting may perform one lazy, source-revision-keyed rebuild when its speaker-identification view is requested; Pluto performs no boot sweep or global backfill. Permanent abstentions are cached, and transient native failures use durable retry backoff.
+- **Outcome boundary:** Candidate-analysis attempts are stored separately from biometric candidates as `eligible`, `abstained`, or `retryable_failure`, with a stable reason and optional retry time. Missing evidence no longer overwrites an earlier candidate with an unexplained zero-vector tombstone, and the UI distinguishes analysis interruption, insufficient clean speech, and a completed analysis with no confident match.
+- **Safety:** Representatives remain bounded 256-dimensional native evidence in dedicated local biometric tables and never enter transcript JSON, logs, analytics, or renderer IPC. Suggestions still require the existing provenance, purity, absolute-similarity, and runner-up-margin gates and remain tentative until explicit confirmation.
+
 ## 2026-09-06 - Settings selection controls share the speaker picker language
 
 - **Status:** Accepted and implemented under [Issue #764](https://github.com/metagrover/pluto/issues/764).

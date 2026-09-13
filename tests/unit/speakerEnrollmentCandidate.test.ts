@@ -81,6 +81,10 @@ describe('buildSpeakerEnrollmentCandidate', () => {
         {
           cluster: 'S1',
           embedding: new Array(256).fill(1 / 16),
+          representativeEmbeddings: [
+            new Array(256).fill(1 / 16),
+            new Array(256).fill(1 / 16),
+          ],
           cleanChunkCount: 3,
           cleanSegmentCount: 2,
           cleanDurationSeconds: 9,
@@ -129,8 +133,15 @@ describe('buildSpeakerEnrollmentCandidate', () => {
     });
     expect(result).toMatchObject({
       sourceRevision: 'generation-1',
-      candidate: { speaker: 'Them', isEligibleForEnrollment: true },
+      candidate: {
+        speaker: 'Them',
+        isEligibleForEnrollment: true,
+        representativeEmbeddings: expect.any(Array),
+        provenance: { enrollmentExtractionVersion: 'single-pass-v2' },
+      },
     });
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(createAudio).toHaveBeenCalledTimes(1);
     expect(removeWorkDir).toHaveBeenCalledWith('/recordings/work');
   });
 
@@ -356,6 +367,10 @@ describe('buildSpeakerEnrollmentCandidate', () => {
         {
           cluster: 'S1',
           embedding: new Array(256).fill(1 / 16),
+          representativeEmbeddings: [
+            new Array(256).fill(1 / 16),
+            new Array(256).fill(1 / 16),
+          ],
           cleanChunkCount: 3,
           cleanSegmentCount: 2,
           cleanDurationSeconds: 9,
@@ -391,7 +406,9 @@ describe('buildSpeakerEnrollmentCandidate', () => {
     expect(result?.timings?.candidateConstructionMs).toBeGreaterThanOrEqual(0);
     expect(typeof result?.timings?.initialInferenceMs).toBe('number');
     expect(result?.timings?.initialInferenceMs).toBeGreaterThanOrEqual(0);
-    expect(result?.timings?.representativeInferencesMs.length).toBe(2);
+    expect(result?.timings?.representativeInferencesMs).toEqual([]);
+    expect(analyze).toHaveBeenCalledTimes(1);
+    expect(createAudio).toHaveBeenCalledTimes(1);
   });
 
   it('aborts candidate construction promptly when signal is aborted', async () => {

@@ -3,6 +3,7 @@ import { selectSpeakerSampleIntervals } from '../utils/speakerReview.ts';
 export interface SpeakerClusterEvidence {
   cluster: string;
   embedding: number[];
+  representativeEmbeddings?: number[][];
   cleanChunkCount: number;
   cleanSegmentCount: number;
   cleanDurationSeconds: number;
@@ -19,7 +20,7 @@ export interface SpeakerCandidateProvenance {
   enrollmentExtractionVersion?: string;
 }
 
-export const ENROLLMENT_EXTRACTION_VERSION = 'multi-interval-v1';
+export const ENROLLMENT_EXTRACTION_VERSION = 'single-pass-v2';
 
 export interface SpeakerCandidateEvidence {
   speaker: string;
@@ -201,7 +202,26 @@ export function deriveSpeakerCandidates(input: {
     const speakerLabel = clusterLabelMap.get(evidence.cluster);
     if (!speakerLabel) continue;
 
-    const digest = computeCandidateDigest(evidence.embedding, input.provenance);
+    const representativeEmbeddings = (
+      evidence.representativeEmbeddings ?? []
+    ).filter(
+      (embedding) =>
+        embedding.length === 256 &&
+        embedding.every((value) => Number.isFinite(value)) &&
+        Math.hypot(...embedding) > 1e-6,
+    );
+    const provenance = {
+      ...input.provenance,
+      profileAlgorithmVersion: input.provenance.profileAlgorithmVersion ?? 'v1',
+      ...(representativeEmbeddings.length >= 2
+        ? { enrollmentExtractionVersion: ENROLLMENT_EXTRACTION_VERSION }
+        : {}),
+    };
+    const digest = computeCandidateDigest(
+      evidence.embedding,
+      provenance,
+      representativeEmbeddings,
+    );
     const eligible = isCandidateEligibleForEnrollment(evidence);
 
     const samples = selectSpeakerSampleIntervals(
@@ -228,17 +248,16 @@ export function deriveSpeakerCandidates(input: {
       nativeCluster: evidence.cluster,
       candidateDigest: digest,
       embedding: evidence.embedding,
+      ...(representativeEmbeddings.length > 0
+        ? { representativeEmbeddings }
+        : {}),
       cleanDurationSeconds: evidence.cleanDurationSeconds,
       cleanSegmentCount: evidence.cleanSegmentCount,
       cleanChunkCount: evidence.cleanChunkCount,
       minimumChunkSimilarity: evidence.minimumChunkSimilarity,
       meanChunkSimilarity: evidence.meanChunkSimilarity,
       referenceInterval,
-      provenance: {
-        ...input.provenance,
-        profileAlgorithmVersion:
-          input.provenance.profileAlgorithmVersion ?? 'v1',
-      },
+      provenance,
       isEligibleForEnrollment: eligible,
     });
   }
@@ -292,7 +311,9 @@ export function deriveReviewedSpeakerCandidate(input: {
   if (eligible.length !== 1) return null;
 
   const representativeEmbeddings = (
-    input.representativeEmbeddings ?? []
+    input.representativeEmbeddings ??
+    eligible[0].representativeEmbeddings ??
+    []
   ).filter(
     (embedding) =>
       embedding.length === 256 &&

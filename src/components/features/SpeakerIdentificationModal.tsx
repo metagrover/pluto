@@ -97,6 +97,7 @@ export const SpeakerIdentificationModal = ({
   >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
+  const [voiceSuggestionsLoading, setVoiceSuggestionsLoading] = useState(false);
   const voiceSuggestionsPromiseRef = useRef<Promise<void> | null>(null);
   const speakerCandidatesRef = useRef<Record<string, ClientCandidateMetadata>>(
     {},
@@ -172,6 +173,7 @@ export const SpeakerIdentificationModal = ({
 
   const loadVoiceSuggestions = useCallback(async () => {
     const refreshStart = performance.now();
+    if (isMountedRef.current) setVoiceSuggestionsLoading(true);
     const currentPromise = (async () => {
       try {
         const res = await getSpeakerVoiceSuggestions(
@@ -194,6 +196,8 @@ export const SpeakerIdentificationModal = ({
         );
       } catch {
         // non-fatal
+      } finally {
+        if (isMountedRef.current) setVoiceSuggestionsLoading(false);
       }
     })();
     voiceSuggestionsPromiseRef.current = currentPromise;
@@ -949,6 +953,26 @@ export const SpeakerIdentificationModal = ({
                     </button>
                   </div>
                 </div>
+              ) : null}
+
+              {currentSpeaker &&
+              !voiceSuggestions[currentSpeaker] &&
+              (voiceSuggestionsLoading ||
+                speakerCandidates[currentSpeaker]?.analysisStatus) ? (
+                <p className="text-xs text-pro-text-muted">
+                  {voiceSuggestionsLoading
+                    ? 'Checking saved voice profiles…'
+                    : speakerCandidates[currentSpeaker]?.analysisStatus ===
+                        'retryable_failure'
+                      ? 'Voice analysis was interrupted. Pluto will retry automatically.'
+                      : speakerCandidates[currentSpeaker]?.analysisStatus ===
+                          'abstained'
+                        ? 'There was not enough reliable isolated speech for voice identification.'
+                        : speakerCandidates[currentSpeaker]?.analysisStatus ===
+                            'eligible'
+                          ? 'No saved voice profile matched with enough confidence.'
+                          : null}
+                </p>
               ) : null}
 
               {/* Attendee 1-click suggestion chips */}

@@ -64,31 +64,6 @@ type SpeakerEnrollmentSource = SpeakerEnrollmentBaseSource & {
   transcriptFingerprint: string;
 };
 
-const MAX_REPRESENTATIVE_INTERVALS = 4;
-
-const selectRepresentativeIntervals = (
-  intervals: SpeakerSampleInterval[],
-): SpeakerSampleInterval[] => {
-  if (intervals.length <= MAX_REPRESENTATIVE_INTERVALS) return intervals;
-  return Array.from({ length: MAX_REPRESENTATIVE_INTERVALS }, (_, index) => {
-    const intervalIndex = Math.round(
-      (index * (intervals.length - 1)) / (MAX_REPRESENTATIVE_INTERVALS - 1),
-    );
-    return intervals[intervalIndex];
-  });
-};
-
-const sameEmbeddingProvenance = (
-  left: SpeakerEvidenceResult['provenance'],
-  right: SpeakerEvidenceResult['provenance'],
-): boolean =>
-  left.modelIdentifier === right.modelIdentifier &&
-  left.modelRevision === right.modelRevision &&
-  left.artifactDigest === right.artifactDigest &&
-  left.runtimeVersion === right.runtimeVersion &&
-  (left.profileAlgorithmVersion ?? 'v1') ===
-    (right.profileAlgorithmVersion ?? 'v1');
-
 const hasUsableEnrollmentTranscript = (
   meeting: EnrollmentMeeting,
   transcriptSegments: ReturnType<typeof parseTranscriptSegments>,
@@ -269,7 +244,7 @@ export const buildSpeakerEnrollmentCandidate = async (
     });
     initialInferenceMs = Math.round(performance.now() - initInfStart);
 
-    const preliminaryCandidate = deriveReviewedSpeakerCandidate({
+    const candidate = deriveReviewedSpeakerCandidate({
       speaker: input.speaker,
       clusterEvidence: evidence.clusterEvidence ?? [],
       provenance: evidence.provenance,
@@ -282,54 +257,9 @@ export const buildSpeakerEnrollmentCandidate = async (
     ) {
       return null;
     }
-    if (!preliminaryCandidate) return null;
-
-    const representativeEmbeddings: number[][] = [];
-    for (const interval of selectRepresentativeIntervals(intervals)) {
-      dependencies.signal?.throwIfAborted?.();
-      const representativeAudio = await dependencies.createAudio({
-        sourcePath,
-        // Repeat only within this isolated embedding pass so FluidAudio gets
-        // enough context for short reviewed intervals. Eligibility and speech
-        // duration remain grounded in the non-duplicated full selection above.
-        intervals: [interval, interval],
-        outputDir: workDir,
-        signal: dependencies.signal,
-      });
-      if (!representativeAudio) continue;
-
-      dependencies.signal?.throwIfAborted?.();
-      const repInfStart = performance.now();
-      const representativeEvidence = await dependencies.analyze({
-        mixedAudioPath: representativeAudio.systemPath,
-        micAudioPath: representativeAudio.micPath,
-        systemAudioPath: representativeAudio.systemPath,
-      });
-      representativeInferencesMs.push(
-        Math.round(performance.now() - repInfStart),
-      );
-
-      if (
-        !sameEmbeddingProvenance(
-          evidence.provenance,
-          representativeEvidence.provenance,
-        )
-      ) {
-        continue;
-      }
-      const clusters = representativeEvidence.clusterEvidence ?? [];
-      if (clusters.length !== 1) continue;
-      representativeEmbeddings.push(clusters[0].embedding);
+    if (!candidate || (candidate.representativeEmbeddings?.length ?? 0) < 2) {
+      return null;
     }
-    if (representativeEmbeddings.length < 2) return null;
-
-    const candidate = deriveReviewedSpeakerCandidate({
-      speaker: input.speaker,
-      clusterEvidence: evidence.clusterEvidence ?? [],
-      provenance: evidence.provenance,
-      reviewedIntervals: intervals,
-      representativeEmbeddings,
-    });
     const finalSource = getSpeakerEnrollmentSource(input, dependencies);
     if (
       !finalSource ||

@@ -18,10 +18,17 @@ export interface ClientVoiceProfile {
 }
 
 export interface ClientCandidateMetadata {
-  candidateDigest: string;
+  candidateDigest?: string;
   sourceRevision: string;
   isEligibleForEnrollment: boolean;
   cleanDurationSeconds: number;
+  analysisStatus?: 'eligible' | 'abstained' | 'retryable_failure';
+  analysisReason?:
+    | 'insufficient_clean_speech'
+    | 'evidence_unavailable'
+    | 'timed_out'
+    | 'native_runtime_failed';
+  retryAfter?: number;
 }
 
 const invoke = <T>(channel: string, payload: object): Promise<T> =>

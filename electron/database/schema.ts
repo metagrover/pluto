@@ -1104,6 +1104,33 @@ export const meetingSpeakerCandidates = sqliteTable(
   ],
 );
 
+export const speakerVoiceCandidateAttempts = sqliteTable(
+  'speaker_voice_candidate_attempts',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    speaker: text('speaker').notNull(),
+    sourceRevision: text('source_revision').notNull(),
+    extractionVersion: text('extraction_version').notNull(),
+    status: text('status').notNull(),
+    reason: text('reason'),
+    retryAfter: integer('retry_after'),
+    attemptedAt: integer('attempted_at').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.meetingId,
+        table.speaker,
+        table.sourceRevision,
+        table.extractionVersion,
+      ],
+    }),
+    index('idx_speaker_voice_candidate_attempts_meeting').on(table.meetingId),
+  ],
+);
+
 export const speakerVoiceEnrollments = sqliteTable(
   'speaker_voice_enrollments',
   {

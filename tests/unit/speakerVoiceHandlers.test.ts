@@ -14,7 +14,10 @@ import {
   cancelScheduledVoiceProfileReconciliation,
   handleSpeakerVoiceRequest,
 } from '../../electron/speakerVoiceHandlers';
-import { saveMeetingSpeakerCandidates } from '../../electron/speakerVoiceStore';
+import {
+  getVoiceCandidateAttempt,
+  saveMeetingSpeakerCandidates,
+} from '../../electron/speakerVoiceStore';
 import type { SpeakerCandidateEvidence } from '../../src/services/speakerCandidateEvidence';
 import { ENROLLMENT_EXTRACTION_VERSION } from '../../src/services/speakerCandidateEvidence';
 import { DEFAULT_CALIBRATION_POLICY_V1 } from '../../src/services/speakerVoiceMatcher';
@@ -52,6 +55,7 @@ describe('speaker voice IPC handlers', () => {
     db.db.prepare('DELETE FROM speaker_voice_rejections').run();
     db.db.prepare('DELETE FROM speaker_voice_profile_settings').run();
     db.db.prepare('DELETE FROM speaker_voice_enrollments').run();
+    db.db.prepare('DELETE FROM speaker_voice_candidate_attempts').run();
     db.db.prepare('DELETE FROM meeting_speaker_candidates').run();
     db.db.prepare('DELETE FROM identity_bindings').run();
     db.db.prepare('DELETE FROM person_aliases').run();
@@ -494,6 +498,60 @@ describe('speaker voice IPC handlers', () => {
     });
   });
 
+  it('lazily builds missing current evidence once for a reviewable legacy meeting', async () => {
+    const getMeeting = () => ({
+      id: meetingId,
+      ...validatedTranscriptTrust,
+      capture_journal_generation: sourceRevision,
+      system_audio_path: '/approved/system.wav',
+      transcript_json: JSON.stringify([
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'First reviewed sample',
+          start: 1,
+          end: 6,
+        },
+        {
+          speaker: 'Remote Speaker 1',
+          text: 'Second reviewed sample',
+          start: 10,
+          end: 14,
+        },
+      ]),
+    });
+    const buildEnrollmentCandidate = vi.fn(async () => ({
+      candidate: dummyCandidate,
+      sourceRevision,
+    }));
+
+    const first = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        getMeeting,
+        fileExists: () => true,
+        buildEnrollmentCandidate,
+        isFeatureFlagEnabled: () => true,
+      },
+    )) as { candidates: Record<string, { analysisStatus: string }> };
+    await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        getMeeting,
+        fileExists: () => true,
+        buildEnrollmentCandidate,
+        isFeatureFlagEnabled: () => true,
+      },
+    );
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+    expect(first.candidates['Remote Speaker 1']).toMatchObject({
+      candidateDigest: dummyCandidate.candidateDigest,
+      analysisStatus: 'eligible',
+    });
+  });
+
   it.each([
     {
       label: 'unvalidated transcript',
@@ -738,6 +796,12 @@ describe('speaker voice IPC handlers', () => {
   });
 
   it('bounds candidate extraction when buildEnrollmentCandidate hangs in suggestions', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [
+      {
+        ...dummyCandidate,
+        provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+      },
+    ]);
     const buildEnrollmentCandidate = vi.fn(
       async () => new Promise<never>(() => {}),
     );
@@ -755,6 +819,44 @@ describe('speaker voice IPC handlers', () => {
     expect(result).toBeDefined();
     expect(result.suggestions).toBeDefined();
     expect(result.candidates).toBeDefined();
+  });
+
+  it('coalesces concurrent lazy candidate builds for the same meeting speaker', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [
+      {
+        ...dummyCandidate,
+        provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+      },
+    ]);
+    let releaseBuild!: () => void;
+    const buildGate = new Promise<void>((resolve) => {
+      releaseBuild = resolve;
+    });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const buildEnrollmentCandidate = vi.fn(async () => {
+      markStarted();
+      await buildGate;
+      return { candidate: dummyCandidate, sourceRevision };
+    });
+
+    const first = handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { buildEnrollmentCandidate },
+    );
+    await started;
+    const second = handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      { buildEnrollmentCandidate },
+    );
+    releaseBuild();
+    await Promise.all([first, second]);
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
   });
 
   it('reconciles a confirmed speaker into a voice profile when profiles are read', async () => {
@@ -965,7 +1067,12 @@ describe('speaker voice IPC handlers', () => {
     expect(buildEnrollmentCandidate).not.toHaveBeenCalled();
   });
 
-  it('persists ineligible candidate tombstone when candidate build returns null during reconciliation to prevent re-extraction loops', async () => {
+  it('persists an explained abstention without overwriting candidate evidence or re-extracting', async () => {
+    const legacyCandidate = {
+      ...dummyCandidate,
+      provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+    };
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [legacyCandidate]);
     const buildEnrollmentCandidate = vi.fn(async () => null);
 
     await handleSpeakerVoiceRequest(
@@ -974,6 +1081,24 @@ describe('speaker voice IPC handlers', () => {
       { buildEnrollmentCandidate },
     );
     expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+    expect(
+      getVoiceCandidateAttempt({
+        meetingId,
+        speaker: dummyCandidate.speaker,
+        sourceRevision,
+        extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+      }),
+    ).toMatchObject({
+      status: 'abstained',
+      reason: 'evidence_unavailable',
+    });
+    expect(
+      db.db
+        .prepare(
+          'SELECT candidate_digest FROM meeting_speaker_candidates WHERE meeting_id = ?',
+        )
+        .get(meetingId),
+    ).toEqual({ candidate_digest: legacyCandidate.candidateDigest });
 
     await handleSpeakerVoiceRequest(
       'SPEAKER_VOICE_GET_PROFILES',
@@ -1047,6 +1172,55 @@ describe('speaker voice IPC handlers', () => {
       representative_embeddings_json: JSON.stringify(
         upgradedQuery.representativeEmbeddings,
       ),
+    });
+  });
+
+  it('backs off retryable query failures and returns an explanatory status', async () => {
+    const queryMeetingId = `${meetingId}-retryable-query`;
+    db.saveMeeting({
+      id: queryMeetingId,
+      title: 'Retryable voice query',
+      capture_journal_generation: sourceRevision,
+      ...validatedTranscriptTrust,
+      transcript_json: JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'Query sample' },
+      ]),
+    });
+    saveMeetingSpeakerCandidates(queryMeetingId, sourceRevision, [
+      {
+        ...dummyCandidate,
+        speaker: 'Remote Speaker 2',
+        provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+      },
+    ]);
+    const buildEnrollmentCandidate = vi.fn(async () => {
+      throw new Error('parakeet_runtime_unavailable');
+    });
+
+    const first = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId: queryMeetingId },
+      { buildEnrollmentCandidate },
+    )) as {
+      candidates: Record<
+        string,
+        { analysisStatus: string; analysisReason?: string }
+      >;
+    };
+    const second = (await handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId: queryMeetingId },
+      { buildEnrollmentCandidate },
+    )) as typeof first;
+
+    expect(buildEnrollmentCandidate).toHaveBeenCalledTimes(1);
+    expect(first.candidates['Remote Speaker 2']).toMatchObject({
+      analysisStatus: 'retryable_failure',
+      analysisReason: 'native_runtime_failed',
+    });
+    expect(second.candidates['Remote Speaker 2']).toMatchObject({
+      analysisStatus: 'retryable_failure',
+      analysisReason: 'native_runtime_failed',
     });
   });
 

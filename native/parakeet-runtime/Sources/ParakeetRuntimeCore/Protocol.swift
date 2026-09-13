@@ -628,6 +628,7 @@ public struct SpeakerEnergyWindow: Codable, Equatable, Sendable {
 public struct SpeakerClusterEvidence: Codable, Equatable, Sendable {
     public let cluster: String
     public let embedding: [Float]
+    public let representativeEmbeddings: [[Float]]?
     public let cleanChunkCount: Int
     public let cleanSegmentCount: Int
     public let cleanDurationSeconds: Double
@@ -637,6 +638,7 @@ public struct SpeakerClusterEvidence: Codable, Equatable, Sendable {
     public init(
         cluster: String,
         embedding: [Float],
+        representativeEmbeddings: [[Float]]? = nil,
         cleanChunkCount: Int,
         cleanSegmentCount: Int,
         cleanDurationSeconds: Double,
@@ -645,6 +647,7 @@ public struct SpeakerClusterEvidence: Codable, Equatable, Sendable {
     ) {
         self.cluster = cluster
         self.embedding = embedding
+        self.representativeEmbeddings = representativeEmbeddings
         self.cleanChunkCount = cleanChunkCount
         self.cleanSegmentCount = cleanSegmentCount
         self.cleanDurationSeconds = cleanDurationSeconds

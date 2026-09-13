@@ -79,6 +79,18 @@ describe('speakerVoiceStore & candidate database operations', () => {
         PRIMARY KEY (meeting_id, speaker, source_revision)
       );
 
+      CREATE TABLE speaker_voice_candidate_attempts (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        speaker TEXT NOT NULL,
+        source_revision TEXT NOT NULL,
+        extraction_version TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reason TEXT,
+        retry_after INTEGER,
+        attempted_at INTEGER NOT NULL,
+        PRIMARY KEY (meeting_id, speaker, source_revision, extraction_version)
+      );
+
       CREATE TABLE speaker_voice_enrollments (
         id TEXT PRIMARY KEY,
         person_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
@@ -338,5 +350,58 @@ describe('speakerVoiceStore & candidate database operations', () => {
       .prepare('SELECT count(*) as count FROM meeting_speaker_candidates')
       .get() as { count: number };
     expect(rowCount.count).toBe(0);
+  });
+
+  it('upserts durable candidate-attempt outcomes and deletes them with the meeting', async () => {
+    const { getVoiceCandidateAttempt, recordVoiceCandidateAttempt } =
+      await import('../../electron/speakerVoiceStore');
+    db.prepare(
+      "INSERT INTO meetings (id, capture_journal_generation) VALUES ('m1', 'gen-1')",
+    ).run();
+    const identity = {
+      meetingId: 'm1',
+      speaker: 'Remote Speaker 1',
+      sourceRevision: 'gen-1',
+      extractionVersion: 'single-pass-v2',
+    };
+
+    recordVoiceCandidateAttempt(
+      {
+        ...identity,
+        status: 'retryable_failure',
+        reason: 'timed_out',
+        retryAfter: 2000,
+        attemptedAt: 1000,
+      },
+      db,
+    );
+    recordVoiceCandidateAttempt(
+      {
+        ...identity,
+        status: 'eligible',
+        reason: null,
+        retryAfter: null,
+        attemptedAt: 3000,
+      },
+      db,
+    );
+
+    expect(getVoiceCandidateAttempt(identity, db)).toEqual({
+      ...identity,
+      status: 'eligible',
+      reason: null,
+      retryAfter: null,
+      attemptedAt: 3000,
+    });
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM speaker_voice_candidate_attempts',
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+
+    db.prepare("DELETE FROM meetings WHERE id = 'm1'").run();
+    expect(getVoiceCandidateAttempt(identity, db)).toBeNull();
   });
 });

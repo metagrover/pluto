@@ -51,6 +51,7 @@ export type SpeakerEvidenceRequest = {
 export type SpeakerClusterEvidence = {
   cluster: string;
   embedding: number[];
+  representativeEmbeddings?: number[][];
   cleanChunkCount: number;
   cleanSegmentCount: number;
   cleanDurationSeconds: number;
@@ -593,6 +594,17 @@ export class ParakeetFinalClient {
             evidence.embedding.every(
               (v) => typeof v === 'number' && Number.isFinite(v),
             ) &&
+            (evidence.representativeEmbeddings === undefined ||
+              (Array.isArray(evidence.representativeEmbeddings) &&
+                evidence.representativeEmbeddings.length <= 4 &&
+                evidence.representativeEmbeddings.every(
+                  (embedding) =>
+                    Array.isArray(embedding) &&
+                    embedding.length === 256 &&
+                    embedding.every(
+                      (v) => typeof v === 'number' && Number.isFinite(v),
+                    ),
+                ))) &&
             Number.isInteger(evidence.cleanChunkCount) &&
             evidence.cleanChunkCount >= 0 &&
             Number.isInteger(evidence.cleanSegmentCount) &&

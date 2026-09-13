@@ -249,6 +249,10 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
         XCTAssertEqual(clusterEvidence[0].cleanSegmentCount, 1)
         XCTAssertEqual(clusterEvidence[0].cleanDurationSeconds, 3.0, accuracy: 1e-4)
         XCTAssertEqual(clusterEvidence[0].embedding.count, 256)
+        XCTAssertEqual(clusterEvidence[0].representativeEmbeddings?.count, 2)
+        XCTAssertTrue(
+            clusterEvidence[0].representativeEmbeddings?.allSatisfy { $0.count == 256 } == true
+        )
         let norm = sqrt(clusterEvidence[0].embedding.reduce(0) { $0 + $1 * $1 })
         XCTAssertEqual(norm, 1.0, accuracy: 1e-4)
         XCTAssertGreaterThanOrEqual(clusterEvidence[0].minimumChunkSimilarity, 0.9)
@@ -372,6 +376,7 @@ final class FluidAudioSpeakerEvidenceTests: XCTestCase {
 
         let evidence = try XCTUnwrap(output.clusterEvidence?.first)
         XCTAssertEqual(evidence.cleanChunkCount, 3)
+        XCTAssertEqual(evidence.representativeEmbeddings?.count, 3)
         XCTAssertGreaterThanOrEqual(evidence.minimumChunkSimilarity, 0.7)
     }
 

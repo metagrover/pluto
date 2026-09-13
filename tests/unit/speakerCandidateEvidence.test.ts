@@ -51,6 +51,7 @@ describe('speakerCandidateEvidence', () => {
     const clusterEligible: SpeakerClusterEvidence = {
       cluster: 'S1',
       embedding: validEmbedding,
+      representativeEmbeddings: [validEmbedding, validEmbedding],
       cleanChunkCount: 3,
       cleanSegmentCount: 2,
       cleanDurationSeconds: 4.5,
@@ -83,6 +84,10 @@ describe('speakerCandidateEvidence', () => {
     expect(candidates[0].speaker).toBe('Them');
     expect(candidates[0].nativeCluster).toBe('S1');
     expect(candidates[0].candidateDigest).toHaveLength(64);
+    expect(candidates[0]).toMatchObject({
+      representativeEmbeddings: [validEmbedding, validEmbedding],
+      provenance: { enrollmentExtractionVersion: 'single-pass-v2' },
+    });
 
     // Ineligible: short duration (< 3.0s)
     const shortCandidates = deriveSpeakerCandidates({
@@ -125,6 +130,7 @@ describe('speakerCandidateEvidence', () => {
     const cluster1: SpeakerClusterEvidence = {
       cluster: 'S1',
       embedding: validEmbedding,
+      representativeEmbeddings: [validEmbedding, validEmbedding],
       cleanChunkCount: 3,
       cleanSegmentCount: 2,
       cleanDurationSeconds: 4.5,
@@ -134,6 +140,7 @@ describe('speakerCandidateEvidence', () => {
     const cluster2: SpeakerClusterEvidence = {
       cluster: 'S2',
       embedding: validEmbedding,
+      representativeEmbeddings: [validEmbedding, validEmbedding],
       cleanChunkCount: 2,
       cleanSegmentCount: 2,
       cleanDurationSeconds: 3.5,
@@ -212,14 +219,18 @@ describe('speakerCandidateEvidence', () => {
 
     const representedCandidate = deriveReviewedSpeakerCandidate({
       speaker: 'Them',
-      clusterEvidence: [strongEvidence],
+      clusterEvidence: [
+        {
+          ...strongEvidence,
+          representativeEmbeddings: [validEmbedding, validEmbedding],
+        },
+      ],
       provenance: dummyProvenance,
       reviewedIntervals: intervals,
-      representativeEmbeddings: [validEmbedding, validEmbedding],
     });
     expect(representedCandidate).toMatchObject({
       representativeEmbeddings: [validEmbedding, validEmbedding],
-      provenance: { enrollmentExtractionVersion: 'multi-interval-v1' },
+      provenance: { enrollmentExtractionVersion: 'single-pass-v2' },
     });
     expect(representedCandidate?.candidateDigest).not.toBe(
       candidate?.candidateDigest,

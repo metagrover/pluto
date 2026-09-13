@@ -79,6 +79,13 @@ struct SpeakerClusterEvidenceAggregator {
     static let minimumConsensusChunkCount = 2
     static let embeddingDimension = 256
     static let maxClusters = 64
+    static let maxRepresentativeEmbeddings = 4
+
+    private struct AcceptedChunkVector {
+        let startTimeSeconds: Double
+        let endTimeSeconds: Double
+        let vector: [Float]
+    }
 
     static func buildClusterEvidence(
         turns: [SpeakerEvidenceTurn],
@@ -124,7 +131,7 @@ struct SpeakerClusterEvidenceAggregator {
 
             // Filter chunks time-aligned to accepted segments
             let clusterChunks = rawChunks.filter { $0.speakerId == cluster }
-            var acceptedUnitVectors: [[Float]] = []
+            var acceptedUnitVectors: [AcceptedChunkVector] = []
 
             for chunk in clusterChunks {
                 guard chunk.endTimeSeconds > chunk.startTimeSeconds else { continue }
@@ -156,7 +163,13 @@ struct SpeakerClusterEvidenceAggregator {
                 var normalized = [Float](repeating: 0, count: embeddingDimension)
                 var scale = 1.0 / norm
                 vDSP_vsmul(chunk.embedding256, 1, &scale, &normalized, 1, vDSP_Length(embeddingDimension))
-                acceptedUnitVectors.append(normalized)
+                acceptedUnitVectors.append(
+                    AcceptedChunkVector(
+                        startTimeSeconds: chunk.startTimeSeconds,
+                        endTimeSeconds: chunk.endTimeSeconds,
+                        vector: normalized
+                    )
+                )
             }
 
             guard !acceptedUnitVectors.isEmpty else { continue }
@@ -166,8 +179,8 @@ struct SpeakerClusterEvidenceAggregator {
 
             // Compute centroid
             var centroid = [Float](repeating: 0, count: embeddingDimension)
-            for vec in consensusUnitVectors {
-                vDSP_vadd(centroid, 1, vec, 1, &centroid, 1, vDSP_Length(embeddingDimension))
+            for chunk in consensusUnitVectors {
+                vDSP_vadd(centroid, 1, chunk.vector, 1, &centroid, 1, vDSP_Length(embeddingDimension))
             }
             var countScale = 1.0 / Float(cleanChunkCount)
             vDSP_vsmul(centroid, 1, &countScale, &centroid, 1, vDSP_Length(embeddingDimension))
@@ -183,9 +196,9 @@ struct SpeakerClusterEvidenceAggregator {
 
             // Compute similarities of each chunk to the unit centroid
             var similarities: [Double] = []
-            for vec in consensusUnitVectors {
+            for chunk in consensusUnitVectors {
                 var dot: Float = 0
-                vDSP_dotpr(vec, 1, unitCentroid, 1, &dot, vDSP_Length(embeddingDimension))
+                vDSP_dotpr(chunk.vector, 1, unitCentroid, 1, &dot, vDSP_Length(embeddingDimension))
                 similarities.append(Double(dot))
             }
 
@@ -196,6 +209,11 @@ struct SpeakerClusterEvidenceAggregator {
                 SpeakerClusterEvidence(
                     cluster: cluster,
                     embedding: unitCentroid,
+                    representativeEmbeddings: selectRepresentativeEmbeddings(
+                        from: consensusUnitVectors,
+                        cleanSegments: acceptedSegments,
+                        centroid: unitCentroid
+                    ),
                     cleanChunkCount: cleanChunkCount,
                     cleanSegmentCount: cleanSegmentCount,
                     cleanDurationSeconds: cleanDurationSeconds,
@@ -218,7 +236,9 @@ struct SpeakerClusterEvidenceAggregator {
         return micRms / max(systemRms, 0.000_001) >= nearEndDominanceRatio
     }
 
-    private static func stableConsensus(from vectors: [[Float]]) -> [[Float]] {
+    private static func stableConsensus(
+        from vectors: [AcceptedChunkVector]
+    ) -> [AcceptedChunkVector] {
         guard vectors.count >= minimumConsensusChunkCount else { return vectors }
         let minimumRetained = max(
             minimumConsensusChunkCount,
@@ -227,8 +247,10 @@ struct SpeakerClusterEvidenceAggregator {
         let maximumSeedCount = 32
         let seedStride = max(1, Int(ceil(Double(vectors.count) / Double(maximumSeedCount))))
         let orderedVectors = vectors.sorted { lhs, rhs in
-            for index in lhs.indices {
-                if lhs[index] != rhs[index] { return lhs[index] < rhs[index] }
+            for index in lhs.vector.indices {
+                if lhs.vector[index] != rhs.vector[index] {
+                    return lhs.vector[index] < rhs.vector[index]
+                }
             }
             return false
         }
@@ -237,7 +259,7 @@ struct SpeakerClusterEvidenceAggregator {
         let seededConsensus = seedVectors
             .map { seed in
                 vectors.filter { vector in
-                    cosineSimilarity(vector, seed) >= minimumConsensusSimilarity - 1e-4
+                    cosineSimilarity(vector.vector, seed.vector) >= minimumConsensusSimilarity - 1e-4
                 }
             }
             .max { $0.count < $1.count } ?? []
@@ -245,9 +267,9 @@ struct SpeakerClusterEvidenceAggregator {
         var consensus = seededConsensus
 
         for _ in 0..<3 {
-            guard let centroid = normalizedCentroid(consensus) else { return [] }
+            guard let centroid = normalizedCentroid(consensus.map(\.vector)) else { return [] }
             let next = consensus.filter { vector in
-                cosineSimilarity(vector, centroid) >= minimumConsensusSimilarity - 1e-4
+                cosineSimilarity(vector.vector, centroid) >= minimumConsensusSimilarity - 1e-4
             }
             if next.count == consensus.count { return consensus }
             if next.count < minimumRetained { return [] }
@@ -255,6 +277,52 @@ struct SpeakerClusterEvidenceAggregator {
         }
 
         return []
+    }
+
+    private static func selectRepresentativeEmbeddings(
+        from chunks: [AcceptedChunkVector],
+        cleanSegments: [(start: Double, end: Double)],
+        centroid: [Float]
+    ) -> [[Float]] {
+        guard !chunks.isEmpty else { return [] }
+
+        // Prefer one high-consensus chunk from each distinct clean interval so
+        // representative support reflects separate observations of the voice.
+        let perSegment = cleanSegments.compactMap { segment -> AcceptedChunkVector? in
+            chunks
+                .filter { chunk in
+                    min(chunk.endTimeSeconds, segment.end)
+                        > max(chunk.startTimeSeconds, segment.start)
+                }
+                .max { left, right in
+                    let leftSimilarity = cosineSimilarity(left.vector, centroid)
+                    let rightSimilarity = cosineSimilarity(right.vector, centroid)
+                    if leftSimilarity != rightSimilarity {
+                        return leftSimilarity < rightSimilarity
+                    }
+                    return left.startTimeSeconds > right.startTimeSeconds
+                }
+        }
+        var seenChunks = Set<String>()
+        let distinctPerSegment = perSegment.filter { chunk in
+            seenChunks.insert(
+                "\(chunk.startTimeSeconds):\(chunk.endTimeSeconds)"
+            ).inserted
+        }
+
+        let candidates = distinctPerSegment.count >= 2
+            ? distinctPerSegment
+            : chunks.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
+        let count = min(maxRepresentativeEmbeddings, candidates.count)
+        guard count > 0 else { return [] }
+        if count == 1 { return [candidates[0].vector] }
+
+        return (0..<count).map { index in
+            let candidateIndex = Int(
+                (Double(index) * Double(candidates.count - 1) / Double(count - 1)).rounded()
+            )
+            return candidates[candidateIndex].vector
+        }
     }
 
     private static func normalizedCentroid(_ vectors: [[Float]]) -> [Float]? {
