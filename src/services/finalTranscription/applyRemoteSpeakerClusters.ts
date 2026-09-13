@@ -36,6 +36,11 @@ export type RemoteDiarizationMetadata = {
   labeledSegmentCount: number;
   coverage?: 'complete' | 'partial';
   fallbackReason?: RemoteDiarizationFallbackReason;
+  unsupportedClusters?: Array<{
+    cluster: string;
+    label: string;
+    intervals: Array<{ startTime: number; endTime: number }>;
+  }>;
   speakerCountConstraint?: {
     source: 'manual_participants';
     remoteSpeakerCount: 1;
@@ -351,28 +356,66 @@ export const applyRemoteSpeakerClusters = <
   const labeledSegmentCount = aligned.filter((segment) =>
     /^Remote Speaker \d+$/u.test(segment.speaker),
   ).length;
+  // A native cluster can survive diarization but fail clean acoustic evidence
+  // extraction. Do not promote that cluster to a person merely because its
+  // turn overlaps transcript text. A single clean chunk is sufficient here:
+  // recognizing a brief speaker must not require voice-enrollment eligibility.
+  // Older runtimes without cluster evidence retain their existing behavior.
+  const supportedClusters = input.clusterEvidence?.length
+    ? new Set(
+        input.clusterEvidence
+          .filter((entry) => entry.cleanChunkCount > 0)
+          .map((entry) => entry.cluster),
+      )
+    : null;
+  const unsupportedClusters = supportedClusters
+    ? established
+        .filter(([cluster]) => !supportedClusters.has(cluster))
+        .map(([cluster]) => ({
+          cluster,
+          label: labels.get(cluster)!,
+          intervals: aligned
+            .filter((segment) => segment.speaker === labels.get(cluster))
+            .map(({ startTime, endTime }) => ({ startTime, endTime })),
+        }))
+    : [];
+  const unsupportedLabels = new Set(
+    unsupportedClusters.map(({ label }) => label),
+  );
+  const supportedEstablished = established.filter(
+    ([cluster]) => !supportedClusters || supportedClusters.has(cluster),
+  );
+  const reviewedSegments = aligned.map((segment) =>
+    unsupportedLabels.has(segment.speaker)
+      ? { ...segment, speaker: 'Unknown' }
+      : segment,
+  );
   const candidateEvidence =
     input.clusterEvidence && input.provenance
       ? deriveSpeakerCandidates({
           clusterEvidence: input.clusterEvidence,
-          segments: aligned,
-          establishedClusters: established.map(([cluster], index) => ({
+          segments: reviewedSegments,
+          establishedClusters: supportedEstablished.map(([cluster]) => ({
             cluster,
-            label: `Remote Speaker ${index + 1}`,
+            label: labels.get(cluster)!,
           })),
           provenance: input.provenance,
         })
       : [];
   return {
     applied: true,
-    segments: aligned,
+    segments: reviewedSegments,
     metadata: {
       attempted: true,
       input: 'system_audio',
       applied: true,
       confidence: roundConfidence(confidence),
-      clusterCount: established.length,
-      labeledSegmentCount,
+      clusterCount: supportedEstablished.length,
+      labeledSegmentCount:
+        labeledSegmentCount -
+        aligned.filter((segment) => unsupportedLabels.has(segment.speaker))
+          .length,
+      ...(unsupportedClusters.length ? { unsupportedClusters } : {}),
       coverage:
         confidence >= MINIMUM_ALIGNMENT_COVERAGE ? 'complete' : 'partial',
     },

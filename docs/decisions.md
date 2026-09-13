@@ -15,6 +15,13 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-12 - Require available acoustic evidence for additional remote labels
+
+- **Status:** Accepted after owner review of a false extra speaker.
+- **Decision:** When native analysis supplies nonempty clean cluster evidence, additional diarization clusters absent from that evidence remain `Unknown` instead of numbered speakers. Preserve the original cluster, label, and affected intervals in attribution metadata. Missing or empty evidence retains the prior behavior; absence of the whole evidence output is not proof of rejection.
+- **Brief speakers:** One clean native chunk suffices; no new duration threshold or enrollment-purity requirement is imposed. Existing clean short speakers remain reviewable. Unknown fragments are not assigned to an existing person or enrolled as voice evidence.
+- **Performance and recovery:** Reuse the native analysis already performed during final transcription; no extra inference or foreground work. This affects subsequent processing, not a silent rewrite of stored meetings. Verification includes the reported recording, a separate multi-remote recording, and focused brief-speaker and overlap regressions; these checks do not establish universal recall.
+
 ## 2026-09-12 - Consistent macOS notification design outside the app for calendar prompts
 
 - **Status:** Accepted
