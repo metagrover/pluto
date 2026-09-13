@@ -4568,7 +4568,6 @@ app.whenReady().then(async () => {
         console.log(
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
-        const provider = await getProvider(await getAllSettings(db));
         const result = await processExtractedEntities(
           entities,
           meetingId,
@@ -4576,12 +4575,6 @@ app.whenReady().then(async () => {
           undefined,
           {
             signal: getAbortSignalForMeeting(String(meetingId)),
-            generate: (prompt, responseSchema, signal) =>
-              provider.synthesizeKnowledgeDocument(prompt, {
-                purpose: 'commitmentReconciliation',
-                responseSchema,
-                signal,
-              }),
           },
         );
         backgroundKnowledgeRefresh?.enqueue(`meeting:${meetingId}`);

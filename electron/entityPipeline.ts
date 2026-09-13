@@ -5,7 +5,7 @@
  * Handles entity resolution, relationship creation, and meeting associations.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
 import {
   type ActionCommitmentMetadata,
@@ -17,17 +17,6 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
-import { resolveRecordIdentity } from './commitmentIdentity';
-import {
-  commitmentRecord,
-  planCommitmentAliases,
-  priorCommitments,
-  serializeCommitmentPublication,
-} from './commitmentReconciliation';
-import type {
-  CommitmentSemanticRecord,
-  SemanticGenerate,
-} from './commitmentSemanticReview';
 import * as db from './db';
 import type {
   EntityExtractionContext,
@@ -909,151 +898,53 @@ export async function processExtractedEntities(
   transcriptForGrounding?: string,
   options: {
     canCommit?: () => boolean;
-    generate?: SemanticGenerate;
     signal?: AbortSignal;
   } = {},
 ): Promise<ProcessedEntities> {
-  if (extracted.action_items.length && !options.generate)
-    throw new Error('commitment_generator_required');
-  if (!extracted.action_items.length)
+  const ensureCurrent = () => {
+    options.signal?.throwIfAborted();
+    if (options.canCommit && !options.canCommit())
+      throw new Error('entity_extraction_superseded');
+  };
+  ensureCurrent();
+  const publicationId = randomUUID();
+  const actionIds = new Map<number, string>();
+  const hasActions = extracted.action_items.some((item) =>
+    Boolean(item?.description?.trim()),
+  );
+  const source = hasActions
+    ? (db.getMeeting(meetingId) as db.PersistedMeeting | undefined)
+    : undefined;
+  for (const [index, item] of extracted.action_items.entries()) {
+    if (!item?.description?.trim()) continue;
+    actionIds.set(
+      index,
+      `action-generation-${createHash('sha256')
+        .update(
+          JSON.stringify([
+            meetingId,
+            publicationId,
+            index,
+            item.description,
+            item.assignee ?? null,
+            item.due_date ?? null,
+            source?.started_at ?? null,
+          ]),
+        )
+        .digest('hex')}`,
+    );
+  }
+
+  return db.withCommitmentTransaction(() => {
+    ensureCurrent();
+    db.retireMeetingDerivedCommitments(meetingId);
     return persistExtractedEntities(
       extracted,
       meetingId,
       context,
       transcriptForGrounding,
-      options,
+      { ...options, actionIds },
     );
-  return serializeCommitmentPublication(async () => {
-    const ensureCurrent = () => {
-      options.signal?.throwIfAborted();
-      if (options.canCommit && !options.canCommit())
-        throw new Error('entity_extraction_superseded');
-    };
-    ensureCurrent();
-    const revision = db.getCommitmentQueueRevision();
-    const source = db.getMeeting(meetingId) as db.PersistedMeeting | undefined;
-    const sourceRevision = JSON.stringify(source);
-    const actionIds = new Map<number, string>();
-    const occurrences = new Map<string, number>();
-    const candidates: CommitmentSemanticRecord[] = [];
-    const restorations: string[] = [];
-    const refreshedAliases: db.CommitmentAliasInput[] = [];
-    for (const [index, item] of extracted.action_items.entries()) {
-      if (!item?.description?.trim()) continue;
-      // Ownership and temporal changes must not collide with an old text hash.
-      const identity = JSON.stringify([
-        meetingId,
-        item.description.trim().replace(/\s+/g, ' '),
-        item.assignee ?? null,
-        item.due_date ?? null,
-        item.evidence ?? null,
-        source?.title,
-        source?.started_at,
-        createHash('sha256')
-          .update(source?.transcript_json ?? transcriptForGrounding ?? '')
-          .digest('hex'),
-      ]);
-      const occurrence = occurrences.get(identity) ?? 0;
-      occurrences.set(identity, occurrence + 1);
-      const id = `action-semantic-${createHash('sha256')
-        .update(JSON.stringify([identity, occurrence]))
-        .digest('hex')}`;
-      actionIds.set(index, id);
-      const candidate: CommitmentSemanticRecord = {
-        id,
-        text: item.description,
-        owner: item.assignee ?? null,
-        sourceEvidence: item.evidence ?? null,
-        due: item.due_date ?? null,
-        meetingId,
-        meetingDate: source?.started_at ?? null,
-        context: [item.evidence, source?.title, context?.summary]
-          .filter(Boolean)
-          .join('\n'),
-        reviewState: 'possible',
-        status: 'active',
-      };
-      const existing = db.resolveCommitmentIdentity(id);
-      if (existing) {
-        if (db.isRetiredCommitment(id)) {
-          const alias = db
-            .getActiveCommitmentAliases()
-            .find((item) => item.extractionId === id)!;
-          const resolved = await resolveRecordIdentity(
-            candidate,
-            options.generate!,
-            options.signal,
-          );
-          const canonical = await resolveRecordIdentity(
-            commitmentRecord(existing),
-            options.generate!,
-            options.signal,
-          );
-          const proof = alias.original?.identityProof;
-          if (!resolved.ownerKey || resolved.ownerKey !== canonical.ownerKey)
-            restorations.push(id);
-          else if (
-            proof?.candidateFingerprint !== resolved.identityFingerprint ||
-            proof?.canonicalFingerprint !== canonical.identityFingerprint
-          ) {
-            const rechecked = await planCommitmentAliases(
-              [candidate],
-              [commitmentRecord(existing)],
-              options.generate!,
-              options.signal,
-            );
-            if (rechecked.length) refreshedAliases.push(rechecked[0]);
-            else restorations.push(id);
-          }
-        }
-        continue;
-      }
-      candidates.push(candidate);
-    }
-    const aliases = await planCommitmentAliases(
-      candidates,
-      priorCommitments(),
-      options.generate!,
-      options.signal,
-    );
-    for (const alias of aliases) {
-      const index = [...actionIds].find(
-        ([, id]) => id === alias.extractionId,
-      )?.[0];
-      if (alias.original && index !== undefined)
-        alias.original.normalizedDue = parseDueDate(
-          extracted.action_items[index].due_date || '',
-        );
-    }
-    ensureCurrent();
-    return db.withCommitmentTransaction(() => {
-      if (
-        db.getCommitmentQueueRevision() !== revision ||
-        JSON.stringify(db.getMeeting(meetingId)) !== sourceRevision
-      )
-        throw new Error('commitment_reconciliation_stale');
-      for (const id of restorations) db.restoreCommitmentAlias(id);
-      for (const alias of refreshedAliases)
-        db.refreshCommitmentIdentityProof(
-          db.getCommitmentQueueRevision(),
-          alias,
-        );
-      const result = persistExtractedEntities(
-        extracted,
-        meetingId,
-        context,
-        transcriptForGrounding,
-        {
-          ...options,
-          actionIds,
-          actionMatches: new Map(
-            aliases.map((alias) => [alias.extractionId, alias.canonicalId]),
-          ),
-        },
-      );
-      db.commitCommitmentAliases(db.getCommitmentQueueRevision(), aliases);
-      return result;
-    });
   });
 }
 
@@ -1095,16 +986,6 @@ export async function extractAndProcessEntities(
     meetingId,
     context,
     transcript,
-    {
-      ...options,
-      generate: provider.synthesizeKnowledgeDocument
-        ? (prompt, responseSchema, signal) =>
-            provider.synthesizeKnowledgeDocument!(prompt, {
-              purpose: 'commitmentReconciliation',
-              responseSchema,
-              signal,
-            })
-        : undefined,
-    },
+    options,
   );
 }

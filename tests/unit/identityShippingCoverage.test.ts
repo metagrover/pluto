@@ -407,7 +407,7 @@ describe('identity shipping lifecycle coverage', () => {
     expect(db.isRetiredCommitment(candidateId)).toBe(true);
   });
 
-  it('does not reuse an exact extraction alias after its speaker identity is corrected', async () => {
+  it('publishes a fresh commitment set after its speaker identity is corrected', async () => {
     db.deleteEntity(candidateId);
     const speaker = 'Speaker 1';
     handleIdentityRequest('SET_MEETING_IDENTITY_BINDING', {
@@ -417,23 +417,7 @@ describe('identity shipping lifecycle coverage', () => {
       individual: true,
       expectedRevision: db.identityStore.getRevision(),
     });
-    const generate: SemanticGenerate = async (prompt) => {
-      const input = JSON.parse(
-        prompt.slice(prompt.lastIndexOf('\nINPUT\n') + 7),
-      );
-      if (input.candidates) return same();
-      return JSON.stringify({
-        status: 'resolved',
-        personId: null,
-        speaker,
-        ownershipKind: 'first_person',
-        evidence: [
-          { turnId: 't0', quote: 'I will publish the release checklist.' },
-        ],
-        identityEvidence: [],
-        reason: 'The explicitly bound individual commits.',
-      });
-    };
+    const generate = vi.fn<SemanticGenerate>();
     const extracted = {
       people: [],
       topics: [],
@@ -455,11 +439,12 @@ describe('identity shipping lifecycle coverage', () => {
       undefined,
       { generate },
     );
-    expect(
-      first.entities
-        .filter((entity) => entity.type === 'action_item')
-        .map((entity) => entity.id),
-    ).toEqual([canonicalId]);
+    const firstAction = first.entities.find(
+      (entity) => entity.type === 'action_item',
+    );
+    expect(firstAction?.id).toBeDefined();
+    expect(firstAction?.id).not.toBe(canonicalId);
+    expect(db.isRetiredCommitment(canonicalId)).toBe(true);
     const other = db.upsertEntity({
       type: 'person',
       name: 'Drew',
@@ -479,11 +464,13 @@ describe('identity shipping lifecycle coverage', () => {
       undefined,
       { generate },
     );
-    expect(
-      second.entities
-        .filter((entity) => entity.type === 'action_item')
-        .map((entity) => entity.id),
-    ).not.toContain(canonicalId);
+    const secondAction = second.entities.find(
+      (entity) => entity.type === 'action_item',
+    );
+    expect(secondAction?.id).toBeDefined();
+    expect(secondAction?.id).not.toBe(firstAction?.id);
+    expect(db.isRetiredCommitment(firstAction?.id ?? '')).toBe(true);
     expect(db.getEntity(canonicalId)?.assigned_to).toBe(personId);
+    expect(generate).not.toHaveBeenCalled();
   });
 });

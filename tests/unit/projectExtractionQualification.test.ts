@@ -4,6 +4,8 @@ const mock = vi.hoisted(() => ({
   upsertEntity: vi.fn(),
   linkEntities: vi.fn(),
   addMeetingEntity: vi.fn(),
+  retireMeetingDerivedCommitments: vi.fn(),
+  withCommitmentTransaction: vi.fn((operation: () => unknown) => operation()),
 }));
 vi.mock('../../electron/db', () => ({
   getEntitiesByType: (type: string) =>
@@ -11,6 +13,8 @@ vi.mock('../../electron/db', () => ({
   upsertEntity: mock.upsertEntity,
   linkEntities: mock.linkEntities,
   addMeetingEntity: mock.addMeetingEntity,
+  retireMeetingDerivedCommitments: mock.retireMeetingDerivedCommitments,
+  withCommitmentTransaction: mock.withCommitmentTransaction,
 }));
 import { processExtractedEntities } from '../../electron/entityPipeline';
 import { readProjectQualification } from '../../src/utils/projectQualification';

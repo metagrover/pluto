@@ -5109,6 +5109,8 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
                     SELECT *
                     FROM entities
                     WHERE type IN ('project', 'person', 'topic', 'decision', 'action_item')
+                      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+                        '$.meeting_regeneration_retired_at') IS NULL
                     ORDER BY updated_at DESC
                     LIMIT 160
                   `,
@@ -5121,9 +5123,11 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
                     FROM entities e
                     LEFT JOIN entity_links l
                       ON l.source_entity_id = e.id OR l.target_entity_id = e.id
-                    WHERE e.id = ?
+                    WHERE (e.id = ?
                        OR l.source_entity_id = ?
-                       OR l.target_entity_id = ?
+                       OR l.target_entity_id = ?)
+                      AND json_type(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END,
+                        '$.meeting_regeneration_retired_at') IS NULL
                     ORDER BY e.updated_at DESC
                     LIMIT 120
                   `,
@@ -5470,6 +5474,8 @@ export const getKnowledgeGraph = (
           WHERE type IN ('project', 'person', 'topic', 'decision', 'action_item')
             AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
               WHERE a.extraction_id = entities.id AND a.active = 1)
+            AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+              '$.meeting_regeneration_retired_at') IS NULL
           ORDER BY updated_at DESC
           LIMIT ?
         `,
@@ -6232,10 +6238,24 @@ export const resolveCommitmentIdentity = (id: string): Entity | undefined => {
         'SELECT canonical_id FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
       )
       .get(current) as { canonical_id: string } | undefined;
-    if (!alias) return getEntity(current);
+    if (!alias) {
+      const entity = getEntity(current);
+      return entity && !isMeetingRegenerationRetired(entity.metadata)
+        ? entity
+        : undefined;
+    }
     current = alias.canonical_id;
   }
   throw new Error('commitment_alias_cycle');
+};
+
+const isMeetingRegenerationRetired = (metadata: string | null): boolean => {
+  try {
+    const parsed = JSON.parse(metadata || '{}') as Record<string, unknown>;
+    return typeof parsed.meeting_regeneration_retired_at === 'string';
+  } catch {
+    return false;
+  }
 };
 
 export const isRetiredCommitment = (id: string): boolean =>
@@ -6243,7 +6263,39 @@ export const isRetiredCommitment = (id: string): boolean =>
     .prepare(
       'SELECT 1 FROM commitment_aliases WHERE extraction_id = ? AND active = 1',
     )
-    .get(id);
+    .get(id) || isMeetingRegenerationRetired(getEntity(id)?.metadata ?? null);
+
+export const retireMeetingDerivedCommitments = (
+  meetingId: string,
+  retiredAt = new Date().toISOString(),
+): number => {
+  const rows = db
+    .prepare(
+      `SELECT id, metadata FROM entities
+       WHERE type = 'action_item'
+         AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.origin') = 'extraction'
+         AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ?
+         AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.meeting_regeneration_retired_at') IS NULL`,
+    )
+    .all(meetingId) as Array<{ id: string; metadata: string | null }>;
+  const update = db.prepare(
+    'UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  );
+  for (const row of rows) {
+    const metadata = JSON.parse(row.metadata || '{}') as Record<
+      string,
+      unknown
+    >;
+    update.run(
+      JSON.stringify({
+        ...metadata,
+        meeting_regeneration_retired_at: retiredAt,
+      }),
+      row.id,
+    );
+  }
+  return rows.length;
+};
 
 export const wasCommitmentRestored = (id: string): boolean =>
   !!db
@@ -6257,7 +6309,9 @@ export const withCommitmentTransaction = <T>(operation: () => T): T =>
 
 export const getIdentityReconciliationInputs = () => ({
   actions: db
-    .prepare("SELECT * FROM entities WHERE type = 'action_item' ORDER BY id")
+    .prepare(`SELECT * FROM entities WHERE type = 'action_item'
+      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL ORDER BY id`)
     .all() as Entity[],
   people: getEntitiesByType('person').map(({ id, name }) => ({ id, name })),
   projects: db
@@ -6789,6 +6843,8 @@ export const getProjectBrief = (projectId: string): ProjectBrief | null => {
        SELECT DISTINCT e.* FROM entities e
        JOIN entity_links l ON l.source_entity_id = e.id
        WHERE e.type = 'action_item'
+         AND json_type(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END,
+           '$.meeting_regeneration_retired_at') IS NULL
          AND l.relationship = 'belongs_to'
          AND l.state = 'confirmed'
          AND l.target_entity_id IN (SELECT id FROM family)
@@ -6917,6 +6973,8 @@ export const getEntitiesByType = (type: EntityType): Entity[] => {
   return db
     .prepare(`SELECT * FROM entities WHERE type = ? AND NOT EXISTS
       (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
       AND NOT EXISTS
       (SELECT 1 FROM person_aliases a WHERE a.person_id = entities.id AND a.active = 1)
       ORDER BY updated_at DESC`)
@@ -6930,6 +6988,8 @@ export const getAllEntities = (): Entity[] => {
   return db
     .prepare(`SELECT * FROM entities WHERE NOT EXISTS
       (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
       AND NOT EXISTS
       (SELECT 1 FROM person_aliases a WHERE a.person_id = entities.id AND a.active = 1)
       ORDER BY type, updated_at DESC`)
@@ -6949,6 +7009,8 @@ export const searchEntities = (query: string): Entity[] => {
     WHERE entities_fts MATCH ?
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
         WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(entities.metadata) THEN entities.metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
       AND NOT EXISTS (SELECT 1 FROM person_aliases a
         WHERE a.person_id = entities.id AND a.active = 1)
     ORDER BY rank
@@ -7924,6 +7986,8 @@ export const getDreamingEntityBaseline = (
             FROM entities action
             JOIN entity_links link ON link.source_entity_id = action.id
             WHERE action.type = 'action_item'
+              AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+                '$.meeting_regeneration_retired_at') IS NULL
               AND link.relationship = 'belongs_to'
               AND link.state = 'confirmed'
               AND link.target_entity_id IN (SELECT id FROM family)
@@ -7945,6 +8009,8 @@ export const getDreamingEntityBaseline = (
             SELECT id, name, status, due_date
             FROM entities
             WHERE type = 'action_item' AND assigned_to IN (SELECT id FROM family)
+              AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+                '$.meeting_regeneration_retired_at') IS NULL
             ORDER BY id
             LIMIT 24
           `)
@@ -8123,6 +8189,8 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         JOIN person_identity identity ON identity.source_id = action.assigned_to
         WHERE action.type = 'action_item'
           AND action.status IN ('active', 'overdue')
+          AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.meeting_regeneration_retired_at') IS NULL
           AND json_extract(
             CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.owner_source'
@@ -8186,6 +8254,8 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
           AND json_extract(binding.payload, '$.individual') = 1
           AND json_type(binding.payload, '$.personId') = 'text'
           AND action.status IN ('active', 'overdue')
+          AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.meeting_regeneration_retired_at') IS NULL
           AND COALESCE(json_extract(
             CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.owner_source'
@@ -8211,6 +8281,8 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
             '$.assignee_name'
           ))) = names.normalized_name
         WHERE action.status IN ('active', 'overdue')
+          AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.meeting_regeneration_retired_at') IS NULL
           AND COALESCE(json_extract(
             CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.owner_source'
@@ -8482,6 +8554,8 @@ export const getPersonBriefing = (
         '$.source_meeting_id'
       )
       WHERE action.type = 'action_item'
+        AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.meeting_regeneration_retired_at') IS NULL
         AND action.assigned_to IN (
           SELECT ? UNION SELECT person_id FROM person_aliases
           WHERE canonical_id = ? AND active = 1
@@ -8556,6 +8630,8 @@ export const getPersonBriefing = (
           )
         )
       WHERE action.type = 'action_item'
+        AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+          '$.meeting_regeneration_retired_at') IS NULL
         AND action.assigned_to IS NULL
         AND (
           LOWER(TRIM(json_extract(
@@ -8698,6 +8774,8 @@ export const getActionItemsByStatus = (status: EntityStatus): Entity[] => {
     SELECT * FROM entities 
     WHERE type = 'action_item' AND status = ?
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
     ORDER BY due_date ASC, created_at DESC
   `)
     .all(status) as Entity[];
@@ -8715,6 +8793,8 @@ export const getOverdueActionItems = (): Entity[] => {
       AND due_date IS NOT NULL 
       AND due_date < datetime('now')
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
     ORDER BY due_date ASC
   `)
     .all() as Entity[];
@@ -8768,6 +8848,8 @@ export const getStaleActionItems = (staleDays = 7): Entity[] => {
     SELECT e.* FROM entities e
     WHERE e.type = 'action_item' 
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = e.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
       AND e.status = 'active'
       AND e.updated_at < datetime('now', '-' || ? || ' days')
     ORDER BY e.updated_at ASC
@@ -8785,24 +8867,44 @@ export const getKnowledgeGraphStats = (): {
   total_meeting_connections: number;
 } => {
   const totalEntities = (
-    db.prepare('SELECT COUNT(*) as count FROM entities').get() as {
+    db
+      .prepare(`SELECT COUNT(*) as count FROM entities
+        WHERE json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+          '$.meeting_regeneration_retired_at') IS NULL`)
+      .get() as {
       count: number;
     }
   ).count;
   const totalLinks = (
-    db.prepare('SELECT COUNT(*) as count FROM entity_links').get() as {
+    db
+      .prepare(`SELECT COUNT(*) as count FROM entity_links link
+        JOIN entities source ON source.id = link.source_entity_id
+        JOIN entities target ON target.id = link.target_entity_id
+        WHERE json_type(CASE WHEN json_valid(source.metadata) THEN source.metadata ELSE '{}' END,
+          '$.meeting_regeneration_retired_at') IS NULL
+          AND json_type(CASE WHEN json_valid(target.metadata) THEN target.metadata ELSE '{}' END,
+            '$.meeting_regeneration_retired_at') IS NULL`)
+      .get() as {
       count: number;
     }
   ).count;
   const totalMeetingConnections = (
-    db.prepare('SELECT COUNT(*) as count FROM meeting_entities').get() as {
+    db
+      .prepare(`SELECT COUNT(*) as count FROM meeting_entities link
+        JOIN entities entity ON entity.id = link.entity_id
+        WHERE json_type(CASE WHEN json_valid(entity.metadata) THEN entity.metadata ELSE '{}' END,
+          '$.meeting_regeneration_retired_at') IS NULL`)
+      .get() as {
       count: number;
     }
   ).count;
 
   const typeCounts = db
     .prepare(`
-    SELECT type, COUNT(*) as count FROM entities GROUP BY type
+    SELECT type, COUNT(*) as count FROM entities
+    WHERE json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+      '$.meeting_regeneration_retired_at') IS NULL
+    GROUP BY type
   `)
     .all() as { type: EntityType; count: number }[];
 
@@ -9038,6 +9140,8 @@ export const searchEntitiesWithMeetingContext = (query: string) => {
     WHERE entities_fts MATCH ?
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a
         WHERE a.extraction_id = e.id AND a.active = 1)
+      AND json_type(CASE WHEN json_valid(e.metadata) THEN e.metadata ELSE '{}' END,
+        '$.meeting_regeneration_retired_at') IS NULL
     ORDER BY rank
     LIMIT 20
   `)

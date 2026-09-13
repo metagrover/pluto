@@ -76,7 +76,7 @@ describe('identity publication boundary', () => {
       ),
     ).rejects.toThrow('identity_revision_stale');
   });
-  it('reuses a reviewed obligation through resolved identities in normal extraction', async () => {
+  it('retires a reviewed obligation instead of reusing it in normal extraction', async () => {
     db.saveMeeting({
       id: 'pipeline-identity',
       title: 'Release',
@@ -112,7 +112,9 @@ describe('identity publication boundary', () => {
         assignee_name: 'Taylor',
       },
     });
-    const before = db.getEntity('reviewed-identity');
+    const synthesizeKnowledgeDocument = vi.fn(async () => {
+      throw new Error('semantic identity should not run during publication');
+    });
     await extractAndProcessEntities(
       {
         extractEntities: async () => ({
@@ -127,46 +129,29 @@ describe('identity publication boundary', () => {
             },
           ],
         }),
-        synthesizeKnowledgeDocument: async (_prompt, options) =>
-          options?.responseSchema?.properties &&
-          'status' in (options.responseSchema.properties as object)
-            ? JSON.stringify({
-                status: 'resolved',
-                personId: null,
-                speaker: 'Me',
-                ownershipKind: 'first_person',
-                evidence: [
-                  { turnId: 't0', quote: "I'll publish the launch checklist." },
-                ],
-                identityEvidence: [],
-                reason:
-                  'The corrected individual speaker committed to this action.',
-              })
-            : JSON.stringify({
-                decisions: [
-                  {
-                    candidateId: 'c0',
-                    decision: 'same',
-                    matchId: 'p0',
-                    reason: 'Same publishing obligation and occurrence.',
-                  },
-                ],
-              }),
+        synthesizeKnowledgeDocument,
       },
       "Me: I'll publish the launch checklist.",
       'pipeline-identity',
     );
-    expect(db.getEntity('reviewed-identity')).toEqual(before);
+    expect(db.isRetiredCommitment('reviewed-identity')).toBe(true);
     expect(
-      db
-        .getEntitiesByType('action_item')
-        .filter(
-          (entity) =>
-            JSON.parse(entity.metadata ?? '{}').source_meeting_id ===
-            'pipeline-identity',
-        )
-        .map((entity) => entity.id),
-    ).toEqual(['reviewed-identity']);
+      JSON.parse(db.getEntity('reviewed-identity')?.metadata ?? '{}'),
+    ).toMatchObject({
+      commitment_state: 'rejected',
+      owner_source: 'user',
+      meeting_regeneration_retired_at: expect.any(String),
+    });
+    const active = db
+      .getEntitiesByType('action_item')
+      .filter(
+        (entity) =>
+          JSON.parse(entity.metadata ?? '{}').source_meeting_id ===
+          'pipeline-identity',
+      );
+    expect(active).toHaveLength(1);
+    expect(active[0]?.id).not.toBe('reviewed-identity');
+    expect(synthesizeKnowledgeDocument).not.toHaveBeenCalled();
   });
   it('builds meeting-local context without guessing the owner of imported or fallback channels', () => {
     db.saveMeeting({

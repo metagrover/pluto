@@ -7,6 +7,7 @@ vi.mock('../../electron/db', () => ({
   getRelatedEntities: vi.fn(() => []),
   getCommitmentSourceRelations: vi.fn(() => ({ projects: [], meetings: [] })),
   withCommitmentTransaction: vi.fn((operation: () => unknown) => operation()),
+  retireMeetingDerivedCommitments: vi.fn(() => 0),
   commitCommitmentAliases: vi.fn(),
   identityStore: {
     getBindings: vi.fn(() => []),
@@ -192,7 +193,6 @@ describe('Relationship Inference', () => {
       'meeting-action-source',
       undefined,
       undefined,
-      { generate: async () => '' },
     );
 
     expect(db.upsertEntity).toHaveBeenCalledWith(

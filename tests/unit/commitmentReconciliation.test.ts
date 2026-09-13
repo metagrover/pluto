@@ -524,7 +524,7 @@ describe('durable semantic commitment identity', () => {
     ).toBe(false);
   });
 
-  it('checks current user state after model work and writes nothing on a stale result', async () => {
+  it('does not wait for semantic comparison before publishing a replacement', async () => {
     db.saveMeeting({
       id: 'model-race',
       title: 'Race source',
@@ -532,7 +532,9 @@ describe('durable semantic commitment identity', () => {
         { speaker: 'Alex', text: 'I will handle the incoming candidate.' },
       ]),
     });
-    const target = action('model-race-target', 'possible', 'Alex');
+    const synthesizeKnowledgeDocument = vi.fn(async () => {
+      throw new Error('semantic comparison should not run');
+    });
     const provider = {
       extractEntities: async () => ({
         people: [],
@@ -544,43 +546,14 @@ describe('durable semantic commitment identity', () => {
           { description: 'An incoming candidate', assignee: 'Alex' },
         ],
       }),
-      synthesizeKnowledgeDocument: async (prompt: string) => {
-        db.updateActionCommitmentState(target.id, 'confirmed');
-        if (
-          !JSON.parse(prompt.slice(prompt.lastIndexOf('\nINPUT\n') + 7))
-            .candidates
-        )
-          return JSON.stringify({
-            status: 'unresolved',
-            personId: null,
-            speaker: null,
-            ownershipKind: 'ambiguous',
-            evidence: [],
-            identityEvidence: [],
-            reason: 'Unclear owner.',
-          });
-        const payload = JSON.parse(
-          prompt.slice(prompt.lastIndexOf('\nINPUT\n') + 7),
-        );
-        return JSON.stringify({
-          decisions: payload.candidates.map((item: { id: string }) => ({
-            candidateId: item.id,
-            decision: 'distinct',
-            matchId: null,
-            reason: 'Different obligation',
-          })),
-        });
-      },
+      synthesizeKnowledgeDocument,
     };
     await expect(
       extractAndProcessEntities(provider, 'Source evidence', 'model-race'),
-    ).rejects.toThrow('commitment_reconciliation_stale');
-    expect(db.getMeetingEntities('model-race')).toEqual([]);
-    expect(
-      JSON.parse(db.getEntity(target.id)!.metadata!).commitment_state,
-    ).toBe('confirmed');
+    ).resolves.toMatchObject({ created: 1, linked: 1 });
+    expect(synthesizeKnowledgeDocument).not.toHaveBeenCalled();
   });
-  it('reconciles paraphrases through the production extraction boundary and caches their identity', async () => {
+  it('replaces reviewed same-meeting history instead of semantically reconciling it', async () => {
     db.saveMeeting({
       id: 'semantic-source',
       title: 'Synthetic release review',
@@ -669,18 +642,24 @@ describe('durable semantic commitment identity', () => {
     );
     expect(
       first.entities.filter((e) => e.type === 'action_item').map((e) => e.id),
-    ).toEqual([canonical.id]);
-    expect(db.getEntity(canonical.id)).toEqual(canonical);
-    const calls = generate.mock.calls.length;
+    ).not.toContain(canonical.id);
+    expect(
+      JSON.parse(db.getEntity(canonical.id)?.metadata ?? '{}'),
+    ).toMatchObject({ meeting_regeneration_retired_at: expect.any(String) });
     await extractAndProcessEntities(
       provider,
       'Alex: I will publish the launch checklist.',
       'semantic-source',
     );
-    expect(generate.mock.calls.length).toBe(calls);
+    expect(generate).not.toHaveBeenCalled();
+    expect(
+      db
+        .getMeetingEntities('semantic-source')
+        .filter((entity) => entity.type === 'action_item'),
+    ).toHaveLength(1);
   });
 
-  it('does not publish actions if semantic comparison fails', async () => {
+  it('publishes replacements without invoking an unavailable semantic model', async () => {
     db.saveMeeting({
       id: 'failure-source',
       title: 'Synthetic failure',
@@ -688,8 +667,9 @@ describe('durable semantic commitment identity', () => {
         { speaker: 'Alex', text: 'I will handle the new obligation.' },
       ]),
     });
-    action('failure-prior', 'confirmed', 'Alex');
-    const revision = db.getCommitmentQueueRevision();
+    const unavailable = vi.fn(async () => {
+      throw new Error('model unavailable');
+    });
     await expect(
       extractAndProcessEntities(
         {
@@ -703,15 +683,13 @@ describe('durable semantic commitment identity', () => {
               { description: 'A new obligation', assignee: 'Alex' },
             ],
           }),
-          synthesizeKnowledgeDocument: async () => {
-            throw new Error('model unavailable');
-          },
+          synthesizeKnowledgeDocument: unavailable,
         },
         'Source evidence',
         'failure-source',
       ),
-    ).rejects.toThrow('model unavailable');
-    expect(db.getCommitmentQueueRevision()).toBe(revision);
+    ).resolves.toMatchObject({ created: 1, linked: 1 });
+    expect(unavailable).not.toHaveBeenCalled();
   });
   it('reuses a reviewed identity and preserves all original fields', () => {
     db.saveMeeting({ id: 'source', title: 'Synthetic source' });
