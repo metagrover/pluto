@@ -6,6 +6,23 @@ import {
 } from '../../electron/voiceWorkQueue';
 
 describe('voice work admission', () => {
+  it('lets other meetings proceed when one extraction keeps failing', async () => {
+    vi.useFakeTimers();
+    const visited: string[] = [];
+    const queue = createVoiceWorkQueue({
+      canRun: () => true,
+      hasMemoryCapacity: async () => true,
+      run: async (id) => {
+        visited.push(id);
+        if (id === 'bad') throw new Error('retry');
+      },
+    });
+    queue.enqueue('bad');
+    queue.enqueue('good');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(visited.slice(0, 2)).toEqual(['bad', 'good']);
+    queue.close();
+  });
   afterEach(() => vi.useRealTimers());
 
   it('excludes only its own transcription lease while still protecting foreground work', () => {

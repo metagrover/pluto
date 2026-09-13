@@ -47,6 +47,7 @@ export const createVoiceWorkQueue = (options: {
     retryMs: 5_000,
     monitorMs: 250,
     ignoreForegroundActivity: true,
+    rotateOnRetry: true,
     getPolicy: () => ({
       systemIdleSeconds: 0,
       onBattery: false,

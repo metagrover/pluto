@@ -21,6 +21,7 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
   monitorMs?: number;
   // Resource-admitted work can continue through ordinary keyboard/mouse use.
   ignoreForegroundActivity?: boolean;
+  rotateOnRetry?: boolean;
   now?: () => number;
   onError?: (error: unknown, meetingId: string) => void;
 }) => {
@@ -101,6 +102,10 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
       if (monitorTimer) clearInterval(monitorTimer);
       monitorTimer = null;
       active = undefined;
+      if (!succeeded && options.rotateOnRetry && pending.has(meetingId)) {
+        pending.delete(meetingId);
+        pending.add(meetingId);
+      }
       if (!closed && pending.size > 0 && !timer) {
         schedule(succeeded ? 0 : retryMs);
       }

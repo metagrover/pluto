@@ -2,6 +2,10 @@
 
 Start with the installation steps in [README.md](../README.md). Use the sections below for specific runtime or verification problems.
 
+Internal recovery tools, including the voice candidate backfill, are documented
+in [scripts/README.md](../scripts/README.md). These are developer maintenance
+commands, not user-facing settings or routine setup requirements.
+
 ## 1) Parakeet transcription is unavailable
 
 **Symptoms**

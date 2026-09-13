@@ -126,6 +126,7 @@ import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
+import { startVoiceCandidateBackfill } from './voiceCandidateBackfill';
 import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
@@ -939,6 +940,7 @@ function abortMeetingTasks(meetingId: string) {
 }
 
 let stopIdentityReconciliation: (() => void) | undefined;
+let stopVoiceCandidateBackfill: (() => void) | undefined;
 const shutdownMainProcessConsumers = async () => {
   for (const controller of activeMeetingTasks.values()) controller.abort();
   activeMeetingTasks.clear();
@@ -949,6 +951,8 @@ const shutdownMainProcessConsumers = async () => {
     task.controller.abort();
   backgroundKnowledgeRefresh?.close();
   backgroundKnowledgeRefresh = null;
+  stopVoiceCandidateBackfill?.();
+  stopVoiceCandidateBackfill = undefined;
   voiceWorkQueue?.close();
   voiceWorkQueue = null;
   await idleDreamingCoordinator?.close();
@@ -1222,6 +1226,24 @@ app.whenReady().then(async () => {
         backgroundVoiceCandidateActive = false;
       }
     },
+  });
+  stopVoiceCandidateBackfill = startVoiceCandidateBackfill({
+    directory: app.getPath('userData'),
+    db: getApplicationDatabase(),
+    enqueue: (meetingId) => voiceWorkQueue?.enqueue(meetingId),
+    pending: () => voiceWorkQueue?.snapshot().pendingMeetingIds ?? [],
+    diagnostics: () => ({
+      onBattery: powerMonitor.isOnBatteryPower(),
+      thermalState: powerMonitor.getCurrentThermalState(),
+      queue: voiceWorkQueue?.snapshot(),
+      runtime: parakeetRuntimeHost?.diagnostics(),
+      pauseReasons: knowledgeSynthesisPause.snapshot(),
+      activeTranscriptionCount,
+      cpuLoad: os.loadavg()[0],
+      cpuCount: os.cpus().length,
+    }),
+    onError: (error) =>
+      console.warn('[Pluto] Voice backfill scan failed', error),
   });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
     getPolicy: () => ({
