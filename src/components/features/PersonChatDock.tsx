@@ -2,6 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   ChevronDown,
+  Globe2,
   Loader2,
   MessageCircle,
   Plus,
@@ -17,17 +18,22 @@ import {
   cancelPersonChatRequest,
   createPersonChatThread,
   getPersonChatCapability,
+  getPersonChatWebPreference,
   listPersonChatMessages,
   listPersonChatThreads,
+  openPersonChatWebSource,
   resumePersonChatThread,
   sendPersonChatMessage,
+  setPersonChatWebPreference,
 } from '../../api/personChat';
 import type {
   PersonChatCitation,
   PersonChatDelta,
   PersonChatMessage,
+  PersonChatSourcesUpdate,
   PersonChatStatusUpdate,
   PersonChatThread,
+  PersonChatWebPreference,
 } from '../../types/personChat';
 import { Logo } from '../Brand/Logo';
 
@@ -58,30 +64,65 @@ const SourceList = ({
   citations: PersonChatCitation[];
   onOpenMeeting: (meetingId: string) => void;
 }) => {
+  const meetings = citations.filter((item) => item.type === 'meeting');
+  const web = citations.filter((item) => item.type === 'web');
   if (citations.length === 0) return null;
   return (
     <div className="person-chat__sources">
-      <details>
-        <summary>Your conversations · {citations.length}</summary>
-        <div>
-          {citations.map((citation) => (
-            <button
-              type="button"
-              key={citation.id}
-              onClick={() => onOpenMeeting(citation.meetingId)}
-            >
-              <strong>{citation.title}</strong>
-              <span>
-                {citation.evidenceClass}
-                {formatSourceDate(citation.date)
-                  ? ` · ${formatSourceDate(citation.date)}`
-                  : ''}
-              </span>
-              <small>{citation.excerpt}</small>
-            </button>
-          ))}
-        </div>
-      </details>
+      {meetings.length ? (
+        <details>
+          <summary>Your conversations · {meetings.length}</summary>
+          <div>
+            {meetings.map((citation) =>
+              citation.type === 'meeting' ? (
+                <button
+                  type="button"
+                  key={citation.id}
+                  onClick={() => onOpenMeeting(citation.meetingId)}
+                >
+                  <strong>{citation.title}</strong>
+                  <span>
+                    {citation.evidenceClass}
+                    {formatSourceDate(citation.date)
+                      ? ` · ${formatSourceDate(citation.date)}`
+                      : ''}
+                  </span>
+                  <small>{citation.excerpt}</small>
+                </button>
+              ) : null,
+            )}
+          </div>
+        </details>
+      ) : null}
+      {web.length ? (
+        <details>
+          <summary>
+            {web.some(
+              (citation) =>
+                citation.type === 'web' &&
+                citation.answerUsage === 'attached_afterward',
+            )
+              ? 'Useful sources'
+              : 'Web'}{' '}
+            · {web.length}
+          </summary>
+          <div>
+            {web.map((citation) =>
+              citation.type === 'web' ? (
+                <button
+                  type="button"
+                  key={citation.id}
+                  onClick={() => void openPersonChatWebSource(citation.url)}
+                >
+                  <strong>{citation.title}</strong>
+                  <span>{citation.domain}</span>
+                  <small>{citation.snippet}</small>
+                </button>
+              ) : null,
+            )}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 };
@@ -100,9 +141,16 @@ export const PersonChatDock: React.FC<{
   const [streaming, setStreaming] = useState('');
   const [asking, setAsking] = useState(false);
   const [status, setStatus] = useState('');
+  const [sanitizedQuery, setSanitizedQuery] = useState('');
   const [error, setError] = useState('');
+  const [preference, setPreference] = useState<PersonChatWebPreference>({
+    automaticSearch: true,
+    disclosureSeen: false,
+  });
   const activeRequest = useRef<string | null>(null);
+  const lateWebRequest = useRef<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const pendingSources = useRef(new Map<string, PersonChatCitation[]>());
   const newlyCreatedThread = useRef<string | null>(null);
 
   const refreshThreads = useCallback(async () => {
@@ -117,19 +165,25 @@ export const PersonChatDock: React.FC<{
     void Promise.all([
       getPersonChatCapability(),
       listPersonChatThreads(personId, true),
-    ]).then(([capability, nextThreads]) => {
+      getPersonChatWebPreference(),
+    ]).then(([capability, nextThreads, nextPreference]) => {
       if (cancelled) return;
       setEnabled(capability.enabled);
       setThreads(nextThreads);
       setThreadId(
         nextThreads.find((thread) => thread.archivedAt === null)?.id ?? null,
       );
+      setPreference(nextPreference);
     });
     return () => {
       cancelled = true;
       const requestId = activeRequest.current;
       if (requestId) void cancelPersonChatRequest(requestId);
+      const lateRequestId = lateWebRequest.current;
+      if (lateRequestId && lateRequestId !== requestId)
+        void cancelPersonChatRequest(lateRequestId);
       activeRequest.current = null;
+      lateWebRequest.current = null;
     };
   }, [personId]);
 
@@ -168,15 +222,49 @@ export const PersonChatDock: React.FC<{
     return window.ipcRenderer.on(
       'intelligence:person-chat:status',
       (_event, packet: PersonChatStatusUpdate) => {
-        if (packet.requestId !== activeRequest.current) return;
+        const isActive = packet.requestId === activeRequest.current;
+        const isLate = packet.requestId === lateWebRequest.current;
+        if (!isActive && !isLate) return;
+        if (packet.status === 'web_unavailable' && isLate) {
+          lateWebRequest.current = null;
+        }
+        setSanitizedQuery(packet.sanitizedQuery ?? '');
         setStatus(
-          packet.status === 'reading_person'
-            ? `Reading what you know about ${personName}…`
-            : 'Pluto is responding…',
+          packet.status === 'searching_web'
+            ? 'Searching the web…'
+            : packet.status === 'reading_person'
+              ? `Reading what you know about ${personName}…`
+              : packet.status === 'web_unavailable'
+                ? 'Web search unavailable — answering locally'
+                : 'Pluto is responding…',
         );
       },
     );
   }, [personName]);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return undefined;
+    return window.ipcRenderer.on(
+      'intelligence:person-chat:sources',
+      (_event, packet: PersonChatSourcesUpdate) => {
+        if (packet.requestId === lateWebRequest.current) {
+          lateWebRequest.current = null;
+        }
+        pendingSources.current.set(packet.messageId, packet.citations);
+        setSanitizedQuery(packet.sanitizedQuery ?? '');
+        setStatus(
+          `${packet.citations.filter((item) => item.type === 'web').length} sources found`,
+        );
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === packet.messageId
+              ? { ...message, citations: packet.citations }
+              : message,
+          ),
+        );
+      },
+    );
+  }, []);
 
   useEffect(() => {
     if (expanded) endRef.current?.scrollIntoView({ block: 'end' });
@@ -193,12 +281,16 @@ export const PersonChatDock: React.FC<{
 
   const cancelActive = () => {
     const requestId = activeRequest.current;
-    if (!requestId) return;
+    const lateRequestId = lateWebRequest.current;
+    if (!requestId && !lateRequestId) return;
     activeRequest.current = null;
+    lateWebRequest.current = null;
     setAsking(false);
     setStreaming('');
     setStatus('');
-    void cancelPersonChatRequest(requestId);
+    if (requestId) void cancelPersonChatRequest(requestId);
+    if (lateRequestId && lateRequestId !== requestId)
+      void cancelPersonChatRequest(lateRequestId);
   };
 
   const submit = async (value: string) => {
@@ -238,7 +330,15 @@ export const PersonChatDock: React.FC<{
           setError('Pluto could not answer right now.');
         return;
       }
-      setMessages((current) => [...current, response.message!]);
+      if (response.webStatus === 'searching') {
+        lateWebRequest.current = requestId;
+      }
+      const late = pendingSources.current.get(response.message.id);
+      setMessages((current) => [
+        ...current,
+        late ? { ...response.message!, citations: late } : response.message!,
+      ]);
+      pendingSources.current.delete(response.message.id);
       await refreshThreads();
     } catch {
       setError('Pluto could not answer right now.');
@@ -247,7 +347,7 @@ export const PersonChatDock: React.FC<{
         activeRequest.current = null;
         setAsking(false);
         setStreaming('');
-        setStatus('');
+        if (!status.includes('sources found')) setStatus('');
       }
     }
   };
@@ -464,6 +564,45 @@ export const PersonChatDock: React.FC<{
           </p>
         ) : null}
         <div ref={endRef} />
+      </div>
+
+      <div className="person-chat__web-setting">
+        <label>
+          <input
+            type="checkbox"
+            checked={preference.automaticSearch}
+            onChange={(event) => {
+              const next = {
+                automaticSearch: event.target.checked,
+                disclosureSeen: true,
+              };
+              setPreference(next);
+              void setPersonChatWebPreference(next);
+            }}
+          />
+          <Globe2 size={13} /> Search the web when useful
+        </label>
+        {!preference.disclosureSeen ? (
+          <span>
+            Sanitized queries go directly to the search provider and result
+            sites.{' '}
+            <button
+              type="button"
+              onClick={() => {
+                const next = { ...preference, disclosureSeen: true };
+                setPreference(next);
+                void setPersonChatWebPreference(next);
+              }}
+            >
+              Got it
+            </button>
+          </span>
+        ) : sanitizedQuery ? (
+          <details>
+            <summary>Web search details</summary>
+            <span>Sanitized query: “{sanitizedQuery}”</span>
+          </details>
+        ) : null}
       </div>
 
       <form

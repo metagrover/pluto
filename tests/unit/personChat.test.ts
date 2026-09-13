@@ -3,7 +3,9 @@ import type { PersistedMeeting, PersonBriefingDetail } from '../../electron/db';
 import {
   buildPersonChatContext,
   buildPersonChatPrompt,
+  isExplicitPersonChatWebRequest,
   routePersonChatIntent,
+  shouldAutomaticallyResearchPersonChat,
 } from '../../electron/intelligence/personChat';
 
 const detail = {
@@ -42,6 +44,10 @@ describe('person chat intelligence', () => {
       'role_play',
     );
     expect(routePersonChatIntent('What do I owe them?')).toBe('commitments');
+    expect(isExplicitPersonChatWebRequest('Find sources online')).toBe(true);
+    expect(
+      shouldAutomaticallyResearchPersonChat('Recommend a feedback framework'),
+    ).toBe(true);
   });
 
   it('only includes statements attributed to a bound speaker', () => {
@@ -73,7 +79,7 @@ describe('person chat intelligence', () => {
     expect(context.evidence).toContain('Mention only');
   });
 
-  it('keeps person evidence, general guidance, and history separated', () => {
+  it('keeps person evidence, general guidance, web, and history separated', () => {
     const context = buildPersonChatContext({
       detail,
       query: 'Help me prepare',
@@ -87,6 +93,7 @@ describe('person chat intelligence', () => {
     });
     expect(prompt).toContain('PERSON EVIDENCE');
     expect(prompt).toContain('GENERAL GUIDANCE');
+    expect(prompt).toContain('WEB CONTEXT');
     expect(prompt).toContain('CONVERSATION HISTORY');
     expect(prompt).toContain('never establish facts about Maya');
   });

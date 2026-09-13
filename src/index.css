@@ -2919,6 +2919,46 @@
 .person-chat__error {
   color: hsl(var(--pro-urgent));
 }
+.person-chat__web-setting {
+  padding: 7px 14px;
+  border-top: 1px solid hsl(var(--pro-border));
+  color: hsl(var(--pro-text-muted));
+  font-size: 9px;
+}
+.person-chat__web-setting label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.person-chat__web-setting > span {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-chat__web-setting details {
+  margin-top: 3px;
+}
+.person-chat__web-setting summary {
+  width: fit-content;
+  cursor: pointer;
+  color: hsl(var(--pro-text-muted));
+  font-weight: 600;
+}
+.person-chat__web-setting details span {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-chat__web-setting > span button {
+  color: hsl(var(--pro-accent));
+  font-weight: 700;
+}
 .person-chat__composer {
   display: flex;
   align-items: flex-end;

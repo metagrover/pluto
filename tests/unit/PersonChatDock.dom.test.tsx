@@ -9,10 +9,13 @@ const api = vi.hoisted(() => ({
   cancelPersonChatRequest: vi.fn(),
   createPersonChatThread: vi.fn(),
   getPersonChatCapability: vi.fn(),
+  getPersonChatWebPreference: vi.fn(),
   listPersonChatMessages: vi.fn(),
   listPersonChatThreads: vi.fn(),
+  openPersonChatWebSource: vi.fn(),
   resumePersonChatThread: vi.fn(),
   sendPersonChatMessage: vi.fn(),
+  setPersonChatWebPreference: vi.fn(),
 }));
 
 vi.mock('../../src/api/personChat', () => api);
@@ -31,6 +34,10 @@ describe('PersonChatDock', () => {
     document.body.append(host);
     root = createRoot(host);
     api.getPersonChatCapability.mockResolvedValue({ enabled: true });
+    api.getPersonChatWebPreference.mockResolvedValue({
+      automaticSearch: true,
+      disclosureSeen: true,
+    });
     api.listPersonChatThreads.mockResolvedValue([]);
     api.listPersonChatMessages.mockResolvedValue([]);
     api.createPersonChatThread.mockResolvedValue({
@@ -43,6 +50,7 @@ describe('PersonChatDock', () => {
     });
     api.sendPersonChatMessage.mockResolvedValue({
       status: 'answered',
+      webStatus: 'not_needed',
       message: {
         id: 'assistant-1',
         threadId: 'thread-1',

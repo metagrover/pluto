@@ -31,6 +31,7 @@ import type {
 import type {
   PersonChatResponse,
   PersonChatSendRequest,
+  PersonChatWebPreference,
 } from '../src/types/personChat';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { createActiveCallDetector } from './activeCall/detector';
@@ -132,6 +133,10 @@ import {
 } from './transcription/parakeetRuntimeHost';
 import { startVoiceCandidateBackfill } from './voiceCandidateBackfill';
 import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
+import {
+  createLocalWebResearchService,
+  sanitizeWebResearchQuery,
+} from './web/localWebResearch';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 const plutoLog = createLogger('Pluto');
@@ -525,6 +530,9 @@ import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
   buildPersonChatContext,
   buildPersonChatPrompt,
+  isExplicitPersonChatWebRequest,
+  shouldAutomaticallyResearchPersonChat,
+  webCitations,
 } from './intelligence/personChat';
 import {
   clearAlertsForMeeting,
@@ -785,6 +793,7 @@ const calendarService = createCalendarService({
   store: db.calendarStore,
 });
 const personChatStore = createPersonChatStore(getApplicationDatabase());
+const localWebResearch = createLocalWebResearchService();
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -4028,6 +4037,19 @@ app.whenReady().then(async () => {
     db.getPersonBriefing(String(personId)),
   );
   const personChatEnabled = process.env.PERSON_CHAT_V1 !== 'false';
+  const readPersonChatWebPreference = (): PersonChatWebPreference => {
+    const raw = db.getSetting('person_chat_web_preference');
+    if (!raw) return { automaticSearch: true, disclosureSeen: false };
+    try {
+      const parsed = JSON.parse(raw) as Partial<PersonChatWebPreference>;
+      return {
+        automaticSearch: parsed.automaticSearch !== false,
+        disclosureSeen: parsed.disclosureSeen === true,
+      };
+    } catch {
+      return { automaticSearch: true, disclosureSeen: false };
+    }
+  };
   const personChatBoundSpeakers = (personId: string, meetingId: string) => {
     const canonicalId = db.resolvePersonIdentityId(personId);
     return (
@@ -4046,6 +4068,35 @@ app.whenReady().then(async () => {
         `)
         .all(canonicalId, canonicalId, meetingId) as Array<{ speaker: string }>
     ).map((row) => row.speaker);
+  };
+  const personChatSensitiveTerms = (
+    personId: string,
+    metadata: string | null,
+  ) => {
+    const canonicalId = db.resolvePersonIdentityId(personId);
+    const names = (
+      getApplicationDatabase()
+        .prepare(`
+          WITH family(id) AS (
+            SELECT ? UNION SELECT person_id FROM person_aliases
+            WHERE canonical_id = ? AND active = 1
+          )
+          SELECT name AS value FROM entities WHERE id IN (SELECT id FROM family)
+          UNION
+          SELECT display_name AS value FROM person_name_aliases
+          WHERE person_id IN (SELECT id FROM family)
+        `)
+        .all(canonicalId, canonicalId) as Array<{ value: string }>
+    ).map((row) => row.value);
+    try {
+      const parsed = JSON.parse(metadata || '{}') as Record<string, unknown>;
+      for (const key of ['company', 'organization', 'employer']) {
+        if (typeof parsed[key] === 'string') names.push(parsed[key]);
+      }
+    } catch {
+      // Invalid metadata is ignored; identity names are still removed.
+    }
+    return names;
   };
   const readPersonChatMeeting = getApplicationDatabase().prepare(`
     SELECT id, title, started_at, created_at, transcript_json, user_notes,
@@ -4101,6 +4152,33 @@ app.whenReady().then(async () => {
         String(payload?.personId ?? ''),
       ),
   );
+  ipcMain.handle('intelligence:person-chat:web-preference:get', () =>
+    readPersonChatWebPreference(),
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:web-preference:set',
+    (_event, rawPreference: Partial<PersonChatWebPreference>) => {
+      const preference: PersonChatWebPreference = {
+        automaticSearch: rawPreference?.automaticSearch !== false,
+        disclosureSeen: rawPreference?.disclosureSeen === true,
+      };
+      db.setSetting('person_chat_web_preference', JSON.stringify(preference));
+      return preference;
+    },
+  );
+  ipcMain.handle(
+    'intelligence:person-chat:open-web-source',
+    async (_event, rawUrl: unknown) => {
+      try {
+        const url = new URL(String(rawUrl));
+        if (url.protocol !== 'https:') return false;
+        await shell.openExternal(url.toString());
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  );
   ipcMain.handle(
     'intelligence:person-chat:send',
     async (event, rawRequest: Partial<PersonChatSendRequest>) => {
@@ -4121,6 +4199,7 @@ app.whenReady().then(async () => {
         return {
           status: 'unavailable',
           message: null,
+          webStatus: 'not_needed',
           rationale: 'The person chat request was invalid.',
         } satisfies PersonChatResponse;
       }
@@ -4143,16 +4222,25 @@ app.whenReady().then(async () => {
         ownerId: event.sender.id,
         settled,
       });
-      const sendStatus = (status: 'reading_person' | 'answering') => {
+      const sendStatus = (
+        status:
+          | 'reading_person'
+          | 'searching_web'
+          | 'answering'
+          | 'web_unavailable',
+        sanitizedQuery?: string,
+      ) => {
         if (!event.sender.isDestroyed()) {
           event.sender.send('intelligence:person-chat:status', {
             requestId,
             status,
+            ...(sanitizedQuery ? { sanitizedQuery } : {}),
           });
         }
       };
       let streamedAnswer = '';
       let firstTokenAt: number | null = null;
+      let backgroundWeb: Promise<unknown> | null = null;
       try {
         personChatStore.appendMessage({
           threadId,
@@ -4163,6 +4251,37 @@ app.whenReady().then(async () => {
         sendStatus('reading_person');
         const detail = db.getPersonBriefing(personId);
         if (!detail) throw new Error('Person not found');
+        const explicitWeb = isExplicitPersonChatWebRequest(query);
+        const preference = readPersonChatWebPreference();
+        const useWeb =
+          explicitWeb ||
+          (preference.automaticSearch &&
+            shouldAutomaticallyResearchPersonChat(query));
+        const sensitiveTerms = personChatSensitiveTerms(
+          detail.person.id,
+          detail.person.metadata,
+        );
+        const sanitizedQuery = useWeb
+          ? sanitizeWebResearchQuery(query, sensitiveTerms)
+          : '';
+        const completedWeb: {
+          value: Awaited<ReturnType<typeof localWebResearch.research>> | null;
+        } = { value: null };
+        const webPromise = useWeb
+          ? localWebResearch.research({
+              query,
+              sensitiveTerms,
+              signal: controller.signal,
+            })
+          : null;
+        if (webPromise) {
+          void webPromise.then((research) => {
+            completedWeb.value = research;
+          });
+        }
+        backgroundWeb = webPromise;
+        if (useWeb) sendStatus('searching_web', sanitizedQuery);
+
         const context = buildPersonChatContext({
           detail,
           query,
@@ -4172,8 +4291,23 @@ app.whenReady().then(async () => {
               | undefined,
           getBoundSpeakers: personChatBoundSpeakers,
         });
+        const racedWeb =
+          explicitWeb && webPromise
+            ? await Promise.race([
+                webPromise,
+                new Promise<null>((resolve) =>
+                  setTimeout(() => resolve(null), 1_200),
+                ),
+              ])
+            : null;
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
+        const webAtGeneration =
+          racedWeb?.status === 'completed'
+            ? racedWeb
+            : completedWeb.value?.status === 'completed'
+              ? completedWeb.value
+              : null;
         const messages = personChatStore
           .listMessages(threadId, personId)
           .slice(0, -1);
@@ -4181,6 +4315,7 @@ app.whenReady().then(async () => {
           query,
           context,
           messages,
+          webResearch: webAtGeneration,
         });
         sendStatus('answering');
         const returnedAnswer = await provider.answerAskPluto(prompt, {
@@ -4207,17 +4342,54 @@ app.whenReady().then(async () => {
           promptChars: prompt.length,
           evidenceChars: context.evidence.length,
           meetingSourceCount: context.citations.length,
+          usedWebDuringGeneration: Boolean(webAtGeneration),
         });
+        const usedWebCitations = webAtGeneration
+          ? webCitations(webAtGeneration, 'used_during_generation')
+          : [];
         const message = personChatStore.appendMessage({
           threadId,
           personId,
           role: 'assistant',
           content,
-          citations: context.citations,
+          citations: [...context.citations, ...usedWebCitations],
         });
+
+        if (webPromise && !webAtGeneration) {
+          void webPromise.then((research) => {
+            if (controller.signal.aborted || research.status !== 'completed') {
+              if (!event.sender.isDestroyed() && !controller.signal.aborted) {
+                sendStatus('web_unavailable', research.sanitizedQuery);
+              }
+              return;
+            }
+            const citations = [
+              ...context.citations,
+              ...webCitations(research, 'attached_afterward'),
+            ];
+            personChatStore.updateMessageCitations(message.id, citations);
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('intelligence:person-chat:sources', {
+                requestId,
+                messageId: message.id,
+                citations,
+                webStatus: 'completed',
+                sanitizedQuery: research.sanitizedQuery,
+              });
+            }
+          });
+        }
         return {
           status: 'answered',
           message,
+          webStatus: webAtGeneration
+            ? 'completed'
+            : useWeb
+              ? 'searching'
+              : 'not_needed',
+          ...(racedWeb?.sanitizedQuery
+            ? { sanitizedQuery: racedWeb.sanitizedQuery }
+            : {}),
         } satisfies PersonChatResponse;
       } catch (error) {
         if (controller.signal.aborted) {
@@ -4234,18 +4406,29 @@ app.whenReady().then(async () => {
           return {
             status: 'cancelled',
             message,
+            webStatus: 'unavailable',
           } satisfies PersonChatResponse;
         }
         console.error('[Pluto][Person Chat] failed:', error);
         return {
           status: 'unavailable',
           message: null,
+          webStatus: 'unavailable',
           rationale: 'Pluto could not answer about this person right now.',
         } satisfies PersonChatResponse;
       } finally {
         settle();
-        if (activePersonChatQueries.get(activeKey)?.controller === controller) {
-          activePersonChatQueries.delete(activeKey);
+        const releaseActiveRequest = () => {
+          if (
+            activePersonChatQueries.get(activeKey)?.controller === controller
+          ) {
+            activePersonChatQueries.delete(activeKey);
+          }
+        };
+        if (backgroundWeb) {
+          void backgroundWeb.finally(releaseActiveRequest);
+        } else {
+          releaseActiveRequest();
         }
       }
     },

@@ -3,6 +3,7 @@ import type {
   PersonChatResponse,
   PersonChatSendRequest,
   PersonChatThread,
+  PersonChatWebPreference,
 } from '../types/personChat';
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> =>
@@ -52,3 +53,15 @@ export const cancelPersonChatRequest = (
   requestId: string,
 ): Promise<{ cancelled: boolean }> =>
   invoke('intelligence:person-chat:cancel', requestId);
+
+export const getPersonChatWebPreference =
+  (): Promise<PersonChatWebPreference> =>
+    invoke('intelligence:person-chat:web-preference:get');
+
+export const setPersonChatWebPreference = (
+  preference: PersonChatWebPreference,
+): Promise<PersonChatWebPreference> =>
+  invoke('intelligence:person-chat:web-preference:set', preference);
+
+export const openPersonChatWebSource = (url: string): Promise<boolean> =>
+  invoke('intelligence:person-chat:open-web-source', url);

@@ -238,6 +238,23 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
           .get(id) as MessageRow,
       );
     },
+
+    updateMessageCitations(
+      messageId: string,
+      citations: PersonChatCitation[],
+    ): PersonChatMessage | null {
+      const result = sqlite
+        .prepare(
+          'UPDATE person_chat_messages SET citations_json = ? WHERE id = ?',
+        )
+        .run(JSON.stringify(citations), messageId);
+      if (result.changes !== 1) return null;
+      return mapMessage(
+        sqlite
+          .prepare('SELECT * FROM person_chat_messages WHERE id = ?')
+          .get(messageId) as MessageRow,
+      );
+    },
   };
 };
 

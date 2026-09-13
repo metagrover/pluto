@@ -15,6 +15,14 @@ describe('Person Chat performance boundary', () => {
     expect(handler).not.toContain('synthesizeKnowledgeDocument');
   });
 
+  it('only waits for web research on explicit requests and caps the wait', () => {
+    expect(handler).toContain('explicitWeb && webPromise');
+    expect(handler).toContain('setTimeout(() => resolve(null), 1_200)');
+    expect(handler.indexOf('buildPersonChatContext')).toBeLessThan(
+      handler.indexOf('explicitWeb && webPromise'),
+    );
+  });
+
   it('records content-free first-token diagnostics', () => {
     expect(handler).toContain('firstTokenMs');
     expect(handler).toContain('promptChars');
