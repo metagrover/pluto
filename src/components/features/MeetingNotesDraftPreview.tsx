@@ -100,6 +100,20 @@ export function MeetingNotesDraftPreview({
           );
         })}
 
+        {/* Trailing skeleton loader showing more notes are actively being written */}
+        <div
+          className="meeting-draft-skeleton mt-6 pl-1 space-y-3"
+          aria-hidden="true"
+        >
+          <div className="flex items-start gap-3">
+            <span className="meeting-note-block__marker mt-[0.75rem] opacity-40 animate-pulse" />
+            <div className="w-full space-y-2.5 pt-0.5">
+              <div className="h-3.5 w-4/5 rounded bg-pro-text-muted/10 animate-pulse motion-reduce:animate-none" />
+              <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10 animate-pulse motion-reduce:animate-none" />
+            </div>
+          </div>
+        </div>
+
         <footer className="mt-12 border-t border-pro-border/30 pt-4 text-xs text-pro-text-muted">
           Editing unlocks automatically when your notes are ready.
         </footer>
