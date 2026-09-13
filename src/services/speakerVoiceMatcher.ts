@@ -163,10 +163,10 @@ export function matchSpeakerVoiceOutcome(
     return { category: 'incompatible' };
   }
 
-  if (input.profiles.length === 0) return { category: 'no_profile' };
+  const activeProfiles = input.profiles.filter((profile) => profile.isActive);
+  if (activeProfiles.length === 0) return { category: 'no_profile' };
 
-  const compatibleProfiles = input.profiles.filter((profile) => {
-    if (!profile.isActive) return false;
+  const compatibleProfiles = activeProfiles.filter((profile) => {
     if (!isProvenanceCompatible(profile.provenance, policy.compatibilityKey)) {
       return false;
     }

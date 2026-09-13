@@ -802,7 +802,11 @@ export const AudioManager = ({
         markSystemCaptureUnresponsive,
       );
       cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
-      const handler = (_: unknown, chunk: NativeAudioChunk) => {
+      const handler = (
+        _: unknown,
+        chunk: NativeAudioChunk,
+        receivedAtMs?: number,
+      ) => {
         if (!chunk) return;
         systemAudioChunkSeenRef.current = true;
         let chunkBytes: Uint8Array | null = null;
@@ -841,7 +845,17 @@ export const AudioManager = ({
         );
         systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
         if (!systemLiveness.received(decoded.samples)) return;
-        eouSessionRef.current?.append('system', decoded.samples);
+        const systemCaptureStartSeconds =
+          Number.isFinite(receivedAtMs) && startTimeRef.current
+            ? Math.max(
+                0,
+                (receivedAtMs! - startTimeRef.current) / 1_000 -
+                  decoded.samples.length / systemPcmSampleRateRef.current,
+              )
+            : undefined;
+        eouSessionRef.current?.append('system', decoded.samples, {
+          captureStartSeconds: systemCaptureStartSeconds,
+        });
         if (
           !systemFailureRecorded &&
           systemAudioHealthRef.current !== 'healthy'
@@ -1151,6 +1165,8 @@ export const AudioManager = ({
       )();
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') await audioContext.resume();
+      const audioContextMeetingOffsetSeconds =
+        getMeetingElapsedSeconds() - audioContext.currentTime;
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
@@ -1174,7 +1190,12 @@ export const AudioManager = ({
             if (resampled.length === 0) return;
             const copied = new Float32Array(resampled);
             micPcmChunksRef.current.push(copied);
-            eouSessionRef.current?.append('mic', copied);
+            eouSessionRef.current?.append('mic', copied, {
+              captureStartSeconds: Math.max(
+                0,
+                audioContextMeetingOffsetSeconds + evt.playbackTime,
+              ),
+            });
           };
           micSource.connect(processor);
           processor.connect(sink);
@@ -1674,6 +1695,8 @@ export const AudioManager = ({
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
       }
+      const audioContextMeetingOffsetSeconds =
+        getMeetingElapsedSeconds() - audioContext.currentTime;
 
       if (isSessionAborted()) {
         console.log(
@@ -1706,7 +1729,12 @@ export const AudioManager = ({
         if (resampled.length === 0) return;
         const copied = new Float32Array(resampled);
         micPcmChunksRef.current.push(copied);
-        eouSessionRef.current?.append('mic', copied);
+        eouSessionRef.current?.append('mic', copied, {
+          captureStartSeconds: Math.max(
+            0,
+            audioContextMeetingOffsetSeconds + evt.playbackTime,
+          ),
+        });
       };
 
       micSource.connect(processor);

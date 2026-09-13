@@ -79,6 +79,40 @@ describe('live transcript reconciliation', () => {
     ).toEqual(['local opening', 'local ending']);
   });
 
+  it('keeps a six-word match when acoustic support does not reach its tail', () => {
+    const words = 'one two three four five six'.split(' ');
+    const timed = (source: 'mic' | 'system', lag: number) => ({
+      ...segment(
+        `${source}-sparse`,
+        source,
+        words.join(' '),
+        1_000 + lag,
+        3_000 + lag,
+      ),
+      wordTimings: words.map((text, index) => ({
+        text,
+        timestampMs: 1_000 + lag + index * 300,
+        endTimestampMs: 1_250 + lag + index * 300,
+      })),
+    });
+    const reading = reconcileLiveTranscriptReading({
+      segments: [timed('mic', 200), timed('system', 0)],
+      activityWindows: [],
+      echoEvidence: [
+        {
+          micStartMs: 1_200,
+          micEndMs: 2_300,
+          systemStartMs: 1_000,
+          systemEndMs: 2_100,
+        },
+      ],
+    });
+
+    expect(
+      reading.ranges.filter((range) => range.visibility === 'suppressed_echo'),
+    ).toHaveLength(0);
+  });
+
   it('reconciles independently split checkpoints without consuming local additions', () => {
     const words =
       'the blue notebook is on the desk and we will review our meeting recording together tomorrow morning'.split(

@@ -61,7 +61,9 @@ export type LiveConversationTimelineItem =
       id: string;
       source: 'mic' | 'system';
       timestampMs: number;
-      rows: LiveConversationRow[];
+      row: LiveConversationRow;
+      continuesPrevious: boolean;
+      continuesNext: boolean;
     }
   | {
       kind: 'draft';
@@ -170,7 +172,6 @@ const truncateDraft = (
       ? [
           {
             ...part,
-            id: `${part.id}:collapsed`,
             text: wordsByPart[index].slice(0, selected[index]).join(' '),
           },
         ]
@@ -188,10 +189,12 @@ export const buildLiveConversationTimeline = (
         ? [
             {
               kind: 'committed' as const,
-              id: row.id,
+              id: row.parts[0]?.id ?? row.id,
               source: row.source,
               timestampMs: row.timestampMs,
-              rows: [row],
+              row,
+              continuesPrevious: false,
+              continuesNext: false,
             },
           ]
         : [],
@@ -204,29 +207,25 @@ export const buildLiveConversationTimeline = (
       part,
     })),
   ].sort(compareEventTime);
-  const timeline: LiveConversationTimelineItem[] = [];
-  for (const item of ordered) {
-    const previous = timeline.at(-1);
-    if (item.kind === 'committed' && previous?.kind === 'committed') {
-      const previousRow = previous.rows.at(-1)!;
-      const row = item.rows[0];
-      if (
-        previousRow.source === row.source &&
-        row.timestampMs - previous.rows[0].timestampMs <= 30_000 &&
-        row.timestampMs -
-          Math.min(
-            previousRow.endTimestampMs,
-            previousRow.timestampMs + 5_000,
-          ) <=
-          2_000
-      ) {
-        previous.rows.push(row);
-        continue;
-      }
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const item = ordered[index];
+    if (item.kind !== 'committed' || previous.kind !== 'committed') continue;
+    const continues =
+      previous.row.source === item.row.source &&
+      item.row.timestampMs - previous.row.timestampMs <= 30_000 &&
+      item.row.timestampMs -
+        Math.min(
+          previous.row.endTimestampMs,
+          previous.row.timestampMs + 5_000,
+        ) <=
+        2_000;
+    if (continues) {
+      previous.continuesNext = true;
+      item.continuesPrevious = true;
     }
-    timeline.push(item);
   }
-  return timeline;
+  return ordered;
 };
 
 const rowSignature = (row: LiveConversationRow): string =>

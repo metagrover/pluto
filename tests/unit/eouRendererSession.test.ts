@@ -306,6 +306,46 @@ describe('EOU renderer session', () => {
     );
   });
 
+  it('uses capture time instead of delayed callback time when provided', async () => {
+    const transport = makeTransport();
+    const onSegments = vi.fn();
+    const session = createEouRendererSession({
+      meetingId: 'meeting-1',
+      generation: 1,
+      sampleRates: { mic: 8_000, system: 8_000 },
+      transport,
+      nowSeconds: () => 20,
+      onSegments,
+      onUnavailable: vi.fn(),
+    });
+    await session.start();
+    session.append('system', new Float32Array(2_560), {
+      captureStartSeconds: 4,
+    });
+    transport.emitUpdate({
+      meetingId: 'meeting-1',
+      generation: 1,
+      event: {
+        streamId: 'eou-meeting-1-system',
+        source: 'system',
+        generation: 1,
+        revision: 1,
+        processedAudioSeconds: 0.32,
+        committedText: 'hello',
+        tentativeText: '',
+        tokens: [
+          { text: 'hello', startSeconds: 0, endSeconds: 0.2, committed: true },
+        ],
+      },
+    });
+
+    expect(onSegments).toHaveBeenCalledWith(
+      [expect.objectContaining({ timestampMs: 4_000, endTimestampMs: 4_200 })],
+      [],
+      'recognition',
+    );
+  });
+
   it('fails unavailable once at four outstanding frames without stopping capture', async () => {
     const transport = makeTransport();
     const blocked = deferred<unknown>();

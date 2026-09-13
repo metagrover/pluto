@@ -63,7 +63,7 @@ describe('capture session production ownership boundary', () => {
 
     expect(nativeStartHandler).toContain('recordingForOwner(');
     expect(nativeStartHandler).toContain(
-      "captureOwner.send('NATIVE_AUDIO_CHUNK', chunk)",
+      "captureOwner.send('NATIVE_AUDIO_CHUNK', chunk, Date.now())",
     );
     expect(nativeStartHandler).toContain(
       'nativeAudioProcess === spawnedProcess',

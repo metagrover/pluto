@@ -77,15 +77,37 @@ const sourceLabel = (source: 'mic' | 'system'): string =>
 
 const ConversationTimelineTurn = memo(
   ({ item }: { item: LiveConversationTimelineItem }) => {
-    const first = item.kind === 'committed' ? item.rows[0] : item.part;
+    const first = item.kind === 'committed' ? item.row : item.part;
     const startedAt = new Date(first.timestampMs).toISOString();
     const draft = item.kind === 'draft';
+    const paragraphs =
+      item.kind === 'committed'
+        ? [
+            {
+              id: item.row.parts[0]?.id ?? item.row.id,
+              rowId: item.row.id,
+              text: item.row.text,
+              tentative: false,
+            },
+          ]
+        : [
+            {
+              id: item.part.id,
+              rowId: undefined,
+              text: item.part.text,
+              tentative: true,
+            },
+          ];
     return (
       <article
         className={
           draft
             ? 'transcript-turn live-conversation-draft'
-            : 'transcript-turn live-conversation-row'
+            : `transcript-turn live-conversation-row${
+                item.continuesPrevious
+                  ? ' live-conversation-row--continuation'
+                  : ''
+              }${item.continuesNext ? ' live-conversation-row--continues' : ''}`
         }
         {...(draft
           ? {
@@ -101,21 +123,23 @@ const ConversationTimelineTurn = memo(
           </time>
         </div>
         <div className="transcript-turn__content">
-          {item.kind === 'committed' ? (
-            item.rows.map((row) => (
-              <p key={row.id} data-conversation-row={row.id}>
-                {row.text}
-              </p>
-            ))
-          ) : (
-            <p className="transcript-paragraph-part--tentative">
-              {item.part.text}
+          {paragraphs.map((paragraph) => (
+            <p
+              key={paragraph.id}
+              className={
+                paragraph.tentative
+                  ? 'transcript-paragraph-part--tentative'
+                  : undefined
+              }
+              data-conversation-row={paragraph.rowId}
+              data-conversation-part={paragraph.id}
+            >
+              {paragraph.text}
             </p>
+          ))}
+          {item.kind === 'committed' && item.row.qualifier && (
+            <span className="live-conversation-row__qualifier">Updated</span>
           )}
-          {item.kind === 'committed' &&
-            item.rows.some((row) => row.qualifier) && (
-              <span className="live-conversation-row__qualifier">Updated</span>
-            )}
         </div>
       </article>
     );
@@ -123,7 +147,7 @@ const ConversationTimelineTurn = memo(
 );
 
 const conversationTimelineKey = (item: LiveConversationTimelineItem): string =>
-  item.kind === 'draft' ? item.part.sourceSegmentId : item.rows[0].id;
+  item.id;
 
 const ConversationDraftControl = ({
   draft,

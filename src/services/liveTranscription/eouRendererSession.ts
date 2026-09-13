@@ -297,11 +297,14 @@ export function createEouRendererSession(options: {
   const ensureSourceOffset = (
     source: LiveSource,
     samplesLength: number,
+    captureStartSeconds?: number,
   ): void => {
     if (sourceOffsetsSeconds[source] === null) {
       const nowSeconds = options.nowSeconds?.() ?? 0;
       const sampleRate = getSampleRate(source);
-      const offset = Math.max(0, nowSeconds - samplesLength / sampleRate);
+      const offset =
+        captureStartSeconds ??
+        Math.max(0, nowSeconds - samplesLength / sampleRate);
       if (
         !Number.isFinite(nowSeconds) ||
         nowSeconds < 0 ||
@@ -365,7 +368,11 @@ export function createEouRendererSession(options: {
       })();
       return startPromise;
     },
-    append(source: LiveSource, samples: Float32Array): void {
+    append(
+      source: LiveSource,
+      samples: Float32Array,
+      timing?: { captureStartSeconds?: number },
+    ): void {
       if (
         currentStatus !== 'starting' &&
         (!accepting || currentStatus !== 'ready')
@@ -374,6 +381,13 @@ export function createEouRendererSession(options: {
       }
       try {
         if (!(samples instanceof Float32Array) || samples.length === 0) {
+          throw new Error('parakeet_request_invalid');
+        }
+        if (
+          timing?.captureStartSeconds !== undefined &&
+          (!Number.isFinite(timing.captureStartSeconds) ||
+            timing.captureStartSeconds < 0)
+        ) {
           throw new Error('parakeet_request_invalid');
         }
         for (const sample of samples) {
@@ -399,7 +413,7 @@ export function createEouRendererSession(options: {
           return;
         }
 
-        ensureSourceOffset(source, samples.length);
+        ensureSourceOffset(source, samples.length, timing?.captureStartSeconds);
         chunkerFor(source).append(samples);
       } catch {
         fail('parakeet_request_invalid');

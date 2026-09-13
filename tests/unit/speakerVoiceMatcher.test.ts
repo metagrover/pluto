@@ -151,6 +151,17 @@ describe('speakerVoiceMatcher & global acoustic calibration', () => {
       }),
     ).toEqual({ category: 'no_profile' });
 
+    expect(
+      matchSpeakerVoiceOutcome({
+        meetingId: 'm1',
+        sourceRevision: 'gen-1',
+        candidate: validCandidate,
+        profiles: [{ ...profileAlex, isActive: false }],
+        rejections: [],
+        options: { policy: dummyPolicy, featureFlagEnabled: true },
+      }),
+    ).toEqual({ category: 'no_profile' });
+
     const lowSimilarityProfile = {
       ...profileAlex,
       embedding: createVector(8),

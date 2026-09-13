@@ -20,9 +20,9 @@ describe('AudioManager Parakeet EOU wiring', () => {
 
   it('feeds copied mic PCM and decoded System PCM into EOU', () => {
     expect(source).toContain('const copied = new Float32Array(input)');
-    expect(source).toContain("eouSessionRef.current?.append('mic', copied)");
+    expect(source).toContain("eouSessionRef.current?.append('mic', copied, {");
     expect(source).toContain(
-      "eouSessionRef.current?.append('system', decoded.samples)",
+      "eouSessionRef.current?.append('system', decoded.samples, {",
     );
   });
 
@@ -238,7 +238,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
   it('does not publish recording until microphone capture is active', () => {
     const startIndex = source.indexOf('const startSession = async ()');
     const microphonePcmIndex = source.indexOf(
-      "eouSessionRef.current?.append('mic', copied)",
+      "eouSessionRef.current?.append('mic', copied, {",
       startIndex,
     );
     const recorderStartIndex = source.indexOf(

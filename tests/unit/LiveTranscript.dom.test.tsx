@@ -1105,6 +1105,55 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('preserves a later paragraph when delayed opposing speech splits its visual group', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const first = { ...liveSegment, id: 'first', timestampMs: 1_000 };
+    const later = { ...continuedSegment, id: 'later', timestampMs: 3_000 };
+    const root = createRoot(container);
+    const initial = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: [first, later],
+        activityWindows: [],
+      }),
+      reason: 'recognition',
+    });
+    act(() =>
+      root.render(
+        <LiveTranscript segments={[]} interimText="" conversation={initial} />,
+      ),
+    );
+    const laterParagraph = container.querySelector(
+      '[data-conversation-row="later"]',
+    );
+    const withInterruption = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: [
+          first,
+          { ...otherSpeakerSegment, id: 'interruption', timestampMs: 2_000 },
+          later,
+        ],
+        activityWindows: [],
+      }),
+      reason: 'recognition',
+    });
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={withInterruption}
+        />,
+      ),
+    );
+
+    expect(container.querySelector('[data-conversation-row="later"]')).toBe(
+      laterParagraph,
+    );
+    act(() => root.unmount());
+  });
+
   it('keeps a long confirmed history stable when the live edge advances', () => {
     const root = createRoot(container);
     const history = Array.from({ length: 300 }, (_, index) => ({
@@ -1330,7 +1379,10 @@ describe('LiveTranscript reading experience', () => {
         />,
       ),
     );
-    expect(container.querySelectorAll('.transcript-turn')).toHaveLength(2);
+    expect(container.querySelectorAll('.transcript-turn')).toHaveLength(3);
+    expect(
+      container.querySelectorAll('.live-conversation-row--continuation'),
+    ).toHaveLength(1);
     expect(container.querySelectorAll('[data-conversation-row]')).toHaveLength(
       3,
     );
@@ -1391,12 +1443,16 @@ describe('LiveTranscript reading experience', () => {
     const toggle = [...container.querySelectorAll('button')].find(
       (button) => button.textContent === 'Show all',
     );
+    const firstDraftPart = container.querySelector('[data-conversation-part]');
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     act(() => {
       toggle?.focus();
       toggle?.click();
     });
     expect(container.textContent).toContain('call17');
+    expect(container.querySelector('[data-conversation-part]')).toBe(
+      firstDraftPart,
+    );
     expect(document.activeElement).toBe(toggle);
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     act(() => root.unmount());
@@ -1449,7 +1505,7 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
-  it('preserves the turn element when tentative speech commits', () => {
+  it('preserves the turn and text elements when tentative speech commits', () => {
     const projector = createLiveConversationProjection({ generation: 1 });
     const tentative = {
       ...liveSegment,
@@ -1476,6 +1532,7 @@ describe('LiveTranscript reading experience', () => {
       ),
     );
     const liveTurn = container.querySelector('.transcript-turn');
+    const liveText = container.querySelector('[data-conversation-part]');
 
     act(() =>
       root.render(
@@ -1495,8 +1552,60 @@ describe('LiveTranscript reading experience', () => {
     );
 
     expect(container.querySelector('.transcript-turn')).toBe(liveTurn);
+    expect(container.querySelector('[data-conversation-part]')).toBe(liveText);
     expect(liveTurn?.classList.contains('live-conversation-row')).toBe(true);
     expect(liveTurn?.textContent).toContain('A stable live phrase');
+    act(() => root.unmount());
+  });
+
+  it('gives split draft fragments distinct stable presentation identities', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const tentative = {
+      ...liveSegment,
+      id: 'split-draft',
+      text: 'local before echoed words local after',
+      confirmed: false,
+    };
+    const conversation = projector.apply({
+      generation: 1,
+      reading: reconcileLiveTranscriptReading({
+        segments: [tentative],
+        activityWindows: [],
+        echoEvidence: [],
+      }),
+      reason: 'recognition',
+    });
+    if (!conversation.draft) throw new Error('Expected draft');
+    conversation.draft.parts = [
+      {
+        ...conversation.draft.parts[0],
+        id: 'split-draft:0:2:visible',
+        text: 'local before',
+      },
+      {
+        ...conversation.draft.parts[0],
+        id: 'split-draft:4:6:visible',
+        text: 'local after',
+        timestampMs: conversation.draft.parts[0].timestampMs + 400,
+      },
+    ];
+    conversation.draft.collapsedParts = conversation.draft.parts;
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={conversation}
+        />,
+      ),
+    );
+
+    expect(
+      [
+        ...container.querySelectorAll<HTMLElement>('[data-conversation-part]'),
+      ].map((element) => element.dataset.conversationPart),
+    ).toEqual(['split-draft:0:2:visible', 'split-draft:4:6:visible']);
     act(() => root.unmount());
   });
 

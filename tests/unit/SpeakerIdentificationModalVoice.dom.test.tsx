@@ -244,6 +244,42 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(document.body.textContent).not.toContain('may be Alex Chen');
   });
 
+  it.each([
+    ['disabled', 'Automatic voice identification is currently unavailable.'],
+    ['impure', 'There was not enough isolated speech'],
+    ['no_candidate', 'Voice evidence is not available for this speaker yet.'],
+    [
+      'below_threshold',
+      'No saved voice profile matched with enough confidence.',
+    ],
+  ])('explains the %s voice-match outcome', async (category, copy) => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {},
+          candidates: {},
+          outcomes: { 'Remote Speaker 1': { category } },
+          enrollmentAvailability: {},
+        };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain(copy);
+  });
+
   it('confirms suggestion and enrolls the voice profile automatically', async () => {
     await act(async () => {
       root.render(

@@ -53,6 +53,31 @@ export interface SpeakerIdentificationModalProps {
   metadataWaitTimeoutMs?: number;
 }
 
+const voiceMatchOutcomeMessage = (
+  outcome: ClientVoiceMatchOutcome | undefined,
+): string | null => {
+  switch (outcome?.category) {
+    case 'ambiguous':
+      return 'Voice evidence matched more than one saved profile too closely. Choose the participant manually.';
+    case 'no_profile':
+      return 'No saved voice profile is available for automatic identification yet.';
+    case 'incompatible':
+      return 'Saved voice evidence is from a different recognition version. Confirm the participant to refresh it.';
+    case 'rejected_for_candidate':
+      return 'The available voice match was previously dismissed for this speaker.';
+    case 'below_threshold':
+      return 'No saved voice profile matched with enough confidence.';
+    case 'impure':
+      return 'There was not enough isolated speech for automatic voice identification.';
+    case 'disabled':
+      return 'Automatic voice identification is currently unavailable. Choose the participant manually.';
+    case 'no_candidate':
+      return 'Voice evidence is not available for this speaker yet.';
+    default:
+      return null;
+  }
+};
+
 export const SpeakerIdentificationModal = ({
   isOpen,
   onClose,
@@ -122,6 +147,8 @@ export const SpeakerIdentificationModal = ({
   );
   const voiceEnrollmentAvailabilityRef = useRef<Record<string, boolean>>({});
   const isMountedRef = useRef(true);
+  const meetingIdRef = useRef(meetingId);
+  meetingIdRef.current = meetingId;
   const initializedReview = useRef<string | null>(null);
 
   useEffect(() => {
@@ -142,6 +169,7 @@ export const SpeakerIdentificationModal = ({
   attendeeNamesRef.current = attendeeNames;
 
   const loadVoiceSuggestions = useCallback(async () => {
+    const requestedMeetingId = meetingId;
     const refreshStart = performance.now();
     if (isMountedRef.current) setVoiceSuggestionsLoading(true);
     const currentPromise = (async () => {
@@ -152,7 +180,11 @@ export const SpeakerIdentificationModal = ({
         );
         speakerCandidatesRef.current = res.candidates;
         voiceEnrollmentAvailabilityRef.current = res.enrollmentAvailability;
-        if (!isMountedRef.current) return;
+        if (
+          !isMountedRef.current ||
+          meetingIdRef.current !== requestedMeetingId
+        )
+          return;
         setVoiceSuggestions(res.suggestions);
         setSpeakerCandidates(res.candidates);
         setVoiceMatchOutcomes(res.outcomes);
@@ -168,7 +200,8 @@ export const SpeakerIdentificationModal = ({
       } catch {
         // non-fatal
       } finally {
-        if (isMountedRef.current) setVoiceSuggestionsLoading(false);
+        if (isMountedRef.current && meetingIdRef.current === requestedMeetingId)
+          setVoiceSuggestionsLoading(false);
       }
     })();
     voiceSuggestionsPromiseRef.current = currentPromise;
@@ -1005,22 +1038,13 @@ export const SpeakerIdentificationModal = ({
                         : speakerCandidates[currentSpeaker]?.analysisStatus ===
                             'abstained'
                           ? 'There was not enough reliable isolated speech for voice identification.'
-                          : voiceMatchOutcomes[currentSpeaker]?.category ===
-                              'ambiguous'
-                            ? 'Voice evidence matched more than one saved profile too closely. Choose the participant manually.'
-                            : voiceMatchOutcomes[currentSpeaker]?.category ===
-                                'no_profile'
-                              ? 'No saved voice profile is available for automatic identification yet.'
-                              : voiceMatchOutcomes[currentSpeaker]?.category ===
-                                  'incompatible'
-                                ? 'Saved voice evidence is from a different recognition version. Confirm the participant to refresh it.'
-                                : voiceMatchOutcomes[currentSpeaker]
-                                      ?.category === 'rejected_for_candidate'
-                                  ? 'The available voice match was previously dismissed for this speaker.'
-                                  : speakerCandidates[currentSpeaker]
-                                        ?.analysisStatus === 'eligible'
-                                    ? 'No saved voice profile matched with enough confidence.'
-                                    : null}
+                          : (voiceMatchOutcomeMessage(
+                              voiceMatchOutcomes[currentSpeaker],
+                            ) ??
+                            (speakerCandidates[currentSpeaker]
+                              ?.analysisStatus === 'eligible'
+                              ? 'No saved voice profile matched with enough confidence.'
+                              : null))}
                 </p>
               ) : null}
 

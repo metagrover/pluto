@@ -2063,6 +2063,12 @@
   .live-conversation-row {
     overflow-anchor: auto;
   }
+  .live-conversation-row--continuation {
+    @apply pt-2;
+  }
+  .live-conversation-row--continues {
+    @apply border-b-0 pb-2;
+  }
   .live-conversation-row--duplicate {
     @apply py-3;
   }

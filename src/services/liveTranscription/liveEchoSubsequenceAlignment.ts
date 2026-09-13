@@ -20,6 +20,21 @@ const supportsOnset = (mic: TimedToken, system: TimedToken, lag: number) => {
   );
 };
 
+const hasBoundaryEvidence = (
+  mic: TimedToken,
+  system: TimedToken,
+  lag: number,
+  evidence: EvidenceLookup,
+) =>
+  evidence(mic.timestampMs - 250, mic.timestampMs + 750).some(
+    (window) =>
+      Math.abs(window.micStartMs - window.systemStartMs - lag) <= 30 &&
+      window.micStartMs <= mic.timestampMs + 250 &&
+      window.micEndMs >= mic.timestampMs - 250 &&
+      window.systemStartMs <= system.timestampMs + 250 &&
+      window.systemEndMs >= system.timestampMs - 250,
+  );
+
 const anchorLag = (
   mic: TimedToken[],
   system: TimedToken[],
@@ -118,6 +133,18 @@ export const findSupportedExactEchoSpans = (
       );
       if (
         lag === undefined ||
+        !hasBoundaryEvidence(
+          mic[micStart],
+          system[systemStart],
+          lag,
+          evidence,
+        ) ||
+        !hasBoundaryEvidence(
+          mic[micStart + tokenCount - 1],
+          system[systemStart + tokenCount - 1],
+          lag,
+          evidence,
+        ) ||
         !mic
           .slice(micStart, micStart + tokenCount)
           .every((word, index) =>

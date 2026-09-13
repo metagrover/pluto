@@ -2675,7 +2675,7 @@ app.whenReady().then(async () => {
           nativeAudioProcess === spawnedProcess &&
           !captureOwner.isDestroyed()
         ) {
-          captureOwner.send('NATIVE_AUDIO_CHUNK', chunk);
+          captureOwner.send('NATIVE_AUDIO_CHUNK', chunk, Date.now());
         }
       });
 

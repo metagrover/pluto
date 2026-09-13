@@ -41,9 +41,9 @@ PLUTO_PRIVATE_PARAKEET_EOU_MANIFEST=/absolute/private/eou-manifest.json \
 pnpm run replay:parakeet-eou
 ```
 
-Set `PLUTO_E2E_PARAKEET_LIVE_CONFIG=low-latency-2s` only to compare the
-native candidate configuration in this private replay. The packaged app keeps
-the pinned default unless a held-out evaluation supports a separate promotion.
+The EOU recognizer currently has one production configuration. The runtime's
+`--live-config` flag applies to its separate sliding-window live session and is
+therefore intentionally not exposed by this EOU replay.
 
 The EOU report contains aggregate transport, presentation, and resource metrics
 only. `crossSourceDuplicatePeak`, `crossSourceDuplicateUpdates`, and

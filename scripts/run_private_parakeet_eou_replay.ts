@@ -440,13 +440,8 @@ export const runPrivateParakeetEouReplay = async (
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), 'pluto-eou-pcm-'),
   );
-  const requestedLiveConfiguration = process.env.PLUTO_E2E_PARAKEET_LIVE_CONFIG;
   const host = makeRuntimeHost({
     paths: runtimePaths(manifest),
-    ...(requestedLiveConfiguration === 'pinned-default' ||
-    requestedLiveConfiguration === 'low-latency-2s'
-      ? { liveConfigurationId: requestedLiveConfiguration }
-      : {}),
   });
   const stopOwned = () => host.shutdown();
   options.signal?.addEventListener('abort', stopOwned, { once: true });
@@ -763,7 +758,9 @@ export const runPrivateParakeetEouReplay = async (
       },
       append: async (frame) => {
         options.signal?.throwIfAborted();
-        rendererSession!.append(frame.source, frame.samples);
+        rendererSession!.append(frame.source, frame.samples, {
+          captureStartSeconds: frame.audioStartSeconds,
+        });
       },
     });
     metrics.maximumQueueDepth = Math.max(
