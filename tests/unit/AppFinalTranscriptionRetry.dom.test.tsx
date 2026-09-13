@@ -61,6 +61,15 @@ describe('App final transcription retry boundary', () => {
       manualRetry: true,
       rebuildSealedAudio: false,
       recovered: false,
+      systemCaptureIncomplete: false,
+    },
+    {
+      reason: 'manual incomplete system capture',
+      retryKind: 'transcript' as const,
+      manualRetry: true,
+      rebuildSealedAudio: true,
+      recovered: false,
+      systemCaptureIncomplete: true,
     },
     {
       reason: 'speaker labels',
@@ -68,6 +77,7 @@ describe('App final transcription retry boundary', () => {
       manualRetry: true,
       rebuildSealedAudio: true,
       recovered: false,
+      systemCaptureIncomplete: false,
     },
     {
       reason: 'automatic',
@@ -75,6 +85,7 @@ describe('App final transcription retry boundary', () => {
       manualRetry: false,
       rebuildSealedAudio: false,
       recovered: false,
+      systemCaptureIncomplete: false,
     },
     {
       reason: 'automatic recovered recording',
@@ -82,6 +93,7 @@ describe('App final transcription retry boundary', () => {
       manualRetry: false,
       rebuildSealedAudio: true,
       recovered: true,
+      systemCaptureIncomplete: false,
     },
   ])(
     'forwards $reason admission to the persisted worker',
@@ -91,6 +103,7 @@ describe('App final transcription retry boundary', () => {
       manualRetry,
       rebuildSealedAudio,
       recovered,
+      systemCaptureIncomplete,
     }) => {
       requestedRetry.kind = retryKind;
       const meeting = {
@@ -118,12 +131,20 @@ describe('App final transcription retry boundary', () => {
                   gapDetected: false,
                 },
               }
-            : {
-                finalTranscription: {
-                  policy: 'parakeet_final_v1',
-                  state: 'needs_attention',
+            : systemCaptureIncomplete
+              ? {
+                  reasons: ['system_capture_incomplete'],
+                  finalTranscription: {
+                    policy: 'parakeet_final_v1',
+                    state: 'needs_attention',
+                  },
+                }
+              : {
+                  finalTranscription: {
+                    policy: 'parakeet_final_v1',
+                    state: 'needs_attention',
+                  },
                 },
-              },
         ),
       };
       runFinal.mockImplementation(async () => {

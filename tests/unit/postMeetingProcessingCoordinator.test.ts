@@ -8,6 +8,7 @@ import {
   forgetExpiredMeetingProcessingAttempts,
   isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
+  needsManualRetryAudioRebuild,
   needsRecoveredAudioRebuild,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
@@ -97,6 +98,26 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForFinalTranscription([meeting])?.id).toBe(
       'recovered-meeting',
     );
+  });
+
+  it('rebuilds sealed audio for a manual retry after incomplete system capture', () => {
+    const meeting = {
+      id: 'incomplete-system-capture',
+      transcript_status: 'needs_attention' as const,
+      finalization_status: 'needs_attention' as const,
+      capture_journal_generation: 'generation-1',
+      transcript_json: '{"segments":[]}',
+      transcript_integrity_json: JSON.stringify({
+        reasons: ['system_capture_incomplete'],
+      }),
+      audio_path: '/approved/mic.wav',
+      system_audio_path: '/stale/system.wav',
+      mixed_audio_path: '/stale/mix.wav',
+    };
+
+    expect(needsManualRetryAudioRebuild(meeting)).toBe(true);
+    expect(needsRecoveredAudioRebuild(meeting)).toBe(false);
+    expect(shouldRunMeetingFinalTranscription(meeting)).toBe(false);
   });
 
   it('selects recovered work from its content-free meeting summary', () => {
@@ -202,8 +223,9 @@ describe('post-meeting processing coordinator', () => {
     expect(appSource).toContain(
       "kind === 'speaker_labels' ? 'speaker_labels' : 'manual'",
     );
+    expect(appSource).toContain('needsRecoveredAudioRebuild(detail)');
     expect(appSource).toContain(
-      "reason === 'speaker_labels' || needsRecoveredAudioRebuild(detail)",
+      "reason === 'manual' && needsManualRetryAudioRebuild(detail)",
     );
   });
 

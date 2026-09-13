@@ -45,6 +45,32 @@ export const needsRecoveredAudioRebuild = (
   }
 };
 
+export const needsManualRetryAudioRebuild = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean => {
+  if (
+    !meeting ||
+    meeting.finalization_status === 'recovery_required' ||
+    meeting.transcript_status !== 'needs_attention' ||
+    !meeting.capture_journal_generation ||
+    !meeting.audio_path ||
+    !meeting.transcript_json
+  ) {
+    return false;
+  }
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      reasons?: unknown;
+    };
+    return (
+      Array.isArray(integrity.reasons) &&
+      integrity.reasons.includes('system_capture_incomplete')
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const shouldRunMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
 ): boolean => {
