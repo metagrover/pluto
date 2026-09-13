@@ -54,4 +54,23 @@ describe('Electron bootstrap boundary', () => {
     );
     expect(source).toContain('speakerVoiceDependencies(true, signal)');
   });
+
+  it('defers speaker correction notes to the cancellable idle queue', () => {
+    const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
+    const bindingHandler = source.slice(
+      source.indexOf('onBindingChange: ({ meetingId, personIds })'),
+      source.indexOf(
+        'invalidateDreamingCatalog();',
+        source.indexOf('onBindingChange: ({ meetingId, personIds })'),
+      ),
+    );
+    expect(bindingHandler).toContain(
+      'backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`)',
+    );
+    expect(bindingHandler).not.toContain('generateAndPublishMeetingNotes');
+    expect(source).toContain(
+      "signal.addEventListener('abort', cancel, { once: true })",
+    );
+    expect(source).toContain("signal.removeEventListener('abort', cancel)");
+  });
 });

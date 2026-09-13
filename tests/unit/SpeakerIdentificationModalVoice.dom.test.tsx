@@ -146,12 +146,13 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(bodyText).toContain('Speaker 1 may be Alex Chen');
     expect(bodyText).toContain('Strong match');
     expect(bodyText).toContain('On calendar');
-    expect(bodyText).toContain('Play reference sample');
+    expect(bodyText).not.toContain('Play reference sample');
+    expect(bodyText).not.toContain('Confirm & Next');
     expect(bodyText).toContain('Confirm Alex Chen');
     expect(bodyText).toContain('Not Alex Chen');
     expect(bodyText).not.toContain('Remember this voice for future meetings');
     expect(bodyText).toContain(
-      'Confirming saves a local voice profile for future meetings.',
+      'Confirming identifies this speaker. Eligible voice samples help with future meetings.',
     );
   });
 
@@ -347,7 +348,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       'Remember this voice for future meetings',
     );
     expect(document.body.textContent).not.toContain(
-      'Confirming saves a local voice profile for future meetings.',
+      'Confirming identifies this speaker. Eligible voice samples help with future meetings.',
     );
     expect(invoke).not.toHaveBeenCalledWith(
       'SPEAKER_VOICE_ENROLL',
@@ -456,6 +457,47 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
   });
 
+  it('keeps the next speaker selected after confirming a suggestion opened on a specific speaker', async () => {
+    const defaultInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'SPEAKER_VOICE_ENROLL') return new Promise(() => {});
+      const result = await defaultInvoke(channel, payload);
+      if (
+        channel === 'GET_MEETING_IDENTITY' ||
+        channel === 'SET_MEETING_IDENTITY_BINDING'
+      ) {
+        return {
+          ...result,
+          speakers: ['Remote Speaker 1', 'Remote Speaker 2'],
+        };
+      }
+      return result;
+    });
+    const render = () =>
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+          initialSpeaker="Remote Speaker 1"
+        />,
+      );
+    await act(async () => render());
+    const confirm = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Confirm Alex Chen',
+    );
+    expect(confirm).toBeDefined();
+    await act(async () => confirm!.click());
+    await act(async () => render());
+    expect(document.body.textContent).toContain('Speaker 2 of 2');
+    expect(document.body.textContent).not.toContain('Confirm Alex Chen');
+    expect(
+      invoke.mock.calls.filter(
+        ([channel]) => channel === 'SET_MEETING_IDENTITY_BINDING',
+      ),
+    ).toHaveLength(1);
+  });
+
   it('advances to the next speaker immediately without stalling on voice enrollment', async () => {
     const multiMeeting: MeetingIdentityState = {
       ...workspace,
@@ -506,6 +548,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
           isOpen={true}
           onClose={() => {}}
           meetingId="meeting-multi"
+          initialSpeaker="Remote Speaker 1"
         />,
       );
     });

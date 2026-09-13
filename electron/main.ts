@@ -1153,6 +1153,32 @@ app.whenReady().then(async () => {
       ),
     }),
     run: async (workId, signal) => {
+      if (workId.startsWith('identity-notes:')) {
+        signal.throwIfAborted();
+        const meetingId = workId.slice('identity-notes:'.length);
+        const meeting = db.getMeeting(meetingId) as
+          | db.PersistedMeeting
+          | undefined;
+        if (
+          meeting?.transcript_status !== 'validated' ||
+          !meeting.transcript_validated_at
+        )
+          return;
+        const cancel = () =>
+          meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
+            meetingId,
+            requestId: randomUUID(),
+            template: 'auto',
+            reason: 'automatic',
+          });
+        } finally {
+          signal.removeEventListener('abort', cancel);
+        }
+        return;
+      }
       if (workId.startsWith('voice:')) {
         signal.throwIfAborted();
         const meetingId = workId.slice('voice:'.length);
@@ -1335,27 +1361,7 @@ app.whenReady().then(async () => {
             const doc = db.getKnowledgeDocByScope('person_context', personId);
             if (doc) queueKnowledgeDocRefresh(doc.id);
           }
-          const meeting = db.getMeeting(meetingId) as
-            | db.PersistedMeeting
-            | undefined;
-          if (
-            meeting?.transcript_status === 'validated' &&
-            meeting.transcript_validated_at
-          ) {
-            void meetingNotesRunCoordinator
-              .generateAndPublishMeetingNotes({
-                meetingId,
-                requestId: randomUUID(),
-                template: 'auto',
-                reason: 'automatic',
-              })
-              .catch((error) => {
-                console.warn(
-                  '[Identity] Notes refresh after speaker correction failed',
-                  error,
-                );
-              });
-          }
+          backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`);
         },
       });
       if (

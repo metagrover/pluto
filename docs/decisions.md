@@ -1029,6 +1029,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Outcome boundary:** Candidate-analysis attempts are stored separately from biometric candidates as `eligible`, `abstained`, or `retryable_failure`, with a stable reason and optional retry time. Missing evidence no longer overwrites an earlier candidate with an unexplained zero-vector tombstone, and the UI distinguishes analysis interruption, insufficient clean speech, and a completed analysis with no confident match.
 - **Safety:** Representatives remain bounded 256-dimensional native evidence in dedicated local biometric tables and never enter transcript JSON, logs, analytics, or renderer IPC. Suggestions still require the existing provenance, purity, absolute-similarity, and runner-up-margin gates and remain tentative until explicit confirmation.
 
+## 2026-09-12 - Defer notes regeneration after speaker confirmation
+
+- **Status:** Accepted and implemented following repeated speaker-review stalls.
+- **Extends:** “Admit legacy voice backfill only while the Mac is idle.” Speaker confirmations persist immediately, advance once, and queue automatic notes regeneration through the same 15-minute idle, power, and thermal admission policy. Repeated confirmations coalesce by meeting; foreground activity cancels the deferred run. Explicit notes regeneration remains available immediately.
+- **UI:** The initial speaker applies once per review session, never again on a binding response. The suggestion has one confirmation action and no reference-recording control. Voice enrollment remains a follow-up and is not represented as guaranteed by identity confirmation.
+
 ## 2026-09-12 - Admit legacy voice backfill only while the Mac is idle
 
 - **Status:** Accepted and implemented.

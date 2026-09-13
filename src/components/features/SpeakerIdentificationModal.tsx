@@ -25,7 +25,6 @@ import {
   type VoiceMatchSuggestion,
   enrollSpeakerVoice,
   getSpeakerVoiceSuggestions,
-  getVoiceReferenceSample,
   rejectSpeakerVoiceSuggestion,
 } from '../../api/speakerVoice';
 import type { IdentityPerson } from '../../types/identity';
@@ -104,8 +103,7 @@ export const SpeakerIdentificationModal = ({
   );
   const voiceEnrollmentAvailabilityRef = useRef<Record<string, boolean>>({});
   const isMountedRef = useRef(true);
-  const [refSampleLoading, setRefSampleLoading] = useState(false);
-  const [refSampleUnavailable, setRefSampleUnavailable] = useState(false);
+  const initializedReview = useRef<string | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -119,54 +117,7 @@ export const SpeakerIdentificationModal = ({
     sampleAudio.current = null;
     if (sampleUrl.current) URL.revokeObjectURL(sampleUrl.current);
     sampleUrl.current = null;
-    setRefSampleLoading(false);
   }, []);
-
-  const playReferenceSample = useCallback(
-    async (suggestion: VoiceMatchSuggestion) => {
-      if (!suggestion.referenceInterval) return;
-      const token = ++sampleRequest.current;
-      releaseSample();
-      setSampleState(null);
-      setSampleError(null);
-      setRefSampleLoading(true);
-      setRefSampleUnavailable(false);
-      try {
-        const result = await getVoiceReferenceSample(
-          suggestion.referenceInterval.sourceMeetingId,
-          suggestion.referenceInterval.startTime,
-          suggestion.referenceInterval.endTime,
-        );
-        if (token !== sampleRequest.current) return;
-        if (!result) {
-          setRefSampleUnavailable(true);
-          return;
-        }
-        const bytes = Uint8Array.from(result.bytes);
-        const url = URL.createObjectURL(
-          new Blob([bytes.buffer], { type: result.mimeType }),
-        );
-        const audio = new Audio(url);
-        sampleUrl.current = url;
-        sampleAudio.current = audio;
-        audio.addEventListener('ended', () => {
-          if (sampleAudio.current !== audio) return;
-          releaseSample();
-        });
-        await audio.play();
-      } catch {
-        if (token === sampleRequest.current) {
-          releaseSample();
-          setRefSampleUnavailable(true);
-        }
-      } finally {
-        if (token === sampleRequest.current) {
-          setRefSampleLoading(false);
-        }
-      }
-    },
-    [releaseSample],
-  );
 
   const attendeeNamesRef = useRef(attendeeNames);
   attendeeNamesRef.current = attendeeNames;
@@ -297,12 +248,17 @@ export const SpeakerIdentificationModal = ({
 
   // Set initial step if initialSpeaker passed
   useEffect(() => {
-    if (!isOpen || !initialSpeaker || reviewableSpeakers.length === 0) return;
-    const index = reviewableSpeakers.indexOf(initialSpeaker);
-    if (index >= 0) {
-      setStepIndex(index);
+    if (!isOpen) {
+      initializedReview.current = null;
+      return;
     }
-  }, [isOpen, initialSpeaker, reviewableSpeakers]);
+    if (state?.meetingId !== meetingId || reviewableSpeakers.length === 0)
+      return;
+    const reviewKey = JSON.stringify([meetingId, initialSpeaker]);
+    if (initializedReview.current === reviewKey) return;
+    initializedReview.current = reviewKey;
+    setStepIndex(Math.max(0, reviewableSpeakers.indexOf(initialSpeaker ?? '')));
+  }, [isOpen, meetingId, initialSpeaker, reviewableSpeakers, state?.meetingId]);
 
   // Sync display names callback
   useEffect(() => {
@@ -344,7 +300,7 @@ export const SpeakerIdentificationModal = ({
 
   // Reset or initialize combobox inputs whenever active speaker changes
   useEffect(() => {
-    setRefSampleUnavailable(false);
+    ++sampleRequest.current;
     releaseSample();
     setSampleState(null);
     setSampleLoading(null);
@@ -901,30 +857,6 @@ export const SpeakerIdentificationModal = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    {voiceSuggestions[currentSpeaker].referenceInterval ? (
-                      <button
-                        type="button"
-                        disabled={busy || refSampleLoading}
-                        onClick={() =>
-                          void playReferenceSample(
-                            voiceSuggestions[currentSpeaker],
-                          )
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-full border border-pro-border/80 bg-pro-bg px-2.5 py-1 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors disabled:opacity-50"
-                      >
-                        <Play
-                          size={10}
-                          className="fill-current mr-0.5 shrink-0"
-                          aria-hidden="true"
-                        />
-                        {refSampleLoading
-                          ? 'Loading reference…'
-                          : refSampleUnavailable
-                            ? 'Reference recording unavailable'
-                            : 'Play reference sample'}
-                      </button>
-                    ) : null}
-
                     <button
                       type="button"
                       disabled={busy}
@@ -1079,7 +1011,8 @@ export const SpeakerIdentificationModal = ({
               (speakerCandidates[currentSpeaker]?.isEligibleForEnrollment ||
                 voiceEnrollmentAvailability[currentSpeaker]) ? (
                 <p className="pt-2 text-xs text-pro-text-muted">
-                  Confirming saves a local voice profile for future meetings.
+                  Confirming identifies this speaker. Eligible voice samples
+                  help with future meetings.
                 </p>
               ) : null}
             </div>
@@ -1121,14 +1054,20 @@ export const SpeakerIdentificationModal = ({
                 >
                   Skip
                 </button>
-                <button
-                  type="button"
-                  disabled={busy || (!selectedSelection && !searchQuery.trim())}
-                  onClick={handleConfirmCurrent}
-                  className="inline-flex items-center justify-center rounded-lg bg-pro-accent px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-pro-accent/90 disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                >
-                  Confirm & Next
-                </button>
+                {(!voiceSuggestions[currentSpeaker] ||
+                  selectedSelection ||
+                  searchQuery.trim()) && (
+                  <button
+                    type="button"
+                    disabled={
+                      busy || (!selectedSelection && !searchQuery.trim())
+                    }
+                    onClick={handleConfirmCurrent}
+                    className="inline-flex items-center justify-center rounded-lg bg-pro-accent px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-pro-accent/90 disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                  >
+                    {busy ? 'Saving…' : 'Confirm & Next'}
+                  </button>
+                )}
               </>
             )}
           </div>
