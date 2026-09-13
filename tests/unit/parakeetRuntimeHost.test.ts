@@ -19,6 +19,31 @@ const paths = {
 };
 
 describe('ParakeetRuntimeHost', () => {
+  it('passes an explicitly selected live configuration to the native runtime', async () => {
+    const child = new FakeChild();
+    const spawn = vi.fn(() => child);
+    const host = makeRuntimeHost({
+      paths,
+      spawn,
+      liveConfigurationId: 'low-latency-2s',
+    });
+    await host.acquire('live');
+
+    expect(spawn).toHaveBeenCalledWith(
+      '/app/parakeet-runtime',
+      [
+        '--model-root',
+        '/models/parakeet',
+        '--audio-root',
+        '/recordings',
+        '--live-config',
+        'low-latency-2s',
+      ],
+      expect.any(Object),
+    );
+    host.shutdown();
+  });
+
   it('hands the one runtime from a cancelled final lease to waiting live work', async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child);

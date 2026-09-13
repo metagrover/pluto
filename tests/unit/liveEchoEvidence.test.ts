@@ -242,8 +242,32 @@ describe('live acoustic echo evidence', () => {
     evidence.reset();
     appendPair(evidence);
     expect(evidence.snapshot().length).toBeGreaterThan(0);
+    const diagnostics = evidence.diagnostics();
+    expect(diagnostics.analyzedWindows).toBeGreaterThan(0);
+    expect(diagnostics.candidateWindows).toBeGreaterThan(0);
+    expect(diagnostics.retainedWindows).toBe(evidence.snapshot().length);
+    expect(
+      diagnostics.insufficientActivityComparisons +
+        diagnostics.independentMicComparisons +
+        diagnostics.degenerateComparisons +
+        diagnostics.lowSimilarityComparisons +
+        diagnostics.similarityQualifiedComparisons,
+    ).toBe(diagnostics.lagComparisons);
     evidence.reset();
     expect(evidence.snapshot()).toEqual([]);
+    expect(evidence.diagnostics()).toEqual({
+      analyzedWindows: 0,
+      completeMicWindows: 0,
+      lagComparisons: 0,
+      insufficientActivityComparisons: 0,
+      independentMicComparisons: 0,
+      degenerateComparisons: 0,
+      lowSimilarityComparisons: 0,
+      similarityQualifiedComparisons: 0,
+      candidateWindows: 0,
+      compatibleCandidatePairs: 0,
+      retainedWindows: 0,
+    });
   });
   it('retains prior positive metadata after PCM history expires without filling the gap', () => {
     const evidence = createLiveEchoEvidence();

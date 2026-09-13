@@ -56,8 +56,12 @@ export class ParakeetRuntimeHost {
       idleTimeoutMs?: number;
       diagnostic?: (code: string) => void;
       persistInterruptedFinalization?: () => Promise<void>;
+      liveConfigurationId?: 'pinned-default' | 'low-latency-2s';
     },
   ) {
+    const liveConfigurationArgs = options.liveConfigurationId
+      ? ['--live-config', options.liveConfigurationId]
+      : [];
     this.process = new NativeJsonLineProcess({
       executablePath: options.paths.executablePath,
       args: [
@@ -65,6 +69,7 @@ export class ParakeetRuntimeHost {
         options.paths.modelRoot,
         '--audio-root',
         options.paths.audioRoot,
+        ...liveConfigurationArgs,
       ],
       spawn: options.spawn ?? (nodeSpawn as NativeProcessSpawn),
       requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,

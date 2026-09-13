@@ -9,6 +9,7 @@ import {
   DEFAULT_CALIBRATION_POLICY_V1,
   type VoiceProfileCalibrationPolicy,
   matchSpeakerVoice,
+  matchSpeakerVoiceOutcome,
 } from '../../src/services/speakerVoiceMatcher';
 
 describe('speakerVoiceMatcher & global acoustic calibration', () => {
@@ -136,6 +137,34 @@ describe('speakerVoiceMatcher & global acoustic calibration', () => {
     expect(result?.confidenceTier).toBe('strong');
     expect(result?.isCalendarAttendee).toBe(false);
     expect(result?.candidateDigest).toBe('cand-digest-1');
+  });
+
+  it('reports why an otherwise valid candidate was not suggested', () => {
+    expect(
+      matchSpeakerVoiceOutcome({
+        meetingId: 'm1',
+        sourceRevision: 'gen-1',
+        candidate: validCandidate,
+        profiles: [],
+        rejections: [],
+        options: { policy: dummyPolicy, featureFlagEnabled: true },
+      }),
+    ).toEqual({ category: 'no_profile' });
+
+    const lowSimilarityProfile = {
+      ...profileAlex,
+      embedding: createVector(8),
+    };
+    expect(
+      matchSpeakerVoiceOutcome({
+        meetingId: 'm1',
+        sourceRevision: 'gen-1',
+        candidate: validCandidate,
+        profiles: [lowSimilarityProfile],
+        rejections: [],
+        options: { policy: dummyPolicy, featureFlagEnabled: true },
+      }),
+    ).toEqual({ category: 'below_threshold' });
   });
 
   it('rejects candidate when purity gate fails (< 3.0s clean duration)', () => {

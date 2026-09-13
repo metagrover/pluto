@@ -204,6 +204,46 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     expect(document.body.textContent).toContain(copy);
   });
 
+  it('explains an ambiguous profile match without naming either candidate', async () => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_IDENTITY_STATE') return workspace;
+      if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
+      if (channel === 'SPEAKER_VOICE_GET_SUGGESTIONS') {
+        return {
+          suggestions: {},
+          candidates: {
+            'Remote Speaker 1': {
+              sourceRevision,
+              isEligibleForEnrollment: true,
+              cleanDurationSeconds: 4.5,
+              analysisStatus: 'eligible',
+            },
+          },
+          outcomes: {
+            'Remote Speaker 1': { category: 'ambiguous' },
+          },
+          enrollmentAvailability: { 'Remote Speaker 1': true },
+        };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={() => {}}
+          meetingId="meeting-voice"
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain(
+      'Voice evidence matched more than one saved profile too closely. Choose the participant manually.',
+    );
+    expect(document.body.textContent).not.toContain('may be Alex Chen');
+  });
+
   it('confirms suggestion and enrolls the voice profile automatically', async () => {
     await act(async () => {
       root.render(

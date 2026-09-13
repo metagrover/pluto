@@ -12,6 +12,20 @@ export type LiveEchoEvidenceFrame = {
   endTimeMs: number;
 };
 
+export type LiveEchoEvidenceDiagnostics = {
+  analyzedWindows: number;
+  completeMicWindows: number;
+  lagComparisons: number;
+  insufficientActivityComparisons: number;
+  independentMicComparisons: number;
+  degenerateComparisons: number;
+  lowSimilarityComparisons: number;
+  similarityQualifiedComparisons: number;
+  candidateWindows: number;
+  compatibleCandidatePairs: number;
+  retainedWindows: number;
+};
+
 type EnergyBin = { energy: number; durationMs: number };
 type Match = LiveEchoEvidenceWindow & {
   lagBins: number;
@@ -41,6 +55,18 @@ export const createLiveEchoEvidence = () => {
   let previous: Match[] = [];
   const lastByLag = new Map<number, LiveEchoEvidenceWindow>();
   let revision = 0;
+  const diagnostics: Omit<LiveEchoEvidenceDiagnostics, 'retainedWindows'> = {
+    analyzedWindows: 0,
+    completeMicWindows: 0,
+    lagComparisons: 0,
+    insufficientActivityComparisons: 0,
+    independentMicComparisons: 0,
+    degenerateComparisons: 0,
+    lowSimilarityComparisons: 0,
+    similarityQualifiedComparisons: 0,
+    candidateWindows: 0,
+    compatibleCandidatePairs: 0,
+  };
 
   const rms = (source: 'mic' | 'system', start: number): number[] | null => {
     const values: number[] = [];
@@ -54,7 +80,15 @@ export const createLiveEchoEvidence = () => {
   const score = (
     mic: number[],
     system: number[],
-  ): { correlation: number; activeBins: number[] } | null => {
+  ):
+    | { kind: 'candidate'; correlation: number; activeBins: number[] }
+    | {
+        kind:
+          | 'insufficient_activity'
+          | 'independent_mic'
+          | 'degenerate'
+          | 'low_similarity';
+      } => {
     let x = 0;
     let y = 0;
     let xx = 0;
@@ -71,21 +105,17 @@ export const createLiveEchoEvidence = () => {
       if (system[i] >= 0.002 && mic[i] >= 0.001) active.push(i);
       if (system[i] < 0.002) micExclusiveEnergy += mic[i] ** 2;
     }
-    if (
-      active.length < 10 ||
-      xx <= 1e-12 ||
-      yy <= 1e-12 ||
-      micExclusiveEnergy / xx > 0.02
-    )
-      return null;
+    if (active.length < 10) return { kind: 'insufficient_activity' };
+    if (xx <= 1e-12 || yy <= 1e-12) return { kind: 'degenerate' };
+    if (micExclusiveEnergy / xx > 0.02) return { kind: 'independent_mic' };
     const variance =
       (xx - (x * x) / WINDOW_BINS) * (yy - (y * y) / WINDOW_BINS);
-    if (variance <= 1e-12) return null;
+    if (variance <= 1e-12) return { kind: 'degenerate' };
     const correlation = (xy - (x * y) / WINDOW_BINS) / Math.sqrt(variance);
     const residual = Math.max(0, 1 - (xy * xy) / (xx * yy));
     return correlation >= 0.9 && residual <= 0.1
-      ? { correlation, activeBins: active }
-      : null;
+      ? { kind: 'candidate', correlation, activeBins: active }
+      : { kind: 'low_similarity' };
   };
   const retain = (match: Match): void => {
     if (match.retained) return;
@@ -129,6 +159,7 @@ export const createLiveEchoEvidence = () => {
       Math.min(lastEnd.mic, lastEnd.system - MAX_LAG_BINS * BIN_MS) / BIN_MS,
     );
     while (nextWindow + WINDOW_BINS <= completeUntil) {
+      diagnostics.analyzedWindows += 1;
       const start = nextWindow;
       nextWindow += STRIDE_BINS;
       previous = previous.filter(
@@ -138,11 +169,24 @@ export const createLiveEchoEvidence = () => {
       let best: { lag: number; score: number; activeBins: number[] } | null =
         null;
       if (mic) {
+        diagnostics.completeMicWindows += 1;
         for (let lag = -MAX_LAG_BINS; lag <= MAX_LAG_BINS; lag++) {
           const system = rms('system', start + lag);
           if (!system) continue;
+          diagnostics.lagComparisons += 1;
           const candidate = score(mic, system);
-          if (candidate && (!best || candidate.correlation > best.score))
+          if (candidate.kind !== 'candidate') {
+            if (candidate.kind === 'insufficient_activity')
+              diagnostics.insufficientActivityComparisons += 1;
+            else if (candidate.kind === 'independent_mic')
+              diagnostics.independentMicComparisons += 1;
+            else if (candidate.kind === 'degenerate')
+              diagnostics.degenerateComparisons += 1;
+            else diagnostics.lowSimilarityComparisons += 1;
+            continue;
+          }
+          diagnostics.similarityQualifiedComparisons += 1;
+          if (!best || candidate.correlation > best.score)
             best = {
               lag,
               score: candidate.correlation,
@@ -153,6 +197,7 @@ export const createLiveEchoEvidence = () => {
       if (!best) {
         continue;
       }
+      diagnostics.candidateWindows += 1;
       const match: Match = {
         micStartMs: start * BIN_MS,
         micEndMs: (start + WINDOW_BINS) * BIN_MS,
@@ -166,6 +211,7 @@ export const createLiveEchoEvidence = () => {
       // overlapping windows and slightly changing lags must not count twice.
       for (const prior of previous) {
         if (Math.abs(prior.lagBins - match.lagBins) > 3) continue;
+        diagnostics.compatibleCandidatePairs += 1;
         const micActivity = new Set<number>();
         const systemActivity = new Set<number>();
         for (const candidate of [prior, match]) {
@@ -235,6 +281,9 @@ export const createLiveEchoEvidence = () => {
         .map((window) => ({ ...window }))
         .sort((a, b) => a.micStartMs - b.micStartMs);
     },
+    diagnostics(): LiveEchoEvidenceDiagnostics {
+      return { ...diagnostics, retainedWindows: verified.length };
+    },
     reset(): void {
       bins.mic.clear();
       bins.system.clear();
@@ -245,6 +294,11 @@ export const createLiveEchoEvidence = () => {
       nextWindow = null;
       previous = [];
       revision = 0;
+      for (const key of Object.keys(diagnostics) as Array<
+        keyof typeof diagnostics
+      >) {
+        diagnostics[key] = 0;
+      }
     },
   };
 };

@@ -56,12 +56,31 @@ export interface VoiceMatchSuggestion {
 
 export type MatchOutcomeCategory =
   | 'suggested'
+  | 'no_candidate'
+  | 'no_profile'
   | 'below_threshold'
   | 'ambiguous'
   | 'impure'
   | 'incompatible'
   | 'rejected_for_candidate'
   | 'disabled';
+
+export type VoiceMatchOutcome =
+  | { category: 'suggested'; suggestion: VoiceMatchSuggestion }
+  | { category: Exclude<MatchOutcomeCategory, 'suggested' | 'no_candidate'> };
+
+type MatchSpeakerVoiceInput = {
+  meetingId: string;
+  sourceRevision: string;
+  candidate: SpeakerCandidateEvidence;
+  profiles: CanonicalVoiceProfile[];
+  rejections: SpeakerVoiceRejection[];
+  calendarAttendeePersonIds?: Set<string> | string[];
+  options?: {
+    policy?: VoiceProfileCalibrationPolicy;
+    featureFlagEnabled?: boolean;
+  };
+};
 
 export function isProvenanceCompatible(
   provenance: SpeakerCandidateProvenance | undefined,
@@ -119,47 +138,46 @@ const representativeSimilarity = (
   return profileSupport[1] ?? 0;
 };
 
-export function matchSpeakerVoice(input: {
-  meetingId: string;
-  sourceRevision: string;
-  candidate: SpeakerCandidateEvidence;
-  profiles: CanonicalVoiceProfile[];
-  rejections: SpeakerVoiceRejection[];
-  calendarAttendeePersonIds?: Set<string> | string[];
-  options?: {
-    policy?: VoiceProfileCalibrationPolicy;
-    featureFlagEnabled?: boolean;
-  };
-}): VoiceMatchSuggestion | null {
+export function matchSpeakerVoiceOutcome(
+  input: MatchSpeakerVoiceInput,
+): VoiceMatchOutcome {
   const featureFlagEnabled = input.options?.featureFlagEnabled ?? false;
   if (!featureFlagEnabled) {
-    return null;
+    return { category: 'disabled' };
   }
 
   const policy = input.options?.policy ?? DEFAULT_CALIBRATION_POLICY_V1;
   if (!policy.enabled) {
-    return null;
+    return { category: 'disabled' };
   }
 
   // Purity gate
   if (!isCandidateEligibleForEnrollment(input.candidate)) {
-    return null;
+    return { category: 'impure' };
   }
 
   // Candidate provenance compatibility
   if (
     !isProvenanceCompatible(input.candidate.provenance, policy.compatibilityKey)
   ) {
-    return null;
+    return { category: 'incompatible' };
   }
 
-  // Filter eligible profiles
-  const eligibleProfiles = input.profiles.filter((profile) => {
+  if (input.profiles.length === 0) return { category: 'no_profile' };
+
+  const compatibleProfiles = input.profiles.filter((profile) => {
     if (!profile.isActive) return false;
     if (!isProvenanceCompatible(profile.provenance, policy.compatibilityKey)) {
       return false;
     }
 
+    return true;
+  });
+  if (compatibleProfiles.length === 0) return { category: 'incompatible' };
+
+  // A rejection applies only to this exact candidate/profile pair. Other
+  // compatible profiles remain eligible for independent acoustic comparison.
+  const eligibleProfiles = compatibleProfiles.filter((profile) => {
     // Check rejection for exact candidate digest
     const isRejected = input.rejections.some(
       (r) =>
@@ -174,7 +192,7 @@ export function matchSpeakerVoice(input: {
   });
 
   if (eligibleProfiles.length === 0) {
-    return null;
+    return { category: 'rejected_for_candidate' };
   }
 
   // Score all eligible profiles
@@ -191,14 +209,14 @@ export function matchSpeakerVoice(input: {
 
   const top = scored[0];
   if (top.score < policy.minAbsoluteSimilarity) {
-    return null;
+    return { category: 'below_threshold' };
   }
 
   if (scored.length > 1) {
     const runnerUp = scored[1];
     const margin = top.score - runnerUp.score;
     if (margin < policy.minRunnerUpMargin) {
-      return null;
+      return { category: 'ambiguous' };
     }
   }
 
@@ -210,14 +228,24 @@ export function matchSpeakerVoice(input: {
   const isCalendarAttendee = calendarSet.has(top.profile.canonicalPersonId);
 
   return {
-    speaker: input.candidate.speaker,
-    suggestedPersonId: top.profile.canonicalPersonId,
-    suggestedPersonName: top.profile.personName,
-    similarityScore: top.score,
-    confidenceTier: 'strong',
-    isCalendarAttendee,
-    candidateDigest: input.candidate.candidateDigest,
-    sourceRevision: input.sourceRevision,
-    referenceInterval: top.profile.referenceInterval,
+    category: 'suggested',
+    suggestion: {
+      speaker: input.candidate.speaker,
+      suggestedPersonId: top.profile.canonicalPersonId,
+      suggestedPersonName: top.profile.personName,
+      similarityScore: top.score,
+      confidenceTier: 'strong',
+      isCalendarAttendee,
+      candidateDigest: input.candidate.candidateDigest,
+      sourceRevision: input.sourceRevision,
+      referenceInterval: top.profile.referenceInterval,
+    },
   };
+}
+
+export function matchSpeakerVoice(
+  input: MatchSpeakerVoiceInput,
+): VoiceMatchSuggestion | null {
+  const outcome = matchSpeakerVoiceOutcome(input);
+  return outcome.category === 'suggested' ? outcome.suggestion : null;
 }

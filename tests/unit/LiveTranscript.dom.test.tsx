@@ -1449,6 +1449,113 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('preserves the turn element when tentative speech commits', () => {
+    const projector = createLiveConversationProjection({ generation: 1 });
+    const tentative = {
+      ...liveSegment,
+      id: 'stable-transition',
+      text: 'A stable live phrase',
+      timestampMs: 2_000,
+      confirmed: false,
+    };
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={projector.apply({
+            generation: 1,
+            reading: reconcileLiveTranscriptReading({
+              segments: [tentative],
+              activityWindows: [],
+            }),
+            reason: 'recognition',
+          })}
+        />,
+      ),
+    );
+    const liveTurn = container.querySelector('.transcript-turn');
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={projector.apply({
+            generation: 1,
+            reading: reconcileLiveTranscriptReading({
+              segments: [{ ...tentative, confirmed: true }],
+              activityWindows: [],
+            }),
+            reason: 'recognition',
+          })}
+        />,
+      ),
+    );
+
+    expect(container.querySelector('.transcript-turn')).toBe(liveTurn);
+    expect(liveTurn?.classList.contains('live-conversation-row')).toBe(true);
+    expect(liveTurn?.textContent).toContain('A stable live phrase');
+    act(() => root.unmount());
+  });
+
+  it('collapses an expanded draft when the meeting generation changes', () => {
+    const draftFor = (generation: number, source: 'mic' | 'system') => {
+      const projector = createLiveConversationProjection({ generation });
+      return projector.apply({
+        generation,
+        reading: reconcileLiveTranscriptReading({
+          segments: [
+            {
+              ...liveSegment,
+              id: `draft-${generation}`,
+              source,
+              text: Array.from(
+                { length: 30 },
+                (_, index) => `word${index}`,
+              ).join(' '),
+              confirmed: false,
+            },
+          ],
+          activityWindows: [],
+        }),
+        reason: 'recognition',
+      });
+    };
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={draftFor(1, 'mic')}
+        />,
+      ),
+    );
+    const firstToggle = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Show all',
+    );
+    act(() => firstToggle?.click());
+    expect(firstToggle?.getAttribute('aria-expanded')).toBe('true');
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[]}
+          interimText=""
+          conversation={draftFor(2, 'system')}
+        />,
+      ),
+    );
+    const nextToggle = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Show all',
+    );
+    expect(nextToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('word29');
+    act(() => root.unmount());
+  });
+
   it('does not group committed rows across intervening tentative speech', () => {
     const before = {
       ...liveSegment,

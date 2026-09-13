@@ -24,6 +24,7 @@ import {
 import type { MeetingSpeakerSampleAvailability } from '../../api/identity';
 import {
   type ClientCandidateMetadata,
+  type ClientVoiceMatchOutcome,
   type SpeakerVoiceEnrollmentResult,
   type VoiceMatchSuggestion,
   enrollSpeakerVoice,
@@ -106,6 +107,9 @@ export const SpeakerIdentificationModal = ({
   const [speakerCandidates, setSpeakerCandidates] = useState<
     Record<string, ClientCandidateMetadata>
   >({});
+  const [voiceMatchOutcomes, setVoiceMatchOutcomes] = useState<
+    Record<string, ClientVoiceMatchOutcome>
+  >({});
   const [voiceEnrollmentAvailability, setVoiceEnrollmentAvailability] =
     useState<Record<string, boolean>>({});
   const [voiceSuggestionsLoading, setVoiceSuggestionsLoading] = useState(false);
@@ -151,6 +155,7 @@ export const SpeakerIdentificationModal = ({
         if (!isMountedRef.current) return;
         setVoiceSuggestions(res.suggestions);
         setSpeakerCandidates(res.candidates);
+        setVoiceMatchOutcomes(res.outcomes);
         setVoiceEnrollmentAvailability(res.enrollmentAvailability);
         const refreshDurationMs = Math.round(performance.now() - refreshStart);
         console.log(
@@ -986,7 +991,8 @@ export const SpeakerIdentificationModal = ({
               {currentSpeaker &&
               !voiceSuggestions[currentSpeaker] &&
               (voiceSuggestionsLoading ||
-                speakerCandidates[currentSpeaker]?.analysisStatus) ? (
+                speakerCandidates[currentSpeaker]?.analysisStatus ||
+                voiceMatchOutcomes[currentSpeaker]) ? (
                 <p className="text-xs text-pro-text-muted">
                   {voiceSuggestionsLoading
                     ? 'Checking saved voice profiles…'
@@ -999,10 +1005,22 @@ export const SpeakerIdentificationModal = ({
                         : speakerCandidates[currentSpeaker]?.analysisStatus ===
                             'abstained'
                           ? 'There was not enough reliable isolated speech for voice identification.'
-                          : speakerCandidates[currentSpeaker]
-                                ?.analysisStatus === 'eligible'
-                            ? 'No saved voice profile matched with enough confidence.'
-                            : null}
+                          : voiceMatchOutcomes[currentSpeaker]?.category ===
+                              'ambiguous'
+                            ? 'Voice evidence matched more than one saved profile too closely. Choose the participant manually.'
+                            : voiceMatchOutcomes[currentSpeaker]?.category ===
+                                'no_profile'
+                              ? 'No saved voice profile is available for automatic identification yet.'
+                              : voiceMatchOutcomes[currentSpeaker]?.category ===
+                                  'incompatible'
+                                ? 'Saved voice evidence is from a different recognition version. Confirm the participant to refresh it.'
+                                : voiceMatchOutcomes[currentSpeaker]
+                                      ?.category === 'rejected_for_candidate'
+                                  ? 'The available voice match was previously dismissed for this speaker.'
+                                  : speakerCandidates[currentSpeaker]
+                                        ?.analysisStatus === 'eligible'
+                                    ? 'No saved voice profile matched with enough confidence.'
+                                    : null}
                 </p>
               ) : null}
 

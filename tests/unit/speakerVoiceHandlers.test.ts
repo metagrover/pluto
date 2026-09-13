@@ -330,6 +330,7 @@ describe('speaker voice IPC handlers', () => {
     ).resolves.toEqual({
       suggestions: {},
       candidates: {},
+      outcomes: {},
       enrollmentAvailability: {},
     });
   });
@@ -395,11 +396,15 @@ describe('speaker voice IPC handlers', () => {
     )) as {
       suggestions: Record<string, any>;
       candidates: Record<string, { sourceRevision: string }>;
+      outcomes: Record<string, { category: string }>;
     };
     expect(optedInResult.candidates['Remote Speaker 1']?.sourceRevision).toBe(
       sourceRevision,
     );
     expect(optedInResult.suggestions['Remote Speaker 1']).toBeDefined();
+    expect(optedInResult.outcomes['Remote Speaker 1']).toEqual({
+      category: 'suggested',
+    });
     const suggestion = optedInResult.suggestions['Remote Speaker 1'];
     expect(suggestion.suggestedPersonId).toBe(personId);
     expect(suggestion.suggestedPersonName).toBe('Robin');

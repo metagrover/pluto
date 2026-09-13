@@ -29,6 +29,38 @@ Private quality manifests contain absolute paths only and must stay outside vers
 pnpm run benchmark:private-transcription:validate -- --manifest /absolute/private/manifest.json
 ```
 
+For a dual-source live-transcript fixture, validate the guarded EOU manifest and
+run the production renderer-session replay with explicit opt-in:
+
+```bash
+pnpm run benchmark:private-parakeet-eou:validate -- \
+  --manifest /absolute/private/eou-manifest.json
+
+RUN_PARAKEET_EOU_CAUSAL_REPLAY=1 \
+PLUTO_PRIVATE_PARAKEET_EOU_MANIFEST=/absolute/private/eou-manifest.json \
+pnpm run replay:parakeet-eou
+```
+
+Set `PLUTO_E2E_PARAKEET_LIVE_CONFIG=low-latency-2s` only to compare the
+native candidate configuration in this private replay. The packaged app keeps
+the pinned default unless a held-out evaluation supports a separate promotion.
+
+The EOU report contains aggregate transport, presentation, and resource metrics
+only. `crossSourceDuplicatePeak`, `crossSourceDuplicateUpdates`, and
+`crossSourceDuplicateVisibleMs` measure substantial time-overlapping passages
+visible under both sources during replay, including a six-unit contiguous
+subspan inside a longer locally owned passage. `settledCrossSourceDuplicates`
+is the strict acceptance gate after recognition finishes. Transient duplicate metrics
+remain diagnostic until the evidence-settlement budget is calibrated against
+annotated local interruptions and held-out recordings.
+The `echoEvidence` counters report content-free detector decisions, including
+activity, independent microphone energy, similarity, compatible-window support,
+and retained evidence. They are comparison counts rather than speech durations.
+`recognition` compares settled live words with an independent final pass using a
+sequence-aware count for each source. It is a diagnostic recall signal rather
+than ground truth; listening-verified annotation is still required before
+tuning recognition behavior.
+
 To replay recent local meetings and create an owner-only blind-review page, keep the output under Pluto's private application-data directory:
 
 ```bash

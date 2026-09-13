@@ -3,6 +3,7 @@ import { isProtectedEchoWord } from './liveEchoTokenAlignment';
 
 type TimedToken = { text: string; timestampMs: number; endTimestampMs: number };
 type EvidenceLookup = (start: number, end: number) => LiveEchoEvidenceWindow[];
+const MIN_EXACT_SPAN_WORDS = 6;
 const MIN_ANCHOR_WORDS = 12;
 const MAX_CHAIN_MS = 30_000;
 
@@ -82,12 +83,12 @@ export const findSupportedExactEchoSpans = (
   }> = [];
   for (
     let micStart = 0;
-    micStart <= mic.length - MIN_ANCHOR_WORDS;
+    micStart <= mic.length - MIN_EXACT_SPAN_WORDS;
     micStart++
   ) {
     for (
       let systemStart = 0;
-      systemStart <= system.length - MIN_ANCHOR_WORDS;
+      systemStart <= system.length - MIN_EXACT_SPAN_WORDS;
       systemStart++
     ) {
       if (
@@ -109,7 +110,7 @@ export const findSupportedExactEchoSpans = (
           MAX_CHAIN_MS
       )
         tokenCount++;
-      if (tokenCount < MIN_ANCHOR_WORDS) continue;
+      if (tokenCount < MIN_EXACT_SPAN_WORDS) continue;
       const lag = anchorLag(
         mic.slice(micStart, micStart + tokenCount),
         system.slice(systemStart, systemStart + tokenCount),

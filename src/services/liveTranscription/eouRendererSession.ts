@@ -471,6 +471,9 @@ export function createEouRendererSession(options: {
     status(): SessionStatus {
       return currentStatus;
     },
+    diagnostics() {
+      return { echoEvidence: echoEvidence.diagnostics() };
+    },
   };
 }
 

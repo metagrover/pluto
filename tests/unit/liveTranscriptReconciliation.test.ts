@@ -26,6 +26,59 @@ const segment = (
 });
 
 describe('live transcript reconciliation', () => {
+  it('removes a six-word acoustically supported echo span without consuming local words', () => {
+    const echoed = 'one two three four five six'.split(' ');
+    const micWords = ['local', 'opening', ...echoed, 'local', 'ending'];
+    const mic = {
+      ...segment('mic-six-word-span', 'mic', micWords.join(' '), 800, 4_000),
+      wordTimings: micWords.map((text, index) => ({
+        text,
+        timestampMs: 800 + index * 300,
+        endTimestampMs: 1_080 + index * 300,
+      })),
+    };
+    const system = {
+      ...segment(
+        'system-six-word-span',
+        'system',
+        echoed.join(' '),
+        1_200,
+        3_000,
+      ),
+      wordTimings: echoed.map((text, index) => ({
+        text,
+        timestampMs: 1_200 + index * 300,
+        endTimestampMs: 1_480 + index * 300,
+      })),
+    };
+    const reading = reconcileLiveTranscriptReading({
+      segments: [mic, system],
+      activityWindows: [],
+      echoEvidence: [
+        {
+          micStartMs: 1_400,
+          micEndMs: 3_180,
+          systemStartMs: 1_200,
+          systemEndMs: 2_980,
+        },
+      ],
+    });
+    const micRanges = reading.ranges.filter(
+      (range) => range.sourceSegmentId === mic.id,
+    );
+
+    expect(
+      micRanges
+        .filter((range) => range.visibility === 'suppressed_echo')
+        .map((range) => range.text),
+    ).toEqual([echoed.join(' ')]);
+    expect(
+      micRanges
+        .filter((range) => range.visibility === 'visible')
+        .map((range) => range.text),
+    ).toEqual(['local opening', 'local ending']);
+  });
+
   it('reconciles independently split checkpoints without consuming local additions', () => {
     const words =
       'the blue notebook is on the desk and we will review our meeting recording together tomorrow morning'.split(

@@ -55,6 +55,22 @@ export type LiveConversationSnapshot = {
   metrics: LiveConversationMetrics;
 };
 
+export type LiveConversationTimelineItem =
+  | {
+      kind: 'committed';
+      id: string;
+      source: 'mic' | 'system';
+      timestampMs: number;
+      rows: LiveConversationRow[];
+    }
+  | {
+      kind: 'draft';
+      id: string;
+      source: 'mic' | 'system';
+      timestampMs: number;
+      part: LiveConversationPart;
+    };
+
 type OwnedRow = {
   row: LiveConversationRow;
   suppressedWordCount: number;
@@ -124,17 +140,93 @@ const truncateDraft = (
   parts: LiveConversationPart[],
   limit: number,
 ): LiveConversationPart[] => {
-  let remaining = limit;
-  const collapsed: LiveConversationPart[] = [];
-  for (const part of parts) {
-    if (remaining <= 0) break;
-    const words = part.text.match(/\S+/gu) ?? [];
-    if (!words.length) continue;
-    const text = words.slice(0, remaining).join(' ');
-    collapsed.push({ ...part, id: `${part.id}:collapsed`, text });
-    remaining -= Math.min(words.length, remaining);
+  const wordsByPart = parts.map((part) => part.text.match(/\S+/gu) ?? []);
+  const sources = [...new Set(parts.map((part) => part.source))];
+  const selected = parts.map(() => 0);
+  const reservedPerSource = Math.floor(limit / Math.max(1, sources.length));
+  const selectedBySource = new Map<'mic' | 'system', number>();
+
+  // Give each active source a share before using the rest chronologically. A
+  // long first draft must not hide a later reply from the other participant.
+  for (let index = 0; index < parts.length; index += 1) {
+    const source = parts[index].source;
+    const sourceRemaining =
+      reservedPerSource - (selectedBySource.get(source) ?? 0);
+    const count = Math.min(wordsByPart[index].length, sourceRemaining);
+    selected[index] = count;
+    selectedBySource.set(source, (selectedBySource.get(source) ?? 0) + count);
   }
-  return collapsed;
+  let remaining = limit - selected.reduce((total, count) => total + count, 0);
+  for (let index = 0; index < parts.length && remaining > 0; index += 1) {
+    const count = Math.min(
+      wordsByPart[index].length - selected[index],
+      remaining,
+    );
+    selected[index] += count;
+    remaining -= count;
+  }
+  return parts.flatMap((part, index) =>
+    selected[index]
+      ? [
+          {
+            ...part,
+            id: `${part.id}:collapsed`,
+            text: wordsByPart[index].slice(0, selected[index]).join(' '),
+          },
+        ]
+      : [],
+  );
+};
+
+export const buildLiveConversationTimeline = (
+  rows: LiveConversationRow[],
+  draftParts: LiveConversationPart[],
+): LiveConversationTimelineItem[] => {
+  const ordered: LiveConversationTimelineItem[] = [
+    ...rows.flatMap((row) =>
+      row.display === 'speech'
+        ? [
+            {
+              kind: 'committed' as const,
+              id: row.id,
+              source: row.source,
+              timestampMs: row.timestampMs,
+              rows: [row],
+            },
+          ]
+        : [],
+    ),
+    ...draftParts.map((part) => ({
+      kind: 'draft' as const,
+      id: part.id,
+      source: part.source,
+      timestampMs: part.timestampMs,
+      part,
+    })),
+  ].sort(compareEventTime);
+  const timeline: LiveConversationTimelineItem[] = [];
+  for (const item of ordered) {
+    const previous = timeline.at(-1);
+    if (item.kind === 'committed' && previous?.kind === 'committed') {
+      const previousRow = previous.rows.at(-1)!;
+      const row = item.rows[0];
+      if (
+        previousRow.source === row.source &&
+        row.timestampMs - previous.rows[0].timestampMs <= 30_000 &&
+        row.timestampMs -
+          Math.min(
+            previousRow.endTimestampMs,
+            previousRow.timestampMs + 5_000,
+          ) <=
+          2_000
+      ) {
+        previous.rows.push(row);
+        continue;
+      }
+    }
+    timeline.push(item);
+  }
+  return timeline;
 };
 
 const rowSignature = (row: LiveConversationRow): string =>

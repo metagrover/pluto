@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildCausalReplayFrames,
+  measureLiveConversationQuality,
+  measureLiveFinalRecognition,
   replayAcceptanceFailures,
   replayCausalFrames,
   replayUpdateLatencyMs,
@@ -63,6 +65,33 @@ describe('Parakeet EOU causal replay', () => {
           thermalStates: [],
           cancellations: 0,
           failures: 1,
+          echoEvidence: {
+            analyzedWindows: 0,
+            completeMicWindows: 0,
+            lagComparisons: 0,
+            insufficientActivityComparisons: 0,
+            independentMicComparisons: 0,
+            degenerateComparisons: 0,
+            lowSimilarityComparisons: 0,
+            similarityQualifiedComparisons: 0,
+            candidateWindows: 0,
+            compatibleCandidatePairs: 0,
+            retainedWindows: 0,
+          },
+          recognition: {
+            mic: {
+              liveUnits: 0,
+              finalUnits: 0,
+              matchedUnits: 0,
+              liveFinalRecall: null,
+            },
+            system: {
+              liveUnits: 0,
+              finalUnits: 0,
+              matchedUnits: 0,
+              liveFinalRecall: null,
+            },
+          },
           presentation: {
             corrections: 0,
             restorations: 0,
@@ -70,6 +99,11 @@ describe('Parakeet EOU causal replay', () => {
             degraded: 1,
             rowPeak: 0,
             draftPeak: 0,
+            eventOrderInversions: 1,
+            crossSourceDuplicatePeak: 1,
+            crossSourceDuplicateUpdates: 2,
+            crossSourceDuplicateVisibleMs: 2_000,
+            settledCrossSourceDuplicates: 1,
           },
         },
         10,
@@ -80,7 +114,101 @@ describe('Parakeet EOU causal replay', () => {
       'system_tail',
       'native_failure',
       'presentation_degraded',
+      'presentation_event_order',
+      'settled_cross_source_duplicate',
     ]);
+  });
+
+  it('reports sequence-aware live recall without exposing transcript content', () => {
+    expect(
+      measureLiveFinalRecognition(
+        [
+          {
+            id: 'mic-1',
+            source: 'mic',
+            speaker: 'Me',
+            text: 'alpha gamma delta',
+            timestampMs: 1_000,
+            confirmed: true,
+          },
+          {
+            id: 'system-1',
+            source: 'system',
+            speaker: 'Them',
+            text: 'remote reply',
+            timestampMs: 1_200,
+            confirmed: true,
+          },
+        ],
+        {
+          mic: 'alpha beta gamma delta',
+          system: 'remote reply',
+        },
+      ),
+    ).toEqual({
+      mic: {
+        liveUnits: 3,
+        finalUnits: 4,
+        matchedUnits: 3,
+        liveFinalRecall: 0.75,
+      },
+      system: {
+        liveUnits: 2,
+        finalUnits: 2,
+        matchedUnits: 2,
+        liveFinalRecall: 1,
+      },
+    });
+  });
+
+  it('detects a substantial overlapping passage under both live sources', () => {
+    expect(
+      measureLiveConversationQuality({
+        generation: 1,
+        status: 'active',
+        rows: [
+          {
+            id: 'remote',
+            sourceSegmentId: 'remote',
+            source: 'system',
+            speaker: 'Them',
+            text: 'The transcript was not working today',
+            timestampMs: 1_000,
+            endTimestampMs: 3_000,
+            parts: [],
+            display: 'speech',
+          },
+        ],
+        draft: {
+          id: 'live-conversation-draft',
+          parts: [
+            {
+              id: 'local-draft',
+              sourceSegmentId: 'local-draft',
+              source: 'mic',
+              text: 'Not working today why not',
+              timestampMs: 1_100,
+              endTimestampMs: 3_100,
+            },
+          ],
+          collapsedParts: [],
+          wordCount: 5,
+          truncated: false,
+        },
+        metrics: {
+          corrections: 0,
+          restorations: 0,
+          lateArrivals: 0,
+          degradedReconciliations: 0,
+          draftWordCount: 5,
+          lastProjectionDurationMs: 0,
+          mutableRows: 1,
+          retainedParts: 0,
+          micWatermarkMs: null,
+          systemWatermarkMs: 3_000,
+        },
+      }),
+    ).toEqual({ eventOrderInversions: 0, crossSourceDuplicates: 1 });
   });
 
   it('uses production 320 ms chunking and interleaves by audio watermark', () => {

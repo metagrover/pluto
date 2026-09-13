@@ -10,14 +10,22 @@ import ffmpegStatic from 'ffmpeg-static';
 import { ParakeetEouClient } from '../electron/transcription/parakeetEouClient.ts';
 import { ParakeetFinalClient } from '../electron/transcription/parakeetFinalClient.ts';
 import { makeRuntimeHost } from '../electron/transcription/parakeetRuntimeHost.ts';
+import type { LiveTranscriptSegment } from '../src/components/features/recordingWorkspaceModel.ts';
 import type { LiveSource } from '../src/services/liveTranscription/contracts.ts';
 import {
   type EouRendererFrame,
   createEouPcmChunker,
 } from '../src/services/liveTranscription/eouPcmChunker.ts';
-import { createEouTranscriptProjection } from '../src/services/liveTranscription/eouTranscriptProjection.ts';
-import { createLiveConversationProjection } from '../src/services/liveTranscription/liveConversationProjection.ts';
-import { createLiveEchoEvidence } from '../src/services/liveTranscription/liveEchoEvidence.ts';
+import {
+  type EouRendererTransport,
+  createEouRendererSession,
+} from '../src/services/liveTranscription/eouRendererSession.ts';
+import {
+  type LiveConversationSnapshot,
+  buildLiveConversationTimeline,
+  createLiveConversationProjection,
+} from '../src/services/liveTranscription/liveConversationProjection.ts';
+import type { LiveEchoEvidenceDiagnostics } from '../src/services/liveTranscription/liveEchoEvidence.ts';
 import { reconcileLiveTranscriptReading } from '../src/services/liveTranscription/liveTranscriptReconciliation.ts';
 import {
   type PrivateParakeetEouManifest,
@@ -30,7 +38,7 @@ type ReplayClock = {
   sleep(ms: number): Promise<void>;
 };
 
-type ReplayMetrics = {
+export type ReplayMetrics = {
   preparationMs: number | null;
   firstPartialAfterReadyMs: number | null;
   firstEouAfterReadyMs: number | null;
@@ -45,6 +53,16 @@ type ReplayMetrics = {
   thermalStates: string[];
   cancellations: number;
   failures: number;
+  echoEvidence: LiveEchoEvidenceDiagnostics;
+  recognition: Record<
+    LiveSource,
+    {
+      liveUnits: number;
+      finalUnits: number;
+      matchedUnits: number;
+      liveFinalRecall: number | null;
+    }
+  >;
   presentation: {
     corrections: number;
     restorations: number;
@@ -52,6 +70,11 @@ type ReplayMetrics = {
     degraded: number;
     rowPeak: number;
     draftPeak: number;
+    eventOrderInversions: number;
+    crossSourceDuplicatePeak: number;
+    crossSourceDuplicateUpdates: number;
+    crossSourceDuplicateVisibleMs: number;
+    settledCrossSourceDuplicates: number;
   };
 };
 
@@ -71,10 +94,156 @@ export const replayAcceptanceFailures = (
   }
   if (metrics.failures > 0) failures.push('native_failure');
   if (metrics.presentation.degraded > 0) failures.push('presentation_degraded');
+  if (metrics.presentation.eventOrderInversions > 0) {
+    failures.push('presentation_event_order');
+  }
+  if (metrics.presentation.settledCrossSourceDuplicates > 0) {
+    failures.push('settled_cross_source_duplicate');
+  }
   return failures;
 };
 
 const SOURCES: readonly LiveSource[] = ['mic', 'system'];
+
+type VisibleSpan = {
+  id: string;
+  source: LiveSource;
+  text: string;
+  timestampMs: number;
+  endTimestampMs: number;
+};
+
+const normalizedWords = (text: string): string[] =>
+  text.toLocaleLowerCase('en-US').match(/[\p{L}\p{N}']+/gu) ?? [];
+
+const longestCommonSubsequenceLength = (
+  left: string[],
+  right: string[],
+): number => {
+  const lengths = new Array<number>(right.length + 1).fill(0);
+  for (const leftWord of left) {
+    let diagonal = 0;
+    for (let index = 0; index < right.length; index += 1) {
+      const previous = lengths[index + 1];
+      lengths[index + 1] =
+        leftWord === right[index]
+          ? diagonal + 1
+          : Math.max(lengths[index + 1], lengths[index]);
+      diagonal = previous;
+    }
+  }
+  return lengths.at(-1) ?? 0;
+};
+
+export const measureLiveFinalRecognition = (
+  liveSegments: LiveTranscriptSegment[],
+  finalText: Record<LiveSource, string>,
+): ReplayMetrics['recognition'] =>
+  Object.fromEntries(
+    SOURCES.map((source) => {
+      const liveWords = normalizedWords(
+        liveSegments
+          .filter((segment) => segment.source === source)
+          .sort((left, right) => left.timestampMs - right.timestampMs)
+          .map((segment) => segment.text)
+          .join(' '),
+      );
+      const finalWords = normalizedWords(finalText[source]);
+      const matchedUnits = longestCommonSubsequenceLength(
+        liveWords,
+        finalWords,
+      );
+      return [
+        source,
+        {
+          liveUnits: liveWords.length,
+          finalUnits: finalWords.length,
+          matchedUnits,
+          liveFinalRecall: finalWords.length
+            ? matchedUnits / finalWords.length
+            : null,
+        },
+      ];
+    }),
+  ) as ReplayMetrics['recognition'];
+
+const longestCommonRun = (left: string[], right: string[]): number => {
+  const lengths = new Array<number>(right.length + 1).fill(0);
+  let longest = 0;
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    for (let rightIndex = right.length - 1; rightIndex >= 0; rightIndex -= 1) {
+      lengths[rightIndex + 1] =
+        left[leftIndex] === right[rightIndex] ? lengths[rightIndex] + 1 : 0;
+      longest = Math.max(longest, lengths[rightIndex + 1]);
+    }
+  }
+  return longest;
+};
+
+const visibleSpans = (snapshot: LiveConversationSnapshot): VisibleSpan[] => [
+  ...snapshot.rows.flatMap((row) =>
+    row.display === 'speech'
+      ? [
+          {
+            id: row.id,
+            source: row.source,
+            text: row.text,
+            timestampMs: row.timestampMs,
+            endTimestampMs: row.endTimestampMs,
+          },
+        ]
+      : [],
+  ),
+  ...(snapshot.draft?.parts ?? []),
+];
+
+export const measureLiveConversationQuality = (
+  snapshot: LiveConversationSnapshot,
+): { eventOrderInversions: number; crossSourceDuplicates: number } => {
+  const timeline = buildLiveConversationTimeline(
+    snapshot.rows,
+    snapshot.draft?.parts ?? [],
+  );
+  let eventOrderInversions = 0;
+  for (let index = 1; index < timeline.length; index += 1) {
+    if (timeline[index].timestampMs < timeline[index - 1].timestampMs) {
+      eventOrderInversions += 1;
+    }
+  }
+
+  const spans = visibleSpans(snapshot);
+  let crossSourceDuplicates = 0;
+  for (let leftIndex = 0; leftIndex < spans.length; leftIndex += 1) {
+    const left = spans[leftIndex];
+    const leftWords = normalizedWords(left.text);
+    if (leftWords.length < 3) continue;
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < spans.length;
+      rightIndex += 1
+    ) {
+      const right = spans[rightIndex];
+      if (
+        left.source === right.source ||
+        Math.max(left.timestampMs, right.timestampMs) >
+          Math.min(left.endTimestampMs, right.endTimestampMs) + 1_250
+      ) {
+        continue;
+      }
+      const rightWords = normalizedWords(right.text);
+      if (rightWords.length < 3) continue;
+      const common = longestCommonRun(leftWords, rightWords);
+      if (
+        common >= 6 ||
+        (common >= 3 &&
+          common / Math.min(leftWords.length, rightWords.length) >= 0.6)
+      ) {
+        crossSourceDuplicates += 1;
+      }
+    }
+  }
+  return { eventOrderInversions, crossSourceDuplicates };
+};
 
 export const buildCausalReplayFrames = (
   inputs: Record<LiveSource, { sampleRate: number; samples: Float32Array }>,
@@ -263,11 +432,7 @@ export const runPrivateParakeetEouReplay = async (
   options: {
     signal?: AbortSignal;
     /** Private diagnostic observer only; callers must not publish raw content. */
-    onTranscript?: (
-      segments: ReturnType<
-        ReturnType<typeof createEouTranscriptProjection>['apply']
-      >,
-    ) => void;
+    onTranscript?: (segments: LiveTranscriptSegment[]) => void;
   } = {},
 ): Promise<ReplayMetrics> => {
   options.signal?.throwIfAborted();
@@ -275,7 +440,14 @@ export const runPrivateParakeetEouReplay = async (
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), 'pluto-eou-pcm-'),
   );
-  const host = makeRuntimeHost({ paths: runtimePaths(manifest) });
+  const requestedLiveConfiguration = process.env.PLUTO_E2E_PARAKEET_LIVE_CONFIG;
+  const host = makeRuntimeHost({
+    paths: runtimePaths(manifest),
+    ...(requestedLiveConfiguration === 'pinned-default' ||
+    requestedLiveConfiguration === 'low-latency-2s'
+      ? { liveConfigurationId: requestedLiveConfiguration }
+      : {}),
+  });
   const stopOwned = () => host.shutdown();
   options.signal?.addEventListener('abort', stopOwned, { once: true });
   const metrics: ReplayMetrics = {
@@ -293,6 +465,33 @@ export const runPrivateParakeetEouReplay = async (
     thermalStates: [],
     cancellations: 0,
     failures: 0,
+    echoEvidence: {
+      analyzedWindows: 0,
+      completeMicWindows: 0,
+      lagComparisons: 0,
+      insufficientActivityComparisons: 0,
+      independentMicComparisons: 0,
+      degenerateComparisons: 0,
+      lowSimilarityComparisons: 0,
+      similarityQualifiedComparisons: 0,
+      candidateWindows: 0,
+      compatibleCandidatePairs: 0,
+      retainedWindows: 0,
+    },
+    recognition: {
+      mic: {
+        liveUnits: 0,
+        finalUnits: 0,
+        matchedUnits: 0,
+        liveFinalRecall: null,
+      },
+      system: {
+        liveUnits: 0,
+        finalUnits: 0,
+        matchedUnits: 0,
+        liveFinalRecall: null,
+      },
+    },
     presentation: {
       corrections: 0,
       restorations: 0,
@@ -300,29 +499,50 @@ export const runPrivateParakeetEouReplay = async (
       degraded: 0,
       rowPeak: 0,
       draftPeak: 0,
+      eventOrderInversions: 0,
+      crossSourceDuplicatePeak: 0,
+      crossSourceDuplicateUpdates: 0,
+      crossSourceDuplicateVisibleMs: 0,
+      settledCrossSourceDuplicates: 0,
     },
   };
   const updateLatencies: number[] = [];
   const committedLengths: Record<LiveSource, number> = { mic: 0, system: 0 };
-  const rawProjection = createEouTranscriptProjection();
-  rawProjection.reset(1);
-  const echoEvidence = createLiveEchoEvidence();
   const conversationProjection = createLiveConversationProjection({
     generation: 1,
   });
-  let latestSegments: ReturnType<typeof rawProjection.apply> = [];
-  const projectConversation = (reason: 'recognition' | 'echo_evidence') => {
-    if (!latestSegments.length) return;
+  let latestSnapshot = conversationProjection.snapshot();
+  let latestSegments: LiveTranscriptSegment[] = [];
+  let lastQualityAtMs: number | null = null;
+  let lastCrossSourceDuplicates = 0;
+  const projectConversation = (
+    segments: LiveTranscriptSegment[],
+    echoEvidence: Parameters<
+      typeof reconcileLiveTranscriptReading
+    >[0]['echoEvidence'],
+    reason: 'recognition' | 'echo_evidence',
+  ) => {
+    if (!segments.length) return;
     try {
       const snapshot = conversationProjection.apply({
         generation: 1,
         reading: reconcileLiveTranscriptReading({
-          segments: latestSegments,
+          segments,
           activityWindows: [],
-          echoEvidence: echoEvidence.snapshot(),
+          echoEvidence,
         }),
         reason,
       });
+      latestSnapshot = snapshot;
+      const quality = measureLiveConversationQuality(snapshot);
+      const observedAtMs = realClock.nowMs();
+      const duplicateVisibleMs =
+        metrics.presentation.crossSourceDuplicateVisibleMs +
+        (lastQualityAtMs !== null && lastCrossSourceDuplicates > 0
+          ? Math.max(0, observedAtMs - lastQualityAtMs)
+          : 0);
+      lastQualityAtMs = observedAtMs;
+      lastCrossSourceDuplicates = quality.crossSourceDuplicates;
       metrics.presentation = {
         corrections: snapshot.metrics.corrections,
         restorations: snapshot.metrics.restorations,
@@ -333,6 +553,20 @@ export const runPrivateParakeetEouReplay = async (
           metrics.presentation.draftPeak,
           snapshot.draft?.wordCount ?? 0,
         ),
+        eventOrderInversions: Math.max(
+          metrics.presentation.eventOrderInversions,
+          quality.eventOrderInversions,
+        ),
+        crossSourceDuplicatePeak: Math.max(
+          metrics.presentation.crossSourceDuplicatePeak,
+          quality.crossSourceDuplicates,
+        ),
+        crossSourceDuplicateUpdates:
+          metrics.presentation.crossSourceDuplicateUpdates +
+          (quality.crossSourceDuplicates > 0 ? 1 : 0),
+        crossSourceDuplicateVisibleMs: duplicateVisibleMs,
+        settledCrossSourceDuplicates:
+          metrics.presentation.settledCrossSourceDuplicates,
       };
     } catch {
       const degraded = conversationProjection.degraded(1);
@@ -342,10 +576,13 @@ export const runPrivateParakeetEouReplay = async (
   const startedAtMs = realClock.nowMs();
   let replayStartedAtMs: number | null = null;
   let client: ParakeetEouClient | null = null;
+  let rendererSession: ReturnType<typeof createEouRendererSession> | null =
+    null;
   const finalClient = new ParakeetFinalClient({
     paths: runtimePaths(manifest),
     runtimeHost: host,
   });
+  let finalText: Record<LiveSource, string> = { mic: '', system: '' };
   try {
     const inputs = Object.fromEntries(
       SOURCES.map((source) => [
@@ -369,9 +606,32 @@ export const runPrivateParakeetEouReplay = async (
       runtimeLease: lease,
       maxOutstandingPerSource: 4,
     });
+    const meetingId = 'private-replay';
+    const identities = {
+      mic: {
+        streamId: `eou-${meetingId}-mic`,
+        source: 'mic' as const,
+        generation: 1,
+      },
+      system: {
+        streamId: `eou-${meetingId}-system`,
+        source: 'system' as const,
+        generation: 1,
+      },
+    };
+    const updateListeners = new Set<(payload: unknown) => void>();
+    const unavailableListeners = new Set<(payload: unknown) => void>();
+    const terminalCodes = new Set<string>();
+    let transportOutstanding = 0;
     client.onTerminalFailure((code) => {
-      if (code === 'parakeet_cancelled') metrics.cancellations += 1;
-      else metrics.failures += 1;
+      if (!terminalCodes.has(code)) {
+        terminalCodes.add(code);
+        if (code === 'parakeet_cancelled') metrics.cancellations += 1;
+        else metrics.failures += 1;
+      }
+      for (const listener of unavailableListeners) {
+        listener({ meetingId, generation: 1, code });
+      }
     });
     client.onUpdate((event) => {
       const source = event.source;
@@ -404,29 +664,90 @@ export const runPrivateParakeetEouReplay = async (
           replayStartedAtMs === null ? null : receivedAtMs - replayStartedAtMs;
       }
       committedLengths[source] = event.committedText.length;
-      latestSegments = rawProjection.apply(event);
-      options.onTranscript?.(structuredClone(latestSegments));
-      projectConversation('recognition');
+      for (const listener of updateListeners) {
+        listener({ meetingId, generation: 1, event });
+      }
       metrics.nativeRssPeakBytes = Math.max(
         metrics.nativeRssPeakBytes,
         sampleNativeRss(),
       );
     });
-    const identities = {
-      mic: {
-        streamId: 'private-eou-mic',
-        source: 'mic' as const,
-        generation: 1,
+    const transport: EouRendererTransport = {
+      async invoke(channel, rawPayload) {
+        if (channel === 'PARAKEET_EOU_START') {
+          await Promise.all(
+            SOURCES.map((source) => client!.open(identities[source])),
+          );
+          return {};
+        }
+        if (channel === 'PARAKEET_EOU_FINISH') {
+          await Promise.all(
+            SOURCES.map((source) => client!.finish(identities[source])),
+          );
+          return {};
+        }
+        if (channel === 'PARAKEET_EOU_CANCEL') {
+          await Promise.allSettled(
+            SOURCES.map((source) => client!.cancel(identities[source])),
+          );
+          return {};
+        }
+        if (channel !== 'PARAKEET_EOU_APPEND') {
+          throw new Error('replay_transport_invalid');
+        }
+        const payload = rawPayload as EouRendererFrame;
+        transportOutstanding += 1;
+        metrics.maximumQueueDepth = Math.max(
+          metrics.maximumQueueDepth,
+          transportOutstanding,
+        );
+        try {
+          await client!.append({
+            ...identities[payload.source],
+            sequence: payload.sequence,
+            sampleRate: payload.sampleRate,
+            samples: payload.samples,
+            audioStartSeconds: payload.audioStartSeconds,
+            audioEndSeconds: payload.audioEndSeconds,
+          });
+        } finally {
+          transportOutstanding -= 1;
+        }
+        return {};
       },
-      system: {
-        streamId: 'private-eou-system',
-        source: 'system' as const,
-        generation: 1,
+      onUpdate(listener) {
+        updateListeners.add(listener);
+        return () => updateListeners.delete(listener);
+      },
+      onUnavailable(listener) {
+        unavailableListeners.add(listener);
+        return () => unavailableListeners.delete(listener);
       },
     };
-    await Promise.all(
-      SOURCES.map((source) => client!.open(identities[source])),
-    );
+    rendererSession = createEouRendererSession({
+      meetingId,
+      generation: 1,
+      sampleRates: { mic: 16_000, system: 16_000 },
+      transport,
+      nowSeconds: () =>
+        replayStartedAtMs === null
+          ? 0
+          : Math.max(0, (realClock.nowMs() - replayStartedAtMs) / 1_000),
+      onSegments: (segments, echoEvidence, reason) => {
+        latestSegments = segments;
+        if (reason === 'recognition') {
+          options.onTranscript?.(structuredClone(segments));
+        }
+        projectConversation(segments, echoEvidence, reason);
+      },
+      onUnavailable: (code) => {
+        if (terminalCodes.has(code)) return;
+        terminalCodes.add(code);
+        if (code === 'parakeet_cancelled') metrics.cancellations += 1;
+        else metrics.failures += 1;
+      },
+    });
+    await rendererSession.start();
     const frames = buildCausalReplayFrames(inputs);
     replayStartedAtMs = realClock.nowMs();
     metrics.preparationMs = replayStartedAtMs - startedAtMs;
@@ -442,28 +763,47 @@ export const runPrivateParakeetEouReplay = async (
       },
       append: async (frame) => {
         options.signal?.throwIfAborted();
-        const evidenceChanged = echoEvidence.append({
-          source: frame.source,
-          sampleRate: frame.sampleRate,
-          samples: frame.samples,
-          startTimeMs: frame.audioStartSeconds * 1_000,
-          endTimeMs: frame.audioEndSeconds * 1_000,
-        });
-        if (evidenceChanged) projectConversation('echo_evidence');
-        await client!.append({
-          ...identities[frame.source],
-          sequence: frame.sequence,
-          sampleRate: frame.sampleRate,
-          samples: frame.samples,
-          audioStartSeconds: frame.audioStartSeconds,
-          audioEndSeconds: frame.audioEndSeconds,
-        });
+        rendererSession!.append(frame.source, frame.samples);
       },
     });
-    metrics.maximumQueueDepth = replay.maximumQueueDepth;
+    metrics.maximumQueueDepth = Math.max(
+      metrics.maximumQueueDepth,
+      replay.maximumQueueDepth,
+    );
     metrics.thermalStates.push(sampleThermalState());
-    await Promise.all(
-      SOURCES.map((source) => client!.finish(identities[source])),
+    await rendererSession.finish();
+    metrics.echoEvidence = rendererSession.diagnostics().echoEvidence;
+    if (lastQualityAtMs !== null && lastCrossSourceDuplicates > 0) {
+      metrics.presentation.crossSourceDuplicateVisibleMs += Math.max(
+        0,
+        realClock.nowMs() - lastQualityAtMs,
+      );
+    }
+    metrics.presentation.settledCrossSourceDuplicates =
+      measureLiveConversationQuality(latestSnapshot).crossSourceDuplicates;
+    await client.close();
+    client = null;
+    finalText = Object.fromEntries(
+      await Promise.all(
+        SOURCES.map(async (source) => {
+          const result = await finalClient.transcribe({
+            meetingId: 'private-replay-reference',
+            role: 'final_validation',
+            source,
+            audioPath: manifest.sources[source].path,
+            language: 'en',
+            signal: options.signal,
+          });
+          return [
+            source,
+            result.segments.map((segment) => segment.text).join(' '),
+          ];
+        }),
+      ),
+    ) as Record<LiveSource, string>;
+    metrics.recognition = measureLiveFinalRecognition(
+      latestSegments,
+      finalText,
     );
     metrics.p50UpdateLatencyMs = percentile(updateLatencies, 0.5);
     metrics.p95UpdateLatencyMs = percentile(updateLatencies, 0.95);

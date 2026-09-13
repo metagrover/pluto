@@ -7,7 +7,7 @@ import {
 import {
   DEFAULT_CALIBRATION_POLICY_V1,
   isProvenanceCompatible,
-  matchSpeakerVoice,
+  matchSpeakerVoiceOutcome,
 } from '../src/services/speakerVoiceMatcher';
 import * as db from './db';
 import {
@@ -673,6 +673,7 @@ export async function handleSpeakerVoiceRequest(
         return {
           suggestions: {},
           candidates: {},
+          outcomes: {},
           enrollmentAvailability: {},
         };
       }
@@ -953,16 +954,28 @@ export async function handleSpeakerVoiceRequest(
         return {
           suggestions: {},
           candidates: clientCandidates,
+          outcomes: Object.fromEntries(
+            Object.keys(clientCandidates).map((speaker) => [
+              speaker,
+              { category: 'disabled' },
+            ]),
+          ),
           enrollmentAvailability,
         };
       }
       const rejections = getVoiceRejections(meetingId, d);
 
       const suggestions: Record<string, unknown> = {};
+      const outcomes: Record<string, unknown> = Object.fromEntries(
+        Object.keys(clientCandidates).map((speaker) => [
+          speaker,
+          { category: 'no_candidate' },
+        ]),
+      );
 
       for (const candidate of candidates) {
         if (!usesCurrentEnrollmentExtraction(candidate)) continue;
-        const match = matchSpeakerVoice({
+        const outcome = matchSpeakerVoiceOutcome({
           meetingId,
           sourceRevision: candidate.sourceRevision,
           candidate,
@@ -971,8 +984,13 @@ export async function handleSpeakerVoiceRequest(
           calendarAttendeePersonIds: payload?.calendarAttendeePersonIds,
           options: { featureFlagEnabled: true },
         });
+        outcomes[candidate.speaker] =
+          outcome.category === 'suggested'
+            ? { category: 'suggested' }
+            : outcome;
 
-        if (match) {
+        if (outcome.category === 'suggested') {
+          const match = outcome.suggestion;
           // Exclude raw embeddings completely
           suggestions[candidate.speaker] = {
             speaker: match.speaker,
@@ -991,6 +1009,7 @@ export async function handleSpeakerVoiceRequest(
       return {
         suggestions,
         candidates: clientCandidates,
+        outcomes,
         enrollmentAvailability,
       };
     }

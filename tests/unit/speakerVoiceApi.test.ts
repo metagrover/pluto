@@ -47,6 +47,7 @@ describe('speakerVoice API client', () => {
       'Robin',
     );
     expect(result.candidates).toEqual({});
+    expect(result.outcomes).toEqual({});
     expect(result.enrollmentAvailability).toEqual({});
   });
 

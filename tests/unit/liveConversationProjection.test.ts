@@ -329,6 +329,39 @@ describe('live conversation projection', () => {
     expect(snapshot.draft?.truncated).toBe(true);
   });
 
+  it('reserves collapsed draft space for every active source', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const snapshot = projection.apply({
+      generation: 1,
+      reading: reading([
+        row(
+          'long-mic-draft',
+          'mic',
+          Array.from({ length: 40 }, (_, index) => `mic${index}`).join(' '),
+          1_000,
+          false,
+        ),
+        row('short-system-draft', 'system', 'remote reply', 1_100, false),
+      ]),
+      reason: 'recognition',
+    });
+
+    expect(snapshot.draft?.collapsedParts.map((part) => part.source)).toEqual([
+      'mic',
+      'system',
+    ]);
+    expect(
+      snapshot.draft?.collapsedParts.find((part) => part.source === 'system')
+        ?.text,
+    ).toBe('remote reply');
+    expect(
+      snapshot.draft?.collapsedParts.reduce(
+        (total, part) => total + part.text.split(/\s+/u).length,
+        0,
+      ),
+    ).toBe(24);
+  });
+
   it('fences stale generations and retains history when live recognition becomes unavailable', () => {
     const projection = createLiveConversationProjection({ generation: 2 });
     const committed = row('committed', 'mic', 'keep this history', 1_000);

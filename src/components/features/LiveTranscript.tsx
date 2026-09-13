@@ -10,10 +10,10 @@ import {
 } from 'react';
 import type {
   LiveConversationDraft,
-  LiveConversationPart,
-  LiveConversationRow,
   LiveConversationSnapshot,
+  LiveConversationTimelineItem,
 } from '../../services/liveTranscription/liveConversationProjection';
+import { buildLiveConversationTimeline } from '../../services/liveTranscription/liveConversationProjection';
 import {
   type LiveTranscriptTurn,
   buildLiveTranscriptTurns,
@@ -75,120 +75,55 @@ const TranscriptTurn = memo(
 const sourceLabel = (source: 'mic' | 'system'): string =>
   source === 'mic' ? 'Mic' : 'Call';
 
-const sourceRank = { mic: 0, system: 1 } as const;
-
-const ConversationTurn = memo(({ rows }: { rows: LiveConversationRow[] }) => {
-  const first = rows[0];
-  const startedAt = new Date(first.timestampMs).toISOString();
-  return (
-    <article className="transcript-turn live-conversation-row">
-      <div className="transcript-speaker">
-        <strong>{sourceLabel(first.source)}</strong>
-        <time dateTime={startedAt}>{startedAt.slice(14, 19)}</time>
-      </div>
-      <div className="transcript-turn__content">
-        {rows.map((row) => (
-          <p key={row.id} data-conversation-row={row.id}>
-            {row.text}
-          </p>
-        ))}
-        {rows.some((row) => row.qualifier) && (
-          <span className="live-conversation-row__qualifier">Updated</span>
-        )}
-      </div>
-    </article>
-  );
-});
-
-const ConversationDraftTurn = memo(
-  ({ part }: { part: LiveConversationPart }) => (
-    <article
-      className="transcript-turn live-conversation-draft"
-      aria-label="Listening now"
-      data-conversation-draft={part.id}
-    >
-      <div className="transcript-speaker">
-        <strong>{sourceLabel(part.source)}</strong>
-        <time dateTime={new Date(part.timestampMs).toISOString()}>Live</time>
-      </div>
-      <div className="transcript-turn__content">
-        <p className="transcript-paragraph-part--tentative">{part.text}</p>
-      </div>
-    </article>
-  ),
+const ConversationTimelineTurn = memo(
+  ({ item }: { item: LiveConversationTimelineItem }) => {
+    const first = item.kind === 'committed' ? item.rows[0] : item.part;
+    const startedAt = new Date(first.timestampMs).toISOString();
+    const draft = item.kind === 'draft';
+    return (
+      <article
+        className={
+          draft
+            ? 'transcript-turn live-conversation-draft'
+            : 'transcript-turn live-conversation-row'
+        }
+        {...(draft
+          ? {
+              'aria-label': 'Listening now',
+              'data-conversation-draft': item.part.id,
+            }
+          : {})}
+      >
+        <div className="transcript-speaker">
+          <strong>{sourceLabel(first.source)}</strong>
+          <time dateTime={startedAt}>
+            {draft ? 'Live' : startedAt.slice(14, 19)}
+          </time>
+        </div>
+        <div className="transcript-turn__content">
+          {item.kind === 'committed' ? (
+            item.rows.map((row) => (
+              <p key={row.id} data-conversation-row={row.id}>
+                {row.text}
+              </p>
+            ))
+          ) : (
+            <p className="transcript-paragraph-part--tentative">
+              {item.part.text}
+            </p>
+          )}
+          {item.kind === 'committed' &&
+            item.rows.some((row) => row.qualifier) && (
+              <span className="live-conversation-row__qualifier">Updated</span>
+            )}
+        </div>
+      </article>
+    );
+  },
 );
 
-type ConversationTimelineItem =
-  | {
-      kind: 'committed';
-      id: string;
-      source: 'mic' | 'system';
-      timestampMs: number;
-      rows: LiveConversationRow[];
-    }
-  | {
-      kind: 'draft';
-      id: string;
-      source: 'mic' | 'system';
-      timestampMs: number;
-      part: LiveConversationPart;
-    };
-
-const buildConversationTimeline = (
-  rows: LiveConversationRow[],
-  draftParts: LiveConversationPart[],
-): ConversationTimelineItem[] => {
-  const ordered: ConversationTimelineItem[] = [
-    ...rows.flatMap((row) =>
-      row.display === 'speech'
-        ? [
-            {
-              kind: 'committed' as const,
-              id: row.id,
-              source: row.source,
-              timestampMs: row.timestampMs,
-              rows: [row],
-            },
-          ]
-        : [],
-    ),
-    ...draftParts.map((part) => ({
-      kind: 'draft' as const,
-      id: part.id,
-      source: part.source,
-      timestampMs: part.timestampMs,
-      part,
-    })),
-  ].sort(
-    (left, right) =>
-      left.timestampMs - right.timestampMs ||
-      sourceRank[left.source] - sourceRank[right.source] ||
-      left.id.localeCompare(right.id),
-  );
-  const timeline: ConversationTimelineItem[] = [];
-  for (const item of ordered) {
-    const previous = timeline.at(-1);
-    if (item.kind === 'committed' && previous?.kind === 'committed') {
-      const previousRow = previous.rows.at(-1)!;
-      const row = item.rows[0];
-      if (
-        previousRow.source === row.source &&
-        row.timestampMs - previous.rows[0].timestampMs <= 30_000 &&
-        row.timestampMs -
-          Math.min(
-            previousRow.endTimestampMs,
-            previousRow.timestampMs + 5_000,
-          ) <=
-          2_000
-      ) {
-        previous.rows.push(row);
-        continue;
-      }
-    }
-    timeline.push(item);
-  }
-  return timeline;
-};
+const conversationTimelineKey = (item: LiveConversationTimelineItem): string =>
+  item.kind === 'draft' ? item.part.sourceSegmentId : item.rows[0].id;
 
 const ConversationDraftControl = ({
   draft,
@@ -237,9 +172,12 @@ export const LiveTranscript = ({
   useEffect(() => {
     if (!conversation?.draft) setExpandedDraftId(null);
   }, [conversation?.draft]);
+  useEffect(() => {
+    setExpandedDraftId(null);
+  }, [conversation?.generation]);
   const conversationTimeline = useMemo(
     () =>
-      buildConversationTimeline(
+      buildLiveConversationTimeline(
         conversation?.rows ?? [],
         draftExpanded
           ? (conversation?.draft?.parts ?? [])
@@ -252,6 +190,11 @@ export const LiveTranscript = ({
     : visibleSegments.length;
   const [announcement, setAnnouncement] = useState('');
   const announcedMetricsRef = useRef({ corrections: 0, restorations: 0 });
+
+  useEffect(() => {
+    announcedMetricsRef.current = { corrections: 0, restorations: 0 };
+    setAnnouncement('');
+  }, [conversation?.generation]);
 
   useEffect(() => {
     if (!conversation) return;
@@ -325,13 +268,12 @@ export const LiveTranscript = ({
                   </span>
                 </div>
               )}
-              {conversationTimeline.map((item) =>
-                item.kind === 'committed' ? (
-                  <ConversationTurn key={item.id} rows={item.rows} />
-                ) : (
-                  <ConversationDraftTurn key={item.id} part={item.part} />
-                ),
-              )}
+              {conversationTimeline.map((item) => (
+                <ConversationTimelineTurn
+                  key={conversationTimelineKey(item)}
+                  item={item}
+                />
+              ))}
               {conversation.draft && (
                 <ConversationDraftControl
                   draft={conversation.draft}

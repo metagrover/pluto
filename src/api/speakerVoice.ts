@@ -1,4 +1,7 @@
-import type { VoiceMatchSuggestion } from '../services/speakerVoiceMatcher';
+import type {
+  MatchOutcomeCategory,
+  VoiceMatchSuggestion,
+} from '../services/speakerVoiceMatcher';
 import type { MeetingSpeakerSample } from './identity';
 
 export type { VoiceMatchSuggestion };
@@ -31,6 +34,10 @@ export interface ClientCandidateMetadata {
   retryAfter?: number;
 }
 
+export interface ClientVoiceMatchOutcome {
+  category: MatchOutcomeCategory;
+}
+
 const invoke = <T>(channel: string, payload: object): Promise<T> =>
   window.ipcRenderer.invoke(channel, payload) as Promise<T>;
 
@@ -40,11 +47,13 @@ export async function getSpeakerVoiceSuggestions(
 ): Promise<{
   suggestions: Record<string, VoiceMatchSuggestion>;
   candidates: Record<string, ClientCandidateMetadata>;
+  outcomes: Record<string, ClientVoiceMatchOutcome>;
   enrollmentAvailability: Record<string, boolean>;
 }> {
   const result = await invoke<{
     suggestions: Record<string, VoiceMatchSuggestion>;
     candidates?: Record<string, ClientCandidateMetadata>;
+    outcomes?: Record<string, ClientVoiceMatchOutcome>;
     enrollmentAvailability?: Record<string, boolean>;
   }>('SPEAKER_VOICE_GET_SUGGESTIONS', {
     meetingId,
@@ -53,6 +62,7 @@ export async function getSpeakerVoiceSuggestions(
   return {
     suggestions: result?.suggestions ?? {},
     candidates: result?.candidates ?? {},
+    outcomes: result?.outcomes ?? {},
     enrollmentAvailability: result?.enrollmentAvailability ?? {},
   };
 }
