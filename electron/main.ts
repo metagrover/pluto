@@ -113,7 +113,10 @@ import {
   buildSaveMeetingFailureDiagnostic,
   saveMeetingWithParticipantSideEffects,
 } from './saveMeetingIpc';
-import { loadSpeakerSample } from './speakerSample';
+import {
+  getSpeakerSampleAvailability,
+  loadSpeakerSample,
+} from './speakerSample';
 import { stitchTimedWavSegments } from './timedWavStitch';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
@@ -2778,9 +2781,8 @@ app.whenReady().then(async () => {
     const meetingId = String(request?.meetingId || '');
     beginMeetingTranscription(meetingId || null);
     try {
-      return await loadSpeakerSample(request, {
-        getMeeting: (id) =>
-          (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null,
+      const result = await loadSpeakerSample(request, {
+        getMeeting: db.getMeetingSpeakerSampleSource,
         fileExists: (inputPath) => fs.existsSync(inputPath),
         createTemporaryPath: () =>
           path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
@@ -2795,12 +2797,30 @@ app.whenReady().then(async () => {
         removeFile: async (outputPath) => {
           await fs.promises.unlink(outputPath);
         },
-        readEncryptedSlice: readEncryptedMeetingSlice,
+        readEncryptedSlice: async (input) => {
+          const bytes = await readEncryptedMeetingSlice(input);
+          if (!bytes) throw new Error('encrypted_audio_unavailable');
+          return bytes;
+        },
       });
+      if (result.status === 'unavailable') {
+        console.warn('[Pluto][SpeakerSample] excerpt unavailable', {
+          meetingId,
+          reason: result.reason,
+        });
+      }
+      return result;
     } finally {
       endMeetingTranscription(meetingId || null);
     }
   });
+
+  ipcMain.handle('GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY', (_event, request) =>
+    getSpeakerSampleAvailability(request, {
+      getMeeting: db.getMeetingSpeakerSampleSource,
+      fileExists: (inputPath) => fs.existsSync(inputPath),
+    }),
+  );
 
   const mixWavSources = async ({
     inputPaths,

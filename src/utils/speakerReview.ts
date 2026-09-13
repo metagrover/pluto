@@ -11,6 +11,7 @@ const SAMPLE_PREFERRED_SECONDS = 5;
 const SAMPLE_MAX_SECONDS = 8;
 const SAMPLE_JOIN_GAP_SECONDS = 0.75;
 const SAMPLE_LIMIT = 2;
+const PLAYBACK_CANDIDATE_LIMIT = 12;
 const ENROLLMENT_MAX_INTERVALS = 12;
 const ENROLLMENT_MAX_SPEECH_SECONDS = 60;
 
@@ -83,6 +84,7 @@ export const selectReviewableAnonymousSpeakers = (
 const selectCleanSpeakerIntervals = (
   segments: SpeakerSegment[],
   speaker: string,
+  options: { ignoreLocalMicOverlap?: boolean } = {},
 ): SpeakerSampleInterval[] => {
   if (!REMOTE_SPEAKER_PATTERN.test(speaker) && speaker !== 'Them') {
     return [];
@@ -99,26 +101,33 @@ const selectCleanSpeakerIntervals = (
       // speech can overlap them in the unified transcript without contaminating
       // the audio used for the voice profile. Only the canonical local label
       // is exempt; every other label may contain another system-audio voice.
-      (!numberedRemoteSpeaker || segment.speaker !== 'Me'),
+      (!(numberedRemoteSpeaker || options.ignoreLocalMicOverlap) ||
+        segment.speaker !== 'Me'),
   );
-  // The blockers are sorted by start. Prefix maxima retain long/nested
-  // intervals, so each overlap check is logarithmic rather than a full scan.
-  const latestEnds: number[] = [];
-  for (const other of otherSpeakers) {
-    latestEnds.push(
-      Math.max(latestEnds.at(-1) ?? Number.NEGATIVE_INFINITY, other.end),
-    );
-  }
-  const hasBlocker = (startBefore: number, endAfter: number): boolean => {
-    let low = 0;
-    let high = otherSpeakers.length;
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      if (otherSpeakers[middle].start < startBefore) low = middle + 1;
-      else high = middle;
+  // Blockers are sorted by start. Prefix maxima retain long/nested intervals,
+  // so each overlap check is logarithmic rather than a full scan.
+  const overlapChecker = (blockers: TimedSpeakerSegment[]) => {
+    const latestEnds: number[] = [];
+    for (const blocker of blockers) {
+      latestEnds.push(
+        Math.max(latestEnds.at(-1) ?? Number.NEGATIVE_INFINITY, blocker.end),
+      );
     }
-    return low > 0 && latestEnds[low - 1] > endAfter;
+    return (startBefore: number, endAfter: number): boolean => {
+      let low = 0;
+      let high = blockers.length;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (blockers[middle].start < startBefore) low = middle + 1;
+        else high = middle;
+      }
+      return low > 0 && latestEnds[low - 1] > endAfter;
+    };
   };
+  const hasBlocker = overlapChecker(otherSpeakers);
+  const hasJoinBlocker = options.ignoreLocalMicOverlap
+    ? overlapChecker(timed.filter((segment) => segment.speaker !== speaker))
+    : hasBlocker;
   const clean = timed.filter(
     (segment) =>
       segment.speaker === speaker && !hasBlocker(segment.end, segment.start),
@@ -131,7 +140,7 @@ const selectCleanSpeakerIntervals = (
     if (
       current &&
       segment.start - currentEnd <= SAMPLE_JOIN_GAP_SECONDS &&
-      !hasBlocker(segment.start, currentEnd)
+      !hasJoinBlocker(segment.start, currentEnd)
     ) {
       current.push(segment);
       currentEnd = Math.max(currentEnd, segment.end);
@@ -186,6 +195,23 @@ export const selectSpeakerSampleIntervals = (
     0,
     Math.min(SAMPLE_LIMIT, Math.floor(limit)),
   );
+};
+
+/**
+ * Select excerpts for listening from the persisted System recording. Local
+ * microphone speech can overlap the unified transcript without being present
+ * in that recording, including for the aggregate `Them` channel. This policy
+ * is intentionally separate from voice-enrollment eligibility.
+ */
+export const selectSpeakerPlaybackIntervals = (
+  segments: SpeakerSegment[],
+  speaker: string,
+  limit = SAMPLE_LIMIT,
+): SpeakerSampleInterval[] => {
+  if (limit <= 0) return [];
+  return selectCleanSpeakerIntervals(segments, speaker, {
+    ignoreLocalMicOverlap: true,
+  }).slice(0, Math.min(PLAYBACK_CANDIDATE_LIMIT, Math.floor(limit)));
 };
 
 export const selectSpeakerEnrollmentIntervals = (

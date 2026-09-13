@@ -4,6 +4,7 @@ import {
   isGenericSpeakerLabel,
   selectReviewableAnonymousSpeakers,
   selectSpeakerEnrollmentIntervals,
+  selectSpeakerPlaybackIntervals,
   selectSpeakerSampleIntervals,
 } from '../../src/utils/speakerReview';
 
@@ -270,6 +271,24 @@ describe('speaker review', () => {
       { startSec: 0, endSec: 5, excerpt: 'First clean answer.' },
       { startSec: 20, endSec: 24, excerpt: 'Second clean answer.' },
     ]);
+    expect(selectSpeakerPlaybackIntervals(segments, 'Them')).toEqual([
+      { startSec: 10, endSec: 16, excerpt: 'Overlapped answer.' },
+      { startSec: 0, endSec: 5, excerpt: 'First clean answer.' },
+    ]);
+  });
+
+  it('keeps coarse aggregate spans separate while ignoring local mic contamination for playback', () => {
+    const segments = [
+      { speaker: 'Me', start: 0, end: 20, text: 'Coarse local span.' },
+      { speaker: 'Them', start: 0, end: 8, text: 'First remote span.' },
+      { speaker: 'Them', start: 8, end: 16, text: 'Second remote span.' },
+    ];
+
+    expect(selectSpeakerPlaybackIntervals(segments, 'Them')).toEqual([
+      { startSec: 0, endSec: 8, excerpt: 'First remote span.' },
+      { startSec: 8, endSec: 16, excerpt: 'Second remote span.' },
+    ]);
+    expect(selectSpeakerEnrollmentIntervals(segments, 'Them')).toEqual([]);
   });
 
   it.each([

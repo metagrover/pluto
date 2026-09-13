@@ -1,22 +1,39 @@
 import { ChevronDown, ChevronRight, Play } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   type IdentitySelection,
   type MeetingIdentityState,
   clearMeetingIdentityBinding,
   getMeetingIdentity,
   getMeetingSpeakerSample,
+  getMeetingSpeakerSampleAvailability,
   identityErrorMessage,
   identityPersonLabel,
   isIdentityRevisionError,
+  meetingSpeakerSampleUnavailableMessage,
   retryIdentityReconciliation,
   setMeetingIdentityBinding,
 } from '../../api/identity';
+import type { MeetingSpeakerSampleAvailability } from '../../api/identity';
 import type { IdentityBinding, IdentityPerson } from '../../types/identity';
 import { getAnonymousSpeakerDisplayLabel } from '../../utils/speakerReview';
 import { SearchSelect } from '../ui/SearchSelect';
 import { identityButtonClass, identityFieldClass } from './IdentitySettings';
 import { extractSpeakerDisplayNames } from './meetingTranscriptPresentation';
+
+const unavailableSample = (
+  reason: Extract<
+    MeetingSpeakerSampleAvailability,
+    { status: 'unavailable' }
+  >['reason'],
+): MeetingSpeakerSampleAvailability => ({ status: 'unavailable', reason });
 
 const SpeakerCorrection = ({
   speaker,
@@ -160,6 +177,8 @@ const AnonymousSpeakerReview = ({
   summary,
   busy,
   hasSystemAudio,
+  sampleAvailability,
+  sampleAvailabilityLoading,
   sample,
   sampleLoading,
   sampleError,
@@ -176,9 +195,11 @@ const AnonymousSpeakerReview = ({
   summary?: SpeakerReviewSummary;
   busy: boolean;
   hasSystemAudio: boolean;
+  sampleAvailability: MeetingSpeakerSampleAvailability | null;
+  sampleAvailabilityLoading: boolean;
   sample: { sampleIndex: number; sampleCount: number } | null;
   sampleLoading: boolean;
-  sampleError: boolean;
+  sampleError: string | null;
   onPlaySample: (sampleIndex: number) => void;
   onSave: (selection: IdentitySelection) => void;
   onClear: () => void;
@@ -289,7 +310,7 @@ const AnonymousSpeakerReview = ({
         <p>Review this speaker’s transcript turns before confirming a name.</p>
       )}
       <div className="speaker-review-sample">
-        {hasSystemAudio ? (
+        {sampleAvailability?.status === 'available' ? (
           <>
             <button
               type="button"
@@ -301,7 +322,11 @@ const AnonymousSpeakerReview = ({
                 className="fill-current mr-1 shrink-0"
                 aria-hidden="true"
               />
-              {sampleLoading ? 'Loading sample…' : 'Play voice sample'}
+              {sampleLoading
+                ? 'Loading sample…'
+                : sampleAvailability.scope === 'remote_channel'
+                  ? 'Play recording excerpt'
+                  : 'Play voice sample'}
             </button>
             {sample && sample.sampleIndex + 1 < sample.sampleCount ? (
               <button
@@ -313,12 +338,20 @@ const AnonymousSpeakerReview = ({
               </button>
             ) : null}
           </>
+        ) : sampleAvailabilityLoading ? (
+          <span>Checking recording…</span>
         ) : (
-          <span>Voice sample unavailable for this meeting.</span>
+          <span>
+            {sampleAvailability?.status === 'unavailable'
+              ? meetingSpeakerSampleUnavailableMessage(
+                  sampleAvailability.reason,
+                )
+              : hasSystemAudio
+                ? 'Pluto could not check this recording excerpt.'
+                : 'The participant recording is unavailable.'}
+          </span>
         )}
-        {sampleError ? (
-          <span role="alert">Could not play this voice sample.</span>
-        ) : null}
+        {sampleError ? <span role="alert">{sampleError}</span> : null}
       </div>
       {attendeeChoices.length > 0 ? (
         <div className="speaker-review-invitees">
@@ -460,7 +493,15 @@ const MeetingIdentityPanel = ({
     sampleCount: number;
   } | null>(null);
   const [sampleLoading, setSampleLoading] = useState<string | null>(null);
-  const [sampleError, setSampleError] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState<{
+    speaker: string;
+    message: string;
+  } | null>(null);
+  const [sampleAvailability, setSampleAvailability] = useState<
+    Record<string, MeetingSpeakerSampleAvailability>
+  >({});
+  const [sampleAvailabilityLoading, setSampleAvailabilityLoading] =
+    useState(false);
 
   const releaseSample = useCallback(() => {
     sampleAudio.current?.pause();
@@ -483,13 +524,17 @@ const MeetingIdentityPanel = ({
           sampleIndex,
         );
         if (token !== sampleRequest.current) return;
-        if (!result) {
-          setSampleError(speaker);
+        if (result.status === 'unavailable') {
+          setSampleError({
+            speaker,
+            message: meetingSpeakerSampleUnavailableMessage(result.reason),
+          });
           return;
         }
-        const bytes = Uint8Array.from(result.bytes);
+        const { sample } = result;
+        const bytes = Uint8Array.from(sample.bytes);
         const url = URL.createObjectURL(
-          new Blob([bytes.buffer], { type: result.mimeType }),
+          new Blob([bytes.buffer], { type: sample.mimeType }),
         );
         const audio = new Audio(url);
         sampleUrl.current = url;
@@ -506,13 +551,16 @@ const MeetingIdentityPanel = ({
         }
         setSampleState({
           speaker,
-          sampleIndex: result.sampleIndex,
-          sampleCount: result.sampleCount,
+          sampleIndex: sample.sampleIndex,
+          sampleCount: sample.sampleCount,
         });
       } catch {
         if (token === sampleRequest.current) {
           releaseSample();
-          setSampleError(speaker);
+          setSampleError({
+            speaker,
+            message: 'Pluto could not play this recording excerpt.',
+          });
         }
       } finally {
         if (token === sampleRequest.current) setSampleLoading(null);
@@ -612,10 +660,62 @@ const MeetingIdentityPanel = ({
             : saved
               ? 'Saved.'
               : '';
-  const remoteSpeakers =
-    state?.speakers.filter((speaker) =>
-      /^Remote Speaker \d+$/u.test(speaker),
-    ) ?? [];
+  const remoteSpeakers = useMemo(
+    () =>
+      state?.speakers.filter((speaker) =>
+        /^Remote Speaker \d+$/u.test(speaker),
+      ) ?? [],
+    [state?.speakers],
+  );
+  useEffect(() => {
+    if (!open || remoteSpeakers.length === 0) {
+      setSampleAvailabilityLoading(false);
+      return;
+    }
+    if (!hasSystemAudio) {
+      setSampleAvailability(
+        Object.fromEntries(
+          remoteSpeakers.map((speaker) => [
+            speaker,
+            unavailableSample('source_unavailable'),
+          ]),
+        ),
+      );
+      setSampleAvailabilityLoading(false);
+      return;
+    }
+    let active = true;
+    setSampleAvailabilityLoading(true);
+    void Promise.all(
+      remoteSpeakers.map(async (speaker) => {
+        try {
+          const value = await getMeetingSpeakerSampleAvailability(
+            meetingId,
+            speaker,
+          );
+          return [
+            speaker,
+            value?.status === 'available' || value?.status === 'unavailable'
+              ? value
+              : unavailableSample('availability_check_failed'),
+          ] as const;
+        } catch {
+          return [
+            speaker,
+            unavailableSample('availability_check_failed'),
+          ] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (active) {
+        setSampleAvailability(Object.fromEntries(entries));
+        setSampleAvailabilityLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [hasSystemAudio, meetingId, open, remoteSpeakers]);
   const unidentifiedCount = remoteSpeakers.filter((speaker) => {
     const binding = state?.bindings.find((item) => item.speaker === speaker);
     return !(binding?.source === 'user' && binding.personId);
@@ -723,9 +823,15 @@ const MeetingIdentityPanel = ({
                   attendeeNames={attendeeNames}
                   summary={speakerSummaries[speaker]}
                   hasSystemAudio={hasSystemAudio}
+                  sampleAvailability={sampleAvailability[speaker] ?? null}
+                  sampleAvailabilityLoading={sampleAvailabilityLoading}
                   sample={sampleState?.speaker === speaker ? sampleState : null}
                   sampleLoading={sampleLoading === speaker}
-                  sampleError={sampleError === speaker}
+                  sampleError={
+                    sampleError?.speaker === speaker
+                      ? sampleError.message
+                      : null
+                  }
                   onPlaySample={(sampleIndex) =>
                     void playSample(speaker, sampleIndex)
                   }

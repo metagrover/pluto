@@ -2488,6 +2488,20 @@ export const getMeeting = (id: string | number) => {
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id));
 };
 
+export const getMeetingSpeakerSampleSource = (
+  id: string | number,
+): Pick<
+  PersistedMeeting,
+  'id' | 'transcript_json' | 'system_audio_path'
+> | null =>
+  (db
+    .prepare(
+      'SELECT id, transcript_json, system_audio_path FROM meetings WHERE id = ?',
+    )
+    .get(String(id)) as
+    | Pick<PersistedMeeting, 'id' | 'transcript_json' | 'system_audio_path'>
+    | undefined) ?? null;
+
 const validNotesStatus = new Set<MeetingAnalysisRunStatus>([
   'running',
   'published',

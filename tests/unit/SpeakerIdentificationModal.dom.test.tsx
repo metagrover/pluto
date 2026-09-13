@@ -57,6 +57,9 @@ describe('SpeakerIdentificationModal', () => {
         if (channel === 'GET_IDENTITY_STATE') return workspace;
         if (channel === 'GET_MEETING_IDENTITY')
           return meeting(payload.meetingId);
+        if (channel === 'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY') {
+          return { status: 'available', sampleCount: 1, scope: 'speaker' };
+        }
         if (channel === 'SET_MEETING_IDENTITY_BINDING') {
           const next = meeting(payload.meetingId);
           if (payload.newName) {
@@ -173,6 +176,66 @@ describe('SpeakerIdentificationModal', () => {
     // Workspace self & nicknames must be excluded
     expect(dialog?.textContent).not.toContain('Aditya Grover ·');
     expect(dialog?.textContent).not.toContain('Grover ·');
+  });
+
+  it('presents aggregate System audio as a recording excerpt', async () => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_MEETING_IDENTITY') {
+        return { ...meeting(payload.meetingId), speakers: ['Me', 'Them'] };
+      }
+      if (channel === 'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY') {
+        return {
+          status: 'available',
+          sampleCount: 1,
+          scope: 'remote_channel',
+        };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          hasSystemAudio={true}
+          speakerSummaries={{
+            Them: { turnCount: 15, excerpt: 'A participant excerpt.' },
+          }}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain('Play recording excerpt');
+    expect(document.body.textContent).not.toContain('Play voice sample');
+  });
+
+  it('explains why a known recording cannot provide a speaker excerpt', async () => {
+    invoke.mockImplementation(async (channel: string, payload: any) => {
+      if (channel === 'GET_MEETING_IDENTITY') return meeting(payload.meetingId);
+      if (channel === 'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY') {
+        return { status: 'unavailable', reason: 'no_speaker_excerpt' };
+      }
+      return null;
+    });
+
+    await act(async () => {
+      root.render(
+        <SpeakerIdentificationModal
+          isOpen={true}
+          onClose={vi.fn()}
+          meetingId="meeting-modal"
+          hasSystemAudio={true}
+          speakerSummaries={{}}
+        />,
+      );
+    });
+
+    expect(document.body.textContent).toContain(
+      'No transcript-backed recording excerpt is available for this speaker.',
+    );
+    expect(document.body.textContent).not.toContain('Play voice sample');
   });
 
   it('reviews an aggregate Them speaker when no numbered speaker exists', async () => {

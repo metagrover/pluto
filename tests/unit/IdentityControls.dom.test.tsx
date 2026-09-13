@@ -411,17 +411,23 @@ describe('identity controls', () => {
       ) =>
         channel === 'GET_MEETING_SPEAKER_SAMPLE'
           ? {
-              bytes: new Uint8Array([1, 2, 3]),
-              mimeType: 'audio/wav',
-              durationSeconds: 5,
-              excerpt: 'A clean sample excerpt.',
-              sampleIndex: payload.sampleIndex ?? 0,
-              sampleCount: 2,
+              status: 'ready',
+              sample: {
+                bytes: new Uint8Array([1, 2, 3]),
+                mimeType: 'audio/wav',
+                durationSeconds: 5,
+                excerpt: 'A clean sample excerpt.',
+                sampleIndex: payload.sampleIndex ?? 0,
+                sampleCount: 2,
+                scope: 'speaker',
+              },
             }
-          : {
-              ...meeting(payload.meetingId),
-              speakers: ['Remote Speaker 1'],
-            },
+          : channel === 'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY'
+            ? { status: 'available', sampleCount: 2, scope: 'speaker' }
+            : {
+                ...meeting(payload.meetingId),
+                speakers: ['Remote Speaker 1'],
+              },
     );
 
     await act(async () =>
@@ -458,7 +464,7 @@ describe('identity controls', () => {
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
   });
 
-  it('explains when a meeting has no isolated voice sample', async () => {
+  it('explains when a meeting has no participant recording', async () => {
     invoke.mockResolvedValueOnce({
       ...meeting(),
       speakers: ['Remote Speaker 1'],
@@ -468,7 +474,7 @@ describe('identity controls', () => {
     );
     await click('1 unidentified speaker · Review');
     expect(container.textContent).toContain(
-      'Voice sample unavailable for this meeting.',
+      'The participant recording is unavailable.',
     );
   });
 

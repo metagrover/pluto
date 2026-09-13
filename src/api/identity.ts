@@ -5,6 +5,12 @@ import type {
   IdentityProfile,
   IdentityProfileInput,
 } from '../types/identity';
+import type {
+  SpeakerSampleAvailability,
+  SpeakerSamplePayload,
+  SpeakerSampleResult,
+  SpeakerSampleUnavailableReason,
+} from '../types/speakerSample';
 
 export interface IdentityState {
   selfPersonId: string | null;
@@ -25,14 +31,11 @@ export interface MeetingIdentityState extends IdentityState {
   } | null;
 }
 
-export interface MeetingSpeakerSample {
-  bytes: Uint8Array;
-  mimeType: 'audio/wav';
-  durationSeconds: number;
-  excerpt: string;
-  sampleIndex: number;
-  sampleCount: number;
-}
+export type MeetingSpeakerSample = SpeakerSamplePayload;
+export type MeetingSpeakerSampleUnavailableReason =
+  SpeakerSampleUnavailableReason;
+export type MeetingSpeakerSampleAvailability = SpeakerSampleAvailability;
+export type MeetingSpeakerSampleResult = SpeakerSampleResult;
 
 export type IdentitySelection =
   | { personId: string | null; newName?: never }
@@ -97,11 +100,46 @@ export const getMeetingSpeakerSample = (
   speaker: string,
   sampleIndex: number,
 ) =>
-  invoke<MeetingSpeakerSample | null>('GET_MEETING_SPEAKER_SAMPLE', {
+  invoke<MeetingSpeakerSampleResult>('GET_MEETING_SPEAKER_SAMPLE', {
     meetingId,
     speaker,
     sampleIndex,
   });
+
+export const getMeetingSpeakerSampleAvailability = (
+  meetingId: string,
+  speaker: string,
+) =>
+  invoke<MeetingSpeakerSampleAvailability>(
+    'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY',
+    { meetingId, speaker, sampleIndex: 0 },
+  );
+
+export const meetingSpeakerSampleUnavailableMessage = (
+  reason: MeetingSpeakerSampleUnavailableReason,
+): string => {
+  switch (reason) {
+    case 'meeting_unavailable':
+      return 'This meeting is no longer available.';
+    case 'source_unavailable':
+      return 'The participant recording is unavailable.';
+    case 'no_speaker_excerpt':
+      return 'No transcript-backed recording excerpt is available for this speaker.';
+    case 'encrypted_audio_unavailable':
+      return 'The participant recording could not be unlocked.';
+    case 'audio_empty':
+      return 'This recording excerpt contains no audio data.';
+    case 'no_audible_speech':
+      return 'No audible speech was found in the available recording excerpts.';
+    case 'audio_too_large':
+    case 'audio_decode_failed':
+      return 'Pluto could not read this recording excerpt.';
+    case 'cancelled':
+      return 'Recording playback was cancelled.';
+    case 'availability_check_failed':
+      return 'Pluto could not check this recording excerpt.';
+  }
+};
 
 export const identityPersonLabel = (
   person: IdentityPerson,

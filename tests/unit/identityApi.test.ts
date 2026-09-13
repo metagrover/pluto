@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getMeetingSpeakerSample } from '../../src/api/identity';
+import {
+  getMeetingSpeakerSample,
+  getMeetingSpeakerSampleAvailability,
+} from '../../src/api/identity';
 
 describe('identity renderer API', () => {
   const invoke = vi.fn(async () => null);
@@ -17,5 +20,18 @@ describe('identity renderer API', () => {
       speaker: 'Remote Speaker 1',
       sampleIndex: 1,
     });
+  });
+
+  it('requests speaker sample availability without loading audio', async () => {
+    await getMeetingSpeakerSampleAvailability('meeting-a', 'Remote Speaker 1');
+
+    expect(invoke).toHaveBeenCalledWith(
+      'GET_MEETING_SPEAKER_SAMPLE_AVAILABILITY',
+      {
+        meetingId: 'meeting-a',
+        speaker: 'Remote Speaker 1',
+        sampleIndex: 0,
+      },
+    );
   });
 });

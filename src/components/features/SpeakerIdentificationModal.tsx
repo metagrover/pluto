@@ -14,11 +14,14 @@ import {
   clearMeetingIdentityBinding,
   getMeetingIdentity,
   getMeetingSpeakerSample,
+  getMeetingSpeakerSampleAvailability,
   identityErrorMessage,
   identityPersonLabel,
   isIdentityRevisionError,
+  meetingSpeakerSampleUnavailableMessage,
   setMeetingIdentityBinding,
 } from '../../api/identity';
+import type { MeetingSpeakerSampleAvailability } from '../../api/identity';
 import {
   type ClientCandidateMetadata,
   type SpeakerVoiceEnrollmentResult,
@@ -85,7 +88,16 @@ export const SpeakerIdentificationModal = ({
     sampleCount: number;
   } | null>(null);
   const [sampleLoading, setSampleLoading] = useState<string | null>(null);
-  const [sampleError, setSampleError] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState<{
+    speaker: string;
+    message: string;
+  } | null>(null);
+  const [sampleAvailability, setSampleAvailability] = useState<{
+    speaker: string;
+    value: MeetingSpeakerSampleAvailability;
+  } | null>(null);
+  const [sampleAvailabilityLoading, setSampleAvailabilityLoading] =
+    useState(false);
 
   // Voice profiles & match suggestions state
   const [voiceSuggestions, setVoiceSuggestions] = useState<
@@ -178,13 +190,18 @@ export const SpeakerIdentificationModal = ({
           sampleIdx,
         );
         if (token !== sampleRequest.current) return;
-        if (!result) {
-          setSampleError(speaker);
+        if (result.status === 'unavailable') {
+          setSampleAvailability({ speaker, value: result });
+          setSampleError({
+            speaker,
+            message: meetingSpeakerSampleUnavailableMessage(result.reason),
+          });
           return;
         }
-        const bytes = Uint8Array.from(result.bytes);
+        const { sample } = result;
+        const bytes = Uint8Array.from(sample.bytes);
         const url = URL.createObjectURL(
-          new Blob([bytes.buffer], { type: result.mimeType }),
+          new Blob([bytes.buffer], { type: sample.mimeType }),
         );
         const audio = new Audio(url);
         sampleUrl.current = url;
@@ -201,13 +218,16 @@ export const SpeakerIdentificationModal = ({
         }
         setSampleState({
           speaker,
-          sampleIndex: result.sampleIndex,
-          sampleCount: result.sampleCount,
+          sampleIndex: sample.sampleIndex,
+          sampleCount: sample.sampleCount,
         });
       } catch {
         if (token === sampleRequest.current) {
           releaseSample();
-          setSampleError(speaker);
+          setSampleError({
+            speaker,
+            message: 'Pluto could not play this recording excerpt.',
+          });
         }
       } finally {
         if (token === sampleRequest.current) setSampleLoading(null);
@@ -288,6 +308,56 @@ export const SpeakerIdentificationModal = ({
   const currentBoundPerson = currentBinding?.personId
     ? state?.people.find((p) => p.id === currentBinding.personId)
     : null;
+
+  useEffect(() => {
+    if (!isOpen || !currentSpeaker) {
+      setSampleAvailability(null);
+      setSampleAvailabilityLoading(false);
+      return;
+    }
+    if (!hasSystemAudio) {
+      setSampleAvailability({
+        speaker: currentSpeaker,
+        value: { status: 'unavailable', reason: 'source_unavailable' },
+      });
+      setSampleAvailabilityLoading(false);
+      return;
+    }
+    let active = true;
+    setSampleAvailability(null);
+    setSampleAvailabilityLoading(true);
+    void getMeetingSpeakerSampleAvailability(meetingId, currentSpeaker)
+      .then((value) => {
+        if (!active) return;
+        setSampleAvailability({
+          speaker: currentSpeaker,
+          value:
+            value?.status === 'available' || value?.status === 'unavailable'
+              ? value
+              : {
+                  status: 'unavailable',
+                  reason: 'availability_check_failed',
+                },
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setSampleAvailability({
+            speaker: currentSpeaker,
+            value: {
+              status: 'unavailable',
+              reason: 'availability_check_failed',
+            },
+          });
+        }
+      })
+      .finally(() => {
+        if (active) setSampleAvailabilityLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentSpeaker, hasSystemAudio, isOpen, meetingId]);
 
   // Close the modal when its nested controls have not consumed Escape.
   useEffect(() => {
@@ -801,7 +871,8 @@ export const SpeakerIdentificationModal = ({
 
               {/* Audio sample button */}
               <div>
-                {hasSystemAudio ? (
+                {sampleAvailability?.speaker === currentSpeaker &&
+                sampleAvailability.value?.status === 'available' ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -816,7 +887,9 @@ export const SpeakerIdentificationModal = ({
                       />
                       {sampleLoading === currentSpeaker
                         ? 'Loading sample…'
-                        : 'Play voice sample'}
+                        : sampleAvailability.value.scope === 'remote_channel'
+                          ? 'Play recording excerpt'
+                          : 'Play voice sample'}
                     </button>
                     {sampleState?.speaker === currentSpeaker &&
                     sampleState.sampleIndex + 1 < sampleState.sampleCount ? (
@@ -835,17 +908,26 @@ export const SpeakerIdentificationModal = ({
                       </button>
                     ) : null}
                   </div>
-                ) : (
+                ) : sampleAvailabilityLoading ? (
                   <span className="text-xs text-pro-text-muted">
-                    Voice sample unavailable for this meeting.
+                    Checking recording…
                   </span>
-                )}
-                {sampleError === currentSpeaker ? (
+                ) : sampleError?.speaker !== currentSpeaker ? (
+                  <span className="text-xs text-pro-text-muted">
+                    {sampleAvailability?.speaker === currentSpeaker &&
+                    sampleAvailability.value?.status === 'unavailable'
+                      ? meetingSpeakerSampleUnavailableMessage(
+                          sampleAvailability.value.reason,
+                        )
+                      : 'The participant recording is unavailable.'}
+                  </span>
+                ) : null}
+                {sampleError?.speaker === currentSpeaker ? (
                   <span
                     role="alert"
                     className="mt-1 block text-xs text-red-400"
                   >
-                    Could not play this voice sample.
+                    {sampleError.message}
                   </span>
                 ) : null}
               </div>
