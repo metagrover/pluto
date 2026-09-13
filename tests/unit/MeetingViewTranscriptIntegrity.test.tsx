@@ -682,7 +682,9 @@ describe('MeetingView transcript integrity', () => {
     );
 
     expect(markup).toContain('Notes couldn&#x27;t be generated');
-    expect(markup).toContain('The previous analysis reached its processing limit.');
+    expect(markup).toContain(
+      'The previous analysis reached its processing limit.',
+    );
     expect(markup).toContain('Retry analysis');
     expect(markup).toContain('meeting-failure-notice__action');
   });
