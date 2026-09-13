@@ -671,7 +671,7 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).toContain('meeting-failure-notice__action');
   });
 
-  it('does not offer an identical retry after a stable capacity rejection', () => {
+  it('keeps manual retry available after a historical capacity rejection', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="validated"
@@ -682,9 +682,9 @@ describe('MeetingView transcript integrity', () => {
     );
 
     expect(markup).toContain('Notes couldn&#x27;t be generated');
-    expect(markup).toContain('Retrying it unchanged won&#x27;t help.');
-    expect(markup).not.toContain('Retry analysis');
-    expect(markup).not.toContain('meeting-failure-notice__action');
+    expect(markup).toContain('The previous analysis reached its processing limit.');
+    expect(markup).toContain('Retry analysis');
+    expect(markup).toContain('meeting-failure-notice__action');
   });
 
   it('does not offer deletion for a recovery-required meeting', () => {

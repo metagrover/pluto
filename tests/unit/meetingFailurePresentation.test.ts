@@ -177,7 +177,7 @@ describe('meeting failure presentation', () => {
     });
   });
 
-  it('does not offer an unchanged retry for a stable capacity rejection', () => {
+  it('allows manual retry because a saved capacity failure describes a previous run', () => {
     expect(
       resolveMeetingFailurePresentation({
         retryableFinalTranscription: false,
@@ -192,8 +192,8 @@ describe('meeting failure presentation', () => {
     ).toEqual({
       title: "Notes couldn't be generated",
       detail:
-        "This transcript exceeds Pluto's current analysis capacity. Retrying it unchanged won't help.",
-      actionLabel: null,
+        'The previous analysis reached its processing limit. Your transcript is ready.',
+      actionLabel: 'Retry analysis',
     });
   });
 });
