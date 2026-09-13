@@ -49,7 +49,9 @@ describe('AutoEndToast component', () => {
     expect(paragraphs[1].textContent).toBe('Zoom closed');
 
     // Verify reopen button works
-    const reopenBtn = container.querySelector('button:not([aria-label])') as HTMLButtonElement;
+    const reopenBtn = container.querySelector(
+      'button:not([aria-label])',
+    ) as HTMLButtonElement;
     expect(reopenBtn).not.toBeNull();
     expect(reopenBtn.textContent).toBe('Reopen');
 
