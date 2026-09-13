@@ -260,6 +260,15 @@ export const runPersistedMeetingFinalTranscription = async (
       vocabulary,
       vocabularyPolicyVersion:
         provisional.payload.transcription?.vocabularyHintPolicyVersion,
+      expectedRemoteSpeakerCount:
+        provisional.payload.speakerCountHint?.source ===
+          'manual_participants' &&
+        Number.isInteger(
+          provisional.payload.speakerCountHint.remoteSpeakerCount,
+        ) &&
+        provisional.payload.speakerCountHint.remoteSpeakerCount > 0
+          ? provisional.payload.speakerCountHint.remoteSpeakerCount
+          : undefined,
       signal: options.signal,
     },
     {
@@ -334,6 +343,7 @@ export const runPersistedMeetingFinalTranscription = async (
               vocabularyTerms: vocabulary,
             },
             speakerAttribution,
+            speakerCountHint: provisional.payload.speakerCountHint,
             liveTranscriptResponsiveness:
               provisional.payload.liveTranscriptResponsiveness,
             stopToValidatedLatency: provisional.payload.stopToValidatedLatency,

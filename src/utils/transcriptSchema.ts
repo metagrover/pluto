@@ -109,6 +109,10 @@ export type StoredTranscriptSpeakerAttribution = {
       | 'no_diarization_segments'
       | 'not_enough_speakers'
       | 'low_coverage';
+    speakerCountConstraint?: {
+      source: 'manual_participants';
+      remoteSpeakerCount: 1;
+    };
   };
 };
 
@@ -133,6 +137,11 @@ export type StoredTranscriptV2 = {
   /** Optional full-session fallback metadata when session recovery ran. */
   sessionFallbackTranscription?: TranscriptTranscriptionMeta;
   speakerAttribution?: StoredTranscriptSpeakerAttribution;
+  /** Explicit user-entered roster evidence; calendar attendees are excluded. */
+  speakerCountHint?: {
+    source: 'manual_participants';
+    remoteSpeakerCount: number;
+  };
   liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
   stopToValidatedLatency?: StopToValidatedLatencySummary;
   lifecycleStatus?: TranscriptLifecycleStatus;
@@ -260,6 +269,7 @@ export function buildTranscriptJsonPayload(
     transcription?: TranscriptTranscriptionMeta;
     sessionFallbackTranscription?: TranscriptTranscriptionMeta;
     speakerAttribution?: StoredTranscriptSpeakerAttribution;
+    speakerCountHint?: StoredTranscriptV2['speakerCountHint'];
     liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
     stopToValidatedLatency?: StopToValidatedLatencySummary;
     lifecycleStatus?: TranscriptLifecycleStatus;
@@ -282,6 +292,9 @@ export function buildTranscriptJsonPayload(
     transcription: options.transcription,
     sessionFallbackTranscription: options.sessionFallbackTranscription,
     speakerAttribution: options.speakerAttribution,
+    ...(options.speakerCountHint
+      ? { speakerCountHint: options.speakerCountHint }
+      : {}),
     ...(options.liveTranscriptResponsiveness
       ? {
           liveTranscriptResponsiveness: options.liveTranscriptResponsiveness,

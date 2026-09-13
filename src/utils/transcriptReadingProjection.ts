@@ -7,6 +7,11 @@ export type TranscriptReadingCandidate = {
   endTime?: unknown;
 };
 
+const NUMBERED_REMOTE_SPEAKER_PATTERN = /^Remote Speaker \d+$/u;
+const REMOTE_CHANNEL_SPEAKER_PATTERN = /^Them$/iu;
+const UNCERTAIN_SPEAKER_PATTERN =
+  /^(?:Speaker|Unknown|Unknown speaker|Unidentified speaker)$/iu;
+
 export type TranscriptReadingSegment = TranscriptReadingCandidate & {
   text: string;
   speaker: string;
@@ -89,7 +94,7 @@ export const assembleReadableTranscriptSentences = <
   };
   const assembled: AssembledSegment[] = [];
 
-  for (const segment of segments) {
+  for (const segment of chronologically(segments)) {
     if (typeof segment.text !== 'string' || !segment.text.trim()) continue;
     const timing = interval(segment);
     const speaker =
@@ -103,6 +108,7 @@ export const assembleReadableTranscriptSentences = <
       previous &&
       previous.timed &&
       previous.speaker === speaker &&
+      !UNCERTAIN_SPEAKER_PATTERN.test(speaker) &&
       typeof previous.endTime === 'number' &&
       timing.startTime - previous.endTime <= MAX_UTTERANCE_GAP_SECONDS &&
       !/[.!?…]["')\]]?$/u.test(previous.text)
@@ -195,6 +201,105 @@ const interval = (
     endTime > startTime
     ? { startTime, endTime }
     : null;
+};
+
+const speakerLabel = (segment: TranscriptReadingCandidate): string =>
+  typeof segment.speaker === 'string' && segment.speaker.trim()
+    ? segment.speaker.trim()
+    : 'Speaker';
+
+const chronologically = <T extends TranscriptReadingCandidate>(
+  segments: ReadonlyArray<T>,
+): T[] =>
+  segments
+    .map((segment, index) => ({ segment, index, timing: interval(segment) }))
+    .sort((left, right) => {
+      if (!left.timing && !right.timing) return left.index - right.index;
+      if (!left.timing) return 1;
+      if (!right.timing) return -1;
+      return (
+        left.timing.startTime - right.timing.startTime ||
+        left.timing.endTime - right.timing.endTime ||
+        left.index - right.index
+      );
+    })
+    .map(({ segment }) => segment);
+
+const gapBetween = (
+  left: TranscriptReadingCandidate,
+  right: TranscriptReadingCandidate,
+): number => {
+  const leftTiming = interval(left);
+  const rightTiming = interval(right);
+  if (!leftTiming || !rightTiming) return Number.POSITIVE_INFINITY;
+  return Math.max(
+    0,
+    Math.max(leftTiming.startTime, rightTiming.startTime) -
+      Math.min(leftTiming.endTime, rightTiming.endTime),
+  );
+};
+
+const isCertainSpeaker = (speaker: string): boolean =>
+  speaker === 'Me' || NUMBERED_REMOTE_SPEAKER_PATTERN.test(speaker);
+
+/**
+ * Build a reversible reading view over raw attribution rows. Final diarization
+ * can leave short system-audio spans as `Them`, and overlap can leave a tiny
+ * span unknown. These are not additional people. Attach only a nearby fragment
+ * with sufficient provenance to a certain speaker; otherwise retain its label.
+ */
+export const projectTranscriptSpeakerContinuity = <
+  T extends TranscriptReadingCandidate,
+>(segments: ReadonlyArray<T>): T[] => {
+  const ordered = chronologically(segments);
+  const projected = ordered.map((segment) => ({ ...segment })) as T[];
+
+  for (let index = 0; index < projected.length; index += 1) {
+    const segment = projected[index];
+    const speaker = speakerLabel(segment);
+    const remoteChannel = REMOTE_CHANNEL_SPEAKER_PATTERN.test(speaker);
+    const uncertain = UNCERTAIN_SPEAKER_PATTERN.test(speaker);
+    if (!remoteChannel && !uncertain) continue;
+
+    const nearby = (direction: -1 | 1) => {
+      for (
+        let candidateIndex = index + direction;
+        candidateIndex >= 0 && candidateIndex < projected.length;
+        candidateIndex += direction
+      ) {
+        const candidate = projected[candidateIndex];
+        const gap = gapBetween(segment, candidate);
+        if (gap > MAXIMUM_BOUNDARY_DISTANCE_SECONDS) return null;
+        const candidateSpeaker = speakerLabel(candidate);
+        if (remoteChannel) {
+          if (NUMBERED_REMOTE_SPEAKER_PATTERN.test(candidateSpeaker)) {
+            return { speaker: candidateSpeaker, gap };
+          }
+          // Mic overlap does not change the provenance of a system-audio row.
+          continue;
+        }
+        if (isCertainSpeaker(candidateSpeaker)) {
+          return { speaker: candidateSpeaker, gap };
+        }
+      }
+      return null;
+    };
+
+    const previous = nearby(-1);
+    const next = nearby(1);
+    const resolved = remoteChannel
+      ? previous && next
+        ? previous.gap <= next.gap
+          ? previous.speaker
+          : next.speaker
+        : (previous?.speaker ?? next?.speaker ?? null)
+      : previous && next && previous.speaker === next.speaker
+        ? previous.speaker
+        : null;
+    if (resolved) segment.speaker = resolved;
+  }
+
+  return projected;
 };
 
 const normalizedTokens = (text: string): string[] =>

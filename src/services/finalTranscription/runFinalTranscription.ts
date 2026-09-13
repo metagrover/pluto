@@ -45,6 +45,7 @@ export type FinalTranscriptionInput = {
   language: string;
   vocabulary?: string[];
   vocabularyPolicyVersion?: string;
+  expectedRemoteSpeakerCount?: number;
   signal?: AbortSignal;
 };
 
@@ -374,6 +375,7 @@ export const runFinalTranscription = async <TTranscript>(
       systemEnergyWindows: speakerEvidence.energyWindows,
       clusterEvidence: speakerEvidence.clusterEvidence,
       provenance: speakerEvidence.provenance,
+      expectedRemoteSpeakerCount: input.expectedRemoteSpeakerCount,
     });
     metadata.speakerAttribution = {
       ...attribution.attribution,

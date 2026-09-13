@@ -15,6 +15,31 @@ describe('buildAnalysisTranscriptFromJson', () => {
     );
     expect(JSON.parse(raw).segments[0].speaker).toBe('Them');
   });
+
+  it('presents one remote thought continuously without changing canonical rows', () => {
+    const segments = [
+      {
+        speaker: 'Remote Speaker 1',
+        startTime: 9,
+        endTime: 11,
+        text: 'In my understanding',
+      },
+      { speaker: 'Them', startTime: 11.1, endTime: 12, text: 'a few things' },
+      {
+        speaker: 'Remote Speaker 1',
+        startTime: 12.1,
+        endTime: 14,
+        text: 'need to get out of the way.',
+      },
+    ];
+    const transcript = JSON.stringify({ segments });
+
+    expect(buildAnalysisTranscriptFromJson(transcript)).toBe(
+      'Remote Speaker 1: In my understanding a few things need to get out of the way.',
+    );
+    expect(JSON.parse(transcript).segments).toEqual(segments);
+  });
+
   it.each(['validated', 'validating', 'needs_attention'])(
     'keeps finalized recovered text and speakers authoritative during %s',
     (lifecycleStatus) => {
@@ -171,7 +196,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
       ),
     ).toEqual(['Them', 'Speaker', 'Me', 'Speaker', 'Speaker', 'Speaker']);
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Them: A longer remote sentence from system audio.\nSpeaker: Short echo.\nMe: Do these match the original format?\nSpeaker: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
+      'Them: A longer remote sentence from system audio.\nSpeaker: Short echo.\nSpeaker: This longer mic row still overlaps remote audio.\nMe: Do these match the original format?\nSpeaker: I agree.\nSpeaker: Timing evidence is missing here.',
     );
   });
 

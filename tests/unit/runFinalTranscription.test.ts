@@ -213,6 +213,32 @@ describe('runFinalTranscription', () => {
     );
   });
 
+  it('carries an explicit single-remote constraint into canonical attribution', async () => {
+    const deps = dependencies();
+
+    const outcome = await runFinalTranscription(
+      { ...baseInput, expectedRemoteSpeakerCount: 1 },
+      deps,
+    );
+
+    expect(outcome.status).toBe('validated');
+    const commit = deps.commitCanonical.mock.calls[0][0];
+    expect(commit.segments.map((segment) => segment.speaker)).toEqual([
+      'Me',
+      'Them',
+    ]);
+    expect(commit.metadata.speakerAttribution).toMatchObject({
+      remoteDiarization: {
+        applied: false,
+        fallbackReason: 'not_enough_speakers',
+        speakerCountConstraint: {
+          source: 'manual_participants',
+          remoteSpeakerCount: 1,
+        },
+      },
+    });
+  });
+
   it('persists stable anonymous labels for multiple supported system speakers', async () => {
     const deps = dependencies();
     deps.transcribe.mockImplementation(async (request) => {

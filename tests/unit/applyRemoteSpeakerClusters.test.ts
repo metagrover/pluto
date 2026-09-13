@@ -6,6 +6,44 @@ const words = (items: Array<[string, number, number]>) =>
   items.map(([word, start, end]) => ({ word, start, end }));
 
 describe('applyRemoteSpeakerClusters', () => {
+  it('uses an explicit one-person roster to prevent remote over-segmentation', () => {
+    const input = [
+      { startTime: 0, endTime: 2, speaker: 'Me', text: 'local' },
+      { startTime: 2, endTime: 4, speaker: 'Them', text: 'remote opening' },
+      { startTime: 4, endTime: 6, speaker: 'Them', text: 'remote continuation' },
+      { startTime: 6, endTime: 7, speaker: 'Unknown', text: 'overlap' },
+    ];
+    const before = structuredClone(input);
+    const result = applyRemoteSpeakerClusters({
+      segments: input,
+      turns: [
+        { startTime: 2, endTime: 3, cluster: 'S1' },
+        { startTime: 3, endTime: 4, cluster: 'S2' },
+        { startTime: 4, endTime: 5, cluster: 'S3' },
+        { startTime: 5, endTime: 6, cluster: 'S4' },
+      ],
+      expectedRemoteSpeakerCount: 1,
+    });
+
+    expect(result.segments.map((segment) => segment.speaker)).toEqual([
+      'Me',
+      'Them',
+      'Them',
+      'Unknown',
+    ]);
+    expect(result.metadata).toMatchObject({
+      applied: false,
+      clusterCount: 1,
+      labeledSegmentCount: 0,
+      fallbackReason: 'not_enough_speakers',
+      speakerCountConstraint: {
+        source: 'manual_participants',
+        remoteSpeakerCount: 1,
+      },
+    });
+    expect(input).toEqual(before);
+  });
+
   it('numbers supported system clusters by first appearance and splits on word bounds', () => {
     const result = applyRemoteSpeakerClusters({
       segments: [

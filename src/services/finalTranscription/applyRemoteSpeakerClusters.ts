@@ -36,6 +36,10 @@ export type RemoteDiarizationMetadata = {
   labeledSegmentCount: number;
   coverage?: 'complete' | 'partial';
   fallbackReason?: RemoteDiarizationFallbackReason;
+  speakerCountConstraint?: {
+    source: 'manual_participants';
+    remoteSpeakerCount: 1;
+  };
 };
 
 const overlapSeconds = (
@@ -138,6 +142,7 @@ export const applyRemoteSpeakerClusters = <
   systemEnergyWindows?: SystemEnergyWindow[];
   clusterEvidence?: SpeakerClusterEvidence[];
   provenance?: SpeakerCandidateProvenance;
+  expectedRemoteSpeakerCount?: number;
 }): {
   applied: boolean;
   segments: T[];
@@ -169,6 +174,26 @@ export const applyRemoteSpeakerClusters = <
 
   if (systemSegments.length === 0) return fallback('no_system_speech');
   const turns = input.turns.filter(validTurn);
+  if (input.expectedRemoteSpeakerCount === 1) {
+    return {
+      applied: false,
+      segments: input.segments.map((segment) => ({ ...segment })),
+      metadata: {
+        attempted: true,
+        input: 'system_audio',
+        applied: false,
+        confidence: 0,
+        clusterCount: 1,
+        labeledSegmentCount: 0,
+        fallbackReason: 'not_enough_speakers',
+        speakerCountConstraint: {
+          source: 'manual_participants',
+          remoteSpeakerCount: 1,
+        },
+      },
+      candidateEvidence: [],
+    };
+  }
   if (turns.length === 0) return fallback('no_diarization_segments');
 
   const support = new Map<string, { seconds: number; first: number }>();

@@ -22,6 +22,8 @@ export const MEETING_ASK_PLUTO_LIMITS = {
   turnChars: 1_200,
   citationIds: 20,
   citationIdChars: 128,
+  evidenceHints: 4,
+  evidenceHintChars: 500,
 } as const;
 
 export type MeetingAskPlutoRequestParseResult =
@@ -49,13 +51,23 @@ const isValidTurn = (value: unknown): value is MeetingAskPlutoTurn => {
   if (!isBoundedString(value.content, MEETING_ASK_PLUTO_LIMITS.turnChars)) {
     return false;
   }
-  if (value.citationIds === undefined) return true;
+  if (
+    value.citationIds !== undefined &&
+    (!Array.isArray(value.citationIds) ||
+      value.citationIds.length > MEETING_ASK_PLUTO_LIMITS.citationIds ||
+      !value.citationIds.every((id) =>
+        isValidId(id, MEETING_ASK_PLUTO_LIMITS.citationIdChars),
+      ))
+  ) {
+    return false;
+  }
   return (
-    Array.isArray(value.citationIds) &&
-    value.citationIds.length <= MEETING_ASK_PLUTO_LIMITS.citationIds &&
-    value.citationIds.every((id) =>
-      isValidId(id, MEETING_ASK_PLUTO_LIMITS.citationIdChars),
-    )
+    value.evidenceHints === undefined ||
+    (Array.isArray(value.evidenceHints) &&
+      value.evidenceHints.length <= MEETING_ASK_PLUTO_LIMITS.evidenceHints &&
+      value.evidenceHints.every((hint) =>
+        isBoundedString(hint, MEETING_ASK_PLUTO_LIMITS.evidenceHintChars),
+      ))
   );
 };
 

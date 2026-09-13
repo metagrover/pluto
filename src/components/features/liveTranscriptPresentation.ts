@@ -109,9 +109,15 @@ export const buildLiveTranscriptTurns = (
   }
 
   for (const segment of visible) {
+    const projectedSpeaker =
+      segment.source === 'mic'
+        ? 'Me'
+        : segment.source === 'system'
+          ? 'Them'
+          : segment.speaker;
     const current = turns.at(-1);
     const canContinueTurn =
-      current?.speaker === segment.speaker &&
+      current?.speaker === projectedSpeaker &&
       current?.source === segment.source &&
       segment.timestampMs - current.timestampMs <= MAX_TURN_DURATION_MS &&
       turnCharacterCount(current) + segment.text.length + 1 <=
@@ -123,7 +129,7 @@ export const buildLiveTranscriptTurns = (
 
     turns.push({
       id: segment.id,
-      speaker: segment.speaker,
+      speaker: projectedSpeaker,
       source: segment.source,
       timestampMs: segment.timestampMs,
       segments: [segment],

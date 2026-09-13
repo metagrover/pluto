@@ -4,6 +4,7 @@ import {
   type TranscriptReadingCandidate,
   assembleReadableTranscriptSentences,
   buildTranscriptReadingProjection,
+  projectTranscriptSpeakerContinuity,
   toStoredLiveTranscriptCandidate,
 } from '../../src/utils/transcriptReadingProjection.ts';
 
@@ -15,6 +16,65 @@ const candidate = (
 ): TranscriptReadingCandidate => ({ speaker, startTime, endTime, text });
 
 describe('saved transcript reading projection', () => {
+  it('orders timestamped rows without mutating raw evidence', () => {
+    const input = [
+      candidate('Them', 4, 5, 'later'),
+      candidate('Me', 0, 1, 'first'),
+      candidate('Them', 2, 3, 'then'),
+    ];
+    const before = structuredClone(input);
+
+    expect(
+      assembleReadableTranscriptSentences(input).map((row) => row.text),
+    ).toEqual(['First.', 'Then later.']);
+    expect(input).toEqual(before);
+  });
+
+  it('joins adjacent unresolved system fragments to a numbered remote voice', () => {
+    const input = [
+      candidate('Remote Speaker 1', 3, 7, 'So let us focus'),
+      candidate('Them', 7.1, 8, 'on the feature gaps'),
+      candidate('Remote Speaker 1', 8.1, 11, 'that we currently have'),
+    ];
+    const before = structuredClone(input);
+    const projected = projectTranscriptSpeakerContinuity(input);
+
+    expect(projected.map((row) => row.speaker)).toEqual([
+      'Remote Speaker 1',
+      'Remote Speaker 1',
+      'Remote Speaker 1',
+    ]);
+    expect(input).toEqual(before);
+  });
+
+  it('does not invent continuity for an unknown fragment between different speakers', () => {
+    const projected = projectTranscriptSpeakerContinuity([
+      candidate('Me', 0, 1, 'local'),
+      candidate('Unknown', 1.1, 1.3, 'uncertain'),
+      candidate('Remote Speaker 1', 1.4, 2, 'remote'),
+    ]);
+
+    expect(projected.map((row) => row.speaker)).toEqual([
+      'Me',
+      'Unknown',
+      'Remote Speaker 1',
+    ]);
+  });
+
+  it('keeps distinct numbered remote voices separate', () => {
+    const projected = projectTranscriptSpeakerContinuity([
+      candidate('Remote Speaker 1', 0, 1, 'first voice'),
+      candidate('Them', 1.1, 1.3, 'near first'),
+      candidate('Remote Speaker 2', 5, 6, 'second voice'),
+    ]);
+
+    expect(projected.map((row) => row.speaker)).toEqual([
+      'Remote Speaker 1',
+      'Remote Speaker 1',
+      'Remote Speaker 2',
+    ]);
+  });
+
   it('assembles adjacent fragments into a punctuated sentence', () => {
     expect(
       assembleReadableTranscriptSentences([

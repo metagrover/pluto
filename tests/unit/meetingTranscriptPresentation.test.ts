@@ -9,6 +9,28 @@ import {
 import type { TranscriptSegment } from '../../src/types';
 
 describe('meeting transcript presentation', () => {
+  it('orders turns by timestamp without changing stored rows', () => {
+    const segments: TranscriptSegment[] = [
+      { speaker: 'Them', startTime: 8, endTime: 9, text: 'Later.' },
+      { speaker: 'Me', startTime: 1, endTime: 2, text: 'First.' },
+    ];
+    const before = structuredClone(segments);
+
+    expect(
+      buildMeetingTranscriptTurns(segments).map((turn) => turn.speaker),
+    ).toEqual(['Me', 'Them']);
+    expect(segments).toEqual(before);
+  });
+
+  it('keeps untimed legacy evidence after timestamped turns', () => {
+    const turns = buildMeetingTranscriptTurns([
+      { speaker: 'Unknown', text: 'Untimed evidence.' },
+      { speaker: 'Me', startTime: 2, endTime: 3, text: 'Timed evidence.' },
+    ]);
+
+    expect(turns.map((turn) => turn.speaker)).toEqual(['Me', 'Unknown']);
+  });
+
   it('bounds long same-speaker reading turns without changing evidence rows', () => {
     const segments: TranscriptSegment[] = Array.from(
       { length: 14 },

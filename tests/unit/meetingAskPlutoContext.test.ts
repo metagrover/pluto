@@ -395,6 +395,13 @@ describe('meeting-scoped Ask Pluto context', () => {
 
     expect(prompt).toContain('Synthesize across the relevant evidence');
     expect(prompt).toContain('Answer conversationally and directly');
+    expect(prompt).toContain('Meeting grounding is implicit');
+    expect(prompt).toContain(
+      'Never begin with “Based on the meeting evidence provided”',
+    );
+    expect(prompt).toContain("“The meeting didn't establish that.”");
+    expect(prompt).toContain('“My interpretation is…”');
+    expect(prompt).toContain("“This wasn't discussed, but generally…”");
     expect(prompt).toContain('Do not merely repeat transcript lines');
     expect(prompt).toContain(
       '“Call audio” is the combined remote audio stream',
@@ -623,6 +630,25 @@ describe('meeting-scoped Ask Pluto context', () => {
     ]);
   });
 
+  it('removes evidence-policy narration from the completed answer', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What did we decide?',
+      entities: [],
+      attentionItems: [],
+    });
+
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw:
+        'Based on the meeting evidence provided, the team chose GraphQL. [Evidence 1]',
+      context,
+    });
+
+    expect(response.answer).toBe('The team chose GraphQL.');
+    expect(response.claims[0]?.text).toBe('The team chose GraphQL.');
+    expect(response.citations).toHaveLength(1);
+  });
+
   it('rejects out-of-range evidence references instead of citing the first item', () => {
     const context = buildMeetingAskPlutoContext({
       meeting: makeMeeting(),
@@ -691,5 +717,38 @@ describe('meeting-scoped Ask Pluto context', () => {
     expect(prompt).toContain('Do not use any other meeting');
     expect(prompt).toContain('[Evidence 1]');
     expect(prompt).toContain('Recent turns');
+  });
+
+  it('marks a resolved follow-up while keeping prior answers non-authoritative', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What should I do about the timeline risk?',
+      entities: [],
+      attentionItems: [],
+    });
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'What should I do about that?',
+      context,
+      turns: [
+        { role: 'user', content: 'What is the main risk?' },
+        {
+          role: 'assistant',
+          content: 'The timeline is not confirmed.',
+        },
+      ],
+      conversation: {
+        relation: 'follow_up',
+        retrievalQuery: 'What should I do about the timeline risk?',
+        routingQuery: 'What is the main risk?\nWhat should I do about that?',
+        priorQuestion: 'What is the main risk?',
+        priorEvidenceHintCount: 1,
+      },
+    });
+
+    expect(prompt).toContain('Conversation relationship: Follow-up');
+    expect(prompt).toContain(
+      'verify every factual claim against Meeting evidence',
+    );
+    expect(prompt).toContain('Question:\nWhat should I do about that?');
   });
 });
