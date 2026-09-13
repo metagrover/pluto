@@ -643,6 +643,7 @@ actor FluidAudioEouManager: ParakeetEouManaging {
     private var pendingSinceAudioSeconds: Double?
     private var pendingSnapshot: ParakeetEouManagerSnapshot?
     private var pendingNativeEou = false
+    private var pendingNativeEouTailStable = false
     private var committedTokenCount = 0
     private var closed = false
 
@@ -752,6 +753,7 @@ actor FluidAudioEouManager: ParakeetEouManaging {
                 pendingSinceAudioSeconds = nil
                 pendingSnapshot = nil
                 pendingNativeEou = false
+                pendingNativeEouTailStable = false
             case .eou:
                 let partial = ParakeetEouManagerSnapshot(
                     kind: .partial,
@@ -760,12 +762,18 @@ actor FluidAudioEouManager: ParakeetEouManaging {
                 )
                 trackPending(partial, audioEndSeconds: audioEndSeconds)
                 pendingNativeEou = true
+                pendingNativeEouTailStable = true
                 if bounded.last?.kind != .partial
                     || bounded.last?.transcript != partial.transcript
                 {
                     bounded.append(partial)
                 }
             case .partial:
+                if pendingNativeEou,
+                    pendingSnapshot?.transcript != snapshot.transcript
+                {
+                    pendingNativeEouTailStable = false
+                }
                 trackPending(snapshot, audioEndSeconds: audioEndSeconds)
                 bounded.append(snapshot)
             }
@@ -776,13 +784,25 @@ actor FluidAudioEouManager: ParakeetEouManaging {
         guard
             let pendingSnapshot,
             pendingNativeEou || pendingTimedOut,
-            let checkpoint = wordSafeCheckpoint(from: pendingSnapshot)
+            let checkpoint = pendingNativeEou
+                && pendingNativeEouTailStable
+                && pendingTimedOut
+                ? ParakeetEouManagerSnapshot.eou(
+                    pendingSnapshot.transcript,
+                    tokens: pendingSnapshot.tokens
+                )
+                : wordSafeCheckpoint(from: pendingSnapshot)
         else { return bounded }
 
         bounded.removeAll { $0.kind == .partial }
         bounded.append(checkpoint)
         committedTokenCount = checkpoint.tokens.count
-        pendingNativeEou = false
+        pendingNativeEou = pendingNativeEou
+            && pendingNativeEouTailStable
+            && pendingSnapshot.tokens.count > committedTokenCount
+        if !pendingNativeEou {
+            pendingNativeEouTailStable = false
+        }
         if pendingSnapshot.tokens.count > committedTokenCount {
             bounded.append(pendingSnapshot)
             self.pendingSinceAudioSeconds = audioEndSeconds

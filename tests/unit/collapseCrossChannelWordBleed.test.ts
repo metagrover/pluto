@@ -166,7 +166,7 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.droppedMicWordCount).toBe(0);
   });
 
-  it('preserves an equal-activity word once as Unknown instead of inventing a speaker', () => {
+  it('keeps the direct System copy for an exact equal-activity duplicate', () => {
     const shared = [
       { word: 'shared', start: 1, end: 1.4 },
       { word: 'overlap', start: 1.5, end: 1.9 },
@@ -182,10 +182,11 @@ describe('collapseCrossChannelWordBleed', () => {
       ],
     });
 
-    expect(result.micSegments).toEqual([
-      expect.objectContaining({ speaker: 'Unknown' }),
+    expect(result.micSegments).toEqual([]);
+    expect(result.systemSegments).toEqual([
+      expect.objectContaining({ speaker: 'Them' }),
     ]);
-    expect(result.systemSegments).toEqual([]);
+    expect(result.droppedMicWordCount).toBe(3);
     expect(result.unresolvedAmbiguousSeconds).toBe(0);
   });
 

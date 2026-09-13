@@ -15,6 +15,7 @@ export type LiveConversationPart = {
 
 export type LiveConversationRow = {
   id: string;
+  sourceSegmentId: string;
   source: 'mic' | 'system';
   speaker: LiveTranscriptSegment['speaker'];
   timestampMs: number;
@@ -138,6 +139,7 @@ const truncateDraft = (
 
 const rowSignature = (row: LiveConversationRow): string =>
   JSON.stringify([
+    row.sourceSegmentId,
     row.source,
     row.speaker,
     row.timestampMs,
@@ -152,19 +154,29 @@ const rowSignature = (row: LiveConversationRow): string =>
 const splitCommittedAtPauses = (
   segment: LiveTranscriptSegment,
   indexed: ReturnType<typeof indexRanges>,
-): LiveTranscriptSegment[] => {
+): Array<LiveTranscriptSegment & { projectionSourceSegmentId: string }> => {
   const times = segment.wordTimings;
   const words = [...segment.text.matchAll(/\S+/gu)];
-  if (!times || times.length !== words.length) return [segment];
-  const starts = [0];
+  if (!times || times.length !== words.length)
+    return [{ ...segment, projectionSourceSegmentId: segment.id }];
+  const original = [...(indexed.visible.get(segment.id) ?? [])].sort(
+    (left, right) => left.startWord - right.startWord,
+  );
+  const starts = new Set([0]);
   for (let index = 1; index < times.length; index++) {
     if (times[index].timestampMs - times[index - 1].timestampMs > 2_000)
-      starts.push(index);
+      starts.add(index);
   }
-  if (starts.length === 1) return [segment];
-  const original = indexed.visible.get(segment.id) ?? [];
-  return starts.map((start, index) => {
-    const end = starts[index + 1] ?? times.length;
+  for (let index = 1; index < original.length; index++) {
+    if (original[index - 1].endWord < original[index].startWord) {
+      starts.add(original[index].startWord);
+    }
+  }
+  if (starts.size === 1)
+    return [{ ...segment, projectionSourceSegmentId: segment.id }];
+  const orderedStarts = [...starts].sort((left, right) => left - right);
+  return orderedStarts.map((start, index) => {
+    const end = orderedStarts[index + 1] ?? times.length;
     const id = `${segment.id}:speech-${start}`;
     const ranges = original.flatMap((range) => {
       const startWord = Math.max(start, range.startWord);
@@ -197,6 +209,7 @@ const splitCommittedAtPauses = (
     return {
       ...segment,
       id,
+      projectionSourceSegmentId: segment.id,
       timestampMs: times[start].timestampMs,
       endTimestampMs: times[end - 1].endTimestampMs,
     };
@@ -345,6 +358,33 @@ export const createLiveConversationProjection = ({
             (segment.source === 'mic' || segment.source === 'system'),
         )
         .flatMap((segment) => splitCommittedAtPauses(segment, rangesBySegment));
+      const projectedIds = new Set(committed.map((segment) => segment.id));
+      const updatedSourceIds = new Set(
+        committed.map((segment) => segment.projectionSourceSegmentId),
+      );
+      for (const [id, previous] of owned) {
+        if (
+          !updatedSourceIds.has(previous.row.sourceSegmentId) ||
+          projectedIds.has(id) ||
+          previous.row.display === 'duplicate_removed'
+        )
+          continue;
+        const next: LiveConversationRow = {
+          ...previous.row,
+          text: '',
+          parts: [],
+          display: 'duplicate_removed',
+          ...(reason === 'echo_evidence'
+            ? { qualifier: 'updated' as const }
+            : {}),
+        };
+        owned.set(id, {
+          row: next,
+          suppressedWordCount: previous.suppressedWordCount,
+          signature: rowSignature(next),
+        });
+        committedRowsDirty = true;
+      }
       const previousWatermarkMs = Math.max(
         sourceWatermarks.mic ?? Number.NEGATIVE_INFINITY,
         sourceWatermarks.system ?? Number.NEGATIVE_INFINITY,
@@ -359,10 +399,11 @@ export const createLiveConversationProjection = ({
 
       // Unseen visible rows are inserted by event time. Mutable rows can be
       // corrected in place; sealed history remains a stable lightweight prefix.
-      const newVisible: LiveTranscriptSegment[] = [];
+      const newVisible: Array<
+        LiveTranscriptSegment & { projectionSourceSegmentId: string }
+      > = [];
       for (const segment of committed) {
         const previous = owned.get(segment.id);
-        if (previous && sealed.has(segment.id)) continue;
         const ranges = rangesBySegment.visible.get(segment.id) ?? [];
         if (!previous) {
           if (ranges.length) newVisible.push(segment);
@@ -370,18 +411,20 @@ export const createLiveConversationProjection = ({
         }
         const nextSuppressedWordCount =
           rangesBySegment.suppressedWords.get(segment.id) ?? 0;
-        const parts = ranges.map(toPart);
-        const text = parts.map((part) => part.text).join(' ');
+        const projectedParts = ranges.map(toPart);
+        const text = projectedParts.map((part) => part.text).join(' ');
+        const parts = sealed.has(segment.id) ? [] : projectedParts;
         const next: LiveConversationRow = {
           ...previous.row,
-          timestampMs: parts[0]?.timestampMs ?? segment.timestampMs,
+          sourceSegmentId: segment.projectionSourceSegmentId,
+          timestampMs: projectedParts[0]?.timestampMs ?? segment.timestampMs,
           endTimestampMs:
-            parts.at(-1)?.endTimestampMs ??
+            projectedParts.at(-1)?.endTimestampMs ??
             segment.endTimestampMs ??
             segment.timestampMs,
           text,
           parts,
-          display: parts.length ? 'speech' : 'duplicate_removed',
+          display: projectedParts.length ? 'speech' : 'duplicate_removed',
           ...(reason === 'echo_evidence' &&
           (text !== previous.row.text ||
             nextSuppressedWordCount !== previous.suppressedWordCount)
@@ -415,6 +458,7 @@ export const createLiveConversationProjection = ({
         const isLate = segment.timestampMs < previousWatermarkMs;
         const row: LiveConversationRow = {
           id: segment.id,
+          sourceSegmentId: segment.projectionSourceSegmentId,
           source: segment.source as 'mic' | 'system',
           speaker: segment.speaker,
           timestampMs: parts[0]?.timestampMs ?? segment.timestampMs,

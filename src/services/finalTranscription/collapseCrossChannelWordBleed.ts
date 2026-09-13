@@ -256,7 +256,6 @@ export const collapseCrossChannelWordBleed = (input: {
   });
   const droppedMicWords = new Set<string>();
   const droppedSystemWords = new Set<string>();
-  const ambiguousMicWords = new Set<string>();
   let droppedSystemExplainedMicSegmentCount = 0;
   let collapsedSequenceCount = 0;
 
@@ -383,15 +382,14 @@ export const collapseCrossChannelWordBleed = (input: {
               micWord.end,
             );
             if (fallbackLocalActivity === fallbackRemoteActivity) {
-              ambiguousMicWords.add(
-                `${micWord.segmentIndex}:${micWord.wordIndex}`,
-              );
-              droppedSystemWords.add(
-                `${systemWord.segmentIndex}:${systemWord.wordIndex}`,
-              );
-              continue;
+              // This is already an exact, time-aligned cross-channel match.
+              // Preserve the direct System capture when neither activity source
+              // can distinguish ownership instead of publishing the noisier mic
+              // copy as a separate unknown speaker.
+              duplicateIsLocal = false;
+            } else {
+              duplicateIsLocal = fallbackLocalActivity > fallbackRemoteActivity;
             }
-            duplicateIsLocal = fallbackLocalActivity > fallbackRemoteActivity;
           }
           const word = duplicateIsLocal ? systemWord : micWord;
           const key = `${word.segmentIndex}:${word.wordIndex}`;
@@ -410,11 +408,7 @@ export const collapseCrossChannelWordBleed = (input: {
     }
   }
 
-  const micSegments = rebuildWordSegments(
-    micSourceSegments,
-    droppedMicWords,
-    (key, fallback) => (ambiguousMicWords.has(key) ? 'Unknown' : fallback),
-  );
+  const micSegments = rebuildWordSegments(micSourceSegments, droppedMicWords);
   const systemSegments = rebuildWordSegments(
     systemSourceSegments,
     droppedSystemWords,
