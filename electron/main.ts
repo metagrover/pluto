@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import ffprobeStatic from '@ffprobe-installer/ffprobe';
 import {
   BrowserWindow,
@@ -589,6 +590,7 @@ let dreamingEntityQueue: DirtyEntityQueue | null = null;
 let lastRendererActivityAt = Date.now();
 let scheduleDreamingRun: ((delayMs?: number) => void) | null = null;
 let backgroundVoiceCandidateActive = false;
+let voiceWorkQueue: ReturnType<typeof createVoiceWorkQueue> | null = null;
 
 const notifyForegroundActivity = () => {
   lastRendererActivityAt = Date.now();
@@ -944,6 +946,8 @@ const shutdownMainProcessConsumers = async () => {
     task.controller.abort();
   backgroundKnowledgeRefresh?.close();
   backgroundKnowledgeRefresh = null;
+  voiceWorkQueue?.close();
+  voiceWorkQueue = null;
   await idleDreamingCoordinator?.close();
   idleDreamingCoordinator = null;
   scheduleDreamingRun = null;
@@ -1030,6 +1034,12 @@ app.whenReady().then(async () => {
       },
     });
   };
+  // db.getMeeting also runs a global retry-recovery sweep. Voice freshness
+  // checks must read only their source, without scanning other transcripts.
+  const readVoiceMeeting = (id: string): db.PersistedMeeting | null =>
+    (getApplicationDatabase()
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(id) as db.PersistedMeeting | undefined) ?? null;
   const buildVoiceEnrollmentCandidate: NonNullable<
     SpeakerVoiceDependencies['buildEnrollmentCandidate']
   > = async (input) => {
@@ -1042,8 +1052,7 @@ app.whenReady().then(async () => {
     beginTranscriptionWork();
     try {
       return await buildSpeakerEnrollmentCandidate(input, {
-        getMeeting: (id) =>
-          (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null,
+        getMeeting: readVoiceMeeting,
         fileExists: (inputPath) => fs.existsSync(inputPath),
         createWorkDir: () =>
           fs.mkdtempSync(
@@ -1080,8 +1089,7 @@ app.whenReady().then(async () => {
     allowCandidateBuild = false,
     backgroundSignal?: AbortSignal,
   ): SpeakerVoiceDependencies => ({
-    getMeeting: (id) =>
-      (db.getMeeting(id) as db.PersistedMeeting | undefined) ?? null,
+    getMeeting: readVoiceMeeting,
     fileExists: (inputPath) => fs.existsSync(inputPath),
     createTemporaryPath: () =>
       path.join(app.getPath('temp'), `speaker-sample-${randomUUID()}.wav`),
@@ -1106,8 +1114,10 @@ app.whenReady().then(async () => {
             : (input.signal ?? backgroundSignal),
       }),
     allowCandidateBuild,
+    signal: backgroundSignal,
+    awaitCandidateCleanup: true,
     scheduleCandidateBackfill: (meetingId) =>
-      backgroundKnowledgeRefresh?.enqueue(`voice:${meetingId}`),
+      voiceWorkQueue?.enqueue(meetingId),
   });
   db.recoverInterruptedMeetingAnalysisRuns();
   const audioRetention = createAudioRetentionManager({
@@ -1141,16 +1151,82 @@ app.whenReady().then(async () => {
       return () => activeAudioDeletions.delete(meetingId);
     },
   });
+  voiceWorkQueue = createVoiceWorkQueue({
+    canRun: (active) =>
+      Boolean(parakeetFinalClient) &&
+      canRunVoiceWork({
+        active,
+        runtime: parakeetRuntimeHost?.diagnostics(),
+        pauses: knowledgeSynthesisPause.snapshot(),
+        transcriptionCount: activeTranscriptionCount,
+        onBattery: powerMonitor.isOnBatteryPower(),
+        thermalState: powerMonitor.getCurrentThermalState(),
+        cpuLoad: os.loadavg()[0],
+        cpuCount: os.cpus().length,
+      }),
+    hasMemoryCapacity: async () => {
+      const memory = await probeAvailableMemory();
+      return (
+        memory.availableMemoryBytes >=
+        Math.max(2 * 1024 ** 3, os.totalmem() * 0.1)
+      );
+    },
+    run: async (meetingId, signal) => {
+      backgroundVoiceCandidateActive = true;
+      idleDreamingCoordinator?.notifyForegroundActivity();
+      try {
+        await handleSpeakerVoiceRequest(
+          'SPEAKER_VOICE_GET_SUGGESTIONS',
+          { meetingId },
+          speakerVoiceDependencies(true, signal),
+        );
+        const personIds = new Set(
+          (
+            getApplicationDatabase()
+              .prepare(
+                `SELECT json_extract(payload, '$.personId') AS person_id
+             FROM identity_bindings WHERE meeting_id = ?
+               AND json_valid(payload)
+               AND json_extract(payload, '$.source') = 'user'
+               AND json_extract(payload, '$.individual') = 1
+               AND json_type(payload, '$.personId') = 'text'`,
+              )
+              .all(meetingId) as Array<{ person_id: string }>
+          ).map((row) => row.person_id),
+        );
+        for (const personId of personIds) {
+          signal.throwIfAborted();
+          await reconcileConfirmedSpeakerVoiceProfiles(
+            speakerVoiceDependencies(true, signal),
+            getApplicationDatabase(),
+            personId,
+          );
+        }
+        signal.throwIfAborted();
+        // Transient native failures already have a durable backoff. Retain the
+        // meeting in the queue so it retries without another UI visit.
+        const retryable = getApplicationDatabase()
+          .prepare(
+            `SELECT 1 FROM speaker_voice_candidate_attempts a
+           JOIN meetings m ON m.id = a.meeting_id
+           WHERE a.meeting_id = ? AND a.source_revision = m.capture_journal_generation
+             AND a.extraction_version = 'single-pass-v2'
+             AND a.status = 'retryable_failure' LIMIT 1`,
+          )
+          .get(meetingId);
+        if (retryable) throw new Error('voice_retry_pending');
+      } finally {
+        backgroundVoiceCandidateActive = false;
+      }
+    },
+  });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
     getPolicy: () => ({
       systemIdleSeconds: powerMonitor.getSystemIdleTime(),
       onBattery: powerMonitor.isOnBatteryPower(),
       thermalState: powerMonitor.getCurrentThermalState(),
       paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
-        ([reason, count]) =>
-          !backgroundVoiceCandidateActive &&
-          reason !== 'llm_active' &&
-          Number(count) > 0,
+        ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
       ),
     }),
     run: async (workId, signal) => {
@@ -1181,42 +1257,7 @@ app.whenReady().then(async () => {
         return;
       }
       if (workId.startsWith('voice:')) {
-        signal.throwIfAborted();
-        const meetingId = workId.slice('voice:'.length);
-        backgroundVoiceCandidateActive = true;
-        idleDreamingCoordinator?.notifyForegroundActivity();
-        try {
-          await handleSpeakerVoiceRequest(
-            'SPEAKER_VOICE_GET_SUGGESTIONS',
-            { meetingId },
-            speakerVoiceDependencies(true, signal),
-          );
-          const personIds = new Set(
-            (
-              getApplicationDatabase()
-                .prepare(
-                  `SELECT json_extract(payload, '$.personId') AS person_id
-                   FROM identity_bindings
-                   WHERE meeting_id = ?
-                     AND json_valid(payload)
-                     AND json_extract(payload, '$.source') = 'user'
-                     AND json_extract(payload, '$.individual') = 1
-                     AND json_type(payload, '$.personId') = 'text'`,
-                )
-                .all(meetingId) as Array<{ person_id: string }>
-            ).map((row) => row.person_id),
-          );
-          for (const personId of personIds) {
-            signal.throwIfAborted();
-            await reconcileConfirmedSpeakerVoiceProfiles(
-              speakerVoiceDependencies(true, signal),
-              getApplicationDatabase(),
-              personId,
-            );
-          }
-        } finally {
-          backgroundVoiceCandidateActive = false;
-        }
+        voiceWorkQueue?.enqueue(workId.slice('voice:'.length));
         return;
       }
       if (workId.startsWith('doc:')) {
@@ -1363,6 +1404,7 @@ app.whenReady().then(async () => {
             if (doc) queueKnowledgeDocRefresh(doc.id);
           }
           backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`);
+          voiceWorkQueue?.enqueue(meetingId);
         },
       });
       if (
@@ -1494,6 +1536,16 @@ app.whenReady().then(async () => {
     freeMemoryBytes: os.freemem(),
     totalMemoryBytes: os.totalmem(),
     ...(await probeAvailableMemory()),
+    voiceWork: {
+      pendingCount: voiceWorkQueue?.snapshot().pendingMeetingIds.length ?? 0,
+      active: Boolean(voiceWorkQueue?.snapshot().activeMeetingId),
+      lastError: voiceWorkQueue?.snapshot().lastError ?? null,
+      runtime: parakeetRuntimeHost?.diagnostics(),
+      pauseReasons: knowledgeSynthesisPause.snapshot(),
+      activeTranscriptionCount,
+      cpuLoad: os.loadavg()[0],
+      cpuCount: os.cpus().length,
+    },
   }));
 
   ipcMain.handle('TRANSCRIPTION_PREPARE_FINAL', async () => {

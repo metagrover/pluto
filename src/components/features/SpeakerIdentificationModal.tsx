@@ -758,7 +758,8 @@ export const SpeakerIdentificationModal = ({
                         </span>
                         {boundPerson && pendingVoiceSpeakers.has(speaker) ? (
                           <p className="mt-1 text-[11px] text-pro-text-muted">
-                            Voice enrollment pending until your Mac is idle.
+                            Voice enrollment pending. Waiting for processing
+                            capacity.
                           </p>
                         ) : null}
                       </div>
@@ -909,7 +910,7 @@ export const SpeakerIdentificationModal = ({
                     ? 'Checking saved voice profiles…'
                     : speakerCandidates[currentSpeaker]?.analysisStatus ===
                         'queued'
-                      ? 'Voice analysis will run later when your Mac is idle.'
+                      ? 'Voice analysis is queued until processing capacity is available.'
                       : speakerCandidates[currentSpeaker]?.analysisStatus ===
                           'retryable_failure'
                         ? 'Voice analysis was interrupted. Pluto will retry automatically.'

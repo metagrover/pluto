@@ -301,7 +301,7 @@ describe('PeopleTab Voice Profile integration', () => {
     );
   });
 
-  it('shows when voice enrollment is waiting for idle processing', async () => {
+  it('refreshes pending voice enrollment when processing completes', async () => {
     vi.useFakeTimers();
     voiceApi.getSpeakerVoiceProfileOverview.mockResolvedValueOnce({
       profiles: [],
@@ -312,7 +312,7 @@ describe('PeopleTab Voice Profile integration', () => {
     await renderTab();
 
     expect(host.textContent).toContain(
-      'Voice enrollment pending. Pluto will finish it when your Mac is idle.',
+      'Voice enrollment pending. Pluto will finish it when processing capacity is available.',
     );
     expect(host.textContent).not.toContain(
       'No voice profile enrolled for this person.',

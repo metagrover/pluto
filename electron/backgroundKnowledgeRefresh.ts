@@ -19,6 +19,8 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
   quietMs?: number;
   retryMs?: number;
   monitorMs?: number;
+  // Resource-admitted work can continue through ordinary keyboard/mouse use.
+  ignoreForegroundActivity?: boolean;
   now?: () => number;
   onError?: (error: unknown, meetingId: string) => void;
 }) => {
@@ -115,6 +117,7 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
     },
     notifyForegroundActivity() {
       if (closed) return;
+      if (options.ignoreForegroundActivity) return;
       lastForegroundActivityAt = now();
       active?.controller.abort(
         new DOMException('Foreground activity resumed', 'AbortError'),

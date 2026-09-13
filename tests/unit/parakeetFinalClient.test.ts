@@ -79,6 +79,33 @@ const speakerEvidenceSuccess = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('bounds speaker cancellation and grants a fresh live worker after a stuck inference', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const nextChild = new FakeChild();
+    const spawn = vi.fn().mockReturnValueOnce(child).mockReturnValue(nextChild);
+    const runtimeHost = makeRuntimeHost({ paths, spawn });
+    const client = new ParakeetFinalClient({ paths, runtimeHost });
+    const evidence = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    const failed = expect(evidence).rejects.toThrow(
+      'parakeet_process_terminated',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const live = runtimeHost.startRecordingLive();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await failed;
+    const lease = await live;
+    expect(child.kill).toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(runtimeHost.diagnostics().state).toBe('live');
+    await lease.release();
+    runtimeHost.shutdown();
+    vi.useRealTimers();
+  });
   it('forwards only progress correlated to its active prepare request', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });

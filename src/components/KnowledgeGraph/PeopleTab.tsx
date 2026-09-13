@@ -1289,8 +1289,8 @@ export const PersonDossier = ({
           </div>
         ) : voiceReconciliationStatus === 'queued' ? (
           <p className="mt-4 text-sm text-pro-text-muted">
-            Voice enrollment pending. Pluto will finish it when your Mac is
-            idle.
+            Voice enrollment pending. Pluto will finish it when processing
+            capacity is available.
           </p>
         ) : voiceReconciliationStatus === 'evidence_unavailable' ? (
           <p className="mt-4 text-sm text-pro-text-muted">

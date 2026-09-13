@@ -735,6 +735,37 @@ describe('speaker voice IPC handlers', () => {
     ).toEqual({ count: 0 });
   });
 
+  it('keeps capacity cancellation retryable without recording a native failure', async () => {
+    saveMeetingSpeakerCandidates(meetingId, sourceRevision, [
+      {
+        ...dummyCandidate,
+        provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+      },
+    ]);
+    const controller = new AbortController();
+    const run = handleSpeakerVoiceRequest(
+      'SPEAKER_VOICE_GET_SUGGESTIONS',
+      { meetingId },
+      {
+        signal: controller.signal,
+        awaitCandidateCleanup: true,
+        buildEnrollmentCandidate: async () => {
+          controller.abort(new Error('foreground_preempted'));
+          throw controller.signal.reason;
+        },
+      },
+    );
+    await expect(run).rejects.toThrow('foreground_preempted');
+    expect(
+      getVoiceCandidateAttempt({
+        meetingId,
+        speaker: 'Remote Speaker 1',
+        sourceRevision,
+        extractionVersion: ENROLLMENT_EXTRACTION_VERSION,
+      }),
+    ).toBeNull();
+  });
+
   it('times out long-running candidate construction during enrollment', async () => {
     const buildEnrollmentCandidate = vi.fn(
       async ({ signal }: { signal?: AbortSignal }) => {

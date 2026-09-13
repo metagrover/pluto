@@ -429,7 +429,14 @@ export class ParakeetFinalClient {
     const lease = acquired.lease;
     const id = this.requestID('speaker-evidence');
     let settled: Promise<void> | null = null;
+    let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
     const cancel = () => {
+      if (cancellationTimer) return;
+      // CoreML may not observe cancellation until an inference finishes. Give
+      // foreground work a bounded handoff, invalidating only this lease's worker.
+      cancellationTimer = setTimeout(() => {
+        void lease.invalidateWorker('parakeet_speaker_cancel_timeout');
+      }, 1_000);
       const cancelID = this.requestID('cancel');
       this.runtimeHost.transport.ignoreResponse(cancelID);
       this.runtimeHost.transport.notify({
@@ -442,16 +449,7 @@ export class ParakeetFinalClient {
     try {
       if (request.signal?.aborted) throw new Error('parakeet_cancelled');
       lease.setPreemptionHandler(async () => {
-        const cancelID = this.requestID('cancel');
-        const response = await this.runtimeHost.transport.request({
-          schemaVersion: 1,
-          id: cancelID,
-          method: 'cancel',
-          targetId: id,
-        });
-        if (!response.ok && response.error?.code !== 'parakeet_cancelled') {
-          this.requireSuccess(response);
-        }
+        cancel();
         if (!settled) throw new Error('parakeet_protocol_invalid');
         await settled;
       });
@@ -473,6 +471,7 @@ export class ParakeetFinalClient {
       return this.parseSpeakerEvidence(result.speakerEvidence);
     } finally {
       request.signal?.removeEventListener('abort', cancel);
+      if (cancellationTimer) clearTimeout(cancellationTimer);
       await lease.release();
     }
   }

@@ -43,6 +43,8 @@ export const SPEAKER_VOICE_CHANNELS = [
 export type SpeakerVoiceChannel = (typeof SPEAKER_VOICE_CHANNELS)[number];
 
 export interface SpeakerVoiceDependencies {
+  signal?: AbortSignal;
+  awaitCandidateCleanup?: boolean;
   dbInstance?: Database.Database;
   isFeatureFlagEnabled?: () => boolean;
   getMeeting?: (meetingId: string) => db.PersistedMeeting | null;
@@ -207,6 +209,7 @@ const buildCandidateWithTimeout = async (
   };
 } | null> => {
   if (!deps?.buildEnrollmentCandidate) return null;
+  deps.signal?.throwIfAborted();
   const abortController = new AbortController();
   let timeoutId: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -215,16 +218,20 @@ const buildCandidateWithTimeout = async (
       reject(new Error('speaker_enrollment_timeout'));
     }, timeoutMs);
   });
+  const build = deps.buildEnrollmentCandidate({
+    meetingId: input.meetingId,
+    speaker: input.speaker,
+    signal: deps.signal
+      ? AbortSignal.any([deps.signal, abortController.signal])
+      : abortController.signal,
+  });
   try {
-    return await Promise.race([
-      deps.buildEnrollmentCandidate({
-        meetingId: input.meetingId,
-        speaker: input.speaker,
-        signal: abortController.signal,
-      }),
-      timeoutPromise,
-    ]);
+    const result = await Promise.race([build, timeoutPromise]);
+    deps.signal?.throwIfAborted();
+    return result;
   } catch (err) {
+    if (deps.awaitCandidateCleanup) await build.catch(() => undefined);
+    deps.signal?.throwIfAborted();
     if (abortController.signal.aborted) {
       throw new Error('speaker_enrollment_timeout');
     }
@@ -501,6 +508,7 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
                 deps?.reconciliationTimeoutMs ?? 15000,
               );
             } catch (error) {
+              deps?.signal?.throwIfAborted();
               sawFailure = true;
               recordVoiceCandidateAttempt(
                 {
@@ -618,6 +626,7 @@ export async function reconcileConfirmedSpeakerVoiceProfiles(
           profiledPeople.add(personId);
           enrolledSources += 1;
         } catch (error) {
+          deps?.signal?.throwIfAborted();
           sawFailure = true;
           console.warn(
             '[Pluto][SpeakerVoice] confirmed profile reconciliation failed',
@@ -874,6 +883,7 @@ export async function handleSpeakerVoiceRequest(
               };
             }
           } catch (error) {
+            deps?.signal?.throwIfAborted();
             const reason = candidateFailureReason(error);
             const retryAfter = Date.now() + CANDIDATE_RETRY_DELAY_MS;
             recordVoiceCandidateAttempt(
@@ -1087,6 +1097,7 @@ export async function handleSpeakerVoiceRequest(
             timeoutMs,
           );
         } catch (error) {
+          deps?.signal?.throwIfAborted();
           const meetingGen = getMeetingDependency(
             deps,
             d,
@@ -1299,11 +1310,11 @@ export async function handleSpeakerVoiceRequest(
               );
               if (previousAttempt?.status === 'abstained') {
                 reconciliation.set(canonicalPersonId, 'evidence_unavailable');
-              } else if (previousAttempt?.status === 'retryable_failure') {
-                reconciliation.set(canonicalPersonId, 'failed');
               } else if (deps.scheduleCandidateBackfill) {
                 deps.scheduleCandidateBackfill(pendingBinding.meeting_id);
                 reconciliation.set(canonicalPersonId, 'queued');
+              } else if (previousAttempt?.status === 'retryable_failure') {
+                reconciliation.set(canonicalPersonId, 'failed');
               }
             }
           }
