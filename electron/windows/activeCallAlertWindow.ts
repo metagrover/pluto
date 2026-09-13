@@ -2,9 +2,17 @@ import path from 'node:path';
 import { BrowserWindow, screen } from 'electron';
 import type { Rectangle } from 'electron';
 
-const ALERT_WIDTH = 320;
-const ALERT_HEIGHT = 80;
-const ALERT_MARGIN = 14;
+export const ALERT_WIDTH = 360;
+export const ALERT_HEIGHT = 80;
+export const ALERT_MARGIN = 14;
+
+export type CalendarPromptAlertPayload = {
+  occurrenceKey: string;
+  title: string;
+  start: string;
+  hasConferenceLink?: boolean;
+  attendeeCount?: number;
+};
 
 type ActiveCallAlertControllerOptions = {
   preloadPath: string;
@@ -18,6 +26,7 @@ export const createActiveCallAlertController = ({
   rendererDist,
 }: ActiveCallAlertControllerOptions) => {
   let activeCallAlertWin: BrowserWindow | null = null;
+  let currentAlertType: 'call' | 'calendar' | null = null;
 
   const enforceAlertBounds = (win: BrowserWindow, x: number, y: number) => {
     if (win.isDestroyed()) return;
@@ -32,6 +41,7 @@ export const createActiveCallAlertController = ({
   };
 
   const close = () => {
+    currentAlertType = null;
     if (!activeCallAlertWin || activeCallAlertWin.isDestroyed()) {
       activeCallAlertWin = null;
       return;
@@ -40,7 +50,15 @@ export const createActiveCallAlertController = ({
     activeCallAlertWin = null;
   };
 
-  const show = (appName: string, anchorBounds?: Rectangle) => {
+  const closeCalendarPrompt = () => {
+    if (currentAlertType === 'calendar') {
+      close();
+    }
+  };
+
+  const createAlertWindow = (
+    anchorBounds?: Rectangle,
+  ): { win: BrowserWindow; x: number; y: number } => {
     close();
 
     const display = anchorBounds
@@ -98,28 +116,74 @@ export const createActiveCallAlertController = ({
       clearTimeout(revealFallbackTimer);
       if (activeCallAlertWin === alertWin) {
         activeCallAlertWin = null;
+        currentAlertType = null;
       }
     });
     alertWin.webContents.once('did-finish-load', () => {
       reveal();
     });
 
+    alertWin.once('ready-to-show', () => {
+      reveal();
+    });
+
+    return { win: alertWin, x, y };
+  };
+
+  const show = (appName: string, anchorBounds?: Rectangle) => {
+    const { win: alertWin } = createAlertWindow(anchorBounds);
+    currentAlertType = 'call';
+
     if (devServerUrl) {
       const base = new URL('active-call-alert.html', devServerUrl).toString();
-      void alertWin.loadURL(`${base}?appName=${encodeURIComponent(appName)}`);
+      void alertWin.loadURL(
+        `${base}?type=call&appName=${encodeURIComponent(appName)}`,
+      );
     } else {
       void alertWin.loadFile(
         path.join(rendererDist, 'active-call-alert.html'),
         {
-          query: { appName },
+          query: { type: 'call', appName },
         },
       );
     }
-
-    alertWin.once('ready-to-show', () => {
-      reveal();
-    });
   };
 
-  return { show, close };
+  const showCalendarPrompt = (
+    payload: CalendarPromptAlertPayload,
+    anchorBounds?: Rectangle,
+  ) => {
+    const { win: alertWin } = createAlertWindow(anchorBounds);
+    currentAlertType = 'calendar';
+
+    const queryParams: Record<string, string> = {
+      type: 'calendar',
+      occurrenceKey: payload.occurrenceKey,
+      title: payload.title,
+      start: payload.start,
+    };
+    if (payload.hasConferenceLink) {
+      queryParams.hasLink = 'true';
+    }
+    if (typeof payload.attendeeCount === 'number') {
+      queryParams.attendees = String(payload.attendeeCount);
+    }
+
+    if (devServerUrl) {
+      const url = new URL('active-call-alert.html', devServerUrl);
+      for (const [k, v] of Object.entries(queryParams)) {
+        url.searchParams.set(k, v);
+      }
+      void alertWin.loadURL(url.toString());
+    } else {
+      void alertWin.loadFile(
+        path.join(rendererDist, 'active-call-alert.html'),
+        {
+          query: queryParams,
+        },
+      );
+    }
+  };
+
+  return { show, showCalendarPrompt, close, closeCalendarPrompt };
 };

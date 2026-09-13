@@ -2394,6 +2394,73 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle(
+    'SHOW_CALENDAR_PROMPT_ALERT',
+    async (
+      _event,
+      payload?: {
+        event?: {
+          occurrenceKey?: string;
+          title?: string;
+          start?: string;
+          hasConferenceLink?: boolean;
+          attendeeCount?: number;
+        };
+      },
+    ) => {
+      const promptEvent = payload?.event;
+      if (!promptEvent || typeof promptEvent.occurrenceKey !== 'string') {
+        return false;
+      }
+      const anchorBounds =
+        win && !win.isDestroyed() ? win.getBounds() : undefined;
+      activeCallAlertController.showCalendarPrompt(
+        {
+          occurrenceKey: promptEvent.occurrenceKey,
+          title: promptEvent.title?.trim() || 'Upcoming Meeting',
+          start: promptEvent.start || new Date().toISOString(),
+          hasConferenceLink: Boolean(promptEvent.hasConferenceLink),
+          attendeeCount: promptEvent.attendeeCount,
+        },
+        anchorBounds,
+      );
+      return true;
+    },
+  );
+
+  ipcMain.handle('HIDE_CALENDAR_PROMPT_ALERT', async () => {
+    activeCallAlertController.closeCalendarPrompt();
+    return true;
+  });
+
+  ipcMain.on(
+    'CALENDAR_PROMPT_ALERT_ACTION',
+    (
+      _event,
+      payload?: {
+        action?: 'record' | 'dismiss';
+        occurrenceKey?: string;
+      },
+    ) => {
+      if (payload?.action === 'record') {
+        if (win) {
+          if (!win.isVisible()) win.show();
+          win.focus();
+          win.webContents.send('CALENDAR_PROMPT_START_RECORDING', {
+            occurrenceKey: payload.occurrenceKey,
+          });
+        }
+      } else if (payload?.action === 'dismiss') {
+        if (win) {
+          win.webContents.send('CALENDAR_PROMPT_DISMISSED', {
+            occurrenceKey: payload?.occurrenceKey,
+          });
+        }
+      }
+      activeCallAlertController.closeCalendarPrompt();
+    },
+  );
+
   ipcMain.handle('BOOT_PROBE_STATUS', () => bootProbeDone);
   ipcMain.handle('BOOT_PROBE_MARK', () => {
     bootProbeDone = true;

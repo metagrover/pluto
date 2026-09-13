@@ -117,6 +117,9 @@ body {
   letter-spacing: 0;
   color: var(--alert-text-main);
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-row {
@@ -124,6 +127,24 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.subtitle-row {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--alert-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dot-sep {
+  opacity: 0.4;
+  margin: 0 1px;
 }
 
 .app {
@@ -161,8 +182,28 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   transition: background-color 0.18s cubic-bezier(0.22, 1, 0.36, 1), transform
     0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.record-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #fb7185;
+  flex-shrink: 0;
+  animation: alert-record-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes alert-record-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .take-notes:hover {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
 
 // Core
@@ -34,6 +34,7 @@ import {
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
 import { CalendarStartPromptBanner } from './components/alerts/CalendarStartPromptBanner';
+import { hasConferenceLink } from './utils/conferenceUrl';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -999,17 +1000,79 @@ function App() {
     promptEnabled: calendarPromptEnabled,
   });
 
-  const handleStartFromPrompt = async (event: CalendarEvent) => {
-    dismissPrompt(event.occurrenceKey);
-    activeCalendarEventRef.current = event;
-    setActiveCalendarEvent(event);
-    setMeetingTitle(event.title || 'Meeting');
-    setMeetingParticipants([]);
-    setParticipantInput('');
-    if (startSessionRef.current) {
-      await startSessionRef.current();
+  const handleStartFromPrompt = useCallback(
+    async (event: CalendarEvent) => {
+      dismissPrompt(event.occurrenceKey);
+      activeCalendarEventRef.current = event;
+      setActiveCalendarEvent(event);
+      setMeetingTitle(event.title || 'Meeting');
+      setMeetingParticipants([]);
+      setParticipantInput('');
+      if (startSessionRef.current) {
+        await startSessionRef.current();
+      }
+    },
+    [dismissPrompt],
+  );
+
+  // Synchronize calendar meeting prompt with the native macOS notification alert window (outside the app)
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+
+    if (activePromptEvent && !isRecording) {
+      void window.ipcRenderer.invoke('SHOW_CALENDAR_PROMPT_ALERT', {
+        event: {
+          occurrenceKey: activePromptEvent.occurrenceKey,
+          title: activePromptEvent.title || 'Upcoming Meeting',
+          start: activePromptEvent.start,
+          hasConferenceLink: hasConferenceLink(activePromptEvent),
+          attendeeCount: activePromptEvent.attendees?.length ?? 0,
+        },
+      });
+    } else {
+      void window.ipcRenderer.invoke('HIDE_CALENDAR_PROMPT_ALERT');
     }
-  };
+  }, [activePromptEvent, isRecording]);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+
+    const handleRecordIpc = async (
+      _event: unknown,
+      payload?: { occurrenceKey?: string },
+    ) => {
+      const target =
+        calendarEvents.find(
+          (e) => e.occurrenceKey === payload?.occurrenceKey,
+        ) || activePromptEvent;
+      if (target) {
+        await handleStartFromPrompt(target);
+      }
+    };
+
+    const handleDismissIpc = (
+      _event: unknown,
+      payload?: { occurrenceKey?: string },
+    ) => {
+      if (payload?.occurrenceKey) {
+        dismissPrompt(payload.occurrenceKey);
+      }
+    };
+
+    const unsubRecord = window.ipcRenderer.on(
+      'CALENDAR_PROMPT_START_RECORDING',
+      handleRecordIpc,
+    );
+    const unsubDismiss = window.ipcRenderer.on(
+      'CALENDAR_PROMPT_DISMISSED',
+      handleDismissIpc,
+    );
+
+    return () => {
+      unsubRecord?.();
+      unsubDismiss?.();
+    };
+  }, [calendarEvents, activePromptEvent, handleStartFromPrompt, dismissPrompt]);
 
   const handleRecordingChange = (recording: boolean) => {
     const wasRecording = isRecording;
@@ -1928,7 +1991,7 @@ function App() {
         />
       )}
 
-      {activePromptEvent && !isRecording && (
+      {activePromptEvent && !isRecording && !window.ipcRenderer && (
         <CalendarStartPromptBanner
           event={activePromptEvent}
           onStartRecording={handleStartFromPrompt}
