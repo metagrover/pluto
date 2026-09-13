@@ -1211,6 +1211,32 @@ describe('UnifiedLLMProvider', () => {
     expect(maxTokens).toBe(50);
   });
 
+  it('keeps Ollama title generation short and non-thinking', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse({ models: [{ name: 'gemma4:12b' }] });
+      }
+      requestBody = parseRequestBody(init);
+      return jsonResponse({ response: 'Quarterly Roadmap Review' });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    const title = await provider.generateTitle('The roadmap review concluded.');
+
+    expect(title).toBe('Quarterly Roadmap Review');
+    expect(requestBody.think).toBe(false);
+    expect(requestBody.options).toMatchObject({
+      num_ctx: 8192,
+      num_predict: 64,
+    });
+    expect(requestBody.prompt).toContain(
+      'Never return a generic placeholder such as Meeting',
+    );
+  });
+
   it('strips a model response label from a generated title', async () => {
     installFetchMock(() =>
       jsonResponse({ content: [{ text: 'Title: Roadmap Review' }] }),
@@ -1352,10 +1378,10 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(budget.num_predict).toBe(2048);
   });
 
-  it('uses separate bounded budgets for fast and deep Ask Pluto answers', () => {
+  it('uses separate bounded budgets for titles and Ask Pluto answers', () => {
     expect(calculateOllamaContextBudget('transcript', 'title')).toEqual({
       num_ctx: 8192,
-      num_predict: 2500,
+      num_predict: 64,
     });
     expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
       num_ctx: 4096,

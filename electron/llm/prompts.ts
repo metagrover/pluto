@@ -184,6 +184,7 @@ The title should:
 - Capture the main topic or purpose
 - Prefer sustained work topics over brief rapport, greetings, schedule chatter, travel, health, or family check-ins unless those personal topics are the main sustained subject
 - If a one-on-one covers several work topics, use the dominant work topic or a neutral one-on-one title
+- Never return a generic placeholder such as Meeting, New Meeting, or Untitled Meeting
 - Be professional and clear
 - Not include quotes or special characters
 - Be in title case

@@ -1425,7 +1425,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (
       task === 'queryClassification' ||
       task === 'projectScopeReview' ||
-      task === 'commitmentReconciliation'
+      task === 'commitmentReconciliation' ||
+      task === 'title'
     )
       requestBody.think = false;
     if (task === 'askPluto') requestBody.think = false;
@@ -2044,21 +2045,23 @@ export function calculateOllamaContextBudget(
   const outputTokenBudget =
     task === 'queryClassification'
       ? 128
-      : task === 'askPlutoLive'
-        ? 768
-        : task === 'askPluto'
-          ? 192
-          : task === 'askPlutoDeep'
-            ? 512
-            : task === 'analysisEditorial'
-              ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-              : task === 'terminologyReconciliation'
-                ? 2048
-                : task === 'knowledgeDoc' ||
-                    task === 'structuredAnalysis' ||
-                    task === 'summary'
-                  ? 4096
-                  : 2500;
+      : task === 'title'
+        ? 64
+        : task === 'askPlutoLive'
+          ? 768
+          : task === 'askPluto'
+            ? 192
+            : task === 'askPlutoDeep'
+              ? 512
+              : task === 'analysisEditorial'
+                ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
+                : task === 'terminologyReconciliation'
+                  ? 2048
+                  : task === 'knowledgeDoc' ||
+                      task === 'structuredAnalysis' ||
+                      task === 'summary'
+                    ? 4096
+                    : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
