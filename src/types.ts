@@ -1,3 +1,4 @@
+import type { MeetingNotesSpeakerReferences } from './utils/meetingNotesSpeakerReferences';
 import type { TranscriptLifecycleStatus } from './utils/transcriptIntegrity';
 
 export type MeetingNotesPreview = {
@@ -166,6 +167,7 @@ export interface AnalysisGenerationMetadata {
       }
     >;
   };
+  speaker_references?: MeetingNotesSpeakerReferences;
   prose_review?: {
     schema_version: 1;
     items: Array<{

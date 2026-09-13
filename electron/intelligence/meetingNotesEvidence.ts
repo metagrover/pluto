@@ -82,6 +82,7 @@ export const resolveSavedMeetingEvidencePolicy = (
 
 export const buildMeetingNotesEvidenceDocument = (
   meeting: MeetingNotesEvidenceSource,
+  speakerDisplayNames: Readonly<Record<string, string>> = {},
 ): MeetingNotesEvidenceDocument => {
   const v3 = parseAnalysisDocumentV3Json(meeting.analysis_json);
   const mid = parseMidEvidence(meeting.mid_json);
@@ -140,6 +141,7 @@ export const buildMeetingNotesEvidenceDocument = (
         v3: normalizedV3,
         userNotes: meeting.user_notes || '',
         editsMap: parseUserEditsJson(meeting.user_edits_json),
+        displayNames: speakerDisplayNames,
       })
     : null;
   const blocks = notesDocument?.sections.flatMap((section) => section.blocks);

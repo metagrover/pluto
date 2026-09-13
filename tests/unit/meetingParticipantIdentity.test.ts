@@ -166,4 +166,70 @@ describe('singleton manual participant identity', () => {
       trustedUserTerms: ['Alex'],
     });
   });
+
+  it('projects the capture-time self person for a local meeting', () => {
+    expect(
+      buildMeetingNotesIdentityProjection({
+        transcriptJson: transcript(singletonRemote),
+        bindings: [],
+        people: [
+          { id: 'person-recorded-me', name: 'Alex' },
+          { id: 'person-current-me', name: 'Someone else' },
+        ],
+        capture: { origin: 'local', selfPersonId: 'person-recorded-me' },
+        currentSelfPersonId: 'person-current-me',
+      }),
+    ).toEqual({
+      speakerDisplayNames: { Me: 'Alex' },
+      trustedUserTerms: ['Alex'],
+    });
+  });
+
+  it('uses the current self person only for a local capture without frozen identity', () => {
+    expect(
+      buildMeetingNotesIdentityProjection({
+        transcriptJson: transcript(singletonRemote),
+        bindings: [],
+        people: [{ id: 'person-me', name: 'Alex' }],
+        capture: { origin: 'local', selfPersonId: null },
+        currentSelfPersonId: 'person-me',
+      }).speakerDisplayNames,
+    ).toEqual({ Me: 'Alex' });
+  });
+
+  it.each(['imported', 'unknown'] as const)(
+    'does not project workspace self identity onto an %s meeting',
+    (origin) => {
+      expect(
+        buildMeetingNotesIdentityProjection({
+          transcriptJson: transcript(singletonRemote),
+          bindings: [],
+          people: [{ id: 'person-me', name: 'Alex' }],
+          capture: { origin, selfPersonId: null },
+          currentSelfPersonId: 'person-me',
+        }).speakerDisplayNames,
+      ).toEqual({});
+    },
+  );
+
+  it('respects an explicit unresolved Me binding over the local fallback', () => {
+    expect(
+      buildMeetingNotesIdentityProjection({
+        transcriptJson: transcript(singletonRemote),
+        bindings: [
+          {
+            speaker: 'Me',
+            personId: null,
+            individual: true,
+            source: 'user',
+            sourceRevision: 'user-choice',
+            evidence: [],
+          },
+        ],
+        people: [{ id: 'person-me', name: 'Alex' }],
+        capture: { origin: 'local', selfPersonId: 'person-me' },
+        currentSelfPersonId: 'person-me',
+      }).speakerDisplayNames,
+    ).toEqual({});
+  });
 });

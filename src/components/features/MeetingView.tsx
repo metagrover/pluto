@@ -965,11 +965,7 @@ const SelectedMeetingView = ({
   useEffect(() => {
     let cancelled = false;
     const meetingId = String(selectedMeeting.id);
-    if (
-      !meetingId ||
-      reviewableSpeakers.length === 0 ||
-      !window?.ipcRenderer?.invoke
-    ) {
+    if (!meetingId || !window?.ipcRenderer?.invoke) {
       return;
     }
 
@@ -995,6 +991,33 @@ const SelectedMeetingView = ({
     selectedMeeting.transcript_validated_at,
     reviewableSpeakers.length,
   ]);
+
+  useEffect(
+    () =>
+      window.ipcRenderer.on(
+        'MEETING_IDENTITY_UPDATED',
+        (_event, updatedMeetingId) => {
+          const meetingId = String(selectedMeeting.id);
+          if (
+            updatedMeetingId != null &&
+            String(updatedMeetingId) !== meetingId
+          ) {
+            return;
+          }
+          void getMeetingIdentity(meetingId)
+            .then((identity) =>
+              updateSpeakerDisplayNames(extractSpeakerDisplayNames(identity)),
+            )
+            .catch((error) => {
+              console.error(
+                'Failed to refresh speaker identity for meeting:',
+                error,
+              );
+            });
+        },
+      ),
+    [selectedMeeting.id, updateSpeakerDisplayNames],
+  );
 
   useEffect(() => {
     let cancelled = false;

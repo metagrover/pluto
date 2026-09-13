@@ -35,6 +35,33 @@ describe('saved meeting evidence policy', () => {
 });
 
 describe('buildMeetingNotesEvidenceDocument', () => {
+  it('projects canonical speaker labels for saved-note consumers', () => {
+    const document = buildMeetingNotesEvidenceDocument(
+      {
+        id: 'meeting-identity',
+        title: 'Project review',
+        analysis_json: JSON.stringify({
+          analysis_schema_version: 3,
+          overview: "Me's project is ready. Them: I will review it.",
+          topics: [],
+          all_decisions: [],
+          all_action_items: [],
+          meeting_type: 'one_on_one',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+        }),
+      },
+      { Me: 'Alex', Them: 'Jordan' },
+    );
+
+    expect(document.notesText).toContain("Alex's project is ready");
+    expect(document.notesText).toContain('Jordan: I will review it');
+  });
+
   it('projects user-edited note blocks without reading transcript text', () => {
     const document = buildMeetingNotesEvidenceDocument({
       id: 'meeting-1',

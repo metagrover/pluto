@@ -16,10 +16,15 @@ import {
   getMeetingFtsIntegrity,
   getMeetingNotesFtsIntegrity,
   getTemporalMeetings,
+  identityStore,
+  listMeetingIdsForPersonIdentity,
+  refreshMeetingIdentityProjection,
   repairMeetingFtsIndex,
   saveMeeting,
   searchMeetingNotesFts,
   searchMeetingsFts,
+  updatePersonName,
+  upsertEntity,
 } from '../../electron/db';
 
 afterAll(() => {
@@ -83,6 +88,55 @@ describe('meeting search index integrity', () => {
 
     expect(searchMeetingNotesFts('"Orchid"')).toHaveLength(1);
     expect(searchMeetingNotesFts('"Cobalt"')).toHaveLength(0);
+  });
+
+  it('refreshes projected self identity without regenerating saved notes', () => {
+    const person = upsertEntity({
+      type: 'person',
+      name: 'Alex Search Identity',
+      dedupe_by_name: false,
+    });
+    identityStore.setSelfPersonId(person.id);
+    saveMeeting({
+      id: 'identity-projection-search',
+      title: 'Identity review',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Me', text: 'I am preparing the project.' }],
+      }),
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: "Me's project is ready.",
+        topics: [],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'one_on_one',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    });
+    identityStore.recordCapture(
+      'identity-projection-search',
+      'local',
+      person.id,
+    );
+
+    expect(refreshMeetingIdentityProjection('identity-projection-search')).toBe(
+      true,
+    );
+    expect(searchMeetingNotesFts('"Alex"')).toHaveLength(1);
+    expect(searchMeetingNotesFts('"Me"')).toHaveLength(0);
+
+    updatePersonName(person.id, 'Casey Search Identity');
+    expect(listMeetingIdsForPersonIdentity([person.id])).toContain(
+      'identity-projection-search',
+    );
+    refreshMeetingIdentityProjection('identity-projection-search');
+    expect(searchMeetingNotesFts('"Casey"')).toHaveLength(1);
+    expect(searchMeetingNotesFts('"Alex"')).toHaveLength(0);
   });
 
   it('refreshes the notes index from user edit overlays', () => {

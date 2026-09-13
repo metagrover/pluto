@@ -187,16 +187,21 @@ export const buildMeetingAskPlutoContext = ({
   query,
   entities = [],
   attentionItems = [],
+  speakerDisplayNames = {},
 }: {
   meeting: PersistedMeeting;
   query: string;
   entities?: MeetingAskPlutoContextEntity[];
   attentionItems?: MeetingAskPlutoAttentionItem[];
+  speakerDisplayNames?: Readonly<Record<string, string>>;
 }): MeetingAskPlutoContext => {
   const scope = buildScope(meeting);
   const evidenceItems: MeetingAskPlutoEvidenceItem[] = [];
   const mid = parseJsonObject<MidFrontmatter>(meeting.mid_json);
-  const notesDocument = buildMeetingNotesEvidenceDocument(meeting);
+  const notesDocument = buildMeetingNotesEvidenceDocument(
+    meeting,
+    speakerDisplayNames,
+  );
   const evidencePolicy = resolveSavedMeetingEvidencePolicy(
     query,
     notesDocument.hasUsableNotes,

@@ -55,7 +55,7 @@ describe('Electron bootstrap boundary', () => {
     expect(source).toContain('speakerVoiceDependencies(true, signal)');
   });
 
-  it('defers speaker correction notes to the cancellable idle queue', () => {
+  it('does not regenerate already-published notes after speaker correction', () => {
     const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
     const bindingHandler = source.slice(
       source.indexOf('onBindingChange: ({ meetingId, personIds })'),
@@ -67,6 +67,8 @@ describe('Electron bootstrap boundary', () => {
     expect(bindingHandler).toContain(
       'backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`)',
     );
+    expect(bindingHandler).toContain('if (!hasPublishedNotes)');
+    expect(bindingHandler).toContain('refreshMeetingIdentityProjection');
     expect(bindingHandler).not.toContain('generateAndPublishMeetingNotes');
     expect(source).toContain(
       "signal.addEventListener('abort', cancel, { once: true })",

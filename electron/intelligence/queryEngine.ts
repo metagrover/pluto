@@ -27,7 +27,10 @@ export const buildMeetingRetrievalResult = (
   meeting: dbModule.PersistedMeeting,
   label = 'Current meeting',
 ): RetrievalResult => {
-  const document = buildMeetingNotesEvidenceDocument(meeting);
+  const document = buildMeetingNotesEvidenceDocument(
+    meeting,
+    dbModule.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+  );
   const evidence: string[] = [`[${label}]: ${document.title}`];
   const occurredAt = meeting.started_at || meeting.created_at;
   if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);

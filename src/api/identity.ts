@@ -21,6 +21,7 @@ export interface IdentityState {
 
 export interface MeetingIdentityState extends IdentityState {
   meetingId: string;
+  speakerDisplayNames: Record<string, string>;
   speakers: string[];
   bindings: IdentityBinding[];
   capture: IdentityContext['capture'];

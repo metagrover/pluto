@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readDownstreamProcessingLease } from '../src/services/downstreamProcessingLease';
+import { buildMeetingNotesSpeakerReferences } from '../src/utils/meetingNotesSpeakerReferences';
 import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
@@ -974,6 +975,15 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             ) {
               analysis.title = generatedTitle;
             }
+          }
+          if (analysis.generation_metadata) {
+            analysis.generation_metadata.speaker_references =
+              buildMeetingNotesSpeakerReferences({
+                analysis,
+                transcriptJson: admittedMeeting.transcript_json,
+                speakerDisplayNames:
+                  admittedNotesInput.projection.speakerDisplayNames,
+              });
           }
           const published = dependencies.db.publishMeetingNotesIfCurrent({
             meetingId,

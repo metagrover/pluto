@@ -28,6 +28,10 @@ vi.mock('../../electron/db', () => ({
   getTemporalMeetings: vi.fn(),
   getMeetingsForEntity: vi.fn().mockReturnValue([]),
   getMeeting: vi.fn(),
+  getMeetingNotesIdentityProjection: vi.fn().mockReturnValue({
+    speakerDisplayNames: {},
+    trustedUserTerms: [],
+  }),
 }));
 
 vi.mock('../../electron/llm/factory', () => ({

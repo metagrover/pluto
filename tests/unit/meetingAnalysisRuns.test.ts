@@ -113,6 +113,118 @@ describe('meeting analysis run coordinator', () => {
     expect(JSON.stringify(publish.mock.calls)).not.toContain('Preview only');
   });
 
+  it('publishes grounded speaker references for later identity projection', async () => {
+    let running = false;
+    const publish = vi.fn().mockImplementation(() => {
+      running = false;
+      return true;
+    });
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'speaker-reference-meeting',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 'Me', text: 'My project is ready.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'source',
+          eligibilityRevision: 'eligibility',
+          userNotesHash: 'notes',
+        }),
+        getMeetingAnalysisRun: () =>
+          running
+            ? {
+                run_id: 'speaker-reference-run',
+                input_revision: 'revision',
+                notes_status: 'running',
+              }
+            : null,
+        beginMeetingAnalysisRun: () => {
+          running = true;
+        },
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: () => true,
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: publish,
+        getAllEntities: () => [],
+        getMeetingNotesIdentityProjection: () => ({
+          speakerDisplayNames: { Me: 'Alex' },
+          trustedUserTerms: ['Alex'],
+        }),
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      createRunId: () => 'speaker-reference-run',
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async () => ({
+          analysis_schema_version: 3,
+          overview: "Alex's project is ready.",
+          topics: [],
+          all_action_items: [],
+          all_decisions: [],
+          meeting_type: 'general',
+          quality: {
+            format_pass: true,
+            retry_count: 0,
+            fallback_used: false,
+            issues: [],
+          },
+          generation_metadata: {
+            provider: 'ollama',
+            model: 'test',
+            generation_path: 'single_pass',
+            prompt_version: 'test',
+            generated_at: '2026-09-13T00:00:00.000Z',
+            error_categories: [],
+            source_provenance: {
+              schema_version: 1,
+              source_revision: 'source',
+              blocks: {
+                overview: {
+                  id: 'overview',
+                  sources: [{ segment: 0, start: 0, end: 20 }],
+                },
+              },
+            },
+          },
+        }),
+      }),
+    });
+
+    await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'speaker-reference-meeting',
+      requestId: 'speaker-reference-request',
+      template: 'auto',
+      reason: 'automatic',
+    });
+
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analysis: expect.objectContaining({
+          generation_metadata: expect.objectContaining({
+            speaker_references: {
+              schema_version: 1,
+              blocks: {
+                overview: [
+                  {
+                    speaker: 'Me',
+                    sourceName: 'Alex',
+                    start: 0,
+                    end: 4,
+                  },
+                ],
+              },
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
   it('generates a bounded fallback title when published notes omit a generic meeting title', async () => {
     let running = false;
     const publish = vi.fn().mockImplementation(() => {

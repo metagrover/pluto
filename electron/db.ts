@@ -1062,8 +1062,85 @@ export const deleteLiveMeetingContextCheckpoint = (meetingId: string): void => {
  * Meeting Management
  */
 function refreshMeetingFts(meeting: PersistedMeeting) {
-  refreshMeetingSearchFts(db, meeting);
+  refreshMeetingSearchFts(
+    db,
+    meeting,
+    getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+  );
 }
+
+export const refreshMeetingIdentityProjection = (
+  meetingId: string | number,
+): boolean => {
+  const meeting = db
+    .prepare('SELECT * FROM meetings WHERE id = ?')
+    .get(String(meetingId)) as PersistedMeeting | undefined;
+  if (!meeting) return false;
+  refreshMeetingFts(meeting);
+  return true;
+};
+
+export const listMeetingIdsForPersonIdentity = (
+  personIds: string[],
+): string[] => {
+  const targets = new Set(
+    personIds
+      .filter(Boolean)
+      .map((personId) => resolvePersonIdentityId(personId)),
+  );
+  if (targets.size === 0) return [];
+  const meetingIds = new Set<string>();
+  const bindings = db
+    .prepare('SELECT meeting_id, payload FROM identity_bindings')
+    .all() as Array<{ meeting_id: string; payload: string }>;
+  for (const row of bindings) {
+    try {
+      const personId = (JSON.parse(row.payload) as { personId?: unknown })
+        .personId;
+      if (
+        typeof personId === 'string' &&
+        targets.has(resolvePersonIdentityId(personId))
+      ) {
+        meetingIds.add(row.meeting_id);
+      }
+    } catch {
+      // Invalid legacy identity rows remain unresolved.
+    }
+  }
+  const captures = db
+    .prepare(
+      `SELECT meeting_id, self_person_id
+       FROM identity_captures
+       WHERE origin = 'local'`,
+    )
+    .all() as Array<{ meeting_id: string; self_person_id: string | null }>;
+  const currentSelfPersonId = identityStore.getSelfPersonId();
+  const currentSelfMatches = Boolean(
+    currentSelfPersonId &&
+      targets.has(resolvePersonIdentityId(currentSelfPersonId)),
+  );
+  for (const capture of captures) {
+    if (
+      (capture.self_person_id &&
+        targets.has(resolvePersonIdentityId(capture.self_person_id))) ||
+      (!capture.self_person_id && currentSelfMatches)
+    ) {
+      meetingIds.add(capture.meeting_id);
+    }
+  }
+  return [...meetingIds];
+};
+
+export const listMeetingIdsWithSavedNotes = (): string[] =>
+  (
+    db
+      .prepare(
+        `SELECT id FROM meetings
+         WHERE analysis_json IS NOT NULL OR enhanced_notes IS NOT NULL
+         ORDER BY COALESCE(started_at, created_at) DESC`,
+      )
+      .all() as Array<{ id: string }>
+  ).map(({ id }) => String(id));
 
 export function getMeetingFtsIntegrity(): SearchIndexIntegrity {
   return readMeetingFtsIntegrity(db);
@@ -2813,7 +2890,11 @@ export const getMeetingNotesIdentityProjection = (
   speakerDisplayNames: Record<string, string>;
   trustedUserTerms: string[];
 } => {
-  const meeting = getMeeting(meetingId) as PersistedMeeting | undefined;
+  const meeting = db
+    .prepare('SELECT id, transcript_json FROM meetings WHERE id = ?')
+    .get(String(meetingId)) as
+    | Pick<PersistedMeeting, 'id' | 'transcript_json'>
+    | undefined;
   if (!meeting?.transcript_json) {
     return { speakerDisplayNames: {}, trustedUserTerms: [] };
   }
@@ -2833,12 +2914,34 @@ export const getMeetingNotesIdentityProjection = (
     const person = getEntity(id);
     return person?.type === 'person' ? [{ id, name: person.name }] : [];
   });
+  const storedSelfPersonId = identityStore.getSelfPersonId();
+  const storedCapture = identityStore.getCapture(String(meetingId));
   return buildMeetingNotesIdentityProjection({
     transcriptJson: meeting.transcript_json,
     bindings,
     people,
+    capture: {
+      ...storedCapture,
+      selfPersonId: storedCapture.selfPersonId
+        ? resolvePersonIdentityId(storedCapture.selfPersonId)
+        : null,
+    },
+    currentSelfPersonId: storedSelfPersonId
+      ? resolvePersonIdentityId(storedSelfPersonId)
+      : null,
   });
 };
+
+export const hasPublishedMeetingNotes = (meetingId: string | number): boolean =>
+  Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM meetings
+         WHERE id = ?
+           AND (analysis_json IS NOT NULL OR enhanced_notes IS NOT NULL)`,
+      )
+      .get(String(meetingId)),
+  );
 
 const meetingEditConflictKey = (conflict: PreservedEditConflict): string =>
   JSON.stringify([

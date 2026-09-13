@@ -30,8 +30,12 @@ const readIntegrity = (
 export const refreshMeetingNotesFts = (
   sqlite: Database.Database,
   meeting: PersistedMeeting,
+  speakerDisplayNames: Readonly<Record<string, string>> = {},
 ): void => {
-  const document = buildMeetingNotesEvidenceDocument(meeting);
+  const document = buildMeetingNotesEvidenceDocument(
+    meeting,
+    speakerDisplayNames,
+  );
   sqlite
     .prepare('DELETE FROM meeting_notes_fts WHERE meeting_id = ?')
     .run(document.meetingId);
@@ -56,6 +60,7 @@ export const refreshMeetingNotesFts = (
 export const refreshMeetingFts = (
   sqlite: Database.Database,
   meeting: PersistedMeeting,
+  speakerDisplayNames: Readonly<Record<string, string>> = {},
 ): void => {
   const id = String(meeting.id);
   let transcriptText = '';
@@ -100,6 +105,11 @@ export const refreshMeetingFts = (
     }
   }
 
+  const projectedNotes = buildMeetingNotesEvidenceDocument(
+    meeting,
+    speakerDisplayNames,
+  ).notesText;
+
   sqlite.transaction(() => {
     sqlite.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(id);
     sqlite
@@ -112,7 +122,7 @@ export const refreshMeetingFts = (
       .run(
         meeting.title,
         transcriptText,
-        meeting.enhanced_notes || '',
+        projectedNotes || meeting.enhanced_notes || '',
         meeting.user_notes || '',
         participants,
         topics,
@@ -120,7 +130,7 @@ export const refreshMeetingFts = (
         actionItems,
         id,
       );
-    refreshMeetingNotesFts(sqlite, meeting);
+    refreshMeetingNotesFts(sqlite, meeting, speakerDisplayNames);
   })();
 };
 

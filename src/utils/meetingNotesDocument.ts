@@ -5,6 +5,7 @@ import type {
   UserEditsMap,
 } from '../types';
 import { applyUserEdit } from './analysisDocument';
+import { projectMeetingNotesSpeakerReferences } from './meetingNotesSpeakerReferences';
 import {
   getAnonymousSpeakerDisplayLabel,
   isGenericSpeakerLabel,
@@ -131,7 +132,9 @@ export const applySpeakerDisplayNamesToText = (
 
     // Handle "Me" before colon / attribution
     if (rawSpeaker.trim() === 'Me') {
-      result = result.replace(/\bMe(?=\s*[:—])/g, displayName);
+      result = result
+        .replace(/(?:^|(?<=[.!?]\s+))Me\b/g, displayName)
+        .replace(/\bMe(?=\s*[:—])/g, displayName);
       continue;
     }
 
@@ -424,7 +427,13 @@ const buildV3Sections = (
       sections.push({
         id: `topic-${firstEntry.index}`,
         kind: 'discussion',
-        title: group.title,
+        title: editsMap[`topic:${firstEntry.index}:title`]
+          ? applyUserEdit(
+              group.title,
+              `topic:${firstEntry.index}:title`,
+              editsMap,
+            )
+          : applySpeakerDisplayNamesToText(group.title, displayNames),
         titleOriginal: firstEntry.topic.title,
         titlePath: `topic:${firstEntry.index}:title`,
         blocks: discussionBlocks,
@@ -555,8 +564,11 @@ export const buildMeetingNotesDocument = ({
   editsMap: UserEditsMap;
   displayNames?: Readonly<Record<string, string>>;
 }): MeetingNotesDocumentModel => {
+  const projectedV3 = v3
+    ? projectMeetingNotesSpeakerReferences(v3, displayNames ?? {})
+    : null;
   const sections = v3
-    ? buildV3Sections(v3, editsMap, displayNames)
+    ? buildV3Sections(projectedV3!, editsMap, displayNames)
     : v2
       ? buildV2Sections(v2, editsMap, displayNames)
       : [

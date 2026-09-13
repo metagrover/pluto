@@ -26,6 +26,7 @@ export const extractSpeakerDisplayNames = (
         bindings?: Array<{ speaker: string; personId?: string | null }>;
         profile?: { preferredName?: string | null } | null;
         selfPersonId?: string | null;
+        speakerDisplayNames?: Record<string, string>;
       }
     | null
     | undefined,
@@ -36,6 +37,16 @@ export const extractSpeakerDisplayNames = (
     !Array.isArray(identity.bindings)
   ) {
     return {};
+  }
+  if (Object.hasOwn(identity, 'speakerDisplayNames')) {
+    return Object.fromEntries(
+      Object.entries(identity.speakerDisplayNames ?? {}).flatMap(
+        ([speaker, name]) =>
+          typeof name === 'string' && name.trim()
+            ? [[speaker, name.trim()]]
+            : [],
+      ),
+    );
   }
   const peopleById = new Map(
     identity.people.map((person) => [person.id, person.name]),

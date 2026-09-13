@@ -1058,6 +1058,13 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Extends:** “Admit legacy voice backfill only while the Mac is idle.” Speaker confirmations persist immediately, advance once, and queue automatic notes regeneration through the same 15-minute idle, power, and thermal admission policy. Repeated confirmations coalesce by meeting; foreground activity cancels the deferred run. Explicit notes regeneration remains available immediately.
 - **UI:** The initial speaker applies once per review session, never again on a binding response. The suggestion has one confirmation action and no reference-recording control. Voice enrollment remains a follow-up and is not represented as guaranteed by identity confirmation.
 
+## 2026-09-13 - Project identity changes onto published notes without regeneration
+
+- **Status:** Accepted and implemented for canonical speaker labels in generated prose and structured attribution fields.
+- **Supersedes:** The published-notes regeneration clause in “2026-09-12 - Defer notes regeneration after speaker confirmation.” A confirmation still cancels a stale in-flight run, and a meeting without any published analysis may queue replacement generation so it is not stranded.
+- **Decision:** Published notes retain their generated content and provenance. Meeting-scoped self identity and confirmed speaker bindings are projected through code into notes display, export, search, and Ask Pluto evidence. Speaker confirmation refreshes those derived views and does not call the notes model. Explicit regeneration remains available for content changes and for historical prose whose attribution cannot be recovered safely.
+- **Trust boundary:** Local capture identity may name `Me`; imported and unknown-origin meetings do not inherit the current workspace user. Remote names still require confirmed bindings. User edits and canonical transcript JSON are unchanged.
+
 ## 2026-09-12 - Admit legacy voice backfill only while the Mac is idle
 
 - **Status:** Accepted and implemented.

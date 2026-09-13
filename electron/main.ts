@@ -1418,17 +1418,60 @@ app.whenReady().then(async () => {
   };
   scheduleDreamingRun = scheduleDreaming;
   scheduleDreaming(0);
+  const notifyMeetingIdentityUpdated = (meetingId?: string) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed())
+        window.webContents.send('MEETING_IDENTITY_UPDATED', meetingId);
+    }
+  };
+  const scheduleMeetingIdentityProjectionRefresh = (personIds: string[]) => {
+    const meetingIds = db.listMeetingIdsForPersonIdentity(personIds);
+    const refreshNext = () => {
+      const meetingId = meetingIds.shift();
+      if (!meetingId) return;
+      db.refreshMeetingIdentityProjection(meetingId);
+      notifyMeetingIdentityUpdated(meetingId);
+      setImmediate(refreshNext);
+    };
+    setImmediate(refreshNext);
+  };
+  const meetingIdentityProjectionVersion =
+    'meeting_notes_identity_projection_v1';
+  if (
+    db.getSetting('meeting_notes_identity_projection_version') !==
+    meetingIdentityProjectionVersion
+  ) {
+    const pendingMeetingIds = db.listMeetingIdsWithSavedNotes();
+    const refreshNextSavedMeeting = () => {
+      const meetingId = pendingMeetingIds.shift();
+      if (!meetingId) {
+        db.setSetting(
+          'meeting_notes_identity_projection_version',
+          meetingIdentityProjectionVersion,
+        );
+        return;
+      }
+      db.refreshMeetingIdentityProjection(meetingId);
+      setTimeout(refreshNextSavedMeeting, 25).unref?.();
+    };
+    setTimeout(refreshNextSavedMeeting, 25).unref?.();
+  }
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) => {
+      const previousSelfPersonId = db.identityStore.getSelfPersonId();
       const result = handleIdentityRequest(channel, payload, {
         onBindingChange: ({ meetingId, personIds }) => {
+          const hasPublishedNotes = db.hasPublishedMeetingNotes(meetingId);
           meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
+          db.refreshMeetingIdentityProjection(meetingId);
           queueKnowledgeDocsRefreshForMeeting(meetingId);
           for (const personId of personIds) {
             const doc = db.getKnowledgeDocByScope('person_context', personId);
             if (doc) queueKnowledgeDocRefresh(doc.id);
           }
-          backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`);
+          if (!hasPublishedNotes) {
+            backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`);
+          }
           voiceWorkQueue?.enqueue(meetingId);
         },
       });
@@ -1437,6 +1480,28 @@ app.whenReady().then(async () => {
         channel !== 'GET_MEETING_IDENTITY'
       ) {
         invalidateDreamingCatalog();
+        const meetingId =
+          result && typeof result === 'object' && 'meetingId' in result
+            ? String(result.meetingId)
+            : undefined;
+        notifyMeetingIdentityUpdated(meetingId);
+        const selfPersonId =
+          result && typeof result === 'object' && 'selfPersonId' in result
+            ? result.selfPersonId
+            : null;
+        const affectedSelfPersonIds = [
+          previousSelfPersonId,
+          selfPersonId,
+        ].filter(
+          (personId): personId is string => typeof personId === 'string',
+        );
+        if (
+          affectedSelfPersonIds.length > 0 &&
+          (channel === 'SET_SELF_IDENTITY' ||
+            channel === 'SAVE_IDENTITY_PROFILE')
+        ) {
+          scheduleMeetingIdentityProjectionRefresh(affectedSelfPersonIds);
+        }
       }
       return result;
     });
@@ -3651,6 +3716,8 @@ app.whenReady().then(async () => {
     const person = db.updatePersonName(String(personId), String(name));
     queueAllKnowledgeDocsRefresh();
     invalidateDreamingCatalog();
+    notifyMeetingIdentityUpdated();
+    scheduleMeetingIdentityProjectionRefresh([String(personId), person.id]);
     return person;
   });
   ipcMain.handle('ADD_PERSON_NAME_ALIAS', (_event, { personId, aliasName }) => {
@@ -3664,12 +3731,19 @@ app.whenReady().then(async () => {
       db.mergePerson(String(personId), String(destinationPersonId));
       queueAllKnowledgeDocsRefresh();
       invalidateDreamingCatalog();
+      notifyMeetingIdentityUpdated();
+      scheduleMeetingIdentityProjectionRefresh([
+        String(personId),
+        String(destinationPersonId),
+      ]);
     },
   );
   ipcMain.handle('RESTORE_PERSON_MERGE', (_event, personId) => {
     db.restorePersonMerge(String(personId));
     queueAllKnowledgeDocsRefresh();
     invalidateDreamingCatalog();
+    notifyMeetingIdentityUpdated();
+    scheduleMeetingIdentityProjectionRefresh([String(personId)]);
   });
   const projectThemeSynthesisStateKey = 'project_theme_synthesis_state_v2';
   const readProjectThemeSynthesisState =
@@ -3693,7 +3767,10 @@ app.whenReady().then(async () => {
     (_event, options?: { retryFailed?: unknown }) => {
       if (projectThemeSynthesis) return projectThemeSynthesis;
       const sourceFromMeeting = (meeting: db.PersistedMeeting) => {
-        const evidence = buildMeetingNotesEvidenceDocument(meeting);
+        const evidence = buildMeetingNotesEvidenceDocument(
+          meeting,
+          db.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+        );
         if (!evidence.hasUsableNotes) return null;
         return {
           id: String(meeting.id),
@@ -5697,6 +5774,9 @@ app.whenReady().then(async () => {
                   query: conversation.retrievalQuery,
                   entities,
                   attentionItems,
+                  speakerDisplayNames:
+                    db.getMeetingNotesIdentityProjection(meetingId)
+                      .speakerDisplayNames,
                 });
               })();
 

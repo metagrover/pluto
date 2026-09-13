@@ -158,6 +158,8 @@ function meetingState(meetingId: string) {
   return {
     ...globalState(),
     meetingId,
+    speakerDisplayNames:
+      db.getMeetingNotesIdentityProjection(meetingId).speakerDisplayNames,
     speakers: [...new Set(context.turns.map((turn) => turn.speaker))],
     bindings: context.bindings,
     capture: context.capture,

@@ -414,6 +414,31 @@ describe('buildMeetingNotesDocument', () => {
     });
   });
 
+  it('projects a known self speaker in possessive and sentence-subject prose', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: "Me's project is ready. Me is preparing a demonstration.",
+      all_decisions: [],
+      all_action_items: [],
+      topics: [],
+      meeting_type: 'one_on_one',
+      quality,
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {},
+      displayNames: { Me: 'Alex' },
+    });
+
+    expect(
+      document.sections.find((section) => section.kind === 'current_read')
+        ?.blocks[0]?.text,
+    ).toBe("Alex's project is ready. Alex is preparing a demonstration.");
+  });
+
   it('preserves manual user edits when speaker display names are provided', () => {
     const v3: AnalysisDocumentV3 = {
       analysis_schema_version: 3,

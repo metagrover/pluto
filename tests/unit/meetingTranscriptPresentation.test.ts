@@ -282,6 +282,25 @@ describe('remote speaker completion status', () => {
   });
 
   describe('extractSpeakerDisplayNames', () => {
+    it('prefers the authoritative meeting projection, including an intentional empty result', () => {
+      expect(
+        extractSpeakerDisplayNames({
+          people: [{ id: 'self-id', name: 'Current user' }],
+          bindings: [],
+          selfPersonId: 'self-id',
+          profile: { preferredName: 'Current user' },
+          speakerDisplayNames: {},
+        }),
+      ).toEqual({});
+      expect(
+        extractSpeakerDisplayNames({
+          people: [],
+          bindings: [],
+          speakerDisplayNames: { Me: 'Alex', Them: 'Jordan' },
+        }),
+      ).toEqual({ Me: 'Alex', Them: 'Jordan' });
+    });
+
     it('returns empty object when identity is null, undefined, or malformed', () => {
       expect(extractSpeakerDisplayNames(null)).toEqual({});
       expect(extractSpeakerDisplayNames(undefined)).toEqual({});

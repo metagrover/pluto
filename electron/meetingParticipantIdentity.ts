@@ -135,6 +135,11 @@ export const buildMeetingNotesIdentityProjection = (input: {
   transcriptJson: string;
   bindings: IdentityBinding[];
   people: Person[];
+  capture?: {
+    origin: 'local' | 'imported' | 'unknown';
+    selfPersonId: string | null;
+  };
+  currentSelfPersonId?: string | null;
 }): {
   speakerDisplayNames: Record<string, string>;
   trustedUserTerms: string[];
@@ -149,6 +154,20 @@ export const buildMeetingNotesIdentityProjection = (input: {
   const speakerDisplayNames: Record<string, string> = {};
   const trustedUserTerms: string[] = [];
   const seenNames = new Set<string>();
+
+  const explicitMeBinding = input.bindings.some(
+    (binding) => binding.speaker === 'Me',
+  );
+  const selfPersonId =
+    input.capture?.origin === 'local' && !explicitMeBinding
+      ? (input.capture.selfPersonId ?? input.currentSelfPersonId ?? null)
+      : null;
+  const selfName = selfPersonId ? people.get(selfPersonId)?.name.trim() : '';
+  if (speakers.has('Me') && selfName) {
+    speakerDisplayNames.Me = selfName;
+    seenNames.add(selfName.toLocaleLowerCase('en-US'));
+    trustedUserTerms.push(selfName);
+  }
 
   for (const binding of input.bindings) {
     if (

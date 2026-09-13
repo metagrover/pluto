@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
+import { applySpeakerDisplayNamesToText } from '../src/utils/meetingNotesDocument';
+import { projectMeetingNotesSpeakerReferences } from '../src/utils/meetingNotesSpeakerReferences';
 import * as db from './db';
 import {
   type AskPlutoClaimCorrection,
@@ -632,14 +635,32 @@ const buildMeetingEvidence = (
 
   const entityHints = buildEntityHints(entities);
   const entityContextText = buildEntityContextEvidence(entities);
+  const speakerDisplayNames = db.getMeetingNotesIdentityProjection(
+    meeting.id,
+  ).speakerDisplayNames;
+  const parsedAnalysis = parseAnalysisDocumentV3Json(meeting.analysis_json);
+  const projectedAnalysis = parsedAnalysis
+    ? JSON.stringify(
+        projectMeetingNotesSpeakerReferences(
+          parsedAnalysis,
+          speakerDisplayNames,
+        ),
+      )
+    : meeting.analysis_json;
   const analysisEvidence = extractAnalysisEvidence(
-    meeting.analysis_json,
+    projectedAnalysis,
     meeting.enhanced_notes,
   );
-  const analysisText = analysisEvidence.text;
+  const analysisText = applySpeakerDisplayNamesToText(
+    analysisEvidence.text,
+    speakerDisplayNames,
+  );
   const notesText = analysisEvidence.usedNotes
     ? ''
-    : extractNotesEvidence(meeting.enhanced_notes);
+    : applySpeakerDisplayNamesToText(
+        extractNotesEvidence(meeting.enhanced_notes),
+        speakerDisplayNames,
+      );
   const userNotesText = extractUserNotesEvidence(meeting.user_notes);
   const valueSignalsText = extractValueSignalsEvidence(
     meeting.value_signals_json,

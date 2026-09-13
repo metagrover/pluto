@@ -4,6 +4,7 @@
  * Topic-structured, speaker-attributed meeting analysis.
  * Replaces the flat v2 schema (summary, key_points, action_items, decisions).
  */
+import type { MeetingNotesSpeakerReferences } from '../../src/utils/meetingNotesSpeakerReferences';
 
 export type MeetingType =
   | 'one_on_one'
@@ -139,6 +140,7 @@ export interface AnalysisGenerationMetadata {
   audit_change_count?: number;
   source_provenance?: NotesPipelineMetadata['source_provenance'];
   prose_review?: NotesProseReview;
+  speaker_references?: MeetingNotesSpeakerReferences;
   hierarchy?: {
     depth: number;
     nodes: number;
