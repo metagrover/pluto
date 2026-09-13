@@ -299,6 +299,11 @@ export const TranscriptIntegrityPanel = ({
   )
     return null;
 
+  // When an analysis retry is actively running, let the document surface communicate
+  // the live typewriter drafting instead of rendering a duplicate retry banner.
+  const activeDownstreamFailed =
+    downstreamFailed && retryOperationKind !== 'analysis';
+
   const panelCopy = resolveMeetingFailurePresentation({
     retryableFinalTranscription: canRetryFinalTranscription,
     systemCaptureIncomplete,
@@ -309,16 +314,18 @@ export const TranscriptIntegrityPanel = ({
     captureRecoveryRequired: trust.kind === 'capture_recovery_required',
     captureGap: trust.kind === 'capture_gap',
     hasExistingAnalysis,
-    downstreamFailed,
+    downstreamFailed: activeDownstreamFailed,
     downstreamFailureCode,
   });
 
-  // Final transcription also regenerates notes. Once speaker attribution has
-  // committed, let the notes skeleton communicate that remaining work instead
-  // of leaving the speaker-label repair banner spinning until analysis ends.
+  // Final transcription and analysis retries also regenerate notes. Once
+  // speaker attribution has committed or an analysis retry has started, let
+  // the notes surface communicate that remaining work instead of leaving
+  // the repair/retry banner spinning above the document canvas.
   const visibleRetryOperationKind =
     systemCaptureIncomplete ||
-    (retryOperationKind === 'speaker_labels' && !speakerAttributionFailure)
+    (retryOperationKind === 'speaker_labels' && !speakerAttributionFailure) ||
+    retryOperationKind === 'analysis'
       ? null
       : retryOperationKind;
   const progressCopy = visibleRetryOperationKind
@@ -1625,7 +1632,14 @@ const SelectedMeetingView = ({
           <MeetingAnalysisUnavailable />
         ) : null}
         {draftPreview ? (
-          <MeetingNotesDraftPreview preview={draftPreview} />
+          <MeetingNotesDraftPreview
+            preview={draftPreview}
+            isRetry={
+              (selectedMeetingRetryOperation
+                ? transcriptValidationRetryOperation?.kind === 'analysis'
+                : false) || downstreamPresentation.state === 'failed'
+            }
+          />
         ) : null}
         {notesDocument.hasAnalysis ? (
           <div data-meeting-artifact="analysis" data-state="ready">

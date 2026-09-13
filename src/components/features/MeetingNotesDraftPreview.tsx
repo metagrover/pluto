@@ -16,71 +16,96 @@ export function currentNotesPreview(
   }
 }
 
+interface MeetingNotesDraftPreviewProps {
+  preview: MeetingNotesPreview;
+  isRetry?: boolean;
+}
+
 /** Plain React text only; never render model HTML or expose draft editing/export. */
 export function MeetingNotesDraftPreview({
   preview,
-}: { preview: MeetingNotesPreview }) {
+  isRetry = false,
+}: MeetingNotesDraftPreviewProps) {
   return (
-    <section
-      aria-busy="true"
-      aria-label="Notes are being drafted"
-      className="meeting-notes-draft"
-      data-meeting-artifact="analysis"
-      data-state="drafting"
-    >
-      <div className="meeting-notes-draft__frame">
-        <header className="meeting-notes-draft__header">
-          <span className="meeting-notes-draft__activity" aria-hidden="true">
-            <Sparkles />
-          </span>
-          <div className="meeting-notes-draft__status">
-            <p aria-live="polite" role="status">
-              Drafting your notes
-              <span className="meeting-notes-draft__dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </p>
+    <div className="meeting-document-workspace">
+      <article
+        aria-busy="true"
+        aria-label="Notes are being drafted"
+        className="meeting-notes-document meeting-notes-document--drafting"
+        data-reading-surface="meeting-notes"
+        data-meeting-artifact="analysis"
+        data-state="drafting"
+      >
+        <div className="meeting-draft-status-row" aria-live="polite">
+          <span className="meeting-draft-status-badge">
+            <Sparkles className="h-3 w-3 animate-pulse text-pro-accent" />
             <span>
-              Pluto is shaping the discussion into a clear, useful summary.
+              {isRetry
+                ? 'Drafting your notes (taking another pass)'
+                : 'Drafting your notes'}
             </span>
-          </div>
-          <span className="meeting-notes-draft__readonly">
-            <LockKeyhole aria-hidden="true" />
-            View only
           </span>
-        </header>
-
-        <div className="meeting-notes-draft__document">
-          {preview.sections.map((section, index) => (
-            <div
-              key={`${index}-${section.title}`}
-              className="meeting-notes-draft__section"
-            >
-              <h3>{section.title}</h3>
-              <ul>
-                {section.items.map((text, itemIndex) => (
-                  <li key={`${itemIndex}-${text}`}>{text}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          <div className="meeting-notes-draft__writing" aria-hidden="true">
-            <span>Continuing the draft</span>
-            <div className="meeting-notes-draft__writing-lines">
-              <i />
-              <i />
-              <i />
-            </div>
-          </div>
+          <span className="meeting-draft-readonly-badge">
+            <LockKeyhole
+              className="h-3 w-3 text-pro-text-muted"
+              aria-hidden="true"
+            />
+            <span>View only</span>
+          </span>
         </div>
 
-        <footer className="meeting-notes-draft__footer">
+        {preview.sections.map((section, index) => {
+          const isLatestSection = index === preview.sections.length - 1;
+          return (
+            <section
+              key={`${index}-${section.title}`}
+              className="meeting-notes-section"
+            >
+              <h2>
+                {section.title}
+                {isLatestSection && section.items.length === 0 && (
+                  <span
+                    className="meeting-typewriter-caret"
+                    aria-hidden="true"
+                  />
+                )}
+              </h2>
+              <div className="meeting-notes-section__content">
+                {section.items.map((text, itemIndex) => {
+                  const isLatestItem =
+                    isLatestSection && itemIndex === section.items.length - 1;
+                  return (
+                    <div
+                      key={`${itemIndex}-${text}`}
+                      className="meeting-note-block meeting-note-block--streaming"
+                    >
+                      <span
+                        className="meeting-note-block__marker"
+                        aria-hidden="true"
+                      />
+                      <div className="meeting-note-block__body">
+                        <p>
+                          {text}
+                          {isLatestItem && (
+                            <span
+                              className="meeting-typewriter-caret"
+                              aria-hidden="true"
+                            />
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+
+        <footer className="mt-12 border-t border-pro-border/30 pt-4 text-xs text-pro-text-muted">
           Editing unlocks automatically when your notes are ready.
         </footer>
-      </div>
-    </section>
+      </article>
+    </div>
   );
 }

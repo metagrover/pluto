@@ -1251,10 +1251,52 @@
   @media (prefers-reduced-motion: reduce) {
     .meeting-notes-draft *,
     .meeting-notes-draft__frame::before,
-    .meeting-notes-draft__activity::after {
+    .meeting-notes-draft__activity::after,
+    .meeting-typewriter-caret,
+    .meeting-note-block--streaming {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
     }
+  }
+  .meeting-typewriter-caret {
+    display: inline-block;
+    width: 2px;
+    height: 1.15em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    background-color: var(--notes-accent, #6366f1);
+    border-radius: 1px;
+    animation: meeting-caret-blink 0.75s ease-in-out infinite;
+  }
+  @keyframes meeting-caret-blink {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+  .meeting-note-block--streaming {
+    animation: meeting-bullet-appear 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes meeting-bullet-appear {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .meeting-draft-status-row {
+    @apply mb-5 flex items-center;
+  }
+  .meeting-draft-status-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors;
+    border-color: var(--notes-rule);
+    color: var(--notes-ink);
+    background: var(--notes-wash);
   }
   .meeting-analysis-queue {
     @apply mx-auto block w-full max-w-[760px] px-6 pb-16 pt-8 md:px-8;
