@@ -15,6 +15,16 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-12 - Consistent macOS notification design outside the app for calendar prompts
+
+- **Status:** Accepted
+- **Supersedes:** The in-app floating pill banner requirement in “2026-09-04 - Proactive calendar session auto-naming, start prompts, and silence-based auto-stop”.
+- **Decision:** Pluto unifies notification appearance and display topology across all system alerts:
+  1. Outside the app in top-right macOS screen corner: Calendar meeting start prompts move from an in-app window-pinned banner to Pluto's native alert window system (`activeCallAlertWindow`), displaying in the top-right corner of the active display work area. Users receive upcoming meeting alerts even when the main Pluto window is minimized, hidden, or behind other applications.
+  2. Consistent rectangular macOS notification design: Calendar prompts adopt the 360×80px rectangular notification card geometry (`border-radius: 8px`), status icon container (`border-radius: 7px`), clean two-line typography with relative start time and attendee count, 34px action button with recording indicator, close affordance, and 15-second progress countdown bar shared with Active Call alerts.
+- **Rationale:** Having Call Detected alerts render as native floating cards outside the app while Calendar prompts rendered as rounded-full pills inside Pluto's window created visual inconsistency and caused scheduled meeting prompts to be missed whenever Pluto was not in the foreground.
+- **Consequences:** Both Active Call and Calendar Start alerts share the same frameless, transparent Electron alert window and design tokens; clicking "Record" focuses the main window and begins recording with the calendar event context immediately attached; in-app rendering remains strictly as a fallback in non-Electron test/browser environments.
+
 ## 2026-09-12 - Treat an explicit singleton roster as a remote-speaker topology bound
 
 - **Status:** Accepted by direct owner request after a two-person recording was acoustically over-segmented into several anonymous speakers.

@@ -47,4 +47,109 @@ describe('activeCallAlertWindow', () => {
     controller.show('Chrome');
     expect(setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
   });
+
+  it('shows calendar prompt outside the app at top-right corner with macOS banner dimensions', async () => {
+    const { BrowserWindow } = await import('electron');
+    const {
+      createActiveCallAlertController,
+      ALERT_WIDTH,
+      ALERT_HEIGHT,
+      ALERT_MARGIN,
+    } = await import('../../electron/windows/activeCallAlertWindow');
+
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+
+    controller.showCalendarPrompt({
+      occurrenceKey: 'meeting-123',
+      title: 'Design Review',
+      start: '2026-09-12T21:00:00.000Z',
+      hasConferenceLink: true,
+      attendeeCount: 4,
+    });
+
+    expect(BrowserWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        width: ALERT_WIDTH,
+        height: ALERT_HEIGHT,
+        x: workArea.width - ALERT_WIDTH - ALERT_MARGIN,
+        y: workArea.y + ALERT_MARGIN,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+      }),
+    );
+
+    const mockInstance = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    expect(mockInstance.loadFile).toHaveBeenCalledWith(
+      expect.stringContaining('active-call-alert.html'),
+      {
+        query: {
+          type: 'calendar',
+          occurrenceKey: 'meeting-123',
+          title: 'Design Review',
+          start: '2026-09-12T21:00:00.000Z',
+          hasLink: 'true',
+          attendees: '4',
+        },
+      },
+    );
+  });
+
+  it('loads calendar prompt with devServerUrl when configured', async () => {
+    const { BrowserWindow } = await import('electron');
+    const { createActiveCallAlertController } = await import(
+      '../../electron/windows/activeCallAlertWindow'
+    );
+
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      devServerUrl: 'http://localhost:5173',
+      rendererDist: '/dist',
+    });
+
+    controller.showCalendarPrompt({
+      occurrenceKey: 'meeting-456',
+      title: 'Architecture Sync',
+      start: '2026-09-12T21:30:00.000Z',
+    });
+
+    const mockInstance = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    expect(mockInstance.loadURL).toHaveBeenCalledWith(
+      expect.stringContaining('http://localhost:5173/active-call-alert.html'),
+    );
+    expect(mockInstance.loadURL).toHaveBeenCalledWith(
+      expect.stringContaining('type=calendar'),
+    );
+    expect(mockInstance.loadURL).toHaveBeenCalledWith(
+      expect.stringContaining('occurrenceKey=meeting-456'),
+    );
+  });
+
+  it('closes calendar prompt alert when closeCalendarPrompt is called', async () => {
+    const { BrowserWindow } = await import('electron');
+    const { createActiveCallAlertController } = await import(
+      '../../electron/windows/activeCallAlertWindow'
+    );
+
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+
+    controller.showCalendarPrompt({
+      occurrenceKey: 'meeting-789',
+      title: '1:1 Sync',
+      start: '2026-09-12T22:00:00.000Z',
+    });
+
+    const mockInstance = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    mockInstance.close = vi.fn();
+
+    controller.closeCalendarPrompt();
+    expect(mockInstance.close).toHaveBeenCalled();
+  });
 });
