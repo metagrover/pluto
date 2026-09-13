@@ -291,6 +291,48 @@ final class FluidAudioEouAdapterTests: XCTestCase {
         XCTAssertEqual(boundary.compactMap(\.eouUpdate).last?.tentativeText, "today")
     }
 
+    func testNativeEouCommitsTrailingWordAfterContinuedSilence() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: [
+                [.eou("send it tomorrow")],
+                [],
+                [],
+            ],
+            rawTokenBatches: [
+                ["▁send", "▁it", "▁tomorrow"],
+                ["▁send", "▁it", "▁tomorrow"],
+                ["▁send", "▁it", "▁tomorrow"],
+            ]
+        )
+        let manager = await FluidAudioEouManager(backend: backend, maxPendingSeconds: 0.5)
+        let session = ParakeetEouSession(
+            driver: SingleEouManagerDriver(manager: manager),
+            activeModelURL: URL(fileURLWithPath: "/models")
+        )
+        try await session.open(streamId: "meeting.mic", source: .mic, generation: 1)
+
+        let initial = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 1,
+            frame: frame(start: 0)
+        )
+        _ = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 2,
+            frame: frame(start: 0.32)
+        )
+        let afterSilence = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 3,
+            frame: frame(start: 0.64)
+        )
+
+        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.committedText, "send it")
+        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.tentativeText, "tomorrow")
+        XCTAssertEqual(
+            afterSilence.compactMap(\.eouUpdate).last?.committedText,
+            "send it tomorrow"
+        )
+        XCTAssertEqual(afterSilence.compactMap(\.eouUpdate).last?.tentativeText, "")
+    }
+
     private func frame(start: Double) throws -> EouPcmFrame {
         let samples = [Float](repeating: 0.25, count: 15_360)
         return try EouPcmFrame(

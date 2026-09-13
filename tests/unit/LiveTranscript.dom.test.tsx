@@ -1279,9 +1279,9 @@ describe('LiveTranscript reading experience', () => {
       'system-1',
       'mic-long-hypothesis:speech-0',
       'system-2',
-      'mic-long-hypothesis:speech-28',
+      'mic-long-hypothesis:speech-40',
       'system-3',
-      'mic-long-hypothesis:speech-56',
+      'mic-long-hypothesis:speech-68',
     ]);
     expect(micText()).toContain(fixture.expectedLocalWords.join(' '));
     expect(container.textContent).toContain('Updated');

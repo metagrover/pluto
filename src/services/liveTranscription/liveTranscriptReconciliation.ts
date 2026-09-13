@@ -831,6 +831,7 @@ export const reconcileLiveTranscriptReading = (input: {
         .filter((segment) => segment.source === source)
         .flatMap((segment) => {
           const words = originalWords(segment.text);
+          if (words.length > MAX_ALIGNMENT_TOKENS) return [];
           const times = verifiedTimedWords(segment, words);
           return times
             ? words.map((word, index) => ({

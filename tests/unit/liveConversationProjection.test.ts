@@ -146,6 +146,37 @@ describe('live conversation projection', () => {
     expect(raw.segments).toEqual([remote, local]);
   });
 
+  it('orders speech retained on both sides of removed echo around an intervening reply', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const mic = {
+      ...row('mic', 'mic', 'before echoed after', 1_000),
+      endTimestampMs: 3_500,
+      wordTimings: [
+        { text: 'before', timestampMs: 1_000, endTimestampMs: 1_500 },
+        { text: 'echoed', timestampMs: 2_000, endTimestampMs: 2_500 },
+        { text: 'after', timestampMs: 3_000, endTimestampMs: 3_500 },
+      ],
+    };
+    const reply = row('reply', 'system', 'intervening reply', 2_000);
+
+    const snapshot = projection.apply({
+      generation: 1,
+      reading: reading([mic, reply], { mic: [[1, 2]] }),
+      reason: 'echo_evidence',
+    });
+
+    expect(snapshot.rows.map(({ text }) => text)).toEqual([
+      'before',
+      'intervening reply',
+      'after',
+    ]);
+    expect(snapshot.rows.map(({ timestampMs }) => timestampMs)).toEqual([
+      1_000, 2_000, 3_000,
+    ]);
+    expect(snapshot.rows[0].parts[0].sourceSegmentId).toBe('mic');
+    expect(snapshot.rows[2].parts[0].sourceSegmentId).toBe('mic');
+  });
+
   it('produces the same event-time order for every callback permutation', () => {
     const segments = [
       row('system-later', 'system', 'remote later', 20_000),
@@ -340,6 +371,38 @@ describe('live conversation projection', () => {
     expect(snapshot.metrics.retainedParts).toBeLessThanOrEqual(128);
     expect(snapshot.rows[0].parts).toEqual([]);
     expect(snapshot.rows.at(-1)?.parts).not.toEqual([]);
+  });
+
+  it('applies supported echo correction after a row has been compacted', () => {
+    const projection = createLiveConversationProjection({ generation: 1 });
+    const segments = Array.from({ length: 180 }, (_, index) =>
+      row(
+        `row-${index}`,
+        index % 2 ? 'system' : 'mic',
+        `words ${index}`,
+        index * 1_000,
+      ),
+    );
+    projection.apply({
+      generation: 1,
+      reading: reading(segments),
+      reason: 'recognition',
+    });
+
+    const corrected = projection.apply({
+      generation: 1,
+      reading: reading(segments, { 'row-0': [[0, 2]] }),
+      reason: 'echo_evidence',
+    });
+
+    expect(corrected.rows[0]).toMatchObject({
+      id: 'row-0',
+      text: '',
+      parts: [],
+      display: 'duplicate_removed',
+      qualifier: 'updated',
+    });
+    expect(corrected.metrics.retainedParts).toBeLessThanOrEqual(128);
   });
 
   it('projects the same ordered visible history for active Ask Pluto', () => {
