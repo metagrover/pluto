@@ -346,7 +346,7 @@ export const TranscriptIntegrityPanel = ({
   return (
     <section aria-live="polite" className="meeting-failure-notice">
       <span className="meeting-failure-notice__marker" aria-hidden="true">
-        <Sparkles className="h-3.5 w-3.5" />
+        <CircleAlert className="h-3.5 w-3.5" />
       </span>
       <div className="meeting-failure-notice__copy">
         <strong>{title}</strong>
@@ -1643,7 +1643,11 @@ const SelectedMeetingView = ({
             isRetry={
               notesDocument.hasAnalysis ||
               Boolean(selectedMeeting.analysis_json) ||
-              Boolean(selectedMeeting.enhanced_notes)
+              Boolean(selectedMeeting.enhanced_notes) ||
+              Boolean(
+                selectedMeetingRetryOperation &&
+                  transcriptValidationRetryOperation?.kind === 'analysis',
+              )
             }
           />
         ) : null}
