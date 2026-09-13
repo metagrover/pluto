@@ -9123,6 +9123,8 @@ export const resetKnowledge = () => {
     'entity_dreaming_runs',
     'entity_alias_suggestions',
     'entity_corrections',
+    'person_chat_messages',
+    'person_chat_threads',
     'person_name_aliases',
     'person_aliases',
     'project_aliases',

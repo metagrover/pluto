@@ -1,0 +1,504 @@
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronDown,
+  Loader2,
+  MessageCircle,
+  Plus,
+  Send,
+  Square,
+} from 'lucide-react';
+import type React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  archivePersonChatThread,
+  cancelPersonChatRequest,
+  createPersonChatThread,
+  getPersonChatCapability,
+  listPersonChatMessages,
+  listPersonChatThreads,
+  resumePersonChatThread,
+  sendPersonChatMessage,
+} from '../../api/personChat';
+import type {
+  PersonChatCitation,
+  PersonChatDelta,
+  PersonChatMessage,
+  PersonChatStatusUpdate,
+  PersonChatThread,
+} from '../../types/personChat';
+import { Logo } from '../Brand/Logo';
+
+const starterPrompts = (name: string) => [
+  `Catch me up on ${name}`,
+  'Prepare me for our next conversation',
+  'What should I follow up on?',
+  'Help me handle a difficult situation',
+  `Draft a message to ${name}`,
+];
+
+const formatSourceDate = (value: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
+};
+
+const SourceList = ({
+  citations,
+  onOpenMeeting,
+}: {
+  citations: PersonChatCitation[];
+  onOpenMeeting: (meetingId: string) => void;
+}) => {
+  if (citations.length === 0) return null;
+  return (
+    <div className="person-chat__sources">
+      <details>
+        <summary>Your conversations · {citations.length}</summary>
+        <div>
+          {citations.map((citation) => (
+            <button
+              type="button"
+              key={citation.id}
+              onClick={() => onOpenMeeting(citation.meetingId)}
+            >
+              <strong>{citation.title}</strong>
+              <span>
+                {citation.evidenceClass}
+                {formatSourceDate(citation.date)
+                  ? ` · ${formatSourceDate(citation.date)}`
+                  : ''}
+              </span>
+              <small>{citation.excerpt}</small>
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+};
+
+export const PersonChatDock: React.FC<{
+  personId: string;
+  personName: string;
+  onOpenMeeting: (meetingId: string) => void;
+}> = ({ personId, personName, onOpenMeeting }) => {
+  const [enabled, setEnabled] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [threads, setThreads] = useState<PersonChatThread[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<PersonChatMessage[]>([]);
+  const [query, setQuery] = useState('');
+  const [streaming, setStreaming] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const activeRequest = useRef<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const newlyCreatedThread = useRef<string | null>(null);
+
+  const refreshThreads = useCallback(async () => {
+    const next = await listPersonChatThreads(personId, true);
+    setThreads(next);
+    return next;
+  }, [personId]);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+    let cancelled = false;
+    void Promise.all([
+      getPersonChatCapability(),
+      listPersonChatThreads(personId, true),
+    ]).then(([capability, nextThreads]) => {
+      if (cancelled) return;
+      setEnabled(capability.enabled);
+      setThreads(nextThreads);
+      setThreadId(
+        nextThreads.find((thread) => thread.archivedAt === null)?.id ?? null,
+      );
+    });
+    return () => {
+      cancelled = true;
+      const requestId = activeRequest.current;
+      if (requestId) void cancelPersonChatRequest(requestId);
+      activeRequest.current = null;
+    };
+  }, [personId]);
+
+  useEffect(() => {
+    if (!threadId) {
+      setMessages([]);
+      return;
+    }
+    if (newlyCreatedThread.current === threadId) {
+      newlyCreatedThread.current = null;
+      return;
+    }
+    let cancelled = false;
+    void listPersonChatMessages(personId, threadId).then((next) => {
+      if (!cancelled) setMessages(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [personId, threadId]);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return undefined;
+    return window.ipcRenderer.on(
+      'intelligence:person-chat:delta',
+      (_event, packet: PersonChatDelta) => {
+        if (packet.requestId === activeRequest.current) {
+          setStreaming((current) => current + packet.delta);
+        }
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return undefined;
+    return window.ipcRenderer.on(
+      'intelligence:person-chat:status',
+      (_event, packet: PersonChatStatusUpdate) => {
+        if (packet.requestId !== activeRequest.current) return;
+        setStatus(
+          packet.status === 'reading_person'
+            ? `Reading what you know about ${personName}…`
+            : 'Pluto is responding…',
+        );
+      },
+    );
+  }, [personName]);
+
+  useEffect(() => {
+    if (expanded) endRef.current?.scrollIntoView({ block: 'end' });
+  }, [expanded, messages, streaming]);
+
+  const ensureThread = async () => {
+    if (threadId) return threadId;
+    const created = await createPersonChatThread(personId);
+    newlyCreatedThread.current = created.id;
+    setThreads((current) => [created, ...current]);
+    setThreadId(created.id);
+    return created.id;
+  };
+
+  const cancelActive = () => {
+    const requestId = activeRequest.current;
+    if (!requestId) return;
+    activeRequest.current = null;
+    setAsking(false);
+    setStreaming('');
+    setStatus('');
+    void cancelPersonChatRequest(requestId);
+  };
+
+  const submit = async (value: string) => {
+    const content = value.trim();
+    if (!content || asking) return;
+    const targetThread = await ensureThread();
+    const requestId = crypto.randomUUID();
+    activeRequest.current = requestId;
+    setExpanded(true);
+    setAsking(true);
+    setError('');
+    setStatus(`Reading what you know about ${personName}…`);
+    setStreaming('');
+    setQuery('');
+    setMessages((current) => [
+      ...current,
+      {
+        id: `optimistic-${requestId}`,
+        threadId: targetThread,
+        role: 'user',
+        content,
+        status: 'complete',
+        citations: [],
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    try {
+      const response = await sendPersonChatMessage({
+        requestId,
+        threadId: targetThread,
+        personId,
+        query: content,
+      });
+      if (activeRequest.current !== requestId) return;
+      if (response.status !== 'answered' || !response.message) {
+        if (response.status !== 'cancelled')
+          setError('Pluto could not answer right now.');
+        return;
+      }
+      setMessages((current) => [...current, response.message!]);
+      await refreshThreads();
+    } catch {
+      setError('Pluto could not answer right now.');
+    } finally {
+      if (activeRequest.current === requestId) {
+        activeRequest.current = null;
+        setAsking(false);
+        setStreaming('');
+        setStatus('');
+      }
+    }
+  };
+
+  const stop = () => {
+    const requestId = activeRequest.current;
+    if (!requestId) return;
+    activeRequest.current = null;
+    if (streaming.trim()) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `stopped-${requestId}`,
+          threadId: threadId ?? '',
+          role: 'assistant',
+          content: streaming.trim(),
+          status: 'interrupted',
+          citations: [],
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    }
+    setStreaming('');
+    setAsking(false);
+    setStatus('Stopped');
+    void cancelPersonChatRequest(requestId).then(async () => {
+      if (!threadId) return;
+      setMessages(await listPersonChatMessages(personId, threadId));
+    });
+  };
+
+  const hasConversation = messages.length > 0 || asking;
+  const starters = useMemo(() => starterPrompts(personName), [personName]);
+  if (!enabled) return null;
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="person-chat-launcher"
+        aria-label={`Open chat about ${personName}`}
+        onClick={() => setExpanded(true)}
+      >
+        <MessageCircle size={17} aria-hidden="true" />
+        <span>Chat about {personName}</span>
+      </button>
+    );
+  }
+
+  return (
+    <aside
+      className="person-chat person-chat--expanded"
+      aria-label={`Chat about ${personName}`}
+    >
+      <header className="person-chat__header">
+        <div>
+          <Logo size={20} variant="default" />
+          <span>
+            <strong>Chat about {personName}</strong>
+            <small>{status || 'Private, person-scoped conversation'}</small>
+          </span>
+        </div>
+        <div>
+          <button
+            type="button"
+            title="New chat"
+            aria-label="New chat"
+            onClick={() => {
+              cancelActive();
+              setThreadId(null);
+              setMessages([]);
+              setError('');
+            }}
+          >
+            <Plus size={16} />
+          </button>
+          {threadId ? (
+            threads.find((thread) => thread.id === threadId)?.archivedAt ? (
+              <button
+                type="button"
+                title="Resume chat"
+                aria-label="Resume chat"
+                onClick={() => {
+                  void resumePersonChatThread(personId, threadId).then(
+                    async () => {
+                      await refreshThreads();
+                    },
+                  );
+                }}
+              >
+                <ArchiveRestore size={15} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                title="Archive chat"
+                aria-label="Archive chat"
+                onClick={() => {
+                  cancelActive();
+                  void archivePersonChatThread(personId, threadId).then(
+                    async () => {
+                      const next = await refreshThreads();
+                      setThreadId(
+                        next.find((thread) => thread.archivedAt === null)?.id ??
+                          null,
+                      );
+                    },
+                  );
+                }}
+              >
+                <Archive size={15} />
+              </button>
+            )
+          ) : null}
+          <button
+            type="button"
+            title="Minimize"
+            aria-label="Minimize person chat"
+            onClick={() => {
+              cancelActive();
+              setExpanded(false);
+            }}
+          >
+            <ChevronDown size={16} />
+          </button>
+        </div>
+      </header>
+
+      {threads.length ? (
+        <label className="person-chat__thread-picker">
+          <span>Conversation</span>
+          <select
+            value={threadId ?? ''}
+            onChange={(event) => {
+              cancelActive();
+              setThreadId(event.target.value || null);
+            }}
+          >
+            <option value="">New conversation</option>
+            {threads.map((thread) => (
+              <option key={thread.id} value={thread.id}>
+                {thread.title}
+                {thread.archivedAt ? ' (Archived)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      <div className="person-chat__conversation" role="log" aria-live="polite">
+        {!hasConversation ? (
+          <div className="person-chat__welcome">
+            <strong>What would you like to think through?</strong>
+            <p>
+              Ask for a catch-up, prepare a conversation, explore an approach,
+              or draft something together.
+            </p>
+            <div>
+              {starters.map((starter) => (
+                <button
+                  type="button"
+                  key={starter}
+                  onClick={() => void submit(starter)}
+                >
+                  {starter}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {messages.map((message) =>
+          message.role === 'user' ? (
+            <div
+              key={message.id}
+              className="person-chat__message person-chat__message--user"
+            >
+              {message.content}
+            </div>
+          ) : (
+            <div key={message.id} className="person-chat__assistant">
+              <Logo size={18} variant="default" />
+              <div className="person-chat__message person-chat__message--assistant">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+                {message.status === 'interrupted' ? (
+                  <small>Stopped</small>
+                ) : null}
+                <SourceList
+                  citations={message.citations}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </div>
+            </div>
+          ),
+        )}
+        {streaming ? (
+          <div className="person-chat__assistant">
+            <Logo size={18} variant="default" />
+            <div className="person-chat__message person-chat__message--assistant">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streaming}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ) : null}
+        {asking && !streaming ? (
+          <output className="person-chat__loading">
+            <Loader2 className="animate-spin" size={15} /> {status}
+          </output>
+        ) : null}
+        {error ? (
+          <p className="person-chat__error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div ref={endRef} />
+      </div>
+
+      <form
+        className="person-chat__composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit(query);
+        }}
+      >
+        <textarea
+          value={query}
+          rows={1}
+          maxLength={4_000}
+          placeholder={`Chat about ${personName}`}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void submit(query);
+            }
+          }}
+        />
+        <button
+          type={asking ? 'button' : 'submit'}
+          onClick={asking ? stop : undefined}
+          disabled={!asking && !query.trim()}
+          aria-label={asking ? 'Stop answering' : 'Send message'}
+        >
+          {asking ? (
+            <Square size={14} fill="currentColor" />
+          ) : (
+            <Send size={16} />
+          )}
+        </button>
+      </form>
+    </aside>
+  );
+};

@@ -1,1 +1,2 @@
 python/model_manifests/*-NOTICE.txt -whitespace
+drizzle/meta/*_snapshot.json linguist-generated=true
