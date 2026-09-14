@@ -39,6 +39,9 @@ type MeetingAnalysisRunRecord = {
   notes_status: string;
   secondary_status?: string;
   automatic_attempt_count?: number;
+  source_revision?: string;
+  eligibility_revision?: string;
+  user_notes_hash?: string;
 };
 
 type EntityHint = { type: string; name: string };
@@ -651,7 +654,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         meetingId,
         runId: persisted.run_id,
         inputRevision: persisted.input_revision,
-        ...revisions,
+        sourceRevision: persisted.source_revision ?? revisions.sourceRevision,
+        eligibilityRevision:
+          persisted.eligibility_revision ?? revisions.eligibilityRevision,
+        userNotesHash: persisted.user_notes_hash ?? revisions.userNotesHash,
       };
       if (
         !dependencies.db.isMeetingAnalysisRunCurrent({
@@ -745,7 +751,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           meetingId,
           runId: persisted.run_id,
           inputRevision: fingerprint,
-          ...revisions,
+          sourceRevision: persisted.source_revision ?? revisions.sourceRevision,
+          eligibilityRevision:
+            persisted.eligibility_revision ?? revisions.eligibilityRevision,
+          userNotesHash: persisted.user_notes_hash ?? revisions.userNotesHash,
         };
         void startSecondary(
           {

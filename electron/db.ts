@@ -3278,9 +3278,31 @@ export const isMeetingAnalysisRunCurrent = (input: {
   sourceRevision: string;
   eligibilityRevision: string;
   userNotesHash: string;
+  notesStatus?: MeetingAnalysisRunStatus;
   requirePublished?: boolean;
 }): boolean => {
   const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+  if (!current) return false;
+
+  const run = getMeetingAnalysisRun(input.meetingId);
+  if (
+    !run ||
+    run.run_id !== input.runId ||
+    run.input_revision !== input.inputRevision ||
+    run.source_revision !== input.sourceRevision ||
+    run.eligibility_revision !== input.eligibilityRevision ||
+    run.user_notes_hash !== input.userNotesHash
+  ) {
+    return false;
+  }
+
+  const requirePublished =
+    input.requirePublished ?? input.notesStatus === 'published';
+
+  if (requirePublished) {
+    return run.notes_status === 'published' && Boolean(current.analysis_json);
+  }
+
   const revisions = getMeetingAnalysisPublicationRevisions(current);
   if (
     !revisions ||
@@ -3290,16 +3312,8 @@ export const isMeetingAnalysisRunCurrent = (input: {
   ) {
     return false;
   }
-  const run = getMeetingAnalysisRun(input.meetingId);
-  return Boolean(
-    run &&
-      run.run_id === input.runId &&
-      run.input_revision === input.inputRevision &&
-      run.source_revision === input.sourceRevision &&
-      run.eligibility_revision === input.eligibilityRevision &&
-      run.user_notes_hash === input.userNotesHash &&
-      (!input.requirePublished || run.notes_status === 'published'),
-  );
+
+  return true;
 };
 
 export const updateMeetingAnalysisRunStatusIfCurrent = (input: {
@@ -3314,7 +3328,14 @@ export const updateMeetingAnalysisRunStatusIfCurrent = (input: {
   stage: string;
   errorCode?: string | null;
 }): boolean => {
-  if (!isMeetingAnalysisRunCurrent(input)) return false;
+  if (
+    !isMeetingAnalysisRunCurrent({
+      ...input,
+      requirePublished: input.notesStatus === 'published',
+    })
+  ) {
+    return false;
+  }
   return updateMeetingAnalysisRunStatus(input);
 };
 

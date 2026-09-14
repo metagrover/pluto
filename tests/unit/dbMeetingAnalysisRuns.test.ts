@@ -19,6 +19,7 @@ import {
   getMeetingNotesIdentityProjection,
   identityStore,
   isMeetingAnalysisAutomaticRetryExhausted,
+  isMeetingAnalysisRunCurrent,
   listMeetingAnalysisRunMetrics,
   publishMeetingNotesIfCurrent,
   recoverInterruptedMeetingAnalysisRuns,
@@ -1120,6 +1121,82 @@ describe('meeting analysis run publication', () => {
     ).toBe(false);
     expect(getMeeting(meetingId)).toMatchObject({
       value_signals_json: null,
+    });
+  });
+
+  it('allows secondary updates on published notes even after speaker projection changes', () => {
+    const meetingId = 'secondary-after-projection-change';
+    saveMeeting({
+      id: meetingId,
+      title: 'Published with projection change',
+      transcript_json: JSON.stringify({
+        segments: [{ speaker: 'Them', text: 'I will review it.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({ trust: 'eligible' }),
+      user_notes: '',
+    });
+    const revisionsBefore = getMeetingAnalysisPublicationRevisions(
+      getMeeting(meetingId),
+    )!;
+    start(meetingId, 'run-pub', 'input-pub', revisionsBefore);
+    expect(
+      publish(
+        meetingId,
+        'run-pub',
+        'input-pub',
+        revisionsBefore,
+        analysis('Published notes before projection update.'),
+      ),
+    ).toBe(true);
+
+    const person = upsertEntity({
+      id: 'person-sec-projection',
+      type: 'person',
+      name: 'Taylor',
+      dedupe_by_name: false,
+    });
+    identityStore.setBinding(meetingId, {
+      speaker: 'Them',
+      personId: person.id,
+      individual: true,
+      source: 'user',
+      sourceRevision: 'user-binding-sec',
+      evidence: [],
+    });
+
+    const revisionsAfter = getMeetingAnalysisPublicationRevisions(
+      getMeeting(meetingId),
+    )!;
+    expect(revisionsAfter.sourceRevision).not.toBe(
+      revisionsBefore.sourceRevision,
+    );
+
+    expect(
+      isMeetingAnalysisRunCurrent({
+        meetingId,
+        runId: 'run-pub',
+        inputRevision: 'input-pub',
+        ...revisionsBefore,
+        requirePublished: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      updateMeetingAnalysisRunStatusIfCurrent({
+        meetingId,
+        runId: 'run-pub',
+        inputRevision: 'input-pub',
+        ...revisionsBefore,
+        notesStatus: 'published',
+        secondaryStatus: 'complete',
+        stage: 'complete',
+      }),
+    ).toBe(true);
+
+    expect(getMeetingAnalysisRun(meetingId)).toMatchObject({
+      run_id: 'run-pub',
+      notes_status: 'published',
+      secondary_status: 'complete',
     });
   });
 });
