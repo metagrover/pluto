@@ -334,7 +334,10 @@ const stringSetting = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
 const errorCode = (error: unknown): string => {
-  if (error instanceof DOMException && error.name === 'AbortError') {
+  if (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  ) {
     return 'notes_cancelled';
   }
   if (
@@ -439,15 +442,19 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     void Promise.resolve()
       .then(() => dependencies.runSecondary!(input))
       .then(() => update('complete', 'complete'))
-      .catch((error) =>
+      .catch((error) => {
+        console.error(
+          `[MeetingNotesCoordinator] Secondary run failed for meeting ${input.meetingId}:`,
+          error,
+        );
         update(
           'failed',
           'secondary_failed',
           errorCode(error) === 'notes_generation_failed'
             ? 'secondary_processing_failed'
             : errorCode(error),
-        ),
-      )
+        );
+      })
       .finally(() => {
         if (secondaryByMeeting.get(input.meetingId)?.runId === input.runId)
           secondaryByMeeting.delete(input.meetingId);

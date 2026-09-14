@@ -1297,6 +1297,29 @@ app.whenReady().then(async () => {
         }
         return;
       }
+      if (workId.startsWith('secondary:')) {
+        signal.throwIfAborted();
+        const meetingId = workId.slice('secondary:'.length);
+        const cancel = () =>
+          meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
+            meetingId,
+            requestId: randomUUID(),
+            template: 'auto',
+            reason: 'secondary',
+          });
+        } catch (error) {
+          console.warn(
+            `[Background] Deferred secondary run failed for ${meetingId}:`,
+            error,
+          );
+        } finally {
+          signal.removeEventListener('abort', cancel);
+        }
+        return;
+      }
       if (workId.startsWith('voice:')) {
         voiceWorkQueue?.enqueue(workId.slice('voice:'.length));
         return;
@@ -1330,6 +1353,9 @@ app.whenReady().then(async () => {
   configureKnowledgeDocBackgroundScheduler((docId) => {
     backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
   });
+  for (const failedMeetingId of db.listMeetingIdsWithFailedSecondary()) {
+    backgroundKnowledgeRefresh?.enqueue(`secondary:${failedMeetingId}`);
+  }
   dreamingEntityQueue = createDirtyEntityQueue({
     getProjects: () => db.getEntitiesByType('project'),
     getPeople: () => db.getEntitiesByType('person'),
@@ -4741,6 +4767,16 @@ app.whenReady().then(async () => {
       meetingId: input.meetingId,
       requestId: input.requestId,
     });
+  });
+
+  ipcMain.handle('RETRY_FAILED_SECONDARY_RUNS', async () => {
+    const meetingIds = db.listMeetingIdsWithFailedSecondary();
+    const enqueued: string[] = [];
+    for (const meetingId of meetingIds) {
+      backgroundKnowledgeRefresh?.enqueue(`secondary:${meetingId}`);
+      enqueued.push(meetingId);
+    }
+    return { enqueued };
   });
 
   ipcMain.handle(

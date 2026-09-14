@@ -2662,6 +2662,18 @@ export const getMeetingAnalysisRun = (
     .prepare('SELECT * FROM meeting_analysis_runs WHERE meeting_id = ?')
     .get(String(meetingId)) as MeetingAnalysisRun | undefined) ?? null;
 
+export const listMeetingIdsWithFailedSecondary = (): string[] =>
+  (
+    db
+      .prepare(
+        `SELECT meeting_id FROM meeting_analysis_runs
+         WHERE notes_status = 'published'
+           AND secondary_status = 'failed'
+         ORDER BY updated_at DESC`,
+      )
+      .all() as Array<{ meeting_id: string }>
+  ).map((row) => String(row.meeting_id));
+
 export const updateMeetingAnalysisRunStatus = (input: {
   meetingId: string | number;
   runId: string;

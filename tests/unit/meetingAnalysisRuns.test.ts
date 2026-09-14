@@ -1786,4 +1786,92 @@ describe('meeting analysis run coordinator', () => {
     ).rejects.toThrow('meeting_notes_superseded');
     expect(generateStructuredAnalysis).not.toHaveBeenCalled();
   });
+
+  it('executes secondary work for published notes without regenerating primary notes', async () => {
+    const updateSecondaryStatus = vi.fn();
+    const generateStructuredAnalysis = vi.fn();
+    const runSecondary = vi.fn().mockResolvedValue(undefined);
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'meeting-secondary-only',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 'Me', text: 'I will finish the report.' }],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          transcript_validated_at: '2026-09-14T00:00:00.000Z',
+          user_notes: '',
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'Discussed project commitments.',
+            topics: [],
+            all_action_items: [
+              {
+                text: 'Finish the report',
+                assignee: 'Me',
+                due: 'tomorrow',
+              },
+            ],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          }),
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'source-sec',
+          eligibilityRevision: 'eligible-sec',
+          userNotesHash: 'notes-sec',
+        }),
+        getMeetingAnalysisRun: () => ({
+          run_id: 'run-sec',
+          input_revision: 'revision-sec',
+          notes_status: 'published',
+          secondary_status: 'failed',
+        }),
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: vi.fn(),
+        updateMeetingAnalysisRunStatusIfCurrent: updateSecondaryStatus,
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: vi.fn(),
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis,
+      }),
+      runSecondary,
+    });
+
+    const result = await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'meeting-secondary-only',
+      requestId: 'request-sec',
+      template: 'auto',
+      reason: 'secondary',
+    });
+
+    expect(result).toEqual({
+      meetingId: 'meeting-secondary-only',
+      runId: 'run-sec',
+      status: 'published',
+    });
+    expect(generateStructuredAnalysis).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(runSecondary).toHaveBeenCalledTimes(1);
+    });
+    await vi.waitFor(() => {
+      expect(updateSecondaryStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          secondaryStatus: 'complete',
+          stage: 'complete',
+        }),
+      );
+    });
+  });
 });

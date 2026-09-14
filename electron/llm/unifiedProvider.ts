@@ -413,7 +413,9 @@ export const getOllamaTimeoutMs = (task: string): number =>
             task === 'analysisEditorial' ||
             task === 'topicSegmentation' ||
             task === 'terminologyReconciliation' ||
-            task === 'topicAnalysis'
+            task === 'topicAnalysis' ||
+            task === 'entities' ||
+            task === 'valueSignals'
           ? OLLAMA_ANALYSIS_TIMEOUT_MS
           : OLLAMA_TIMEOUT_MS;
 
@@ -428,7 +430,9 @@ const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
   task === 'topicSegmentation' ||
   task === 'terminologyReconciliation' ||
   task === 'topicAnalysis' ||
-  task === 'knowledgeDoc';
+  task === 'knowledgeDoc' ||
+  task === 'entities' ||
+  task === 'valueSignals';
 
 export const getOllamaActiveGenerationTimeoutMs = (
   numPredict: number,
