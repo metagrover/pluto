@@ -3,6 +3,7 @@ import type { PersistedMeeting, PersonBriefingDetail } from '../../electron/db';
 import {
   buildPersonChatContext,
   buildPersonChatPrompt,
+  getPersonChatQuickReply,
   routePersonChatIntent,
 } from '../../electron/intelligence/personChat';
 
@@ -42,6 +43,14 @@ describe('person chat intelligence', () => {
       'role_play',
     );
     expect(routePersonChatIntent('What do I owe them?')).toBe('commitments');
+  });
+
+  it('answers brief polite closures without retrieving evidence or calling a model', () => {
+    expect(getPersonChatQuickReply('nice, thank you')).toBe("You're welcome.");
+    expect(getPersonChatQuickReply('Thanks, Pluto!')).toBe("You're welcome.");
+    expect(getPersonChatQuickReply('Thank you, what should I send next?')).toBe(
+      null,
+    );
   });
 
   it('only includes statements attributed to a bound speaker', () => {
@@ -89,5 +98,25 @@ describe('person chat intelligence', () => {
     expect(prompt).toContain('GENERAL GUIDANCE');
     expect(prompt).toContain('CONVERSATION HISTORY');
     expect(prompt).toContain('never establish facts about Maya');
+  });
+
+  it('keeps one useful clarification before returning a copy-ready draft', () => {
+    const context = buildPersonChatContext({
+      detail,
+      query: 'Draft a message to Maya',
+      getMeeting: () => undefined,
+      getBoundSpeakers: () => [],
+    });
+    const prompt = buildPersonChatPrompt({
+      query: 'Draft a message to Maya',
+      context,
+      messages: [],
+    });
+
+    expect(prompt).toContain('ask one concise clarifying question');
+    expect(prompt).toContain('one copy-ready version first');
+    expect(prompt).toContain('Keep it under 90 words');
+    expect(prompt).toContain('never add one by habit');
+    expect(prompt).not.toContain('Prefer 2-4 short paragraphs');
   });
 });

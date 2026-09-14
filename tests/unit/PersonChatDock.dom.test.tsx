@@ -117,10 +117,12 @@ describe('PersonChatDock', () => {
       }),
     );
     expect(host.textContent).toContain('Start with the shared goal.');
-    expect(host.textContent).toContain('Your conversations · 1');
+    expect(host.textContent).toContain('1 source');
+    expect(host.textContent).not.toContain('Your conversations');
+    expect(host.querySelector('.person-chat__assistant-mark')).not.toBeNull();
 
     const summary = [...host.querySelectorAll('summary')].find((item) =>
-      item.textContent?.includes('Your conversations'),
+      item.textContent?.includes('1 source'),
     ) as HTMLElement;
     summary.click();
     const source = [...host.querySelectorAll('button')].find((button) =>

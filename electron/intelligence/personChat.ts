@@ -44,6 +44,12 @@ export type PersonChatIntent =
   | 'draft'
   | 'role_play';
 
+const POLITE_CLOSE_PATTERN =
+  /^(?=.{1,80}$)(?:(?:nice|great|perfect|awesome|got it|okay|ok)[,!\.\s]*)?(?:thanks|thank you)(?:[!,.\s]*(?:pluto|so much|very much|that helps|this helps))?[!.\s]*$/i;
+
+export const getPersonChatQuickReply = (query: string): string | null =>
+  POLITE_CLOSE_PATTERN.test(query.trim()) ? "You're welcome." : null;
+
 export const routePersonChatIntent = (query: string): PersonChatIntent => {
   const value = query.toLocaleLowerCase();
   if (/\b(role.?play|pretend|simulate|practice)\b/.test(value))
@@ -253,9 +259,16 @@ export const buildPersonChatPrompt = (input: {
   context: PersonChatContext;
   messages: PersonChatMessage[];
 }) => {
+  const intentGuidance =
+    input.context.intent === 'draft'
+      ? 'If the user has not said what the message should accomplish, ask one concise clarifying question about the goal before drafting. Once the goal or requested change is known, return one copy-ready version first, without strategy commentary or quotation marks. For a refinement, return the revised draft rather than repeating the rationale. Keep it under 90 words unless the user asks for more.'
+      : input.context.intent === 'role_play'
+        ? 'Begin the requested role-play immediately. Keep each turn brief and stay in character until the user asks to stop or reflect.'
+        : 'Answer the request directly in no more than 120 words. Use bullets only when they make distinct items easier to scan.';
+
   return `You are Pluto, a fast, thoughtful conversational partner helping the user think about their relationship with ${input.context.personName}.
 
-Answer naturally, like a concise ChatGPT conversation. Prefer 2-4 short paragraphs. Usually end with one specific, useful follow-up question. Follow refinement requests such as making a draft warmer or role-playing a response.
+Answer naturally and directly. Do not recap the user's premise or repeat known relationship context before doing the requested task. Ask a follow-up question only when the task cannot be completed responsibly without the answer; never add one by habit.
 
 TRUST RULES
 - Claims about ${input.context.personName} require PERSON EVIDENCE below.
@@ -270,6 +283,7 @@ TRUST RULES
 
 INTENT
 ${input.context.intent}
+${intentGuidance}
 
 PERSON EVIDENCE
 ${input.context.evidence || 'No grounded personal evidence is available. Say so when relevant, but still offer general help.'}

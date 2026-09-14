@@ -2873,8 +2873,22 @@
 }
 .person-chat__assistant {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+.person-chat__assistant-mark {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    hsl(var(--pro-accent)) 8%,
+    hsl(var(--pro-surface))
+  );
 }
 .person-chat__message--assistant p + p,
 .person-chat__message--assistant ul,
@@ -2899,13 +2913,21 @@
   position: relative;
 }
 .person-chat__sources summary {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   list-style: none;
   padding: 4px 8px;
   font-size: 10px;
 }
 .person-chat__sources summary::-webkit-details-marker {
   display: none;
+}
+.person-chat__sources summary svg {
+  transition: transform 150ms ease-out;
+}
+.person-chat__sources details[open] summary svg {
+  transform: rotate(180deg);
 }
 .person-chat__sources details > div {
   width: min(420px, calc(100vw - 92px));

@@ -62,7 +62,12 @@ const SourceList = ({
   return (
     <div className="person-chat__sources">
       <details>
-        <summary>Your conversations · {citations.length}</summary>
+        <summary>
+          <span>
+            {citations.length} {citations.length === 1 ? 'source' : 'sources'}
+          </span>
+          <ChevronDown size={13} aria-hidden="true" />
+        </summary>
         <div>
           {citations.map((citation) => (
             <button
@@ -427,7 +432,9 @@ export const PersonChatDock: React.FC<{
             </div>
           ) : (
             <div key={message.id} className="person-chat__assistant">
-              <Logo size={18} variant="default" />
+              <div className="person-chat__assistant-mark" aria-hidden="true">
+                <Logo size={16} variant="default" />
+              </div>
               <div className="person-chat__message person-chat__message--assistant">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {message.content}
@@ -445,7 +452,9 @@ export const PersonChatDock: React.FC<{
         )}
         {streaming ? (
           <div className="person-chat__assistant">
-            <Logo size={18} variant="default" />
+            <div className="person-chat__assistant-mark" aria-hidden="true">
+              <Logo size={16} variant="default" />
+            </div>
             <div className="person-chat__message person-chat__message--assistant">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {streaming}

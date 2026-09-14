@@ -525,6 +525,7 @@ import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
   buildPersonChatContext,
   buildPersonChatPrompt,
+  getPersonChatQuickReply,
 } from './intelligence/personChat';
 import {
   clearAlertsForMeeting,
@@ -4160,6 +4161,19 @@ app.whenReady().then(async () => {
           role: 'user',
           content: query,
         });
+        const quickReply = getPersonChatQuickReply(query);
+        if (quickReply) {
+          const message = personChatStore.appendMessage({
+            threadId,
+            personId,
+            role: 'assistant',
+            content: quickReply,
+          });
+          return {
+            status: 'answered',
+            message,
+          } satisfies PersonChatResponse;
+        }
         sendStatus('reading_person');
         const detail = db.getPersonBriefing(personId);
         if (!detail) throw new Error('Person not found');
