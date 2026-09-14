@@ -1,4 +1,11 @@
-import { Check, MoreHorizontal, Pencil } from 'lucide-react';
+import {
+  Activity,
+  Check,
+  MoreHorizontal,
+  Pencil,
+  Repeat2,
+  Users,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProjectBrief,
@@ -25,6 +32,7 @@ interface ProjectDossierProps {
   projectName?: string;
   onBack: () => void;
   onOpenMeeting?: (id: string) => void;
+  onOpenPerson?: (id: string) => void;
   relatedWork?: ProjectPortfolioEntry[];
   onOpenRelatedWork?: (id: string) => void;
   mergeCandidates?: ProjectPortfolioEntry[];
@@ -52,11 +60,61 @@ const normalizeProjectCopy = (value: string): string =>
     .replace(/[.!?]+$/, '')
     .toLocaleLowerCase();
 
+const getPersonInitials = (name: string): string =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join('')
+    .toLocaleUpperCase();
+
+const getPersonFunctionTag = (role: string | undefined): string | null => {
+  const normalized = role?.trim().toLocaleLowerCase();
+  if (!normalized) return null;
+  if (/\b(?:project|program|programme)\s+lead(?:er)?\b/.test(normalized))
+    return 'Project lead';
+  if (/\b(?:executive|exec|project)\s+sponsor\b/.test(normalized))
+    return 'Executive sponsor';
+  if (
+    /\b(?:project|program|programme)\s+(?:manager|management|director)\b|\bpmo\b/.test(
+      normalized,
+    )
+  )
+    return 'Project management';
+  if (
+    /\b(?:ai|engineer|engineering|developer|machine learning|software|technical|technology|data)\b/.test(
+      normalized,
+    )
+  )
+    return 'Engineering';
+  if (/\b(?:product|product management)\b/.test(normalized)) return 'Product';
+  if (/\b(?:design|designer|ux|user research)\b/.test(normalized))
+    return 'Design';
+  if (/\b(?:marketing|growth|communications?)\b/.test(normalized))
+    return 'Marketing';
+  if (/\b(?:sales|account executive|business development)\b/.test(normalized))
+    return 'Sales';
+  if (/\b(?:operations|ops)\b/.test(normalized)) return 'Operations';
+  if (/\b(?:finance|accounting)\b/.test(normalized)) return 'Finance';
+  if (/\b(?:people|human resources|talent)\b/.test(normalized)) return 'People';
+  if (/\b(?:legal|counsel)\b/.test(normalized)) return 'Legal';
+  return null;
+};
+
+const healthTone: Record<ProjectBrief['health']['state'], string> = {
+  appears_on_track: 'text-pro-success',
+  watch: 'text-pro-warning',
+  falling_behind: 'text-pro-urgent',
+  not_enough_evidence: 'text-pro-text-muted',
+};
+
 export const ProjectDossier = ({
   projectId,
   projectName,
   onBack,
   onOpenMeeting,
+  onOpenPerson,
   relatedWork = [],
   onOpenRelatedWork,
   mergeCandidates = [],
@@ -176,6 +234,94 @@ export const ProjectDossier = ({
   const currentFocusRepeatsOutcome =
     normalizeProjectCopy(projectCurrentFocus) ===
     normalizeProjectCopy(projectOutcome);
+  const needsAttention =
+    current?.health.state === 'watch' ||
+    current?.health.state === 'falling_behind';
+  const attentionTasks =
+    current?.tasks.filter((task) =>
+      current.health.evidenceTaskIds.includes(task.id),
+    ) ?? [];
+  const nextMilestone = current?.milestones.find(
+    (milestone) => milestone.status !== 'complete',
+  );
+  const peopleInvolved = (() => {
+    const people = new Map<
+      string,
+      {
+        id: string;
+        entityId: string;
+        name: string;
+        role?: string;
+        meetingCount: number;
+      }
+    >();
+    for (const meeting of current?.meetings ?? []) {
+      const seen = new Set<string>();
+      for (const participant of meeting.participants ?? []) {
+        const name = participant.name.trim();
+        const entityId = participant.entity_id.trim();
+        const key = entityId || name.toLocaleLowerCase();
+        if (
+          !name ||
+          participant.entity_id.toLocaleLowerCase().startsWith('speaker:') ||
+          /^(?:none|unknown|n\/a)$/i.test(name) ||
+          seen.has(key)
+        )
+          continue;
+        seen.add(key);
+        const existing = people.get(key);
+        people.set(key, {
+          id: key,
+          entityId: existing?.entityId || entityId,
+          name,
+          role: existing?.role || participant.role?.trim() || undefined,
+          meetingCount: (existing?.meetingCount ?? 0) + 1,
+        });
+      }
+    }
+    return [...people.values()].sort(
+      (left, right) =>
+        right.meetingCount - left.meetingCount ||
+        left.name.localeCompare(right.name),
+    );
+  })();
+  const activeAssignments = (current?.tasks ?? [])
+    .flatMap((task) => {
+      if (!task.assigned_to || task.status === 'completed') return [];
+      const person = peopleInvolved.find(
+        (candidate) => candidate.entityId === task.assigned_to,
+      );
+      return person ? [{ person, task }] : [];
+    })
+    .slice(0, 2);
+  const projectActivitySummary = currentFocusRepeatsOutcome
+    ? current?.theme?.recentChanges[0]?.summary ||
+      current?.meetings[0]?.context ||
+      `${current?.meetingStats.meetingCount ?? 0} linked conversations currently support this project.`
+    : projectCurrentFocus;
+  const rolePeople = peopleInvolved.filter((person) => person.role).slice(0, 3);
+  const rolePeopleLabel = new Intl.ListFormat(undefined, {
+    style: 'long',
+    type: 'conjunction',
+  }).format(rolePeople.map((person) => `${person.name} (${person.role})`));
+  const projectPeopleSummary = activeAssignments.length
+    ? activeAssignments
+        .map(
+          ({ person, task }) =>
+            `${person.name} is responsible for ${task.name}`,
+        )
+        .join('; ')
+    : rolePeople.length > 0
+      ? `${rolePeopleLabel} ${rolePeople.length === 1 ? 'is' : 'are'} linked to this work.`
+      : peopleInvolved.length > 0
+        ? `${peopleInvolved.length} named people are linked across the available project conversations.`
+        : 'No named contributors are linked in the available evidence yet.';
+  const primaryAttentionTask = attentionTasks[0];
+  const projectWatchSummary = primaryAttentionTask
+    ? `${primaryAttentionTask.name}${primaryAttentionTask.due_date ? `, due ${formatDate(primaryAttentionTask.due_date)}` : ''}, needs attention.`
+    : nextMilestone
+      ? `The next milestone is ${nextMilestone.title}${nextMilestone.timing ? `, expected ${nextMilestone.timing}` : ''}.`
+      : 'No upcoming milestone or dated commitment is established yet.';
   const isSuggestion =
     Boolean(current) &&
     !current?.theme &&
@@ -463,11 +609,6 @@ export const ProjectDossier = ({
                 </button>
               </div>
             )}
-            {!currentFocusRepeatsOutcome && (
-              <p className="mt-3 max-w-[65ch] text-base leading-relaxed text-pro-text-muted">
-                {projectOutcome}
-              </p>
-            )}
             <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-pro-text-muted">
               <span>
                 {current.meetingStats.meetingCount} conversation
@@ -529,19 +670,243 @@ export const ProjectDossier = ({
 
           <div className="space-y-12">
             <section
-              aria-labelledby="project-current-focus"
-              className="border-y border-pro-border/45 py-7"
+              aria-labelledby="project-about"
+              className="grid min-w-0 gap-8 border-y border-pro-border/45 py-7 lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-10 lg:py-8"
             >
-              <p className="text-xs font-medium uppercase tracking-[0.1em] text-pro-text-muted">
-                Current focus
-              </p>
-              <h2
-                id="project-current-focus"
-                className="mt-3 max-w-[46ch] text-xl font-semibold leading-snug"
-              >
-                {projectCurrentFocus}
-              </h2>
+              <div className="min-w-0">
+                <h2
+                  id="project-about"
+                  className="text-sm font-semibold text-pro-text-main"
+                >
+                  What this project is about
+                </h2>
+                <p className="mt-3 max-w-[66ch] break-words text-[22px] font-semibold leading-[1.35] tracking-[-0.02em] text-pro-text-main sm:text-2xl">
+                  {projectOutcome}
+                </p>
+                <dl className="mt-6 max-w-[72ch] divide-y divide-pro-border/35 border-t border-pro-border/40 text-sm leading-6">
+                  <div className="grid min-w-0 gap-1 py-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
+                    <dt className="font-medium text-pro-text-main">
+                      {currentFocusRepeatsOutcome
+                        ? 'Latest evidence'
+                        : 'Current focus'}
+                    </dt>
+                    <dd className="min-w-0 break-words text-pro-text-muted">
+                      {projectActivitySummary}
+                    </dd>
+                  </div>
+                  <div className="grid min-w-0 gap-1 py-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
+                    <dt className="font-medium text-pro-text-main">People</dt>
+                    <dd className="min-w-0 break-words text-pro-text-muted">
+                      {projectPeopleSummary}
+                      {activeAssignments.length > 0 ? '.' : ''}
+                    </dd>
+                  </div>
+                  <div className="grid min-w-0 gap-1 pt-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
+                    <dt className="font-medium text-pro-text-main">
+                      What to watch
+                    </dt>
+                    <dd className="min-w-0 break-words text-pro-text-muted">
+                      {projectWatchSummary}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <aside className="min-w-0 border-t border-pro-border/40 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+                <div className="flex items-center gap-2 text-xs font-medium text-pro-text-muted">
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  <h2 id="project-health">Project health</h2>
+                </div>
+                <p
+                  className={`mt-3 break-words text-xl font-semibold leading-snug ${healthTone[current.health.state]}`}
+                >
+                  {current.health.headline}
+                </p>
+                <p className="mt-2 break-words text-sm leading-6 text-pro-text-muted">
+                  {current.health.summary}
+                </p>
+                {attentionTasks.length > 0 && (
+                  <ul className="mt-5 space-y-3 border-t border-pro-border/40 pt-4 text-sm">
+                    {attentionTasks.map((task) => (
+                      <li key={task.id} className="break-words">
+                        <span className="font-medium">{task.name}</span>
+                        {task.due_date && (
+                          <span className="mt-0.5 block text-xs text-pro-text-muted">
+                            Due {formatDate(task.due_date)}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </aside>
             </section>
+
+            <section
+              aria-label="Project at a glance"
+              className="grid gap-x-8 gap-y-5 border-y border-pro-border/45 py-5 sm:grid-cols-2 xl:grid-cols-5"
+            >
+              <div>
+                <p className="text-xs text-pro-text-muted">Conversations</p>
+                <p className="mt-1 text-sm font-medium">
+                  {current.meetingStats.meetingCount} linked
+                  {current.meetingStats.activeWeeks !== null
+                    ? ` across ${current.meetingStats.activeWeeks} week${current.meetingStats.activeWeeks === 1 ? '' : 's'}`
+                    : ''}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-pro-text-muted">People involved</p>
+                <p className="mt-1 text-sm font-medium">
+                  {peopleInvolved.length
+                    ? `${peopleInvolved.length} linked`
+                    : 'No named people linked yet'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-pro-text-muted">Regular meetings</p>
+                <p className="mt-1 text-sm font-medium">
+                  {current.meetingStats.recurringSeries[0]?.cadence ||
+                    'No established pattern'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-pro-text-muted">Next milestone</p>
+                <p className="mt-1 text-sm font-medium">
+                  {nextMilestone
+                    ? `${nextMilestone.title}${nextMilestone.timing ? ` · ${nextMilestone.timing}` : ''}`
+                    : 'Nothing upcoming yet'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-pro-text-muted">Commitments</p>
+                <p className="mt-1 text-sm font-medium">
+                  {current.momentum.openCommitmentCount} open ·{' '}
+                  {current.momentum.completedCommitmentCount} completed
+                </p>
+              </div>
+            </section>
+
+            {peopleInvolved.length > 0 && (
+              <section aria-labelledby="project-people">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <div>
+                    <h2 id="project-people" className="text-lg font-semibold">
+                      People involved
+                    </h2>
+                    <p className="mt-1 text-xs text-pro-text-muted">
+                      Names linked by project evidence across conversations.
+                    </p>
+                  </div>
+                  {current.meetingStats.typicalParticipantCount !== null && (
+                    <span className="inline-flex items-center gap-2 text-xs text-pro-text-muted">
+                      <Users aria-hidden="true" className="h-4 w-4" />
+                      Typically {current.meetingStats.typicalParticipantCount}{' '}
+                      people per covered conversation
+                    </span>
+                  )}
+                </div>
+                <ul className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  {peopleInvolved.map((person) => {
+                    const functionTag = getPersonFunctionTag(person.role);
+                    return (
+                      <li key={person.id} className="h-24 min-w-0">
+                        <button
+                          type="button"
+                          data-person-card={person.name}
+                          aria-label={`Open ${person.name}'s profile`}
+                          disabled={!onOpenPerson || !person.entityId}
+                          onClick={() => onOpenPerson?.(person.entityId)}
+                          className="group flex h-full w-full min-w-0 items-start gap-3 rounded-xl border border-pro-border/55 bg-pro-bg-elevated/25 p-3 text-left transition-colors hover:border-pro-accent/25 hover:bg-pro-hover/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-default disabled:hover:border-pro-border/55 disabled:hover:bg-pro-bg-elevated/25"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted transition-colors group-hover:border-pro-accent/25 group-hover:text-pro-accent"
+                          >
+                            {getPersonInitials(person.name)}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-pro-text-main">
+                              {person.name}
+                            </p>
+                            {person.role && (
+                              <p className="mt-0.5 truncate text-xs text-pro-text-muted">
+                                {person.role}
+                              </p>
+                            )}
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                              {functionTag && (
+                                <span className="rounded-md border border-pro-accent/15 bg-pro-accent/5 px-1.5 py-0.5 font-medium text-pro-accent">
+                                  {functionTag}
+                                </span>
+                              )}
+                              <span className="text-pro-text-muted">
+                                {person.meetingCount} linked conversation
+                                {person.meetingCount === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {current.meetingStats.participantCoverage <
+                  current.meetingStats.meetingCount && (
+                  <p className="mt-3 text-xs text-pro-text-muted">
+                    People data is available for{' '}
+                    {current.meetingStats.participantCoverage} of{' '}
+                    {current.meetingStats.meetingCount} linked conversations.
+                  </p>
+                )}
+              </section>
+            )}
+
+            {current.meetingStats.recurringSeries.length > 0 && (
+              <section aria-labelledby="project-meeting-rhythm">
+                <div>
+                  <h2
+                    id="project-meeting-rhythm"
+                    className="text-lg font-semibold"
+                  >
+                    Regular meetings
+                  </h2>
+                  <p className="mt-1 text-xs text-pro-text-muted">
+                    Patterns established from at least three consistently spaced
+                    conversations.
+                  </p>
+                </div>
+                <div className="mt-4 divide-y divide-pro-border/40 border-y border-pro-border/45">
+                  {current.meetingStats.recurringSeries.map((series) => (
+                    <div
+                      key={series.key}
+                      className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div>
+                        <p className="flex items-center gap-2 font-medium">
+                          <Repeat2
+                            aria-hidden="true"
+                            className="h-4 w-4 text-pro-text-muted"
+                          />
+                          {series.title}
+                        </p>
+                        <p className="mt-1 text-sm text-pro-text-muted">
+                          {series.cadence}
+                        </p>
+                      </div>
+                      <p className="text-sm tabular-nums text-pro-text-muted sm:text-right">
+                        {series.meetingCount} observed
+                        {series.typicalParticipantCount !== null
+                          ? ` · typically ${series.typicalParticipantCount} people`
+                          : ''}
+                        <br />
+                        Last met {formatDate(series.lastMetAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <PreparedUpdates
               key={current.project.id}
@@ -562,6 +927,20 @@ export const ProjectDossier = ({
                 setMergeOpen(true);
                 setMergeState('idle');
               }}
+            />
+
+            <ProjectMilestones
+              projectId={current.project.id}
+              milestones={current.milestones}
+              evidenceMeetings={current.meetings.map((meeting) => ({
+                id: meeting.id,
+                title: meeting.title,
+                date: meeting.started_at || meeting.created_at,
+              }))}
+              onOpenMeeting={onOpenMeeting}
+              onChange={(milestones) =>
+                setBrief((value) => (value ? { ...value, milestones } : value))
+              }
             />
 
             {current.theme?.recentChanges.length ? (
@@ -630,7 +1009,7 @@ export const ProjectDossier = ({
               <ProjectCommitments
                 key={projectId}
                 projectId={projectId}
-                defaultOpen={false}
+                defaultOpen={needsAttention}
               />
             </section>
 
@@ -686,20 +1065,6 @@ export const ProjectDossier = ({
               </div>
             </section>
 
-            <ProjectMilestones
-              projectId={current.project.id}
-              milestones={current.milestones}
-              evidenceMeetings={current.meetings.map((meeting) => ({
-                id: meeting.id,
-                title: meeting.title,
-                date: meeting.started_at || meeting.created_at,
-              }))}
-              onOpenMeeting={onOpenMeeting}
-              onChange={(milestones) =>
-                setBrief((value) => (value ? { ...value, milestones } : value))
-              }
-            />
-
             {relatedWork.length > 0 && (
               <section aria-labelledby="project-related-work">
                 <h2 id="project-related-work" className="text-lg font-semibold">
@@ -729,38 +1094,6 @@ export const ProjectDossier = ({
                 </ul>
               </section>
             )}
-
-            <details className="group border-y border-pro-border/45 text-sm">
-              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded py-3 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
-                <span>Activity signals</span>
-                <span className="font-normal text-pro-text-muted">
-                  Optional context
-                </span>
-              </summary>
-              <dl className="grid gap-4 border-t border-pro-border/35 py-5 text-pro-text-muted sm:grid-cols-3">
-                <div>
-                  <dt className="text-xs">Recent conversations</dt>
-                  <dd className="mt-1 font-medium text-pro-text-main">
-                    {current.momentum.recentMeetingCount} in 30 days
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs">Confirmed commitments</dt>
-                  <dd className="mt-1 font-medium text-pro-text-main">
-                    {current.momentum.openCommitmentCount} open,{' '}
-                    {current.momentum.completedCommitmentCount} completed
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs">Evidence read</dt>
-                  <dd className="mt-1 font-medium text-pro-text-main">
-                    {current.health.state === 'not_enough_evidence'
-                      ? 'No health claim'
-                      : current.health.headline}
-                  </dd>
-                </div>
-              </dl>
-            </details>
 
             <details className="border-t border-pro-border/50 pt-5 text-sm text-pro-text-muted">
               <summary className="min-h-10 cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent">

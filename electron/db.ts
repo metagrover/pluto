@@ -6901,7 +6901,11 @@ const parseMeetingParticipants = (
   if (!midJson) return [];
   try {
     const parsed = JSON.parse(midJson) as {
-      participants?: Array<{ entity_id?: unknown; name?: unknown }>;
+      participants?: Array<{
+        entity_id?: unknown;
+        name?: unknown;
+        role?: unknown;
+      }>;
     };
     return (parsed.participants ?? []).flatMap((participant) =>
       typeof participant.entity_id === 'string' &&
@@ -6910,6 +6914,10 @@ const parseMeetingParticipants = (
             {
               entity_id: participant.entity_id,
               name: participant.name,
+              ...(typeof participant.role === 'string' &&
+              participant.role.trim()
+                ? { role: participant.role.trim() }
+                : {}),
             },
           ]
         : [],

@@ -6,6 +6,7 @@ import {
 export interface ProjectBriefingParticipant {
   entity_id: string;
   name: string;
+  role?: string;
 }
 
 export interface ProjectBriefingMeeting {
@@ -52,6 +53,7 @@ export interface ProjectBriefingTask {
   name: string;
   status: string | null;
   due_date: string | null;
+  assigned_to?: string | null;
   updated_at: string;
   metadata: string | null;
 }

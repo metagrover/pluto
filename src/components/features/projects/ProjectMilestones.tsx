@@ -246,10 +246,11 @@ export function ProjectMilestones({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="project-milestones" className="text-lg font-semibold">
-            Milestones
+            Timeline and milestones
           </h2>
           <p className="mt-1 text-xs text-pro-text-muted">
-            User plans and checkpoints grounded in meeting evidence
+            Upcoming dates, user plans, and checkpoints grounded in meeting
+            evidence
           </p>
         </div>
         <button type="button" onClick={openCreate} className={buttonClass}>
@@ -496,7 +497,7 @@ export function ProjectMilestones({
         </ol>
       ) : (
         <div className="border-y border-pro-border/45 py-5">
-          <p className="text-sm font-medium">No milestones yet</p>
+          <p className="text-sm font-medium">No timeline or milestones yet</p>
           <p className="mt-1 max-w-[55ch] text-sm leading-6 text-pro-text-muted">
             Add a checkpoint you want to remember, or Pluto will surface one
             when meeting evidence establishes a date or completion.

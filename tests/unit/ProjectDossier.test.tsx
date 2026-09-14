@@ -133,11 +133,37 @@ const brief = (overrides: Partial<ProjectBrief> = {}): ProjectBrief => ({
       title: 'Archive weekly review',
       started_at: '2026-08-27T12:00:00Z',
       created_at: null,
-      participants: [],
+      participants: [
+        {
+          entity_id: 'person-alex',
+          name: 'Alex Rivera',
+          role: 'Engineering lead',
+        },
+        {
+          entity_id: 'person-sam',
+          name: 'Sam',
+          role: 'Project manager',
+        },
+        {
+          entity_id: 'person-lauren',
+          name: 'Lauren Kessler',
+          role: 'Exec sponsor from Frames Direct',
+        },
+      ],
       context: 'Migration and rollout',
     },
   ],
-  tasks: [],
+  tasks: [
+    {
+      id: 't1',
+      name: 'Complete migration review',
+      status: 'active',
+      due_date: '2026-09-05T10:00:00Z',
+      assigned_to: 'person-alex',
+      updated_at: '2026-08-28T12:00:00Z',
+      metadata: null,
+    },
+  ],
   mergedProjects: [],
   ...overrides,
 });
@@ -221,23 +247,80 @@ const setValue = async (
   });
 };
 
-it('leads with current focus, recent changes, and open threads', async () => {
+it('leads with the project brief, people, timeline, health, and meeting rhythm', async () => {
   await render();
   expect(host.textContent).toContain('Archive modernization');
+  expect(host.textContent).toContain('What this project is about');
   expect(host.textContent).toContain('Make historical records searchable');
   expect(host.textContent).toContain('7 conversations');
   expect(host.textContent).toContain('Current focus');
   expect(host.textContent).toContain('Validate access rules before launch');
+  expect(host.textContent).toContain(
+    'Alex Rivera is responsible for Complete migration review',
+  );
+  expect(host.textContent).toContain('What to watch');
+  expect(host.textContent).toContain('Project health');
+  expect(host.textContent).toContain('Watch');
+  expect(host.textContent).toContain(
+    'One confirmed milestone is due within two weeks.',
+  );
+  expect(
+    host.textContent?.match(
+      /One confirmed milestone is due within two weeks\./g,
+    ),
+  ).toHaveLength(1);
+  expect(host.textContent).toContain('People involved');
+  expect(host.textContent).toContain('Alex Rivera');
+  expect(host.textContent).toContain('Sam');
+  const alexCard = host.querySelector('[data-person-card="Alex Rivera"]');
+  const samCard = host.querySelector('[data-person-card="Sam"]');
+  const laurenCard = host.querySelector('[data-person-card="Lauren Kessler"]');
+  expect(alexCard?.parentElement?.classList.contains('h-24')).toBe(true);
+  expect(samCard?.parentElement?.classList.contains('h-24')).toBe(true);
+  expect(alexCard?.textContent).toContain('AR');
+  expect(alexCard?.textContent).toContain('Engineering lead');
+  expect(alexCard?.textContent).toContain('Engineering');
+  expect(samCard?.textContent).toContain('Project manager');
+  expect(samCard?.textContent).toContain('Project management');
+  expect(laurenCard?.textContent).toContain('Executive sponsor');
+  expect(host.textContent).toContain('Typically 4 people');
+  expect(host.textContent).toContain('Regular meetings');
+  expect(host.textContent).toContain('Weekly pattern');
+  expect(host.textContent).toContain('4 observed');
   expect(host.textContent).toContain('Since last time');
   expect(host.textContent).toContain('The first collection is now indexed.');
+  expect(host.textContent).toContain('Timeline and milestones');
   expect(host.textContent).toContain('Open threads');
   expect(host.textContent).toContain('Complete migration review');
   expect(host.textContent).toContain('From meeting evidence');
   expect(host.textContent).toContain('Conversation history');
-  expect(host.textContent!.indexOf('Conversation history')).toBeLessThan(
-    host.textContent!.indexOf('Milestones'),
+  expect(host.textContent!.indexOf('Timeline and milestones')).toBeLessThan(
+    host.textContent!.indexOf('Open threads'),
   );
   expect(host.textContent).not.toContain('Momentum');
+});
+
+it('opens the matching person profile from a person card', async () => {
+  const onOpenPerson = vi.fn();
+  await render({ onOpenPerson });
+
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('[data-person-card="Alex Rivera"]')
+      ?.click();
+  });
+
+  expect(onOpenPerson).toHaveBeenCalledWith('person-alex');
+});
+
+it('uses known roles in the summary when no ownership is established', async () => {
+  api.getProjectBrief.mockResolvedValueOnce(brief({ tasks: [] }));
+
+  await render();
+
+  expect(host.textContent).toContain(
+    'Alex Rivera (Engineering lead), Lauren Kessler (Exec sponsor from Frames Direct), and Sam (Project manager) are linked to this work.',
+  );
 });
 
 it('does not repeat the project outcome when it matches the current focus', async () => {
@@ -248,7 +331,7 @@ it('does not repeat the project outcome when it matches the current focus', asyn
 
   await render();
 
-  expect(host.textContent).toContain('Current focus');
+  expect(host.textContent).not.toContain('Current focus');
   expect(
     host.textContent?.match(/Make historical records searchable/g),
   ).toHaveLength(1);
@@ -498,7 +581,26 @@ it('teaches honest empty states when evidence is sparse', async () => {
         freshness: 'unknown',
         evidenceTaskIds: [],
       },
+      momentum: {
+        recentMeetingCount: 0,
+        openCommitmentCount: 0,
+        completedCommitmentCount: 0,
+        recentlyCompletedCount: 0,
+        lastActivityAt: '2026-08-28T12:00:00Z',
+        headline: 'Not enough evidence for a trend',
+      },
       milestones: [],
+      tasks: [],
+      meetings: [
+        {
+          id: 'm1',
+          title: 'Archive weekly review',
+          started_at: '2026-08-27T12:00:00Z',
+          created_at: null,
+          participants: [],
+          context: 'Migration and rollout',
+        },
+      ],
       theme: null,
     }),
   );
@@ -507,8 +609,13 @@ it('teaches honest empty states when evidence is sparse', async () => {
     'One conversation supports this suggestion',
   );
   expect(host.textContent).toContain('Review suggestion');
+  expect(host.textContent).toContain('Not enough evidence');
+  expect(host.textContent).toContain('No named people linked yet');
+  expect(host.textContent).toContain('No established pattern');
+  expect(host.textContent).toContain('No timeline or milestones yet');
+  expect(host.querySelector('#project-people')).toBeNull();
+  expect(host.querySelector('#project-meeting-rhythm')).toBeNull();
   expect(host.textContent).not.toContain('Momentum');
-  expect(host.textContent).not.toContain('Not enough evidence');
 });
 
 it('lets the user confirm a one-conversation suggestion', async () => {

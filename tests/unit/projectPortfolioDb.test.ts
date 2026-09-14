@@ -74,7 +74,11 @@ describe('project portfolio source summaries', () => {
         started_at: `2026-08-${String(day).padStart(2, '0')}T10:00:00Z`,
         mid_json: JSON.stringify({
           participants: [
-            { entity_id: 'person:alex', name: 'Alex' },
+            {
+              entity_id: 'person:alex',
+              name: 'Alex',
+              role: 'Engineering lead',
+            },
             { entity_id: 'person:sam', name: 'Sam' },
             { entity_id: 'speaker:unknown', name: 'Speaker 1' },
           ],
@@ -105,6 +109,11 @@ describe('project portfolio source summaries', () => {
     expect(brief?.meetingStats.recurringSeries[0]).toMatchObject({
       meetingCount: 3,
       cadence: 'Weekly pattern',
+    });
+    expect(brief?.meetings[0]?.participants).toContainEqual({
+      entity_id: 'person:alex',
+      name: 'Alex',
+      role: 'Engineering lead',
     });
     expect(brief?.milestones[0]).toMatchObject({
       title: 'Complete migration review',

@@ -27,9 +27,11 @@ type SynthesisState = 'idle' | 'running' | 'paused' | 'failed' | 'incomplete';
 export function ProjectsOverview({
   selectedProjectId = null,
   onOpenMeeting,
+  onOpenPerson,
 }: {
   selectedProjectId?: string | null;
   onOpenMeeting?: (id: string) => void;
+  onOpenPerson?: (id: string) => void;
 }) {
   const [activeId, setActiveId] = useState(selectedProjectId);
   const [entries, setEntries] = useState<ProjectPortfolioEntry[]>([]);
@@ -112,6 +114,7 @@ export function ProjectsOverview({
         projectName={entries.find((entry) => entry.id === activeId)?.name}
         onBack={() => setActiveId(null)}
         onOpenMeeting={onOpenMeeting}
+        onOpenPerson={onOpenPerson}
         relatedWork={entries.filter(
           (entry) =>
             readProjectQualification(entry.metadata)?.parentProjectId ===

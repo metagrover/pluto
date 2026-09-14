@@ -1811,6 +1811,12 @@ function App() {
                 <ProjectsExecutionTab
                   selectedProjectId={selectedProjectId}
                   onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                  onOpenPerson={(personId) => {
+                    setSelectedPersonId(personId);
+                    setSelectedProjectId(null);
+                    setSelectedMeetingId(null);
+                    setActiveTab('people');
+                  }}
                 />
               </div>
             ) : activeTab === 'meetings' ? (

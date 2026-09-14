@@ -46,12 +46,21 @@ vi.mock('../../src/components/AudioManager', () => ({
 vi.mock('../../src/components/KnowledgeGraph/ProjectsExecutionTab', () => ({
   ProjectsExecutionTab: ({
     selectedProjectId,
+    onOpenPerson,
   }: {
     selectedProjectId?: string | null;
+    onOpenPerson?: (personId: string) => void;
   }) => (
     <section>
       <h1>Projects</h1>
       <p data-testid="selected-project">{selectedProjectId ?? 'none'}</p>
+      <button
+        type="button"
+        data-testid="project-person-link"
+        onClick={() => onOpenPerson?.('person-from-project')}
+      >
+        Open project person
+      </button>
     </section>
   ),
 }));
@@ -299,6 +308,34 @@ describe('App Search Pluto navigation', () => {
     expect(
       container.querySelector('[data-testid="selected-person"]')?.textContent,
     ).toBe('person-luna');
+
+    await act(async () => root.unmount());
+  });
+
+  it('opens a project person in their People profile', async () => {
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'Projects')
+        ?.click();
+      await flushPromises();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="project-person-link"]')
+        ?.click();
+      await flushPromises();
+    });
+
+    expect(
+      container.querySelector('[data-testid="selected-person"]')?.textContent,
+    ).toBe('person-from-project');
 
     await act(async () => root.unmount());
   });
