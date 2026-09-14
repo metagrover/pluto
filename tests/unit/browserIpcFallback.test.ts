@@ -180,6 +180,38 @@ describe('browser IPC capture journal fallback', () => {
     await expect(
       ipc.invoke('RESTORE_PERSON_MERGE', 'preview-maya'),
     ).resolves.toBeUndefined();
+    await expect(
+      ipc.invoke('intelligence:person-chat:capability'),
+    ).resolves.toEqual({ enabled: true });
+    await expect(
+      ipc.invoke('intelligence:person-chat:list-threads', {
+        personId: 'preview-avery',
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          personId: 'preview-avery',
+          title: 'What is Avery focused on?',
+          archivedAt: null,
+        }),
+        expect.objectContaining({
+          title: 'Launch handoff follow-ups',
+          archivedAt: expect.any(String),
+        }),
+      ]),
+    );
+    await expect(
+      ipc.invoke('intelligence:person-chat:list-messages', {
+        personId: 'preview-avery',
+        threadId: 'preview-person-chat-current',
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      ipc.invoke('GET_PENDING_DREAMING_PROPOSALS', {
+        entityId: 'preview-avery',
+        entityType: 'person',
+      }),
+    ).resolves.toEqual([]);
   });
 
   it('returns the exact latest activity evidence when sealing a started journal', async () => {

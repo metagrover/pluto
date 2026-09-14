@@ -164,10 +164,10 @@
     @apply block h-20 animate-pulse rounded-xl bg-pro-hover;
   }
   .person-dossier {
-    @apply mx-auto w-full max-w-4xl px-5 pb-24 md:px-8;
+    @apply mx-auto w-full max-w-5xl px-5 pb-24 md:px-10;
   }
   .person-dossier__topline {
-    @apply mb-7 flex min-h-10 items-start justify-between gap-4;
+    @apply mb-5 flex min-h-10 items-start justify-between gap-4;
   }
   .person-dossier__back {
     @apply inline-flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
@@ -188,13 +188,13 @@
     @apply flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-pro-text-main hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:opacity-40;
   }
   .person-dossier__identity {
-    @apply flex items-start gap-4 border-b border-pro-border/60 pb-7;
+    @apply flex items-start gap-4 pb-3;
   }
   .person-dossier__identity .person-avatar {
-    @apply h-12 w-12 rounded-xl border-pro-accent/20 bg-pro-accent/5 text-base text-pro-accent;
+    @apply h-12 w-12 rounded-xl border-pro-border bg-pro-surface text-base text-pro-text-main;
   }
   .person-dossier__identity h1 {
-    @apply font-serif text-[30px] font-medium tracking-[-0.01em] text-pro-text-main;
+    @apply text-balance font-serif text-[clamp(2rem,4vw,2.75rem)] font-medium leading-tight tracking-[-0.025em] text-pro-text-main;
   }
   .person-dossier__identity-copy {
     @apply min-w-0 flex-1;
@@ -209,7 +209,7 @@
     @apply mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1;
   }
   .person-dossier__identity-meta p {
-    @apply text-sm text-pro-text-muted;
+    @apply text-[13px] text-pro-text-muted;
   }
   .person-dossier__identity-meta button {
     @apply min-h-8 rounded-md px-1.5 text-xs font-semibold text-pro-accent hover:bg-pro-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
@@ -288,93 +288,28 @@
   .person-dossier__merged li {
     @apply flex min-h-11 items-center justify-between gap-3 border-t border-pro-border/40 text-sm text-pro-text-main;
   }
-  .person-dossier__current-read,
+  .person-dossier__about,
   .person-dossier__open-loops,
-  .person-dossier__upcoming {
-    @apply border-b border-pro-border/60 py-7;
+  .person-dossier__history {
+    @apply border-b border-pro-border/60 py-8;
   }
-  .person-dossier__current-read-heading,
   .person-dossier__major-heading {
     @apply flex items-center justify-between gap-4;
   }
-  .person-dossier__current-read-heading > div,
   .person-dossier__major-heading > div {
     @apply flex items-center gap-2 text-pro-text-main;
   }
-  .person-dossier__current-read-heading h2,
   .person-dossier__major-heading h2 {
-    @apply text-xs font-bold uppercase tracking-[0.1em];
-  }
-  .person-dossier__current-read-heading > span {
-    @apply rounded-full bg-pro-hover px-2 py-1 text-[10px] font-semibold text-pro-text-muted;
+    @apply text-lg font-semibold tracking-[-0.01em] text-pro-text-main;
   }
   .person-dossier__major-heading > span {
-    @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-pro-text-muted;
+    @apply text-xs tabular-nums text-pro-text-muted;
   }
-  .person-dossier__headline {
-    @apply mt-4 max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main;
+  .person-dossier__about > p {
+    @apply max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main;
   }
-  .person-dossier__read-meta {
-    @apply mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-pro-text-muted;
-  }
-  .person-dossier__read-meta span + span::before {
-    content: "·";
-    @apply mr-3 text-pro-text-muted/60;
-  }
-  .person-dossier__read-sources {
-    @apply mt-4 flex flex-wrap gap-2;
-  }
-  .person-dossier__read-sources button,
-  .person-dossier__insights button,
-  .person-dossier__commitments > li > button {
-    @apply rounded-md text-xs font-semibold text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .person-dossier__read-empty {
-    @apply mt-4 max-w-2xl border-l border-pro-border pl-4;
-  }
-  .person-dossier__read-empty strong {
-    @apply text-sm font-semibold text-pro-text-main;
-  }
-  .person-dossier__read-empty p {
-    @apply mt-1 text-sm leading-6 text-pro-text-muted;
-  }
-  .person-dossier__read-empty span {
-    @apply mt-2 block text-xs font-medium text-pro-text-muted;
-  }
-  .person-dossier__patterns {
-    @apply mt-6 border-t border-pro-border/50 pt-5;
-  }
-  .person-dossier__patterns h3 {
-    @apply text-[10px] font-bold uppercase tracking-[0.12em] text-pro-text-muted;
-  }
-  .person-dossier__insights {
-    @apply mt-3 grid gap-x-8 gap-y-5 md:grid-cols-2;
-  }
-  .person-dossier__insights li {
-    @apply border-t border-pro-border/60 pt-3;
-  }
-  .person-dossier__insights strong {
-    @apply text-sm font-semibold text-pro-text-main;
-  }
-  .person-dossier__insights p {
-    @apply mt-1 text-sm leading-6 text-pro-text-muted;
-  }
-  .person-dossier__insights q,
-  .person-dossier__commitment-copy q {
-    @apply mt-2 block text-xs italic leading-5 text-pro-text-muted/80;
-  }
-  .person-dossier__insights button,
-  .person-dossier__commitments > li > button {
-    @apply mt-2;
-  }
-  .person-dossier__activity {
-    @apply grid border-b border-pro-border/60 md:grid-cols-2 md:divide-x md:divide-pro-border/60;
-  }
-  .person-dossier__section {
-    @apply pt-5 first:pr-0 md:first:pr-7 md:last:pl-7;
-  }
-  .person-dossier__section--candidate {
-    @apply rounded-xl bg-pro-accent/[0.035] px-4 pb-5 md:rounded-none md:bg-transparent md:px-0 md:pb-0;
+  .person-dossier__about > .person-dossier__about-empty {
+    @apply font-sans text-sm leading-6 text-pro-text-muted;
   }
   .person-dossier__section-heading {
     @apply flex items-center gap-2;
@@ -387,13 +322,16 @@
     @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-pro-text-muted;
   }
   .person-dossier__commitments {
-    @apply mt-4 space-y-5;
+    @apply mt-4;
   }
   .person-dossier__commitments li {
-    @apply grid grid-cols-[auto_1fr] gap-x-3;
+    @apply border-b border-pro-border/40 last:border-b-0;
+  }
+  .person-dossier__commitments li > button {
+    @apply grid min-h-16 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .person-dossier__commitment-icon {
-    @apply mt-0.5 text-pro-text-muted;
+    @apply text-pro-text-muted;
   }
   .person-dossier__commitment-copy {
     @apply min-w-0;
@@ -403,9 +341,6 @@
   }
   .person-dossier__commitment-copy > span {
     @apply mt-1 block text-xs text-pro-text-muted;
-  }
-  .person-dossier__commitments > li > button {
-    @apply col-start-2 justify-self-start;
   }
   .person-dossier__candidates {
     @apply mt-4 space-y-5;
@@ -428,52 +363,47 @@
   .person-dossier__section-empty {
     @apply mt-4 text-sm leading-6 text-pro-text-muted;
   }
-  .person-dossier__delivered {
+  .person-dossier__commitment-more,
+  .person-dossier__other-links {
     @apply mt-6 border-t border-pro-border/50 pt-2;
   }
-  .person-dossier__delivered > summary,
-  .person-dossier__history > summary {
+  .person-dossier__commitment-more > summary,
+  .person-dossier__other-links > summary {
     @apply flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
-  .person-dossier__delivered > summary::-webkit-details-marker,
-  .person-dossier__history > summary::-webkit-details-marker {
+  .person-dossier__commitment-more > summary::-webkit-details-marker,
+  .person-dossier__other-links > summary::-webkit-details-marker {
     @apply hidden;
   }
-  .person-dossier__delivered > summary > span,
-  .person-dossier__history > summary > span:nth-child(2) {
+  .person-dossier__commitment-more > summary > span,
+  .person-dossier__other-links > summary > span {
     @apply rounded-full bg-pro-hover px-1.5 py-0.5 text-[10px] tabular-nums;
   }
-  .person-dossier__delivered > summary svg,
-  .person-dossier__history > summary > svg {
+  .person-dossier__commitment-more > summary svg,
+  .person-dossier__other-links > summary svg {
     @apply ml-auto transition-transform;
   }
-  .person-dossier__delivered[open] > summary svg,
-  .person-dossier__history[open] > summary > svg {
+  .person-dossier__commitment-more[open] > summary svg,
+  .person-dossier__other-links[open] > summary svg {
     @apply rotate-180;
   }
-  .person-dossier__upcoming > button {
-    @apply mt-3 flex min-h-14 w-full items-center justify-between gap-4 rounded-lg px-3 py-2 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  .person-dossier__commitment-group {
+    @apply py-5;
   }
-  .person-dossier__upcoming > button strong {
-    @apply block text-sm font-medium text-pro-text-main;
+  .person-dossier__voice-profile {
+    @apply border-b border-pro-border/60 px-2 pb-7 pt-4;
   }
-  .person-dossier__upcoming > button small {
-    @apply mt-1 block text-xs text-pro-text-muted;
+  .person-dossier__voice-heading-actions {
+    @apply flex items-center gap-2;
   }
-  .person-dossier__upcoming > button > span:last-child {
-    @apply shrink-0 text-xs tabular-nums text-pro-text-muted;
-  }
-  .person-dossier__history {
-    @apply border-b border-pro-border/60 py-3;
-  }
-  .person-dossier__history > summary > span:first-child {
-    @apply flex min-w-0 flex-1 items-center gap-2;
+  .person-dossier__voice-heading-actions > button {
+    @apply min-h-8 rounded-md px-2 text-xs font-semibold text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .person-dossier__history-note {
     @apply border-t border-pro-border/50 py-4 text-xs text-pro-text-muted;
   }
   .person-dossier__meeting-group {
-    @apply py-7;
+    @apply py-6;
   }
   .person-dossier__disclosure,
   .person-dossier__empty-line {
@@ -483,7 +413,7 @@
     @apply mt-3;
   }
   .person-dossier__meetings > button {
-    @apply flex min-h-14 w-full items-center justify-between gap-4 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply flex min-h-16 w-full items-center justify-between gap-4 rounded-lg px-3 py-3 text-left transition-colors hover:bg-pro-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .person-dossier__meetings > button > span:first-child {
     @apply min-w-0;
@@ -514,18 +444,6 @@
     }
     .person-row__chevron {
       @apply col-start-3 row-start-1;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .person-dossier__activity {
-      @apply block divide-x-0 divide-y divide-pro-border/60;
-    }
-    .person-dossier__section {
-      @apply px-0;
-    }
-    .person-dossier__section--candidate {
-      @apply px-4;
     }
   }
 
@@ -2707,6 +2625,7 @@
   gap: 8px;
   border: 1px solid
     color-mix(in srgb, hsl(var(--pro-accent)) 35%, hsl(var(--pro-border)));
+  justify-content: center;
   border-radius: 999px;
   background: hsl(var(--pro-bg));
   padding: 0 16px;
@@ -2714,6 +2633,8 @@
   color: hsl(var(--pro-text-main));
   font-size: 12px;
   font-weight: 650;
+  transition: border-color 150ms ease-out, background-color 150ms ease-out,
+    transform 150ms ease-out;
 }
 .person-chat-launcher svg {
   color: hsl(var(--pro-accent));
@@ -2722,6 +2643,10 @@
   border-color: hsl(var(--pro-accent));
   background: color-mix(in srgb, hsl(var(--pro-bg)) 92%, hsl(var(--pro-accent)));
   transform: translateY(-1px);
+}
+.person-chat-launcher:focus-visible {
+  outline: 2px solid hsl(var(--pro-accent));
+  outline-offset: 3px;
 }
 .person-chat {
   position: fixed;
@@ -2792,23 +2717,200 @@
   background: hsl(var(--pro-hover));
   color: hsl(var(--pro-text-main));
 }
-.person-chat__thread-picker {
+.person-chat__hamburger.is-active {
+  background: hsl(var(--pro-hover));
+  color: hsl(var(--pro-text-main));
+}
+.person-chat__body {
+  position: relative;
   display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.person-chat__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.person-chat__sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 25%);
+  backdrop-filter: blur(2px);
+  animation: person-chat-fade-in 150ms ease;
+}
+.person-chat__sidebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  width: min(290px, 85%);
+  flex-direction: column;
+  border-right: 1px solid hsl(var(--pro-border));
+  background: color-mix(in srgb, hsl(var(--pro-bg)) 98%, transparent);
+  box-shadow: 4px 0 28px rgb(15 23 42 / 16%);
+  backdrop-filter: blur(20px);
+  animation: person-chat-slide-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes person-chat-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes person-chat-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.person-chat__sidebar-header {
+  display: flex;
+  min-height: 48px;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px 0;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid hsl(var(--pro-border) / 60%);
+}
+.person-chat__sidebar-header strong {
+  color: hsl(var(--pro-text-main));
+  font-size: 12px;
+  font-weight: 600;
+}
+.person-chat__sidebar-header button {
+  display: inline-flex;
+  min-width: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: hsl(var(--pro-text-muted));
+}
+.person-chat__sidebar-header button:hover {
+  background: hsl(var(--pro-hover));
+  color: hsl(var(--pro-text-main));
+}
+.person-chat__sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+.person-chat__sidebar-new {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--pro-border) / 70%);
+  border-radius: 9px;
+  background: hsl(var(--pro-surface));
+  color: hsl(var(--pro-text-muted));
+  text-align: left;
+  transition: all 120ms ease;
+}
+.person-chat__sidebar-new:hover {
+  background: hsl(var(--pro-hover));
+  color: hsl(var(--pro-text-main));
+}
+.person-chat__sidebar-new.is-active {
+  border-color: hsl(var(--pro-accent) / 50%);
+  background: hsl(var(--pro-accent) / 8%);
+  color: hsl(var(--pro-text-main));
+}
+.person-chat__sidebar-new span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.person-chat__sidebar-new strong {
+  overflow: hidden;
+  color: hsl(var(--pro-text-main));
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-chat__sidebar-new small {
+  color: hsl(var(--pro-text-muted));
+  font-size: 10px;
+}
+.person-chat__sidebar-section-title {
+  margin: 14px 6px 6px;
   color: hsl(var(--pro-text-muted));
   font-size: 10px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
-.person-chat__thread-picker select {
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
+.person-chat__sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.person-chat__sidebar-item {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: hsl(var(--pro-text-muted));
+  text-align: left;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.person-chat__sidebar-item:hover {
+  background: hsl(var(--pro-hover));
   color: hsl(var(--pro-text-main));
+}
+.person-chat__sidebar-item.is-active {
+  background: hsl(var(--pro-accent) / 8%);
+  color: hsl(var(--pro-text-main));
+}
+.person-chat__sidebar-item:focus-visible {
+  outline: 2px solid hsl(var(--pro-accent) / 35%);
+  outline-offset: -1px;
+}
+.person-chat__sidebar-item-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.person-chat__sidebar-item strong {
+  overflow: hidden;
+  color: hsl(var(--pro-text-main));
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-chat__sidebar-item small {
+  color: hsl(var(--pro-text-muted));
+  font-size: 9px;
+}
+.person-chat__sidebar-item svg:last-child {
+  color: hsl(var(--pro-accent));
+}
+.person-chat__sidebar-empty {
+  margin: 20px 8px;
+  color: hsl(var(--pro-text-muted));
   font-size: 11px;
-  outline: none;
+  text-align: center;
 }
 .person-chat__conversation {
   flex: 1;

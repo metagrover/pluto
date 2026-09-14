@@ -986,6 +986,36 @@ const createInvokeFallback =
       case 'GET_PERSON_BRIEFING':
         result = previewPersonBriefings[String(args[0])];
         break;
+      case 'intelligence:person-chat:capability':
+        result = { enabled: true };
+        break;
+      case 'intelligence:person-chat:list-threads': {
+        const request = args[0] as { personId?: string } | undefined;
+        const personId = request?.personId ?? 'preview-avery';
+        result = [
+          {
+            id: 'preview-person-chat-current',
+            personId,
+            title: 'What is Avery focused on?',
+            createdAt: '2026-09-12T16:00:00.000Z',
+            updatedAt: '2026-09-13T18:30:00.000Z',
+            archivedAt: null,
+          },
+          {
+            id: 'preview-person-chat-launch',
+            personId,
+            title: 'Launch handoff follow-ups',
+            createdAt: '2026-09-08T16:00:00.000Z',
+            updatedAt: '2026-09-09T18:30:00.000Z',
+            archivedAt: '2026-09-10T12:00:00.000Z',
+          },
+        ];
+        break;
+      }
+      case 'intelligence:person-chat:list-messages':
+      case 'GET_PENDING_DREAMING_PROPOSALS':
+        result = [];
+        break;
       case 'GET_KNOWLEDGE_TIMELINE':
         result = workspaceFor().timeline;
         break;

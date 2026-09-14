@@ -1657,6 +1657,12 @@ function App() {
               setZenVisible(true);
             }}
             onOpenSearch={() => setSearchVisible(true)}
+            onOpenPeopleHome={() => {
+              setSelectedPersonId(null);
+              setSelectedProjectId(null);
+              setSelectedMeetingId(null);
+              setActiveTab('people');
+            }}
             theme={theme}
             setTheme={(newTheme) => {
               setTheme(newTheme);

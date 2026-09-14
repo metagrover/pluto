@@ -36,6 +36,7 @@ describe('Sidebar navigation', () => {
           safeMeetings={[]}
           onStartRecording={vi.fn()}
           onOpenSearch={vi.fn()}
+          onOpenPeopleHome={vi.fn()}
           theme="dark"
           setTheme={vi.fn()}
         />,
@@ -83,6 +84,7 @@ describe('Sidebar navigation', () => {
           safeMeetings={[meeting]}
           onStartRecording={vi.fn()}
           onOpenSearch={vi.fn()}
+          onOpenPeopleHome={vi.fn()}
           theme="dark"
           setTheme={vi.fn()}
         />,

@@ -80,7 +80,7 @@ describe('PersonChatDock', () => {
     host.remove();
   });
 
-  it('opens from a floating launcher and persists a sourced response', async () => {
+  it('opens from the fixed launcher and persists a sourced response', async () => {
     const onOpenMeeting = vi.fn();
     await act(async () => {
       root.render(
@@ -93,21 +93,22 @@ describe('PersonChatDock', () => {
       await Promise.resolve();
     });
 
-    expect(host.querySelector('textarea')).toBeNull();
-    const launcher = host.querySelector(
-      'button[aria-label="Open chat about Maya"]',
+    expect(document.querySelector('textarea')).toBeNull();
+    const launcher = document.querySelector(
+      'button[aria-label="Ask about Maya"]',
     ) as HTMLButtonElement;
     await act(async () => launcher.click());
-    expect(host.querySelector('textarea')).not.toBeNull();
-    expect(host.textContent).toContain('What would you like to think through?');
-    const starter = [...host.querySelectorAll('button')].find(
+    expect(document.querySelector('textarea')).not.toBeNull();
+    expect(document.body.textContent).toContain(
+      'What would you like to think through?',
+    );
+    const starter = [...document.querySelectorAll('button')].find(
       (button) => button.textContent === 'Catch me up on Maya',
     ) as HTMLButtonElement;
     await act(async () => {
       starter.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-
     expect(api.createPersonChatThread).toHaveBeenCalledWith('maya');
     expect(api.sendPersonChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -116,19 +117,126 @@ describe('PersonChatDock', () => {
         query: 'Catch me up on Maya',
       }),
     );
-    expect(host.textContent).toContain('Start with the shared goal.');
-    expect(host.textContent).toContain('1 source');
-    expect(host.textContent).not.toContain('Your conversations');
-    expect(host.querySelector('.person-chat__assistant-mark')).not.toBeNull();
+    expect(document.body.textContent).toContain('Start with the shared goal.');
+    expect(document.body.textContent).toContain('1 source');
+    expect(document.body.textContent).not.toContain('Your conversations');
+    expect(
+      document.querySelector('.person-chat__assistant-mark'),
+    ).not.toBeNull();
 
-    const summary = [...host.querySelectorAll('summary')].find((item) =>
+    const summary = [...document.querySelectorAll('summary')].find((item) =>
       item.textContent?.includes('1 source'),
     ) as HTMLElement;
     summary.click();
-    const source = [...host.querySelectorAll('button')].find((button) =>
+    const source = [...document.querySelectorAll('button')].find((button) =>
       button.textContent?.includes('Weekly sync'),
     ) as HTMLButtonElement;
     source.click();
     expect(onOpenMeeting).toHaveBeenCalledWith('meeting-1');
+  });
+
+  it('uses a hamburger sidebar menu to show past conversations and a header plus button for new threads', async () => {
+    api.listPersonChatThreads.mockResolvedValue([
+      {
+        id: 'thread-current',
+        personId: 'maya',
+        title: 'Current priorities',
+        createdAt: '2026-09-13T12:00:00Z',
+        updatedAt: '2026-09-13T12:00:00Z',
+        archivedAt: null,
+      },
+      {
+        id: 'thread-archived',
+        personId: 'maya',
+        title: 'Launch history',
+        createdAt: '2026-09-10T12:00:00Z',
+        updatedAt: '2026-09-10T12:00:00Z',
+        archivedAt: '2026-09-11T12:00:00Z',
+      },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <PersonChatDock
+          personId="maya"
+          personName="Maya"
+          onOpenMeeting={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    const launcher = document.querySelector(
+      'button[aria-label="Ask about Maya"]',
+    ) as HTMLButtonElement;
+    await act(async () => launcher.click());
+
+    // 1. Dropdown picker is not rendered
+    expect(document.querySelector('.person-chat__thread-picker')).toBeNull();
+
+    // 2. Header has hamburger button and new conversation plus button next to archive
+    const hamburger = document.querySelector(
+      'button[aria-label="Past conversations"]',
+    ) as HTMLButtonElement;
+    expect(hamburger).not.toBeNull();
+    expect(hamburger.getAttribute('aria-expanded')).toBe('false');
+
+    const newConversationHeaderBtn = document.querySelector(
+      'button[aria-label="New conversation"]',
+    ) as HTMLButtonElement;
+    expect(newConversationHeaderBtn).not.toBeNull();
+
+    const archiveBtn = document.querySelector(
+      'button[aria-label="Archive chat"]',
+    ) as HTMLButtonElement;
+    expect(archiveBtn).not.toBeNull();
+    expect(newConversationHeaderBtn.nextElementSibling).toBe(archiveBtn);
+
+    // 3. Sidebar is initially hidden
+    expect(document.querySelector('.person-chat__sidebar')).toBeNull();
+
+    // 4. Click hamburger to toggle sidebar open
+    await act(async () => hamburger.click());
+    expect(hamburger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('.person-chat__sidebar')).not.toBeNull();
+    expect(document.body.textContent).toContain('Past conversations');
+    expect(document.body.textContent).toContain('New conversation');
+    expect(document.body.textContent).toContain('Recent conversations');
+    expect(document.body.textContent).toContain('Current priorities');
+    expect(document.body.textContent).toContain('Launch history');
+    expect(document.body.textContent).toContain('Archived');
+
+    // 5. Escape key dismisses sidebar
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(document.querySelector('.person-chat__sidebar')).toBeNull();
+    expect(hamburger.getAttribute('aria-expanded')).toBe('false');
+
+    // 6. Reopen sidebar and click a past conversation
+    await act(async () => hamburger.click());
+    expect(document.querySelector('.person-chat__sidebar')).not.toBeNull();
+
+    const archivedThread = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Launch history'),
+    ) as HTMLButtonElement;
+    await act(async () => {
+      archivedThread.click();
+      await Promise.resolve();
+    });
+
+    expect(api.listPersonChatMessages).toHaveBeenCalledWith(
+      'maya',
+      'thread-archived',
+    );
+    expect(document.querySelector('.person-chat__sidebar')).toBeNull();
+
+    // 7. Click header plus button to start a fresh thread
+    await act(async () => newConversationHeaderBtn.click());
+    expect(
+      document.querySelector('button[aria-label="Archive chat"]'),
+    ).toBeNull();
   });
 });

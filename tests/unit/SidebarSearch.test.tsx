@@ -37,6 +37,7 @@ describe('Sidebar search launcher', () => {
           safeMeetings={[]}
           onStartRecording={vi.fn()}
           onOpenSearch={onOpenSearch}
+          onOpenPeopleHome={vi.fn()}
           setSettingsVisible={vi.fn()}
           theme="dark"
           setTheme={vi.fn()}

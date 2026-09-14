@@ -337,6 +337,17 @@ describe('App Search Pluto navigation', () => {
       container.querySelector('[data-testid="selected-person"]')?.textContent,
     ).toBe('person-from-project');
 
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'People')
+        ?.click();
+      await flushPromises();
+    });
+
+    expect(
+      container.querySelector('[data-testid="selected-person"]')?.textContent,
+    ).toBe('none');
+
     await act(async () => root.unmount());
   });
 });

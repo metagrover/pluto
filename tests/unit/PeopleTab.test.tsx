@@ -337,7 +337,7 @@ const briefingDetail: PersonBriefingDetail = {
 };
 
 describe('PersonDossier', () => {
-  it('leads with a source-backed current read and open loops', () => {
+  it('shows a concise description, verified commitments, and meetings', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={briefingDetail}
@@ -346,22 +346,25 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('Current read');
     expect(markup).toContain('Avery is coordinating the launch handoff.');
-    expect(markup).toContain('Confirmed context');
-    expect(markup).toContain('Prefers written review before handoff');
-    expect(markup).toContain('Source: Product review');
-    expect(markup).toContain('Open loops');
-    expect(markup).toContain('They owe');
+    expect(markup).toContain('Commitments');
+    expect(markup).toContain('Send the final launch review');
+    expect(markup).toContain('Meetings');
+    expect(markup).toContain('Product review');
+    expect(markup).not.toContain('Current read');
+    expect(markup).not.toContain('Recent patterns');
+    expect(markup).not.toContain('Prefers written review before handoff');
+    expect(markup).toContain('More commitments');
     expect(markup).toContain('Needs confirmation');
     expect(markup).toContain('Confirm owner');
     expect(markup).toContain('Not theirs');
-    expect(markup).toContain('Recently delivered');
-    expect(markup).toContain('Evidence and conversation history');
+    expect(markup).toContain('Delivered');
+    expect(markup).not.toContain('Conversations');
+    expect(markup).not.toContain('Evidence and participation are labeled');
     expect(markup).toContain('Participation not confirmed');
   });
 
-  it('explains missing context without expanding empty history sections', () => {
+  it('explains missing context without implying meeting participation', () => {
     const markup = renderToStaticMarkup(
       <PersonDossier
         detail={{
@@ -377,9 +380,12 @@ describe('PersonDossier', () => {
       />,
     );
 
-    expect(markup).toContain('Current read');
-    expect(markup).toContain('No reliable relationship brief yet');
-    expect(markup).toContain('Conversation links available: 2');
+    expect(markup).toContain(
+      'There is not enough verified context to describe this person yet.',
+    );
+    expect(markup).toContain('No verified commitments.');
+    expect(markup).toContain('No confirmed meetings yet.');
+    expect(markup).toContain('Other meeting links');
     expect(markup).not.toContain('No confirmed conversations yet');
     expect(markup).not.toContain('No scheduled conversations');
     expect(markup).not.toContain('No mention-only conversations');

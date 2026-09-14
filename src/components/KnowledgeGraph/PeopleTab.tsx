@@ -1,17 +1,14 @@
 import {
   ArrowLeft,
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleHelp,
   Clock3,
-  ListChecks,
   MessageCircle,
   MoreHorizontal,
   Pencil,
   Play,
-  Quote,
   Search,
   Undo2,
   UserRound,
@@ -26,7 +23,6 @@ import {
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
-  recordEntityCorrection,
   resolvePersonCommitmentOwner,
   restorePersonMerge,
   triggerDreamingNow,
@@ -351,26 +347,25 @@ const CommitmentList = ({
   <ul className="person-dossier__commitments">
     {items.slice(0, 3).map((item) => (
       <li key={item.id}>
-        <span className="person-dossier__commitment-icon" aria-hidden="true">
-          {item.status === 'completed' ? (
-            <CheckCircle2 size={15} />
-          ) : (
-            <Clock3 size={15} />
-          )}
-        </span>
-        <span className="person-dossier__commitment-copy">
-          <strong>{item.text}</strong>
-          <span>
-            {formatDueDate(item.dueDate) ??
-              (item.status === 'completed' ? 'Recently completed' : 'Open')}
-          </span>
-          {item.evidence ? <q>{item.evidence}</q> : null}
-        </span>
         <button
           type="button"
           onClick={() => onOpenMeeting(item.sourceMeetingId)}
         >
-          Source: {item.sourceMeetingTitle ?? 'Meeting'}
+          <span className="person-dossier__commitment-icon" aria-hidden="true">
+            {item.status === 'completed' ? (
+              <CheckCircle2 size={15} />
+            ) : (
+              <Clock3 size={15} />
+            )}
+          </span>
+          <span className="person-dossier__commitment-copy">
+            <strong>{item.text}</strong>
+            <span>
+              {formatDueDate(item.dueDate) ??
+                (item.status === 'completed' ? 'Recently completed' : 'Open')}
+            </span>
+          </span>
+          <ChevronRight aria-hidden="true" size={14} />
         </button>
       </li>
     ))}
@@ -437,6 +432,33 @@ const CandidateCommitmentList = ({
   </ul>
 );
 
+const MeetingList = ({
+  meetings,
+  onOpenMeeting,
+}: {
+  meetings: PersonBriefingMeeting[];
+  onOpenMeeting: (meetingId: string) => void;
+}) => (
+  <div className="person-dossier__meetings">
+    {meetings.map((meeting) => (
+      <button
+        type="button"
+        key={meeting.id}
+        onClick={() => onOpenMeeting(meeting.id)}
+      >
+        <span>
+          <strong>{meeting.title}</strong>
+          {meeting.context ? <small>{meeting.context}</small> : null}
+        </span>
+        <span className="person-dossier__meeting-date">
+          {formatDate(meeting.started_at || meeting.created_at)}
+          <ChevronRight aria-hidden="true" size={14} />
+        </span>
+      </button>
+    ))}
+  </div>
+);
+
 const MeetingGroup = ({
   evidence,
   meetings,
@@ -459,24 +481,7 @@ const MeetingGroup = ({
       {meetings.length === 0 ? (
         <p className="person-dossier__empty-line">{copy.empty}</p>
       ) : (
-        <div className="person-dossier__meetings">
-          {meetings.map((meeting) => (
-            <button
-              type="button"
-              key={meeting.id}
-              onClick={() => onOpenMeeting(meeting.id)}
-            >
-              <span>
-                <strong>{meeting.title}</strong>
-                {meeting.context ? <small>{meeting.context}</small> : null}
-              </span>
-              <span className="person-dossier__meeting-date">
-                {formatDate(meeting.started_at || meeting.created_at)}
-                <ChevronRight aria-hidden="true" size={14} />
-              </span>
-            </button>
-          ))}
-        </div>
+        <MeetingList meetings={meetings} onOpenMeeting={onOpenMeeting} />
       )}
     </section>
   );
@@ -504,6 +509,7 @@ export const PersonDossier = ({
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeState, setMergeState] = useState<
     'idle' | 'saving' | 'saved' | 'error'
@@ -518,7 +524,6 @@ export const PersonDossier = ({
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
   const prepareGeneration = useRef(0);
-  const [dismissedInsights, setDismissedInsights] = useState<string[]>([]);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const [voiceProfile, setVoiceProfile] = useState<ClientVoiceProfile | null>(
@@ -619,41 +624,22 @@ export const PersonDossier = ({
     currentDetail.knowledgeDoc,
     currentDetail.workingMemorySnapshot,
   );
-  const confirmedIds = new Set(
-    currentDetail.meetings
-      .filter((meeting) => meeting.evidence === 'confirmed')
-      .map((meeting) => meeting.id),
-  );
-  const insights = brief.patterns
-    .filter(
-      (pattern) =>
-        pattern.evidence_quality.mode === 'direct' &&
-        pattern.evidence_quality.confidence >= 0.7 &&
-        pattern.citations.length > 0,
-    )
-    .slice(0, 2);
   const hasReliableRead =
     brief.isCompiled &&
     ![
       'No reliable compiled brief yet.',
       'Indexed knowledge needs a stronger synthesis.',
     ].includes(brief.headline);
-  const confirmedContext =
-    hasReliableRead &&
-    brief.trustStatus === 'grounded' &&
-    brief.evidenceIndex.some((entry) => confirmedIds.has(entry.meeting_id));
-  const readEvidence = brief.evidenceIndex.slice(0, 2);
   const meetingCount = currentDetail.meetings.length;
-  const briefConversationCount =
-    brief.coverage.sourceCount ??
-    brief.coverage.citedMeetingCount ??
-    meetingCount;
-  const mentionedCount = currentDetail.meetings.filter(
+  const confirmedMeetings = currentDetail.meetings.filter(
+    (meeting) => meeting.evidence === 'confirmed',
+  );
+  const otherMeetingLinks = currentDetail.meetings.filter(
+    (meeting) => meeting.evidence !== 'confirmed',
+  );
+  const mentionedCount = otherMeetingLinks.filter(
     (meeting) => meeting.evidence === 'mentioned',
   ).length;
-  const scheduledMeeting = currentDetail.meetings.find(
-    (meeting) => meeting.evidence === 'scheduled',
-  );
   const eligibleMergeCandidates = mergeCandidates.filter(
     (candidate) => candidate.id !== currentDetail.person.id,
   );
@@ -892,20 +878,6 @@ export const PersonDossier = ({
     }
   };
 
-  const handleDismissInsight = async (observation: string) => {
-    try {
-      await recordEntityCorrection({
-        entityId: currentDetail.person.id,
-        itemType: 'insight',
-        fingerprint: observation,
-        reason: 'reported_inaccurate',
-      });
-      setDismissedInsights((prev) => [...prev, observation]);
-    } catch {
-      // keep on error
-    }
-  };
-
   return (
     <article className="person-dossier">
       <div className="person-dossier__topline">
@@ -943,6 +915,16 @@ export const PersonDossier = ({
             </button>
             <button
               type="button"
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
+                setProfileSettingsOpen(true);
+              }}
+            >
+              <Volume2 aria-hidden="true" size={14} />
+              Identity &amp; voice
+            </button>
+            <button
+              type="button"
               disabled={dreamingState === 'running'}
               onClick={(event) => {
                 event.currentTarget.closest('details')?.removeAttribute('open');
@@ -954,11 +936,11 @@ export const PersonDossier = ({
           </div>
         </details>
       </div>
-      <div
-        className="person-dossier__prepare-status flex min-h-6 items-center gap-3 text-sm text-pro-text-muted"
-        aria-live="polite"
-      >
-        {dreamingState !== 'idle' ? (
+      {dreamingState !== 'idle' ? (
+        <div
+          className="person-dossier__prepare-status flex items-center gap-3 text-sm text-pro-text-muted"
+          aria-live="polite"
+        >
           <>
             <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
             {dreamingState === 'proposed' ? (
@@ -977,8 +959,8 @@ export const PersonDossier = ({
               </button>
             ) : null}
           </>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
           {currentDetail.person.name.slice(0, 1).toUpperCase()}
@@ -1174,288 +1156,213 @@ export const PersonDossier = ({
         </details>
       ) : null}
 
-      <section
-        className="person-dossier__voice-profile border-b border-pro-border/60 py-7"
-        aria-labelledby="voice-profile-heading"
-      >
-        <div className="person-dossier__major-heading">
-          <div className="flex items-center gap-2 text-pro-text-main">
-            <Volume2 aria-hidden="true" size={16} />
-            <h2 id="voice-profile-heading">Voice Profile</h2>
+      {profileSettingsOpen ? (
+        <section
+          className="person-dossier__voice-profile"
+          aria-labelledby="voice-profile-heading"
+        >
+          <div className="person-dossier__major-heading">
+            <div className="flex items-center gap-2 text-pro-text-main">
+              <Volume2 aria-hidden="true" size={16} />
+              <h2 id="voice-profile-heading">Voice Profile</h2>
+            </div>
+            <div className="person-dossier__voice-heading-actions">
+              {voiceProfile ? (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    voiceProfile.isActive
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                      : 'bg-pro-hover text-pro-text-muted border border-pro-border'
+                  }`}
+                >
+                  {voiceProfile.isActive
+                    ? 'Remembered voice (Active)'
+                    : 'Disabled'}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setProfileSettingsOpen(false)}
+              >
+                Done
+              </button>
+            </div>
           </div>
+
           {voiceProfile ? (
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                voiceProfile.isActive
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : 'bg-pro-hover text-pro-text-muted border border-pro-border'
-              }`}
-            >
-              {voiceProfile.isActive ? 'Remembered voice (Active)' : 'Disabled'}
-            </span>
-          ) : null}
-        </div>
+            <div className="mt-4 space-y-3">
+              <p className="text-xs text-pro-text-muted">
+                {voiceProfile.sampleCount}{' '}
+                {voiceProfile.sampleCount === 1 ? 'sample' : 'samples'} (
+                {Math.round(voiceProfile.cleanDurationSeconds)}s speech)
+              </p>
 
-        {voiceProfile ? (
-          <div className="mt-4 space-y-3">
-            <p className="text-xs text-pro-text-muted">
-              {voiceProfile.sampleCount}{' '}
-              {voiceProfile.sampleCount === 1 ? 'sample' : 'samples'} (
-              {Math.round(voiceProfile.cleanDurationSeconds)}s speech)
-            </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {voiceProfile.referenceInterval ? (
+                  <button
+                    type="button"
+                    disabled={voiceLoading || sampleLoading}
+                    onClick={() => void playVoiceSample()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-pro-border/80 bg-pro-bg px-2.5 py-1 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors disabled:opacity-50"
+                  >
+                    <Play
+                      size={10}
+                      className="fill-current mr-0.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    {sampleLoading
+                      ? 'Loading sample…'
+                      : samplePlaying
+                        ? 'Playing…'
+                        : sampleUnavailable
+                          ? 'Reference recording unavailable'
+                          : 'Play reference sample'}
+                  </button>
+                ) : null}
 
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {voiceProfile.referenceInterval ? (
                 <button
                   type="button"
-                  disabled={voiceLoading || sampleLoading}
-                  onClick={() => void playVoiceSample()}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-pro-border/80 bg-pro-bg px-2.5 py-1 text-xs font-medium text-pro-text-main hover:bg-pro-hover transition-colors disabled:opacity-50"
+                  disabled={voiceLoading}
+                  onClick={() => void handleToggleVoiceStatus()}
+                  className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors disabled:opacity-50"
                 >
-                  <Play
-                    size={10}
-                    className="fill-current mr-0.5 shrink-0"
-                    aria-hidden="true"
-                  />
-                  {sampleLoading
-                    ? 'Loading sample…'
-                    : samplePlaying
-                      ? 'Playing…'
-                      : sampleUnavailable
-                        ? 'Reference recording unavailable'
-                        : 'Play reference sample'}
+                  {voiceProfile.isActive
+                    ? 'Disable voice recognition'
+                    : 'Enable voice recognition'}
                 </button>
-              ) : null}
 
+                <button
+                  type="button"
+                  disabled={voiceLoading || isMergedFamily}
+                  title={
+                    isMergedFamily
+                      ? 'Restore this person merge before permanently deleting voice samples.'
+                      : undefined
+                  }
+                  onClick={() => void handleDeleteVoiceProfile()}
+                  className="rounded-lg border border-red-500/20 text-red-600 dark:text-red-400 px-2.5 py-1 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Delete voice profile
+                </button>
+              </div>
+
+              {isMergedFamily ? (
+                <p className="text-xs text-pro-text-muted">
+                  Restore this person merge before permanently deleting voice
+                  samples.
+                </p>
+              ) : null}
+              {sampleUnavailable ? (
+                <p role="alert" className="text-xs text-pro-urgent">
+                  Reference recording unavailable
+                </p>
+              ) : null}
+              {voiceError ? (
+                <p role="alert" className="text-xs text-pro-urgent">
+                  {voiceError}
+                </p>
+              ) : null}
+            </div>
+          ) : voiceError ? (
+            <p role="alert" className="mt-4 text-sm text-pro-urgent">
+              {voiceError}
+            </p>
+          ) : voiceOptedOut ? (
+            <div className="mt-4 space-y-3">
+              <p className="text-sm text-pro-text-muted">
+                Voice profile deleted. Pluto will not automatically recreate it.
+              </p>
               <button
                 type="button"
                 disabled={voiceLoading}
-                onClick={() => void handleToggleVoiceStatus()}
+                onClick={() => void handleAllowVoiceEnrollment()}
                 className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors disabled:opacity-50"
               >
-                {voiceProfile.isActive
-                  ? 'Disable voice recognition'
-                  : 'Enable voice recognition'}
-              </button>
-
-              <button
-                type="button"
-                disabled={voiceLoading || isMergedFamily}
-                title={
-                  isMergedFamily
-                    ? 'Restore this person merge before permanently deleting voice samples.'
-                    : undefined
-                }
-                onClick={() => void handleDeleteVoiceProfile()}
-                className="rounded-lg border border-red-500/20 text-red-600 dark:text-red-400 px-2.5 py-1 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Delete voice profile
+                Allow voice enrollment
               </button>
             </div>
-
-            {isMergedFamily ? (
-              <p className="text-xs text-pro-text-muted">
-                Restore this person merge before permanently deleting voice
-                samples.
-              </p>
-            ) : null}
-            {sampleUnavailable ? (
-              <p role="alert" className="text-xs text-pro-urgent">
-                Reference recording unavailable
-              </p>
-            ) : null}
-            {voiceError ? (
-              <p role="alert" className="text-xs text-pro-urgent">
-                {voiceError}
-              </p>
-            ) : null}
-          </div>
-        ) : voiceError ? (
-          <p role="alert" className="mt-4 text-sm text-pro-urgent">
-            {voiceError}
-          </p>
-        ) : voiceOptedOut ? (
-          <div className="mt-4 space-y-3">
-            <p className="text-sm text-pro-text-muted">
-              Voice profile deleted. Pluto will not automatically recreate it.
+          ) : voiceReconciliationStatus === 'queued' ? (
+            <p className="mt-4 text-sm text-pro-text-muted">
+              Voice enrollment pending. Pluto will finish it when processing
+              capacity is available.
             </p>
-            <button
-              type="button"
-              disabled={voiceLoading}
-              onClick={() => void handleAllowVoiceEnrollment()}
-              className="rounded-lg border border-pro-border/80 px-2.5 py-1 text-xs font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors disabled:opacity-50"
-            >
-              Allow voice enrollment
-            </button>
-          </div>
-        ) : voiceReconciliationStatus === 'queued' ? (
-          <p className="mt-4 text-sm text-pro-text-muted">
-            Voice enrollment pending. Pluto will finish it when processing
-            capacity is available.
-          </p>
-        ) : voiceReconciliationStatus === 'evidence_unavailable' ? (
-          <p className="mt-4 text-sm text-pro-text-muted">
-            No eligible voice profile could be created from retained meeting
-            evidence.
-          </p>
-        ) : voiceReconciliationStatus === 'failed' ? (
-          <p role="alert" className="mt-4 text-sm text-pro-urgent">
-            Voice profile enrollment could not be completed.
-          </p>
-        ) : (
-          <p className="mt-4 text-sm text-pro-text-muted">
-            No voice profile enrolled for this person.
-          </p>
-        )}
-      </section>
+          ) : voiceReconciliationStatus === 'evidence_unavailable' ? (
+            <p className="mt-4 text-sm text-pro-text-muted">
+              No eligible voice profile could be created from retained meeting
+              evidence.
+            </p>
+          ) : voiceReconciliationStatus === 'failed' ? (
+            <p role="alert" className="mt-4 text-sm text-pro-urgent">
+              Voice profile enrollment could not be completed.
+            </p>
+          ) : (
+            <p className="mt-4 text-sm text-pro-text-muted">
+              No voice profile enrolled for this person.
+            </p>
+          )}
+        </section>
+      ) : null}
 
-      <section className="person-dossier__current-read">
-        <div className="person-dossier__current-read-heading">
-          <div>
-            <Quote aria-hidden="true" size={14} />
-            <h2>Current read</h2>
-          </div>
-          <span>
-            {confirmedContext ? 'Confirmed context' : 'Mention-backed context'}
-          </span>
-        </div>
+      <section className="person-dossier__about" aria-label="About this person">
         {hasReliableRead ? (
-          <>
-            <p className="person-dossier__headline">{brief.headline}</p>
-            <div className="person-dossier__read-meta">
-              <span>
-                Updated from {briefConversationCount || meetingCount}{' '}
-                conversation
-                {(briefConversationCount || meetingCount) === 1 ? '' : 's'}
-              </span>
-              {brief.freshnessAt ? (
-                <span>{formatDate(brief.freshnessAt)}</span>
-              ) : null}
-              {currentDetail.knowledgeDoc?.status === 'stale' ? (
-                <span>Brief needs refresh</span>
-              ) : null}
-            </div>
-            {readEvidence.length > 0 ? (
-              <div className="person-dossier__read-sources">
-                {readEvidence.map((entry) => (
-                  <button
-                    type="button"
-                    key={entry.id}
-                    onClick={() => onOpenMeeting(entry.meeting_id)}
-                  >
-                    Source: {entry.meeting_title ?? 'Meeting'}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </>
+          <p>{brief.headline}</p>
         ) : (
-          <div className="person-dossier__read-empty">
-            <strong>No reliable relationship brief yet</strong>
-            <p>
-              {meetingCount > 0
-                ? 'Pluto has conversation links, but not enough verified context for a current read.'
-                : 'Link a conversation or confirm this identity before Pluto summarizes the relationship.'}
-            </p>
-            {meetingCount > 0 ? (
-              <span>Conversation links available: {meetingCount}</span>
-            ) : null}
-          </div>
+          <p className="person-dossier__about-empty">
+            {meetingCount > 0
+              ? 'There is not enough verified context to describe this person yet.'
+              : 'No confirmed conversations are linked to this person yet.'}
+          </p>
         )}
-        {insights.length > 0 ? (
-          <div className="person-dossier__patterns">
-            <h3>Recent patterns</h3>
-            <ul className="person-dossier__insights">
-              {insights
-                .filter((insight) => !dismissedInsights.includes(insight.title))
-                .map((insight) => {
-                  const citation = insight.citations[0];
-                  const source = brief.evidenceIndex.find(
-                    (entry) => entry.meeting_id === citation?.meeting_id,
-                  );
-                  return (
-                    <li key={insight.id}>
-                      <div className="flex items-start justify-between gap-2">
-                        <strong>{insight.title}</strong>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleDismissInsight(insight.title)
-                          }
-                          title="Report inaccurate"
-                          className="text-xs text-pro-text-muted hover:text-pro-urgent"
-                        >
-                          Report inaccurate
-                        </button>
-                      </div>
-                      <p>{insight.summary}</p>
-                      {citation ? <q>{citation.quote}</q> : null}
-                      {citation ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenMeeting(citation.meeting_id)}
-                        >
-                          Source: {source?.meeting_title ?? 'Meeting'}
-                        </button>
-                      ) : null}
-                    </li>
-                  );
-                })}
-            </ul>
-          </div>
-        ) : null}
       </section>
 
-      <PreparedUpdates
-        key={currentDetail.person.id}
-        entityId={currentDetail.person.id}
-        entityType="person"
-        reloadToken={preparedUpdatesReload}
-        evidenceMeetings={currentDetail.meetings.map((meeting) => ({
-          id: meeting.id,
-          title: meeting.title,
-          date: meeting.started_at || meeting.created_at,
-        }))}
-        onCanonicalChange={onIdentityChanged}
-        onOpenMeeting={onOpenMeeting}
-        onReviewIdentity={() => {
-          setMergeOpen(true);
-          setMergeState('idle');
-        }}
-      />
+      {dreamingState === 'proposed' || dreamingState === 'existing' ? (
+        <PreparedUpdates
+          key={currentDetail.person.id}
+          entityId={currentDetail.person.id}
+          entityType="person"
+          reloadToken={preparedUpdatesReload}
+          evidenceMeetings={currentDetail.meetings.map((meeting) => ({
+            id: meeting.id,
+            title: meeting.title,
+            date: meeting.started_at || meeting.created_at,
+          }))}
+          onCanonicalChange={onIdentityChanged}
+          onOpenMeeting={onOpenMeeting}
+          onReviewIdentity={() => {
+            setMergeOpen(true);
+            setMergeState('idle');
+          }}
+        />
+      ) : null}
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">
-          <div>
-            <ListChecks aria-hidden="true" size={16} />
-            <h2>Open loops</h2>
-          </div>
-          <span>
-            {currentDetail.commitments.open.length +
-              currentDetail.commitments.candidates.length}
-          </span>
+          <h2>Commitments</h2>
+          <span>{currentDetail.commitments.open.length}</span>
         </div>
-        {currentDetail.commitments.open.length === 0 &&
-        currentDetail.commitments.candidates.length === 0 ? (
+        {currentDetail.commitments.open.length === 0 ? (
           <p className="person-dossier__section-empty">
-            No verified open loops or ownership candidates.
+            No verified commitments.
           </p>
         ) : (
-          <div className="person-dossier__activity">
-            {currentDetail.commitments.open.length > 0 ? (
-              <section className="person-dossier__section">
-                <div className="person-dossier__section-heading">
-                  <h3>{currentDetail.isSelf ? 'You owe' : 'They owe'}</h3>
-                  <span>{currentDetail.commitments.open.length}</span>
-                </div>
-                <CommitmentList
-                  items={currentDetail.commitments.open}
-                  onOpenMeeting={onOpenMeeting}
-                />
-              </section>
-            ) : null}
+          <CommitmentList
+            items={currentDetail.commitments.open}
+            onOpenMeeting={onOpenMeeting}
+          />
+        )}
+        {currentDetail.commitments.candidates.length > 0 ||
+        currentDetail.commitments.delivered.length > 0 ? (
+          <details className="person-dossier__commitment-more">
+            <summary>
+              More commitments
+              <span>
+                {currentDetail.commitments.candidates.length +
+                  currentDetail.commitments.delivered.length}
+              </span>
+              <ChevronDown aria-hidden="true" size={14} />
+            </summary>
             {currentDetail.commitments.candidates.length > 0 ? (
-              <section className="person-dossier__section person-dossier__section--candidate">
+              <section className="person-dossier__commitment-group">
                 <div className="person-dossier__section-heading">
                   <h3>Needs confirmation</h3>
                   <span>{currentDetail.commitments.candidates.length}</span>
@@ -1477,87 +1384,65 @@ export const PersonDossier = ({
                 />
               </section>
             ) : null}
-          </div>
-        )}
-        {currentDetail.commitments.delivered.length > 0 ? (
-          <details className="person-dossier__delivered">
-            <summary>
-              Recently delivered
-              <span>{currentDetail.commitments.delivered.length}</span>
-              <ChevronDown aria-hidden="true" size={14} />
-            </summary>
-            <CommitmentList
-              items={currentDetail.commitments.delivered}
-              onOpenMeeting={onOpenMeeting}
-            />
+            {currentDetail.commitments.delivered.length > 0 ? (
+              <section className="person-dossier__commitment-group">
+                <div className="person-dossier__section-heading">
+                  <h3>Delivered</h3>
+                  <span>{currentDetail.commitments.delivered.length}</span>
+                </div>
+                <CommitmentList
+                  items={currentDetail.commitments.delivered}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              </section>
+            ) : null}
           </details>
         ) : null}
       </section>
 
-      {scheduledMeeting ? (
-        <section className="person-dossier__upcoming">
-          <div className="person-dossier__major-heading">
-            <div>
-              <CalendarDays aria-hidden="true" size={16} />
-              <h2>Scheduled or invited</h2>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onOpenMeeting(scheduledMeeting.id)}
-          >
-            <span>
-              <strong>{scheduledMeeting.title}</strong>
-              <small>Attendance is not confirmed.</small>
-            </span>
-            <span>
-              {formatDate(
-                scheduledMeeting.started_at || scheduledMeeting.created_at,
-              )}
-            </span>
-          </button>
-        </section>
-      ) : null}
-
-      <details className="person-dossier__history">
-        <summary>
-          <span>
-            <MessageCircle aria-hidden="true" size={15} />
-            <strong>Evidence and conversation history</strong>
-          </span>
-          <span>{meetingCount}</span>
-          <ChevronDown aria-hidden="true" size={14} />
-        </summary>
-        {meetingCount === 0 ? (
+      <section className="person-dossier__history">
+        <div className="person-dossier__major-heading">
+          <h2>Meetings</h2>
+          <span>{confirmedMeetings.length}</span>
+        </div>
+        {confirmedMeetings.length === 0 ? (
           <p className="person-dossier__section-empty">
-            No conversations are linked to this identity.
+            No confirmed meetings yet.
           </p>
         ) : (
-          (['confirmed', 'scheduled', 'mentioned'] as const).map((evidence) => {
-            const meetings = currentDetail.meetings.filter(
-              (meeting) => meeting.evidence === evidence,
-            );
-            return meetings.length > 0 ? (
-              <MeetingGroup
-                key={evidence}
-                evidence={evidence}
-                meetings={meetings}
-                onOpenMeeting={onOpenMeeting}
-              />
-            ) : null;
-          })
+          <MeetingList
+            meetings={confirmedMeetings}
+            onOpenMeeting={onOpenMeeting}
+          />
         )}
-        {mentionedCount > 0 ? (
-          <p className="person-dossier__history-note">
-            Mention-only links do not confirm participation or ownership.
-          </p>
+        {otherMeetingLinks.length > 0 ? (
+          <details className="person-dossier__other-links">
+            <summary>
+              Other meeting links
+              <span>{otherMeetingLinks.length}</span>
+              <ChevronDown aria-hidden="true" size={14} />
+            </summary>
+            {(['scheduled', 'mentioned'] as const).map((evidence) => {
+              const meetings = otherMeetingLinks.filter(
+                (meeting) => meeting.evidence === evidence,
+              );
+              return meetings.length > 0 ? (
+                <MeetingGroup
+                  key={evidence}
+                  evidence={evidence}
+                  meetings={meetings}
+                  onOpenMeeting={onOpenMeeting}
+                />
+              ) : null;
+            })}
+            {mentionedCount > 0 ? (
+              <p className="person-dossier__history-note">
+                Mention-only links do not confirm participation or ownership.
+              </p>
+            ) : null}
+          </details>
         ) : null}
-      </details>
-      <PersonChatDock
-        personId={currentDetail.person.id}
-        personName={currentDetail.person.name}
-        onOpenMeeting={onOpenMeeting}
-      />
+      </section>
     </article>
   );
 };
@@ -1678,27 +1563,34 @@ export const PeopleTab: React.FC<{
         row.id === selectedDetail.person.id || row.id === selectedPersonId,
     );
     return (
-      <PersonDossier
-        detail={selectedDetail}
-        onBack={() => onSelectPerson(null)}
-        onOpenMeeting={onOpenMeeting}
-        mergeCandidates={rows}
-        possibleDuplicateCount={selectedSummary?.possibleDuplicateCount ?? 0}
-        onIdentityChanged={async () => {
-          const [nextRows, nextDetail] = await Promise.all([
-            getPeopleBriefingSummaries(),
-            getPersonBriefing(selectedDetail.person.id),
-          ]);
-          setRows(nextRows);
-          if (nextDetail) {
-            setDetails((current) => ({
-              ...current,
-              [selectedPersonId || nextDetail.person.id]: nextDetail,
-              [nextDetail.person.id]: nextDetail,
-            }));
-          }
-        }}
-      />
+      <>
+        <PersonDossier
+          detail={selectedDetail}
+          onBack={() => onSelectPerson(null)}
+          onOpenMeeting={onOpenMeeting}
+          mergeCandidates={rows}
+          possibleDuplicateCount={selectedSummary?.possibleDuplicateCount ?? 0}
+          onIdentityChanged={async () => {
+            const [nextRows, nextDetail] = await Promise.all([
+              getPeopleBriefingSummaries(),
+              getPersonBriefing(selectedDetail.person.id),
+            ]);
+            setRows(nextRows);
+            if (nextDetail) {
+              setDetails((current) => ({
+                ...current,
+                [selectedPersonId || nextDetail.person.id]: nextDetail,
+                [nextDetail.person.id]: nextDetail,
+              }));
+            }
+          }}
+        />
+        <PersonChatDock
+          personId={selectedDetail.person.id}
+          personName={selectedDetail.person.name}
+          onOpenMeeting={onOpenMeeting}
+        />
+      </>
     );
   }
   return (

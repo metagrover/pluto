@@ -40,6 +40,7 @@ interface SidebarProps {
   recordingState?: CaptureLifecycleState;
   onReturnToRecording?: () => void;
   onOpenSearch: () => void;
+  onOpenPeopleHome: () => void;
   theme: 'light' | 'dark' | 'system';
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
@@ -56,6 +57,7 @@ export const Sidebar = ({
   recordingState,
   onReturnToRecording,
   onOpenSearch,
+  onOpenPeopleHome,
   theme,
   setTheme,
 }: SidebarProps) => {
@@ -208,10 +210,7 @@ export const Sidebar = ({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setActiveTab('people');
-              setSelectedMeetingId(null);
-            }}
+            onClick={onOpenPeopleHome}
             className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'people' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Users

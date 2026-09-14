@@ -148,6 +148,14 @@ describe('PeopleTab Voice Profile integration', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    const more = Array.from(host.querySelectorAll('summary')).find(
+      (item) => item.textContent?.trim() === 'More',
+    );
+    more?.click();
+    const settings = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Identity & voice',
+    );
+    await act(async () => settings?.click());
   };
 
   it('renders voice profile card with active status, sample count, and clean speech duration', async () => {

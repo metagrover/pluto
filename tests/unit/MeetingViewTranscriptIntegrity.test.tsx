@@ -712,6 +712,7 @@ describe('MeetingView transcript integrity', () => {
         ]}
         onStartRecording={vi.fn()}
         onOpenSearch={vi.fn()}
+        onOpenPeopleHome={vi.fn()}
         handleDeleteMeeting={vi.fn()}
         setSettingsVisible={vi.fn()}
         theme="light"

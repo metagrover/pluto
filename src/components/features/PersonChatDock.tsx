@@ -1,15 +1,19 @@
 import {
   Archive,
   ArchiveRestore,
+  Check,
   ChevronDown,
   Loader2,
+  Menu,
   MessageCircle,
   Plus,
   Send,
   Square,
+  X,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -100,6 +104,7 @@ export const PersonChatDock: React.FC<{
   const [expanded, setExpanded] = useState(false);
   const [threads, setThreads] = useState<PersonChatThread[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [messages, setMessages] = useState<PersonChatMessage[]>([]);
   const [query, setQuery] = useState('');
   const [streaming, setStreaming] = useState('');
@@ -186,6 +191,18 @@ export const PersonChatDock: React.FC<{
   useEffect(() => {
     if (expanded) endRef.current?.scrollIntoView({ block: 'end' });
   }, [expanded, messages, streaming]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen]);
 
   const ensureThread = async () => {
     if (threadId) return threadId;
@@ -288,26 +305,42 @@ export const PersonChatDock: React.FC<{
   const starters = useMemo(() => starterPrompts(personName), [personName]);
   if (!enabled) return null;
   if (!expanded) {
-    return (
+    return createPortal(
       <button
         type="button"
         className="person-chat-launcher"
-        aria-label={`Open chat about ${personName}`}
+        aria-label={`Ask about ${personName}`}
         onClick={() => setExpanded(true)}
       >
         <MessageCircle size={17} aria-hidden="true" />
-        <span>Chat about {personName}</span>
-      </button>
+        <span>Ask about {personName}</span>
+      </button>,
+      document.body,
     );
   }
 
-  return (
+  return createPortal(
     <aside
       className="person-chat person-chat--expanded"
       aria-label={`Chat about ${personName}`}
     >
       <header className="person-chat__header">
         <div>
+          <button
+            type="button"
+            className={`person-chat__hamburger ${sidebarOpen ? 'is-active' : ''}`}
+            title={
+              sidebarOpen ? 'Hide past conversations' : 'Past conversations'
+            }
+            aria-label={
+              sidebarOpen ? 'Hide past conversations' : 'Past conversations'
+            }
+            aria-expanded={sidebarOpen}
+            aria-controls="person-chat-sidebar"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+          >
+            <Menu size={16} aria-hidden="true" />
+          </button>
           <Logo size={20} variant="default" />
           <span>
             <strong>Chat about {personName}</strong>
@@ -317,13 +350,14 @@ export const PersonChatDock: React.FC<{
         <div>
           <button
             type="button"
-            title="New chat"
-            aria-label="New chat"
+            title="New conversation"
+            aria-label="New conversation"
             onClick={() => {
               cancelActive();
               setThreadId(null);
               setMessages([]);
               setError('');
+              setSidebarOpen(false);
             }}
           >
             <Plus size={16} />
@@ -373,6 +407,7 @@ export const PersonChatDock: React.FC<{
             onClick={() => {
               cancelActive();
               setExpanded(false);
+              setSidebarOpen(false);
             }}
           >
             <ChevronDown size={16} />
@@ -380,134 +415,213 @@ export const PersonChatDock: React.FC<{
         </div>
       </header>
 
-      {threads.length ? (
-        <label className="person-chat__thread-picker">
-          <span>Conversation</span>
-          <select
-            value={threadId ?? ''}
-            onChange={(event) => {
-              cancelActive();
-              setThreadId(event.target.value || null);
-            }}
-          >
-            <option value="">New conversation</option>
-            {threads.map((thread) => (
-              <option key={thread.id} value={thread.id}>
-                {thread.title}
-                {thread.archivedAt ? ' (Archived)' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      <div className="person-chat__conversation" role="log" aria-live="polite">
-        {!hasConversation ? (
-          <div className="person-chat__welcome">
-            <strong>What would you like to think through?</strong>
-            <p>
-              Ask for a catch-up, prepare a conversation, explore an approach,
-              or draft something together.
-            </p>
-            <div>
-              {starters.map((starter) => (
+      <div className="person-chat__body">
+        {sidebarOpen ? (
+          <>
+            <div
+              className="person-chat__sidebar-backdrop"
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden="true"
+            />
+            <nav
+              id="person-chat-sidebar"
+              className="person-chat__sidebar"
+              aria-label="Past conversations"
+            >
+              <div className="person-chat__sidebar-header">
+                <strong>Past conversations</strong>
                 <button
                   type="button"
-                  key={starter}
-                  onClick={() => void submit(starter)}
+                  title="Close sidebar"
+                  aria-label="Close sidebar"
+                  onClick={() => setSidebarOpen(false)}
                 >
-                  {starter}
+                  <X size={15} />
                 </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {messages.map((message) =>
-          message.role === 'user' ? (
-            <div
-              key={message.id}
-              className="person-chat__message person-chat__message--user"
-            >
-              {message.content}
-            </div>
-          ) : (
-            <div key={message.id} className="person-chat__assistant">
-              <div className="person-chat__assistant-mark" aria-hidden="true">
-                <Logo size={16} variant="default" />
               </div>
-              <div className="person-chat__message person-chat__message--assistant">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
-                </ReactMarkdown>
-                {message.status === 'interrupted' ? (
-                  <small>Stopped</small>
-                ) : null}
-                <SourceList
-                  citations={message.citations}
-                  onOpenMeeting={onOpenMeeting}
-                />
+              <div className="person-chat__sidebar-content">
+                <button
+                  type="button"
+                  aria-label="New conversation"
+                  className={`person-chat__sidebar-new ${!threadId ? 'is-active' : ''}`}
+                  onClick={() => {
+                    cancelActive();
+                    setThreadId(null);
+                    setMessages([]);
+                    setError('');
+                    setSidebarOpen(false);
+                  }}
+                >
+                  <Plus size={15} aria-hidden="true" />
+                  <span>
+                    <strong>New conversation</strong>
+                    <small>Start a fresh thread</small>
+                  </span>
+                  {!threadId ? <Check size={14} aria-hidden="true" /> : null}
+                </button>
+                {threads.length > 0 ? (
+                  <>
+                    <p className="person-chat__sidebar-section-title">
+                      Recent conversations
+                    </p>
+                    <div className="person-chat__sidebar-list">
+                      {threads.map((thread) => {
+                        const isActive = thread.id === threadId;
+                        return (
+                          <button
+                            type="button"
+                            key={thread.id}
+                            aria-label={`${thread.title}${thread.archivedAt ? ', archived' : ''}${isActive ? ', selected' : ''}`}
+                            className={`person-chat__sidebar-item ${isActive ? 'is-active' : ''}`}
+                            onClick={() => {
+                              cancelActive();
+                              setThreadId(thread.id);
+                              setSidebarOpen(false);
+                            }}
+                          >
+                            <MessageCircle size={14} aria-hidden="true" />
+                            <span className="person-chat__sidebar-item-text">
+                              <strong>{thread.title}</strong>
+                              {thread.archivedAt ? (
+                                <small>Archived</small>
+                              ) : null}
+                            </span>
+                            {isActive ? (
+                              <Check size={14} aria-hidden="true" />
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p className="person-chat__sidebar-empty">
+                    No past conversations yet
+                  </p>
+                )}
               </div>
-            </div>
-          ),
-        )}
-        {streaming ? (
-          <div className="person-chat__assistant">
-            <div className="person-chat__assistant-mark" aria-hidden="true">
-              <Logo size={16} variant="default" />
-            </div>
-            <div className="person-chat__message person-chat__message--assistant">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {streaming}
-              </ReactMarkdown>
-            </div>
-          </div>
+            </nav>
+          </>
         ) : null}
-        {asking && !streaming ? (
-          <output className="person-chat__loading">
-            <Loader2 className="animate-spin" size={15} /> {status}
-          </output>
-        ) : null}
-        {error ? (
-          <p className="person-chat__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div ref={endRef} />
-      </div>
 
-      <form
-        className="person-chat__composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit(query);
-        }}
-      >
-        <textarea
-          value={query}
-          rows={1}
-          maxLength={4_000}
-          placeholder={`Chat about ${personName}`}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+        <div className="person-chat__main">
+          <div
+            className="person-chat__conversation"
+            role="log"
+            aria-live="polite"
+          >
+            {!hasConversation ? (
+              <div className="person-chat__welcome">
+                <strong>What would you like to think through?</strong>
+                <p>
+                  Ask for a catch-up, prepare a conversation, explore an
+                  approach, or draft something together.
+                </p>
+                <div>
+                  {starters.map((starter) => (
+                    <button
+                      type="button"
+                      key={starter}
+                      onClick={() => void submit(starter)}
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {messages.map((message) =>
+              message.role === 'user' ? (
+                <div
+                  key={message.id}
+                  className="person-chat__message person-chat__message--user"
+                >
+                  {message.content}
+                </div>
+              ) : (
+                <div key={message.id} className="person-chat__assistant">
+                  <div
+                    className="person-chat__assistant-mark"
+                    aria-hidden="true"
+                  >
+                    <Logo size={16} variant="default" />
+                  </div>
+                  <div className="person-chat__message person-chat__message--assistant">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
+                    {message.status === 'interrupted' ? (
+                      <small>Stopped</small>
+                    ) : null}
+                    <SourceList
+                      citations={message.citations}
+                      onOpenMeeting={onOpenMeeting}
+                    />
+                  </div>
+                </div>
+              ),
+            )}
+            {streaming ? (
+              <div className="person-chat__assistant">
+                <div className="person-chat__assistant-mark" aria-hidden="true">
+                  <Logo size={16} variant="default" />
+                </div>
+                <div className="person-chat__message person-chat__message--assistant">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {streaming}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ) : null}
+            {asking && !streaming ? (
+              <output className="person-chat__loading">
+                <Loader2 className="animate-spin" size={15} /> {status}
+              </output>
+            ) : null}
+            {error ? (
+              <p className="person-chat__error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <div ref={endRef} />
+          </div>
+
+          <form
+            className="person-chat__composer"
+            onSubmit={(event) => {
               event.preventDefault();
               void submit(query);
-            }
-          }}
-        />
-        <button
-          type={asking ? 'button' : 'submit'}
-          onClick={asking ? stop : undefined}
-          disabled={!asking && !query.trim()}
-          aria-label={asking ? 'Stop answering' : 'Send message'}
-        >
-          {asking ? (
-            <Square size={14} fill="currentColor" />
-          ) : (
-            <Send size={16} />
-          )}
-        </button>
-      </form>
-    </aside>
+            }}
+          >
+            <textarea
+              value={query}
+              rows={1}
+              maxLength={4_000}
+              placeholder={`Chat about ${personName}`}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit(query);
+                }
+              }}
+            />
+            <button
+              type={asking ? 'button' : 'submit'}
+              onClick={asking ? stop : undefined}
+              disabled={!asking && !query.trim()}
+              aria-label={asking ? 'Stop answering' : 'Send message'}
+            >
+              {asking ? (
+                <Square size={14} fill="currentColor" />
+              ) : (
+                <Send size={16} />
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    </aside>,
+    document.body,
   );
 };
