@@ -493,77 +493,77 @@ export const ProjectDossier = ({
             </div>
           ) : null}
           <details className="relative">
-          <summary className={`${quietButton} cursor-pointer list-none`}>
-            <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
-            More
-          </summary>
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-lg border border-pro-border bg-pro-bg p-1 shadow-lg">
-            {isSuggestion && (
-              <>
-                <button
-                  type="button"
-                  disabled={dispositionState === 'saving'}
-                  onClick={() => void setDisposition('confirmed')}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-                >
-                  <Check aria-hidden="true" className="h-3.5 w-3.5" />
-                  Keep as project
-                </button>
-                <button
-                  type="button"
-                  disabled={dispositionState === 'saving'}
-                  onClick={() => void setDisposition('dismissed')}
-                  className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-                >
-                  Dismiss suggestion
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setEditingTitle(true);
-                setTitleState('idle');
-              }}
-              className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
-            >
-              <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-              Rename project
-            </button>
-            <button
-              type="button"
-              disabled={!eligibleMergeCandidates.length}
-              onClick={() => {
-                setMergeOpen(true);
-                setMergeState('idle');
-              }}
-              className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-            >
-              Merge another project
-            </button>
-            {current?.mergedProjects.map((project) => (
+            <summary className={`${quietButton} cursor-pointer list-none`}>
+              <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
+              More
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 w-52 rounded-lg border border-pro-border bg-pro-bg p-1 shadow-lg">
+              {isSuggestion && (
+                <>
+                  <button
+                    type="button"
+                    disabled={dispositionState === 'saving'}
+                    onClick={() => void setDisposition('confirmed')}
+                    className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+                  >
+                    <Check aria-hidden="true" className="h-3.5 w-3.5" />
+                    Keep as project
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dispositionState === 'saving'}
+                    onClick={() => void setDisposition('dismissed')}
+                    className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+                  >
+                    Dismiss suggestion
+                  </button>
+                </>
+              )}
               <button
-                key={project.id}
                 type="button"
-                disabled={mergeState === 'saving'}
-                onClick={() => void restoreMergedProject(project.id)}
+                onClick={() => {
+                  setEditingTitle(true);
+                  setTitleState('idle');
+                }}
+                className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+              >
+                <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                Rename project
+              </button>
+              <button
+                type="button"
+                disabled={!eligibleMergeCandidates.length}
+                onClick={() => {
+                  setMergeOpen(true);
+                  setMergeState('idle');
+                }}
                 className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
               >
-                Restore {project.name}
+                Merge another project
               </button>
-            ))}
-            <button
-              type="button"
-              disabled={dreamingState === 'running'}
-              onClick={() => void handleDreamNow()}
-              className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
-            >
-              {DREAMING_STATUS_LABEL[dreamingState]}
-            </button>
-          </div>
-        </details>
+              {current?.mergedProjects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  disabled={mergeState === 'saving'}
+                  onClick={() => void restoreMergedProject(project.id)}
+                  className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+                >
+                  Restore {project.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={dreamingState === 'running'}
+                onClick={() => void handleDreamNow()}
+                className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+              >
+                {DREAMING_STATUS_LABEL[dreamingState]}
+              </button>
+            </div>
+          </details>
+        </div>
       </div>
-    </div>
 
       {error && (
         <div
@@ -1031,7 +1031,6 @@ export const ProjectDossier = ({
                 </div>
               </section>
             )}
-
 
             {current.theme?.openThreads.length ? (
               <section aria-labelledby="project-open-threads">

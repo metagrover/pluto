@@ -903,7 +903,9 @@ export const PersonDossier = ({
               <button
                 type="button"
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  event.currentTarget
+                    .closest('details')
+                    ?.removeAttribute('open');
                   setEditingName(true);
                   setNameState('idle');
                 }}
@@ -915,7 +917,9 @@ export const PersonDossier = ({
                 type="button"
                 disabled={eligibleMergeCandidates.length === 0}
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  event.currentTarget
+                    .closest('details')
+                    ?.removeAttribute('open');
                   setMergeOpen(true);
                   setMergeState('idle');
                 }}
@@ -925,7 +929,9 @@ export const PersonDossier = ({
               <button
                 type="button"
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  event.currentTarget
+                    .closest('details')
+                    ?.removeAttribute('open');
                   setProfileSettingsOpen(true);
                 }}
               >
@@ -936,7 +942,9 @@ export const PersonDossier = ({
                 type="button"
                 disabled={dreamingState === 'running'}
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  event.currentTarget
+                    .closest('details')
+                    ?.removeAttribute('open');
                   void handleDreamNow();
                 }}
               >
