@@ -969,6 +969,13 @@
     color: var(--notes-ink);
     background: transparent;
   }
+  .project-reading-surface {
+    --pro-text-muted: 0 0% 42%;
+  }
+  .dark .project-reading-surface {
+    --pro-text-muted: 0 0% 72%;
+    letter-spacing: 0.005em;
+  }
   .meeting-document--transcript-collapsed {
     @apply flex min-h-full flex-col;
   }

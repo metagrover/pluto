@@ -434,7 +434,10 @@ export const ProjectDossier = ({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1080px] pb-16 text-pro-text-main">
+    <div
+      className="project-reading-surface mx-auto w-full max-w-[760px] pb-16 text-pro-text-main"
+      data-reading-surface="project-dossier"
+    >
       <div className="mb-8 flex items-center justify-between gap-4">
         <button type="button" onClick={onBack} className={quietButton}>
           ← Back to projects
@@ -540,7 +543,7 @@ export const ProjectDossier = ({
 
       {current && (
         <>
-          <header className="mb-9">
+          <header className="mb-12">
             {editingTitle ? (
               <form
                 onSubmit={(event) => {
@@ -567,7 +570,7 @@ export const ProjectDossier = ({
                         setTitleDraft(current.project.displayTitle);
                       }
                     }}
-                    className="min-w-0 flex-1 rounded-md border border-pro-accent/60 bg-transparent px-3 py-2 font-serif text-2xl outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/30"
+                    className="min-w-0 flex-1 rounded-md border border-pro-accent/60 bg-transparent px-3 py-2 font-serif text-[38px] font-medium leading-[1.18] tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/30"
                   />
                   <button
                     type="submit"
@@ -596,7 +599,7 @@ export const ProjectDossier = ({
               </form>
             ) : (
               <div className="group flex items-start gap-2">
-                <h1 className="max-w-[26ch] font-serif text-[32px] font-medium leading-tight tracking-[-0.01em]">
+                <h1 className="max-w-[26ch] text-pretty font-serif text-[38px] font-medium leading-[1.18] tracking-tight">
                   {current.project.displayTitle}
                 </h1>
                 <button
@@ -609,7 +612,7 @@ export const ProjectDossier = ({
                 </button>
               </div>
             )}
-            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-pro-text-muted">
+            <div className="mt-5 flex flex-wrap gap-x-3 gap-y-1.5 text-[0.85rem] leading-5 text-pro-text-muted">
               <span>
                 {current.meetingStats.meetingCount} conversation
                 {current.meetingStats.meetingCount === 1 ? '' : 's'}
@@ -668,87 +671,94 @@ export const ProjectDossier = ({
             </section>
           )}
 
-          <div className="space-y-12">
-            <section
-              aria-labelledby="project-about"
-              className="grid min-w-0 gap-8 border-y border-pro-border/45 py-7 lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-10 lg:py-8"
-            >
-              <div className="min-w-0">
-                <h2
-                  id="project-about"
-                  className="text-sm font-semibold text-pro-text-main"
-                >
-                  What this project is about
-                </h2>
-                <p className="mt-3 max-w-[66ch] break-words text-[22px] font-semibold leading-[1.35] tracking-[-0.02em] text-pro-text-main sm:text-2xl">
-                  {projectOutcome}
-                </p>
-                <dl className="mt-6 max-w-[72ch] divide-y divide-pro-border/35 border-t border-pro-border/40 text-sm leading-6">
-                  <div className="grid min-w-0 gap-1 py-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
-                    <dt className="font-medium text-pro-text-main">
-                      {currentFocusRepeatsOutcome
-                        ? 'Latest evidence'
-                        : 'Current focus'}
-                    </dt>
-                    <dd className="min-w-0 break-words text-pro-text-muted">
-                      {projectActivitySummary}
-                    </dd>
-                  </div>
-                  <div className="grid min-w-0 gap-1 py-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
-                    <dt className="font-medium text-pro-text-main">People</dt>
-                    <dd className="min-w-0 break-words text-pro-text-muted">
-                      {projectPeopleSummary}
-                      {activeAssignments.length > 0 ? '.' : ''}
-                    </dd>
-                  </div>
-                  <div className="grid min-w-0 gap-1 pt-3.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
-                    <dt className="font-medium text-pro-text-main">
-                      What to watch
-                    </dt>
-                    <dd className="min-w-0 break-words text-pro-text-muted">
-                      {projectWatchSummary}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-
-              <aside className="min-w-0 border-t border-pro-border/40 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-                <div className="flex items-center gap-2 text-xs font-medium text-pro-text-muted">
-                  <Activity aria-hidden="true" className="h-4 w-4" />
-                  <h2 id="project-health">Project health</h2>
+          <div className="space-y-14">
+            <section aria-labelledby="project-about" className="min-w-0">
+              <h2
+                id="project-about"
+                className="mb-4 text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
+              >
+                What this project is about
+              </h2>
+              <p className="max-w-[68ch] break-words text-[17px] font-medium leading-[1.65] text-pro-text-main">
+                {projectOutcome}
+              </p>
+              <dl className="mt-7 max-w-[68ch] space-y-5">
+                <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-5">
+                  <dt className="text-[0.8rem] font-semibold leading-6 text-pro-text-muted">
+                    {currentFocusRepeatsOutcome
+                      ? 'Latest evidence'
+                      : 'Current focus'}
+                  </dt>
+                  <dd className="min-w-0 break-words text-[17px] leading-[1.65] text-pro-text-main">
+                    {projectActivitySummary}
+                  </dd>
                 </div>
-                <p
-                  className={`mt-3 break-words text-xl font-semibold leading-snug ${healthTone[current.health.state]}`}
+                <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-5">
+                  <dt className="text-[0.8rem] font-semibold leading-6 text-pro-text-muted">
+                    People
+                  </dt>
+                  <dd className="min-w-0 break-words text-[17px] leading-[1.65] text-pro-text-main">
+                    {projectPeopleSummary}
+                    {activeAssignments.length > 0 ? '.' : ''}
+                  </dd>
+                </div>
+                <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-5">
+                  <dt className="text-[0.8rem] font-semibold leading-6 text-pro-text-muted">
+                    What to watch
+                  </dt>
+                  <dd className="min-w-0 break-words text-[17px] leading-[1.65] text-pro-text-main">
+                    {projectWatchSummary}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <section aria-labelledby="project-health">
+              <div className="flex items-center gap-2">
+                <Activity
+                  aria-hidden="true"
+                  className="h-4 w-4 text-pro-text-muted"
+                />
+                <h2
+                  id="project-health"
+                  className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
                 >
-                  {current.health.headline}
-                </p>
-                <p className="mt-2 break-words text-sm leading-6 text-pro-text-muted">
-                  {current.health.summary}
-                </p>
-                {attentionTasks.length > 0 && (
-                  <ul className="mt-5 space-y-3 border-t border-pro-border/40 pt-4 text-sm">
-                    {attentionTasks.map((task) => (
-                      <li key={task.id} className="break-words">
-                        <span className="font-medium">{task.name}</span>
-                        {task.due_date && (
-                          <span className="mt-0.5 block text-xs text-pro-text-muted">
-                            Due {formatDate(task.due_date)}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </aside>
+                  Project health
+                </h2>
+              </div>
+              <p
+                className={`mt-4 max-w-[68ch] break-words text-[17px] font-medium leading-[1.65] ${healthTone[current.health.state]}`}
+              >
+                {current.health.headline}
+              </p>
+              <p className="mt-1.5 max-w-[68ch] break-words text-[17px] leading-[1.65] text-pro-text-main">
+                {current.health.summary}
+              </p>
+              {attentionTasks.length > 0 && (
+                <ul className="mt-5 max-w-[68ch] divide-y divide-pro-border/40 border-y border-pro-border/45">
+                  {attentionTasks.map((task) => (
+                    <li key={task.id} className="break-words py-4">
+                      <span className="text-base font-medium">{task.name}</span>
+                      {task.due_date && (
+                        <span className="mt-1 block text-[0.8rem] leading-5 text-pro-text-muted">
+                          Due {formatDate(task.due_date)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
 
             <section
               aria-label="Project at a glance"
-              className="grid gap-x-8 gap-y-5 border-y border-pro-border/45 py-5 sm:grid-cols-2 xl:grid-cols-5"
+              className="grid gap-x-8 gap-y-6 border-y border-pro-border/45 py-6 sm:grid-cols-2"
             >
               <div>
-                <p className="text-xs text-pro-text-muted">Conversations</p>
-                <p className="mt-1 text-sm font-medium">
+                <p className="text-[0.8rem] leading-5 text-pro-text-muted">
+                  Conversations
+                </p>
+                <p className="mt-1 text-base font-medium leading-6">
                   {current.meetingStats.meetingCount} linked
                   {current.meetingStats.activeWeeks !== null
                     ? ` across ${current.meetingStats.activeWeeks} week${current.meetingStats.activeWeeks === 1 ? '' : 's'}`
@@ -756,31 +766,39 @@ export const ProjectDossier = ({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-pro-text-muted">People involved</p>
-                <p className="mt-1 text-sm font-medium">
+                <p className="text-[0.8rem] leading-5 text-pro-text-muted">
+                  People involved
+                </p>
+                <p className="mt-1 text-base font-medium leading-6">
                   {peopleInvolved.length
                     ? `${peopleInvolved.length} linked`
                     : 'No named people linked yet'}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-pro-text-muted">Regular meetings</p>
-                <p className="mt-1 text-sm font-medium">
+                <p className="text-[0.8rem] leading-5 text-pro-text-muted">
+                  Regular meetings
+                </p>
+                <p className="mt-1 text-base font-medium leading-6">
                   {current.meetingStats.recurringSeries[0]?.cadence ||
                     'No established pattern'}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-pro-text-muted">Next milestone</p>
-                <p className="mt-1 text-sm font-medium">
+                <p className="text-[0.8rem] leading-5 text-pro-text-muted">
+                  Next milestone
+                </p>
+                <p className="mt-1 text-base font-medium leading-6">
                   {nextMilestone
                     ? `${nextMilestone.title}${nextMilestone.timing ? ` · ${nextMilestone.timing}` : ''}`
                     : 'Nothing upcoming yet'}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-pro-text-muted">Commitments</p>
-                <p className="mt-1 text-sm font-medium">
+                <p className="text-[0.8rem] leading-5 text-pro-text-muted">
+                  Commitments
+                </p>
+                <p className="mt-1 text-base font-medium leading-6">
                   {current.momentum.openCommitmentCount} open ·{' '}
                   {current.momentum.completedCommitmentCount} completed
                 </p>
@@ -791,10 +809,13 @@ export const ProjectDossier = ({
               <section aria-labelledby="project-people">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
                   <div>
-                    <h2 id="project-people" className="text-lg font-semibold">
+                    <h2
+                      id="project-people"
+                      className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
+                    >
                       People involved
                     </h2>
-                    <p className="mt-1 text-xs text-pro-text-muted">
+                    <p className="mt-1.5 text-[0.85rem] leading-5 text-pro-text-muted">
                       Names linked by project evidence across conversations.
                     </p>
                   </div>
@@ -867,11 +888,11 @@ export const ProjectDossier = ({
                 <div>
                   <h2
                     id="project-meeting-rhythm"
-                    className="text-lg font-semibold"
+                    className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
                   >
                     Regular meetings
                   </h2>
-                  <p className="mt-1 text-xs text-pro-text-muted">
+                  <p className="mt-1.5 text-[0.85rem] leading-5 text-pro-text-muted">
                     Patterns established from at least three consistently spaced
                     conversations.
                   </p>
@@ -947,7 +968,7 @@ export const ProjectDossier = ({
               <section aria-labelledby="project-recent-changes">
                 <h2
                   id="project-recent-changes"
-                  className="text-lg font-semibold"
+                  className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
                 >
                   Since last time
                 </h2>
@@ -957,7 +978,7 @@ export const ProjectDossier = ({
                       key={`${change.sourceMeetingId}-${change.summary}`}
                       className="py-4"
                     >
-                      <p className="max-w-[68ch] text-sm leading-6">
+                      <p className="max-w-[68ch] text-[17px] leading-[1.65]">
                         {change.summary}
                       </p>
                       <p className="mt-1.5 text-xs text-pro-text-muted">
@@ -977,11 +998,11 @@ export const ProjectDossier = ({
                 <div>
                   <h2
                     id="project-open-threads"
-                    className="text-lg font-semibold"
+                    className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
                   >
                     Open threads
                   </h2>
-                  <p className="mt-1 text-xs text-pro-text-muted">
+                  <p className="mt-1.5 text-[0.85rem] leading-5 text-pro-text-muted">
                     Decisions, actions, questions, and confirmed commitments.
                   </p>
                 </div>
@@ -996,12 +1017,14 @@ export const ProjectDossier = ({
                       <span className="text-xs capitalize text-pro-text-muted">
                         {thread.kind}
                       </span>
-                      <span className="text-sm leading-6">{thread.text}</span>
+                      <span className="text-[17px] leading-[1.65]">
+                        {thread.text}
+                      </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-4 border-y border-pro-border/40 py-4 text-sm leading-6 text-pro-text-muted">
+                <p className="mt-4 border-y border-pro-border/40 py-4 text-[17px] leading-[1.65] text-pro-text-muted">
                   No open decisions or questions are established in the linked
                   notes yet.
                 </p>
@@ -1017,7 +1040,7 @@ export const ProjectDossier = ({
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <h2
                   id="project-conversation-history"
-                  className="text-lg font-semibold"
+                  className="text-[1.375rem] font-semibold leading-[1.3] tracking-[-0.015em]"
                 >
                   Conversation history
                 </h2>
