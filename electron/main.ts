@@ -1353,9 +1353,6 @@ app.whenReady().then(async () => {
   configureKnowledgeDocBackgroundScheduler((docId) => {
     backgroundKnowledgeRefresh?.enqueue(`doc:${docId}`);
   });
-  for (const failedMeetingId of db.listMeetingIdsWithFailedSecondary()) {
-    backgroundKnowledgeRefresh?.enqueue(`secondary:${failedMeetingId}`);
-  }
   dreamingEntityQueue = createDirtyEntityQueue({
     getProjects: () => db.getEntitiesByType('project'),
     getPeople: () => db.getEntitiesByType('person'),
@@ -1498,6 +1495,63 @@ app.whenReady().then(async () => {
     };
     setTimeout(refreshNextSavedMeeting, 25).unref?.();
   }
+
+  let secondaryRecoveryRunning = false;
+  let secondaryRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  const secondaryAttempts = new Map<string, number>();
+
+  const runSecondaryRecovery = async () => {
+    if (secondaryRecoveryRunning) return;
+    secondaryRecoveryRunning = true;
+    try {
+      const failedMeetingIds = db.listMeetingIdsWithFailedSecondary();
+      for (const meetingId of failedMeetingIds) {
+        if (activeTranscriptionCount > 0) {
+          scheduleSecondaryRecovery(5_000);
+          return;
+        }
+        const attempts = secondaryAttempts.get(meetingId) ?? 0;
+        if (attempts >= 2) continue;
+        secondaryAttempts.set(meetingId, attempts + 1);
+
+        try {
+          await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
+            meetingId,
+            requestId: randomUUID(),
+            template: 'auto',
+            reason: 'secondary',
+          });
+        } catch (error) {
+          console.warn(
+            `[SecondaryRecovery] Secondary run failed for meeting ${meetingId}:`,
+            error,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      secondaryRecoveryRunning = false;
+    }
+  };
+
+  const scheduleSecondaryRecovery = (delayMs = 3_000) => {
+    if (secondaryRecoveryTimer) {
+      clearTimeout(secondaryRecoveryTimer);
+    }
+    secondaryRecoveryTimer = setTimeout(() => {
+      secondaryRecoveryTimer = null;
+      void runSecondaryRecovery();
+    }, delayMs);
+    if (
+      typeof secondaryRecoveryTimer === 'object' &&
+      'unref' in secondaryRecoveryTimer
+    ) {
+      secondaryRecoveryTimer.unref();
+    }
+  };
+
+  scheduleSecondaryRecovery(3_000);
+
   for (const channel of IDENTITY_CHANNELS) {
     ipcMain.handle(channel, (_event, payload) => {
       const previousSelfPersonId = db.identityStore.getSelfPersonId();
@@ -4770,13 +4824,10 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('RETRY_FAILED_SECONDARY_RUNS', async () => {
+    secondaryAttempts.clear();
     const meetingIds = db.listMeetingIdsWithFailedSecondary();
-    const enqueued: string[] = [];
-    for (const meetingId of meetingIds) {
-      backgroundKnowledgeRefresh?.enqueue(`secondary:${meetingId}`);
-      enqueued.push(meetingId);
-    }
-    return { enqueued };
+    scheduleSecondaryRecovery(0);
+    return { enqueued: meetingIds };
   });
 
   ipcMain.handle(

@@ -419,9 +419,9 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   const startSecondary = (
     input: Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
     controller: AbortController,
-  ) => {
+  ): Promise<void> => {
     if (!dependencies.runSecondary || secondaryByMeeting.has(input.meetingId))
-      return;
+      return Promise.resolve();
     secondaryByMeeting.set(input.meetingId, { runId: input.runId, controller });
     const update = (
       secondaryStatus: 'running' | 'complete' | 'failed',
@@ -439,7 +439,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       notify(input.meetingId);
     };
     update('running', 'value_signals');
-    void Promise.resolve()
+    return Promise.resolve()
       .then(() => dependencies.runSecondary!(input))
       .then(() => update('complete', 'complete'))
       .catch((error) => {
@@ -662,7 +662,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         throw new Error('meeting_notes_superseded');
       if (persisted.secondary_status !== 'complete') {
         const controller = new AbortController();
-        startSecondary(
+        await startSecondary(
           {
             ...identity,
             transcript: analysisTranscript(meeting),
@@ -747,7 +747,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           inputRevision: fingerprint,
           ...revisions,
         };
-        startSecondary(
+        void startSecondary(
           {
             ...identity,
             transcript: analysisTranscript(meeting),
@@ -1010,7 +1010,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
               inputRevision: fingerprint,
               ...revisions,
             };
-            startSecondary(
+            void startSecondary(
               {
                 ...secondaryInput,
                 transcript: buildAnalysisTranscriptFromJson(

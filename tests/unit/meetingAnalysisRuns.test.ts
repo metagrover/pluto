@@ -1862,16 +1862,12 @@ describe('meeting analysis run coordinator', () => {
       status: 'published',
     });
     expect(generateStructuredAnalysis).not.toHaveBeenCalled();
-    await vi.waitFor(() => {
-      expect(runSecondary).toHaveBeenCalledTimes(1);
-    });
-    await vi.waitFor(() => {
-      expect(updateSecondaryStatus).toHaveBeenCalledWith(
-        expect.objectContaining({
-          secondaryStatus: 'complete',
-          stage: 'complete',
-        }),
-      );
-    });
+    expect(runSecondary).toHaveBeenCalledTimes(1);
+    expect(updateSecondaryStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secondaryStatus: 'complete',
+        stage: 'complete',
+      }),
+    );
   });
 });
