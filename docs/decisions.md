@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-14 - Automatic knowledge consolidation without suggestion review friction
+
+- **Status:** Accepted
+- **Supersedes:** “2026-09-02 - Keep idle dreaming proposal-only and evidence-bound” and the proposal review requirement in “2026-08-04 - Asynchronous Memory Dreaming and Knowledge Consolidation Engine”.
+- **Decision:** Pluto eliminates the suggested-update based design and its manual review friction. Knowledge synthesis from conversations (including person headlines, current focus, collaborators, project themes, milestones, commitments, and aliases) is automatically applied to canonical knowledge records upon completion.
+- **Rationale:** Staging updates as proposals that required manual Accept/Reject decisions added high cognitive load, interrupted dossier reading surfaces, and produced stale-proposal friction whenever source notes were updated before review. Knowledge flows in Pluto must be frictionless, automatic, and calm.
+- **Consequences:** The `<PreparedUpdates>` review inbox and "Review prepared updates" actions are removed from person and project reading surfaces. Extracted collaborators, headlines, focus, milestones, and commitments display directly within their respective dossier sections. Users retain full control through direct in-place editing and inaccurate-item reporting.
+
 ## 2026-09-12 - Admit automatic identity reconciliation only while idle
 
 - **Status:** Accepted following repeated speaker-confirmation responsiveness reports.

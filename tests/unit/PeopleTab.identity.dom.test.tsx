@@ -246,7 +246,7 @@ describe('People identity controls', () => {
     expect(host.textContent).toContain('Preparation cancelled');
   });
 
-  it('announces prepared updates outside the closed menu with a review action', async () => {
+  it('announces prepared updates outside the closed menu automatically', async () => {
     api.triggerDreamingNow.mockResolvedValueOnce({
       status: 'proposed',
       entityId: 'person-1',
@@ -258,6 +258,5 @@ describe('People identity controls', () => {
 
     const status = host.querySelector('[aria-live="polite"]');
     expect(status?.textContent).toContain('Updates are ready');
-    expect(host.textContent).toContain('Review prepared updates');
   });
 });

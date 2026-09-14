@@ -49,7 +49,6 @@ import type {
 } from '../../utils/personBriefing';
 import { parsePersonRole } from '../../utils/personBriefing';
 import { PersonChatDock } from '../features/PersonChatDock';
-import { PreparedUpdates } from '../features/dreaming/PreparedUpdates';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { compileKnowledgeBrief } from './knowledgeDocument';
@@ -522,7 +521,6 @@ export const PersonDossier = ({
     name: string;
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
-  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
   const prepareGeneration = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -854,19 +852,15 @@ export const PersonDossier = ({
         preparedPersonId !== currentDetail.person.id
       )
         return;
-      if (result.status === 'proposed') {
+      if (result.status === 'proposed' || result.status === 'existing') {
         await onIdentityChanged();
         if (
           generation !== prepareGeneration.current ||
           preparedPersonId !== currentDetail.person.id
         )
           return;
-        setPreparedUpdatesReload((value) => value + 1);
-        setDreamingState('proposed');
+        setDreamingState(result.status);
       } else {
-        if (result.status === 'existing') {
-          setPreparedUpdatesReload((value) => value + 1);
-        }
         setDreamingState(result.status);
       }
     } catch {
@@ -885,82 +879,73 @@ export const PersonDossier = ({
           <ArrowLeft aria-hidden="true" size={15} />
           All people
         </button>
-        <details className="person-dossier__more">
-          <summary>
-            <MoreHorizontal aria-hidden="true" size={16} />
-            More
-          </summary>
-          <div>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                setEditingName(true);
-                setNameState('idle');
-              }}
+        <div className="flex items-center gap-2.5">
+          {dreamingState !== 'idle' ? (
+            <div
+              className="person-dossier__prepare-status flex items-center gap-2 rounded-full border border-pro-border/70 bg-pro-surface/60 px-3 py-1 text-xs font-medium text-pro-text-muted"
+              aria-live="polite"
             >
-              <Pencil aria-hidden="true" size={14} />
-              Edit name
-            </button>
-            <button
-              type="button"
-              disabled={eligibleMergeCandidates.length === 0}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                setMergeOpen(true);
-                setMergeState('idle');
-              }}
-            >
-              Merge another person
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                setProfileSettingsOpen(true);
-              }}
-            >
-              <Volume2 aria-hidden="true" size={14} />
-              Identity &amp; voice
-            </button>
-            <button
-              type="button"
-              disabled={dreamingState === 'running'}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                void handleDreamNow();
-              }}
-            >
-              {DREAMING_STATUS_LABEL[dreamingState]}
-            </button>
-          </div>
-        </details>
-      </div>
-      {dreamingState !== 'idle' ? (
-        <div
-          className="person-dossier__prepare-status flex items-center gap-3 text-sm text-pro-text-muted"
-          aria-live="polite"
-        >
-          <>
-            <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
-            {dreamingState === 'proposed' ? (
+              {dreamingState === 'running' ? (
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent animate-pulse"
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
+            </div>
+          ) : null}
+          <details className="person-dossier__more">
+            <summary>
+              <MoreHorizontal aria-hidden="true" size={16} />
+              More
+            </summary>
+            <div>
               <button
                 type="button"
-                className="rounded font-medium text-pro-accent underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
-                onClick={() => {
-                  const heading = document.getElementById(
-                    `prepared-updates-person-${currentDetail.person.id}`,
-                  );
-                  heading?.focus();
-                  heading?.scrollIntoView?.({ block: 'start' });
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  setEditingName(true);
+                  setNameState('idle');
                 }}
               >
-                Review prepared updates
+                <Pencil aria-hidden="true" size={14} />
+                Edit name
               </button>
-            ) : null}
-          </>
+              <button
+                type="button"
+                disabled={eligibleMergeCandidates.length === 0}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  setMergeOpen(true);
+                  setMergeState('idle');
+                }}
+              >
+                Merge another person
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  setProfileSettingsOpen(true);
+                }}
+              >
+                <Volume2 aria-hidden="true" size={14} />
+                Identity &amp; voice
+              </button>
+              <button
+                type="button"
+                disabled={dreamingState === 'running'}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  void handleDreamNow();
+                }}
+              >
+                {DREAMING_STATUS_LABEL[dreamingState]}
+              </button>
+            </div>
+          </details>
         </div>
-      ) : null}
+      </div>
       <header className="person-dossier__identity">
         <span className="person-avatar" aria-hidden="true">
           {currentDetail.person.name.slice(0, 1).toUpperCase()}
@@ -1305,7 +1290,18 @@ export const PersonDossier = ({
 
       <section className="person-dossier__about" aria-label="About this person">
         {hasReliableRead ? (
-          <p>{brief.headline}</p>
+          <div>
+            <p>{brief.headline}</p>
+            {brief.supportingBullets.length > 0 ? (
+              <div className="mt-3 space-y-1">
+                {brief.supportingBullets.map((bullet, idx) => (
+                  <p key={idx} className="text-sm text-pro-text-muted">
+                    {bullet}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : (
           <p className="person-dossier__about-empty">
             {meetingCount > 0
@@ -1314,26 +1310,6 @@ export const PersonDossier = ({
           </p>
         )}
       </section>
-
-      {dreamingState === 'proposed' || dreamingState === 'existing' ? (
-        <PreparedUpdates
-          key={currentDetail.person.id}
-          entityId={currentDetail.person.id}
-          entityType="person"
-          reloadToken={preparedUpdatesReload}
-          evidenceMeetings={currentDetail.meetings.map((meeting) => ({
-            id: meeting.id,
-            title: meeting.title,
-            date: meeting.started_at || meeting.created_at,
-          }))}
-          onCanonicalChange={onIdentityChanged}
-          onOpenMeeting={onOpenMeeting}
-          onReviewIdentity={() => {
-            setMergeOpen(true);
-            setMergeState('idle');
-          }}
-        />
-      ) : null}
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">

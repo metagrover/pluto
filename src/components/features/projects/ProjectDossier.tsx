@@ -23,7 +23,6 @@ import type { ProjectBrief } from '../../../utils/projectBriefing';
 import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
 import { SearchSelect } from '../../ui/SearchSelect';
-import { PreparedUpdates } from '../dreaming/PreparedUpdates';
 import { ProjectMilestones } from './ProjectMilestones';
 
 interface ProjectDossierProps {
@@ -146,7 +145,6 @@ export const ProjectDossier = ({
     name: string;
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
-  const [preparedUpdatesReload, setPreparedUpdatesReload] = useState(0);
   const [showAllPeople, setShowAllPeople] = useState(false);
   const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -204,14 +202,10 @@ export const ProjectDossier = ({
         preparedProjectId !== projectId
       )
         return;
-      if (result.status === 'proposed') {
+      if (result.status === 'proposed' || result.status === 'existing') {
         setRequest((r) => r + 1);
-        setPreparedUpdatesReload((value) => value + 1);
-        setDreamingState('proposed');
+        setDreamingState(result.status);
       } else {
-        if (result.status === 'existing') {
-          setPreparedUpdatesReload((value) => value + 1);
-        }
         setDreamingState(result.status);
       }
     } catch {
@@ -483,7 +477,22 @@ export const ProjectDossier = ({
         <button type="button" onClick={onBack} className={quietButton}>
           ← Back to projects
         </button>
-        <details className="relative">
+        <div className="flex items-center gap-2.5">
+          {dreamingState !== 'idle' ? (
+            <div
+              className="flex items-center gap-2 rounded-full border border-pro-border/70 bg-pro-surface/60 px-3 py-1 text-xs font-medium text-pro-text-muted"
+              aria-live="polite"
+            >
+              {dreamingState === 'running' ? (
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-pro-accent animate-pulse"
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
+            </div>
+          ) : null}
+          <details className="relative">
           <summary className={`${quietButton} cursor-pointer list-none`}>
             <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
             More
@@ -554,6 +563,7 @@ export const ProjectDossier = ({
           </div>
         </details>
       </div>
+    </div>
 
       {error && (
         <div
@@ -1022,26 +1032,6 @@ export const ProjectDossier = ({
               </section>
             )}
 
-            <PreparedUpdates
-              key={current.project.id}
-              entityId={current.project.id}
-              entityType="project"
-              reloadToken={preparedUpdatesReload}
-              evidenceMeetings={current.meetings.map((meeting) => ({
-                id: meeting.id,
-                title: meeting.title,
-                date: meeting.started_at || meeting.created_at,
-              }))}
-              onCanonicalChange={async () => {
-                setRequest((value) => value + 1);
-                await onPortfolioChanged?.();
-              }}
-              onOpenMeeting={onOpenMeeting}
-              onReviewIdentity={() => {
-                setMergeOpen(true);
-                setMergeState('idle');
-              }}
-            />
 
             {current.theme?.openThreads.length ? (
               <section aria-labelledby="project-open-threads">

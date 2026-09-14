@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDatabaseRuntime } from '../../electron/database/runtime';
 import { createDreamingProposalStore } from '../../electron/dreaming/proposalStore';

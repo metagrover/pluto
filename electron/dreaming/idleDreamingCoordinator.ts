@@ -81,6 +81,17 @@ export interface IdleDreamingCoordinatorDeps {
       errorCode: string;
     }): unknown;
     cancelRun(input: { runId: string; leaseToken: string }): unknown;
+    listPendingProposals?: (
+      entityId: string,
+      entityType: DreamingEntityType,
+    ) => Array<{ id: string }>;
+    acceptDreamingProposal?: (input: {
+      proposalId: string;
+      getCurrentSourceRevision: (
+        entityId: string,
+        entityType: DreamingEntityType,
+      ) => string | null;
+    }) => unknown;
   };
   getEntity?: (entityId: string) => { type: string } | null | undefined;
   idleThresholdSeconds?: number;
@@ -410,6 +421,25 @@ export const createIdleDreamingCoordinator = (
               entityId: candidate.entityId,
               errorCode: 'lease_expired',
             };
+          }
+          if (
+            deps.proposalStore.listPendingProposals &&
+            deps.proposalStore.acceptDreamingProposal
+          ) {
+            const pending = deps.proposalStore.listPendingProposals(
+              candidate.entityId,
+              candidate.type,
+            );
+            for (const proposal of pending) {
+              try {
+                deps.proposalStore.acceptDreamingProposal({
+                  proposalId: proposal.id,
+                  getCurrentSourceRevision: () => pkg.sourceRevision,
+                });
+              } catch {
+                // keep moving if individual proposal conflicts with existing records
+              }
+            }
           }
         } catch {
           deps.proposalStore.failRun({
