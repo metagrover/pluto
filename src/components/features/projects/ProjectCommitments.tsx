@@ -196,7 +196,7 @@ const Commitments = ({
               ) : (
                 <p className="text-sm">
                   {projectId
-                    ? 'No open tasks are linked to this project.'
+                    ? 'No open tasks for this project.'
                     : 'No open unassigned tasks.'}
                 </p>
               )}
@@ -224,7 +224,9 @@ const Commitments = ({
           >
             <input
               type="text"
-              aria-label={projectId ? 'New linked task' : 'New unassigned task'}
+              aria-label={
+                projectId ? 'New project task' : 'New unassigned task'
+              }
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               disabled={busy}

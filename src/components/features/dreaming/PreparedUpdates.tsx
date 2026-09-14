@@ -290,18 +290,17 @@ export function PreparedUpdates({
     <section
       ref={sectionRef}
       aria-labelledby={`prepared-updates-${entityType}-${entityId}`}
-      className="border-y border-pro-border/45 py-6"
+      className="py-2"
     >
       <h2
         id={`prepared-updates-${entityType}-${entityId}`}
         tabIndex={-1}
         className="text-lg font-semibold"
       >
-        Prepared updates
+        Suggested updates
       </h2>
       <p className="mt-1 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
-        Review changes Pluto prepared from linked meeting notes before they
-        become part of this dossier.
+        Review suggestions from your meeting notes before adding them here.
       </p>
 
       {loading ? (
@@ -320,7 +319,7 @@ export function PreparedUpdates({
           </button>
         </div>
       ) : (
-        <ol className="mt-4 divide-y divide-pro-border/40 border-y border-pro-border/45 empty:hidden">
+        <ol className="mt-4 divide-y divide-pro-border/40 empty:hidden">
           {proposals.map((proposal) => {
             const result = results[proposal.id];
             const acceptDisabled =
@@ -344,7 +343,7 @@ export function PreparedUpdates({
                 {proposal.evidence.length > 0 ? (
                   <details className="mt-2 text-sm">
                     <summary className="min-h-11 cursor-pointer rounded py-2 text-pro-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent sm:min-h-10">
-                      Show source
+                      See meeting note
                     </summary>
                     <ul className="space-y-3 border-l border-pro-border/60 pl-3 text-pro-text-muted">
                       {proposal.evidence.map((evidence, index) => {
@@ -362,12 +361,12 @@ export function PreparedUpdates({
                                 }
                                 className="min-h-11 rounded text-left text-xs text-pro-text-muted hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent sm:min-h-10"
                               >
-                                {meeting?.title || 'Linked meeting'}
+                                {meeting?.title || 'Meeting'}
                                 {date ? ` · ${date}` : ''}
                               </button>
                             ) : (
                               <p className="text-xs">
-                                {meeting?.title || 'Linked meeting'}
+                                {meeting?.title || 'Meeting'}
                                 {date ? ` · ${date}` : ''}
                               </p>
                             )}
@@ -431,8 +430,8 @@ export function PreparedUpdates({
       {refreshWarning ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-pro-text-muted">
           <p>
-            The choice was saved, but Pluto couldn’t refresh the dossier. The
-            saved decision is unchanged.
+            The choice was saved, but Pluto couldn’t refresh this page. Your
+            decision is still saved.
           </p>
           <button
             type="button"

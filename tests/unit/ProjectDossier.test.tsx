@@ -250,23 +250,23 @@ const setValue = async (
 it('leads with the project brief, people, timeline, health, and meeting rhythm', async () => {
   await render();
   expect(host.textContent).toContain('Archive modernization');
-  expect(host.textContent).toContain('What this project is about');
+  expect(host.textContent).toContain('Project brief');
   expect(host.textContent).toContain('Make historical records searchable');
-  expect(host.textContent).toContain('7 conversations');
+  expect(host.textContent).toContain('7 meetings');
   expect(host.textContent).toContain('Current focus');
   expect(host.textContent).toContain('Validate access rules before launch');
   expect(host.textContent).toContain(
     'Alex Rivera is responsible for Complete migration review',
   );
-  expect(host.textContent).toContain('What to watch');
+  expect(host.textContent).toContain('Coming up');
   expect(host.textContent).toContain('Project health');
-  expect(host.textContent).toContain('Watch');
+  expect(host.textContent).toContain('Needs attention');
   expect(host.textContent).toContain(
-    'One confirmed milestone is due within two weeks.',
+    '1 milestone or commitment is due in the next two weeks.',
   );
   expect(
     host.textContent?.match(
-      /One confirmed milestone is due within two weeks\./g,
+      /1 milestone or commitment is due in the next two weeks\./g,
     ),
   ).toHaveLength(1);
   expect(host.textContent).toContain('People involved');
@@ -283,20 +283,21 @@ it('leads with the project brief, people, timeline, health, and meeting rhythm',
   expect(samCard?.textContent).toContain('Project manager');
   expect(samCard?.textContent).toContain('Project management');
   expect(laurenCard?.textContent).toContain('Executive sponsor');
-  expect(host.textContent).toContain('Typically 4 people');
+  expect(host.textContent).toContain('Usually 4 people');
   expect(host.textContent).toContain('Regular meetings');
   expect(host.textContent).toContain('Weekly pattern');
-  expect(host.textContent).toContain('4 observed');
-  expect(host.textContent).toContain('Since last time');
-  expect(host.textContent).toContain('The first collection is now indexed.');
+  expect(host.textContent).toContain('4 meetings');
   expect(host.textContent).toContain('Timeline and milestones');
-  expect(host.textContent).toContain('Open threads');
+  expect(host.textContent).toContain('Open questions and actions');
   expect(host.textContent).toContain('Complete migration review');
-  expect(host.textContent).toContain('From meeting evidence');
-  expect(host.textContent).toContain('Conversation history');
+  expect(host.textContent).toContain('From meeting notes');
+  expect(host.textContent).toContain('Meeting history');
   expect(host.textContent!.indexOf('Timeline and milestones')).toBeLessThan(
-    host.textContent!.indexOf('Open threads'),
+    host.textContent!.indexOf('Open questions and actions'),
   );
+  expect(host.textContent).not.toContain('More details');
+  expect(host.textContent).not.toContain('Since last time');
+  expect(host.textContent).not.toContain('Project details');
   expect(host.textContent).not.toContain('Momentum');
 });
 
@@ -313,13 +314,36 @@ it('opens the matching person profile from a person card', async () => {
   expect(onOpenPerson).toHaveBeenCalledWith('person-alex');
 });
 
+it('keeps a large people roster compact until the user expands it', async () => {
+  const manyPeopleBrief = brief();
+  manyPeopleBrief.meetings[0].participants = Array.from(
+    { length: 8 },
+    (_, index) => ({
+      entity_id: `person-${index + 1}`,
+      name: `Person ${index + 1}`,
+      role: index === 0 ? 'Engineering lead' : undefined,
+    }),
+  );
+  api.getProjectBrief.mockResolvedValueOnce(manyPeopleBrief);
+
+  await render();
+
+  expect(host.querySelectorAll('[data-person-card]')).toHaveLength(6);
+  expect(host.textContent).toContain('Show 2 more');
+
+  await click('Show 2 more');
+
+  expect(host.querySelectorAll('[data-person-card]')).toHaveLength(8);
+  expect(host.textContent).toContain('Show fewer people');
+});
+
 it('uses known roles in the summary when no ownership is established', async () => {
   api.getProjectBrief.mockResolvedValueOnce(brief({ tasks: [] }));
 
   await render();
 
   expect(host.textContent).toContain(
-    'Alex Rivera (Engineering lead), Lauren Kessler (Exec sponsor from Frames Direct), and Sam (Project manager) are linked to this work.',
+    'Alex Rivera (Engineering lead), Lauren Kessler (Exec sponsor from Frames Direct), and Sam (Project manager) are involved in this project.',
   );
 });
 
@@ -352,7 +376,7 @@ it('adds a user milestone from an inline form', async () => {
     targetDate: null,
     note: null,
   });
-  expect(host.textContent).toContain('User-created');
+  expect(host.textContent).toContain('Added by you');
   expect(host.textContent).toContain('Milestone saved');
 });
 
@@ -544,7 +568,7 @@ it('previews, performs and undoes a reversible merge', async () => {
       .querySelector<HTMLButtonElement>('[role="option"][data-value="p2"]')
       ?.click(),
   );
-  expect(host.textContent).toContain('Meeting references10');
+  expect(host.textContent).toContain('Meetings10');
   await click('Merge Archive indexing');
   expect(api.mergeProject).toHaveBeenCalledWith('p2', 'p1');
   expect(host.textContent).toContain('was merged into this project');
@@ -605,14 +629,12 @@ it('teaches honest empty states when evidence is sparse', async () => {
     }),
   );
   await render();
-  expect(host.textContent).toContain(
-    'One conversation supports this suggestion',
-  );
+  expect(host.textContent).toContain('Pluto found this in one meeting');
   expect(host.textContent).toContain('Review suggestion');
-  expect(host.textContent).toContain('Not enough evidence');
-  expect(host.textContent).toContain('No named people linked yet');
-  expect(host.textContent).toContain('No established pattern');
-  expect(host.textContent).toContain('No timeline or milestones yet');
+  expect(host.textContent).toContain('Status not clear yet');
+  expect(host.textContent).toContain('No people yet');
+  expect(host.textContent).toContain('No regular schedule');
+  expect(host.textContent).toContain('No dates or milestones yet');
   expect(host.querySelector('#project-people')).toBeNull();
   expect(host.querySelector('#project-meeting-rhythm')).toBeNull();
   expect(host.textContent).not.toContain('Momentum');
@@ -762,9 +784,9 @@ it('shows generated milestone provenance and keeps its durable remove action', a
   );
   await render({ onOpenMeeting: openMeeting });
 
-  expect(host.textContent).toContain('Pluto-prepared');
+  expect(host.textContent).toContain('Suggested by Pluto');
   const source = Array.from(host.querySelectorAll('summary')).find((item) =>
-    item.textContent?.includes('Show source'),
+    item.textContent?.includes('See meeting note'),
   );
   await act(async () => source?.click());
   expect(host.textContent).toContain('Archive weekly review');

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Montserrat:wght@400;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -970,9 +970,43 @@
     background: transparent;
   }
   .project-reading-surface {
+    --project-paper-soft: oklch(98.4% 0.006 82);
+    --project-paper-muted: oklch(96.8% 0.009 82);
+    --project-rule: oklch(90.5% 0.008 82);
     --pro-text-muted: 0 0% 42%;
   }
+  .project-dossier-health {
+    background: var(--project-paper-muted);
+  }
+  .project-dossier-stat-card {
+    border-color: var(--project-rule);
+    background: var(--project-paper-soft);
+  }
+  .project-dossier-title {
+    @apply max-w-[28ch] break-words font-serif text-[38px] font-medium leading-[1.18] tracking-[-0.02em];
+    text-wrap: pretty;
+  }
+  .project-dossier-section-title {
+    @apply text-xl font-semibold leading-7 tracking-[-0.012em];
+    text-wrap: pretty;
+  }
+  .project-dossier-lead {
+    @apply max-w-[68ch] break-words text-[17px] leading-[1.65];
+    text-wrap: pretty;
+  }
+  .project-dossier-body {
+    @apply max-w-[68ch] break-words text-base leading-[1.65];
+  }
+  .project-dossier-meta {
+    @apply text-[13px] leading-5 text-pro-text-muted;
+  }
+  .project-dossier-property-label {
+    @apply text-[13px] font-medium leading-5 text-pro-text-muted;
+  }
   .dark .project-reading-surface {
+    --project-paper-soft: oklch(20.5% 0.014 272);
+    --project-paper-muted: oklch(23% 0.016 272);
+    --project-rule: oklch(30% 0.014 272);
     --pro-text-muted: 0 0% 72%;
     letter-spacing: 0.005em;
   }

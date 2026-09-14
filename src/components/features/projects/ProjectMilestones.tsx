@@ -245,12 +245,11 @@ export function ProjectMilestones({
     <section aria-labelledby="project-milestones">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="project-milestones" className="text-lg font-semibold">
+          <h2 id="project-milestones" className="project-dossier-section-title">
             Timeline and milestones
           </h2>
-          <p className="mt-1 text-xs text-pro-text-muted">
-            Upcoming dates, user plans, and checkpoints grounded in meeting
-            evidence
+          <p className="project-dossier-meta mt-1">
+            Upcoming dates, plans, and checkpoints from your meetings
           </p>
         </div>
         <button type="button" onClick={openCreate} className={buttonClass}>
@@ -391,16 +390,16 @@ export function ProjectMilestones({
                   )}
                   <p className="mt-1.5 text-xs text-pro-text-muted">
                     {milestone.source === 'user'
-                      ? 'User-created'
+                      ? 'Added by you'
                       : milestone.source === 'dreaming'
-                        ? 'Pluto-prepared'
-                        : 'From meeting evidence'}
+                        ? 'Suggested by Pluto'
+                        : 'From meeting notes'}
                   </p>
                   {milestone.source === 'dreaming' &&
                   milestone.sourceExcerpts?.length ? (
                     <details className="mt-1.5 text-sm">
                       <summary className="min-h-11 cursor-pointer rounded py-2 text-pro-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent sm:min-h-10">
-                        Show source
+                        See meeting note
                       </summary>
                       <ul className="space-y-2 border-l border-pro-border/60 pl-3">
                         {milestone.sourceExcerpts.map((excerpt, index) => {
@@ -419,12 +418,12 @@ export function ProjectMilestones({
                                   onClick={() => onOpenMeeting(meeting.id)}
                                   className="min-h-11 rounded text-left text-xs text-pro-text-muted hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent sm:min-h-10"
                                 >
-                                  {meeting.title || 'Linked meeting'}
+                                  {meeting.title || 'Meeting'}
                                   {meetingDate ? ` · ${meetingDate}` : ''}
                                 </button>
                               ) : (
                                 <p className="text-xs text-pro-text-muted">
-                                  {meeting?.title || 'Linked meeting'}
+                                  {meeting?.title || 'Meeting'}
                                   {meetingDate ? ` · ${meetingDate}` : ''}
                                 </p>
                               )}
@@ -496,11 +495,11 @@ export function ProjectMilestones({
           ))}
         </ol>
       ) : (
-        <div className="border-y border-pro-border/45 py-5">
-          <p className="text-sm font-medium">No timeline or milestones yet</p>
+        <div className="py-1">
+          <p className="text-sm font-medium">No dates or milestones yet</p>
           <p className="mt-1 max-w-[55ch] text-sm leading-6 text-pro-text-muted">
-            Add a checkpoint you want to remember, or Pluto will surface one
-            when meeting evidence establishes a date or completion.
+            Add an important date or checkpoint. Pluto will also suggest one
+            when it comes up in a meeting.
           </p>
         </div>
       )}
