@@ -280,6 +280,7 @@ describe('UpcomingMeetings', () => {
       'button[aria-label="Choose calendars"]',
     );
     expect(trigger).not.toBeNull();
+    expect(trigger?.parentElement?.className).toBe('relative');
     expect(trigger?.getAttribute('aria-expanded')).toBe('false');
     expect(picker.container.textContent).not.toContain(
       'Pluto will read meetings from selected calendars.',

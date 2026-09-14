@@ -274,7 +274,7 @@ export const UpcomingMeetings = ({
           />
         ) : snapshot.state === 'needs_selection' ||
           snapshot.state === 'selected_calendar_missing' ? (
-          <div ref={dropdownRef} className="relative pb-5">
+          <div ref={dropdownRef} className="relative">
             <button
               type="button"
               aria-label={triggerLabel}
