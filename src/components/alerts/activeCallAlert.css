@@ -162,6 +162,12 @@ body {
   height: 18px;
 }
 
+.pluto-status-logo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
 .left-block {
   min-width: 0;
   display: flex;
