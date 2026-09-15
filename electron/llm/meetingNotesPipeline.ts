@@ -658,10 +658,7 @@ const deterministicallyAcceptedDraft = (
     acceptancePolicy: 'conservative',
   });
   audited.issues = [
-    ...new Set([
-      ...(checked.audited.issues ?? []),
-      ...(audited.issues ?? []),
-    ]),
+    ...new Set([...(checked.audited.issues ?? []), ...(audited.issues ?? [])]),
   ];
   return { ...checked, draft: audited.draft, audited };
 };
@@ -1860,10 +1857,10 @@ const runMeetingNotes = async (
           : error.code === 'notes_review_budget_exhausted'
             ? 'deadline_budget'
             : (error.code === 'notes_audit_invalid' &&
-                (error.validationCategory === 'schema' ||
-                  error.validationCategory === 'guardrail')) ||
-              error.code.startsWith('notes_guardrail')
-              ? error.validationCategory ?? 'guardrail'
+                  (error.validationCategory === 'schema' ||
+                    error.validationCategory === 'guardrail')) ||
+                error.code.startsWith('notes_guardrail')
+              ? (error.validationCategory ?? 'guardrail')
               : null
         : null;
     if (!fallbackReason) throw error;

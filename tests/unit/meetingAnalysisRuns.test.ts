@@ -241,7 +241,10 @@ describe('meeting analysis run coordinator', () => {
           id: 'parallel-meeting',
           transcript_json: JSON.stringify({
             segments: [
-              { speaker: 'Remote Speaker 1', text: 'We agreed to ship Friday.' },
+              {
+                speaker: 'Remote Speaker 1',
+                text: 'We agreed to ship Friday.',
+              },
             ],
           }),
           transcript_status: 'validated',

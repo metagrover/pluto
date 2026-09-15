@@ -193,7 +193,8 @@ describe('meeting notes speaker references', () => {
     const projected = projectMeetingNotesSpeakerReferences(generated, {
       'Remote Speaker 2': 'Bob',
     });
-    expect(projected.overview).toBe('Bob noted that the server is operational.');
+    expect(projected.overview).toBe(
+      'Bob noted that the server is operational.',
+    );
   });
 });
-

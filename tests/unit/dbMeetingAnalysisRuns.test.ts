@@ -1181,9 +1181,7 @@ describe('meeting analysis run publication', () => {
     const revisionsAfter = getMeetingAnalysisPublicationRevisions(
       getMeeting(meetingId),
     )!;
-    expect(revisionsAfter.sourceRevision).toBe(
-      revisionsBefore.sourceRevision,
-    );
+    expect(revisionsAfter.sourceRevision).toBe(revisionsBefore.sourceRevision);
 
     expect(
       isMeetingAnalysisRunCurrent({
