@@ -1,7 +1,13 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { resolveUnpackedExecutablePath } from '../packagedExecutablePath';
+import { resolveUnpackedExecutablePath } from '../packagedExecutablePath.ts';
 import type * as implementation from './encryptedAudioPipelineImpl';
+
+const currentDir =
+  typeof __dirname !== 'undefined'
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 
 type Pipeline = Pick<
   typeof implementation,
@@ -95,6 +101,6 @@ export const {
   sliceEncryptedAudio,
 } = createEncryptedAudioPipeline(
   resolveUnpackedExecutablePath(
-    path.join(__dirname, 'encryptedAudioWorker.js'),
+    path.join(currentDir, 'encryptedAudioWorker.js'),
   ),
 );

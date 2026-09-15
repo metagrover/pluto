@@ -1033,6 +1033,140 @@ it.each(['notes_context_exhausted', 'notes_audit_invalid'] as const)(
   },
 );
 
+it('recovers deterministically and records missing_action as advisory when leaf review budget is exhausted', async () => {
+  const text = 'I will send the outline by Friday.';
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: `${text} ${'Context '.repeat(3_000)}` },
+  ]);
+  const span = { segment: 0, start: 0, end: text.length };
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
+    {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: text,
+      sourceText: text,
+      sourceRevision: source.revision,
+    },
+  ]);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesAudit') {
+      throw new MeetingNotesError('notes_review_budget_exhausted');
+    }
+    return JSON.stringify({
+      title: { text: 'Outline Context', sources: [span] },
+      sections: [
+        {
+          title: 'Discussion',
+          items: [
+            {
+              kind: 'point',
+              text: 'Outline discussion occurred.',
+              owner: null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 8_192,
+      optionalReviewDeadlineAtMs: Date.now() + 100,
+      optionalReviewMinStartMs: 1_000,
+    });
+
+    expect(result.all_action_items).toEqual([]);
+    expect(result.quality.issues).toContain('notes_guardrail:missing_action');
+    expect(result.quality.issues).toContain(
+      'notes_leaf_audit_fallback:deadline_budget',
+    );
+    expect(result.generation_metadata.audit_status).toBe(
+      'complete_with_warnings',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('filters conflicting actions and records missing_action in deterministic_only compact leaves', async () => {
+  const text =
+    'I will send the outline by Friday. Actually, cancel the plan to send the outline. I will prepare the slides.';
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: `${text} ${'Context '.repeat(3_000)}`,
+    },
+  ]);
+  const span0 = { segment: 0, start: 0, end: 34 };
+  const span1 = { segment: 0, start: 35, end: 81 };
+  const span2 = { segment: 0, start: 82, end: 108 };
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue([
+    {
+      primarySpans: [span0, span1, span2],
+      overlapSpans: [],
+      primaryText: source.segments[0]!.text,
+      sourceText: source.segments[0]!.text,
+      sourceRevision: source.revision,
+    },
+  ]);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesAudit') {
+      throw new Error('unexpected-audit-in-deterministic-only');
+    }
+    return JSON.stringify({
+      title: null,
+      sections: [
+        {
+          title: 'Tasks',
+          items: [
+            {
+              kind: 'action',
+              text: 'Milo will send the outline.',
+              owner: 'Milo',
+              due: null,
+              sources: [span0],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      hierarchyAuditStrategy: 'deterministic_only',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 8_192,
+    });
+
+    expect(result.all_action_items).toEqual([]);
+    expect(result.quality.issues).toContain('notes_guardrail:missing_action');
+    expect(result.quality.issues).toContain(
+      'notes_guardrail:conflicting_action:leaf0:s0:item:0',
+    );
+    expect(result.generation_metadata.audit_status).toBe(
+      'complete_with_warnings',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
 it('preserves conservative acceptance issues alongside leaf review fallback warnings', async () => {
   const text = 'If legal approves, I can draft the announcement.';
   const source = makeSyntheticNotesSource([

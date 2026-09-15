@@ -575,17 +575,51 @@ const deterministicallyCheckedDraft = (
   const checkedDraft =
     input.compactWriterContract && draft.title
       ? { ...structuredClone(draft), title: null }
-      : draft;
+      : structuredClone(draft);
   assertAllowedSources(checkedDraft, evidenceSpans);
-  assertSourceGuardrails(input, checkedDraft, evidenceSpans, false);
-  validateInheritedItems(
-    inherited.filter(
-      (item): item is NotesItem & { kind: 'action' | 'decision' } =>
-        item.kind === 'action' || item.kind === 'decision',
-    ),
-    commitmentsFor(checkedDraft),
-    [],
+  const issues = findNotesGuardrailIssues(
+    input.source,
+    checkedDraft,
+    evidenceSpans,
   );
+  const auditedIssues: string[] = issues.map(
+    (issue) => `notes_guardrail:${issue.code}`,
+  );
+  // Check each action alone: sharing a source turn with a disputed task
+  // must not remove unrelated, source-supported work from that turn.
+  for (const section of checkedDraft.sections) {
+    section.items = section.items.filter((item) => {
+      if (item.kind !== 'action') return true;
+      const unsafe = findNotesGuardrailIssues(
+        input.source,
+        { ...checkedDraft, sections: [{ ...section, items: [item] }] },
+        evidenceSpans,
+        ['missing_condition', 'conflicting_action'],
+      );
+      auditedIssues.push(
+        ...unsafe.map((issue) => `notes_guardrail:${issue.code}:${item.id}`),
+      );
+      return unsafe.length === 0;
+    });
+  }
+  try {
+    validateInheritedItems(
+      inherited.filter(
+        (item): item is NotesItem & { kind: 'action' | 'decision' } =>
+          item.kind === 'action' || item.kind === 'decision',
+      ),
+      commitmentsFor(checkedDraft),
+      [],
+    );
+  } catch (error) {
+    if (
+      !(error instanceof MeetingNotesError) ||
+      error.code !== 'notes_merge_dropped_commitment'
+    ) {
+      throw error;
+    }
+    auditedIssues.push(error.code);
+  }
   const audit: NotesAudit = {
     changes: [],
     verdicts: [],
@@ -601,7 +635,7 @@ const deterministicallyCheckedDraft = (
       draft: checkedDraft,
       verdicts: new Map(),
       acceptedTerminology: [],
-      issues: [],
+      issues: auditedIssues,
     },
   };
 };
@@ -623,6 +657,12 @@ const deterministicallyAcceptedDraft = (
     draft: checked.draft,
     acceptancePolicy: 'conservative',
   });
+  audited.issues = [
+    ...new Set([
+      ...(checked.audited.issues ?? []),
+      ...(audited.issues ?? []),
+    ]),
+  ];
   return { ...checked, draft: audited.draft, audited };
 };
 
@@ -1591,12 +1631,13 @@ const runBoundedCompactNotes = async (
       } catch (error) {
         if (
           !(error instanceof MeetingNotesError) ||
-          ![
+          (![
             'notes_context_exhausted',
             'notes_audit_invalid',
             'notes_model_call_limit',
             'notes_review_budget_exhausted',
-          ].includes(error.code)
+          ].includes(error.code) &&
+            !error.code.startsWith('notes_guardrail'))
         ) {
           throw error;
         }
@@ -1605,7 +1646,9 @@ const runBoundedCompactNotes = async (
         reviewed.audited.issues.push(
           error.code === 'notes_review_budget_exhausted'
             ? 'notes_leaf_audit_fallback:deadline_budget'
-            : `notes_leaf_audit_fallback:${error.code}`,
+            : error.code.startsWith('notes_guardrail')
+              ? 'notes_leaf_audit_fallback:guardrail'
+              : `notes_leaf_audit_fallback:${error.code}`,
         );
       }
     }
@@ -1816,10 +1859,11 @@ const runMeetingNotes = async (
           ? error.code
           : error.code === 'notes_review_budget_exhausted'
             ? 'deadline_budget'
-            : error.code === 'notes_audit_invalid' &&
+            : (error.code === 'notes_audit_invalid' &&
                 (error.validationCategory === 'schema' ||
-                  error.validationCategory === 'guardrail')
-              ? error.validationCategory
+                  error.validationCategory === 'guardrail')) ||
+              error.code.startsWith('notes_guardrail')
+              ? error.validationCategory ?? 'guardrail'
               : null
         : null;
     if (!fallbackReason) throw error;

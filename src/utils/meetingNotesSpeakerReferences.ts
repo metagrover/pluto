@@ -142,17 +142,24 @@ export const buildMeetingNotesSpeakerReferences = (input: {
     );
     if (speakers.size !== 1) continue;
     const speaker = speakers.values().next().value as string;
-    const sourceName = input.speakerDisplayNames[speaker]?.trim();
-    if (!sourceName || sourceName === speaker) continue;
+    const sourceName = input.speakerDisplayNames[speaker]?.trim() || speaker;
+    if (!sourceName) continue;
 
     const references: MeetingNotesSpeakerReference[] = [];
+    const lowerText = text.toLowerCase();
+    const lowerSourceName = sourceName.toLowerCase();
     let offset = 0;
     while (offset < text.length) {
-      const start = text.indexOf(sourceName, offset);
+      let start = text.indexOf(sourceName, offset);
+      const matchLen = sourceName.length;
+      if (start < 0 && sourceName === speaker) {
+        start = lowerText.indexOf(lowerSourceName, offset);
+      }
       if (start < 0) break;
-      const end = start + sourceName.length;
+      const actualSourceName = text.slice(start, start + matchLen);
+      const end = start + matchLen;
       if (isAttributionUse(text, start, end)) {
-        references.push({ speaker, sourceName, start, end });
+        references.push({ speaker, sourceName: actualSourceName, start, end });
       }
       offset = end;
     }
@@ -166,9 +173,20 @@ export const buildMeetingNotesSpeakerReferences = (input: {
     const structuredName = structuredPath
       ? textAtPath(input.analysis, structuredPath)
       : null;
-    if (structuredPath && structuredName === sourceName) {
+    if (
+      structuredPath &&
+      structuredName &&
+      (structuredName === sourceName ||
+        (sourceName === speaker &&
+          structuredName.toLowerCase() === lowerSourceName))
+    ) {
       blocks[structuredPath] = [
-        { speaker, sourceName, start: 0, end: sourceName.length },
+        {
+          speaker,
+          sourceName: structuredName,
+          start: 0,
+          end: structuredName.length,
+        },
       ];
     }
   }

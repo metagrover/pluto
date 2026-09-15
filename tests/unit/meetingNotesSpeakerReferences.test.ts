@@ -122,4 +122,78 @@ describe('meeting notes speaker references', () => {
         .all_action_items[0]?.assignee,
     ).toBe('Casey');
   });
+
+  it('records and projects generic speaker labels such as Remote Speaker 1', () => {
+    const generated = analysis(
+      'Remote Speaker 1 explained the migration steps. Remote Speaker 1 will lead deployment.',
+    );
+    generated.all_action_items = [
+      { text: 'Lead deployment.', assignee: 'Remote Speaker 1' },
+    ];
+    generated.generation_metadata!.source_provenance!.blocks.overview = {
+      id: 'overview',
+      sources: [{ segment: 0, start: 0, end: 30 }],
+    };
+    generated.generation_metadata!.source_provenance!.blocks[
+      'all_action_items:0'
+    ] = {
+      id: 'action-0',
+      sources: [{ segment: 0, start: 0, end: 30 }],
+    };
+    generated.generation_metadata!.speaker_references =
+      buildMeetingNotesSpeakerReferences({
+        analysis: generated,
+        transcriptJson: JSON.stringify({
+          segments: [
+            {
+              speaker: 'Remote Speaker 1',
+              text: 'I will lead the deployment.',
+            },
+          ],
+        }),
+        speakerDisplayNames: {},
+      });
+
+    expect(generated.generation_metadata!.speaker_references).toBeDefined();
+    const projected = projectMeetingNotesSpeakerReferences(generated, {
+      'Remote Speaker 1': 'Alice',
+    });
+    expect(projected.overview).toBe(
+      'Alice explained the migration steps. Alice will lead deployment.',
+    );
+    expect(projected.all_action_items[0]?.assignee).toBe('Alice');
+
+    const unconfirmed = projectMeetingNotesSpeakerReferences(generated, {});
+    expect(unconfirmed.overview).toBe(
+      'Remote speaker 1 explained the migration steps. Remote speaker 1 will lead deployment.',
+    );
+    expect(unconfirmed.all_action_items[0]?.assignee).toBe('Remote speaker 1');
+  });
+
+  it('handles lowercase variations of generic speaker labels in generated text', () => {
+    const generated = analysis(
+      'Remote speaker 2 noted that the server is operational.',
+    );
+    generated.generation_metadata!.source_provenance!.blocks.overview = {
+      id: 'overview',
+      sources: [{ segment: 0, start: 0, end: 20 }],
+    };
+    generated.generation_metadata!.speaker_references =
+      buildMeetingNotesSpeakerReferences({
+        analysis: generated,
+        transcriptJson: JSON.stringify({
+          segments: [
+            { speaker: 'Remote Speaker 2', text: 'The server is operational.' },
+          ],
+        }),
+        speakerDisplayNames: {},
+      });
+
+    expect(generated.generation_metadata!.speaker_references).toBeDefined();
+    const projected = projectMeetingNotesSpeakerReferences(generated, {
+      'Remote Speaker 2': 'Bob',
+    });
+    expect(projected.overview).toBe('Bob noted that the server is operational.');
+  });
 });
+

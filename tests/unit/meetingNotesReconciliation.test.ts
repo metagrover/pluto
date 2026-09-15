@@ -773,7 +773,7 @@ it('builds a short source-only prompt compatible with the exact-source wire code
     questions: raw.questions.map((item) => ({ ...item, sources: ['R3'] })),
     facts: [{ ...raw.facts[0], sources: ['R0'] }],
   });
-  expect(wire.prompt).toContain('"descriptor":"R0"');
+  expect(wire.prompt).toContain('["R0"');
   expect(
     parseReconciledSource(wire.decode(encoded), source).facts[0]!.sources,
   ).toEqual([spans[0]]);

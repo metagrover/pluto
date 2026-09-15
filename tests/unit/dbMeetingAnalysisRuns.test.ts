@@ -172,7 +172,7 @@ const publish = (
   });
 
 describe('meeting analysis run publication', () => {
-  it('invalidates notes revisions when a confirmed speaker projection changes', () => {
+  it('keeps source revisions stable across speaker identity projection changes', () => {
     const meetingId = 'identity-projected-notes';
     saveMeeting({
       id: meetingId,
@@ -191,7 +191,9 @@ describe('meeting analysis run publication', () => {
     });
     const before = getMeetingAnalysisPublicationRevisions(
       getMeeting(meetingId),
-    );
+    )!;
+
+    start(meetingId, 'run-parallel', 'fingerprint-p', before, 'automatic');
 
     identityStore.setBinding(meetingId, {
       speaker: 'Them',
@@ -209,10 +211,22 @@ describe('meeting analysis run publication', () => {
     expect(
       getMeetingAnalysisPublicationRevisions(getMeeting(meetingId))
         ?.sourceRevision,
-    ).not.toBe(before?.sourceRevision);
+    ).toBe(before.sourceRevision);
     expect(getMeeting(meetingId)?.transcript_json).toContain(
       '"speaker":"Them"',
     );
+
+    // In-flight run can publish safely even after identity projection changed
+    expect(
+      publish(
+        meetingId,
+        'run-parallel',
+        'fingerprint-p',
+        before,
+        analysis('Alex reviewed it.'),
+      ),
+    ).toBe(true);
+    expect(getMeetingAnalysisRun(meetingId)?.notes_status).toBe('published');
   });
   it('counts automatic attempts for one input revision and resets for changed input', () => {
     const meetingId = 'automatic-attempt-count';
@@ -1167,7 +1181,7 @@ describe('meeting analysis run publication', () => {
     const revisionsAfter = getMeetingAnalysisPublicationRevisions(
       getMeeting(meetingId),
     )!;
-    expect(revisionsAfter.sourceRevision).not.toBe(
+    expect(revisionsAfter.sourceRevision).toBe(
       revisionsBefore.sourceRevision,
     );
 

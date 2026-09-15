@@ -3001,11 +3001,7 @@ export const getMeetingAnalysisPublicationRevisions = (
 ): MeetingAnalysisPublicationRevisions | null => {
   if (!meeting?.transcript_json) return null;
   try {
-    const projection = getMeetingNotesIdentityProjection(meeting.id);
-    const source = createNotesSource(
-      meeting.transcript_json,
-      projection.speakerDisplayNames,
-    );
+    const source = createNotesSource(meeting.transcript_json);
     const partialLease = readDownstreamProcessingLease(
       meeting.downstream_processing_json,
     );

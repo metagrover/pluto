@@ -15,6 +15,21 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-15 - Recover deterministically from notes guardrail omissions without aborting publication
+
+- **Status:** Accepted
+- **Decision:** Deterministic checking of meeting notes drafts (`deterministicallyCheckedDraft`) evaluates guardrails advisively rather than throwing terminal fatal exceptions (`notes_guardrail`). Missing actions and cancellation context are recorded as quality warnings in `issues` (`notes_guardrail:missing_action`, `notes_guardrail:missing_cancellation_context`), and unsafe actions (`missing_condition`, `conflicting_action`) are filtered out. In bounded compact leaf review and direct review fallback, guardrail errors bubble into deterministic recovery rather than crashing the pipeline.
+- **Rationale:** When model review is skipped or falls back due to context exhaustion, review deadlines, or model call budgets, no LLM is present to invent or repair omitted action items. Throwing `assertSourceGuardrails` in deterministic checking was an unrecoverable failure mode that caused long meetings (e.g. meeting `c49c104b-22ed-41e0-9fbb-af8a6e9cae56` at segment 502) to abort after minutes of successful writer generation. Treating omissions as advisory warnings matches Ollama review policy and enables notes to publish with `complete_with_warnings` while preserving safety against cancelled or conditional commitments.
+- **Consequences:** Notes generation no longer crashes on `notes_guardrail:missing_action` when falling back to deterministic review or running `deterministic_only`. Bounded compact leaf and direct pipelines gracefully catch guardrail errors and recover into valid published notes with truthful diagnostic issues.
+
+## 2026-09-15 - Support parallel speaker identification and meeting notes generation via late-binding attribution projection
+
+- **Status:** Accepted
+- **Supersedes:** The notes regeneration clause of “2026-09-12 - Defer notes regeneration after speaker confirmation”.
+- **Decision:** Speaker identification and meeting notes generation run in parallel without aborting active runs or enqueueing deferred regeneration. Confirmed bindings update speaker projection deterministically through code (`buildMeetingNotesSpeakerReferences` and `projectMeetingNotesSpeakerReferences`). Notes generation runs uninterrupted to completion, and newly confirmed identities are projected dynamically onto the completed notes at publication and in views. `sourceRevision` represents canonical transcript source segments rather than transient speaker display name projections.
+- **Rationale:** Previously, confirming a speaker aborted in-flight LLM notes generation (`AbortError: Meeting notes run superseded`), discarding heavy local model compute (often 100+ seconds) and surfacing false failure banners ("Notes weren't generated / Try again") during standard attendee review. By late-binding speaker attribution over stable provenance metadata, notes generation and speaker identification proceed simultaneously with zero wasted compute and immediate name attribution.
+- **Consequences:** `onBindingChange` no longer calls `supersedeMeetingNotes` or enqueues `identity-notes:<meetingId>`. Active runs publish successfully even if speakers are identified mid-generation. Manual regeneration via the UI remains available when prompt-level re-reading is explicitly desired.
+
 ## 2026-09-14 - Automatic knowledge consolidation without suggestion review friction
 
 - **Status:** Accepted

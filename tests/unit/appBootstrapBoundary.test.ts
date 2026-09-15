@@ -49,13 +49,11 @@ describe('Electron bootstrap boundary', () => {
     const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
 
     expect(source).toContain('speakerVoiceDependencies(false)');
-    expect(source).toContain(
-      'backgroundKnowledgeRefresh?.enqueue(`voice:${meetingId}`)',
-    );
+    expect(source).toContain('voiceWorkQueue?.enqueue(meetingId)');
     expect(source).toContain('speakerVoiceDependencies(true, signal)');
   });
 
-  it('does not regenerate already-published notes after speaker correction', () => {
+  it('does not abort active runs or regenerate notes after speaker confirmation', () => {
     const source = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
     const bindingHandler = source.slice(
       source.indexOf('onBindingChange: ({ meetingId, personIds })'),
@@ -64,15 +62,9 @@ describe('Electron bootstrap boundary', () => {
         source.indexOf('onBindingChange: ({ meetingId, personIds })'),
       ),
     );
-    expect(bindingHandler).toContain(
-      'backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`)',
-    );
-    expect(bindingHandler).toContain('if (!hasPublishedNotes)');
+    expect(bindingHandler).not.toContain('supersedeMeetingNotes');
+    expect(bindingHandler).not.toContain('identity-notes');
     expect(bindingHandler).toContain('refreshMeetingIdentityProjection');
     expect(bindingHandler).not.toContain('generateAndPublishMeetingNotes');
-    expect(source).toContain(
-      "signal.addEventListener('abort', cancel, { once: true })",
-    );
-    expect(source).toContain("signal.removeEventListener('abort', cancel)");
   });
 });

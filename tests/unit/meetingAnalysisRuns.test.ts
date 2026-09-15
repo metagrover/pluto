@@ -225,6 +225,143 @@ describe('meeting analysis run coordinator', () => {
     );
   });
 
+  it('allows an in-flight run to publish and build references when speaker identity projection updates mid-generation', async () => {
+    let running = false;
+    let projection = {
+      speakerDisplayNames: {} as Record<string, string>,
+      trustedUserTerms: [] as string[],
+    };
+    const publish = vi.fn().mockImplementation(() => {
+      running = false;
+      return true;
+    });
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'parallel-meeting',
+          transcript_json: JSON.stringify({
+            segments: [
+              { speaker: 'Remote Speaker 1', text: 'We agreed to ship Friday.' },
+            ],
+          }),
+          transcript_status: 'validated',
+          transcript_integrity_json: JSON.stringify({ verified: true }),
+          user_notes: '',
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'canonical-source-rev',
+          eligibilityRevision: 'eligibility',
+          userNotesHash: 'notes',
+        }),
+        getMeetingAnalysisRun: () =>
+          running
+            ? {
+                run_id: 'parallel-run',
+                input_revision: 'revision',
+                notes_status: 'running',
+              }
+            : null,
+        beginMeetingAnalysisRun: () => {
+          running = true;
+        },
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: () => true,
+        isMeetingAnalysisRunCurrent: () => true,
+        publishMeetingNotesIfCurrent: publish,
+        getAllEntities: () => [],
+        getMeetingNotesIdentityProjection: () => projection,
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      createRunId: () => 'parallel-run',
+      getProvider: async () => ({
+        name: 'ollama',
+        generateStructuredAnalysis: async () => {
+          // Mid-generation, user confirms Remote Speaker 1 as Alice
+          projection = {
+            speakerDisplayNames: { 'Remote Speaker 1': 'Alice' },
+            trustedUserTerms: ['Alice'],
+          };
+          return {
+            analysis_schema_version: 3,
+            overview: 'Remote Speaker 1 agreed to ship Friday.',
+            topics: [],
+            all_action_items: [
+              { text: 'Ship Friday.', assignee: 'Remote Speaker 1' },
+            ],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+            generation_metadata: {
+              provider: 'ollama',
+              model: 'test',
+              generation_path: 'single_pass',
+              prompt_version: 'test',
+              generated_at: '2026-09-15T00:00:00.000Z',
+              error_categories: [],
+              source_provenance: {
+                schema_version: 1,
+                source_revision: 'canonical-source-rev',
+                blocks: {
+                  overview: {
+                    id: 'overview',
+                    sources: [{ segment: 0, start: 0, end: 25 }],
+                  },
+                  'all_action_items:0': {
+                    id: 'action-0',
+                    sources: [{ segment: 0, start: 0, end: 25 }],
+                  },
+                },
+              },
+            },
+          };
+        },
+      }),
+    });
+
+    const result = await coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'parallel-meeting',
+      requestId: 'parallel-request',
+      template: 'auto',
+      reason: 'automatic',
+    });
+
+    expect(result.status).toBe('published');
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analysis: expect.objectContaining({
+          generation_metadata: expect.objectContaining({
+            speaker_references: {
+              schema_version: 1,
+              blocks: expect.objectContaining({
+                overview: [
+                  {
+                    speaker: 'Remote Speaker 1',
+                    sourceName: 'Remote Speaker 1',
+                    start: 0,
+                    end: 16,
+                  },
+                ],
+                'all_action_items:0:assignee': [
+                  {
+                    speaker: 'Remote Speaker 1',
+                    sourceName: 'Remote Speaker 1',
+                    start: 0,
+                    end: 16,
+                  },
+                ],
+              }),
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
   it('generates a bounded fallback title when published notes omit a generic meeting title', async () => {
     let running = false;
     const publish = vi.fn().mockImplementation(() => {

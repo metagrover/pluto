@@ -1273,32 +1273,6 @@ app.whenReady().then(async () => {
       ),
     }),
     run: async (workId, signal) => {
-      if (workId.startsWith('identity-notes:')) {
-        signal.throwIfAborted();
-        const meetingId = workId.slice('identity-notes:'.length);
-        const meeting = db.getMeeting(meetingId) as
-          | db.PersistedMeeting
-          | undefined;
-        if (
-          meeting?.transcript_status !== 'validated' ||
-          !meeting.transcript_validated_at
-        )
-          return;
-        const cancel = () =>
-          meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
-        signal.addEventListener('abort', cancel, { once: true });
-        try {
-          await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
-            meetingId,
-            requestId: randomUUID(),
-            template: 'auto',
-            reason: 'automatic',
-          });
-        } finally {
-          signal.removeEventListener('abort', cancel);
-        }
-        return;
-      }
       if (workId.startsWith('secondary:')) {
         signal.throwIfAborted();
         const meetingId = workId.slice('secondary:'.length);
@@ -1562,15 +1536,17 @@ app.whenReady().then(async () => {
       const result = handleIdentityRequest(channel, payload, {
         onBindingChange: ({ meetingId, personIds }) => {
           const hasPublishedNotes = db.hasPublishedMeetingNotes(meetingId);
-          meetingNotesRunCoordinator.supersedeMeetingNotes(meetingId);
           db.refreshMeetingIdentityProjection(meetingId);
           queueKnowledgeDocsRefreshForMeeting(meetingId);
           for (const personId of personIds) {
             const doc = db.getKnowledgeDocByScope('person_context', personId);
             if (doc) queueKnowledgeDocRefresh(doc.id);
           }
-          if (!hasPublishedNotes) {
-            backgroundKnowledgeRefresh?.enqueue(`identity-notes:${meetingId}`);
+          if (hasPublishedNotes) {
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed())
+                win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+            }
           }
           voiceWorkQueue?.enqueue(meetingId);
         },
