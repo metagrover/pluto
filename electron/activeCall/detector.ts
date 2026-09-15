@@ -60,7 +60,12 @@ type CreateActiveCallDetectorArgs = {
   getRunningProcesses?: () => Promise<RunningProcessInfo[]>;
   detectBrowserCallProviders?: (
     matchedApps: MatchedCallApp[],
-  ) => Promise<Map<string, CallProvider>>;
+  ) => Promise<Map<string, CallProvider> | BrowserProviderDetection>;
+};
+
+type BrowserProviderDetection = {
+  providerByLabel: Map<string, CallProvider>;
+  inspectionFailures: Set<string>;
 };
 
 const BROWSER_DISPLAY_LABELS: Record<string, string> = {
@@ -74,6 +79,13 @@ const BROWSER_DISPLAY_LABELS: Record<string, string> = {
   safari: 'Safari',
   firefox: 'Firefox',
   'mozilla firefox': 'Firefox',
+};
+
+const CALL_PROVIDER_DISPLAY_LABELS: Record<CallProvider, string> = {
+  'google-meet': 'Google Meet',
+  zoom: 'Zoom',
+  teams: 'Microsoft Teams',
+  slack: 'Slack',
 };
 
 const CALL_APP_MATCHERS: CallAppMatcher[] = [
@@ -282,28 +294,37 @@ return urls
 end tell`;
 };
 
-const listBrowserTabUrls = async (browserId: BrowserId): Promise<string[]> => {
-  if (process.platform !== 'darwin') return [];
+const listBrowserTabUrls = async (
+  browserId: BrowserId,
+): Promise<{ urls: string[]; inspectionAvailable: boolean }> => {
+  if (process.platform !== 'darwin') {
+    return { urls: [], inspectionAvailable: false };
+  }
   const adapter = BROWSER_ADAPTERS[browserId];
-  if (!adapter) return [];
+  if (!adapter) return { urls: [], inspectionAvailable: false };
   const script = buildBrowserTabUrlScript(adapter);
 
-  return await new Promise<string[]>((resolve) => {
+  return await new Promise<{
+    urls: string[];
+    inspectionAvailable: boolean;
+  }>((resolve) => {
     const proc = spawn('osascript', ['-e', script]);
     let stdout = '';
     proc.stdout.on('data', (chunk) => {
       stdout += String(chunk);
     });
     proc.on('close', (code) => {
-      if (code !== 0) return resolve([]);
+      if (code !== 0) {
+        return resolve({ urls: [], inspectionAvailable: false });
+      }
       const urls = stdout
         .split(/\r?\n/)
         .map((url) => url.trim())
         .filter(Boolean);
-      resolve(urls);
+      resolve({ urls, inspectionAvailable: true });
     });
     proc.on('error', () => {
-      resolve([]);
+      resolve({ urls: [], inspectionAvailable: false });
     });
   });
 };
@@ -332,11 +353,18 @@ const matchProviderFromUrl = (rawUrl: string): CallProvider | null => {
 
 const detectBrowserCallProviders = async (
   matchedApps: MatchedCallApp[],
-): Promise<Map<string, CallProvider>> => {
+): Promise<BrowserProviderDetection> => {
   const providerByLabel = new Map<string, CallProvider>();
+  const inspectionFailures = new Set<string>();
   for (const matched of matchedApps) {
     if (!matched.browserId) continue;
-    const urls = await listBrowserTabUrls(matched.browserId);
+    const { urls, inspectionAvailable } = await listBrowserTabUrls(
+      matched.browserId,
+    );
+    if (!inspectionAvailable) {
+      inspectionFailures.add(matched.label);
+      continue;
+    }
     const provider = urls
       .map(matchProviderFromUrl)
       .find((candidate): candidate is CallProvider => Boolean(candidate));
@@ -344,7 +372,24 @@ const detectBrowserCallProviders = async (
       providerByLabel.set(matched.label, provider);
     }
   }
-  return providerByLabel;
+  return { providerByLabel, inspectionFailures };
+};
+
+const normalizeBrowserProviderDetection = (
+  result: Map<string, CallProvider> | BrowserProviderDetection,
+): BrowserProviderDetection =>
+  result instanceof Map
+    ? { providerByLabel: result, inspectionFailures: new Set() }
+    : result;
+
+const getMatchedDisplayName = (
+  matched: MatchedCallApp,
+  providerByLabel: Map<string, CallProvider>,
+): string => {
+  const provider = providerByLabel.get(matched.label);
+  return provider
+    ? CALL_PROVIDER_DISPLAY_LABELS[provider]
+    : toDisplayLabel(matched.label);
 };
 
 export const createActiveCallDetector = ({
@@ -413,9 +458,12 @@ export const createActiveCallDetector = ({
         pids,
       };
     }).filter((entry) => entry.pids.length > 0);
-    const browserCallProviderByLabel = await (
-      detectBrowserCallProvidersOverride ?? detectBrowserCallProviders
-    )(matchedApps);
+    const browserDetection = normalizeBrowserProviderDetection(
+      await (detectBrowserCallProvidersOverride ?? detectBrowserCallProviders)(
+        matchedApps,
+      ),
+    );
+    const browserCallProviderByLabel = browserDetection.providerByLabel;
 
     if (matchedApps.length === 0) {
       return {
@@ -443,7 +491,7 @@ export const createActiveCallDetector = ({
       if (externalAudioActive) {
         return {
           active: true,
-          appName: toDisplayLabel(matched.label),
+          appName: getMatchedDisplayName(matched, browserCallProviderByLabel),
           pidCount: matched.pids.length,
           confidence: 'high',
           reason: 'call-app-running-with-active-audio',
@@ -472,7 +520,7 @@ export const createActiveCallDetector = ({
           : 'call-app-running-silent-fallback';
         return {
           active: true,
-          appName: toDisplayLabel(matched.label),
+          appName: getMatchedDisplayName(matched, browserCallProviderByLabel),
           pidCount: matched.pids.length,
           confidence: 'medium',
           reason,
@@ -484,15 +532,22 @@ export const createActiveCallDetector = ({
     const browserCallTabClosed =
       Boolean(firstMatchedApp?.browserId) &&
       !browserCallProviderByLabel.has(firstMatchedApp.label);
+    const browserInspectionUnavailable = matchedApps.some(
+      (matched) =>
+        Boolean(matched.browserId) &&
+        browserDetection.inspectionFailures.has(matched.label),
+    );
 
     return {
       active: false,
       appName: firstMatchedApp ? toDisplayLabel(firstMatchedApp.label) : null,
       pidCount: firstMatchedApp?.pids.length || null,
       confidence: 'low',
-      reason: browserCallTabClosed
-        ? 'browser-call-tab-closed'
-        : 'call-app-running-without-target-audio',
+      reason: browserInspectionUnavailable
+        ? 'browser-tab-inspection-unavailable'
+        : browserCallTabClosed
+          ? 'browser-call-tab-closed'
+          : 'call-app-running-without-target-audio',
     };
   };
 };

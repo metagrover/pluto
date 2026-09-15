@@ -5,6 +5,8 @@ import type { Rectangle } from 'electron';
 export const ALERT_WIDTH = 380;
 export const ALERT_HEIGHT = 80;
 export const ALERT_MARGIN = 14;
+export const CALL_ALERT_MARGIN_RIGHT = 24;
+export const CALL_ALERT_MARGIN_TOP = 16;
 
 export type CalendarPromptAlertPayload = {
   occurrenceKey: string;
@@ -56,8 +58,16 @@ export const createActiveCallAlertController = ({
     }
   };
 
+  const closeCallAlert = () => {
+    if (currentAlertType === 'call') {
+      close();
+    }
+  };
+
   const createAlertWindow = (
     anchorBounds?: Rectangle,
+    marginRight = ALERT_MARGIN,
+    marginTop = ALERT_MARGIN,
   ): { win: BrowserWindow; x: number; y: number } => {
     close();
 
@@ -66,9 +76,9 @@ export const createActiveCallAlertController = ({
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const workArea = display.workArea;
     const x = Math.round(
-      workArea.x + workArea.width - ALERT_WIDTH - ALERT_MARGIN,
+      workArea.x + workArea.width - ALERT_WIDTH - marginRight,
     );
-    const y = Math.round(workArea.y + ALERT_MARGIN);
+    const y = Math.round(workArea.y + marginTop);
 
     const alertWin = new BrowserWindow({
       width: ALERT_WIDTH,
@@ -130,23 +140,40 @@ export const createActiveCallAlertController = ({
     return { win: alertWin, x, y };
   };
 
-  const show = (appName: string, anchorBounds?: Rectangle) => {
-    const { win: alertWin } = createAlertWindow(anchorBounds);
+  const show = (
+    appName: string,
+    theme: 'light' | 'dark',
+    anchorBounds?: Rectangle,
+  ): boolean => {
+    if (
+      currentAlertType === 'calendar' &&
+      activeCallAlertWin &&
+      !activeCallAlertWin.isDestroyed()
+    ) {
+      return false;
+    }
+
+    const { win: alertWin } = createAlertWindow(
+      anchorBounds,
+      CALL_ALERT_MARGIN_RIGHT,
+      CALL_ALERT_MARGIN_TOP,
+    );
     currentAlertType = 'call';
 
     if (devServerUrl) {
       const base = new URL('active-call-alert.html', devServerUrl).toString();
       void alertWin.loadURL(
-        `${base}?type=call&appName=${encodeURIComponent(appName)}`,
+        `${base}?type=call&appName=${encodeURIComponent(appName)}&theme=${theme}`,
       );
     } else {
       void alertWin.loadFile(
         path.join(rendererDist, 'active-call-alert.html'),
         {
-          query: { type: 'call', appName },
+          query: { type: 'call', appName, theme },
         },
       );
     }
+    return true;
   };
 
   const showCalendarPrompt = (
@@ -185,5 +212,11 @@ export const createActiveCallAlertController = ({
     }
   };
 
-  return { show, showCalendarPrompt, close, closeCalendarPrompt };
+  return {
+    show,
+    showCalendarPrompt,
+    close,
+    closeCallAlert,
+    closeCalendarPrompt,
+  };
 };

@@ -2618,18 +2618,25 @@ app.whenReady().then(async () => {
     return await detectActiveCall();
   });
 
-  ipcMain.handle('SHOW_ACTIVE_CALL_ALERT', async (_event, { appName } = {}) => {
-    if (typeof appName !== 'string') return false;
-    const normalized = appName.trim();
-    if (!normalized) return false;
-    const anchorBounds =
-      win && !win.isDestroyed() ? win.getBounds() : undefined;
-    activeCallAlertController.show(normalized, anchorBounds);
-    return true;
-  });
+  ipcMain.handle(
+    'SHOW_ACTIVE_CALL_ALERT',
+    async (_event, { appName, theme } = {}) => {
+      if (typeof appName !== 'string') return false;
+      const normalized = appName.trim();
+      if (!normalized) return false;
+      const resolvedTheme = theme === 'dark' ? 'dark' : 'light';
+      const anchorBounds =
+        win && !win.isDestroyed() ? win.getBounds() : undefined;
+      return activeCallAlertController.show(
+        normalized,
+        resolvedTheme,
+        anchorBounds,
+      );
+    },
+  );
 
   ipcMain.handle('HIDE_ACTIVE_CALL_ALERT', async () => {
-    activeCallAlertController.close();
+    activeCallAlertController.closeCallAlert();
     return true;
   });
 
