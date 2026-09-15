@@ -10,6 +10,18 @@ export interface CitationChain {
   evidence_span?: string;
   evidence_valid: boolean;
   trust_status: TrustStatus;
+  evidence_kind?:
+    | 'overview'
+    | 'section'
+    | 'commitment'
+    | 'note'
+    | 'transcript'
+    | 'live';
+  section_id?: string;
+  section_heading?: string;
+  timestamp_ms?: number;
+  timestamp_end_ms?: number;
+  source_revision?: string;
 }
 
 interface CitationCardProps {

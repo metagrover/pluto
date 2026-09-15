@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
 
 import {
   deleteMeeting,
+  getMeetingContextSectionIntegrity,
   getMeetingFtsIntegrity,
   getMeetingNotesFtsIntegrity,
   getTemporalMeetings,
@@ -21,6 +22,7 @@ import {
   refreshMeetingIdentityProjection,
   repairMeetingFtsIndex,
   saveMeeting,
+  searchMeetingContextSectionsFts,
   searchMeetingNotesFts,
   searchMeetingsFts,
   updatePersonName,
@@ -88,6 +90,57 @@ describe('meeting search index integrity', () => {
 
     expect(searchMeetingNotesFts('"Orchid"')).toHaveLength(1);
     expect(searchMeetingNotesFts('"Cobalt"')).toHaveLength(0);
+  });
+
+  it('indexes accepted note headings and section summaries independently', () => {
+    saveMeeting({
+      id: 'section-index-1',
+      title: 'Release review',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The team reviewed the release.',
+        topics: [
+          {
+            title: 'Rollout sequence',
+            summary: 'Canary customers receive the Juniper build first.',
+            key_points: ['Monitor errors for one hour.'],
+            decisions: [],
+            action_items: [],
+            open_questions: [],
+          },
+        ],
+        all_decisions: [],
+        all_action_items: [],
+        meeting_type: 'team_sync',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+      }),
+    });
+
+    const matches = searchMeetingContextSectionsFts('"Juniper"');
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({
+      meeting: { id: 'section-index-1' },
+      section: {
+        heading: 'Rollout sequence',
+        kind: 'discussion',
+        trust_status: 'grounded',
+      },
+    });
+    expect(getMeetingContextSectionIntegrity()).toEqual(
+      expect.objectContaining({ duplicateRowCount: 0 }),
+    );
+    const sectionCount = getMeetingContextSectionIntegrity().rowCount;
+    saveMeeting(matches[0].meeting);
+    expect(getMeetingContextSectionIntegrity()).toMatchObject({
+      rowCount: sectionCount,
+      duplicateRowCount: 0,
+      staleMeetingCount: 0,
+    });
   });
 
   it('refreshes projected self identity without regenerating saved notes', () => {
@@ -169,6 +222,8 @@ describe('meeting search index integrity', () => {
 
     expect(searchMeetingNotesFts('"Orchid"')).toHaveLength(0);
     expect(searchMeetingNotesFts('"Marigold"')).toHaveLength(1);
+    expect(searchMeetingContextSectionsFts('"Orchid"')).toHaveLength(0);
+    expect(searchMeetingContextSectionsFts('"Marigold"')).toHaveLength(1);
     expect(getMeetingNotesFtsIntegrity()).toEqual(
       expect.objectContaining({ duplicateRowCount: 0 }),
     );
@@ -187,6 +242,21 @@ describe('meeting search index integrity', () => {
 
     expect(searchMeetingNotesFts('"Marzipan"')).toHaveLength(0);
     expect(getMeetingNotesFtsIntegrity().rowCount).toBe(beforeDelete - 1);
+  });
+
+  it('removes derived section evidence when its meeting is deleted', () => {
+    saveMeeting({
+      id: 'section-delete-1',
+      title: 'Section deletion review',
+      enhanced_notes: '## Cleanup\nSaffron section deletion marker.',
+    });
+    expect(searchMeetingContextSectionsFts('"Saffron"')).toHaveLength(1);
+    const beforeDelete = getMeetingContextSectionIntegrity().rowCount;
+
+    deleteMeeting('section-delete-1');
+
+    expect(searchMeetingContextSectionsFts('"Saffron"')).toHaveLength(0);
+    expect(getMeetingContextSectionIntegrity().rowCount).toBe(beforeDelete - 1);
   });
 
   it('uses a half-open temporal range and returns complete meeting rows', () => {

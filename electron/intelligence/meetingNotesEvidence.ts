@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   parseAnalysisDocumentV3Json,
   parseUserEditsJson,
@@ -17,6 +18,25 @@ export interface MeetingNotesEvidenceSource {
   analysis_json?: string | null;
   user_edits_json?: string | null;
   mid_json?: string | null;
+  analysis_format_pass?: boolean | number | null;
+}
+
+export interface MeetingNotesEvidenceReference {
+  blockId: string;
+  path?: string;
+  quote?: string;
+  transcriptRange?: [number, number];
+}
+
+export interface MeetingNotesEvidenceSection {
+  sectionId: string;
+  heading: string;
+  kind: string;
+  summary: string;
+  content: string;
+  entitiesText: string;
+  evidenceReferences: MeetingNotesEvidenceReference[];
+  transcriptRange?: [number, number];
 }
 
 export interface MeetingNotesEvidenceDocument {
@@ -27,6 +47,9 @@ export interface MeetingNotesEvidenceDocument {
   actionItemsText: string;
   topicsText: string;
   participantsText: string;
+  sourceRevision: string;
+  trustStatus: 'grounded' | 'needs_review';
+  sections: MeetingNotesEvidenceSection[];
   hasUsableNotes: boolean;
 }
 
@@ -35,6 +58,7 @@ interface MidEvidence {
   topics?: Array<{ name?: unknown }>;
   decisions?: Array<{ description?: unknown }>;
   action_items?: Array<{ description?: unknown }>;
+  projects?: Array<{ name?: unknown }>;
 }
 
 const EXACT_WORDING_INTENT =
@@ -195,6 +219,112 @@ export const buildMeetingNotesEvidenceDocument = (
   const participantsText = uniqueText(
     (mid.participants || []).map((participant) => clean(participant.name)),
   );
+  const entitiesText = uniqueText([
+    ...(mid.participants || []).map((participant) => clean(participant.name)),
+    ...(mid.topics || []).map((topic) => clean(topic.name)),
+    ...(mid.projects || []).map((project) => clean(project.name)),
+  ]);
+  const sections: MeetingNotesEvidenceSection[] = notesDocument
+    ? notesDocument.sections.flatMap((section) => {
+        if (section.kind === 'review') return [];
+        const acceptedBlocks = section.blocks.filter(
+          (block) => block.blockType !== 'review' && block.text.trim(),
+        );
+        const content = uniqueText(
+          acceptedBlocks.flatMap((block) => [
+            block.text,
+            ...(block.nativeContinuations || []).map(
+              (continuation) => continuation.text,
+            ),
+          ]),
+        );
+        if (!content) return [];
+        const transcriptRanges = acceptedBlocks
+          .map((block) => block.transcriptRange)
+          .filter((range): range is [number, number] => Boolean(range));
+        const transcriptRange = transcriptRanges.length
+          ? ([
+              Math.min(...transcriptRanges.map((range) => range[0])),
+              Math.max(...transcriptRanges.map((range) => range[1])),
+            ] as [number, number])
+          : section.transcriptRange;
+        return [
+          {
+            sectionId: section.id,
+            heading: section.title,
+            kind: section.kind,
+            summary: acceptedBlocks[0]?.text.slice(0, 600) || section.title,
+            content,
+            entitiesText,
+            evidenceReferences: acceptedBlocks.slice(0, 24).map((block) => ({
+              blockId: block.id,
+              ...(block.path ? { path: block.path } : {}),
+              ...(block.evidence ? { quote: block.evidence } : {}),
+              ...(block.transcriptRange
+                ? { transcriptRange: block.transcriptRange }
+                : {}),
+            })),
+            ...(transcriptRange ? { transcriptRange } : {}),
+          },
+        ];
+      })
+    : [
+        ...(notesText
+          ? [
+              {
+                sectionId: 'meeting-notes',
+                heading: 'Meeting notes',
+                kind: 'discussion',
+                summary: notesText.split('\n')[0]?.slice(0, 600) || notesText,
+                content: notesText,
+                entitiesText,
+                evidenceReferences: [],
+              },
+            ]
+          : []),
+        ...(decisionsText
+          ? [
+              {
+                sectionId: 'decisions',
+                heading: 'Decisions',
+                kind: 'outcomes',
+                summary: decisionsText.split('\n')[0]?.slice(0, 600),
+                content: decisionsText,
+                entitiesText,
+                evidenceReferences: [],
+              },
+            ]
+          : []),
+        ...(actionItemsText
+          ? [
+              {
+                sectionId: 'action-items',
+                heading: 'Action items',
+                kind: 'outcomes',
+                summary: actionItemsText.split('\n')[0]?.slice(0, 600),
+                content: actionItemsText,
+                entitiesText,
+                evidenceReferences: [],
+              },
+            ]
+          : []),
+      ];
+  const sourceRevision = createHash('sha256')
+    .update(
+      JSON.stringify({
+        title: meeting.title || '',
+        userNotes: meeting.user_notes || '',
+        enhancedNotes: meeting.enhanced_notes || '',
+        analysis: meeting.analysis_json || '',
+        edits: meeting.user_edits_json || '',
+        mid: meeting.mid_json || '',
+      }),
+    )
+    .digest('hex');
+  const trustStatus =
+    meeting.analysis_format_pass === false || meeting.analysis_format_pass === 0
+      ? 'needs_review'
+      : 'grounded';
   const hasUsableNotes = Boolean(
     notesText ||
       decisionsText ||
@@ -211,6 +341,9 @@ export const buildMeetingNotesEvidenceDocument = (
     actionItemsText,
     topicsText,
     participantsText,
+    sourceRevision,
+    trustStatus,
+    sections,
     hasUsableNotes,
   };
 };

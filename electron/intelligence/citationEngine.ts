@@ -280,14 +280,34 @@ export const buildCitationChain = (
       if (seenClaimSources.has(claimSourceKey)) continue;
       seenClaimSources.add(claimSourceKey);
 
+      const evidenceSpan = getBestEvidenceSpan(source, claim);
+      const transcriptPassage = source.transcript_passages?.find((passage) =>
+        evidenceSpan
+          ? passage.quote
+              .toLocaleLowerCase()
+              .includes(evidenceSpan.toLocaleLowerCase()) ||
+            evidenceSpan
+              .toLocaleLowerCase()
+              .includes(passage.quote.toLocaleLowerCase())
+          : false,
+      );
+      const section = source.retrieved_sections?.[0];
+
       citations.push({
         claim,
         meeting_id: source.meeting_id,
         meeting_title:
           source.meeting_title || source.mid?.title || 'Unknown Meeting',
-        evidence_span: getBestEvidenceSpan(source, claim),
+        evidence_span: evidenceSpan,
         evidence_valid: false, // set by auditCitations
         trust_status: 'needs_review',
+        evidence_kind: transcriptPassage ? 'transcript' : source.evidence_kind,
+        section_id: section?.section_id,
+        section_heading: section?.heading,
+        timestamp_ms: transcriptPassage?.start_ms,
+        timestamp_end_ms: transcriptPassage?.end_ms,
+        source_revision:
+          transcriptPassage?.source_revision || source.source_revision,
       });
     }
   }
@@ -314,6 +334,14 @@ export const buildCitationChain = (
         evidence_span: evidence_span || undefined,
         evidence_valid: false,
         trust_status: 'needs_review',
+        evidence_kind: source?.evidence_kind,
+        section_id: source?.retrieved_sections?.[0]?.section_id,
+        section_heading: source?.retrieved_sections?.[0]?.heading,
+        timestamp_ms: source?.transcript_passages?.[0]?.start_ms,
+        timestamp_end_ms: source?.transcript_passages?.[0]?.end_ms,
+        source_revision:
+          source?.transcript_passages?.[0]?.source_revision ||
+          source?.source_revision,
       });
     }
   }

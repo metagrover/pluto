@@ -538,6 +538,7 @@ import {
   buildExtractiveTemporalSummary,
   buildLiveMeetingRetrievalResult,
   buildMeetingRetrievalResult,
+  buildWorkingMemoryOverviewRecall,
   mergeRetrievalResultsByMeeting,
   parseQuery,
   resolveExplicitMeetingScope,
@@ -5177,6 +5178,9 @@ app.whenReady().then(async () => {
                 ...(turn.retrievalSummary
                   ? { retrievalSummary: turn.retrievalSummary }
                   : {}),
+                ...(turn.retrievalTrace
+                  ? { retrievalTrace: turn.retrievalTrace }
+                  : {}),
               }));
       const activeRecording = captureSessionLease.recordingForOwner(
         event.sender.id,
@@ -5267,6 +5271,10 @@ app.whenReady().then(async () => {
           effectiveQueryText,
           persistedMeetings,
         );
+        const overviewRecall = buildWorkingMemoryOverviewRecall(
+          effectiveQueryText,
+          parsed.entity_mentions,
+        );
         const explicitMeetingScope = resolveExplicitMeetingScope(
           effectiveQueryText,
           persistedMeetings,
@@ -5316,6 +5324,7 @@ app.whenReady().then(async () => {
             outcome: 'answered' as const,
             resolvedScope,
             retrievalSummary: previousAssistantTurn.retrievalSummary,
+            retrievalTrace: previousAssistantTurn.retrievalTrace,
           };
         }
         const globalKnowledgeDoc = db.ensureGlobalKnowledgeDoc();
@@ -5616,12 +5625,19 @@ app.whenReady().then(async () => {
             buildMeetingRetrievalResult(meeting, 'Earlier meeting'),
           );
         comparisonMeetingCount = historicalPinnedResults.length;
+        const overviewContextUsed = Boolean(
+          !explicitMeetingScope &&
+            !temporalRange &&
+            !currentMeetingRequested &&
+            overviewRecall?.context.length,
+        );
         const pinnedResults = mergeRetrievalResultsByMeeting(
           currentPinnedResult ? [currentPinnedResult] : [],
           temporalPinnedResults,
           explicitlyScopedPinnedResults,
           historicalPinnedResults,
           priorPinnedResults,
+          overviewContextUsed ? overviewRecall?.context || [] : [],
         );
         retrievalStartedAt = Date.now();
         const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
@@ -5645,16 +5661,27 @@ app.whenReady().then(async () => {
         const generalContext =
           !assigneeRecall || assigneeRecall.coverageLimited
             ? explicitResolvedScope
-              ? explicitlyScopedPinnedResults
+              ? await retrieveContext(parsed, {
+                  pinnedResults: explicitlyScopedPinnedResults,
+                  query: effectiveQueryText,
+                  meetingIds: explicitResolvedScope.meetingIds,
+                })
               : temporalResolvedScope
-                ? pinnedResults
+                ? await retrieveContext(parsed, {
+                    pinnedResults,
+                    query: effectiveQueryText,
+                    meetingIds: temporalResolvedScope.meetingIds,
+                  })
                 : restrictToCurrentMeeting && currentPinnedResult
                   ? [currentPinnedResult]
                   : restrictToPinnedCurrentComparison
                     ? pinnedResults
                     : restrictToPriorConversation
                       ? priorPinnedResults
-                      : await retrieveContext(parsed, { pinnedResults })
+                      : await retrieveContext(parsed, {
+                          pinnedResults,
+                          query: effectiveQueryText,
+                        })
             : [];
         const context =
           assigneeRecall && !assigneeRecall.coverageLimited
@@ -5677,12 +5704,15 @@ app.whenReady().then(async () => {
                 source: 'explicit',
               }
             : inheritedScope || {
-                kind: context.length > 0 ? 'meeting_ids' : 'global',
+                kind:
+                  overviewContextUsed || context.length === 0
+                    ? 'global'
+                    : 'meeting_ids',
                 meetingIds: context.map((result) => result.meeting_id),
                 resolvedAt: new Date().toISOString(),
                 source: 'explicit',
               });
-        const retrievalSummary: AskPlutoRetrievalSummary =
+        const baseRetrievalSummary: AskPlutoRetrievalSummary =
           explicitRetrievalSummary ||
             temporalRetrievalSummary || {
               matchedMeetingCount: context.length,
@@ -5691,6 +5721,74 @@ app.whenReady().then(async () => {
               transcriptOnlyCount: 0,
               omittedMeetingCount: 0,
             };
+        const matchedSectionCount = context.reduce(
+          (total, result) => total + (result.retrieved_sections?.length || 0),
+          0,
+        );
+        const transcriptPassageCount = context.reduce(
+          (total, result) => total + (result.transcript_passages?.length || 0),
+          0,
+        );
+        const retrievalSummary: AskPlutoRetrievalSummary = {
+          ...baseRetrievalSummary,
+          matchedSectionCount,
+          includedSectionCount: matchedSectionCount,
+          transcriptPassageCount,
+          commitmentCount: assigneeRecall?.commitmentCount || 0,
+          retrievalLevel: assigneeRecall
+            ? 'commitment'
+            : transcriptPassageCount > 0
+              ? 'transcript'
+              : overviewContextUsed
+                ? 'overview'
+                : matchedSectionCount > 0
+                  ? 'section'
+                  : 'note',
+        };
+        const retrievalTrace = {
+          level: retrievalSummary.retrievalLevel || ('note' as const),
+          searchedMeetingCount:
+            explicitResolvedScope?.meetingIds.length ??
+            temporalResolvedScope?.meetingIds.length ??
+            (assigneeRecall
+              ? assigneeRecall.mentionedMeetingCount
+              : persistedMeetings.length),
+          meetings: context.map((result) => ({
+            meetingId: result.meeting_id,
+            meetingTitle:
+              result.meeting_title || result.mid?.title || 'Untitled meeting',
+          })),
+          sections: context.flatMap((result) =>
+            (result.retrieved_sections || []).map((section) => ({
+              meetingId: result.meeting_id,
+              meetingTitle:
+                result.meeting_title || result.mid?.title || 'Untitled meeting',
+              sectionId: section.section_id,
+              heading: section.heading,
+              kind: section.kind,
+              sourceRevision: section.source_revision,
+            })),
+          ),
+          transcriptPassages: context.flatMap((result) =>
+            (result.transcript_passages || []).map((passage) => ({
+              meetingId: result.meeting_id,
+              meetingTitle:
+                result.meeting_title || result.mid?.title || 'Untitled meeting',
+              quote: passage.quote,
+              speaker: passage.speaker,
+              ...(passage.start_ms !== undefined
+                ? { startMs: passage.start_ms }
+                : {}),
+              ...(passage.end_ms !== undefined
+                ? { endMs: passage.end_ms }
+                : {}),
+              sourceRevision: passage.source_revision,
+              trustStatus: passage.trust_status,
+            })),
+          ),
+          commitmentCount: assigneeRecall?.commitmentCount || 0,
+          omittedResultCount: retrievalSummary.omittedMeetingCount,
+        };
         if (context.length === 0) {
           return {
             status: 'answered' as const,
@@ -5702,6 +5800,7 @@ app.whenReady().then(async () => {
             outcome: 'no_evidence' as const,
             resolvedScope,
             retrievalSummary,
+            retrievalTrace,
           };
         }
 
@@ -5796,6 +5895,7 @@ app.whenReady().then(async () => {
             : presentation.outcome,
           resolvedScope,
           retrievalSummary,
+          retrievalTrace,
           trustStatus: presentation.trustStatus,
           unsupportedClaimCount: presentation.unsupportedClaimCount,
         };

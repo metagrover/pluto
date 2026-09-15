@@ -45,6 +45,8 @@ const expectedTables = [
   'meeting_audio_retention',
   'meeting_calendar_context',
   'meeting_context_events',
+  'meeting_context_sections',
+  'meeting_context_sections_fts',
   'meeting_context_snapshots',
   'meeting_entities',
   'meeting_notes_fts',
@@ -87,7 +89,7 @@ const readApplicationTableNames = (sqlite: Database.Database) =>
     .map(({ name }) => name)
     .filter(
       (name) =>
-        !/^(entities_fts|meeting_notes_fts|meetings_fts)_(config|content|data|docsize|idx)$/.test(
+        !/^(entities_fts|meeting_context_sections_fts|meeting_notes_fts|meetings_fts)_(config|content|data|docsize|idx)$/.test(
           name,
         ),
     );

@@ -104,6 +104,36 @@ export const meetingAnalysisRunHistory = sqliteTable(
   ],
 );
 
+export const meetingContextSections = sqliteTable(
+  'meeting_context_sections',
+  {
+    id: text('id').primaryKey(),
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    sectionId: text('section_id').notNull(),
+    heading: text('heading').notNull(),
+    kind: text('kind').notNull(),
+    summary: text('summary').notNull(),
+    content: text('content').notNull(),
+    entitiesText: text('entities_text').notNull().default(''),
+    evidenceJson: text('evidence_json').notNull().default('[]'),
+    transcriptStartIndex: integer('transcript_start_index'),
+    transcriptEndIndex: integer('transcript_end_index'),
+    sourceRevision: text('source_revision').notNull(),
+    trustStatus: text('trust_status').notNull(),
+    updatedAt: datetime('updated_at').notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex('idx_meeting_context_sections_meeting_section').on(
+      table.meetingId,
+      table.sectionId,
+    ),
+    index('idx_meeting_context_sections_meeting').on(table.meetingId),
+    index('idx_meeting_context_sections_revision').on(table.sourceRevision),
+  ],
+);
+
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value'),
