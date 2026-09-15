@@ -45,6 +45,9 @@ describe('ActiveCallAlertWindow component', () => {
     expect(container.querySelector('.active-call-alert--call')).not.toBeNull();
     expect(container.querySelector('.alert-theme--dark')).not.toBeNull();
     expect(container.querySelector('.app')?.getAttribute('title')).toBe('Zoom');
+    const logo = container.querySelector('.pluto-status-logo');
+    expect(logo?.tagName).toBe('IMG');
+    expect(logo?.getAttribute('alt')).toBe('');
 
     const button = container.querySelector('.take-notes') as HTMLButtonElement;
     expect(button).not.toBeNull();

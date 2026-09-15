@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import plutoLogo from '../../assets/brand/pluto_logo.svg?inline';
+import plutoLogoDark from '../../assets/brand/pluto_logo_dark_mode.svg?inline';
 
 const LIFETIME_MS = 15_000;
 
@@ -218,14 +220,11 @@ export const ActiveCallAlertWindow = () => {
             </svg>
           )
         ) : (
-          <svg viewBox="0 0 24 24" fill="none">
-            <path
-              d="M7 8.5h10M7 12h7M7 15.5h4M6.5 4.75h11A1.75 1.75 0 0 1 19.25 6.5v11a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 6.5 4.75Z"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
+          <img
+            className="pluto-status-logo"
+            src={alertData.theme === 'dark' ? plutoLogoDark : plutoLogo}
+            alt=""
+          />
         )}
       </div>
       <div className="left-block">
