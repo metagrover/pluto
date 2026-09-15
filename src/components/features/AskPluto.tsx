@@ -19,13 +19,17 @@ import type {
   AskPlutoQueryResponse,
   AskPlutoQueryStatus,
   AskPlutoRetrievalSummary,
+  AskPlutoRetrievalTrace,
   ResolvedAskPlutoScope,
 } from '../../types/askPlutoQuery';
 import { Logo } from '../Brand/Logo';
 import type { CitationChain } from './CitationCard';
 
 interface AskPlutoProps {
-  onOpenMeeting: (id: string) => void;
+  onOpenMeeting: (
+    id: string,
+    target?: { sectionId?: string; timestampMs?: number },
+  ) => void;
   visible: boolean;
   onClose: () => void;
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
@@ -44,6 +48,7 @@ interface Message {
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
+  retrievalTrace?: AskPlutoRetrievalTrace;
 }
 
 const groupCitationsByMeeting = (citations: CitationChain[]) => {
@@ -238,6 +243,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             ...(message.retrievalSummary
               ? { retrievalSummary: message.retrievalSummary }
               : {}),
+            ...(message.retrievalTrace
+              ? { retrievalTrace: message.retrievalTrace }
+              : {}),
           }));
         const response = await window.ipcRenderer.invoke<
           string | AskPlutoQueryResponse<CitationChain>
@@ -292,6 +300,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               typeof response === 'string'
                 ? undefined
                 : response.retrievalSummary,
+            retrievalTrace:
+              typeof response === 'string'
+                ? undefined
+                : response.retrievalTrace,
           });
           return newMsg;
         });
@@ -587,6 +599,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
                     {msg.role === 'assistant' &&
                       !msg.isLoading &&
+                      msg.retrievalTrace &&
+                      (msg.retrievalTrace.searchedMeetingCount > 0 ||
+                        msg.retrievalTrace.sections.length > 0 ||
+                        msg.retrievalTrace.transcriptPassages.length > 0 ||
+                        msg.retrievalTrace.commitmentCount > 0) && (
+                        <div className="px-1 text-[11px] text-pro-text-muted/75">
+                          {[
+                            msg.retrievalTrace.searchedMeetingCount > 0
+                              ? `${msg.retrievalTrace.searchedMeetingCount} ${msg.retrievalTrace.searchedMeetingCount === 1 ? 'meeting' : 'meetings'} searched`
+                              : '',
+                            msg.retrievalTrace.sections.length > 0
+                              ? `${msg.retrievalTrace.sections.length} ${msg.retrievalTrace.sections.length === 1 ? 'section' : 'sections'} matched`
+                              : '',
+                            msg.retrievalTrace.commitmentCount > 0
+                              ? `${msg.retrievalTrace.commitmentCount} ${msg.retrievalTrace.commitmentCount === 1 ? 'commitment' : 'commitments'}`
+                              : '',
+                            msg.retrievalTrace.transcriptPassages.length > 0
+                              ? `${msg.retrievalTrace.transcriptPassages.length} transcript ${msg.retrievalTrace.transcriptPassages.length === 1 ? 'passage' : 'passages'} used`
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                      )}
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
                       msg.retryQuery && (
                         <button
                           type="button"
@@ -623,6 +662,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
                           <div className="mt-2 overflow-hidden rounded-xl border border-pro-border/50 bg-black/[0.015] dark:bg-white/[0.02] divide-y divide-pro-border/40">
                             {citationGroups.map((group) => {
+                              const navigationCitation =
+                                group.citations.find(
+                                  (citation) =>
+                                    citation.timestamp_ms !== undefined,
+                                ) ||
+                                group.citations.find((citation) =>
+                                  Boolean(citation.section_id),
+                                );
                               const evidence = [
                                 ...new Set(
                                   group.citations
@@ -640,9 +687,27 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                   <button
                                     type="button"
                                     aria-label={`Open ${group.meetingTitle}`}
-                                    onClick={() =>
-                                      onOpenMeeting(group.meetingId)
-                                    }
+                                    onClick={() => {
+                                      if (!navigationCitation) {
+                                        onOpenMeeting(group.meetingId);
+                                        return;
+                                      }
+                                      onOpenMeeting(group.meetingId, {
+                                        ...(navigationCitation.section_id
+                                          ? {
+                                              sectionId:
+                                                navigationCitation.section_id,
+                                            }
+                                          : {}),
+                                        ...(navigationCitation.timestamp_ms !==
+                                        undefined
+                                          ? {
+                                              timestampMs:
+                                                navigationCitation.timestamp_ms,
+                                            }
+                                          : {}),
+                                      });
+                                    }}
                                     className="group/meeting flex w-full items-start justify-between gap-3 text-left"
                                   >
                                     <span className="min-w-0">
@@ -650,10 +715,24 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                         {group.meetingTitle}
                                       </span>
                                       <span className="mt-0.5 block text-[11px] text-pro-text-muted">
-                                        {group.citations.length}{' '}
-                                        {group.citations.length === 1
-                                          ? 'reference'
-                                          : 'references'}
+                                        {navigationCitation?.section_heading ||
+                                          (navigationCitation?.timestamp_ms !==
+                                          undefined
+                                            ? `Transcript · ${Math.floor(
+                                                navigationCitation.timestamp_ms /
+                                                  60000,
+                                              )}:${Math.floor(
+                                                (navigationCitation.timestamp_ms /
+                                                  1000) %
+                                                  60,
+                                              )
+                                                .toString()
+                                                .padStart(2, '0')}`
+                                            : `${group.citations.length} ${
+                                                group.citations.length === 1
+                                                  ? 'reference'
+                                                  : 'references'
+                                              }`)}
                                       </span>
                                     </span>
                                     <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pro-text-muted/60 transition-colors group-hover/meeting:text-pro-accent" />

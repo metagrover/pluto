@@ -208,6 +208,11 @@ function App() {
   const [selectedMeetingId, setSelectedMeetingId] = useState<
     string | number | null
   >(meetingPreviewEnabled ? 'preview-architecture-docs' : null);
+  const [askPlutoCitationTarget, setAskPlutoCitationTarget] = useState<{
+    meetingId: string;
+    sectionId?: string;
+    timestampMs?: number;
+  } | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
@@ -1749,6 +1754,12 @@ function App() {
             ) : selectedMeetingId ? (
               <MeetingView
                 selectedMeeting={selectedMeeting}
+                citationTarget={
+                  askPlutoCitationTarget?.meetingId ===
+                  String(selectedMeeting?.id)
+                    ? askPlutoCitationTarget
+                    : undefined
+                }
                 editingTitle={editingTitle}
                 setEditingTitle={setEditingTitle}
                 titleValue={titleValue}
@@ -1836,7 +1847,10 @@ function App() {
                 <AskPluto
                   visible={true}
                   onClose={() => setActiveTab('hub')}
-                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                  onOpenMeeting={(meetingId, target) => {
+                    setAskPlutoCitationTarget({ meetingId, ...target });
+                    setSelectedMeetingId(meetingId);
+                  }}
                   activeMeetingSnapshot={
                     captureLifecycle.state === 'recording' &&
                     captureLifecycle.meetingId

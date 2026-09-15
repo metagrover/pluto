@@ -46,6 +46,46 @@ export interface AskPlutoRetrievalSummary {
   preparedEvidenceCount: number;
   transcriptOnlyCount: number;
   omittedMeetingCount: number;
+  matchedSectionCount?: number;
+  includedSectionCount?: number;
+  transcriptPassageCount?: number;
+  commitmentCount?: number;
+  retrievalLevel?:
+    | 'overview'
+    | 'section'
+    | 'commitment'
+    | 'note'
+    | 'transcript';
+}
+
+export interface AskPlutoRetrievedSection {
+  meetingId: string;
+  meetingTitle: string;
+  sectionId: string;
+  heading: string;
+  kind: string;
+  sourceRevision: string;
+}
+
+export interface AskPlutoTranscriptPassage {
+  meetingId: string;
+  meetingTitle: string;
+  quote: string;
+  speaker: string;
+  startMs?: number;
+  endMs?: number;
+  sourceRevision?: string;
+  trustStatus?: 'grounded' | 'inferred' | 'weak_evidence' | 'needs_review';
+}
+
+export interface AskPlutoRetrievalTrace {
+  level: 'overview' | 'section' | 'commitment' | 'note' | 'transcript';
+  searchedMeetingCount: number;
+  meetings?: Array<{ meetingId: string; meetingTitle: string }>;
+  sections: AskPlutoRetrievedSection[];
+  transcriptPassages: AskPlutoTranscriptPassage[];
+  commitmentCount: number;
+  omittedResultCount: number;
 }
 
 export type AskPlutoCurrentMeeting =
@@ -78,6 +118,7 @@ export interface AskPlutoConversationTurn {
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
+  retrievalTrace?: AskPlutoRetrievalTrace;
 }
 
 export interface AskPlutoActiveMeetingSnapshot {
@@ -126,4 +167,5 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
   outcome?: AskPlutoOutcome;
   resolvedScope?: ResolvedAskPlutoScope;
   retrievalSummary?: AskPlutoRetrievalSummary;
+  retrievalTrace?: AskPlutoRetrievalTrace;
 }

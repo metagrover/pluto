@@ -137,6 +137,7 @@ const SavedEditConflicts = ({
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
+  citationTarget?: { sectionId?: string; timestampMs?: number };
   editingTitle: boolean;
   setEditingTitle: (val: boolean) => void;
   titleValue: string;
@@ -696,6 +697,7 @@ export const MeetingView = (props: MeetingViewProps) => {
 
 const SelectedMeetingView = ({
   selectedMeeting,
+  citationTarget,
   editingTitle,
   setEditingTitle,
   titleValue,
@@ -950,6 +952,40 @@ const SelectedMeetingView = ({
   const transcriptTurns = buildMeetingTranscriptTurns(
     displayedTranscriptSegments,
   );
+  useEffect(() => {
+    if (!citationTarget) return;
+    if (citationTarget?.timestampMs !== undefined && !transcriptVisible) {
+      setTranscriptVisible(true);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (citationTarget?.timestampMs !== undefined) {
+        const rows = [
+          ...document.querySelectorAll<HTMLElement>(
+            '[data-transcript-start-ms]',
+          ),
+        ];
+        const closest = rows.reduce<HTMLElement | null>((best, row) => {
+          const value = Number(row.dataset.transcriptStartMs);
+          if (!Number.isFinite(value)) return best;
+          if (!best) return row;
+          const bestValue = Number(best.dataset.transcriptStartMs);
+          return Math.abs(value - citationTarget.timestampMs!) <
+            Math.abs(bestValue - citationTarget.timestampMs!)
+            ? row
+            : best;
+        }, null);
+        closest?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      if (citationTarget?.sectionId) {
+        document
+          .getElementById(`meeting-section-${citationTarget.sectionId}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [citationTarget, setTranscriptVisible, transcriptVisible]);
   const updateSpeakerDisplayNames = useCallback(
     (names: Record<string, string>) => {
       const meetingId = String(selectedMeeting.id);
@@ -1828,7 +1864,13 @@ const SelectedMeetingView = ({
                   reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
                 );
                 return (
-                  <div key={turn.id} className="meeting-transcript-row">
+                  <div
+                    key={turn.id}
+                    className="meeting-transcript-row"
+                    data-transcript-start-ms={Math.round(
+                      turn.startSeconds * 1000,
+                    )}
+                  >
                     <div>
                       <strong
                         className={

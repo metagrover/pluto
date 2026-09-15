@@ -108,10 +108,14 @@ import { createCalendarStore } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
 import { getApplicationDatabase } from './database/applicationDatabase';
 import {
+  type MeetingContextSectionIntegrity,
+  type MeetingContextSectionRow,
   type SearchIndexIntegrity,
+  getMeetingContextSectionIntegrity as readMeetingContextSectionIntegrity,
   getMeetingFtsIntegrity as readMeetingFtsIntegrity,
   getMeetingNotesFtsIntegrity as readMeetingNotesFtsIntegrity,
   refreshMeetingFts as refreshMeetingSearchFts,
+  repairMeetingContextSectionIndex as repairMeetingContextSectionSearchIndex,
   repairMeetingNotesFtsIndex as repairMeetingNotesSearchFtsIndex,
   repairMeetingFtsIndex as repairMeetingSearchFtsIndex,
 } from './database/meetingSearchMaintenance';
@@ -1150,6 +1154,10 @@ export function getMeetingNotesFtsIntegrity(): SearchIndexIntegrity {
   return readMeetingNotesFtsIntegrity(db);
 }
 
+export function getMeetingContextSectionIntegrity(): MeetingContextSectionIntegrity {
+  return readMeetingContextSectionIntegrity(db);
+}
+
 export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
   rebuilt: boolean;
   indexedMeetingCount: number;
@@ -1162,6 +1170,12 @@ export function repairMeetingNotesFtsIndex(options: { force?: boolean } = {}): {
   indexedMeetingCount: number;
 } {
   return repairMeetingNotesSearchFtsIndex(db, options);
+}
+
+export function repairMeetingContextSectionIndex(
+  options: { force?: boolean } = {},
+): { rebuilt: boolean; indexedMeetingCount: number; sectionCount: number } {
+  return repairMeetingContextSectionSearchIndex(db, options);
 }
 
 const saveMeetingRecord = (incomingMeeting: PersistedMeeting) => {
@@ -3471,6 +3485,12 @@ export const deleteMeeting = (id: string | number) => {
   // 2. Delete from FTS index
   db.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(safeId);
   db.prepare('DELETE FROM meeting_notes_fts WHERE meeting_id = ?').run(safeId);
+  db.prepare(
+    'DELETE FROM meeting_context_sections_fts WHERE meeting_id = ?',
+  ).run(safeId);
+  db.prepare('DELETE FROM meeting_context_sections WHERE meeting_id = ?').run(
+    safeId,
+  );
 
   // 3. Delete from entity_links (ones specifically created for this meeting)
   db.prepare('DELETE FROM entity_links WHERE meeting_id = ?').run(safeId);
@@ -8847,7 +8867,12 @@ export const getPersonBriefing = (
     commitments: {
       ...selectVerifiedPersonCommitments({
         personId: canonicalId,
-        actions: actionCandidates,
+        actions: actionCandidates.map((action) => ({
+          ...action,
+          assigned_to: action.assigned_to
+            ? resolvePersonIdentityId(action.assigned_to)
+            : null,
+        })),
       }),
       candidates: selectCandidatePersonCommitments({
         personNames: personNames.map((row) => row.name),
@@ -8861,6 +8886,11 @@ export const getPersonBriefing = (
     workingMemorySnapshot,
     mergedPeople,
   };
+};
+
+export const getCanonicalPersonCommitments = (personId: string) => {
+  const briefing = getPersonBriefing(personId);
+  return briefing?.commitments;
 };
 
 /**
@@ -9175,6 +9205,8 @@ export const resetKnowledge = () => {
     'meetings',
     'meetings_fts',
     'meeting_notes_fts',
+    'meeting_context_sections_fts',
+    'meeting_context_sections',
   ];
 
   const deleteTransaction = db.transaction(() => {
@@ -9252,6 +9284,12 @@ export interface SearchFtsOptions {
   limit?: number;
 }
 
+export interface MeetingContextSectionSearchResult {
+  section: MeetingContextSectionRow;
+  meeting: PersistedMeeting;
+  snippet: string;
+}
+
 export const searchMeetingsFts = (
   query: string,
   options: SearchFtsOptions = {},
@@ -9288,6 +9326,39 @@ export const searchMeetingNotesFts = (
     LIMIT ?
   `)
     .all(query, limit) as (PersistedMeeting & { snippet: string })[];
+};
+
+export const searchMeetingContextSectionsFts = (
+  query: string,
+  options: SearchFtsOptions & { meetingIds?: string[] } = {},
+): MeetingContextSectionSearchResult[] => {
+  const limit = Math.min(60, Math.max(1, options.limit || 24));
+  const meetingIds = [...new Set(options.meetingIds || [])].slice(0, 24);
+  const scopeSql = meetingIds.length
+    ? `AND section.meeting_id IN (${meetingIds.map(() => '?').join(', ')})`
+    : '';
+  const rows = db
+    .prepare(`
+      SELECT section.*,
+             snippet(meeting_context_sections_fts, -1, '', '', '...', 48) AS snippet
+      FROM meeting_context_sections_fts search
+      JOIN meeting_context_sections section
+        ON section.meeting_id = search.meeting_id
+       AND section.section_id = search.section_id
+      WHERE meeting_context_sections_fts MATCH ?
+        ${scopeSql}
+      ORDER BY rank
+      LIMIT ?
+    `)
+    .all(query, ...meetingIds, limit) as Array<
+    MeetingContextSectionRow & { snippet: string }
+  >;
+  return rows.flatMap((row) => {
+    const meeting = getMeeting(row.meeting_id) as PersistedMeeting | undefined;
+    if (!meeting) return [];
+    const { snippet, ...section } = row;
+    return [{ section, meeting, snippet }];
+  });
 };
 
 export const searchEntitiesWithMeetingContext = (query: string) => {

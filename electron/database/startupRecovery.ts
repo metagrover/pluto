@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { recoverInterruptedIdentityJobs } from '../identityStore';
 import {
+  repairMeetingContextSectionIndex,
   repairMeetingFtsIndex,
   repairMeetingNotesFtsIndex,
 } from './meetingSearchMaintenance';
@@ -11,6 +12,7 @@ export interface StartupRecoveryResult {
   genericSpeakerEntitiesPurged: number;
   meetingFtsRebuilt: boolean;
   meetingNotesFtsRebuilt: boolean;
+  meetingContextSectionsRebuilt: boolean;
 }
 
 export const runDatabaseStartupRecovery = (
@@ -87,9 +89,11 @@ export const runDatabaseStartupRecovery = (
   })();
   const meetingFts = repairMeetingFtsIndex(sqlite);
   const meetingNotesFts = repairMeetingNotesFtsIndex(sqlite);
+  const meetingContextSections = repairMeetingContextSectionIndex(sqlite);
   return {
     ...relational,
     meetingFtsRebuilt: meetingFts.rebuilt,
     meetingNotesFtsRebuilt: meetingNotesFts.rebuilt,
+    meetingContextSectionsRebuilt: meetingContextSections.rebuilt,
   };
 };

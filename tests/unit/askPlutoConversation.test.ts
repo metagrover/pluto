@@ -69,6 +69,42 @@ describe('Ask Pluto conversation scope', () => {
     );
   });
 
+  it('reports the headings and transcript passages from the prior retrieval', () => {
+    const prior = {
+      ...priorTurns[1],
+      retrievalTrace: {
+        level: 'transcript' as const,
+        searchedMeetingCount: 18,
+        sections: [
+          {
+            meetingId: 'meeting-1',
+            meetingTitle: 'Launch review',
+            sectionId: 'topic:release',
+            heading: 'Release timing',
+            kind: 'discussion',
+            sourceRevision: 'revision-1',
+          },
+        ],
+        transcriptPassages: [
+          {
+            meetingId: 'meeting-1',
+            meetingTitle: 'Launch review',
+            quote: 'The release moves Friday.',
+            speaker: 'Sam',
+            startMs: 42000,
+          },
+        ],
+        commitmentCount: 0,
+        omittedResultCount: 0,
+      },
+    } satisfies AskPlutoConversationTurn;
+
+    const explanation = describePreviousConversationFailure(prior);
+    expect(explanation).toContain('18 meetings');
+    expect(explanation).toContain('Release timing');
+    expect(explanation).toContain('1 transcript passage');
+  });
+
   it('carries the assignee into a request for more results', () => {
     const turns: AskPlutoConversationTurn[] = [
       { role: 'user', content: "What's assigned to Ayush?" },

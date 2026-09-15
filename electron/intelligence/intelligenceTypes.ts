@@ -82,6 +82,18 @@ export interface CitationChain {
   evidence_span?: string;
   evidence_valid: boolean;
   trust_status: TrustStatus;
+  evidence_kind?:
+    | 'overview'
+    | 'section'
+    | 'commitment'
+    | 'note'
+    | 'transcript'
+    | 'live';
+  section_id?: string;
+  section_heading?: string;
+  timestamp_ms?: number;
+  timestamp_end_ms?: number;
+  source_revision?: string;
 }
 
 // =============================================
@@ -116,6 +128,28 @@ export interface RetrievalResult {
   evidence_text: string;
   score: number;
   score_breakdown: ScoreBreakdown;
+  evidence_kind?: CitationChain['evidence_kind'];
+  retrieved_sections?: Array<{
+    section_id: string;
+    heading: string;
+    kind: string;
+    summary: string;
+    trust_status: TrustStatus;
+    source_revision: string;
+    transcript_range?: [number, number];
+  }>;
+  transcript_passages?: Array<{
+    quote: string;
+    speaker: string;
+    start_ms?: number;
+    end_ms?: number;
+    start_segment_index: number;
+    end_segment_index: number;
+    source_revision: string;
+    trust_status: TrustStatus;
+  }>;
+  source_revision?: string;
+  trust_status?: TrustStatus;
 }
 
 // =============================================

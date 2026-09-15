@@ -4,6 +4,7 @@ import {
   buildAssigneeActionRecall,
   buildExtractiveTemporalSummary,
   buildMeetingRetrievalResult,
+  buildWorkingMemoryOverviewRecall,
   mergeRetrievalResultsByMeeting,
   parseQuery,
   resolveExplicitMeetingScope,
@@ -18,16 +19,27 @@ type EntitySearchRow = ReturnType<
   typeof dbModule.searchEntitiesWithMeetingContext
 >[number];
 type FtsRow = ReturnType<typeof dbModule.searchMeetingNotesFts>[number];
+type SectionFtsRow = ReturnType<
+  typeof dbModule.searchMeetingContextSectionsFts
+>[number];
 type GraphEntity = ReturnType<typeof dbModule.walkEntityGraph>[number];
 
 vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
   searchMeetingNotesFts: vi.fn(),
+  searchMeetingContextSectionsFts: vi.fn().mockReturnValue([]),
   searchEntitiesWithMeetingContext: vi.fn(),
   walkEntityGraph: vi.fn(),
   getTemporalMeetings: vi.fn(),
   getMeetingsForEntity: vi.fn().mockReturnValue([]),
   getMeeting: vi.fn(),
+  getEntity: vi.fn(),
+  findEntity: vi.fn(),
+  getCanonicalPersonCommitments: vi.fn(),
+  getWorkingMemorySnapshot: vi.fn(),
+  identityStore: {
+    getSelfPersonId: vi.fn(),
+  },
   getMeetingNotesIdentityProjection: vi.fn().mockReturnValue({
     speakerDisplayNames: {},
     trustedUserTerms: [],
@@ -42,6 +54,14 @@ vi.mock('../../electron/llm/factory', () => ({
 describe('Query Engine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([]);
+    vi.mocked(dbModule.findEntity).mockReturnValue(undefined);
+    vi.mocked(dbModule.getEntity).mockReturnValue(undefined);
+    vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+      open: [],
+      delivered: [],
+      candidates: [],
+    });
   });
 
   describe('parseQuery', () => {
@@ -241,6 +261,132 @@ describe('Query Engine', () => {
       expect(result[0].evidence_text).not.toContain('Cobalt');
       expect(dbModule.searchMeetingNotesFts).toHaveBeenCalled();
       expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
+    });
+
+    it('uses matching note sections before transcript evidence', async () => {
+      const meeting = {
+        id: 'section-meeting',
+        title: 'Launch review',
+        started_at: '2026-09-01T10:00:00.000Z',
+      } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
+        {
+          meeting,
+          section: {
+            id: 1,
+            meeting_id: 'section-meeting',
+            section_id: 'topic:release',
+            heading: 'Release timing',
+            kind: 'topic',
+            summary: 'The release moved to Friday.',
+            content: 'The release moved to Friday after final QA.',
+            entities_text: 'release QA',
+            evidence_json: '[]',
+            transcript_start_index: 3,
+            transcript_end_index: 4,
+            source_revision: 'revision-1',
+            trust_status: 'grounded',
+            updated_at: '2026-09-01T10:30:00.000Z',
+          },
+          snippet: 'Release timing',
+        } satisfies SectionFtsRow,
+      ]);
+
+      const result = await retrieveContext(
+        {
+          keywords: ['release'],
+          expanded_keywords: [],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        {
+          query: 'What changed about the release?',
+          meetingIds: ['section-meeting'],
+        },
+      );
+
+      expect(result[0]).toMatchObject({
+        meeting_id: 'section-meeting',
+        evidence_kind: 'section',
+        retrieved_sections: [
+          { section_id: 'topic:release', heading: 'Release timing' },
+        ],
+      });
+      expect(dbModule.searchMeetingNotesFts).not.toHaveBeenCalled();
+      expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
+      expect(dbModule.searchMeetingContextSectionsFts).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ meetingIds: ['section-meeting'] }),
+      );
+    });
+
+    it('deepens a matching section into bounded timestamped transcript passages', async () => {
+      const meeting = {
+        id: 'transcript-meeting',
+        title: 'Release review',
+        started_at: '2026-09-01T10:00:00.000Z',
+        transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          segments: [
+            { speaker: 'Sam', startTime: 40, text: 'Final QA is complete.' },
+            {
+              speaker: 'Sam',
+              startTime: 42,
+              text: 'The release moves to Friday.',
+            },
+            { speaker: 'Lee', startTime: 45, text: 'I will notify support.' },
+            { speaker: 'Lee', startTime: 80, text: 'Unrelated budget topic.' },
+          ],
+        }),
+      } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getMeeting).mockReturnValue(meeting);
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
+        {
+          meeting,
+          section: {
+            id: 2,
+            meeting_id: meeting.id,
+            section_id: 'topic:release',
+            heading: 'Release timing',
+            kind: 'discussion',
+            summary: 'The release moved to Friday.',
+            content: 'The release moved to Friday after final QA.',
+            entities_text: 'release QA',
+            evidence_json: '[]',
+            transcript_start_index: 0,
+            transcript_end_index: 2,
+            source_revision: 'revision-2',
+            trust_status: 'grounded',
+            updated_at: '2026-09-01T10:30:00.000Z',
+          },
+          snippet: 'Release timing',
+        } satisfies SectionFtsRow,
+      ]);
+
+      const result = await retrieveContext(
+        {
+          keywords: ['release', 'Friday'],
+          expanded_keywords: [],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { query: 'Quote exactly why the release moved to Friday.' },
+      );
+
+      expect(result[0].evidence_kind).toBe('transcript');
+      expect(result[0].transcript_passages?.[0]).toMatchObject({
+        start_ms: 40000,
+        start_segment_index: 0,
+        end_segment_index: 2,
+      });
+      expect(result[0].transcript_passages?.[0].quote).toContain(
+        'The release moves to Friday.',
+      );
+      expect(result[0].transcript_passages?.[0].quote).not.toContain(
+        'Unrelated budget topic',
+      );
     });
   });
 
@@ -534,6 +680,123 @@ describe('Query Engine', () => {
         mentionedMeetingCount: 2,
       });
       expect(recall?.context).toHaveLength(1);
+    });
+
+    it('resolves “me” through the confirmed self identity and canonical commitments', () => {
+      const self = { id: 'person-self', name: 'Punit', type: 'person' };
+      vi.mocked(dbModule.identityStore.getSelfPersonId).mockReturnValue(
+        self.id,
+      );
+      vi.mocked(dbModule.getEntity).mockImplementation((id) =>
+        id === self.id
+          ? (self as ReturnType<typeof dbModule.getEntity>)
+          : undefined,
+      );
+      vi.mocked(dbModule.getMeeting).mockReturnValue(meetings[0]);
+      vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
+        open: [
+          {
+            id: 'commitment-1',
+            text: 'Send the revised launch plan.',
+            status: 'open',
+            dueDate: '2026-09-03',
+            sourceMeetingId: 'planning',
+            sourceKind: 'mid',
+            evidence: 'Punit will send the revised launch plan.',
+          },
+        ],
+        delivered: [
+          {
+            id: 'commitment-completed',
+            text: 'Archive the old checklist.',
+            status: 'completed',
+            dueDate: null,
+            sourceMeetingId: 'planning',
+            sourceKind: 'mid',
+            evidence: null,
+          },
+        ],
+        candidates: [
+          {
+            id: 'commitment-candidate',
+            text: 'Maybe prepare the customer appendix.',
+            status: 'active',
+            dueDate: null,
+            sourceMeetingId: 'planning',
+            sourceMeetingTitle: 'Launch planning',
+            evidence: 'Could you prepare the customer appendix?',
+            updatedAt: '2026-09-01T12:00:00.000Z',
+            suggestedOwnerName: 'Punit',
+          },
+        ],
+      });
+
+      const recall = buildAssigneeActionRecall(
+        "What's assigned to me?",
+        meetings,
+      );
+
+      expect(recall).toMatchObject({
+        assignee: 'you',
+        commitmentCount: 1,
+        coverageLimited: false,
+      });
+      expect(recall?.answer).toContain('Send the revised launch plan');
+      expect(recall?.answer).toContain(
+        'Possible follow-ups — ownership is not confirmed:',
+      );
+      expect(recall?.answer).toContain('Maybe prepare the customer appendix');
+      expect(recall?.answer).not.toContain('Archive the old checklist');
+      expect(dbModule.getCanonicalPersonCommitments).toHaveBeenCalledWith(
+        'person-self',
+      );
+
+      const completed = buildAssigneeActionRecall(
+        'What are my completed commitments?',
+        meetings,
+      );
+      expect(completed?.answer).toContain('Archive the old checklist');
+      expect(completed?.answer).not.toContain('Send the revised launch plan');
+    });
+  });
+
+  describe('buildWorkingMemoryOverviewRecall', () => {
+    it('uses working-memory citations as navigation to meeting evidence', () => {
+      const meeting = {
+        id: 'overview-meeting',
+        title: 'Company planning',
+        started_at: '2026-09-01T10:00:00.000Z',
+      } as dbModule.PersistedMeeting;
+      vi.mocked(dbModule.getMeeting).mockReturnValue(meeting);
+      vi.mocked(dbModule.getWorkingMemorySnapshot).mockReturnValue({
+        trust_status: 'grounded',
+        payload: {
+          evidence_index: [
+            {
+              meeting_id: 'overview-meeting',
+              quote: 'The team prioritized launch reliability.',
+            },
+          ],
+        },
+      } as ReturnType<typeof dbModule.getWorkingMemorySnapshot>);
+
+      const recall = buildWorkingMemoryOverviewRecall(
+        'Give me a global overview across meetings',
+        [],
+      );
+
+      expect(recall).toMatchObject({
+        scope: 'global',
+        context: [
+          {
+            meeting_id: 'overview-meeting',
+            evidence_kind: 'overview',
+          },
+        ],
+      });
+      expect(recall?.context[0].evidence_text).toContain(
+        'The team prioritized launch reliability.',
+      );
     });
   });
 
