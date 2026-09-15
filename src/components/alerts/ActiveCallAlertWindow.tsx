@@ -6,6 +6,7 @@ type AlertData =
   | {
       type: 'call';
       appName: string;
+      theme: 'light' | 'dark';
     }
   | {
       type: 'calendar';
@@ -69,6 +70,7 @@ const getAlertData = (): AlertData => {
   return {
     type: 'call',
     appName: normalized || 'Call',
+    theme: params.get('theme') === 'dark' ? 'dark' : 'light',
   };
 };
 
@@ -180,7 +182,9 @@ export const ActiveCallAlertWindow = () => {
 
   return (
     <div
-      className="active-call-alert"
+      className={`active-call-alert active-call-alert--${isCalendar ? 'calendar' : 'call'}${
+        !isCalendar ? ` alert-theme--${alertData.theme}` : ''
+      }`}
       onMouseEnter={pauseCountdown}
       onMouseLeave={resumeCountdown}
     >
@@ -244,7 +248,9 @@ export const ActiveCallAlertWindow = () => {
             </div>
           ) : (
             <div className="app-row">
-              <p className="app">{alertData.appName}</p>
+              <p className="app" title={alertData.appName}>
+                {alertData.appName}
+              </p>
             </div>
           )}
         </div>

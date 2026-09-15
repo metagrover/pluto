@@ -26,11 +26,19 @@ export const useActiveCallMonitor = ({
   const callMonitorLastConfidenceRef = useRef<'low' | 'medium' | 'high'>('low');
   const callMonitorLastPidCountRef = useRef<number | null>(null);
   const callMonitorPollInFlightRef = useRef(false);
+  const callMonitorLastDiagnosticRef = useRef<string | null>(null);
   const alertVisibilityAutoResetRef = useRef<number | null>(null);
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
+  const wasCaptureBusyRef = useRef(isRecording || isProcessing);
+  const suppressNextActiveBaselineRef = useRef(false);
 
   useEffect(() => {
+    const isCaptureBusy = isRecording || isProcessing;
+    if (wasCaptureBusyRef.current && !isCaptureBusy) {
+      suppressNextActiveBaselineRef.current = true;
+    }
+    wasCaptureBusyRef.current = isCaptureBusy;
     isRecordingRef.current = isRecording;
     isProcessingRef.current = isProcessing;
   }, [isRecording, isProcessing]);
@@ -45,8 +53,12 @@ export const useActiveCallMonitor = ({
     }
 
     if (visible) {
+      const theme = document.documentElement.classList.contains('dark')
+        ? 'dark'
+        : 'light';
       const shown = await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', {
         appName: appName || 'Call',
+        theme,
       });
       if (!shown) {
         return false;
@@ -98,22 +110,41 @@ export const useActiveCallMonitor = ({
           confidence,
         });
 
-        // Establish startup baseline: do not alert for calls that were already active
-        // before monitoring began.
         if (!callMonitorInitializedRef.current) {
-          const baselineActive = isActive;
           callMonitorInitializedRef.current = true;
-          callMonitorWasActiveRef.current = baselineActive;
-          callMonitorLastAppRef.current = baselineActive ? appName : null;
-          callMonitorLastConfidenceRef.current = baselineActive
-            ? confidence
-            : 'low';
-          callMonitorLastPidCountRef.current = baselineActive ? pidCount : null;
-          // Do not mark in-flight on baseline; this allows a later
-          // medium->high upgrade on the same app to still trigger an alert.
-          activeCallAlertInFlightRef.current = null;
-          return;
+          if (!isActive) {
+            suppressNextActiveBaselineRef.current = false;
+            callMonitorWasActiveRef.current = false;
+            callMonitorLastAppRef.current = null;
+            callMonitorLastConfidenceRef.current = 'low';
+            callMonitorLastPidCountRef.current = null;
+            activeCallAlertInFlightRef.current = null;
+            return;
+          }
+          if (suppressNextActiveBaselineRef.current) {
+            suppressNextActiveBaselineRef.current = false;
+            callMonitorWasActiveRef.current = true;
+            callMonitorLastAppRef.current = appName;
+            callMonitorLastConfidenceRef.current = confidence;
+            callMonitorLastPidCountRef.current = pidCount;
+            activeCallAlertInFlightRef.current = appName;
+            return;
+          }
         }
+
+        const diagnosticKey =
+          result?.reason === 'browser-tab-inspection-unavailable'
+            ? `${result.reason}:${appName || 'browser'}`
+            : null;
+        if (
+          diagnosticKey &&
+          callMonitorLastDiagnosticRef.current !== diagnosticKey
+        ) {
+          console.warn(
+            '[Pluto] Call detection could not inspect meeting tabs; browser call alerts may be unavailable.',
+          );
+        }
+        callMonitorLastDiagnosticRef.current = diagnosticKey;
 
         if (!isActive || !appName) {
           activeCallAlertInFlightRef.current = null;
@@ -159,10 +190,12 @@ export const useActiveCallMonitor = ({
           }
 
           activeCallAlertInFlightRef.current = appName;
-          activeCallAlertCooldownRef.current.set(appName, now);
           const shown = await setCallAlertVisibility(true, appName);
-          if (!shown) {
+          if (shown) {
+            activeCallAlertCooldownRef.current.set(appName, now);
+          } else {
             activeCallAlertInFlightRef.current = null;
+            callMonitorWasActiveRef.current = false;
           }
         }
       } catch {

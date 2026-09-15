@@ -44,7 +44,7 @@ describe('activeCallAlertWindow', () => {
       preloadPath: '/preload.js',
       rendererDist: '/dist',
     });
-    controller.show('Chrome');
+    controller.show('Chrome', 'light');
     expect(setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
   });
 
@@ -151,5 +151,75 @@ describe('activeCallAlertWindow', () => {
 
     controller.closeCalendarPrompt();
     expect(mockInstance.close).toHaveBeenCalled();
+  });
+
+  it('positions call alerts using the current toast offsets and forwards theme', async () => {
+    const { BrowserWindow } = await import('electron');
+    const {
+      createActiveCallAlertController,
+      ALERT_WIDTH,
+      CALL_ALERT_MARGIN_RIGHT,
+      CALL_ALERT_MARGIN_TOP,
+    } = await import('../../electron/windows/activeCallAlertWindow');
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+
+    expect(controller.show('Google Meet', 'dark')).toBe(true);
+
+    expect(BrowserWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        x: workArea.width - ALERT_WIDTH - CALL_ALERT_MARGIN_RIGHT,
+        y: workArea.y + CALL_ALERT_MARGIN_TOP,
+      }),
+    );
+    const mockInstance = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    expect(mockInstance.loadFile).toHaveBeenCalledWith(
+      expect.stringContaining('active-call-alert.html'),
+      { query: { type: 'call', appName: 'Google Meet', theme: 'dark' } },
+    );
+  });
+
+  it('does not let call show or hide operations replace a calendar prompt', async () => {
+    const { BrowserWindow } = await import('electron');
+    const { createActiveCallAlertController } = await import(
+      '../../electron/windows/activeCallAlertWindow'
+    );
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+    controller.showCalendarPrompt({
+      occurrenceKey: 'protected-calendar',
+      title: 'Planning',
+      start: '2026-09-12T22:00:00.000Z',
+    });
+    const calendarWindow = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    calendarWindow.close = vi.fn();
+
+    expect(controller.show('Google Meet', 'light')).toBe(false);
+    controller.closeCallAlert();
+
+    expect(BrowserWindow).toHaveBeenCalledTimes(1);
+    expect(calendarWindow.close).not.toHaveBeenCalled();
+  });
+
+  it('closes a call alert through the call-only close operation', async () => {
+    const { BrowserWindow } = await import('electron');
+    const { createActiveCallAlertController } = await import(
+      '../../electron/windows/activeCallAlertWindow'
+    );
+    const controller = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+    controller.show('Zoom', 'light');
+    const callWindow = vi.mocked(BrowserWindow).mock.results[0]?.value;
+    callWindow.close = vi.fn();
+
+    controller.closeCallAlert();
+
+    expect(callWindow.close).toHaveBeenCalled();
   });
 });

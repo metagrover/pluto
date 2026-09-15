@@ -89,7 +89,7 @@ describe('createActiveCallDetector', () => {
     const result = await detector();
 
     expect(result.active).toBe(true);
-    expect(result.appName).toBe('Chrome');
+    expect(result.appName).toBe('Google Meet');
     expect(result.confidence).toBe('high');
     expect(result.reason).toBe('call-app-running-with-active-audio');
   });
@@ -211,9 +211,36 @@ describe('createActiveCallDetector', () => {
     const result = await detector();
 
     expect(result.active).toBe(true);
-    expect(result.appName).toBe('Chrome');
+    expect(result.appName).toBe('Google Meet');
     expect(result.confidence).toBe('medium');
     expect(result.reason).toBe('browser-call-tab-open-silent-fallback');
     expect(runAudioProbe).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports when browser meeting-tab inspection is unavailable', async () => {
+    setPlatform('darwin');
+    const runAudioProbe = vi.fn(async () => true);
+    const detector = createActiveCallDetector({
+      runAudioProbe,
+      getRunningProcesses: async () => [
+        {
+          pid: 501,
+          ppid: 1,
+          name: 'google chrome',
+          command:
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        },
+      ],
+      detectBrowserCallProviders: async () => ({
+        providerByLabel: new Map(),
+        inspectionFailures: new Set(['Google Chrome']),
+      }),
+    });
+
+    const result = await detector();
+
+    expect(result.active).toBe(false);
+    expect(result.reason).toBe('browser-tab-inspection-unavailable');
+    expect(runAudioProbe).not.toHaveBeenCalled();
   });
 });

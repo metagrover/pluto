@@ -32,7 +32,7 @@ describe('ActiveCallAlertWindow component', () => {
   });
 
   it('renders active call alert with call details and sends take-notes action', async () => {
-    window.history.replaceState({}, '', '/?type=call&appName=Zoom');
+    window.history.replaceState({}, '', '/?type=call&appName=Zoom&theme=dark');
 
     const root = createRoot(container);
     await act(async () => {
@@ -42,6 +42,9 @@ describe('ActiveCallAlertWindow component', () => {
     expect(container.textContent).toContain('Call detected');
     expect(container.textContent).toContain('Zoom');
     expect(container.textContent).toContain('Take notes');
+    expect(container.querySelector('.active-call-alert--call')).not.toBeNull();
+    expect(container.querySelector('.alert-theme--dark')).not.toBeNull();
+    expect(container.querySelector('.app')?.getAttribute('title')).toBe('Zoom');
 
     const button = container.querySelector('.take-notes') as HTMLButtonElement;
     expect(button).not.toBeNull();
