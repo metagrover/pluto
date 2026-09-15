@@ -1,5 +1,6 @@
 import { classifyAskPlutoFailure } from '../intelligence/askPlutoFailures';
 import type { LLMWorkClass } from '../llm/llmWorkClass';
+import { isSerializedTaskPreemption } from '../serializedTaskGate';
 import { buildDreamingGenerationRequest } from './prompt';
 import type {
   DreamingLeasedRunRecord,
@@ -50,7 +51,9 @@ export {
   type DirtyEntityQueueDeps,
 } from './entityQueue';
 
-export const DREAMING_ENTITY_DEADLINE_MS = 3 * 60_000;
+export const DREAMING_ENTITY_DEADLINE_MS = 10 * 60_000;
+export const DREAMING_RENDERER_QUIET_MS = 3 * 60_000;
+export const DREAMING_STREAMING_IDLE_TIMEOUT_MS = 2 * 60_000;
 
 export interface IdleDreamingCoordinatorDeps {
   getPolicy: () => IdleDreamingPolicy;
@@ -64,6 +67,7 @@ export interface IdleDreamingCoordinatorDeps {
     promptVersion: string,
     workClass: LLMWorkClass,
     onStart: () => void,
+    onProgress?: () => void,
   ) => Promise<string>;
   proposalStore: {
     startRun(input: DreamingStartInput): DreamingStartResult;
@@ -117,6 +121,7 @@ export interface DreamingGenerationProvider {
       promptVersion: string;
       workClass: LLMWorkClass;
       onStart: () => void;
+      onProgress?: () => void;
     },
   ): Promise<string>;
 }
@@ -130,6 +135,7 @@ export const generateDreamingWithProvider = (
   promptVersion: string,
   workClass: LLMWorkClass,
   onStart: () => void,
+  onProgress?: () => void,
 ): Promise<string> =>
   provider.synthesizeKnowledgeDocument(prompt, {
     purpose: 'dreaming',
@@ -139,6 +145,7 @@ export const generateDreamingWithProvider = (
     promptVersion,
     workClass,
     onStart,
+    onProgress,
   });
 
 export const createIdleDreamingCoordinator = (
@@ -209,6 +216,9 @@ export const createIdleDreamingCoordinator = (
       activeController &&
       (activeMode === 'automatic' || deps.getPolicy().paused)
     ) {
+      console.warn(
+        `[Dreaming] Aborting active run on foreground activity (activeMode=${activeMode}, paused=${deps.getPolicy().paused})`,
+      );
       activeController.abort(
         new DOMException('Foreground activity resumed', 'AbortError'),
       );
@@ -223,6 +233,7 @@ export const createIdleDreamingCoordinator = (
     new Promise<string>((resolve, reject) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      let startedAt = now();
       const finish = (callback: () => void) => {
         if (settled) return;
         settled = true;
@@ -237,8 +248,9 @@ export const createIdleDreamingCoordinator = (
               new DOMException('Dreaming cancelled', 'AbortError'),
           ),
         );
-      const onStart = () => {
-        if (settled || timer) return;
+      const scheduleTimer = (durationMs: number) => {
+        if (settled) return;
+        if (timer) cancelTimeout(timer);
         timer = scheduleTimeout(
           () =>
             finish(() => {
@@ -246,8 +258,25 @@ export const createIdleDreamingCoordinator = (
               activeController?.abort(error);
               reject(error);
             }),
-          deadlineMs,
+          durationMs,
         );
+      };
+      const onStart = () => {
+        if (settled || timer) return;
+        startedAt = now();
+        scheduleTimer(deadlineMs);
+      };
+      const onProgress = () => {
+        if (settled) return;
+        const elapsed = now() - startedAt;
+        if (elapsed < deadlineMs) {
+          scheduleTimer(
+            Math.min(
+              DREAMING_STREAMING_IDLE_TIMEOUT_MS,
+              Math.max(1, deadlineMs - elapsed),
+            ),
+          );
+        }
       };
       signal.addEventListener('abort', onAbort, { once: true });
       void deps
@@ -259,6 +288,7 @@ export const createIdleDreamingCoordinator = (
           request.promptVersion,
           mode === 'manual' ? 'manual_notes' : 'background',
           onStart,
+          onProgress,
         )
         .then(
           (value) => finish(() => resolve(value)),
@@ -319,6 +349,9 @@ export const createIdleDreamingCoordinator = (
 
       const raw = await generateWithDeadline(request, signal, mode);
       if (signal.aborted) {
+        console.warn(
+          `[Dreaming] Run aborted after generation for ${candidate.type} ${candidate.entityId}: reason=${String(signal.reason)}`,
+        );
         if (lease) {
           deps.proposalStore.cancelRun({
             runId: lease.id,
@@ -330,6 +363,9 @@ export const createIdleDreamingCoordinator = (
 
       const validated = validateDreamingOutput(raw, pkg);
       if (!validated.valid) {
+        console.warn(
+          `[Dreaming] Output validation failed for ${candidate.type} ${candidate.entityId}: ${validated.error}. Raw output was:\n${raw}`,
+        );
         if (lease) {
           deps.proposalStore.failRun({
             runId: lease.id,
@@ -343,7 +379,15 @@ export const createIdleDreamingCoordinator = (
           errorCode: validated.error,
         };
       }
-      if (lease && mode === 'automatic' && !isEligible()) {
+      if (
+        lease &&
+        (activeMode === 'automatic' || mode === 'automatic') &&
+        activeMode !== 'manual' &&
+        !isEligible()
+      ) {
+        console.warn(
+          `[Dreaming] Automatic run cancelled due to ineligibility for ${candidate.type} ${candidate.entityId}`,
+        );
         deps.proposalStore.cancelRun({
           runId: lease.id,
           leaseToken: lease.leaseToken,
@@ -360,6 +404,13 @@ export const createIdleDreamingCoordinator = (
         (lease?.sourceRevision !== undefined &&
           currentPackage.sourceRevision !== lease.sourceRevision)
       ) {
+        console.warn(
+          `[Dreaming] Source revision mismatch or missing package for ${candidate.type} ${candidate.entityId}: ` +
+            `currentPackage=${Boolean(currentPackage)}, ` +
+            `pkgRevision=${pkg.sourceRevision}, ` +
+            `currentRevision=${currentPackage?.sourceRevision}, ` +
+            `leaseRevision=${lease?.sourceRevision}`,
+        );
         if (lease) {
           deps.proposalStore.cancelRun({
             runId: lease.id,
@@ -461,6 +512,9 @@ export const createIdleDreamingCoordinator = (
       };
     } catch (err) {
       if (err instanceof Error && err.message === 'dreaming_timeout') {
+        console.warn(
+          `[Dreaming] Timeout for ${candidate.type} ${candidate.entityId}`,
+        );
         if (lease) {
           deps.proposalStore.failRun({
             runId: lease.id,
@@ -474,10 +528,32 @@ export const createIdleDreamingCoordinator = (
           errorCode: 'timeout',
         };
       }
+      if (isSerializedTaskPreemption(err)) {
+        console.warn(
+          `[Dreaming] Preempted for ${candidate.type} ${candidate.entityId} (activeMode=${activeMode})`,
+        );
+        if (lease) {
+          deps.proposalStore.cancelRun({
+            runId: lease.id,
+            leaseToken: lease.leaseToken,
+          });
+        }
+        requeue(candidate);
+        if (activeMode === 'manual') {
+          const retryController = new AbortController();
+          activeController = retryController;
+          return executeEntityRun(candidate, retryController.signal, 'manual');
+        }
+        return { status: 'cancelled', entityId: candidate.entityId };
+      }
       if (
         signal.aborted ||
         (err instanceof Error && err.name === 'AbortError')
       ) {
+        console.warn(
+          `[Dreaming] Run aborted for ${candidate.type} ${candidate.entityId}: ` +
+            `signalAborted=${signal.aborted}, reason=${String(signal.reason)}, err=${err}`,
+        );
         if (lease) {
           deps.proposalStore.cancelRun({
             runId: lease.id,
@@ -517,9 +593,19 @@ export const createIdleDreamingCoordinator = (
       };
     }
     if (activeRun) {
-      return activeCandidate?.entityId === options.entityId
-        ? activeRun
-        : { status: 'busy', entityId: options.entityId };
+      if (activeCandidate?.entityId === options.entityId) {
+        if (!activeController?.signal.aborted) {
+          activeMode = 'manual';
+          return activeRun;
+        }
+        try {
+          await activeRun;
+        } catch {
+          // Allow previous aborted run to settle before starting a fresh run
+        }
+      } else {
+        return { status: 'busy', entityId: options.entityId };
+      }
     }
     // Manual requests bypass idle, power, thermal, and renderer-quiet checks,
     // but never foreground/capture/transcription/downstream pause locks.

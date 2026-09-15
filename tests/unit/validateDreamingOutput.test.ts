@@ -288,6 +288,45 @@ describe('validateDreamingOutput', () => {
     );
   });
 
+  it.each([
+    'The team agreed that Alice will deliver the checklist.',
+    'The team agreed on shipping the migration checklist.',
+    'Alice is responsible for the billing migration checklist.',
+    'Alice is tasked with the billing migration checklist.',
+    'The team is required to deliver the checklist.',
+    'Action items: deliver the billing migration checklist.',
+    'The team decided to ship the billing migration checklist.',
+    'The team must deliver the billing migration checklist.',
+    'Alice needs to deliver the billing migration checklist.',
+  ])('accepts explicit commitment language variant: %s', (notesContent) => {
+    const committedPackage: DreamingInputPackage = {
+      ...projectPackage,
+      recentMeetingNotes: [
+        {
+          meetingId: 'meeting-1',
+          title: 'Delivery review',
+          startedAt: '2026-08-01T10:00:00.000Z',
+          notesContent,
+        },
+      ],
+    };
+    expect(
+      validate(
+        {
+          status: 'proposed',
+          proposals: [
+            {
+              kind: 'project_commitment',
+              payload: { task: 'Deliver the billing migration checklist.' },
+              evidence: [{ meetingId: 'meeting-1', excerpt: notesContent }],
+            },
+          ],
+        },
+        committedPackage,
+      ),
+    ).toMatchObject({ valid: true, status: 'proposed' });
+  });
+
   it('accepts a project commitment with explicit commitment language', () => {
     const committedPackage: DreamingInputPackage = {
       ...projectPackage,
@@ -322,6 +361,54 @@ describe('validateDreamingOutput', () => {
         committedPackage,
       ),
     ).toMatchObject({ valid: true, status: 'proposed' });
+  });
+
+  it('drops an ungrounded commitment proposal if another valid proposal exists in the batch', () => {
+    const mixedPackage: DreamingInputPackage = {
+      ...projectPackage,
+      recentMeetingNotes: [
+        {
+          meetingId: 'meeting-1',
+          title: 'Delivery review',
+          startedAt: '2026-08-01T10:00:00.000Z',
+          notesContent:
+            'Stripe Elements is in progress. The team might deliver the checklist later.',
+        },
+      ],
+    };
+    const validProposal = milestoneProposal();
+    const tentativeCommitment: RawDreamingProposal = {
+      kind: 'project_commitment',
+      payload: { task: 'Deliver the checklist later.' },
+      evidence: [
+        {
+          meetingId: 'meeting-1',
+          excerpt: 'The team might deliver the checklist later.',
+        },
+      ],
+    };
+
+    const result = validate(
+      {
+        status: 'proposed',
+        proposals: [validProposal, tentativeCommitment],
+      },
+      mixedPackage,
+    );
+
+    expect(result).toMatchObject({
+      valid: true,
+      status: 'proposed',
+      proposals: [
+        expect.objectContaining({
+          kind: 'project_milestone',
+          payload: { name: 'Stripe Elements connected', status: 'in_progress' },
+        }),
+      ],
+    });
+    if (result.valid && result.status === 'proposed') {
+      expect(result.proposals).toHaveLength(1);
+    }
   });
 
   it('rejects current and legacy correction collisions after normalization', () => {

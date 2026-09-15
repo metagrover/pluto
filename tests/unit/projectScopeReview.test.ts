@@ -471,3 +471,19 @@ it('does not reconsider a user-confirmed unresolved classification', async () =>
   });
   expect(deps.generate).not.toHaveBeenCalled();
 });
+
+it('defers cleanly when preempted by higher priority inference', async () => {
+  const deps = makeDeps(1);
+  const preemptionError = new Error('The operation was aborted', {
+    cause: new DOMException('foreground_preempted', 'AbortError'),
+  });
+  deps.generate.mockRejectedValue(preemptionError);
+
+  const result = await reviewProjectScopeBatch(deps);
+  expect(result).toMatchObject({
+    reviewed: 0,
+    remaining: 1,
+    deferred: true,
+  });
+  expect(deps.save).not.toHaveBeenCalled();
+});

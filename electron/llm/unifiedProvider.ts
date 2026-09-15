@@ -58,6 +58,7 @@ const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_RESIDENCY_TIMEOUT_MS = 10_000;
 const OLLAMA_RESIDENCY_TOTAL_TIMEOUT_MS = 40_000;
 const OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS = 3 * 60_000;
+const OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
@@ -400,26 +401,29 @@ const normalizeOllamaModelName = (value: unknown): string | null => {
 };
 
 export const getOllamaTimeoutMs = (task: string): number =>
-  task === 'knowledgeDoc'
-    ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-    : task === 'projectScopeReview'
-      ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
-      : task === 'askPlutoLive'
-        ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
-        : task === 'structuredAnalysis' ||
-            task === 'notesWriter' ||
-            task === 'notesAudit' ||
-            task === 'notesMerge' ||
-            task === 'analysisEditorial' ||
-            task === 'topicSegmentation' ||
-            task === 'terminologyReconciliation' ||
-            task === 'topicAnalysis' ||
-            task === 'entities' ||
-            task === 'valueSignals'
-          ? OLLAMA_ANALYSIS_TIMEOUT_MS
-          : OLLAMA_TIMEOUT_MS;
+  task === 'dreaming'
+    ? OLLAMA_DREAMING_CAPACITY_TIMEOUT_MS
+    : task === 'knowledgeDoc'
+      ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
+      : task === 'projectScopeReview'
+        ? OLLAMA_PROJECT_SCOPE_CAPACITY_TIMEOUT_MS
+        : task === 'askPlutoLive'
+          ? OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS
+          : task === 'structuredAnalysis' ||
+              task === 'notesWriter' ||
+              task === 'notesAudit' ||
+              task === 'notesMerge' ||
+              task === 'analysisEditorial' ||
+              task === 'topicSegmentation' ||
+              task === 'terminologyReconciliation' ||
+              task === 'topicAnalysis' ||
+              task === 'entities' ||
+              task === 'valueSignals'
+            ? OLLAMA_ANALYSIS_TIMEOUT_MS
+            : OLLAMA_TIMEOUT_MS;
 
 const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
+  task === 'dreaming' ||
   task === 'commitmentReconciliation' ||
   task === 'projectScopeReview' ||
   task === 'notesWriter' ||
@@ -464,6 +468,7 @@ interface TextGenerationOptions {
   signal?: AbortSignal;
   onStart?: () => void;
   onToken?: (delta: string) => void;
+  onProgress?: () => void;
   /** Entire current physical answer, reset to empty on each retry. UI only. */
   onNotesPartial?: (answer: string) => void;
   notesBudget?: { contextTokens: number; outputTokens: number };
@@ -910,6 +915,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       promptVersion?: string;
       workClass?: import('./llmWorkClass').LLMWorkClass;
       onStart?: () => void;
+      onProgress?: () => void;
     } = {},
   ): Promise<string> {
     if (options.purpose === 'dreaming' && this.providerType !== 'ollama') {
@@ -938,6 +944,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       signal: options.signal,
       workClass: options.workClass,
       onStart: options.onStart,
+      onProgress: options.onProgress,
     });
   }
 
@@ -1382,6 +1389,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     modelOverride,
     onNotesMetrics,
     onNotesPartial,
+    onProgress,
   }: TextGenerationOptions): Promise<string> {
     ollamaActivityEpoch += 1;
     const model = modelOverride
@@ -1430,7 +1438,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       task === 'queryClassification' ||
       task === 'projectScopeReview' ||
       task === 'commitmentReconciliation' ||
-      task === 'title'
+      task === 'title' ||
+      task === 'dreaming'
     )
       requestBody.think = false;
     if (task === 'askPluto') requestBody.think = false;
@@ -1551,6 +1560,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           },
           (chunk) => {
             deadline?.recordProgress();
+            onProgress?.();
             return consumeChunk(chunk);
           },
         );
@@ -1570,6 +1580,14 @@ export class UnifiedLLMProvider implements LLMProvider {
           throw new Error('project_scope_response_incomplete');
         if (task === 'commitmentReconciliation' && !completed)
           throw new Error('commitment_response_incomplete');
+        const duration = Date.now() - start;
+        try {
+          console.log(
+            `[Ollama] Generation complete in ${duration}ms (${task})`,
+          );
+        } catch (_ioErr) {
+          // stdout may be closed in packaged Electron — ignore write errors
+        }
         return answer;
       } catch (error) {
         const fastModel = (this.settings.ollama_fast_model || '').trim();
@@ -1796,7 +1814,11 @@ export class UnifiedLLMProvider implements LLMProvider {
     externalSignal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(
+      () =>
+        controller.abort(new DOMException('ollama_timeout', 'TimeoutError')),
+      timeoutMs,
+    );
     const abortFromExternal = () => controller.abort(externalSignal?.reason);
     externalSignal?.addEventListener('abort', abortFromExternal, {
       once: true,

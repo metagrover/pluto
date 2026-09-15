@@ -211,6 +211,7 @@ export interface LLMProvider {
       promptVersion?: string;
       workClass?: import('./llmWorkClass').LLMWorkClass;
       onStart?: () => void;
+      onProgress?: () => void;
     },
   ): Promise<string>;
   answerAskPluto(

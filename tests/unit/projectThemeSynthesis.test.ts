@@ -277,4 +277,21 @@ describe('cross-conversation project theme synthesis', () => {
     });
     expect(fixture.deps.generate).not.toHaveBeenCalled();
   });
+
+  it('defers cleanly when preempted by foreground inference without saving failed state', async () => {
+    const fixture = makeDeps();
+    const preemptionError = new Error('The operation was aborted', {
+      cause: new DOMException('foreground_preempted', 'AbortError'),
+    });
+    fixture.deps.generate.mockRejectedValue(preemptionError);
+
+    const result = await synthesizeProjectThemes(fixture.deps);
+    expect(result).toMatchObject({
+      discovered: 0,
+      remaining: 1,
+      failed: 0,
+      deferred: true,
+    });
+    expect(fixture.state).toBeNull();
+  });
 });

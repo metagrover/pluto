@@ -124,6 +124,7 @@ describe('IdleDreamingCoordinator', () => {
       request.promptVersion,
       'background',
       expect.any(Function),
+      expect.any(Function),
     );
     expect(proposalStore.startRun).toHaveBeenCalledWith({
       entityId: 'proj-1',
@@ -319,6 +320,7 @@ describe('IdleDreamingCoordinator', () => {
       expect.any(String),
       'manual_notes',
       expect.any(Function),
+      expect.any(Function),
     );
   });
 
@@ -465,6 +467,109 @@ describe('IdleDreamingCoordinator', () => {
     await expect(run).resolves.toMatchObject({ status: 'no_change' });
   });
 
+  it('promotes an in-flight automatic run to manual when triggerNow is called', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let release!: () => void;
+    generateMock.mockImplementation(
+      async (_prompt: string, _schema: unknown, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise<string>((resolve) => {
+          release = () =>
+            resolve(JSON.stringify({ status: 'no_change', proposals: [] }));
+        });
+      },
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    const idleRun = coordinator.attemptIdleRun();
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledOnce());
+
+    const manualRun = coordinator.triggerNow({ entityId: 'proj-1' });
+
+    policy.systemIdleSeconds = 0;
+    policy.rendererQuiet = false;
+    coordinator.notifyForegroundActivity();
+
+    expect(capturedSignal?.aborted).toBe(false);
+
+    release();
+    const [idleResult, manualResult] = await Promise.all([idleRun, manualRun]);
+    expect(manualResult).toMatchObject({ status: 'no_change' });
+    expect(idleResult).toMatchObject({ status: 'no_change' });
+    expect(proposalStore.cancelRun).not.toHaveBeenCalled();
+    expect(proposalStore.completeRun).toHaveBeenCalledOnce();
+  });
+
+  it('recovers with a fresh manual run when triggerNow is called on an already-aborted run', async () => {
+    let attempt = 0;
+    let releaseSecond!: (val: string) => void;
+    generateMock.mockImplementation(
+      async (_prompt: string, _schema: unknown, signal: AbortSignal) => {
+        attempt += 1;
+        const currentAttempt = attempt;
+        return new Promise<string>((resolve, reject) => {
+          if (currentAttempt === 1) {
+            signal.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          } else {
+            releaseSecond = resolve;
+          }
+        });
+      },
+    );
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    const idleRun = coordinator.attemptIdleRun();
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledTimes(1));
+
+    coordinator.notifyForegroundActivity();
+    await expect(idleRun).resolves.toMatchObject({ status: 'cancelled' });
+
+    const manualRun = coordinator.triggerNow({ entityId: 'proj-1' });
+    await vi.waitFor(() => expect(generateMock).toHaveBeenCalledTimes(2));
+
+    releaseSecond(JSON.stringify({ status: 'no_change', proposals: [] }));
+    await expect(manualRun).resolves.toMatchObject({ status: 'no_change' });
+  });
+
+  it('retries when a manual run is preempted by foreground task gate', async () => {
+    let attempt = 0;
+    generateMock.mockImplementation(async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new DOMException('foreground_preempted', 'AbortError');
+      }
+      return JSON.stringify({ status: 'no_change', proposals: [] });
+    });
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      getEntity: () => ({ type: 'project' }),
+    });
+
+    const manualRun = coordinator.triggerNow({ entityId: 'proj-1' });
+    await expect(manualRun).resolves.toMatchObject({ status: 'no_change' });
+    expect(generateMock).toHaveBeenCalledTimes(2);
+  });
+
   it('still cancels a manual run when a safety pause lock becomes active', async () => {
     generateMock.mockReturnValue(new Promise(() => {}));
     const coordinator = createIdleDreamingCoordinator({
@@ -573,7 +678,7 @@ describe('IdleDreamingCoordinator', () => {
     await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
       status: 'existing',
     });
-    expect(retryDelay).toBe(60_000);
+    expect(retryDelay).toBe(480_000);
     expect(generateMock).not.toHaveBeenCalled();
 
     nowMs += retryDelay!;
@@ -746,6 +851,56 @@ describe('IdleDreamingCoordinator', () => {
     resolveLate(JSON.stringify({ status: 'no_change', proposals: [] }));
     await Promise.resolve();
     expect(proposalStore.completeRun).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('resets the idle window when onProgress is called during generation', async () => {
+    vi.useFakeTimers();
+    let resolveGen!: (value: string) => void;
+    let admit!: () => void;
+    let progress!: () => void;
+    generateMock.mockImplementation(
+      (
+        _prompt: string,
+        _schema: unknown,
+        _signal: AbortSignal,
+        _model: string,
+        _promptVersion: string,
+        _workClass: string,
+        onStart: () => void,
+        onProgress: () => void,
+      ) => {
+        admit = onStart;
+        progress = onProgress;
+        return new Promise<string>((resolve) => {
+          resolveGen = resolve;
+        });
+      },
+    );
+    const unloadModel = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      deadlineMs: 1_000,
+      unloadModel,
+    });
+
+    const run = coordinator.attemptIdleRun();
+    admit();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(proposalStore.failRun).not.toHaveBeenCalled();
+    progress();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(proposalStore.failRun).not.toHaveBeenCalled();
+    resolveGen(JSON.stringify({ status: 'no_change', proposals: [] }));
+    await expect(run).resolves.toEqual({
+      status: 'no_change',
+      entityId: 'proj-1',
+      proposals: [],
+    });
     vi.useRealTimers();
   });
 

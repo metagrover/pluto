@@ -44,7 +44,7 @@ const normalizeEvidenceText = (text: string): string =>
     .trim();
 
 const EXPLICIT_COMMITMENT_CUE =
-  /\b(?:agreed to|committed to|promised to|must|needs? to|assigned to|action item(?: is|:)?|owns? the task of)\b/;
+  /\b(?:agreed (?:to|that|on)|committed (?:to|that)|promised (?:to|that)|must|needs? to|assigned (?:to|that)|(?:is |are |was |were )?required to|action items?(?: is| are)?|owns? the task of|responsible for|tasked with|decided (?:to|that))\b/;
 const TENTATIVE_COMMITMENT_CUE =
   /\b(?:propos(?:e|es|ed|ing|als?)|suggest(?:s|ed|ing|ions?)?|consider(?:s|ed|ing|ation)?|might|may|could|options?|alternatives?|aim(?:s|ed|ing)? to|aspirations?)\b/;
 const NEGATED_COMMITMENT_CUE =
@@ -174,28 +174,43 @@ export const validateDreamingOutput = (
   );
   const fingerprints = new Set<string>();
   const proposals: ValidatedDreamingProposal[] = [];
+  let firstRejectionError: string | null = null;
 
   for (const value of parsed.proposals) {
     const proposal = parseRawDreamingProposal(value, pkg.entityType);
-    if (!proposal) return invalid('invalid_proposal_shape');
+    if (!proposal) {
+      firstRejectionError ??= 'invalid_proposal_shape';
+      continue;
+    }
 
     const distinctMeetingIds = new Set<string>();
+    let evidenceValid = true;
     for (const reference of proposal.evidence) {
       const notes = meetingNotes.get(reference.meetingId);
       const excerpt = normalizeEvidenceText(reference.excerpt);
       if (!notes || !excerpt || !notes.includes(excerpt)) {
-        return invalid('invalid_proposal_evidence');
+        evidenceValid = false;
+        break;
       }
       distinctMeetingIds.add(reference.meetingId);
     }
+    if (!evidenceValid) {
+      firstRejectionError ??= 'invalid_proposal_evidence';
+      continue;
+    }
     if (proposal.kind === 'project_summary' && distinctMeetingIds.size < 2) {
-      return invalid('insufficient_summary_evidence');
+      firstRejectionError ??= 'insufficient_summary_evidence';
+      continue;
     }
     if (
       proposal.kind === 'project_commitment' &&
       !hasExplicitCommitmentEvidence(proposal)
     ) {
-      return invalid('unsupported_project_commitment');
+      console.warn(
+        `[Dreaming] Dropping ungrounded commitment proposal: "${proposal.payload.task}"`,
+      );
+      firstRejectionError ??= 'unsupported_project_commitment';
+      continue;
     }
 
     const fingerprint = generateProposalFingerprint(proposal, pkg);
@@ -203,13 +218,18 @@ export const validateDreamingOutput = (
       corrections.has(generateItemFingerprint(fingerprint)) ||
       corrections.has(legacyClaimFingerprint(proposal))
     ) {
-      return invalid('proposal_corrected');
+      firstRejectionError ??= 'proposal_corrected';
+      continue;
     }
     if (fingerprints.has(fingerprint)) {
       return invalid('duplicate_proposal');
     }
     fingerprints.add(fingerprint);
     proposals.push({ ...proposal, fingerprint } as ValidatedDreamingProposal);
+  }
+
+  if (proposals.length === 0) {
+    return invalid(firstRejectionError ?? 'invalid_proposed_output');
   }
 
   return {

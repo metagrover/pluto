@@ -6,6 +6,7 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { selectProjectReviewSources } from './projectScopeEvidence';
+import { isSerializedTaskPreemption } from './serializedTaskGate';
 
 type Candidate = { id: string; name: string; metadata: string | null };
 type Source = { id: string; text: string; fullText?: string };
@@ -153,6 +154,9 @@ ${JSON.stringify(supported.map((project) => ({ id: project.id, name: project.nam
         }
       }
     } catch (error) {
+      if (isSerializedTaskPreemption(error)) {
+        return { reviewed: 0, remaining: pending.length, deferred: true };
+      }
       // A malformed candidate must not block unrelated candidates or become an
       // assessment. Provider outages still fail the run instead of fanning out.
       if (

@@ -1237,6 +1237,31 @@ describe('UnifiedLLMProvider', () => {
     );
   });
 
+  it('keeps Ollama dreaming generation non-thinking for thinking models', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse({ models: [{ name: 'gemma4:12b' }] });
+      }
+      requestBody = parseRequestBody(init);
+      return jsonResponse({
+        response: '{"status":"no_change","proposals":[]}',
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'gemma4:12b',
+    });
+    await provider.synthesizeKnowledgeDocument('Consolidate project updates', {
+      purpose: 'dreaming',
+      model: 'gemma4:12b',
+      promptVersion: 'dreaming-proposals-v2',
+      responseSchema: { type: 'object' },
+    });
+
+    expect(requestBody.think).toBe(false);
+  });
+
   it('strips a model response label from a generated title', async () => {
     installFetchMock(() =>
       jsonResponse({ content: [{ text: 'Title: Roadmap Review' }] }),

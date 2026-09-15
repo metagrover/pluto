@@ -3,6 +3,7 @@ import {
   type ProjectQualification,
   readProjectQualification,
 } from '../src/utils/projectQualification';
+import { isSerializedTaskPreemption } from './serializedTaskGate';
 
 export const PROJECT_THEME_SYNTHESIS_VERSION = 2;
 
@@ -316,6 +317,9 @@ ${JSON.stringify(
     );
     parsed = JSON.parse(cleanJson(raw));
   } catch (error) {
+    if (isSerializedTaskPreemption(error)) {
+      return { discovered: 0, remaining: 1, failed: 0, deferred: true };
+    }
     if (
       !(error instanceof SyntaxError) &&
       !(error instanceof Error && error.message === 'invalid_theme_response')

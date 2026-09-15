@@ -138,7 +138,7 @@ export const buildDreamingGenerationRequest = (
       : '';
   const commitmentEvidenceRule =
     input.entityType === 'project'
-      ? ' A project_commitment requires an excerpt with explicit agreed, assigned, promised, or required action language; tentative, negated, or conditional language is not a commitment, and an excerpt mixing those qualifiers with explicit language must not be used.'
+      ? " A project_commitment requires an excerpt with explicit agreed, committed, promised, assigned, tasked, responsible, or required action language (e.g. 'agreed to', 'committed to', 'assigned to', 'responsible for', 'tasked with', 'required to', 'action item:', 'must', 'needs to'); tentative, negated, or conditional language is not a commitment, and an excerpt mixing those qualifiers with explicit language must not be used. If no explicit unconditional commitment exists in the notes, do not output a project_commitment."
       : '';
 
   return {

@@ -451,6 +451,7 @@ import {
 } from './dreaming/entityQueue';
 import {
   DREAMING_ENTITY_DEADLINE_MS,
+  DREAMING_RENDERER_QUIET_MS,
   type IdleDreamingResult,
   createDirtyEntityQueue,
   createIdleDreamingCoordinator,
@@ -1374,7 +1375,7 @@ app.whenReady().then(async () => {
       onBattery: powerMonitor.isOnBatteryPower(),
       thermalState: powerMonitor.getCurrentThermalState(),
       rendererQuiet:
-        Date.now() - lastRendererActivityAt >= DREAMING_ENTITY_DEADLINE_MS,
+        Date.now() - lastRendererActivityAt >= DREAMING_RENDERER_QUIET_MS,
       paused: Object.entries(knowledgeSynthesisPause.snapshot()).some(
         ([reason, count]) => reason !== 'llm_active' && Number(count) > 0,
       ),
@@ -1397,6 +1398,7 @@ app.whenReady().then(async () => {
       promptVersion,
       workClass,
       onStart,
+      onProgress,
     ) => {
       const provider = new UnifiedLLMProvider(
         'ollama',
@@ -1412,6 +1414,7 @@ app.whenReady().then(async () => {
         promptVersion,
         workClass,
         onStart,
+        onProgress,
       );
     },
     unloadModel: async (signal) => {
