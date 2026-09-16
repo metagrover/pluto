@@ -1973,9 +1973,15 @@ const SelectedMeetingView = ({
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <p className="leading-relaxed">
-                          <strong>{candidate.speakerName}</strong> mentioned completing{' '}
-                          <strong className="underline underline-offset-2">&ldquo;{candidate.actionName}&rdquo;</strong>:{' '}
-                          <span className="italic opacity-80">&ldquo;{candidate.snippet}&rdquo;</span>
+                          <strong>{candidate.speakerName}</strong> mentioned
+                          completing{' '}
+                          <strong className="underline underline-offset-2">
+                            &ldquo;{candidate.actionName}&rdquo;
+                          </strong>
+                          :{' '}
+                          <span className="italic opacity-80">
+                            &ldquo;{candidate.snippet}&rdquo;
+                          </span>
                         </p>
                       </div>
                     </div>
