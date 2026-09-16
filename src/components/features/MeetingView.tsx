@@ -1165,6 +1165,109 @@ const SelectedMeetingView = ({
   const canImproveHistoricalSpeakerLabelsForMeeting =
     canImproveHistoricalSpeakerLabels(selectedMeeting);
 
+  const [dismissedVerbalResolutions, setDismissedVerbalResolutions] = useState<
+    Set<string>
+  >(new Set());
+
+  const verbalCompletionCandidates = useMemo(() => {
+    const activeActions = meetingEntities.filter(
+      (e) =>
+        e.type === 'action_item' &&
+        e.status !== 'completed' &&
+        !dismissedVerbalResolutions.has(e.id),
+    );
+    if (!activeActions.length || !transcriptTurns.length) return [];
+
+    const completionRegex =
+      /\b(?:i(?:'ve| have)?\s+(?:finished|completed|sent|shipped|done with|submitted|wrapped up)|(?:that|it)(?:'s| is)?\s+(?:done|taken care of|finished|completed)|we\s+(?:finished|completed|wrapped up|shipped))\b/i;
+    const stopWords = new Set([
+      'meeting',
+      'review',
+      'please',
+      'update',
+      'follow',
+      'check',
+      'about',
+      'with',
+      'that',
+      'this',
+      'from',
+      'have',
+    ]);
+
+    const candidates: Array<{
+      actionId: string;
+      actionName: string;
+      speakerName: string;
+      snippet: string;
+    }> = [];
+
+    for (const action of activeActions) {
+      const words = action.name
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !stopWords.has(w));
+      const keywords =
+        words.length > 0
+          ? words
+          : action.name
+              .toLowerCase()
+              .split(/\s+/)
+              .filter((w) => w.length >= 3);
+      if (!keywords.length) continue;
+
+      for (const turn of transcriptTurns) {
+        const turnText = turn.segments.map((s) => s.text).join(' ');
+        if (completionRegex.test(turnText)) {
+          const lower = turnText.toLowerCase();
+          const hasKeyword = keywords.some((k) => lower.includes(k));
+          if (hasKeyword) {
+            const speakerName =
+              displayNames[String(turn.speaker)] ||
+              String(turn.speaker || 'Speaker');
+            const snippet =
+              turnText.length > 120 ? `${turnText.slice(0, 117)}…` : turnText;
+            candidates.push({
+              actionId: action.id,
+              actionName: action.name,
+              speakerName,
+              snippet,
+            });
+            break;
+          }
+        }
+      }
+    }
+    return candidates;
+  }, [
+    meetingEntities,
+    transcriptTurns,
+    dismissedVerbalResolutions,
+    displayNames,
+  ]);
+
+  const handleConfirmVerbalCompletion = async (
+    actionId: string,
+    actionName: string,
+  ) => {
+    try {
+      await upsertEntity({
+        id: actionId,
+        type: 'action_item',
+        name: actionName,
+        status: 'completed',
+      });
+      setMeetingEntities((prev) =>
+        prev.map((e) =>
+          e.id === actionId ? { ...e, status: 'completed' } : e,
+        ),
+      );
+    } catch (err) {
+      console.error('Failed to mark action completed:', err);
+    }
+  };
+
   const notesDocument = buildMeetingNotesDocument({
     v2,
     v3,
@@ -1859,6 +1962,52 @@ const SelectedMeetingView = ({
                 Couldn’t update notes. Your previous notes are still here.
               </output>
             ) : null}
+            {verbalCompletionCandidates.length > 0 && (
+              <div className="mx-auto mb-6 w-full max-w-[760px] px-6 md:px-8 space-y-2">
+                {verbalCompletionCandidates.map((candidate) => (
+                  <div
+                    key={candidate.actionId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-900 dark:text-emerald-200 shadow-2xs"
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="leading-relaxed">
+                          <strong>{candidate.speakerName}</strong> mentioned completing{' '}
+                          <strong className="underline underline-offset-2">&ldquo;{candidate.actionName}&rdquo;</strong>:{' '}
+                          <span className="italic opacity-80">&ldquo;{candidate.snippet}&rdquo;</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleConfirmVerbalCompletion(
+                            candidate.actionId,
+                            candidate.actionName,
+                          )
+                        }
+                        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors shadow-2xs"
+                      >
+                        Mark Done
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDismissedVerbalResolutions(
+                            (prev) => new Set([...prev, candidate.actionId]),
+                          )
+                        }
+                        className="rounded-lg px-2 py-1 text-xs text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover/50 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <SavedEditConflicts
               conflicts={editConflicts}
               onCopy={handleCopySummary}
