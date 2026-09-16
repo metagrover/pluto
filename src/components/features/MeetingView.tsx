@@ -67,6 +67,7 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
+import { InferenceActivityInline } from '../layout/InferenceActivityBadge';
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
@@ -1902,18 +1903,29 @@ const SelectedMeetingView = ({
           downstreamPresentation.state === 'loading' &&
           !draftPreview) ||
         (isAnalysisRetrying && !draftPreview) ? (
-          <MeetingAnalysisSkeleton
-            title={
-              downstreamPresentation.state === 'loading'
-                ? downstreamPresentation.title
-                : 'Preparing notes'
-            }
-            detail={
-              downstreamPresentation.state === 'loading'
-                ? downstreamPresentation.detail
-                : 'Pluto is preparing your notes from the transcript…'
-            }
-          />
+          <>
+            <InferenceActivityInline
+              tasks={[
+                'notesWriter',
+                'notesAudit',
+                'notesRepair',
+                'summary',
+                'entities',
+              ]}
+            />
+            <MeetingAnalysisSkeleton
+              title={
+                downstreamPresentation.state === 'loading'
+                  ? downstreamPresentation.title
+                  : 'Preparing notes'
+              }
+              detail={
+                downstreamPresentation.state === 'loading'
+                  ? downstreamPresentation.detail
+                  : 'Pluto is preparing your notes from the transcript…'
+              }
+            />
+          </>
         ) : null}
         {isMeetingProcessing && downstreamPresentation.state === 'queued' ? (
           <MeetingAnalysisQueueStatus

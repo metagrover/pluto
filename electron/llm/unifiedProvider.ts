@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import {
   OLLAMA_GENERAL_MODEL,
@@ -12,6 +13,7 @@ import {
 } from './analysisDocument';
 import { normalizeTranscriptEvidence } from './analysisGrounding';
 import type { AnalysisDocumentV3, TopicSection } from './analysisTypes';
+import { publishInferenceActivity } from './inferenceActivity';
 import {
   type LocalInferenceTask,
   runWithLocalInferenceCoordinator,
@@ -486,10 +488,27 @@ export class UnifiedLLMProvider implements LLMProvider {
   name: string;
   requiresApiKey: boolean;
 
+  private usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+
   private openAIBaseUrl = 'https://api.openai.com/v1';
+  private openRouterBaseUrl = 'https://openrouter.ai/api/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenAI | null = null;
+
+  public getUsageSnapshot() {
+    return { ...this.usage };
+  }
+
+  private recordUsage(
+    inputTokens: number | null,
+    outputTokens: number | null,
+    costUsd = 0,
+  ) {
+    this.usage.inputTokens += inputTokens ?? 0;
+    this.usage.outputTokens += outputTokens ?? 0;
+    this.usage.costUsd += Number.isFinite(costUsd) ? costUsd : 0;
+  }
   private activeOllamaModel: string | null = null;
 
   constructor(
@@ -515,6 +534,11 @@ export class UnifiedLLMProvider implements LLMProvider {
         return !!this.settings.gemini_api_key;
       case 'openai':
         return !!this.settings.openai_api_key;
+      case 'openrouter':
+        return Boolean(
+          this.settings.openrouter_api_key &&
+            this.settings.openrouter_model?.trim(),
+        );
       case 'claude':
         return !!this.settings.claude_api_key;
       default:
@@ -728,11 +752,23 @@ export class UnifiedLLMProvider implements LLMProvider {
         );
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
+      case 'openrouter':
+        return this.settings.openrouter_model || '';
       case 'claude':
         return this.settings.claude_model || 'claude-3-haiku-20240307';
       case 'gemini':
         return resolveGeminiModelName(this.settings.gemini_model);
     }
+  }
+
+  private getConfiguredTaskModel(task: LLMTask): string {
+    if (
+      this.providerType === 'ollama' &&
+      (task === 'askPluto' || task === 'askPlutoLive')
+    ) {
+      return this.settings.ollama_fast_model || OLLAMA_QUICK_CHAT_MODEL;
+    }
+    return this.getConfiguredAnalysisModel();
   }
 
   // =============================================
@@ -1042,6 +1078,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         return 'Google Gemini';
       case 'openai':
         return 'OpenAI';
+      case 'openrouter':
+        return 'OpenRouter';
       case 'claude':
         return 'Anthropic Claude';
       default:
@@ -1050,6 +1088,15 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async generateText(options: TextGenerationOptions): Promise<string> {
+    const activity = {
+      requestId: randomUUID(),
+      task: options.task,
+      provider: this.providerType,
+      model: this.getConfiguredTaskModel(options.task),
+      location: (this.providerType === 'ollama' ? 'local' : 'cloud') as
+        | 'local'
+        | 'cloud',
+    };
     const queuedAt = Date.now();
     const notesStageObserver = options.notesBudget
       ? options.notesStageObserver
@@ -1108,6 +1155,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       knowledgeSynthesisPause.acquire('llm_active');
     }
 
+    publishInferenceActivity({
+      ...activity,
+      state: 'started',
+      at: Date.now(),
+    });
     try {
       options.signal?.throwIfAborted();
       let result: string;
@@ -1116,6 +1168,11 @@ export class UnifiedLLMProvider implements LLMProvider {
           observeNotesStarted();
           options.onStart?.();
           result = await this.generateWithOpenAI(options);
+          break;
+        case 'openrouter':
+          observeNotesStarted();
+          options.onStart?.();
+          result = await this.generateWithOpenRouter(options);
           break;
         case 'claude':
           observeNotesStarted();
@@ -1172,8 +1229,18 @@ export class UnifiedLLMProvider implements LLMProvider {
       }
       options.signal?.throwIfAborted();
       observeNotesFinished('complete');
+      publishInferenceActivity({
+        ...activity,
+        state: 'completed',
+        at: Date.now(),
+      });
       return result;
     } catch (error) {
+      publishInferenceActivity({
+        ...activity,
+        state: isAbortError(error) ? 'cancelled' : 'failed',
+        at: Date.now(),
+      });
       observeNotesFinished(
         isSerializedTaskPreemption(error)
           ? 'preempted'
@@ -1221,6 +1288,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     responseSchema,
     signal,
     notesBudget,
+    onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
     if (!this.settings.openai_api_key) {
       throw new Error('OpenAI API key not configured');
@@ -1228,6 +1296,94 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     const body: Record<string, unknown> = {
       model: this.settings.openai_model || 'gpt-4o-mini',
+      instructions: this.getSystemInstruction(task),
+      input: prompt,
+      store: false,
+      temperature: this.getTemperature(task),
+      ...(notesBudget ? { max_output_tokens: notesBudget.outputTokens } : {}),
+    };
+
+    if (jsonMode) {
+      body.text = {
+        format: responseSchema
+          ? {
+              type: 'json_schema',
+              name: task,
+              schema: responseSchema,
+              strict: true,
+            }
+          : { type: 'json_object' },
+      };
+    }
+
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(180_000)])
+      : AbortSignal.timeout(180_000);
+    const response = await fetch(`${this.openAIBaseUrl}/responses`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.settings.openai_api_key}`,
+      },
+      body: JSON.stringify(body),
+      signal: requestSignal,
+    });
+
+    if (!response.ok) {
+      if (notesBudget) return rejectNotesProviderResponse(response);
+      throw new Error(`OpenAI API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const inputTokens =
+      typeof data.usage?.input_tokens === 'number'
+        ? data.usage.input_tokens
+        : null;
+    const outputTokens =
+      typeof data.usage?.output_tokens === 'number'
+        ? data.usage.output_tokens
+        : null;
+    this.recordUsage(inputTokens, outputTokens);
+    onNotesMetrics?.({ inputTokens, outputTokens });
+    if (
+      notesBudget &&
+      data.status === 'incomplete' &&
+      data.incomplete_details?.reason === 'max_output_tokens'
+    )
+      throw new MeetingNotesError('notes_output_truncated');
+    if (task === 'commitmentReconciliation' && data.status === 'incomplete')
+      throw new Error('commitment_response_incomplete');
+    if (typeof data.output_text === 'string') return data.output_text;
+    const output = Array.isArray(data.output)
+      ? (data.output as Array<{
+          content?: Array<{ type?: unknown; text?: unknown }>;
+        }>)
+      : [];
+    return output.length > 0
+      ? output
+          .flatMap((item) => (Array.isArray(item.content) ? item.content : []))
+          .filter((item) => item.type === 'output_text')
+          .map((item) => item.text)
+          .filter((text: unknown): text is string => typeof text === 'string')
+          .join('')
+      : '';
+  }
+
+  private async generateWithOpenRouter({
+    prompt,
+    task,
+    jsonMode,
+    responseSchema,
+    signal,
+    notesBudget,
+    onNotesMetrics,
+  }: TextGenerationOptions): Promise<string> {
+    const apiKey = this.settings.openrouter_api_key;
+    const model = this.settings.openrouter_model?.trim();
+    if (!apiKey) throw new Error('OpenRouter API key not configured');
+    if (!model) throw new Error('OpenRouter model not configured');
+    const body: Record<string, unknown> = {
+      model,
       messages: [
         { role: 'system', content: this.getSystemInstruction(task) },
         { role: 'user', content: prompt },
@@ -1237,7 +1393,6 @@ export class UnifiedLLMProvider implements LLMProvider {
         ? { max_completion_tokens: notesBudget.outputTokens }
         : {}),
     };
-
     if (jsonMode) {
       body.response_format = responseSchema
         ? {
@@ -1246,30 +1401,67 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
         : { type: 'json_object' };
     }
-
-    const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(180_000)])
+      : AbortSignal.timeout(180_000);
+    const response = await fetch(`${this.openRouterBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.settings.openai_api_key}`,
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://github.com/metagrover/pluto',
+        'X-OpenRouter-Title': 'Pluto',
       },
       body: JSON.stringify(body),
-      signal,
+      signal: requestSignal,
     });
-
     if (!response.ok) {
+      if (jsonMode) {
+        let providerError: unknown;
+        try {
+          providerError = await response.json();
+        } catch {
+          /* Error bodies are optional and never logged. */
+        }
+        if (
+          /response_format|structured.output|json_schema/i.test(
+            JSON.stringify(providerError ?? ''),
+          )
+        ) {
+          throw new Error('openrouter_structured_output_unsupported');
+        }
+        if (notesBudget && reportsNotesInputOverflow(providerError)) {
+          throw new MeetingNotesError('notes_input_overflow');
+        }
+        if (notesBudget) throw new MeetingNotesError('notes_provider_error');
+      }
       if (notesBudget) return rejectNotesProviderResponse(response);
-      throw new Error(`OpenAI API error: ${response.statusText}`);
+      throw new Error(`OpenRouter API error: ${response.statusText}`);
     }
-
     const data = await response.json();
-    if (notesBudget && data.choices?.[0]?.finish_reason === 'length')
+    const inputTokens =
+      typeof data.usage?.prompt_tokens === 'number'
+        ? data.usage.prompt_tokens
+        : null;
+    const outputTokens =
+      typeof data.usage?.completion_tokens === 'number'
+        ? data.usage.completion_tokens
+        : null;
+    this.recordUsage(
+      inputTokens,
+      outputTokens,
+      typeof data.usage?.cost === 'number' ? data.usage.cost : 0,
+    );
+    onNotesMetrics?.({ inputTokens, outputTokens });
+    if (notesBudget && data.choices?.[0]?.finish_reason === 'length') {
       throw new MeetingNotesError('notes_output_truncated');
+    }
     if (
       task === 'commitmentReconciliation' &&
       data.choices?.[0]?.finish_reason === 'length'
-    )
+    ) {
       throw new Error('commitment_response_incomplete');
+    }
     return data.choices?.[0]?.message?.content ?? '';
   }
 
@@ -1505,7 +1697,11 @@ export class UnifiedLLMProvider implements LLMProvider {
           if (!line.trim()) continue;
           const packet = JSON.parse(line) as Record<string, unknown>;
           const isDone = packet.done === true;
-          if (isDone) completed = true;
+          if (isDone) {
+            completed = true;
+            const usage = readNotesMetrics(packet);
+            this.recordUsage(usage.inputTokens, usage.outputTokens);
+          }
           if (task === 'projectScopeReview' && packet.done === true) {
             if (packet.done_reason === 'length')
               throw new Error('project_scope_response_incomplete');
@@ -1635,6 +1831,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
 
     const data = await response.json();
+    const usage = readNotesMetrics(data);
+    this.recordUsage(usage.inputTokens, usage.outputTokens);
     const duration = Date.now() - start;
     try {
       console.log(`[Ollama] Generation complete in ${duration}ms (${task})`);

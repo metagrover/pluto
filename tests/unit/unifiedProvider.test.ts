@@ -20,7 +20,12 @@ vi.mock('@google/genai', () => {
   return { GoogleGenAI: MockGoogleGenAI };
 });
 
-import { getAllSettings, getProvider } from '../../electron/llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderSettings,
+} from '../../electron/llm/factory';
+import { subscribeInferenceActivity } from '../../electron/llm/inferenceActivity';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
@@ -160,7 +165,7 @@ describe('UnifiedLLMProvider', () => {
     ];
     const fetchMock = installFetchMock((_url, init) =>
       jsonResponse({
-        choices: [{ message: { content: JSON.stringify(responses.shift()) } }],
+        output_text: JSON.stringify(responses.shift()),
       }),
     );
     const provider = new UnifiedLLMProvider('openai', {
@@ -180,8 +185,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [, init] of fetchMock.mock.calls) {
-      expect(parseRequestBody(init).response_format).toEqual({
-        type: 'json_object',
+      expect(parseRequestBody(init).text).toEqual({
+        format: { type: 'json_object' },
       });
       expect(parseRequestBody(init).format).toBeUndefined();
     }
@@ -190,9 +195,7 @@ describe('UnifiedLLMProvider', () => {
     ).toEqual(['configured-analysis-model', 'configured-analysis-model']);
     expect(
       fetchMock.mock.calls.map(
-        ([, init]) =>
-          (parseRequestBody(init).messages as Array<{ content: string }>)[0]
-            ?.content,
+        ([, init]) => parseRequestBody(init).instructions,
       ),
     ).toEqual([
       'You are a source-grounded meeting notes writer. Always respond with valid JSON only.',
@@ -549,7 +552,7 @@ describe('UnifiedLLMProvider', () => {
           response: '{"projects":[]}',
           done: true,
           done_reason: 'stop',
-          choices: [{ message: { content: '{"projects":[]}' } }],
+          output_text: '{"projects":[]}',
         });
       });
       const provider = new UnifiedLLMProvider(providerType, {
@@ -566,17 +569,15 @@ describe('UnifiedLLMProvider', () => {
       expect(
         providerType === 'ollama'
           ? bodies[0].format
-          : bodies[0].response_format,
+          : (bodies[0].text as { format?: unknown })?.format,
       ).toEqual(
         providerType === 'ollama'
           ? responseSchema
           : {
               type: 'json_schema',
-              json_schema: {
-                name: 'projectScopeReview',
-                schema: responseSchema,
-                strict: true,
-              },
+              name: 'projectScopeReview',
+              schema: responseSchema,
+              strict: true,
             },
       );
     },
@@ -1079,14 +1080,15 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModel).toBe('gemma4:12b');
   });
 
-  it('routes openai user-analysis generation through chat completions', async () => {
+  it('routes openai user-analysis generation through Responses without storage', async () => {
     let usedModel = '';
     installFetchMock((url, init) => {
-      expect(url).toContain('/chat/completions');
+      expect(url).toContain('/responses');
       const body = parseRequestBody(init);
+      expect(body.store).toBe(false);
       usedModel = String(body.model);
       return jsonResponse({
-        choices: [{ message: { content: validAnalysisMarkdown } }],
+        output_text: validAnalysisMarkdown,
       });
     });
 
@@ -1102,30 +1104,99 @@ describe('UnifiedLLMProvider', () => {
     expect(usedModel).toBe('gpt-4.1-mini');
   });
 
+  it('maps OpenRouter requests, attribution headers, and explicit model', async () => {
+    installFetchMock((url, init) => {
+      expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+      expect(init?.headers).toMatchObject({
+        'HTTP-Referer': 'https://github.com/metagrover/pluto',
+        'X-OpenRouter-Title': 'Pluto',
+      });
+      const body = parseRequestBody(init);
+      expect(body.model).toBe('openai/gpt-4.1-mini');
+      return jsonResponse({
+        choices: [{ message: { content: validAnalysisMarkdown } }],
+        usage: { prompt_tokens: 11, completion_tokens: 7, cost: 0.001 },
+      });
+    });
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'openai/gpt-4.1-mini',
+    });
+
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
+    expect(provider.getUsageSnapshot()).toEqual({
+      inputTokens: 11,
+      outputTokens: 7,
+      costUsd: 0.001,
+    });
+  });
+
+  it('reports when an OpenRouter model rejects structured output', async () => {
+    installFetchMock(() =>
+      jsonResponse(
+        { error: { message: 'response_format json_schema not supported' } },
+        false,
+        'Bad Request',
+      ),
+    );
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'example/model',
+    });
+
+    await expect(
+      provider.synthesizeKnowledgeDocument('Return JSON', {
+        responseSchema: {
+          type: 'object',
+          properties: { result: { type: 'string' } },
+          required: ['result'],
+          additionalProperties: false,
+        },
+      }),
+    ).rejects.toThrow('openrouter_structured_output_unsupported');
+  });
+
+  it('publishes typed cloud inference lifecycle activity', async () => {
+    installFetchMock(() => jsonResponse({ output_text: 'Roadmap Review' }));
+    const events: Array<Record<string, unknown>> = [];
+    const unsubscribe = subscribeInferenceActivity((event) =>
+      events.push(event),
+    );
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+      openai_model: 'gpt-4.1-mini',
+    });
+
+    await provider.generateTitle('Speaker A: status update');
+    unsubscribe();
+
+    expect(events.map(({ state }) => state)).toEqual(['started', 'completed']);
+    expect(events[0]).toMatchObject({
+      task: 'title',
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      location: 'cloud',
+    });
+  });
+
   it('extracts internal signals in openai JSON mode with normalized tags', async () => {
     installFetchMock((url, init) => {
-      expect(url).toContain('/chat/completions');
+      expect(url).toContain('/responses');
       const body = parseRequestBody(init);
-      expect(body.response_format).toEqual({ type: 'json_object' });
+      expect(body.text).toEqual({ format: { type: 'json_object' } });
       return jsonResponse({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                continuity: ['Security hardening remains an ongoing stream'],
-                accountability_risks: [
-                  'Most fixes bottleneck on one maintainer',
-                ],
-                decision_impacts: ['Integrated AI validation for skills'],
-                extra_tags: [
-                  { tag: 'Maintainer Bandwidth', confidence: 0.9 },
-                  { tag: 'maintainer-bandwidth', confidence: 0.7 },
-                  { tag: 'responsible-disclosure', confidence: 0.8 },
-                ],
-              }),
-            },
-          },
-        ],
+        output_text: JSON.stringify({
+          continuity: ['Security hardening remains an ongoing stream'],
+          accountability_risks: ['Most fixes bottleneck on one maintainer'],
+          decision_impacts: ['Integrated AI validation for skills'],
+          extra_tags: [
+            { tag: 'Maintainer Bandwidth', confidence: 0.9 },
+            { tag: 'maintainer-bandwidth', confidence: 0.7 },
+            { tag: 'responsible-disclosure', confidence: 0.8 },
+          ],
+        }),
       });
     });
 
@@ -1153,31 +1224,26 @@ describe('UnifiedLLMProvider', () => {
   it('retries analysis once and falls back to safe skeleton when still invalid', async () => {
     let callCount = 0;
     installFetchMock((url, init) => {
-      expect(url).toContain('/chat/completions');
+      expect(url).toContain('/responses');
       const body = parseRequestBody(init);
-      const messages = Array.isArray(body.messages)
-        ? (body.messages as Array<{ role: string; content: string }>)
-        : [];
 
       callCount += 1;
-      if (messages.some((m) => m.content?.includes('internal signals'))) {
+      if (
+        `${String(body.instructions)} ${String(body.input)}`.includes(
+          'internal signals',
+        )
+      ) {
         return jsonResponse({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  continuity: [],
-                  accountability_risks: [],
-                  decision_impacts: [],
-                  extra_tags: [],
-                }),
-              },
-            },
-          ],
+          output_text: JSON.stringify({
+            continuity: [],
+            accountability_risks: [],
+            decision_impacts: [],
+            extra_tags: [],
+          }),
         });
       }
 
-      return jsonResponse({ choices: [{ message: { content: 'invalid' } }] });
+      return jsonResponse({ output_text: 'invalid' });
     });
 
     const provider = new UnifiedLLMProvider('openai', {
@@ -1321,9 +1387,10 @@ describe('UnifiedLLMProvider', () => {
 describe('LLM factory', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    invalidateProviderSettings();
   });
 
-  it('falls back from unavailable ollama to openai', async () => {
+  it('does not fall back from unavailable ollama to cloud', async () => {
     installFetchMock((url) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({}, false, 'unavailable');
@@ -1336,9 +1403,28 @@ describe('LLM factory', () => {
       openai_api_key: 'fallback-openai',
     };
 
-    const provider = await getProvider(settings);
-    expect(provider.name).toBe('OpenAI');
-    expect(provider).toBeInstanceOf(UnifiedLLMProvider);
+    await expect(getProvider(settings)).rejects.toThrow(
+      'Local inference is unavailable',
+    );
+  });
+
+  it('blocks cloud execution until the current disclosure is accepted', async () => {
+    await expect(
+      getProvider({
+        llm_provider: 'openai',
+        openai_api_key: 'test-key',
+      }),
+    ).rejects.toThrow('cloud_provider_consent_required');
+  });
+
+  it('requires an explicit OpenRouter model after consent', async () => {
+    await expect(
+      getProvider({
+        llm_provider: 'openrouter',
+        openrouter_api_key: 'test-key',
+        cloud_consent_version: '1',
+      }),
+    ).rejects.toThrow('OpenRouter model not configured');
   });
 
   it('normalizes invalid provider setting to ollama', async () => {

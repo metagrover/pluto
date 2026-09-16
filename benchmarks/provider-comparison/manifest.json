@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "fixtureRevision": "provider-comparison-v1",
+  "fixtures": [
+    {
+      "id": "synthetic-product-sync-v1",
+      "path": "fixtures/product-sync.json",
+      "sha256": "8bb93d5e21867f0f6559f2880e45ed1ac640082996b04c3fe052df771326ed6e"
+    }
+  ],
+  "requiredDimensions": [
+    "factuality",
+    "unsupported_claims",
+    "missed_commitments",
+    "speaker_context_accuracy",
+    "deterministic_validation_failures",
+    "end_to_end_latency_ms",
+    "model_latency_ms",
+    "input_tokens",
+    "output_tokens",
+    "api_cost_usd"
+  ],
+  "workflows": [
+    "meeting_notes",
+    "commitments",
+    "profile_updates",
+    "project_updates",
+    "meeting_qa",
+    "suggested_questions"
+  ]
+}

@@ -19,6 +19,7 @@ export type SecureSettingsBackend = {
 const SECRET_SETTING_KEYS = new Set([
   'gemini_api_key',
   'openai_api_key',
+  'openrouter_api_key',
   'claude_api_key',
   'hf_token',
 ]);
@@ -49,7 +50,15 @@ function writeSecureSettingsFile(
   filePath = getSecureSettingsPath(),
 ) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(next, null, 2));
+  const temporary = `${filePath}.tmp-${process.pid}`;
+  const fd = fs.openSync(temporary, 'w', 0o600);
+  try {
+    fs.writeFileSync(fd, JSON.stringify(next, null, 2));
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temporary, filePath);
 }
 
 export function createElectronSecureSettingsBackend(): SecureSettingsBackend {
@@ -95,18 +104,32 @@ export function createSecureSettingsManager({
     get(key: string) {
       if (!isSecretSettingKey(key)) return plaintext.get(key);
 
-      const secureValue = getSecureValue(key);
+      let secureValue: string | null;
+      try {
+        secureValue = getSecureValue(key);
+      } catch (error) {
+        logFailure(key, 'read', error);
+        return null;
+      }
       if (secureValue !== null) return secureValue;
 
       const plaintextValue = plaintext.get(key);
       if (plaintextValue === null) return null;
-      if (!backend.isAvailable()) return plaintextValue;
+      if (!backend.isAvailable()) {
+        logFailure(
+          key,
+          'read-unavailable',
+          new Error('Encryption unavailable'),
+        );
+        return null;
+      }
 
       try {
         writeSecureValue(key, plaintextValue);
         plaintext.delete(key);
       } catch (error) {
         logFailure(key, 'read-migration', error);
+        return null;
       }
 
       return plaintextValue;
@@ -126,7 +149,7 @@ export function createSecureSettingsManager({
           'write-unavailable',
           new Error('Encryption unavailable'),
         );
-        return plaintext.set(key, value);
+        throw new Error('secure_storage_unavailable');
       }
 
       try {
@@ -134,7 +157,7 @@ export function createSecureSettingsManager({
         return plaintext.delete(key);
       } catch (error) {
         logFailure(key, 'write', error);
-        return plaintext.set(key, value);
+        throw new Error('secure_storage_write_failed');
       }
     },
   };

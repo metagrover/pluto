@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "migrations": {
+    "0000_pluto_baseline": { "risk": "major" },
+    "0001_voice_representatives": { "risk": "additive" },
+    "0002_live_meeting_context_checkpoints": { "risk": "additive" },
+    "0003_singleton_participant_identity": { "risk": "major" },
+    "0004_audio_retention": { "risk": "additive" },
+    "0005_audio_encryption_rollout": { "risk": "additive" },
+    "0006_voice_candidate_attempts": { "risk": "additive" },
+    "0007_person_chat": { "risk": "additive" },
+    "0008_hierarchical_context": { "risk": "additive" }
+  }
+}

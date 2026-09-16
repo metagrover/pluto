@@ -14,6 +14,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
 import { useAppUpdate } from '../../api/updater';
 import {
+  CLOUD_CONSENT_DISCLOSURE,
+  CLOUD_CONSENT_VERSION,
+} from '../../utils/cloudProviderConsent';
+import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../utils/ollamaModels';
@@ -22,17 +26,25 @@ import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
 
+type ProviderType = 'ollama' | 'gemini' | 'openai' | 'openrouter' | 'claude';
+
 interface SettingsTabProps {
-  llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
-  setLlmProvider: (val: 'ollama' | 'gemini' | 'openai' | 'claude') => void;
+  llmProvider: ProviderType;
+  setLlmProvider: (val: ProviderType) => void;
   geminiApiKey: string;
   setGeminiApiKey: (val: string) => void;
   openaiApiKey: string;
   setOpenaiApiKey: (val: string) => void;
+  openrouterApiKey: string;
+  setOpenrouterApiKey: (val: string) => void;
   claudeApiKey: string;
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
+  openaiModel: string;
+  setOpenaiModel: (val: string) => void;
+  openrouterModel: string;
+  setOpenrouterModel: (val: string) => void;
   autoEndEnabled: boolean;
   setAutoEndEnabled: (val: boolean) => void;
   fetchMeetings: () => void;
@@ -56,6 +68,7 @@ const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local', icon: Cpu },
   { id: 'gemini', name: 'Gemini', detail: 'Google', icon: Zap },
   { id: 'openai', name: 'OpenAI', detail: 'GPT', icon: Cloud },
+  { id: 'openrouter', name: 'OpenRouter', detail: 'Cloud', icon: Cloud },
   { id: 'claude', name: 'Claude', detail: 'Anthropic', icon: Cloud },
 ] as const;
 
@@ -173,10 +186,16 @@ export const SettingsTab = ({
   setGeminiApiKey,
   openaiApiKey,
   setOpenaiApiKey,
+  openrouterApiKey,
+  setOpenrouterApiKey,
   claudeApiKey,
   setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
+  openaiModel,
+  setOpenaiModel,
+  openrouterModel,
+  setOpenrouterModel,
   autoEndEnabled,
   setAutoEndEnabled,
   fetchMeetings,
@@ -211,14 +230,17 @@ export const SettingsTab = ({
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
+  const [settingsWriteError, setSettingsWriteError] = useState<string | null>(
+    null,
+  );
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const {
     status: updateStatus,
     isChecking: isCheckingUpdate,
-    isUpdating: isApplyingUpdate,
+    isDownloading: isApplyingUpdate,
     checkNow: checkUpdateNow,
-    applyUpdate: triggerApplyUpdate,
+    downloadUpdate: triggerApplyUpdate,
     openReleaseUrl,
   } = useAppUpdate();
 
@@ -254,8 +276,17 @@ export const SettingsTab = ({
       });
   }, []);
 
-  const persistSetting = (key: string, value: string) => {
-    void window.ipcRenderer.invoke('SET_SETTING', { key, value });
+  const persistSetting = async (key: string, value: string) => {
+    try {
+      await window.ipcRenderer.invoke('SET_SETTING', { key, value });
+      setSettingsWriteError(null);
+      return true;
+    } catch {
+      setSettingsWriteError(
+        'This setting could not be saved securely. Cloud inference remains disabled.',
+      );
+      return false;
+    }
   };
 
   const providerTokenValue =
@@ -263,7 +294,9 @@ export const SettingsTab = ({
       ? geminiApiKey
       : llmProvider === 'openai'
         ? openaiApiKey
-        : claudeApiKey;
+        : llmProvider === 'openrouter'
+          ? openrouterApiKey
+          : claudeApiKey;
 
   const selectAndFocusTab = (index: number) => {
     const nextTab = settingsTabs[index];
@@ -593,9 +626,31 @@ export const SettingsTab = ({
                     <button
                       key={provider.id}
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
+                        const consentVersion =
+                          provider.id === 'ollama'
+                            ? null
+                            : await window.ipcRenderer.invoke(
+                                'GET_SETTING',
+                                'cloud_consent_version',
+                              );
+                        if (
+                          provider.id !== 'ollama' &&
+                          consentVersion !== CLOUD_CONSENT_VERSION &&
+                          !window.confirm(CLOUD_CONSENT_DISCLOSURE)
+                        )
+                          return;
+                        if (
+                          !(await persistSetting(
+                            'cloud_consent_version',
+                            provider.id === 'ollama'
+                              ? ''
+                              : CLOUD_CONSENT_VERSION,
+                          )) ||
+                          !(await persistSetting('llm_provider', provider.id))
+                        )
+                          return;
                         setLlmProvider(provider.id);
-                        persistSetting('llm_provider', provider.id);
                       }}
                       className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-all text-left ${
                         active
@@ -606,13 +661,42 @@ export const SettingsTab = ({
                       <Icon
                         className={`w-4 h-4 shrink-0 ${active ? 'text-pro-accent' : 'opacity-60'}`}
                       />
-                      <span className="text-[13px] font-medium tracking-tight truncate">
-                        {provider.name}
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-medium tracking-tight truncate">
+                          {provider.name}
+                        </span>
+                        <span className="block text-[10px] text-pro-text-muted">
+                          {provider.detail}
+                        </span>
                       </span>
                     </button>
                   );
                 })}
               </div>
+            </SettingsRow>
+            {settingsWriteError ? (
+              <p
+                className="border-b border-pro-border/40 px-5 py-3 text-xs text-red-600 dark:text-red-400"
+                role="alert"
+              >
+                {settingsWriteError}
+              </p>
+            ) : null}
+            <SettingsRow
+              label="Active execution"
+              helper="Shown during meeting processing and Ask Pluto requests."
+              actionControl
+            >
+              <span className="inline-flex rounded-full border border-pro-border/70 px-2.5 py-1 text-xs font-medium text-pro-text-main">
+                {llmProvider === 'ollama' ? 'Local' : 'Cloud'} ·{' '}
+                {llmProvider === 'ollama'
+                  ? ollamaModel || OLLAMA_GENERAL_MODEL
+                  : llmProvider === 'openai'
+                    ? openaiModel || 'gpt-4o-mini'
+                    : llmProvider === 'openrouter'
+                      ? openrouterModel || 'Model required'
+                      : llmProvider}
+              </span>
             </SettingsRow>
 
             {llmProvider === 'ollama' ? (
@@ -671,6 +755,9 @@ export const SettingsTab = ({
                     } else if (llmProvider === 'openai') {
                       setOpenaiApiKey(value);
                       persistSetting('openai_api_key', value);
+                    } else if (llmProvider === 'openrouter') {
+                      setOpenrouterApiKey(value);
+                      persistSetting('openrouter_api_key', value);
                     } else if (llmProvider === 'claude') {
                       setClaudeApiKey(value);
                       persistSetting('claude_api_key', value);
@@ -679,6 +766,40 @@ export const SettingsTab = ({
                 />
               </SettingsRow>
             )}
+            {llmProvider === 'openai' || llmProvider === 'openrouter' ? (
+              <SettingsRow
+                htmlFor="cloud-model"
+                label="Model"
+                helper={
+                  llmProvider === 'openrouter'
+                    ? 'Required OpenRouter model slug. Pluto never chooses a paid model automatically.'
+                    : 'Leave blank to keep the compatible OpenAI default.'
+                }
+              >
+                <Input
+                  id="cloud-model"
+                  type="text"
+                  placeholder={
+                    llmProvider === 'openrouter'
+                      ? 'provider/model'
+                      : 'Default: gpt-4o-mini'
+                  }
+                  value={
+                    llmProvider === 'openrouter' ? openrouterModel : openaiModel
+                  }
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (llmProvider === 'openrouter') {
+                      setOpenrouterModel(value);
+                      persistSetting('openrouter_model', value);
+                    } else {
+                      setOpenaiModel(value);
+                      persistSetting('openai_model', value);
+                    }
+                  }}
+                />
+              </SettingsRow>
+            ) : null}
           </Section>
         </div>
       ) : null}
@@ -718,7 +839,7 @@ export const SettingsTab = ({
                       <RefreshCw
                         className={`w-3.5 h-3.5 ${isApplyingUpdate ? 'animate-spin' : ''}`}
                       />
-                      {isApplyingUpdate ? 'Updating...' : 'Update Now'}
+                      {isApplyingUpdate ? 'Opening...' : 'Download DMG'}
                     </button>
                   </>
                 ) : (

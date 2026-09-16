@@ -258,12 +258,15 @@ function App() {
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [llmProvider, setLlmProvider] = useState<
-    'ollama' | 'gemini' | 'openai' | 'claude'
+    'ollama' | 'gemini' | 'openai' | 'openrouter' | 'claude'
   >('ollama');
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('');
+  const [openrouterModel, setOpenrouterModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
@@ -728,7 +731,10 @@ function App() {
     fetchMeetings();
 
     window.ipcRenderer.invoke('GET_SETTING', 'llm_provider').then((val) => {
-      if (val) setLlmProvider(val as 'ollama' | 'gemini' | 'openai' | 'claude');
+      if (val)
+        setLlmProvider(
+          val as 'ollama' | 'gemini' | 'openai' | 'openrouter' | 'claude',
+        );
     });
     window.ipcRenderer.invoke('GET_SETTING', 'gemini_api_key').then((val) => {
       if (val) setGeminiApiKey(val);
@@ -736,11 +742,22 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'openai_api_key').then((val) => {
       if (val) setOpenaiApiKey(val);
     });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'openrouter_api_key')
+      .then((val) => {
+        if (val) setOpenrouterApiKey(val);
+      });
     window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
       if (val) setClaudeApiKey(val);
     });
     window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
       if (val) setOllamaModel(val);
+    });
+    window.ipcRenderer.invoke('GET_SETTING', 'openai_model').then((val) => {
+      if (val) setOpenaiModel(val);
+    });
+    window.ipcRenderer.invoke('GET_SETTING', 'openrouter_model').then((val) => {
+      if (val) setOpenrouterModel(val);
     });
     window.ipcRenderer.invoke('GET_SETTING', 'auto_end_enabled').then((val) => {
       if (val !== null) setAutoEndEnabled(val !== 'false');
@@ -2089,10 +2106,16 @@ function App() {
                 setGeminiApiKey={setGeminiApiKey}
                 openaiApiKey={openaiApiKey}
                 setOpenaiApiKey={setOpenaiApiKey}
+                openrouterApiKey={openrouterApiKey}
+                setOpenrouterApiKey={setOpenrouterApiKey}
                 claudeApiKey={claudeApiKey}
                 setClaudeApiKey={setClaudeApiKey}
                 ollamaModel={ollamaModel}
                 setOllamaModel={setOllamaModel}
+                openaiModel={openaiModel}
+                setOpenaiModel={setOpenaiModel}
+                openrouterModel={openrouterModel}
+                setOpenrouterModel={setOpenrouterModel}
                 autoEndEnabled={autoEndEnabled}
                 setAutoEndEnabled={setAutoEndEnabled}
                 fetchMeetings={fetchMeetings}

@@ -2,6 +2,7 @@
   "name": "pluto",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/metagrover/pluto.git"
@@ -47,6 +48,7 @@
     "benchmark:speaker-attribution": "node --experimental-strip-types scripts/run_local_speaker_attribution_benchmark.ts",
     "benchmark:production-speaker-attribution": "node --experimental-strip-types scripts/run_production_speaker_attribution_acceptance.ts",
     "benchmark:meeting-notes-quality": "RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 vitest run --config vitest.benchmark.config.ts --reporter=verbose",
+    "benchmark:provider-comparison": "RUN_PROVIDER_COMPARISON_BENCHMARK=1 vitest run --config vitest.manual.config.ts tests/manual/providerComparisonBenchmark.test.ts --reporter=verbose",
     "benchmark:meeting-notes-latency:validate": "tsx scripts/validate_private_meeting_notes_latency_manifest.ts",
     "benchmark:meeting-summaries": "tsx scripts/benchmark_meeting_summaries.ts",
     "benchmark:meeting-notes-latency": "tsx scripts/run_meeting_notes_latency_benchmark.ts",

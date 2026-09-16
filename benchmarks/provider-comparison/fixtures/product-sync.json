@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "synthetic-product-sync-v1",
+  "transcript": [
+    "Maya: The launch date is October 12. We are keeping the REST API for this release.",
+    "Jon: I will send the revised onboarding copy to Maya by Friday.",
+    "Maya: Correction: the beta is October 12; the public launch remains October 19.",
+    "Priya: I own the latency dashboard and will publish it next Tuesday.",
+    "Jon: The Acme pilot needs SSO, but that is not approved for this release.",
+    "Maya: Please record that Priya leads observability for Project Atlas."
+  ],
+  "expected": {
+    "facts": [
+      "The beta date is October 12.",
+      "The public launch date is October 19.",
+      "The release will use the REST API."
+    ],
+    "commitments": [
+      {
+        "owner": "Jon",
+        "action": "Send the revised onboarding copy to Maya.",
+        "due": "Friday"
+      },
+      {
+        "owner": "Priya",
+        "action": "Publish the latency dashboard.",
+        "due": "next Tuesday"
+      }
+    ],
+    "decisions": ["Keep the REST API for this release."],
+    "corrections": ["October 12 is the beta date, not the public launch date."],
+    "speakerContext": ["Priya leads observability for Project Atlas."],
+    "profileUpdates": ["Priya: leads observability"],
+    "projectUpdates": ["Project Atlas: public launch remains October 19"],
+    "qa": [
+      {
+        "question": "When is the public launch?",
+        "answer": "October 19"
+      }
+    ],
+    "suggestedQuestions": [
+      "What remains before the Project Atlas public launch?"
+    ],
+    "unsupportedClaims": []
+  }
+}

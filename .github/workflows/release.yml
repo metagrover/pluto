@@ -26,18 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve Release Version
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
-          VERSION="${TAG#v}"
-          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "Resolved Tag: ${TAG} (Version: ${VERSION})"
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -50,8 +38,26 @@ jobs:
           node-version: 24.11.0
           cache: pnpm
 
+      - name: Resolve Release Version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="$(node scripts/validate_release_tag.mjs "${TAG}")"
+          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Resolved Tag: ${TAG} (Version: ${VERSION})"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify source and migrations
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+          pnpm run db:check
 
       - name: Build Native Runtimes
         run: pnpm run build-native
@@ -66,13 +72,26 @@ jobs:
           pnpm exec vite build
           pnpm exec electron-builder --mac --publish never
 
+      - name: Verify packaged runtimes
+        run: pnpm run package:verify-runtime -- "release/${RELEASE_VERSION}/mac-arm64/Pluto.app"
+
       - name: Generate Checksums
         run: |
           mkdir -p dist-release
-          cp release/*/*.dmg dist-release/ || cp release/*.dmg dist-release/ || true
+          DMG="release/${RELEASE_VERSION}/Pluto-Mac-${RELEASE_VERSION}-Installer.dmg"
+          test -f "${DMG}"
+          cp "${DMG}" dist-release/
           cd dist-release
-          shasum -a 256 *.dmg > SHA256SUMS.txt
+          shasum -a 256 "Pluto-Mac-${RELEASE_VERSION}-Installer.dmg" > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Smoke-test unsigned DMG
+        run: |
+          MOUNT_DIR="$(mktemp -d)"
+          hdiutil attach "dist-release/Pluto-Mac-${RELEASE_VERSION}-Installer.dmg" -readonly -nobrowse -mountpoint "${MOUNT_DIR}"
+          test -d "${MOUNT_DIR}/Pluto.app"
+          test -x "${MOUNT_DIR}/Pluto.app/Contents/MacOS/Pluto"
+          hdiutil detach "${MOUNT_DIR}"
 
       - name: Publish GitHub Release
         env:

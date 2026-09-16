@@ -270,6 +270,12 @@ let win: BrowserWindow | null;
 let tray: Tray | null = null;
 let updateChecker: UpdateChecker | null = null;
 
+subscribeInferenceActivity((activity) => {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('llm:activity', activity);
+  }
+});
+
 export const focusPrimaryWindow = (): void => {
   if (!win || win.isDestroyed()) return;
   if (win.isMinimized()) win.restore();
@@ -571,7 +577,12 @@ import {
   knowledgeSynthesisPause,
 } from './knowledgeSynthesisPause';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
-import { getAllSettings, getProvider } from './llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderSettings,
+} from './llm/factory';
+import { subscribeInferenceActivity } from './llm/inferenceActivity';
 import { createNotesSource } from './llm/meetingNotesSource';
 import type {
   AnalysisArtifacts,
@@ -4621,9 +4632,11 @@ app.whenReady().then(async () => {
 
   // Settings handlers
   ipcMain.handle('GET_SETTING', (_event, key) => db.getSetting(key));
-  ipcMain.handle('SET_SETTING', (_event, { key, value }) =>
-    db.setSetting(key, value),
-  );
+  ipcMain.handle('SET_SETTING', (_event, { key, value }) => {
+    const result = db.setSetting(key, value);
+    invalidateProviderSettings();
+    return result;
+  });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
   ipcMain.handle('AUDIO_RETENTION_SET_BUDGET', async (_event, value) => {
     const parsed = parseAudioStorageBudgetGb(value);

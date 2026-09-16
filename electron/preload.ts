@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld('plutoUpdater', {
   getStatus: () => ipcRenderer.invoke('PLUTO_UPDATER_GET_STATUS'),
   checkNow: () => ipcRenderer.invoke('PLUTO_UPDATER_CHECK_NOW'),
-  applyUpdate: () => ipcRenderer.invoke('PLUTO_UPDATER_APPLY_UPDATE'),
+  downloadUpdate: () => ipcRenderer.invoke('PLUTO_UPDATER_DOWNLOAD_UPDATE'),
   openReleaseUrl: (url?: string) =>
     ipcRenderer.invoke('PLUTO_UPDATER_OPEN_RELEASE_URL', url),
   onStatusChanged: (callback: (status: unknown) => void) => {

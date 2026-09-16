@@ -1,3 +1,4 @@
+import { CLOUD_CONSENT_VERSION } from '../../src/utils/cloudProviderConsent';
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
 import { UnifiedLLMProvider } from './unifiedProvider';
 
@@ -16,10 +17,13 @@ function getSettingsHash(settings: LLMSettings): string {
     llm: settings.llm_model,
     gemini: settings.gemini_model,
     openai: settings.openai_model,
+    openrouter: settings.openrouter_model,
     claude: settings.claude_model,
     hasGemini: !!settings.gemini_api_key,
     hasOpenAI: !!settings.openai_api_key,
+    hasOpenRouter: !!settings.openrouter_api_key,
     hasClaude: !!settings.claude_api_key,
+    consent: settings.cloud_consent_version,
   });
 }
 
@@ -55,6 +59,12 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
   if (!pendingProviderPromise) {
     pendingProviderPromise = (async (): Promise<LLMProvider> => {
       const providerType: ProviderType = settings.llm_provider || 'ollama';
+      if (
+        providerType !== 'ollama' &&
+        settings.cloud_consent_version !== CLOUD_CONSENT_VERSION
+      ) {
+        throw new Error('cloud_provider_consent_required');
+      }
       let providerInstance: LLMProvider;
 
       console.log(
@@ -68,24 +78,9 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             console.log('[LLM Factory] Ollama is available');
             providerInstance = ollama;
           } else {
-            console.warn(
-              '[LLM Factory] Ollama not available, falling back to cloud provider',
+            throw new Error(
+              'Local inference is unavailable. Start Ollama or explicitly select a cloud provider in Settings.',
             );
-
-            if (settings.gemini_api_key) {
-              console.log('[LLM Factory] Falling back to Gemini');
-              providerInstance = new UnifiedLLMProvider('gemini', settings);
-            } else if (settings.openai_api_key) {
-              console.log('[LLM Factory] Falling back to OpenAI');
-              providerInstance = new UnifiedLLMProvider('openai', settings);
-            } else if (settings.claude_api_key) {
-              console.log('[LLM Factory] Falling back to Claude');
-              providerInstance = new UnifiedLLMProvider('claude', settings);
-            } else {
-              throw new Error(
-                'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
-              );
-            }
           }
           break;
         }
@@ -103,6 +98,17 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             throw new Error('OpenAI API key not configured');
           }
           providerInstance = new UnifiedLLMProvider('openai', settings);
+          break;
+        }
+
+        case 'openrouter': {
+          if (!settings.openrouter_api_key) {
+            throw new Error('OpenRouter API key not configured');
+          }
+          if (!settings.openrouter_model?.trim()) {
+            throw new Error('OpenRouter model not configured');
+          }
+          providerInstance = new UnifiedLLMProvider('openrouter', settings);
           break;
         }
 
@@ -128,6 +134,14 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
 let cachedSettings: LLMSettings | null = null;
 let lastSettingsFetch = 0;
 const SETTINGS_CACHE_MS = 10_000;
+
+export const invalidateProviderSettings = () => {
+  cachedSettings = null;
+  lastSettingsFetch = 0;
+  pendingProviderPromise = null;
+  lastSettingsHash = null;
+  lastHealthCheck = 0;
+};
 
 export async function getAllSettings(db: {
   getSetting: (key: string) => unknown;
@@ -163,6 +177,7 @@ export async function getAllSettings(db: {
     'ollama',
     'gemini',
     'openai',
+    'openrouter',
     'claude',
   ];
   const llmProvider =
@@ -175,6 +190,7 @@ export async function getAllSettings(db: {
     llm_provider: llmProvider,
     gemini_api_key: getStringSetting('gemini_api_key'),
     openai_api_key: getStringSetting('openai_api_key'),
+    openrouter_api_key: getStringSetting('openrouter_api_key'),
     claude_api_key: getStringSetting('claude_api_key'),
     llm_model: getStringSetting('llm_model'),
     ollama_model: getStringSetting('ollama_model'),
@@ -183,7 +199,9 @@ export async function getAllSettings(db: {
     ollama_seed: getIntegerSetting('ollama_seed'),
     gemini_model: getStringSetting('gemini_model'),
     openai_model: getStringSetting('openai_model'),
+    openrouter_model: getStringSetting('openrouter_model'),
     claude_model: getStringSetting('claude_model'),
+    cloud_consent_version: getStringSetting('cloud_consent_version'),
   };
 
   cachedSettings = settings;

@@ -85,18 +85,21 @@ const cloudCases = [
     type: 'openai' as const,
     settings: { openai_api_key: 'test-key', openai_model: 'configured-openai' },
     response: (truncated: boolean) => ({
-      choices: [
-        {
-          index: 0,
-          message: { role: 'assistant', content: structuredText },
-          finish_reason: truncated ? 'length' : 'stop',
-        },
-      ],
+      output_text: structuredText,
+      status: truncated ? 'incomplete' : 'completed',
+      incomplete_details: truncated
+        ? { reason: 'max_output_tokens' }
+        : undefined,
     }),
     format: {
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'commitmentReconciliation', schema, strict: true },
+      store: false,
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'commitmentReconciliation',
+          schema,
+          strict: true,
+        },
       },
     },
   },

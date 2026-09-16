@@ -235,11 +235,13 @@ it('decodes chat packets split at every byte without leaking reasoning or duplic
 
 it('forwards notes output limits to OpenAI and rejects length termination even for valid JSON', async () => {
   const fetcher = vi.fn(async (_url, init) => {
-    expect(JSON.parse(init.body).max_completion_tokens).toBe(2048);
+    expect(JSON.parse(init.body).max_output_tokens).toBe(2048);
     return {
       ok: true,
       json: async () => ({
-        choices: [{ message: { content: '{}' }, finish_reason: 'length' }],
+        output_text: '{}',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
       }),
     };
   });
@@ -330,7 +332,9 @@ it('reports cloud truncation exactly once with null token counts', async () => {
     vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        choices: [{ message: { content: '{}' }, finish_reason: 'length' }],
+        output_text: '{}',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
       }),
     })),
   );

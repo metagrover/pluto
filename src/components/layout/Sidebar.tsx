@@ -19,6 +19,7 @@ import {
 import type { Meeting } from '../../types';
 import { sortMeetingsByStartTime } from '../../utils/meetingOrdering';
 import { Logo } from '../Brand/Logo';
+import { InferenceActivityBadge } from './InferenceActivityBadge';
 import { SidebarUpdateBadge } from './SidebarUpdateBadge';
 
 type ActiveTab =
@@ -332,6 +333,7 @@ export const Sidebar = ({
         </div>
       </div>
 
+      <InferenceActivityBadge />
       <SidebarUpdateBadge />
 
       <div className="px-3 py-3 border-t border-pro-border flex items-center justify-between gap-2">

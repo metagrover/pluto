@@ -2,6 +2,33 @@
 
 Intelligent meeting assistant and "second brain" application.
 
+## Install Pluto
+
+Pluto currently ships as an unsigned Apple Silicon macOS application. Download
+the DMG from the latest [GitHub Release](https://github.com/metagrover/pluto/releases/latest),
+open it, and drag `Pluto.app` into `/Applications`.
+
+Because the first releases are not notarized, macOS may block the first launch.
+Open **System Settings → Privacy & Security**, review the warning, and choose
+**Open Anyway** only if the publisher, release tag, and SHA-256 checksum match
+the GitHub release. Pluto never asks you to run a remote installer command or
+disable Gatekeeper.
+
+Updates are manual: Pluto opens the exact newer DMG in your browser. Quit Pluto,
+open the DMG, drag the new app into `/Applications`, and approve replacing the
+old app. User data remains in `~/Library/Application Support/pluto`; replacing
+the application bundle does not replace that directory. To roll back the app,
+install an older DMG. A database created by a newer incompatible Pluto version
+will be rejected rather than downgraded.
+
+Before a major or destructive schema migration, Pluto writes a durable,
+hash-verified backup under `~/Library/Application Support/pluto/db-backups`.
+If automatic migration recovery cannot prove either the source or target state,
+Pluto stops without replacing the database and offers explicit backup
+restoration. Failed database artifacts are retained for diagnosis.
+
+Pluto is released under the [MIT License](LICENSE).
+
 ## 🚀 Getting Started
 
 ### Prerequisites

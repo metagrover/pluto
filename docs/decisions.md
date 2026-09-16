@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-16 - Ship unsigned manual updates while preserving durable data and explicit cloud consent
+
+- **Status:** Accepted
+- **Supersedes:** “2026-09-01 - Use a verified Drizzle lifecycle with development-phase replacement,” specifically its permission to replace pre-Drizzle or integrity-failed databases; and any prior plaintext fallback for provider credentials.
+- **Decision:** Pluto ships an MIT-licensed Apple Silicon DMG through GitHub Releases. The app checks the latest stable release and opens only the exact validated GitHub DMG; installation remains manual. Durable state stays at `~/Library/Application Support/pluto`. Drizzle timestamp-and-hash history remains authoritative, is mirrored to SQLite `user_version`, and is protected by classified migration policies, durable journals, hash-verified backups for major/destructive migrations, and explicit restoration. Integrity failures never create an empty replacement. Local inference is the default; every cloud provider requires the current persistent disclosure consent and secure credential storage. OpenRouter joins the shared execution abstraction without becoming a silent default.
+- **Rationale:** Replacing an application bundle must be independent from user data, and an updater must not execute remote shell code or modify `/Applications`. Cloud inference is useful only when users knowingly choose it and credentials cannot leak into plaintext. Provider recommendations need repeatable evidence rather than marketing labels.
+- **Consequences:** Unsigned builds require the user to approve Gatekeeper and replace the app manually. Interrupted migrations retry or finalize only against the exact packaged history; otherwise Pluto fails closed and offers restoration from a complete hash-verified backup while preserving the failed artifacts. No local failure transmits meeting content to cloud. Signing, notarization, automatic installation, and restart-based updating require a later decision, including a safe Keychain-binding migration.
+
 ## 2026-09-15 - Recover deterministically from notes guardrail omissions without aborting publication
 
 - **Status:** Accepted

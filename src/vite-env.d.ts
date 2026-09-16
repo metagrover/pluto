@@ -31,7 +31,7 @@ interface Window {
   plutoUpdater?: {
     getStatus: () => Promise<import('../electron/updateChecker').UpdateInfo>;
     checkNow: () => Promise<import('../electron/updateChecker').UpdateInfo>;
-    applyUpdate: () => Promise<void>;
+    downloadUpdate: () => Promise<void>;
     openReleaseUrl: (url?: string) => Promise<void>;
     onStatusChanged: (
       callback: (

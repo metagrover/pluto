@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApplicationKeyStore } from '../../electron/crypto/applicationKeyStore';
 import { deriveDatabaseKey } from '../../electron/crypto/keyDerivation';
 import { DatabaseLifecycleError } from '../../electron/database/errors';
+import { readPackagedMigrationHistory } from '../../electron/database/migrationHistory';
+import { restoreLatestVerifiedSchemaBackup } from '../../electron/database/migrationSafety';
 import { createDatabaseRuntime } from '../../electron/database/runtime';
 
 const roots: string[] = [];
@@ -17,7 +19,12 @@ const makeRoot = () => {
 
 const writeMigrations = (
   root: string,
-  migrations: Array<{ tag: string; when: number; sql: string }>,
+  migrations: Array<{
+    tag: string;
+    when: number;
+    sql: string;
+    risk?: 'additive' | 'major' | 'destructive';
+  }>,
 ) => {
   const folder = path.join(root, 'drizzle');
   fs.mkdirSync(path.join(folder, 'meta'), { recursive: true });
@@ -38,6 +45,15 @@ const writeMigrations = (
   for (const migration of migrations) {
     fs.writeFileSync(path.join(folder, `${migration.tag}.sql`), migration.sql);
   }
+  fs.writeFileSync(
+    path.join(folder, 'migration-policy.json'),
+    JSON.stringify({
+      version: 1,
+      migrations: Object.fromEntries(
+        migrations.map(({ tag, risk }) => [tag, { risk: risk ?? 'additive' }]),
+      ),
+    }),
+  );
   return folder;
 };
 
@@ -251,6 +267,146 @@ describe('database runtime', () => {
         .get(),
     ).toBeUndefined();
     inspection.close();
+  });
+
+  it('creates a durable verified backup before a major migration', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    let migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE durable_marker (value TEXT);',
+      },
+    ]);
+    const first = createDatabaseRuntime({ databasePath, migrationsFolder });
+    first
+      .initialize()
+      .prepare('INSERT INTO durable_marker VALUES (?)')
+      .run('preserved');
+    first.close();
+
+    migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE durable_marker (value TEXT);',
+      },
+      {
+        tag: '0001_major',
+        when: 200,
+        risk: 'major',
+        sql: 'ALTER TABLE durable_marker ADD COLUMN extra TEXT;',
+      },
+    ]);
+    const second = createDatabaseRuntime({ databasePath, migrationsFolder });
+    const sqlite = second.initialize();
+    expect(sqlite.pragma('user_version', { simple: true })).toBe(2);
+    second.close();
+
+    const backupRoot = path.join(root, 'db-backups');
+    const backupDirectory = path.join(
+      backupRoot,
+      fs.readdirSync(backupRoot)[0],
+    );
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(backupDirectory, 'manifest.json'), 'utf8'),
+    );
+    expect(manifest).toMatchObject({
+      state: 'complete',
+      fromSchemaVersion: 1,
+      toSchemaVersion: 2,
+      pendingMigrationIds: ['0001_major'],
+    });
+    expect(manifest.sourceDatabaseSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.targetMigrationHashes).toEqual([
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+    ]);
+
+    expect(restoreLatestVerifiedSchemaBackup(databasePath)).toBe(
+      backupDirectory,
+    );
+    const restored = new Database(databasePath, { readonly: true });
+    expect(restored.pragma('user_version', { simple: true })).toBe(1);
+    expect(restored.prepare('SELECT value FROM durable_marker').get()).toEqual({
+      value: 'preserved',
+    });
+    expect(
+      restored
+        .prepare(
+          "SELECT 1 FROM pragma_table_info('durable_marker') WHERE name = 'extra'",
+        )
+        .get(),
+    ).toBeUndefined();
+    restored.close();
+    expect(
+      fs.readdirSync(root).some((name) => name.startsWith('pluto.db.failed-')),
+    ).toBe(true);
+  });
+
+  it('retries an interrupted transaction from the valid source version', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    let migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE durable_marker (value TEXT);',
+      },
+    ]);
+    const first = createDatabaseRuntime({ databasePath, migrationsFolder });
+    first.initialize();
+    first.close();
+    migrationsFolder = writeMigrations(root, [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE durable_marker (value TEXT);',
+      },
+      {
+        tag: '0001_retry',
+        when: 200,
+        sql: 'CREATE TABLE retry_marker (id INTEGER);',
+      },
+    ]);
+    const packaged = readPackagedMigrationHistory(migrationsFolder);
+    fs.writeFileSync(
+      `${databasePath}.schema-migration-journal.json`,
+      JSON.stringify({
+        version: 1,
+        state: 'prepared',
+        fromSchemaVersion: 1,
+        toSchemaVersion: 2,
+        pendingMigrationIds: ['0001_retry'],
+        targetMigrationHashes: [packaged[1].hash],
+        startedAt: new Date().toISOString(),
+      }),
+    );
+    expect(fs.existsSync(`${databasePath}.schema-migration-journal.json`)).toBe(
+      true,
+    );
+    const retried = createDatabaseRuntime({ databasePath, migrationsFolder });
+    expect(() => retried.initialize()).not.toThrow();
+    expect(fs.existsSync(`${databasePath}.schema-migration-journal.json`)).toBe(
+      false,
+    );
+    retried.close();
+  });
+
+  it('preserves an integrity-failed database without replacing it', () => {
+    const root = makeRoot();
+    const databasePath = path.join(root, 'pluto.db');
+    const original = Buffer.from('not a sqlite database');
+    fs.writeFileSync(databasePath, original);
+    const runtime = createDatabaseRuntime({
+      databasePath,
+      migrationsFolder: writeMigrations(root, []),
+    });
+    expect(() => runtime.initialize()).toThrow();
+    expect(fs.readFileSync(databasePath)).toEqual(original);
+    expect(
+      fs.readdirSync(root).some((name) => name.includes('replacement')),
+    ).toBe(false);
   });
 
   it('rejects unsupported history without changing persistent journal mode', () => {

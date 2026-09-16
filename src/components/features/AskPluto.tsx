@@ -23,6 +23,7 @@ import type {
   ResolvedAskPlutoScope,
 } from '../../types/askPlutoQuery';
 import { Logo } from '../Brand/Logo';
+import { InferenceActivityInline } from '../layout/InferenceActivityBadge';
 import type { CitationChain } from './CitationCard';
 
 interface AskPlutoProps {
@@ -762,48 +763,53 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
         {/* Input bar — sticky at the bottom */}
         <div className="pb-8 pt-6 sticky bottom-0 left-0 right-0 z-10 flex justify-center bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent pointer-events-none mt-auto">
-          <form
-            onSubmit={handleSubmit}
-            className="relative flex items-center w-full pointer-events-auto bg-white dark:bg-[#202020] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_-4px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.3)] hover:border-black/20 dark:hover:border-white/20"
-          >
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-28 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
-              placeholder="Ask Pluto…"
+          <div className="w-full space-y-2">
+            <InferenceActivityInline
+              tasks={['askPluto', 'askPlutoDeep', 'askPlutoLive']}
             />
-            <button
-              type="button"
-              aria-label="Analyze deeply"
-              aria-pressed={modeOverride === 'deep'}
-              title="Use deeper reasoning for the next question"
-              disabled={isProcessing}
-              onClick={() =>
-                setModeOverride((current) =>
-                  current === 'deep' ? 'auto' : 'deep',
-                )
-              }
-              className={`absolute right-12 inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                modeOverride === 'deep'
-                  ? 'bg-pro-accent/10 text-pro-accent'
-                  : 'text-pro-text-muted hover:bg-black/5 hover:text-pro-text-main dark:hover:bg-white/5'
-              }`}
+            <form
+              onSubmit={handleSubmit}
+              className="relative flex items-center w-full pointer-events-auto bg-white dark:bg-[#202020] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_-4px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.3)] hover:border-black/20 dark:hover:border-white/20"
             >
-              <Brain className="h-3.5 w-3.5" />
-              Deep
-            </button>
-            <button
-              type="submit"
-              disabled={!query.trim() || isProcessing}
-              className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit"
-            >
-              <ArrowRight
-                className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5"
-                strokeWidth={2}
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-28 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
+                placeholder="Ask Pluto…"
               />
-            </button>
-          </form>
+              <button
+                type="button"
+                aria-label="Analyze deeply"
+                aria-pressed={modeOverride === 'deep'}
+                title="Use deeper reasoning for the next question"
+                disabled={isProcessing}
+                onClick={() =>
+                  setModeOverride((current) =>
+                    current === 'deep' ? 'auto' : 'deep',
+                  )
+                }
+                className={`absolute right-12 inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                  modeOverride === 'deep'
+                    ? 'bg-pro-accent/10 text-pro-accent'
+                    : 'text-pro-text-muted hover:bg-black/5 hover:text-pro-text-main dark:hover:bg-white/5'
+                }`}
+              >
+                <Brain className="h-3.5 w-3.5" />
+                Deep
+              </button>
+              <button
+                type="submit"
+                disabled={!query.trim() || isProcessing}
+                className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit"
+              >
+                <ArrowRight
+                  className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5"
+                  strokeWidth={2}
+                />
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>

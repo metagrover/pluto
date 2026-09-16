@@ -238,12 +238,18 @@ export interface LLMProvider {
   ): Promise<ExtractedEntities>;
 }
 
-export type ProviderType = 'ollama' | 'gemini' | 'openai' | 'claude';
+export type ProviderType =
+  | 'ollama'
+  | 'gemini'
+  | 'openai'
+  | 'openrouter'
+  | 'claude';
 
 export interface LLMSettings {
   llm_provider?: ProviderType;
   gemini_api_key?: string;
   openai_api_key?: string;
+  openrouter_api_key?: string;
   claude_api_key?: string;
   llm_model?: string;
   ollama_model?: string;
@@ -252,5 +258,7 @@ export interface LLMSettings {
   ollama_seed?: number;
   gemini_model?: string;
   openai_model?: string;
+  openrouter_model?: string;
   claude_model?: string;
+  cloud_consent_version?: string;
 }

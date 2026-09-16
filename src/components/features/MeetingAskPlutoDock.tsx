@@ -25,6 +25,7 @@ import {
 } from '../../utils/askPlutoDiagnostics';
 import { MEETING_ASK_PLUTO_LIMITS } from '../../utils/meetingAskPlutoRequest';
 import { Logo } from '../Brand/Logo';
+import { InferenceActivityInline } from '../layout/InferenceActivityBadge';
 
 type MeetingAskPlutoDockProps = {
   onOpenMeeting?: (meetingId: string) => void;
@@ -440,6 +441,9 @@ export const MeetingAskPlutoDock: React.FC<MeetingAskPlutoDockProps> = ({
           <div className="meeting-ask-pluto-dock__header-copy">
             <span>Ask Pluto</span>
             <span>{scopeTitle}</span>
+            <InferenceActivityInline
+              tasks={['askPluto', 'askPlutoDeep', 'askPlutoLive']}
+            />
           </div>
           <button
             type="button"

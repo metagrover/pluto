@@ -10,11 +10,6 @@ import {
 import { deriveDatabaseKey } from '../crypto/keyDerivation';
 import { adoptLegacyDatabase, backupLegacyDatabase } from './adoption';
 import {
-  type StagedDatabase,
-  cleanupStagedDatabase,
-  stageDatabaseArtifacts,
-} from './artifacts';
-import {
   DatabaseEncryptionMigrator,
   isPlaintextSqliteDatabase,
 } from './encryptionMigration';
@@ -25,6 +20,12 @@ import {
   readAppliedMigrationHistory,
   readPackagedMigrationHistory,
 } from './migrationHistory';
+import {
+  completeSchemaMigration,
+  prepareSchemaMigration,
+  readMigrationPolicies,
+  readSchemaMigrationJournal,
+} from './migrationSafety';
 
 export interface DatabaseRuntime {
   initialize(): Database.Database;
@@ -37,7 +38,6 @@ export interface DatabaseRuntimeOptions {
   databasePath: string;
   migrationsFolder: string;
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
-  cleanupStaged?: (staged: StagedDatabase) => void;
   openConnection?: (databasePath: string) => Database.Database;
   encryptionKeyHex?: string;
   keyStore?: ApplicationKeyStore;
@@ -51,11 +51,6 @@ const sqliteCode = (error: unknown): string | undefined => {
     return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' ? code : undefined;
-};
-
-const isCorruptionError = (error: unknown) => {
-  const code = sqliteCode(error);
-  return code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB';
 };
 
 const prepareDirectory = (databasePath: string) => {
@@ -167,7 +162,6 @@ export const createDatabaseRuntime = (
   let currentState: DatabaseRuntime['state'] = 'new';
   let connection: Database.Database | null = null;
   const inMemory = options.databasePath === ':memory:';
-  const cleanup = options.cleanupStaged ?? cleanupStagedDatabase;
   const opener =
     options.openConnection ?? ((databasePath) => new Database(databasePath));
   const packaged = () => readPackagedMigrationHistory(options.migrationsFolder);
@@ -181,8 +175,61 @@ export const createDatabaseRuntime = (
     const packagedHistory = packaged();
     const applied = readAppliedMigrationHistory(sqlite);
     assertSupportedMigrationHistory(applied, packagedHistory);
+    const userVersion = Number(
+      sqlite.pragma('user_version', { simple: true }) ?? 0,
+    );
+    if (userVersion !== 0 && userVersion !== applied.length) {
+      throw new DatabaseLifecycleError(
+        'database_version_unsupported',
+        'SQLite user_version does not match applied migration history.',
+      );
+    }
+    const interrupted = readSchemaMigrationJournal(options.databasePath);
+    if (interrupted) {
+      const expected = packagedHistory.slice(interrupted.fromSchemaVersion);
+      if (
+        interrupted.toSchemaVersion !== packagedHistory.length ||
+        interrupted.pendingMigrationIds.join('\n') !==
+          expected.map(({ tag }) => tag).join('\n') ||
+        interrupted.targetMigrationHashes.join('\n') !==
+          expected.map(({ hash }) => hash).join('\n')
+      ) {
+        throw new DatabaseLifecycleError(
+          'database_migration_recovery_required',
+          'Interrupted migration does not match the packaged migration history.',
+        );
+      }
+    }
+    if (interrupted && applied.length === interrupted.toSchemaVersion) {
+      sqlite.pragma(`user_version = ${applied.length}`);
+      verifyHealth(sqlite);
+      completeSchemaMigration(options.databasePath);
+      return;
+    }
     const pendingMigrationId = getPendingMigrationId(applied, packagedHistory);
-    if (!pendingMigrationId) return;
+    if (!pendingMigrationId) {
+      if (userVersion === 0 && applied.length > 0) {
+        sqlite.pragma(`user_version = ${applied.length}`);
+      }
+      if (interrupted) {
+        throw new DatabaseLifecycleError(
+          'database_migration_recovery_required',
+          'Interrupted migration does not match the database version.',
+        );
+      }
+      return;
+    }
+
+    prepareSchemaMigration({
+      sqlite,
+      databasePath: options.databasePath,
+      fromSchemaVersion: applied.length,
+      packaged: packagedHistory,
+      policies: readMigrationPolicies(
+        options.migrationsFolder,
+        packagedHistory,
+      ),
+    });
 
     let migrationFailure: DatabaseLifecycleError | undefined;
     try {
@@ -216,6 +263,9 @@ export const createDatabaseRuntime = (
       readAppliedMigrationHistory(sqlite),
       packagedHistory,
     );
+    sqlite.pragma(`user_version = ${packagedHistory.length}`);
+    verifyHealth(sqlite);
+    completeSchemaMigration(options.databasePath);
   };
 
   const isEncryptedDatabaseTarget = (
@@ -308,41 +358,6 @@ export const createDatabaseRuntime = (
     return sqlite;
   };
 
-  const initializeFresh = (keyHex: string | null) => {
-    connection = openWithKey(options.databasePath, keyHex);
-    configureConnection(connection, inMemory);
-    applyPendingMigrations(connection);
-    verifyHealth(connection);
-    return connection;
-  };
-
-  const replaceExisting = (
-    reason: 'integrity-failed',
-    keyHex: string | null,
-  ) => {
-    closeConnection();
-    const staged = stageDatabaseArtifacts(options.databasePath, reason);
-    try {
-      const sqlite = initializeFresh(keyHex);
-      try {
-        cleanup(staged);
-      } catch (error) {
-        throw error instanceof DatabaseLifecycleError
-          ? error
-          : new DatabaseLifecycleError(
-              'database_cleanup_failed',
-              'Could not delete verified staged database artifacts.',
-              {},
-              { cause: error },
-            );
-      }
-      return sqlite;
-    } catch (error) {
-      closeConnection();
-      throw error;
-    }
-  };
-
   return {
     get state() {
       return currentState;
@@ -405,7 +420,6 @@ export const createDatabaseRuntime = (
           const code = sqliteCode(cause);
 
           if (isEncrypted) {
-            // Encrypted database must NEVER reach replaceExisting!
             if (code === 'SQLITE_NOTADB') {
               throw new DatabaseLifecycleError(
                 keyHex ? 'database_key_rejected' : 'database_key_unavailable',
@@ -417,22 +431,6 @@ export const createDatabaseRuntime = (
               );
             }
             throw error;
-          }
-
-          if (
-            !inMemory &&
-            (isCorruptionError(error) ||
-              error instanceof DatabaseLifecycleError)
-          ) {
-            if (
-              isCorruptionError(cause) ||
-              (error instanceof DatabaseLifecycleError &&
-                error.code === 'database_integrity_failed')
-            ) {
-              connection = replaceExisting('integrity-failed', keyHex);
-              currentState = 'open';
-              return connection;
-            }
           }
           throw error;
         }

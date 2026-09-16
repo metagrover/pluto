@@ -13,7 +13,12 @@ export type MeetingType =
   | 'presentation'
   | 'general';
 
-export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
+export type AnalysisProvider =
+  | 'ollama'
+  | 'gemini'
+  | 'openai'
+  | 'openrouter'
+  | 'claude';
 
 export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
 

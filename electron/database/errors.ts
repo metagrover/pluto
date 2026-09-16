@@ -5,6 +5,9 @@ export type DatabaseErrorCode =
   | 'database_configuration_failed'
   | 'database_version_unsupported'
   | 'database_migration_failed'
+  | 'database_migration_policy_invalid'
+  | 'database_migration_recovery_required'
+  | 'database_backup_failed'
   | 'database_integrity_failed'
   | 'database_replacement_failed'
   | 'database_cleanup_failed'
@@ -59,6 +62,12 @@ export const describeDatabaseStartupError = (error: unknown): string => {
       const code = sqliteCode ? ` (${sqliteCode})` : '';
       return `Database migration${migration} failed${code}.`;
     }
+    case 'database_migration_policy_invalid':
+      return 'Packaged database migration policy is invalid.';
+    case 'database_migration_recovery_required':
+      return 'An interrupted database migration requires recovery.';
+    case 'database_backup_failed':
+      return 'Database backup before migration failed.';
     case 'database_integrity_failed':
       return 'Database integrity verification failed.';
     case 'database_replacement_failed':

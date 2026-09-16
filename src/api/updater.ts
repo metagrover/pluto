@@ -4,7 +4,10 @@ import type { UpdateInfo } from '../../electron/updateChecker';
 export type { UpdateInfo };
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
-  if (typeof window === 'undefined' || !window.ipcRenderer) {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.ipcRenderer?.invoke !== 'function'
+  ) {
     return Promise.resolve({
       hasUpdate: false,
       currentVersion: '0.1.0',
@@ -20,8 +23,8 @@ export const getUpdateStatus = (): Promise<UpdateInfo> =>
 export const checkForUpdates = (): Promise<UpdateInfo> =>
   invoke<UpdateInfo>('PLUTO_UPDATER_CHECK_NOW');
 
-export const applyUpdate = (): Promise<void> =>
-  invoke<void>('PLUTO_UPDATER_APPLY_UPDATE');
+export const downloadUpdate = (): Promise<void> =>
+  invoke<void>('PLUTO_UPDATER_DOWNLOAD_UPDATE');
 
 export const openReleaseUrl = (url?: string): Promise<void> =>
   invoke<void>('PLUTO_UPDATER_OPEN_RELEASE_URL', url);
@@ -29,15 +32,19 @@ export const openReleaseUrl = (url?: string): Promise<void> =>
 export const subscribeToUpdateStatus = (
   callback: (status: UpdateInfo) => void,
 ): (() => void) => {
-  if (typeof window === 'undefined' || !window.ipcRenderer) {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.ipcRenderer?.on !== 'function'
+  ) {
     return () => {};
   }
-  return window.ipcRenderer.on(
+  const unsubscribe = window.ipcRenderer.on(
     'pluto-updater:status-changed',
     (_event, status: UpdateInfo) => {
       callback(status);
     },
   );
+  return typeof unsubscribe === 'function' ? unsubscribe : () => {};
 };
 
 export const useAppUpdate = () => {
@@ -47,7 +54,7 @@ export const useAppUpdate = () => {
     checkedAt: Date.now(),
   });
   const [isChecking, setIsChecking] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -75,21 +82,21 @@ export const useAppUpdate = () => {
     }
   };
 
-  const handleApplyUpdate = async () => {
-    setIsUpdating(true);
+  const handleDownloadUpdate = async () => {
+    setIsDownloading(true);
     try {
-      await applyUpdate();
+      await downloadUpdate();
     } finally {
-      setIsUpdating(false);
+      setIsDownloading(false);
     }
   };
 
   return {
     status,
     isChecking,
-    isUpdating,
+    isDownloading,
     checkNow: handleCheckNow,
-    applyUpdate: handleApplyUpdate,
+    downloadUpdate: handleDownloadUpdate,
     openReleaseUrl,
   };
 };

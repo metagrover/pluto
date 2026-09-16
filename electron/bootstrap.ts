@@ -12,11 +12,15 @@ import {
 } from './appRuntimePolicy';
 import { ApplicationKeyStore } from './crypto/applicationKeyStore';
 import { hasValidRecoveryKeyFile } from './crypto/recoveryKeyFile';
-import { initializeApplicationDatabase } from './database/applicationDatabase';
+import {
+  initializeApplicationDatabase,
+  resolveApplicationDatabasePath,
+} from './database/applicationDatabase';
 import {
   DatabaseLifecycleError,
   describeDatabaseStartupError,
 } from './database/errors';
+import { restoreLatestVerifiedSchemaBackup } from './database/migrationSafety';
 import { probeSignedMacBuild } from './encryptionRollout';
 import { createLogger, initializeElectronLogging } from './logger';
 
@@ -27,9 +31,6 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   }
   throw err;
 });
-
-initializeElectronLogging({ isPackaged: app.isPackaged });
-const log = createLogger('Bootstrap');
 
 let focusPrimaryWindow: (() => void) | null = null;
 const developmentUserDataDir = resolveUserDataArgument(process.argv);
@@ -50,7 +51,12 @@ const recoveryKeyAvailable = Boolean(
 if (!app.isPackaged && developmentUserDataDir) {
   app.setPath('userData', developmentUserDataDir);
 }
-if (app.isPackaged) app.setName(PLUTO_PRODUCT_NAME);
+if (app.isPackaged) {
+  app.setName(PLUTO_PRODUCT_NAME);
+  if (productionUserDataDir) app.setPath('userData', productionUserDataDir);
+}
+initializeElectronLogging({ isPackaged: app.isPackaged });
+const log = createLogger('Bootstrap');
 const productionSignature = app.isPackaged
   ? probeSignedMacBuild(process.execPath, {
       expectedIdentifier: PLUTO_BUNDLE_IDENTIFIER,
@@ -120,6 +126,9 @@ if (!canOpenDatabase) {
       const isIdentityMismatch =
         error instanceof DatabaseLifecycleError &&
         error.code === 'database_key_identity_mismatch';
+      const isMigrationRecovery =
+        error instanceof DatabaseLifecycleError &&
+        error.code === 'database_migration_recovery_required';
 
       const title = isIdentityMismatch
         ? 'Database recovery required'
@@ -135,11 +144,18 @@ if (!canOpenDatabase) {
         detail,
         buttons: isIdentityMismatch
           ? ['Open Data Folder', 'Quit Pluto']
-          : isKeyLocked
-            ? ['Retry', 'Open Data Folder', 'Quit Pluto']
-            : ['Retry', 'Open Data Folder', 'Quit Pluto'],
+          : isMigrationRecovery
+            ? [
+                'Retry',
+                'Restore verified backup',
+                'Open Data Folder',
+                'Quit Pluto',
+              ]
+            : isKeyLocked
+              ? ['Retry', 'Open Data Folder', 'Quit Pluto']
+              : ['Retry', 'Open Data Folder', 'Quit Pluto'],
         defaultId: isIdentityMismatch ? 1 : 0,
-        cancelId: isIdentityMismatch ? 1 : 2,
+        cancelId: isIdentityMismatch ? 1 : isMigrationRecovery ? 3 : 2,
       });
 
       if (isIdentityMismatch) {
@@ -148,6 +164,30 @@ if (!canOpenDatabase) {
         break;
       }
       if (choice === 0) {
+        continue;
+      }
+      if (isMigrationRecovery && choice === 1) {
+        try {
+          restoreLatestVerifiedSchemaBackup(
+            resolveApplicationDatabasePath({
+              userDataPath: app.getPath('userData'),
+            }),
+          );
+          continue;
+        } catch (restoreError) {
+          log.error(
+            'Verified database backup restoration failed:',
+            restoreError,
+          );
+          dialog.showErrorBox(
+            'Database restore failed',
+            describeDatabaseStartupError(restoreError),
+          );
+          continue;
+        }
+      }
+      if (isMigrationRecovery && choice === 2) {
+        void shell.openPath(app.getPath('userData'));
         continue;
       }
       if (choice === 1) {
