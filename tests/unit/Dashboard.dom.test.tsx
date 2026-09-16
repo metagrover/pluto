@@ -252,7 +252,7 @@ describe('Dashboard interactions', () => {
     act(() => root.unmount());
   });
 
-  it('keeps one compact suggestion open and makes its synthesis the source link', async () => {
+  it('shows compact review controls for each focused possible item', async () => {
     const setSelectedMeetingId = vi.fn();
     const handleReviewCommitment = vi.fn(async () => {});
     const model = buildDashboardHomeModel({
@@ -303,8 +303,8 @@ describe('Dashboard interactions', () => {
       'button[aria-label="Review suggestion: Assign the customer recap"]',
     );
     expect(firstReview?.getAttribute('aria-expanded')).toBe('false');
-    expect(secondReview).toBeNull();
-    expect(container.textContent).toContain('Fresh suggestion · 1 of 2');
+    expect(secondReview?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Fresh suggestion');
     expect(
       container.querySelector(
         'button[aria-label="Open source meeting for Send the launch recap"]',
@@ -343,7 +343,7 @@ describe('Dashboard interactions', () => {
     act(() => root.unmount());
   });
 
-  it('advances suggestion progress as items are dismissed', async () => {
+  it('removes dismissed possible items from the focused list', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -413,11 +413,17 @@ describe('Dashboard interactions', () => {
       });
     };
 
-    expect(container.textContent).toContain('Fresh suggestion · 1 of 3');
+    expect(
+      container.querySelectorAll('button[aria-label^="Review suggestion:"]'),
+    ).toHaveLength(3);
     await dismissCurrentSuggestion();
-    expect(container.textContent).toContain('Fresh suggestion · 2 of 3');
+    expect(
+      container.querySelectorAll('button[aria-label^="Review suggestion:"]'),
+    ).toHaveLength(2);
     await dismissCurrentSuggestion();
-    expect(container.textContent).toContain('Fresh suggestion · 3 of 3');
+    expect(
+      container.querySelectorAll('button[aria-label^="Review suggestion:"]'),
+    ).toHaveLength(1);
 
     act(() => root.unmount());
   });

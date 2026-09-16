@@ -253,6 +253,47 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('prioritizes daily choices before overdue, stale, and active open items regardless of review state', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-08-25',
+      meetings: [],
+      overdueActions: [
+        makeAction({ id: 'overdue-confirmed', name: 'Overdue confirmed' }),
+      ],
+      staleActions: [
+        makeAction({
+          id: 'stale-possible',
+          name: 'Stale possible',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      activeActions: [
+        makeAction({ id: 'active-confirmed', name: 'Active confirmed' }),
+        makeAction({
+          id: 'daily-possible',
+          name: 'Daily possible',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            dashboard_daily_priority: { date: '2026-08-25', rank: 0 },
+          }),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.commitments.items.map((item) => item.id)).toEqual([
+      'daily-possible',
+      'overdue-confirmed',
+      'stale-possible',
+    ]);
+    expect(model.commitments.backlog.map((item) => item.id)).toEqual([
+      'active-confirmed',
+    ]);
+  });
+
   it('uses calm empty states when no attention item, commitment, or supported win exists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -278,7 +319,7 @@ describe('buildDashboardHomeModel', () => {
     });
     expect(model.commitments).toMatchObject({
       state: 'empty',
-      summary: 'No confirmed commitments need attention',
+      summary: 'No open action items need attention',
       items: [],
     });
     expect(model.recentWin).toMatchObject({
@@ -287,7 +328,7 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
-  it('separates possible follow-ups from confirmed commitments', () => {
+  it('shows possible follow-ups as reviewable open action items', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -305,12 +346,13 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.commitments.state).toBe('empty');
-    expect(model.commitments.items).toHaveLength(0);
-    expect(model.commitments.needsConfirmation).toHaveLength(1);
-    expect(model.commitments.needsConfirmation[0].title).toBe(
-      'Maybe send a launch note',
-    );
+    expect(model.commitments.state).toBe('populated');
+    expect(model.commitments.items).toHaveLength(1);
+    expect(model.commitments.items[0]).toMatchObject({
+      title: 'Maybe send a launch note',
+      commitmentState: 'possible',
+      canComplete: false,
+    });
     expect(model.topOfMind.state).toBe('empty');
   });
 
@@ -1204,6 +1246,8 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('latest_meeting');
     expect(model.briefingFocus.kind).toBe('latest_meeting');
     expect(model.actionInsights.state).toBe('empty');
+    expect(model.commitments.state).toBe('populated');
+    expect(model.commitments.items[0].title).toBe('Ship privacy review');
   });
 
   it('suppresses snoozed linked follow-ups from dashboard attention lists', () => {
@@ -1221,6 +1265,8 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('latest_meeting');
     expect(model.briefingFocus.kind).toBe('latest_meeting');
     expect(model.actionInsights.state).toBe('empty');
+    expect(model.commitments.state).toBe('populated');
+    expect(model.commitments.items[0].title).toBe('Revisit launch blockers');
   });
 
   it('keeps dashboard follow-ups visible when any linked alert is still active', () => {
@@ -2236,11 +2282,16 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.commitments.state).toBe('populated');
-    expect(model.commitments.items[0]).toMatchObject({
-      id: 'newly-confirmed',
+    expect(model.commitments.items).toHaveLength(3);
+    expect(model.commitments.backlog).toHaveLength(4);
+    expect(
+      [...model.commitments.items, ...model.commitments.backlog].find(
+        (item) => item.id === 'newly-confirmed',
+      ),
+    ).toMatchObject({
       title: 'Ship the standard meeting analysis view',
+      commitmentState: 'confirmed',
     });
-    expect(model.commitments.needsConfirmation).toHaveLength(3);
   });
 
   it('keeps a blocker-backed possible action possible and non-completable', () => {
@@ -2876,7 +2927,7 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
-  describe('needsConfirmation briefing suggestions quality and deduplication', () => {
+  describe('open commitment quality and canonical identity', () => {
     it('canonicalizes action title for display in action insights', () => {
       const model = buildDashboardHomeModel({
         isRecording: false,
@@ -2898,11 +2949,11 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(model.commitments.needsConfirmation).toHaveLength(1);
-      expect(model.commitments.needsConfirmation[0].title).toBe(
+      expect(model.commitments.items).toHaveLength(1);
+      expect(model.commitments.items[0].title).toBe(
         'Circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
       );
-      expect(model.commitments.needsConfirmation[0].assigneeName).toBe('Me');
+      expect(model.commitments.items[0].assigneeName).toBe('Me');
     });
 
     it('does not treat wording overlap as canonical identity with a confirmed commitment', () => {
@@ -2935,11 +2986,10 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(model.commitments.items).toHaveLength(1);
-      expect(model.commitments.items[0].id).toBe('confirmed-1');
-      expect(
-        model.commitments.needsConfirmation.map((item) => item.id),
-      ).toEqual(['possible-dup']);
+      expect(model.commitments.items.map((item) => item.id)).toEqual([
+        'possible-dup',
+        'confirmed-1',
+      ]);
     });
 
     it('does not apply one rejected lifecycle decision to a different canonical action', () => {
@@ -2971,9 +3021,9 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(
-        model.commitments.needsConfirmation.map((item) => item.id),
-      ).toEqual(['possible-candidate']);
+      expect(model.commitments.items.map((item) => item.id)).toEqual([
+        'possible-candidate',
+      ]);
     });
 
     it('filters out suggestions assigned to third parties', () => {
@@ -3016,8 +3066,8 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(model.commitments.needsConfirmation).toHaveLength(1);
-      expect(model.commitments.needsConfirmation[0].id).toBe('possible-me');
+      expect(model.commitments.items).toHaveLength(1);
+      expect(model.commitments.items[0].id).toBe('possible-me');
     });
 
     it('keeps distinct canonical suggestions even when their wording overlaps', () => {
@@ -3057,8 +3107,8 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(model.commitments.needsConfirmation).toHaveLength(3);
-      expect(model.commitments.needsConfirmation.map((c) => c.id)).toEqual([
+      expect(model.commitments.items).toHaveLength(3);
+      expect(model.commitments.items.map((c) => c.id)).toEqual([
         'cand-3',
         'cand-2',
         'cand-1',
@@ -3098,9 +3148,10 @@ describe('buildDashboardHomeModel', () => {
         graphStats: null,
       });
 
-      expect(
-        model.commitments.needsConfirmation.map((item) => item.id),
-      ).toEqual(['candidate-new']);
+      expect(model.commitments.items.map((item) => item.id)).toEqual([
+        'confirmed-old',
+        'candidate-new',
+      ]);
     });
 
     it('trusts an explicit self assignment over stale assignee text', () => {
@@ -3128,9 +3179,9 @@ describe('buildDashboardHomeModel', () => {
         selfNames: ['Alex Morgan'],
       });
 
-      expect(
-        model.commitments.needsConfirmation.map((item) => item.id),
-      ).toEqual(['self-with-stale-name']);
+      expect(model.commitments.items.map((item) => item.id)).toEqual([
+        'self-with-stale-name',
+      ]);
     });
 
     it('excludes commitments assigned to other individuals from Daily Briefing suggestions and focus', () => {
@@ -3205,13 +3256,10 @@ describe('buildDashboardHomeModel', () => {
         selfNames: ['Me'],
       });
 
-      // Arnold's candidate action is excluded from suggestions
-      expect(model.commitments.needsConfirmation).toHaveLength(1);
-      expect(model.commitments.needsConfirmation[0].id).toBe('my-candidate');
-
-      // Taylor's confirmed action is excluded from Today's focus
-      expect(model.commitments.items).toHaveLength(1);
-      expect(model.commitments.items[0].id).toBe('my-confirmed');
+      expect(model.commitments.items.map((item) => item.id)).toEqual([
+        'my-confirmed',
+        'my-candidate',
+      ]);
       expect(model.commitments.backlog).toHaveLength(0);
     });
   });

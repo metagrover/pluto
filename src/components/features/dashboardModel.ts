@@ -156,14 +156,12 @@ export type DashboardCommitments =
       summary: string;
       items: [];
       backlog: DashboardActionInsightItem[];
-      needsConfirmation: DashboardActionInsightItem[];
     }
   | {
       state: 'populated';
       summary: string;
       items: DashboardActionInsightItem[];
       backlog: DashboardActionInsightItem[];
-      needsConfirmation: DashboardActionInsightItem[];
     };
 
 export interface DashboardKnowledgeDocumentCard {
@@ -1134,55 +1132,39 @@ const buildTopOfMind = (
 export const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
 ): DashboardCommitments => {
-  const confirmedItems =
+  const openItems =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
-          .filter((item) => item.commitmentState === 'confirmed')
+          .map((item, index) => ({ item, index }))
           .sort((a, b) => {
-            if (a.dailyPriorityRank !== null || b.dailyPriorityRank !== null) {
-              if (a.dailyPriorityRank === null) return 1;
-              if (b.dailyPriorityRank === null) return -1;
-              if (a.dailyPriorityRank !== b.dailyPriorityRank) {
-                return a.dailyPriorityRank - b.dailyPriorityRank;
-              }
+            const aRank = a.item.dailyPriorityRank;
+            const bRank = b.item.dailyPriorityRank;
+            if (aRank !== null || bRank !== null) {
+              if (aRank === null) return 1;
+              if (bRank === null) return -1;
+              if (aRank !== bRank) return aRank - bRank;
             }
-            return toTimestamp(b.reviewedAt) - toTimestamp(a.reviewedAt);
+            return a.index - b.index;
           })
+          .map(({ item }) => item)
       : [];
-  const items = confirmedItems.slice(0, MAX_DASHBOARD_BRIEFING_ITEMS);
-  const backlog = confirmedItems.slice(MAX_DASHBOARD_BRIEFING_ITEMS);
-
-  const candidateItems =
-    actionInsights.state === 'populated'
-      ? actionInsights.allItems.filter(
-          (item) => item.commitmentState === 'possible',
-        )
-      : [];
-
-  const needsConfirmation: DashboardActionInsightItem[] = [];
-  for (const candidate of candidateItems) {
-    needsConfirmation.push(candidate);
-    if (needsConfirmation.length >= MAX_DASHBOARD_BRIEFING_ITEMS) {
-      break;
-    }
-  }
+  const items = openItems.slice(0, MAX_DASHBOARD_BRIEFING_ITEMS);
+  const backlog = openItems.slice(MAX_DASHBOARD_BRIEFING_ITEMS);
 
   if (items.length === 0) {
     return {
       state: 'empty',
-      summary: 'No confirmed commitments need attention',
+      summary: 'No open action items need attention',
       items: [],
       backlog,
-      needsConfirmation,
     };
   }
 
   return {
     state: 'populated',
-    summary: `${pluralize(items.length, 'commitment')} shown`,
+    summary: `${pluralize(items.length, 'open item')} shown`,
     items,
     backlog,
-    needsConfirmation,
   };
 };
 
@@ -1874,16 +1856,20 @@ export const buildDashboardHomeModel = (
   const rawStale = input.staleActions.filter(isPersonalAction);
   const rawActive = input.activeActions.filter(isPersonalAction);
 
+  const openOverdueActions = filterRejectedDashboardActions(rawOverdue);
+  const openStaleActions = filterRejectedDashboardActions(rawStale);
+  const openActiveActions = filterRejectedDashboardActions(rawActive);
+
   const overdueActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(rawOverdue),
+    openOverdueActions,
     attentionAlerts,
   );
   const staleActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(rawStale),
+    openStaleActions,
     attentionAlerts,
   );
   const activeActions = filterSuppressedDashboardActions(
-    filterRejectedDashboardActions(rawActive),
+    openActiveActions,
     attentionAlerts,
   );
   const confirmedOverdueActions =
@@ -1900,7 +1886,15 @@ export const buildDashboardHomeModel = (
     input.dateKey ?? getDashboardDateKey(),
   );
   const topOfMind = buildTopOfMind(actionInsights);
-  const commitments = buildDashboardCommitments(actionInsights);
+  const commitmentActionInsights = buildActionInsights(
+    input.meetings,
+    openOverdueActions,
+    openStaleActions,
+    openActiveActions,
+    attentionAlerts,
+    input.dateKey ?? getDashboardDateKey(),
+  );
+  const commitments = buildDashboardCommitments(commitmentActionInsights);
   const recentWin = buildRecentWin(input.meetings);
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
