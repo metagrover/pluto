@@ -79,6 +79,7 @@ worktrees/
 .claude/
 .superpowers/
 .gstack/
+.impeccable/
 
 .builder.env
 

@@ -1,26 +1,39 @@
 import {
   Activity,
   Check,
+  ChevronRight,
+  Layers,
   MoreHorizontal,
   Pencil,
   Repeat2,
+  Star,
   Users,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  detachTopicFromProject,
   getProjectBrief,
   mergeProject,
   restoreProjectMerge,
   setProjectPortfolioDisposition,
   triggerDreamingNow,
   updateProjectDisplayTitle,
+  upsertEntity,
 } from '../../../api/knowledgeGraph';
 import {
   DREAMING_STATUS_LABEL,
   type DreamingUiStatus,
 } from '../../../utils/dreamingStatus';
 import type { ProjectBrief } from '../../../utils/projectBriefing';
-import type { ProjectPortfolioEntry } from '../../../utils/projectPortfolio';
+import {
+  type ProjectCadence,
+  type ProjectPortfolioEntry,
+  getProjectActivityState,
+  isProjectStarred,
+  readProjectCadence,
+  withProjectCadence,
+} from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
 import { SearchSelect } from '../../ui/SearchSelect';
 import { ProjectMilestones } from './ProjectMilestones';
@@ -148,6 +161,8 @@ export const ProjectDossier = ({
   const [showAllPeople, setShowAllPeople] = useState(false);
   const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const moreDetailsRef = useRef<HTMLDetailsElement>(null);
+  const mergeSectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (editingTitle) titleInputRef.current?.focus();
@@ -218,6 +233,129 @@ export const ProjectDossier = ({
   };
 
   const current = loadedProjectId === projectId ? brief : null;
+
+  const cadence = readProjectCadence(current?.project.metadata);
+  const activityState = useMemo(() => {
+    return getProjectActivityState(
+      current?.momentum.lastActivityAt ||
+        (current?.meetings[0]?.started_at ?? current?.meetings[0]?.created_at) ||
+        null,
+      Date.now(),
+      cadence,
+    );
+  }, [current?.momentum.lastActivityAt, current?.meetings, cadence]);
+
+  const handleUpdateCadence = async (newCadence: ProjectCadence | null) => {
+    if (!current) return;
+    try {
+      const updatedMetadata = withProjectCadence(
+        current.project.metadata,
+        newCadence,
+      );
+      let parsedMeta: Record<string, unknown> = {};
+      try {
+        parsedMeta = JSON.parse(updatedMetadata);
+      } catch {
+        parsedMeta = {};
+      }
+      await upsertEntity({
+        id: current.project.id,
+        name: current.project.detectedTitle,
+        type: 'project',
+        metadata: parsedMeta,
+      });
+      setBrief((prev) =>
+        prev
+          ? {
+              ...prev,
+              project: {
+                ...prev.project,
+                metadata: updatedMetadata,
+              },
+            }
+          : prev,
+      );
+      if (onPortfolioChanged) void onPortfolioChanged();
+    } catch (err) {
+      console.error('Failed to update project cadence:', err);
+    }
+  };
+
+  const evolutionTouchpoints = useMemo(() => {
+    if (!current || !current.meetings.length) return [];
+    const orderedMeetings = [...current.meetings].sort(
+      (a, b) =>
+        (Date.parse(a.started_at || a.created_at || '') || 0) -
+        (Date.parse(b.started_at || b.created_at || '') || 0),
+    );
+    const genesisMeeting = orderedMeetings[0];
+    const latestMeeting = orderedMeetings[orderedMeetings.length - 1];
+
+    const completedMilestones = (current.milestones || []).filter(
+      (m) => m.status === 'complete',
+    );
+
+    const points: Array<{
+      id: string;
+      label: string;
+      date: string | null;
+      title: string;
+      description?: string | null;
+      meetingId?: string;
+      type: 'genesis' | 'milestone' | 'pulse';
+    }> = [];
+
+    points.push({
+      id: `genesis-${genesisMeeting.id}`,
+      label: 'Genesis',
+      date: genesisMeeting.started_at || genesisMeeting.created_at,
+      title: `First discussed in ${genesisMeeting.title || 'Initial meeting'}`,
+      description: genesisMeeting.context || 'Project originated in discussion.',
+      meetingId: genesisMeeting.id,
+      type: 'genesis',
+    });
+
+    if (completedMilestones.length > 0) {
+      const ms = completedMilestones[0];
+      points.push({
+        id: `milestone-${ms.id}`,
+        label: 'Milestone reached',
+        date: ms.targetDate,
+        title: ms.title,
+        description: ms.evidenceQuote || 'Milestone confirmed complete.',
+        type: 'milestone',
+      });
+    } else if (orderedMeetings.length >= 3) {
+      const midMeeting = orderedMeetings[Math.floor(orderedMeetings.length / 2)];
+      points.push({
+        id: `mid-${midMeeting.id}`,
+        label: 'Intermediate progress',
+        date: midMeeting.started_at || midMeeting.created_at,
+        title: midMeeting.title || 'Progress check',
+        description: midMeeting.context || 'Midpoint alignment and scope review.',
+        meetingId: midMeeting.id,
+        type: 'milestone',
+      });
+    }
+
+    if (latestMeeting && latestMeeting.id !== genesisMeeting.id) {
+      points.push({
+        id: `latest-${latestMeeting.id}`,
+        label: 'Latest pulse',
+        date: latestMeeting.started_at || latestMeeting.created_at,
+        title: latestMeeting.title || 'Recent discussion',
+        description:
+          current.theme?.currentFocus ||
+          latestMeeting.context ||
+          'Current working direction.',
+        meetingId: latestMeeting.id,
+        type: 'pulse',
+      });
+    }
+
+    return points;
+  }, [current]);
+
   const qualification = readProjectQualification(current?.project.metadata);
   const projectOutcome =
     current?.theme?.outcome ||
@@ -387,6 +525,17 @@ export const ProjectDossier = ({
     };
   }, [mergeSourceId]);
 
+  useEffect(() => {
+    if (mergeOpen) {
+      requestAnimationFrame(() => {
+        mergeSectionRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      });
+    }
+  }, [mergeOpen]);
+
   const saveTitle = async () => {
     const title = titleDraft.trim();
     if (!current || !title || title === current.project.displayTitle) {
@@ -468,6 +617,33 @@ export const ProjectDossier = ({
     }
   };
 
+  const isStarred = isProjectStarred(brief?.project.metadata);
+
+  const toggleStar = async () => {
+    if (!brief?.project) return;
+    const nextStarred = !isStarred;
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(brief.project.metadata || '{}');
+    } catch {}
+    try {
+      await upsertEntity({
+        id: brief.project.id,
+        type: 'project',
+        name: brief.project.detectedTitle || brief.project.displayTitle,
+        metadata: {
+          ...parsed,
+          projectStarred: nextStarred,
+          projectStarredUpdatedAt: new Date().toISOString(),
+        },
+      });
+      await onPortfolioChanged?.();
+      setRequest((val) => val + 1);
+    } catch (err) {
+      console.error('Failed to toggle star in dossier:', err);
+    }
+  };
+
   return (
     <div
       className="project-reading-surface mx-auto w-full max-w-[760px] pb-16 text-pro-text-main"
@@ -492,7 +668,27 @@ export const ProjectDossier = ({
               <span>{DREAMING_STATUS_LABEL[dreamingState]}</span>
             </div>
           ) : null}
-          <details className="relative">
+          <button
+            type="button"
+            onClick={() => void toggleStar()}
+            title={isStarred ? 'Remove from primary focus' : 'Star as primary focus'}
+            aria-label={isStarred ? 'Unstar project' : 'Star project'}
+            className={`${quietButton} ${
+              isStarred
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 font-semibold'
+                : ''
+            }`}
+          >
+            <Star
+              className={`h-3.5 w-3.5 ${
+                isStarred
+                  ? 'fill-amber-400 text-amber-500'
+                  : 'text-pro-text-muted'
+              }`}
+            />
+            <span>{isStarred ? 'Primary Focus' : 'Star'}</span>
+          </button>
+          <details ref={moreDetailsRef} className="relative">
             <summary className={`${quietButton} cursor-pointer list-none`}>
               <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
               More
@@ -536,6 +732,9 @@ export const ProjectDossier = ({
                 onClick={() => {
                   setMergeOpen(true);
                   setMergeState('idle');
+                  if (moreDetailsRef.current) {
+                    moreDetailsRef.current.open = false;
+                  }
                 }}
                 className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
               >
@@ -674,7 +873,28 @@ export const ProjectDossier = ({
                 </button>
               </div>
             )}
-            <div className="project-dossier-meta mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
+            <div className="project-dossier-meta mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+                  activityState.state === 'active'
+                    ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300'
+                    : activityState.state === 'dormant'
+                      ? 'border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-300'
+                      : 'border border-stone-500/30 bg-stone-500/10 text-stone-700 dark:text-stone-300'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    activityState.state === 'active'
+                      ? 'bg-emerald-500'
+                      : activityState.state === 'dormant'
+                        ? 'bg-amber-500'
+                        : 'bg-stone-400'
+                  }`}
+                  aria-hidden="true"
+                />
+                {activityState.label}
+              </span>
               <span>
                 {current.meetingStats.meetingCount} meeting
                 {current.meetingStats.meetingCount === 1 ? '' : 's'}
@@ -854,12 +1074,39 @@ export const ProjectDossier = ({
                   </dd>
                 </div>
                 <div className={`${statCard} lg:col-span-2`}>
-                  <dt className="project-dossier-property-label">
-                    Regular meetings
-                  </dt>
+                  <div className="flex items-center justify-between gap-1">
+                    <dt className="project-dossier-property-label">
+                      Expected cadence
+                    </dt>
+                    <select
+                      value={cadence || 'default'}
+                      onChange={(e) =>
+                        void handleUpdateCadence(
+                          e.target.value === 'default'
+                            ? null
+                            : (e.target.value as ProjectCadence),
+                        )
+                      }
+                      className="rounded border border-pro-border/70 bg-transparent px-1 py-0.5 text-xs text-pro-text-muted hover:text-pro-text-main focus:outline-none focus:ring-1 focus:ring-pro-accent cursor-pointer"
+                      aria-label="Set project cadence"
+                    >
+                      <option value="default">Default (30d)</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="biweekly">Bi-weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                      <option value="adhoc">Ad-hoc</option>
+                    </select>
+                  </div>
                   <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {current.meetingStats.recurringSeries[0]?.cadence ||
-                      'No regular schedule'}
+                    {cadence
+                      ? cadence === 'adhoc'
+                        ? 'Ad-hoc'
+                        : cadence === 'biweekly'
+                          ? 'Bi-weekly'
+                          : cadence.charAt(0).toUpperCase() + cadence.slice(1)
+                      : current.meetingStats.recurringSeries[0]?.cadence ||
+                        'Standard rhythm'}
                   </dd>
                 </div>
                 <div className={`${statCard} lg:col-span-3`}>
@@ -883,6 +1130,66 @@ export const ProjectDossier = ({
                 </div>
               </dl>
             </section>
+
+            {evolutionTouchpoints.length > 1 && (
+              <section aria-labelledby="project-evolution" className="mt-10">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2
+                    id="project-evolution"
+                    className="project-dossier-section-title"
+                  >
+                    How this evolved
+                  </h2>
+                  <span className="text-xs text-pro-text-muted">
+                    {evolutionTouchpoints.length} touchpoints
+                  </span>
+                </div>
+                <div className="relative mt-5 pl-6 border-l-2 border-pro-border/70 space-y-6">
+                  {evolutionTouchpoints.map((pt) => (
+                    <div key={pt.id} className="relative group">
+                      <span
+                        className={`absolute -left-[31px] top-1 h-3 w-3 rounded-full ring-4 ring-pro-bg ${
+                          pt.type === 'pulse'
+                            ? 'bg-emerald-500'
+                            : pt.type === 'milestone'
+                              ? 'bg-amber-500'
+                              : 'bg-pro-accent'
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-pro-text-muted">
+                          {pt.label}
+                        </span>
+                        {pt.date && (
+                          <span className="text-xs text-pro-text-muted">
+                            · {formatDate(pt.date)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-pro-text-main">
+                        {pt.meetingId && onOpenMeeting ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenMeeting(pt.meetingId!)}
+                            className="text-left hover:text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent rounded"
+                          >
+                            {pt.title} ↗
+                          </button>
+                        ) : (
+                          <span>{pt.title}</span>
+                        )}
+                      </div>
+                      {pt.description && (
+                        <p className="mt-1 text-xs leading-relaxed text-pro-text-muted max-w-[65ch]">
+                          {pt.description}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {peopleInvolved.length > 0 && (
               <section aria-labelledby="project-people">
@@ -1120,50 +1427,101 @@ export const ProjectDossier = ({
 
             {relatedWork.length > 0 && (
               <section aria-labelledby="project-related-work">
-                <h2
-                  id="project-related-work"
-                  className="project-dossier-section-title"
-                >
-                  Related work
-                </h2>
-                <ul className="mt-4 divide-y divide-pro-border/40">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-pro-accent" />
+                    <h2
+                      id="project-related-work"
+                      className="project-dossier-section-title"
+                    >
+                      Topics &amp; Discussion Streams
+                    </h2>
+                    <span className="rounded-full border border-pro-border/60 bg-pro-surface px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
+                      {relatedWork.length}
+                    </span>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-pro-text-muted">
+                  Constituent workstreams and topics filed under this initiative.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {relatedWork.map((entry) => (
-                    <li key={entry.id} className="py-4">
-                      {onOpenRelatedWork ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenRelatedWork(entry.id)}
-                          className="rounded text-left text-sm font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
-                        >
-                          {entry.name}
-                        </button>
-                      ) : (
-                        <p className="text-sm font-medium">{entry.name}</p>
-                      )}
-                      {entry.latest_context && (
-                        <p className="mt-1 text-sm leading-6 text-pro-text-muted">
-                          {entry.latest_context}
-                        </p>
-                      )}
-                    </li>
+                    <div
+                      key={entry.id}
+                      className="group relative flex flex-col justify-between rounded-xl border border-pro-border/60 bg-pro-surface/40 p-3.5 transition-all hover:bg-pro-surface/70 shadow-2xs"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-[13.5px] font-semibold text-pro-text-main group-hover:text-pro-accent transition-colors">
+                            {entry.display_title || entry.name}
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await detachTopicFromProject(entry.id);
+                              await onPortfolioChanged?.();
+                            }}
+                            title="Detach topic from this initiative"
+                            aria-label={`Detach ${entry.name} from this initiative`}
+                            className="rounded p-1 text-pro-text-muted/50 hover:bg-pro-hover hover:text-rose-600 transition-colors"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {entry.latest_context && (
+                          <p className="mt-1.5 text-xs text-pro-text-muted line-clamp-2 leading-relaxed">
+                            {entry.latest_context}
+                          </p>
+                        )}
+                      </div>
+                      <div className="mt-3 flex items-center justify-between pt-2 border-t border-pro-border/30 text-[11px] text-pro-text-muted">
+                        <span>
+                          {entry.meeting_count} conversation
+                          {entry.meeting_count === 1 ? '' : 's'}
+                        </span>
+                        {onOpenRelatedWork && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenRelatedWork(entry.id)}
+                            className="inline-flex items-center gap-1 font-medium text-pro-accent hover:underline"
+                          >
+                            Open stream
+                            <ChevronRight className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </section>
             )}
           </div>
 
           {mergeOpen && (
             <section
+              ref={mergeSectionRef}
               aria-labelledby="merge-project-heading"
-              className="mt-12 border-y border-pro-border/60 py-6"
+              className="mt-12 rounded-xl border border-pro-accent/40 bg-pro-surface/40 p-6 shadow-sm ring-1 ring-pro-accent/20"
             >
-              <h2 id="merge-project-heading" className="text-lg font-semibold">
-                Merge another project into {current.project.displayTitle}
-              </h2>
-              <p className="mt-2 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
-                Meetings, commitments, and alternate names will appear together.
-                The original project is kept, and the merge can be undone.
-              </p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="merge-project-heading" className="text-lg font-semibold text-pro-text-main">
+                    Merge another project into {current.project.displayTitle}
+                  </h2>
+                  <p className="mt-1.5 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
+                    Meetings, commitments, and alternate names will appear together.
+                    The original project is kept, and the merge can be undone.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMergeOpen(false)}
+                  aria-label="Close merge section"
+                  className="rounded-lg p-1.5 text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main"
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
               <label
                 htmlFor="merge-project-source"
                 className="mt-5 block text-xs font-medium text-pro-text-muted"

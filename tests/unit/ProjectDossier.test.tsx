@@ -32,6 +32,8 @@ const api = vi.hoisted(() => ({
   getPendingDreamingProposals: vi.fn().mockResolvedValue([]),
   acceptDreamingProposal: vi.fn(),
   rejectDreamingProposal: vi.fn(),
+  detachTopicFromProject: vi.fn().mockResolvedValue({}),
+  fileTopicUnderProject: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../src/api/knowledgeGraph', () => api);
 import { ProjectDossier } from '../../src/components/features/projects/ProjectDossier';
@@ -809,3 +811,79 @@ it('shows generated milestone provenance and keeps its durable remove action', a
     'dream-milestone-1',
   );
 });
+
+it('allows toggling primary focus star from header toolbar', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  await render();
+
+  const starBtn = host.querySelector<HTMLButtonElement>(
+    '[aria-label="Star project"]',
+  );
+  expect(starBtn).not.toBeNull();
+  expect(starBtn?.textContent).toContain('Star');
+
+  await act(async () => {
+    starBtn?.click();
+  });
+
+  expect(api.upsertEntity).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'p1',
+      metadata: expect.objectContaining({
+        projectStarred: true,
+      }),
+    }),
+  );
+});
+
+it('renders Topics & Discussion Streams and allows detaching a topic', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  const onPortfolioChanged = vi.fn();
+  const relatedWork = [
+    {
+      id: 'topic-1',
+      type: 'project' as const,
+      name: 'Search indexing pipeline',
+      display_title: 'Search indexing pipeline',
+      status: 'active' as const,
+      meeting_count: 2,
+      last_mentioned_at: '2026-08-20T10:00:00Z',
+      latest_context: 'Discussion about index compression',
+      created_at: '2026-08-01T00:00:00Z',
+      updated_at: '2026-08-20T10:00:00Z',
+      due_date: null,
+      last_seen_at: null,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          parentProjectId: 'p1',
+        },
+      }),
+      confidence: 1,
+    },
+  ];
+
+  await render({
+    relatedWork,
+    onPortfolioChanged,
+  });
+
+  expect(host.textContent).toContain('Topics & Discussion Streams');
+  expect(host.textContent).toContain('Search indexing pipeline');
+  expect(host.textContent).toContain('Discussion about index compression');
+  expect(host.textContent).toContain('2 conversations');
+
+  const detachBtn = host.querySelector<HTMLButtonElement>(
+    '[aria-label="Detach Search indexing pipeline from this initiative"]',
+  );
+  expect(detachBtn).not.toBeNull();
+
+  await act(async () => {
+    detachBtn?.click();
+  });
+
+  expect(api.detachTopicFromProject).toHaveBeenCalledWith('topic-1');
+  expect(onPortfolioChanged).toHaveBeenCalled();
+});
+

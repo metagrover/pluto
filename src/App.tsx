@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 
 // Core
@@ -217,6 +217,17 @@ function App() {
     null,
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [navHistory, setNavHistory] = useState<
+    Array<{
+      tab: 'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings';
+      meetingId: string | number | null;
+      personId: string | null;
+      personName?: string | null;
+      projectId: string | null;
+      projectName?: string | null;
+      label?: string;
+    }>
+  >([]);
   const [activeTab, setActiveTab] = useState<
     'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings'
   >(
@@ -1178,6 +1189,172 @@ function App() {
     setSidebarVisible(true);
   };
 
+  const handleOpenMeeting = useCallback(
+    (
+      meetingId: string | number,
+      sourceContext?: {
+        personId?: string | null;
+        personName?: string | null;
+        projectId?: string | null;
+        projectName?: string | null;
+        label?: string;
+      },
+    ) => {
+      const activePersonId =
+        sourceContext?.personId !== undefined
+          ? sourceContext.personId
+          : selectedPersonId;
+      const activeProjectId =
+        sourceContext?.projectId !== undefined
+          ? sourceContext.projectId
+          : selectedProjectId;
+
+      let defaultLabel = 'Back';
+      if (sourceContext?.label) {
+        defaultLabel = sourceContext.label;
+      } else if (sourceContext?.personName) {
+        defaultLabel = `Back to ${sourceContext.personName}`;
+      } else if (activeTab === 'people' && activePersonId) {
+        defaultLabel = 'Back to Person';
+      } else if (activeTab === 'people') {
+        defaultLabel = 'Back to People';
+      } else if (sourceContext?.projectName) {
+        defaultLabel = `Back to ${sourceContext.projectName}`;
+      } else if (activeTab === 'projects' && activeProjectId) {
+        defaultLabel = 'Back to Project';
+      } else if (activeTab === 'projects') {
+        defaultLabel = 'Back to Projects';
+      } else if (activeTab === 'meetings') {
+        defaultLabel = 'All meetings';
+      } else if (activeTab === 'chat') {
+        defaultLabel = 'Back to Chat';
+      } else if (activeTab === 'hub') {
+        defaultLabel = 'Back to Dashboard';
+      }
+
+      setNavHistory((prev) => [
+        ...prev,
+        {
+          tab: activeTab,
+          meetingId: selectedMeetingId,
+          personId: activePersonId,
+          personName: sourceContext?.personName,
+          projectId: activeProjectId,
+          projectName: sourceContext?.projectName,
+          label: defaultLabel,
+        },
+      ]);
+      setSelectedMeetingId(meetingId);
+    },
+    [activeTab, selectedMeetingId, selectedPersonId, selectedProjectId],
+  );
+
+  const handleOpenPerson = useCallback(
+    (
+      personId: string,
+      sourceContext?: {
+        meetingId?: string | number | null;
+        meetingTitle?: string | null;
+        label?: string;
+      },
+    ) => {
+      const currentMeeting = safeMeetings.find(
+        (m) => String(m.id) === String(selectedMeetingId),
+      );
+      const title =
+        sourceContext?.meetingTitle ||
+        currentMeeting?.title ||
+        selectedMeetingDetail?.title;
+
+      let defaultLabel = 'Back';
+      if (sourceContext?.label) {
+        defaultLabel = sourceContext.label;
+      } else if (selectedMeetingId != null) {
+        defaultLabel = title ? `Back to ${title}` : 'Back to Meeting';
+      } else if (activeTab === 'people') {
+        defaultLabel = 'All people';
+      }
+
+      setNavHistory((prev) => [
+        ...prev,
+        {
+          tab: activeTab,
+          meetingId: selectedMeetingId,
+          personId: selectedPersonId,
+          projectId: selectedProjectId,
+          label: defaultLabel,
+        },
+      ]);
+      setSelectedMeetingId(null);
+      setSelectedPersonId(personId);
+      setActiveTab('people');
+    },
+    [
+      activeTab,
+      safeMeetings,
+      selectedMeetingDetail?.title,
+      selectedMeetingId,
+      selectedPersonId,
+      selectedProjectId,
+    ],
+  );
+
+  const handleBack = useCallback(() => {
+    if (navHistory.length > 0) {
+      setNavHistory((prev) => {
+        const next = [...prev];
+        const previous = next.pop()!;
+        setActiveTab(previous.tab);
+        setSelectedPersonId(previous.personId);
+        setSelectedProjectId(previous.projectId);
+        setSelectedMeetingId(previous.meetingId);
+        return next;
+      });
+      return;
+    }
+
+    if (selectedMeetingId != null) {
+      setSelectedMeetingId(null);
+      return;
+    }
+    if (selectedPersonId != null) {
+      setSelectedPersonId(null);
+      return;
+    }
+    if (selectedProjectId != null) {
+      setSelectedProjectId(null);
+      return;
+    }
+    setActiveTab('hub');
+  }, [navHistory.length, selectedMeetingId, selectedPersonId, selectedProjectId]);
+
+  const currentBackLabel = useMemo(() => {
+    if (navHistory.length > 0) {
+      const top = navHistory[navHistory.length - 1];
+      if (top.label) return top.label;
+      if (top.personName) return `Back to ${top.personName}`;
+      if (top.projectName) return `Back to ${top.projectName}`;
+      if (top.tab === 'people' && top.personId) return 'Back to Person';
+      if (top.tab === 'people') return 'Back to People';
+      if (top.tab === 'projects') return 'Back to Projects';
+      if (top.tab === 'meetings') return 'All meetings';
+      if (top.tab === 'chat') return 'Back to Chat';
+      if (top.tab === 'hub') return 'Back to Dashboard';
+    }
+    if (selectedMeetingId != null) {
+      if (activeTab === 'people' && selectedPersonId) return 'Back to Person';
+      if (activeTab === 'people') return 'Back to People';
+      if (activeTab === 'projects') return 'Back to Projects';
+      if (activeTab === 'meetings') return 'All meetings';
+      if (activeTab === 'chat') return 'Back to Chat';
+      return 'Back to Dashboard';
+    }
+    if (activeTab === 'people' && selectedPersonId) {
+      return 'All people';
+    }
+    return 'Back';
+  }, [navHistory, selectedMeetingId, activeTab, selectedPersonId]);
+
   const runMeetingFinalTranscription = async (
     meeting: Pick<Meeting, 'id'>,
     reason: 'automatic' | 'manual' | 'speaker_labels' = 'automatic',
@@ -1663,10 +1840,15 @@ function App() {
             }}
             onOpenSearch={() => setSearchVisible(true)}
             onOpenPeopleHome={() => {
-              setSelectedPersonId(null);
-              setSelectedProjectId(null);
-              setSelectedMeetingId(null);
-              setActiveTab('people');
+              if (selectedMeetingId != null) {
+                setSelectedMeetingId(null);
+                setActiveTab('people');
+              } else {
+                setSelectedPersonId(null);
+                setSelectedProjectId(null);
+                setSelectedMeetingId(null);
+                setActiveTab('people');
+              }
             }}
             theme={theme}
             setTheme={(newTheme) => {
@@ -1779,6 +1961,9 @@ function App() {
                 }
                 calendarContext={meetingCalendarContext}
                 exportIncludeTranscript={exportIncludeTranscript}
+                onBack={handleBack}
+                backLabel={currentBackLabel}
+                onOpenPerson={handleOpenPerson}
               />
             ) : activeTab === 'hub' ? (
               <>
@@ -1792,7 +1977,13 @@ function App() {
                   model={dashboardHome.model}
                   loading={dashboardHome.loading}
                   isRecording={isRecording}
-                  setSelectedMeetingId={setSelectedMeetingId}
+                  setSelectedMeetingId={(id) => {
+                    if (id != null) {
+                      handleOpenMeeting(id, { label: 'Back to Dashboard' });
+                    } else {
+                      setSelectedMeetingId(null);
+                    }
+                  }}
                   setActiveTab={setActiveTab}
                   updatingTaskIds={updatingDashboardTaskIds}
                   actionError={dashboardActionError}
@@ -1820,26 +2011,44 @@ function App() {
                 <PeopleTab
                   selectedPersonId={selectedPersonId}
                   onSelectPerson={setSelectedPersonId}
-                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                  onOpenMeeting={(meetingId, personContext) =>
+                    handleOpenMeeting(meetingId, {
+                      personId: selectedPersonId,
+                      personName: personContext?.name,
+                    })
+                  }
+                  backLabel={
+                    navHistory.length > 0 &&
+                    navHistory[navHistory.length - 1].meetingId != null
+                      ? currentBackLabel
+                      : undefined
+                  }
+                  onBack={
+                    navHistory.length > 0 &&
+                    navHistory[navHistory.length - 1].meetingId != null
+                      ? handleBack
+                      : undefined
+                  }
                 />
               </div>
             ) : activeTab === 'projects' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
                 <ProjectsExecutionTab
                   selectedProjectId={selectedProjectId}
-                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
-                  onOpenPerson={(personId) => {
-                    setSelectedPersonId(personId);
-                    setSelectedProjectId(null);
-                    setSelectedMeetingId(null);
-                    setActiveTab('people');
-                  }}
+                  onOpenMeeting={(meetingId) =>
+                    handleOpenMeeting(meetingId, {
+                      projectId: selectedProjectId,
+                    })
+                  }
+                  onOpenPerson={(personId) => handleOpenPerson(personId)}
                 />
               </div>
             ) : activeTab === 'meetings' ? (
               <AllMeetingsTab
                 meetings={safeMeetings}
-                onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                onOpenMeeting={(meetingId) =>
+                  handleOpenMeeting(meetingId, { label: 'All meetings' })
+                }
                 handleDeleteMeeting={handleDeleteMeeting}
               />
             ) : activeTab === 'chat' ? (
@@ -1849,7 +2058,7 @@ function App() {
                   onClose={() => setActiveTab('hub')}
                   onOpenMeeting={(meetingId, target) => {
                     setAskPlutoCitationTarget({ meetingId, ...target });
-                    setSelectedMeetingId(meetingId);
+                    handleOpenMeeting(meetingId, { label: 'Back to Chat' });
                   }}
                   activeMeetingSnapshot={
                     captureLifecycle.state === 'recording' &&
@@ -1960,10 +2169,7 @@ function App() {
         setSearchQuery={setSearchQuery}
         results={searchPlutoResults}
         onOpenMeeting={(meetingId) => {
-          setSelectedMeetingId(meetingId);
-          setSelectedProjectId(null);
-          setSelectedPersonId(null);
-          setActiveTab('hub');
+          handleOpenMeeting(meetingId);
         }}
         onOpenProjects={(projectId) => {
           setSelectedProjectId(String(projectId));
@@ -1972,10 +2178,7 @@ function App() {
           setSelectedMeetingId(null);
         }}
         onOpenPeople={(personId) => {
-          setSelectedPersonId(String(personId));
-          setSelectedProjectId(null);
-          setActiveTab('people');
-          setSelectedMeetingId(null);
+          handleOpenPerson(String(personId));
         }}
       />
 

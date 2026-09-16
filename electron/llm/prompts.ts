@@ -302,20 +302,22 @@ const getScopeGuidance = (scopeType: string): string => {
     case 'team_tracker':
       return `Focus on TEAM dynamics:
 - Track recurring themes, blockers, and wins across standups/syncs.
-- Highlight who is working on what and ownership patterns.
+- Highlight who worked on what and ownership patterns, using past tense for past meetings.
 - Surface cross-cutting risks that affect multiple team members.
-- Capture evolving team priorities and shifts in direction.`;
+- Capture evolving team priorities and shifts in direction over time.`;
     case 'person_context':
       return `Focus on RELATIONSHIP context:
 - Capture all meaningful topics discussed with this person across meetings.
 - Track commitments, action items, and follow-ups involving them.
 - Note their perspectives, concerns, and recurring themes.
+- CRITICAL TEMPORAL GROUNDING: Distinguish current active state from historical discussions. If meetings are older than 14 days, use past tense (e.g. "Discussed in June", "Previously collaborated on", "Historically worked on") instead of present continuous ("is working on"). Never assert someone is currently doing something unless recent evidence from the last 14 days explicitly confirms it.
 - Surface useful context for preparing future 1-on-1s or check-ins.`;
     case 'project':
       return `Focus on PROJECT trajectory:
 - Track decisions, milestones, and evolving requirements.
 - Surface open risks, blockers, and dependency patterns.
-- Capture topic evolution and how the project scope has shifted.`;
+- Capture topic evolution and how the project scope has shifted.
+- CRITICAL TEMPORAL GROUNDING: Clearly distinguish ongoing active work from historical or dormant phases. Use past tense for discussions older than 14 days and anchor milestones to their dates.`;
     default:
       return '';
   }
@@ -432,6 +434,11 @@ Quality bar:
 - Avoid making a single narrow meeting sound like the current read for the whole scope. If evidence is narrow, keep the statement specific to that meeting/topic.
 - Avoid generic phrasing ("It is important..."). Be concrete.
 - Keep citations tight (short quotes that clearly support the statement).
+- TEMPORAL INTEGRITY (MANDATORY):
+  * Differentiate CURRENT active state from HISTORICAL discussions.
+  * For evidence originating from meetings older than 14 days, use past tense (e.g., "In June, discussed...", "Collaborated on...", "Explored...", "Previously focused on...").
+  * NEVER claim someone "is currently", "is actively", or "is leading" without explicit evidence confirming it in the past 14 days. If the only evidence is older, write what was discussed or agreed at that time.
+  * When evidence spans past meetings, anchor statements with the date or month (e.g., "As of the last discussion in July, ...").
 `;
 };
 
@@ -452,6 +459,7 @@ export const getKnowledgeDocumentMergePrompt = (params: {
     previousStructuredJson,
     claimCorrections = [],
   } = params;
+
   const chunksBlock = chunkDocuments
     .map(
       (chunk) =>
@@ -517,6 +525,7 @@ Quality bar:
 - CRITICAL: You are acting as a lossless aggregator! You MUST copy over EVERY distinct active stream, needs_attention item, pattern, risk/unknown, and evidence entry from the chunks into the final JSON unless combining true duplicates.
 - You may output up to 15 distinct items per array. Be exhaustive and comprehensive without repeating duplicates.
 - Preserve concrete project, person, and risk names.
+- Preserve temporal past-tense phrasing from inputs; do not convert past-tense descriptions into present-continuous claims.
 `;
 };
 
@@ -544,6 +553,7 @@ Rules:
 - Use ONLY the provided evidence snippets. Never invent facts.
 - Output MUST be valid JSON only.
 - Write 3-8 short sentences. Each sentence should be directly supported by cited sources.
+- TEMPORAL GROUNDING: Distinguish current status from past discussions. Use past tense ("discussed", "worked on") for past meetings; never describe historical activities as actively ongoing unless recent evidence confirms it.
 
 Available evidence snippets:
 ${sourcesBlock || '(none)'}

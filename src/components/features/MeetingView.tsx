@@ -1,5 +1,7 @@
 import {
+  ArrowLeft,
   Check,
+  ChevronDown,
   ChevronRight,
   ChevronUp,
   CircleAlert,
@@ -23,13 +25,24 @@ import {
 } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
-import { getMeetingIdentity } from '../../api/identity';
+import {
+  type MeetingIdentityState,
+  getMeetingIdentity,
+} from '../../api/identity';
+import {
+  type Entity,
+  getMeetingEntities,
+} from '../../api/knowledgeGraph';
 import {
   type VoiceMatchSuggestion,
   getSpeakerVoiceSuggestions,
 } from '../../api/speakerVoice';
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
+import {
+  MeetingParticipantsPopover,
+  resolveMeetingParticipants,
+} from './MeetingParticipants';
 import {
   parseAnalysisEditConflictsJson,
   parseUserEditsJson,
@@ -153,6 +166,9 @@ interface MeetingViewProps {
   transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
   exportIncludeTranscript?: boolean;
+  onBack?: () => void;
+  backLabel?: string;
+  onOpenPerson?: (personId: string) => void;
 }
 
 type MeetingNotesTemplate =
@@ -712,6 +728,9 @@ const SelectedMeetingView = ({
   transcriptValidationRetryOperation = null,
   calendarContext = null,
   exportIncludeTranscript = false,
+  onBack,
+  backLabel,
+  onOpenPerson,
 }: Omit<MeetingViewProps, 'selectedMeeting'> & {
   selectedMeeting: Meeting;
 }) => {
@@ -739,6 +758,13 @@ const SelectedMeetingView = ({
     meetingId: string;
     suggestions: Record<string, VoiceMatchSuggestion>;
   } | null>(null);
+  const [meetingIdentityState, setMeetingIdentityState] =
+    useState<MeetingIdentityState | null>(null);
+  const [meetingEntities, setMeetingEntities] = useState<
+    Array<Entity & { mention_count?: number; context?: string | null }>
+  >([]);
+  const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
+  const participantsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const deleteRecordingAudio = async () => {
     if (
@@ -1005,19 +1031,30 @@ const SelectedMeetingView = ({
       return;
     }
 
-    void getMeetingIdentity(meetingId)
-      .then((identity) => {
-        if (cancelled) return;
+    void Promise.all([
+      getMeetingIdentity(meetingId).catch((error) => {
+        console.error('Failed to load speaker identity for meeting:', error);
+        return null;
+      }),
+      getMeetingEntities(meetingId).catch((error) => {
+        console.error('Failed to load meeting entities:', error);
+        return [];
+      }),
+    ]).then(([identity, entities]) => {
+      if (cancelled) return;
+      if (identity) {
+        setMeetingIdentityState(identity);
         const names = extractSpeakerDisplayNames(identity);
         speakerDisplayNamesCache[meetingId] = names;
         setSpeakerDisplayNamesByMeeting((prev) => ({
           ...prev,
           [meetingId]: names,
         }));
-      })
-      .catch((error) => {
-        console.error('Failed to load speaker identity for meeting:', error);
-      });
+      }
+      if (entities) {
+        setMeetingEntities(entities);
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -1028,32 +1065,32 @@ const SelectedMeetingView = ({
     reviewableSpeakers.length,
   ]);
 
-  useEffect(
-    () =>
-      window.ipcRenderer.on(
-        'MEETING_IDENTITY_UPDATED',
-        (_event, updatedMeetingId) => {
-          const meetingId = String(selectedMeeting.id);
-          if (
-            updatedMeetingId != null &&
-            String(updatedMeetingId) !== meetingId
-          ) {
-            return;
-          }
-          void getMeetingIdentity(meetingId)
-            .then((identity) =>
-              updateSpeakerDisplayNames(extractSpeakerDisplayNames(identity)),
-            )
-            .catch((error) => {
-              console.error(
-                'Failed to refresh speaker identity for meeting:',
-                error,
-              );
-            });
-        },
-      ),
-    [selectedMeeting.id, updateSpeakerDisplayNames],
-  );
+  useEffect(() => {
+    if (!window?.ipcRenderer?.on) return;
+    return window.ipcRenderer.on(
+      'MEETING_IDENTITY_UPDATED',
+      (_event, updatedMeetingId) => {
+        const meetingId = String(selectedMeeting.id);
+        if (
+          updatedMeetingId != null &&
+          String(updatedMeetingId) !== meetingId
+        ) {
+          return;
+        }
+        void getMeetingIdentity(meetingId)
+          .then((identity) => {
+            setMeetingIdentityState(identity);
+            updateSpeakerDisplayNames(extractSpeakerDisplayNames(identity));
+          })
+          .catch((error) => {
+            console.error(
+              'Failed to refresh speaker identity for meeting:',
+              error,
+            );
+          });
+      },
+    );
+  }, [selectedMeeting.id, updateSpeakerDisplayNames]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1089,13 +1126,34 @@ const SelectedMeetingView = ({
   const hasTranscriptContent = transcriptTurns.length > 0;
   const transcriptClipboardText =
     formatMeetingTranscriptForClipboard(transcriptTurns);
-  const participantCount = new Set(
-    transcriptSegments
-      .map((segment) => String(segment.speaker || '').trim())
-      .filter(
-        (speaker) => Boolean(speaker) && speaker.toLowerCase() !== 'unknown',
-      ),
-  ).size;
+  const resolvedParticipants = useMemo(
+    () =>
+      resolveMeetingParticipants({
+        transcriptSegments,
+        speakerDisplayNames: displayNames,
+        identityState: meetingIdentityState,
+        meetingEntities,
+        calendarAttendeeNames,
+      }),
+    [
+      transcriptSegments,
+      displayNames,
+      meetingIdentityState,
+      meetingEntities,
+      calendarAttendeeNames,
+    ],
+  );
+  const participantCount = resolvedParticipants.length;
+  const speakerToPersonIdMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of resolvedParticipants) {
+      if (p.personId) {
+        if (p.speakerKey) map.set(p.speakerKey, p.personId);
+        map.set(p.name, p.personId);
+      }
+    }
+    return map;
+  }, [resolvedParticipants]);
   const selectedMeetingRetryOperation =
     transcriptValidationRetryOperation !== null &&
     String(transcriptValidationRetryOperation.meetingId) ===
@@ -1203,7 +1261,24 @@ const SelectedMeetingView = ({
       } ${isMeetingProcessing ? 'meeting-document--processing' : ''}`}
     >
       <div className="meeting-notes-surface" aria-label="Notes">
-        <header className="meeting-document-header">
+        {onBack && (
+          <div className="meeting-document-topline">
+            <button
+              type="button"
+              className="meeting-document-back"
+              onClick={onBack}
+              aria-label={backLabel || 'Back'}
+            >
+              <ArrowLeft aria-hidden="true" size={15} />
+              <span>{backLabel || 'Back'}</span>
+            </button>
+          </div>
+        )}
+        <header
+          className={`meeting-document-header ${
+            onBack ? 'meeting-document-header--has-back' : ''
+          }`}
+        >
           <TextareaAutosize
             value={
               editingTitle || titleSaveError || isSavingTitle
@@ -1300,10 +1375,49 @@ const SelectedMeetingView = ({
                 })}
               </span>
               {participantCount > 0 ? (
-                <span>
-                  {participantCount}{' '}
-                  {participantCount === 1 ? 'participant' : 'participants'}
-                </span>
+                <div className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    ref={participantsTriggerRef}
+                    data-meeting-participants-trigger
+                    onClick={() => setIsParticipantsOpen((prev) => !prev)}
+                    className="meeting-participants-trigger inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent group"
+                    aria-expanded={isParticipantsOpen}
+                    aria-haspopup="dialog"
+                    aria-label={`View ${participantCount} meeting participants`}
+                  >
+                    <Users
+                      size={12}
+                      className="opacity-75 group-hover:text-pro-text-main transition-colors"
+                    />
+                    <span className="font-medium text-pro-text-main/90">
+                      {participantCount}{' '}
+                      {participantCount === 1 ? 'participant' : 'participants'}
+                    </span>
+                    <ChevronDown
+                      size={11}
+                      className={`opacity-60 transition-transform duration-150 ${
+                        isParticipantsOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {isParticipantsOpen && (
+                    <MeetingParticipantsPopover
+                      participants={resolvedParticipants}
+                      onClose={() => setIsParticipantsOpen(false)}
+                      onOpenPerson={(personId) => {
+                        setIsParticipantsOpen(false);
+                        onOpenPerson?.(personId);
+                      }}
+                      onIdentifySpeaker={(speakerKey) => {
+                        setIsParticipantsOpen(false);
+                        setSelectedSpeakerForModal(speakerKey);
+                        setIsSpeakerModalOpen(true);
+                      }}
+                    />
+                  )}
+                </div>
               ) : selectedMeeting.duration_seconds ? (
                 <span>
                   {selectedMeeting.duration_seconds < 60
@@ -1863,6 +1977,11 @@ const SelectedMeetingView = ({
                 const isAnonymousSpeaker = Boolean(
                   reviewSpeaker && reviewableSpeakers.includes(reviewSpeaker),
                 );
+                const rawSpeakerKey = String(turn.speaker ?? '');
+                const personIdForSpeaker =
+                  !isAnonymousSpeaker &&
+                  (speakerToPersonIdMap.get(speakerLabel) ||
+                    speakerToPersonIdMap.get(rawSpeakerKey));
                 return (
                   <div
                     key={turn.id}
@@ -1876,12 +1995,16 @@ const SelectedMeetingView = ({
                         className={
                           isAnonymousSpeaker
                             ? 'cursor-pointer transition-colors hover:text-pro-accent'
-                            : undefined
+                            : personIdForSpeaker && onOpenPerson
+                              ? 'cursor-pointer transition-colors hover:text-pro-accent hover:underline underline-offset-2'
+                              : undefined
                         }
                         title={
                           isAnonymousSpeaker
                             ? 'Click to review and identify this speaker'
-                            : undefined
+                            : personIdForSpeaker && onOpenPerson
+                              ? `View ${speakerLabel.replace(/ \(You\)$/, '')}'s profile`
+                              : undefined
                         }
                         onClick={
                           isAnonymousSpeaker
@@ -1889,7 +2012,9 @@ const SelectedMeetingView = ({
                                 setSelectedSpeakerForModal(reviewSpeaker);
                                 setIsSpeakerModalOpen(true);
                               }
-                            : undefined
+                            : personIdForSpeaker && onOpenPerson
+                              ? () => onOpenPerson(personIdForSpeaker)
+                              : undefined
                         }
                       >
                         {isSelfSpeaker ? (

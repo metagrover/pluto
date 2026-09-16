@@ -13,7 +13,13 @@ import type {
 } from '../../electron/dreaming/proposalStore';
 import type { DreamingEntityType } from '../../electron/dreaming/types';
 import type { PersonBriefingSummary } from '../utils/personBriefing';
-import type { ProjectPortfolioDisposition } from '../utils/projectQualification';
+import {
+  type ProjectPortfolioDisposition,
+  withParentProject,
+  withProjectPortfolioDisposition,
+  withoutParentProject,
+  withoutProjectPortfolioDisposition,
+} from '../utils/projectQualification';
 
 // Type definitions matching the database schema
 export type EntityType =
@@ -350,6 +356,67 @@ export const addProjectAlias = async (
 
 export const restoreProjectMerge = async (projectId: string): Promise<void> =>
   invoke('RESTORE_PROJECT_MERGE', projectId);
+
+export const fileTopicUnderProject = async (
+  topicId: string,
+  parentProjectId: string,
+): Promise<Entity> => {
+  const current = await getEntity(topicId);
+  const nextMetadata = withParentProject(
+    current?.metadata || null,
+    parentProjectId,
+  );
+  return upsertEntity({
+    id: topicId,
+    type: 'project',
+    name: current?.name || topicId,
+    metadata: JSON.parse(nextMetadata),
+  });
+};
+
+export const detachTopicFromProject = async (
+  topicId: string,
+): Promise<Entity> => {
+  const current = await getEntity(topicId);
+  const nextMetadata = withoutParentProject(current?.metadata || null);
+  return upsertEntity({
+    id: topicId,
+    type: 'project',
+    name: current?.name || topicId,
+    metadata: JSON.parse(nextMetadata),
+  });
+};
+
+export const promoteTopicToInitiative = async (
+  topicId: string,
+): Promise<Entity> => {
+  const current = await getEntity(topicId);
+  const nextMetadata = withProjectPortfolioDisposition(
+    current?.metadata || null,
+    'confirmed',
+  );
+  return upsertEntity({
+    id: topicId,
+    type: 'project',
+    name: current?.name || topicId,
+    metadata: JSON.parse(nextMetadata),
+  });
+};
+
+export const demoteInitiativeToTopic = async (
+  projectId: string,
+): Promise<Entity> => {
+  const current = await getEntity(projectId);
+  const nextMetadata = withoutProjectPortfolioDisposition(
+    current?.metadata || null,
+  );
+  return upsertEntity({
+    id: projectId,
+    type: 'project',
+    name: current?.name || projectId,
+    metadata: JSON.parse(nextMetadata),
+  });
+};
 
 export const updatePersonName = async (
   personId: string,

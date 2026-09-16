@@ -33,6 +33,13 @@ const reviewProjectScopeMock = vi.hoisted(() => vi.fn());
 const getEntityMock = vi.hoisted(() => vi.fn());
 const getEntityMeetingsMock = vi.hoisted(() => vi.fn());
 const getProjectBriefMock = vi.hoisted(() => vi.fn());
+const upsertEntityMock = vi.hoisted(() => vi.fn());
+const mergeProjectMock = vi.hoisted(() => vi.fn());
+const restoreProjectMergeMock = vi.hoisted(() => vi.fn());
+const fileTopicUnderProjectMock = vi.hoisted(() => vi.fn());
+const detachTopicFromProjectMock = vi.hoisted(() => vi.fn());
+const promoteTopicToInitiativeMock = vi.hoisted(() => vi.fn());
+const demoteInitiativeToTopicMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
   const actual =
@@ -47,6 +54,13 @@ vi.mock('../../src/api/knowledgeGraph', async (importOriginal) => {
     getEntity: getEntityMock,
     getEntityMeetings: getEntityMeetingsMock,
     getProjectBrief: getProjectBriefMock,
+    upsertEntity: upsertEntityMock,
+    mergeProject: mergeProjectMock,
+    restoreProjectMerge: restoreProjectMergeMock,
+    fileTopicUnderProject: fileTopicUnderProjectMock,
+    detachTopicFromProject: detachTopicFromProjectMock,
+    promoteTopicToInitiative: promoteTopicToInitiativeMock,
+    demoteInitiativeToTopic: demoteInitiativeToTopicMock,
   };
 });
 
@@ -676,6 +690,20 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     getProjectPortfolioMock.mockReset();
     discoverProjectInitiativeMock.mockReset();
     reviewProjectScopeMock.mockReset();
+    upsertEntityMock.mockReset();
+    mergeProjectMock.mockReset();
+    restoreProjectMergeMock.mockReset();
+    fileTopicUnderProjectMock.mockReset();
+    detachTopicFromProjectMock.mockReset();
+    promoteTopicToInitiativeMock.mockReset();
+    demoteInitiativeToTopicMock.mockReset();
+    upsertEntityMock.mockImplementation(async (entity) => entity);
+    mergeProjectMock.mockResolvedValue(undefined);
+    restoreProjectMergeMock.mockResolvedValue(undefined);
+    fileTopicUnderProjectMock.mockResolvedValue(qualified());
+    detachTopicFromProjectMock.mockResolvedValue(qualified());
+    promoteTopicToInitiativeMock.mockResolvedValue(qualified());
+    demoteInitiativeToTopicMock.mockResolvedValue(qualified());
     getProjectPortfolioMock.mockResolvedValue([qualified()]);
     discoverProjectInitiativeMock.mockResolvedValue({
       discovered: 0,
@@ -999,7 +1027,7 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
         ) as HTMLButtonElement
       ).click(),
     );
-    expect(container.textContent).toContain('Conversation history');
+    expect(container.textContent).toContain('Meeting history');
     const back = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.includes('Back'),
     );
@@ -1015,5 +1043,500 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
       root.render(<ProjectsExecutionTab selectedProjectId="project-1" />),
     );
     expect(getProjectBriefMock).toHaveBeenCalledWith('project-1');
+  });
+
+  it('partitions projects into Primary Focus and Other initiatives when starring is active', async () => {
+    const starredProject = {
+      ...qualified(),
+      id: 'project-star',
+      name: 'Alpha Engine',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'user',
+          reason: 'Confirmed initiative',
+          assessedAt: '2026-08-28',
+          outcome: 'Ship Alpha',
+        },
+        projectStarred: true,
+      }),
+    };
+    const sideProject = {
+      ...qualified(),
+      id: 'project-side',
+      name: 'Beta Exploration',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'user',
+          reason: 'Confirmed initiative',
+          assessedAt: '2026-08-28',
+          outcome: 'Explore Beta',
+        },
+        projectStarred: false,
+      }),
+    };
+
+    getProjectPortfolioMock.mockResolvedValue([starredProject, sideProject]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    expect(container.textContent).toContain('Primary focus');
+    expect(container.textContent).toContain('Other initiatives');
+    expect(container.textContent).toContain('Alpha Engine');
+    expect(container.textContent).toContain('Beta Exploration');
+    expect(container.textContent).toContain('Primary');
+  });
+
+  it('allows starring a project directly from the overview list', async () => {
+    getProjectPortfolioMock.mockResolvedValue([qualified()]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const starButton = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Star Project Orion"]',
+    );
+    expect(starButton).not.toBeNull();
+
+    await act(async () => {
+      starButton?.click();
+    });
+
+    expect(upsertEntityMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'project-1',
+        metadata: expect.objectContaining({
+          projectStarred: true,
+        }),
+      }),
+    );
+  });
+
+  it('opens quick merge modal, merges a project, and supports undo toast', async () => {
+    const projectA = qualified();
+    const projectB = {
+      ...qualified(),
+      id: 'project-2',
+      name: 'Project Vega',
+    };
+    getProjectPortfolioMock.mockResolvedValue([projectA, projectB]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    // Click quick merge on project-1
+    const mergeBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Merge Project Orion with another project"]',
+    );
+    expect(mergeBtn).not.toBeNull();
+    await act(async () => {
+      mergeBtn?.click();
+    });
+
+    // Verify modal is open
+    const modal = document.body.querySelector('[role="dialog"]');
+    expect(modal).not.toBeNull();
+    expect(modal?.textContent).toContain('Quick Merge Project');
+    expect(modal?.textContent).toContain('Merge this into another');
+
+    // Select Project Vega as target
+    const candidateBtn = Array.from(
+      modal?.querySelectorAll('button') ?? [],
+    ).find((b) => b.textContent?.includes('Project Vega'));
+    expect(candidateBtn).not.toBeNull();
+    await act(async () => {
+      candidateBtn?.click();
+    });
+
+    // Click "Confirm Merge"
+    const confirmBtn = Array.from(
+      modal?.querySelectorAll('button') ?? [],
+    ).find((b) => b.textContent?.includes('Confirm Merge'));
+    expect(confirmBtn).not.toBeNull();
+
+    await act(async () => {
+      confirmBtn?.click();
+    });
+
+    expect(mergeProjectMock).toHaveBeenCalledWith('project-1', 'project-2');
+
+    // Verify undo toast appears
+    expect(document.body.textContent).toContain(
+      'Merged Project Orion into Project Vega',
+    );
+    const undoBtn = Array.from(document.body.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Undo',
+    );
+    expect(undoBtn).not.toBeNull();
+
+    // Undo the merge
+    await act(async () => {
+      undoBtn?.click();
+    });
+    expect(restoreProjectMergeMock).toHaveBeenCalledWith('project-1');
+  });
+
+  it('supports drag-and-drop merge to trigger confirmation modal', async () => {
+    const projectA = qualified();
+    const projectB = {
+      ...qualified(),
+      id: 'project-2',
+      name: 'Project Vega',
+    };
+    getProjectPortfolioMock.mockResolvedValue([projectA, projectB]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const rowA = container.querySelector('[data-project-id="project-1"]');
+    const rowB = container.querySelector('[data-project-id="project-2"]');
+    expect(rowA).not.toBeNull();
+    expect(rowB).not.toBeNull();
+
+    const dragStartEvent = new Event('dragstart', { bubbles: true });
+    Object.assign(dragStartEvent, {
+      dataTransfer: {
+        setData: vi.fn(),
+        effectAllowed: '',
+      },
+    });
+    await act(async () => {
+      rowA?.dispatchEvent(dragStartEvent);
+    });
+
+    const dropEvent = new Event('drop', { bubbles: true });
+    Object.assign(dropEvent, {
+      preventDefault: vi.fn(),
+    });
+    await act(async () => {
+      rowB?.dispatchEvent(dropEvent);
+    });
+
+    // Modal should now be open
+    expect(document.body.textContent).toContain('Confirm Project Merge');
+
+    const confirmBtn = Array.from(
+      document.body.querySelectorAll('button'),
+    ).find((b) => b.textContent?.includes('Merge into Project Vega'));
+    expect(confirmBtn).not.toBeNull();
+
+    await act(async () => {
+      confirmBtn?.click();
+    });
+
+    expect(mergeProjectMock).toHaveBeenCalledWith('project-1', 'project-2');
+  });
+
+  it('renders unfiled discussion streams in the Discussed Topics Radar', async () => {
+    const initiative = qualified();
+    const radarTopic = {
+      ...qualified(),
+      id: 'topic-1',
+      name: 'Authentication Discussion',
+      meeting_count: 1,
+      last_mentioned_at: '2026-08-20T10:00:00Z',
+      latest_context: 'Single call discussion about OAuth2 providers',
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, radarTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const radar = container.querySelector('[data-testid="topic-radar"]');
+    expect(radar).not.toBeNull();
+    expect(radar?.textContent).toContain('Discussed work & topics');
+    expect(radar?.textContent).toContain('Authentication Discussion');
+    expect(radar?.textContent).toContain(
+      'Single call discussion about OAuth2 providers',
+    );
+    expect(radar?.textContent).toContain('1 call');
+  });
+
+  it('files a topic under an initiative via File under menu with undo support', async () => {
+    const initiative = qualified();
+    const radarTopic = {
+      ...qualified(),
+      id: 'topic-1',
+      name: 'OAuth Discussion',
+      meeting_count: 1,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, radarTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    // Click "File under…" button on the topic
+    const fileUnderBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="File OAuth Discussion under an initiative"]',
+    );
+    expect(fileUnderBtn).not.toBeNull();
+    await act(async () => {
+      fileUnderBtn?.click();
+    });
+
+    // Dropdown should be open showing Project Orion
+    const initOption = Array.from(
+      container.querySelectorAll('[role="menu"] button'),
+    ).find((b) => b.textContent?.includes('Project Orion'));
+    expect(initOption).not.toBeNull();
+
+    // Select Project Orion
+    await act(async () => {
+      (initOption as HTMLButtonElement).click();
+    });
+
+    expect(fileTopicUnderProjectMock).toHaveBeenCalledWith(
+      'topic-1',
+      'project-1',
+    );
+
+    // Verify undo toast appears
+    expect(document.body.textContent).toContain(
+      'Filed "OAuth Discussion" under Project Orion',
+    );
+    const undoBtn = Array.from(document.body.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Undo',
+    );
+    expect(undoBtn).not.toBeNull();
+
+    // Undo filing
+    await act(async () => {
+      undoBtn?.click();
+    });
+    expect(detachTopicFromProjectMock).toHaveBeenCalledWith('topic-1');
+  });
+
+  it('files a topic under an initiative via drag-and-drop directly without merge modal', async () => {
+    const initiative = qualified();
+    const radarTopic = {
+      ...qualified(),
+      id: 'topic-1',
+      name: 'OAuth Discussion',
+      meeting_count: 1,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, radarTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const topicRow = container.querySelector('[data-project-id="topic-1"]');
+    const initRow = container.querySelector('[data-project-id="project-1"]');
+    expect(topicRow).not.toBeNull();
+    expect(initRow).not.toBeNull();
+
+    const dragStartEvent = new Event('dragstart', { bubbles: true });
+    Object.assign(dragStartEvent, {
+      dataTransfer: {
+        setData: vi.fn(),
+        effectAllowed: '',
+      },
+    });
+    await act(async () => {
+      topicRow?.dispatchEvent(dragStartEvent);
+    });
+
+    const dropEvent = new Event('drop', { bubbles: true });
+    Object.assign(dropEvent, {
+      preventDefault: vi.fn(),
+    });
+    await act(async () => {
+      initRow?.dispatchEvent(dropEvent);
+    });
+
+    // Should NOT open Confirm Project Merge modal, directly calls fileTopicUnderProject
+    expect(container.textContent).not.toContain('Confirm Project Merge');
+    expect(fileTopicUnderProjectMock).toHaveBeenCalledWith(
+      'topic-1',
+      'project-1',
+    );
+  });
+
+  it('renders constituent topic chips on initiative card and allows detaching', async () => {
+    const initiative = qualified();
+    const filedTopic = {
+      ...qualified(),
+      id: 'topic-filed',
+      name: 'Token Storage Strategy',
+      meeting_count: 1,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'subordinate',
+          source: 'user',
+          reason: 'Filed under parent initiative by user.',
+          assessedAt: '2026-08-28T12:00:00.000Z',
+          parentProjectId: 'project-1',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, filedTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const initCard = container.querySelector('[data-project-id="project-1"]');
+    expect(initCard?.textContent).toContain('Topics:');
+    expect(initCard?.textContent).toContain('Token Storage Strategy');
+
+    const detachBtn = initCard?.querySelector<HTMLButtonElement>(
+      '[aria-label="Detach Token Storage Strategy"]',
+    );
+    expect(detachBtn).not.toBeNull();
+
+    await act(async () => {
+      detachBtn?.click();
+    });
+
+    expect(detachTopicFromProjectMock).toHaveBeenCalledWith('topic-filed');
+  });
+
+  it('promotes a topic to an initiative via Make project button with undo support', async () => {
+    const initiative = qualified();
+    const radarTopic = {
+      ...qualified(),
+      id: 'topic-1',
+      name: 'Pluto Architecture',
+      meeting_count: 4,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, radarTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    // Check for Suggested initiative badge since meeting_count >= 2
+    const topicRow = container.querySelector('[data-project-id="topic-1"]');
+    expect(topicRow?.textContent).toContain('Suggested initiative');
+    expect(topicRow?.textContent).toContain('4 calls');
+
+    // Click "Make project" button
+    const makeProjectBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Make Pluto Architecture a project"]',
+    );
+    expect(makeProjectBtn).not.toBeNull();
+    await act(async () => {
+      makeProjectBtn?.click();
+    });
+
+    expect(promoteTopicToInitiativeMock).toHaveBeenCalledWith('topic-1');
+
+    // Verify undo toast appears
+    expect(document.body.textContent).toContain(
+      'Promoted "Pluto Architecture" to a project',
+    );
+    const undoBtn = Array.from(document.body.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Undo',
+    );
+    expect(undoBtn).not.toBeNull();
+
+    // Click Undo
+    await act(async () => {
+      undoBtn?.click();
+    });
+    expect(demoteInitiativeToTopicMock).toHaveBeenCalledWith('topic-1');
+  });
+
+  it('promotes a topic to an initiative via Promote to project in File under menu', async () => {
+    const initiative = qualified();
+    const radarTopic = {
+      ...qualified(),
+      id: 'topic-1',
+      name: 'ARP',
+      meeting_count: 1,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, radarTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    // Open File under menu
+    const fileUnderBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="File ARP under an initiative"]',
+    );
+    expect(fileUnderBtn).not.toBeNull();
+    await act(async () => {
+      fileUnderBtn?.click();
+    });
+
+    // Click "Promote to project" option
+    const promoteOption = Array.from(
+      container.querySelectorAll('[role="menu"] button'),
+    ).find((b) => b.textContent?.includes('Promote to project'));
+    expect(promoteOption).not.toBeNull();
+
+    await act(async () => {
+      (promoteOption as HTMLButtonElement).click();
+    });
+
+    expect(promoteTopicToInitiativeMock).toHaveBeenCalledWith('topic-1');
+  });
+
+  it('renders Reference badge instead of 0 calls for topics with 0 meetings', async () => {
+    const initiative = qualified();
+    const zeroCallTopic = {
+      ...qualified(),
+      id: 'topic-zero',
+      name: 'Open Source Community',
+      meeting_count: 0,
+      metadata: JSON.stringify({
+        projectQualification: {
+          version: 1,
+          state: 'unassessed',
+        },
+      }),
+    };
+    getProjectPortfolioMock.mockResolvedValue([initiative, zeroCallTopic]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    const topicRow = container.querySelector('[data-project-id="topic-zero"]');
+    expect(topicRow?.textContent).toContain('Reference');
+    expect(topicRow?.textContent).not.toContain('0 calls');
+  });
+
+  it('renders Dormant initiatives section with dormancy badge for projects untouched >30 days', async () => {
+    const activeProject = {
+      ...qualified(),
+      id: 'active-proj',
+      name: 'Active Project',
+      last_mentioned_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3d ago
+    };
+    const dormantProject = {
+      ...qualified(),
+      id: 'dormant-proj',
+      name: 'Old Untouched Project',
+      last_mentioned_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(), // 45d ago
+    };
+
+    getProjectPortfolioMock.mockResolvedValue([activeProject, dormantProject]);
+    await act(async () => root.render(<ProjectsExecutionTab />));
+
+    // Active project in current-projects
+    const activeRow = container.querySelector(
+      '[data-testid="current-projects"] [data-project-id="active-proj"]',
+    );
+    expect(activeRow).not.toBeNull();
+
+    // Dormant project in dormant-projects section
+    const dormantSection = container.querySelector(
+      '[data-testid="dormant-projects"]',
+    );
+    expect(dormantSection).not.toBeNull();
+    expect(dormantSection?.textContent).toContain('Dormant initiatives');
+    expect(dormantSection?.textContent).toContain('1 dormant');
+    expect(dormantSection?.textContent).toContain('Old Untouched');
+    expect(dormantSection?.textContent).toContain('Inactive for');
   });
 });

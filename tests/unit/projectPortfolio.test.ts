@@ -129,4 +129,80 @@ describe('project portfolio', () => {
     expect(result.current).toEqual([]);
     expect(result.other.map((p) => p.id)).toEqual(['Routine configuration']);
   });
+
+  it('partitions active from dormant initiatives based on 30-day inactivity threshold', () => {
+    const baseDate = Date.parse('2026-09-15T12:00:00Z');
+    const recentInitiative = entry('Active Project', 'qualified', '2026-09-10'); // 5 days ago
+    const olderInitiative = entry('Dormant Project', 'qualified', '2026-07-15'); // ~62 days ago
+    const moderateInitiative = entry('Aging Project', 'qualified', '2026-08-05'); // 41 days ago
+    const baseStarred = entry('Starred Old', 'qualified', '2026-06-01');
+    const starredOld = {
+      ...baseStarred,
+      metadata: JSON.stringify({
+        ...JSON.parse(baseStarred.metadata!),
+        projectStarred: true,
+      }),
+    };
+
+    const result = buildProjectPortfolio(
+      [recentInitiative, olderInitiative, moderateInitiative, starredOld],
+      '',
+      baseDate,
+    );
+
+    // Starred stays in starred
+    expect(result.starred.map((p) => p.id)).toEqual(['Starred Old']);
+
+    // Unstarred active (<= 30d)
+    expect(result.activeSide.map((p) => p.id)).toEqual(['Active Project']);
+    expect(result.activeSide[0].activity_state).toBe('active');
+    expect(result.activeSide[0].activity_label).toBe('Active 5d ago');
+
+    // Unstarred dormant (> 30d)
+    expect(result.dormant.map((p) => p.id)).toEqual([
+      'Aging Project',
+      'Dormant Project',
+    ]);
+    expect(result.dormant[0].activity_state).toBe('dormant');
+    expect(result.dormant[0].activity_label).toContain('Inactive for');
+    expect(result.dormant[1].activity_state).toBe('stale');
+    expect(result.dormant[1].activity_label).toContain('Dormant · 2 months ago');
+  });
+
+  it('adjusts dormancy thresholds based on configured project cadence', () => {
+    const baseDate = Date.parse('2026-09-15T12:00:00Z');
+    // 45 days ago: dormant by default (30d threshold), but active if cadence is 'monthly' (60d threshold)
+    const monthlyEntry = entry('Monthly Project', 'qualified', '2026-08-01');
+    monthlyEntry.metadata = JSON.stringify({
+      ...JSON.parse(monthlyEntry.metadata!),
+      projectCadence: 'monthly',
+    });
+
+    // 20 days ago: active by default (30d threshold), but dormant if cadence is 'weekly' (14d threshold)
+    const weeklyEntry = entry('Weekly Project', 'qualified', '2026-08-26');
+    weeklyEntry.metadata = JSON.stringify({
+      ...JSON.parse(weeklyEntry.metadata!),
+      projectCadence: 'weekly',
+    });
+
+    // 80 days ago: dormant/stale by default, but active if cadence is 'quarterly' (120d threshold)
+    const quarterlyEntry = entry('Quarterly Project', 'qualified', '2026-06-27');
+    quarterlyEntry.metadata = JSON.stringify({
+      ...JSON.parse(quarterlyEntry.metadata!),
+      projectCadence: 'quarterly',
+    });
+
+    const result = buildProjectPortfolio(
+      [monthlyEntry, weeklyEntry, quarterlyEntry],
+      '',
+      baseDate,
+    );
+
+    // Monthly Project and Quarterly Project remain in activeSide because of their cadences
+    expect(result.activeSide.map((p) => p.id)).toContain('Monthly Project');
+    expect(result.activeSide.map((p) => p.id)).toContain('Quarterly Project');
+
+    // Weekly Project is dormant because 20 days > 14 days
+    expect(result.dormant.map((p) => p.id)).toContain('Weekly Project');
+  });
 });

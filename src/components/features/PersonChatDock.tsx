@@ -113,7 +113,15 @@ export const PersonChatDock: React.FC<{
   const [error, setError] = useState('');
   const activeRequest = useRef<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const newlyCreatedThread = useRef<string | null>(null);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [query]);
 
   const refreshThreads = useCallback(async () => {
     const next = await listPersonChatThreads(personId, true);
@@ -594,10 +602,12 @@ export const PersonChatDock: React.FC<{
             }}
           >
             <textarea
+              ref={textareaRef}
               value={query}
               rows={1}
               maxLength={4_000}
               placeholder={`Chat about ${personName}`}
+              aria-label={`Chat about ${personName}`}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {

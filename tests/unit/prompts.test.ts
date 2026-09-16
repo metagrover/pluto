@@ -452,6 +452,28 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('Do not introduce new meeting_id values');
     expect(prompt).toContain('"schema_version": 2');
     expect(prompt).toContain('Preserve item classifications');
+    expect(prompt).toContain('Preserve temporal past-tense phrasing from inputs');
     expect(prompt).not.toContain('Available meeting evidence (newest first):');
+  });
+
+  it('embeds temporal integrity rules in knowledge document prompts', () => {
+    const personPrompt = getKnowledgeDocumentPrompt({
+      scopeType: 'person_context',
+      scopeTitle: 'Ayush',
+      sourceMeetings: [
+        {
+          id: 'm1',
+          title: 'Product Sync',
+          occurred_at: '2026-06-10T10:00:00Z',
+          evidence: 'Ayush worked on the onboarding flow.',
+        },
+      ],
+      previousStructuredJson: null,
+    });
+
+    expect(personPrompt).toContain('TEMPORAL INTEGRITY (MANDATORY)');
+    expect(personPrompt).toContain('CRITICAL TEMPORAL GROUNDING');
+    expect(personPrompt).toContain('use past tense');
+    expect(personPrompt).toContain('NEVER claim someone "is currently", "is actively"');
   });
 });

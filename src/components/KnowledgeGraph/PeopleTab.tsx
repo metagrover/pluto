@@ -10,6 +10,7 @@ import {
   Pencil,
   Play,
   Search,
+  Sparkles,
   Undo2,
   UserRound,
   Volume2,
@@ -27,6 +28,7 @@ import {
   restorePersonMerge,
   triggerDreamingNow,
   updatePersonName,
+  upsertEntity,
 } from '../../api/knowledgeGraph';
 import {
   type ClientVoiceProfile,
@@ -220,6 +222,16 @@ export const PeopleBriefing = ({
                 {person.meetingCount === 1 ? '' : 's'}
               </span>
             ) : null}
+            {person.latestMeetingAt &&
+            !Number.isNaN(Date.parse(person.latestMeetingAt)) &&
+            Math.floor(
+              (Date.now() - Date.parse(person.latestMeetingAt)) /
+                (1000 * 60 * 60 * 24),
+            ) > 45 ? (
+              <span className="person-historical rounded-full border border-stone-500/20 bg-stone-500/5 px-2 py-0.5 text-[10px] font-medium text-stone-600 dark:text-stone-400">
+                Historical
+              </span>
+            ) : null}
             <span className="person-date">
               <Clock3 aria-hidden="true" size={12} />
               {formatDate(person.latestMeetingAt)}
@@ -328,12 +340,81 @@ const meetingLabels: Record<
   },
 };
 
-const formatDueDate = (value: string | null) => {
-  if (!value) return null;
-  return `Due ${new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(value))}`;
+export const formatCommitmentChronology = (
+  item: PersonBriefingCommitment,
+  now = Date.now(),
+): { label: string; isOverdue: boolean; isLingering: boolean } => {
+  const updatedTime = Date.parse(item.updatedAt);
+  const daysSinceUpdate = !Number.isNaN(updatedTime)
+    ? Math.max(0, Math.floor((now - updatedTime) / (1000 * 60 * 60 * 24)))
+    : null;
+
+  if (item.status === 'completed') {
+    if (daysSinceUpdate === null || daysSinceUpdate <= 1) {
+      return { label: 'Recently completed', isOverdue: false, isLingering: false };
+    }
+    if (daysSinceUpdate < 7) {
+      return {
+        label: `Completed ${daysSinceUpdate}d ago`,
+        isOverdue: false,
+        isLingering: false,
+      };
+    }
+    const weeks = Math.round(daysSinceUpdate / 7);
+    return {
+      label: `Completed ${weeks}w ago`,
+      isOverdue: false,
+      isLingering: false,
+    };
+  }
+
+  if (item.dueDate) {
+    const dueTime = Date.parse(item.dueDate);
+    if (!Number.isNaN(dueTime)) {
+      const diffDays = Math.floor((now - dueTime) / (1000 * 60 * 60 * 24));
+      const formattedDue = new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+      }).format(new Date(dueTime));
+
+      if (diffDays > 0) {
+        const weeks = Math.round(diffDays / 7);
+        const overdueText =
+          weeks > 0 ? `${weeks}w overdue` : `${diffDays}d overdue`;
+        return {
+          label: `Due ${formattedDue} · ${overdueText}`,
+          isOverdue: true,
+          isLingering: false,
+        };
+      }
+      return {
+        label: `Due ${formattedDue}`,
+        isOverdue: false,
+        isLingering: false,
+      };
+    }
+  }
+
+  if (daysSinceUpdate !== null) {
+    if (daysSinceUpdate >= 45) {
+      const months = Math.max(1, Math.round(daysSinceUpdate / 30));
+      return {
+        label: `Lingering loop · Agreed ${months}mo ago`,
+        isOverdue: false,
+        isLingering: true,
+      };
+    }
+    if (daysSinceUpdate >= 7) {
+      const weeks = Math.round(daysSinceUpdate / 7);
+      return {
+        label: `Agreed ${weeks}w ago`,
+        isOverdue: false,
+        isLingering: false,
+      };
+    }
+  }
+
+  return { label: 'Open', isOverdue: false, isLingering: false };
 };
 
 const CommitmentList = ({
@@ -344,30 +425,50 @@ const CommitmentList = ({
   onOpenMeeting: (meetingId: string) => void;
 }) => (
   <ul className="person-dossier__commitments">
-    {items.slice(0, 3).map((item) => (
-      <li key={item.id}>
-        <button
-          type="button"
-          onClick={() => onOpenMeeting(item.sourceMeetingId)}
-        >
-          <span className="person-dossier__commitment-icon" aria-hidden="true">
-            {item.status === 'completed' ? (
-              <CheckCircle2 size={15} />
-            ) : (
-              <Clock3 size={15} />
-            )}
-          </span>
-          <span className="person-dossier__commitment-copy">
-            <strong>{item.text}</strong>
-            <span>
-              {formatDueDate(item.dueDate) ??
-                (item.status === 'completed' ? 'Recently completed' : 'Open')}
+    {items.slice(0, 3).map((item) => {
+      const timing = formatCommitmentChronology(item);
+      return (
+        <li key={item.id}>
+          <button
+            type="button"
+            onClick={() => onOpenMeeting(item.sourceMeetingId)}
+          >
+            <span
+              className="person-dossier__commitment-icon"
+              aria-hidden="true"
+            >
+              {item.status === 'completed' ? (
+                <CheckCircle2 size={15} />
+              ) : (
+                <Clock3 size={15} />
+              )}
             </span>
-          </span>
-          <ChevronRight aria-hidden="true" size={14} />
-        </button>
-      </li>
-    ))}
+            <span className="person-dossier__commitment-copy">
+              <strong>{item.text}</strong>
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span
+                  className={
+                    timing.isOverdue
+                      ? 'text-rose-600 dark:text-rose-400 font-medium'
+                      : timing.isLingering
+                        ? 'text-amber-700 dark:text-amber-400 font-medium'
+                        : ''
+                  }
+                >
+                  {timing.label}
+                </span>
+                {item.sourceMeetingTitle && (
+                  <span className="text-pro-text-muted/70 text-[11px] truncate max-w-[200px]">
+                    · &ldquo;{item.sourceMeetingTitle}&rdquo;
+                  </span>
+                )}
+              </span>
+            </span>
+            <ChevronRight aria-hidden="true" size={14} />
+          </button>
+        </li>
+      );
+    })}
   </ul>
 );
 
@@ -489,6 +590,7 @@ const MeetingGroup = ({
 export const PersonDossier = ({
   detail,
   onBack,
+  backLabel,
   onOpenMeeting,
   mergeCandidates = [],
   possibleDuplicateCount = 0,
@@ -496,6 +598,7 @@ export const PersonDossier = ({
 }: {
   detail: PersonBriefingDetail;
   onBack: () => void;
+  backLabel?: string;
   onOpenMeeting: (meetingId: string) => void;
   mergeCandidates?: PersonBriefingRow[];
   possibleDuplicateCount?: number;
@@ -644,6 +747,46 @@ export const PersonDossier = ({
   const selectedMergeSource = eligibleMergeCandidates.find(
     (candidate) => candidate.id === mergeSourceId,
   );
+
+  // Temporal provenance for working context
+  const latestMeeting = currentDetail.meetings[0] ?? null;
+  const rawDate =
+    latestMeeting?.started_at ||
+    latestMeeting?.created_at ||
+    brief.freshnessAt;
+  const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
+  const isValidDate = !Number.isNaN(parsedDate);
+
+  const daysSince = isValidDate
+    ? Math.floor((Date.now() - parsedDate) / (1000 * 60 * 60 * 24))
+    : null;
+
+  let recencyTier: 'fresh' | 'aging' | 'historical' = 'fresh';
+  let ageLabel = '';
+  if (daysSince !== null) {
+    if (daysSince <= 14) {
+      recencyTier = 'fresh';
+      ageLabel = daysSince <= 1 ? 'recently' : `${daysSince}d ago`;
+    } else if (daysSince <= 45) {
+      recencyTier = 'aging';
+      const weeks = Math.max(2, Math.round(daysSince / 7));
+      ageLabel = `${weeks} weeks ago`;
+    } else {
+      recencyTier = 'historical';
+      const months = Math.max(2, Math.round(daysSince / 30));
+      ageLabel = `${months} months ago`;
+    }
+  }
+
+  const formattedDate = isValidDate
+    ? new Date(parsedDate).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        ...(new Date(parsedDate).getFullYear() !== new Date().getFullYear()
+          ? { year: 'numeric' }
+          : {}),
+      })
+    : null;
 
   const saveName = async () => {
     const name = nameDraft.trim();
@@ -872,12 +1015,106 @@ export const PersonDossier = ({
     }
   };
 
+  const handleMarkContextOutdated = async () => {
+    try {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(currentDetail.person.metadata || '{}');
+      } catch {
+        parsed = {};
+      }
+      const updatedMetadata = {
+        ...parsed,
+        contextOutdatedAt: new Date().toISOString(),
+      };
+      const updatedPerson = await upsertEntity({
+        id: currentDetail.person.id,
+        type: 'person',
+        name: currentDetail.person.name,
+        metadata: updatedMetadata,
+      });
+      setCurrentDetail((prev) => ({
+        ...prev,
+        person: updatedPerson,
+      }));
+      await onIdentityChanged();
+    } catch (err) {
+      console.error('Failed to mark context as outdated:', err);
+    }
+  };
+
+  const isContextOutdated = Boolean(
+    (() => {
+      try {
+        const parsed = JSON.parse(currentDetail.person.metadata || '{}');
+        return parsed?.contextOutdatedAt;
+      } catch {
+        return false;
+      }
+    })(),
+  );
+
+  const handleSynthesizeFreshRead = async () => {
+    try {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(currentDetail.person.metadata || '{}');
+      } catch {
+        parsed = {};
+      }
+      parsed.contextOutdatedAt = undefined;
+      const updatedPerson = await upsertEntity({
+        id: currentDetail.person.id,
+        type: 'person',
+        name: currentDetail.person.name,
+        metadata: parsed,
+      });
+      setCurrentDetail((prev) => ({
+        ...prev,
+        person: updatedPerson,
+      }));
+      await handleDreamNow();
+      await onIdentityChanged();
+    } catch (err) {
+      console.error('Failed to synthesize fresh read:', err);
+    }
+  };
+
+  const collaborationJourney = useMemo(() => {
+    if (!currentDetail.meetings || currentDetail.meetings.length === 0) return null;
+    const sorted = [...currentDetail.meetings].sort(
+      (a, b) =>
+        (Date.parse(a.started_at || a.created_at || '') || 0) -
+        (Date.parse(b.started_at || b.created_at || '') || 0),
+    );
+    const earliest = sorted[0];
+    const latest = sorted[sorted.length - 1];
+    const earliestDate = earliest.started_at || earliest.created_at;
+    const latestDate = latest.started_at || latest.created_at;
+
+    let spanMonths = 0;
+    if (earliestDate && latestDate) {
+      const diffMs = Math.max(0, Date.parse(latestDate) - Date.parse(earliestDate));
+      spanMonths = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 30)));
+    }
+
+    return {
+      meetingCount: sorted.length,
+      earliestTitle: earliest.title || 'First conversation',
+      earliestDate: earliestDate ? formatDate(earliestDate) : null,
+      latestTitle: latest.title || 'Recent conversation',
+      latestDate: latestDate ? formatDate(latestDate) : null,
+      latestMeetingId: latest.id,
+      spanMonths,
+    };
+  }, [currentDetail.meetings]);
+
   return (
     <article className="person-dossier">
       <div className="person-dossier__topline">
         <button type="button" className="person-dossier__back" onClick={onBack}>
           <ArrowLeft aria-hidden="true" size={15} />
-          All people
+          {backLabel || 'All people'}
         </button>
         <div className="flex items-center gap-2.5">
           {dreamingState !== 'idle' ? (
@@ -950,6 +1187,20 @@ export const PersonDossier = ({
               >
                 {DREAMING_STATUS_LABEL[dreamingState]}
               </button>
+              {hasReliableRead && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.currentTarget
+                      .closest('details')
+                      ?.removeAttribute('open');
+                    void handleMarkContextOutdated();
+                  }}
+                >
+                  <Clock3 aria-hidden="true" size={14} />
+                  Mark context as outdated
+                </button>
+              )}
             </div>
           </details>
         </div>
@@ -1299,7 +1550,104 @@ export const PersonDossier = ({
       <section className="person-dossier__about" aria-label="About this person">
         {hasReliableRead ? (
           <div>
-            <p>{brief.headline}</p>
+            <div className="person-dossier__section-heading mb-3">
+              <h2>
+                {recencyTier === 'fresh'
+                  ? 'Active Focus'
+                  : recencyTier === 'aging'
+                    ? `Recent Focus${formattedDate ? ` · as of ${formattedDate}` : ''}`
+                    : `Historical Context${formattedDate ? ` · Discussed ${formattedDate}` : ''}`}
+              </h2>
+            </div>
+
+            {isContextOutdated && (
+              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-semibold">Context marked as outdated</p>
+                  <button
+                    type="button"
+                    disabled={dreamingState === 'running'}
+                    onClick={() => void handleSynthesizeFreshRead()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/30 bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>
+                      {dreamingState === 'running'
+                        ? 'Synthesizing…'
+                        : 'Synthesize fresh read'}
+                    </span>
+                  </button>
+                </div>
+                <p className="text-pro-text-muted">
+                  You acknowledged this working context as stale. Pluto will synthesize a new brief across available conversation history.
+                </p>
+              </div>
+            )}
+
+            {isValidDate && formattedDate ? (
+              <div className="mb-4 rounded-xl border border-pro-border/70 bg-pro-surface/50 p-3 space-y-1.5 shadow-2xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 font-medium">
+                    {recencyTier === 'fresh' ? (
+                      <>
+                        <span
+                          className="h-2 w-2 rounded-full bg-emerald-500"
+                          aria-hidden="true"
+                        />
+                        <span className="text-emerald-900 dark:text-emerald-300">
+                          Active context · Last discussed {formattedDate}
+                        </span>
+                      </>
+                    ) : recencyTier === 'aging' ? (
+                      <>
+                        <Clock3
+                          className="h-3.5 w-3.5 text-stone-500"
+                          aria-hidden="true"
+                        />
+                        <span className="text-pro-text-muted">
+                          Discussed {formattedDate} ({ageLabel})
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Clock3
+                          className="h-3.5 w-3.5 text-stone-500"
+                          aria-hidden="true"
+                        />
+                        <span className="text-pro-text-muted">
+                          Historical context · Discussed {formattedDate} ({ageLabel})
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {latestMeeting && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenMeeting(latestMeeting.id)}
+                      className="group inline-flex items-center gap-1 text-xs text-pro-accent hover:underline focus-visible:outline-none"
+                      title={`Open source meeting: ${latestMeeting.title}`}
+                    >
+                      <span className="text-pro-text-muted font-normal">From</span>
+                      <span className="font-medium max-w-[200px] truncate">
+                        &ldquo;{latestMeeting.title}&rdquo;
+                      </span>
+                      <ChevronRight className="h-3 w-3 text-pro-accent/70 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+                  )}
+                </div>
+
+                {daysSince !== null && daysSince > 30 && (
+                  <p className="text-[11.5px] text-pro-text-muted/80 leading-relaxed pt-0.5 border-t border-pro-border/40">
+                    Captured during past conversations; active focus or responsibilities may have evolved since then.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
+              {brief.headline}
+            </p>
             {brief.supportingBullets.length > 0 ? (
               <div className="mt-3 space-y-1">
                 {brief.supportingBullets.map((bullet, idx) => (
@@ -1384,6 +1732,48 @@ export const PersonDossier = ({
         ) : null}
       </section>
 
+      {collaborationJourney && collaborationJourney.meetingCount > 1 && (
+        <section
+          aria-labelledby="collaboration-journey"
+          className="person-dossier__journey mb-8"
+        >
+          <div className="person-dossier__major-heading mb-3">
+            <h2 id="collaboration-journey">Collaboration journey</h2>
+            <span className="text-xs text-pro-text-muted">
+              {collaborationJourney.meetingCount} meetings · {collaborationJourney.spanMonths}mo span
+            </span>
+          </div>
+          <div className="rounded-xl border border-pro-border/70 bg-pro-surface/50 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <span className="text-pro-text-muted">
+                First met in{' '}
+                <strong className="font-medium text-pro-text-main">
+                  {collaborationJourney.earliestTitle}
+                </strong>{' '}
+                {collaborationJourney.earliestDate
+                  ? `(${collaborationJourney.earliestDate})`
+                  : ''}
+              </span>
+              <span className="text-pro-text-muted">
+                Last met in{' '}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenMeeting(collaborationJourney.latestMeetingId)
+                  }
+                  className="font-medium text-pro-accent hover:underline focus-visible:outline-none"
+                >
+                  &ldquo;{collaborationJourney.latestTitle}&rdquo; ↗
+                </button>{' '}
+                {collaborationJourney.latestDate
+                  ? `(${collaborationJourney.latestDate})`
+                  : ''}
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="person-dossier__history">
         <div className="person-dossier__major-heading">
           <h2>Meetings</h2>
@@ -1434,11 +1824,18 @@ export const PersonDossier = ({
 export const PeopleTab: React.FC<{
   selectedPersonId?: string | null;
   onSelectPerson?: (personId: string | null) => void;
-  onOpenMeeting?: (meetingId: string) => void;
+  onOpenMeeting?: (
+    meetingId: string,
+    personContext?: { id: string; name: string },
+  ) => void;
+  backLabel?: string;
+  onBack?: () => void;
 }> = ({
   selectedPersonId = null,
   onSelectPerson = () => {},
   onOpenMeeting = () => {},
+  backLabel,
+  onBack,
 }) => {
   const [rows, setRows] = useState<PersonBriefingRow[]>([]);
   const [details, setDetails] = useState<Record<string, PersonBriefingDetail>>(
@@ -1550,8 +1947,14 @@ export const PeopleTab: React.FC<{
       <>
         <PersonDossier
           detail={selectedDetail}
-          onBack={() => onSelectPerson(null)}
-          onOpenMeeting={onOpenMeeting}
+          onBack={onBack || (() => onSelectPerson(null))}
+          backLabel={backLabel}
+          onOpenMeeting={(meetingId) =>
+            onOpenMeeting(meetingId, {
+              id: selectedDetail.person.id,
+              name: selectedDetail.person.name,
+            })
+          }
           mergeCandidates={rows}
           possibleDuplicateCount={selectedSummary?.possibleDuplicateCount ?? 0}
           onIdentityChanged={async () => {

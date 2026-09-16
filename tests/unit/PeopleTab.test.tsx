@@ -5,6 +5,7 @@ import {
   PeopleBriefing,
   type PersonBriefingRow,
   PersonDossier,
+  formatCommitmentChronology,
 } from '../../src/components/KnowledgeGraph/PeopleTab';
 
 const rows: PersonBriefingRow[] = [
@@ -389,5 +390,111 @@ describe('PersonDossier', () => {
     expect(markup).not.toContain('No confirmed conversations yet');
     expect(markup).not.toContain('No scheduled conversations');
     expect(markup).not.toContain('No mention-only conversations');
+  });
+
+  it('renders temporal provenance and meeting link for working context', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={briefingDetail}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Product review');
+    expect(markup).toContain('From');
+    expect(markup).toContain('Captured during past conversations');
+  });
+
+  it('renders custom back label when returning from meeting context', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={briefingDetail}
+        onBack={() => {}}
+        backLabel="Back to Product review"
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Back to Product review');
+  });
+
+  it('renders temporal section heading and outdated option in PersonDossier', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={briefingDetail}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    // Shows temporal heading
+    expect(markup).toMatch(/(?:Recent Focus|Historical Context|Active Focus)/);
+    // Shows Mark context as outdated button in More dropdown
+    expect(markup).toContain('Mark context as outdated');
+  });
+});
+
+describe('formatCommitmentChronology', () => {
+  it('formats overdue, lingering, and completed commitments with clear chronology', () => {
+    const now = Date.parse('2026-09-15T12:00:00Z');
+
+    // Overdue item
+    const overdueItem = {
+      id: 'c1',
+      text: 'Send API docs',
+      status: 'active' as const,
+      dueDate: '2026-08-01T00:00:00Z', // 45d overdue (~6 weeks)
+      evidence: null,
+      sourceMeetingId: 'm1',
+      sourceMeetingTitle: 'API Sync',
+      updatedAt: '2026-07-20T00:00:00Z',
+    };
+    const overdueResult = formatCommitmentChronology(overdueItem, now);
+    expect(overdueResult.isOverdue).toBe(true);
+    expect(overdueResult.label).toContain('6w overdue');
+
+    // Lingering loop without due date (>45 days)
+    const lingeringItem = {
+      id: 'c2',
+      text: 'Align with design',
+      status: 'active' as const,
+      dueDate: null,
+      evidence: null,
+      sourceMeetingId: 'm1',
+      sourceMeetingTitle: 'Design review',
+      updatedAt: '2026-07-15T00:00:00Z', // 62d ago (~2 months)
+    };
+    const lingeringResult = formatCommitmentChronology(lingeringItem, now);
+    expect(lingeringResult.isLingering).toBe(true);
+    expect(lingeringResult.label).toContain('Lingering loop · Agreed 2mo ago');
+
+    // Recent open item (2 weeks ago)
+    const recentItem = {
+      id: 'c3',
+      text: 'Update staging',
+      status: 'active' as const,
+      dueDate: null,
+      evidence: null,
+      sourceMeetingId: 'm1',
+      sourceMeetingTitle: 'Dev Sync',
+      updatedAt: '2026-09-01T00:00:00Z', // 14d ago (~2 weeks)
+    };
+    const recentResult = formatCommitmentChronology(recentItem, now);
+    expect(recentResult.label).toBe('Agreed 2w ago');
+
+    // Completed item with duration
+    const completedItem = {
+      id: 'c4',
+      text: 'Deploy hotfix',
+      status: 'completed' as const,
+      dueDate: null,
+      evidence: null,
+      sourceMeetingId: 'm1',
+      sourceMeetingTitle: 'Incident postmortem',
+      updatedAt: '2026-08-25T00:00:00Z', // 21d ago (3 weeks)
+    };
+    const completedResult = formatCommitmentChronology(completedItem, now);
+    expect(completedResult.label).toBe('Completed 3w ago');
   });
 });

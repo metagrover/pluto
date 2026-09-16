@@ -67,12 +67,17 @@ export function withProjectPortfolioDisposition(
     parsed = {};
   }
   const current = readProjectQualification(parsed);
+  const {
+    parentProjectId: _removedParentId,
+    parentEvidenceQuote: _removedEvidence,
+    ...restQ
+  } = (current || {}) as Record<string, unknown>;
   return JSON.stringify({
     ...parsed,
     projectPortfolioDisposition: disposition,
     projectPortfolioDispositionUpdatedAt: new Date().toISOString(),
     projectQualification: {
-      ...(current || {}),
+      ...restQ,
       version: 1,
       state: disposition === 'confirmed' ? 'qualified' : 'subordinate',
       source: 'user',
@@ -80,6 +85,35 @@ export function withProjectPortfolioDisposition(
         disposition === 'confirmed'
           ? 'Confirmed by the user as a project.'
           : 'Dismissed by the user from the project portfolio.',
+      assessedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export function withoutProjectPortfolioDisposition(
+  metadata: string | null,
+): string {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(metadata || '{}');
+    if (record(value)) parsed = value;
+  } catch {
+    parsed = {};
+  }
+  const current = readProjectQualification(parsed);
+  const {
+    projectPortfolioDisposition: _removedDisposition,
+    projectPortfolioDispositionUpdatedAt: _removedDispositionAt,
+    ...restParsed
+  } = parsed;
+  return JSON.stringify({
+    ...restParsed,
+    projectQualification: {
+      ...(current || {}),
+      version: 1,
+      state: 'unassessed',
+      source: 'user',
+      reason: 'Reverted to topic by user.',
       assessedAt: new Date().toISOString(),
     },
   });
@@ -311,3 +345,57 @@ export function assessProjectProposal(
     workItems,
   };
 }
+
+export function withParentProject(
+  metadata: string | null,
+  parentProjectId: string,
+): string {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(metadata || '{}');
+    if (record(value)) parsed = value;
+  } catch {
+    parsed = {};
+  }
+  const current = readProjectQualification(parsed);
+  return JSON.stringify({
+    ...parsed,
+    projectQualification: {
+      ...(current || {}),
+      version: 1,
+      state: 'subordinate',
+      source: 'user',
+      parentProjectId,
+      reason: 'Filed as a topic under parent initiative.',
+      assessedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export function withoutParentProject(metadata: string | null): string {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const value = JSON.parse(metadata || '{}');
+    if (record(value)) parsed = value;
+  } catch {
+    parsed = {};
+  }
+  const current = readProjectQualification(parsed);
+  const {
+    parentProjectId: _removedParentId,
+    parentEvidenceQuote: _removedEvidence,
+    ...restQ
+  } = (current || {}) as Record<string, unknown>;
+  return JSON.stringify({
+    ...parsed,
+    projectQualification: {
+      ...restQ,
+      version: 1,
+      state: 'unassessed',
+      source: 'user',
+      reason: 'Detached from parent initiative.',
+      assessedAt: new Date().toISOString(),
+    },
+  });
+}
+

@@ -1,3 +1,4 @@
+import { ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   type Entity,
@@ -136,30 +137,114 @@ const Commitments = ({
       setBusy(false);
     }
   };
+  const formatTaskChronology = (task: Entity, now = Date.now()) => {
+    let dueDate: string | null = task.due_date ?? null;
+    if (!dueDate && task.metadata) {
+      try {
+        const parsed = JSON.parse(task.metadata);
+        if (typeof parsed?.due_date === 'string') dueDate = parsed.due_date;
+        else if (typeof parsed?.dueDate === 'string') dueDate = parsed.dueDate;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (task.status === 'completed') {
+      const time = Date.parse(task.updated_at || task.created_at);
+      if (!Number.isNaN(time)) {
+        const diffDays = Math.max(
+          0,
+          Math.floor((now - time) / (1000 * 60 * 60 * 24)),
+        );
+        if (diffDays <= 1) return { label: 'Completed recently', isOverdue: false };
+        if (diffDays < 7)
+          return { label: `Completed ${diffDays}d ago`, isOverdue: false };
+        const weeks = Math.round(diffDays / 7);
+        return { label: `Completed ${weeks}w ago`, isOverdue: false };
+      }
+      return { label: 'Completed', isOverdue: false };
+    }
+
+    if (dueDate) {
+      const dueTime = Date.parse(dueDate);
+      if (!Number.isNaN(dueTime)) {
+        const diffDays = Math.floor((now - dueTime) / (1000 * 60 * 60 * 24));
+        const formatted = new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+        }).format(new Date(dueTime));
+        if (diffDays > 0) {
+          const weeks = Math.round(diffDays / 7);
+          const overdueText =
+            weeks > 0 ? `${weeks}w overdue` : `${diffDays}d overdue`;
+          return { label: `Due ${formatted} · ${overdueText}`, isOverdue: true };
+        }
+        return { label: `Due ${formatted}`, isOverdue: false };
+      }
+    }
+
+    const createdTime = Date.parse(task.created_at);
+    if (!Number.isNaN(createdTime)) {
+      const diffDays = Math.max(
+        0,
+        Math.floor((now - createdTime) / (1000 * 60 * 60 * 24)),
+      );
+      if (diffDays >= 45) {
+        const months = Math.max(1, Math.round(diffDays / 30));
+        return {
+          label: `Lingering loop · Opened ${months}mo ago`,
+          isOverdue: false,
+        };
+      }
+      if (diffDays >= 14) {
+        const weeks = Math.round(diffDays / 7);
+        return { label: `Opened ${weeks}w ago`, isOverdue: false };
+      }
+    }
+
+    return null;
+  };
+
   const taskList = (items: Entity[]) => (
-    <ul className="space-y-3">
-      {items.map((task) => (
-        <li key={task.id}>
-          <label className="flex items-start gap-3 text-sm leading-relaxed">
-            <input
-              type="checkbox"
-              checked={task.status === 'completed'}
-              disabled={busy}
-              onChange={() => void toggle(task)}
-              className="mt-1 accent-pro-accent"
-            />
-            <span
-              className={
-                task.status === 'completed'
-                  ? 'text-pro-text-muted line-through'
-                  : 'text-pro-text-main'
-              }
-            >
-              {task.name}
-            </span>
-          </label>
-        </li>
-      ))}
+    <ul className="space-y-2.5">
+      {items.map((task) => {
+        const timing = formatTaskChronology(task);
+        return (
+          <li key={task.id}>
+            <label className="group/task flex items-start gap-3 text-sm leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={task.status === 'completed'}
+                disabled={busy}
+                onChange={() => void toggle(task)}
+                className="mt-1 h-4 w-4 rounded border-pro-border/70 accent-pro-accent cursor-pointer"
+              />
+              <div className="flex flex-1 flex-wrap items-baseline justify-between gap-x-2">
+                <span
+                  className={
+                    task.status === 'completed'
+                      ? 'text-pro-text-muted line-through'
+                      : 'text-pro-text-main group-hover/task:text-pro-accent transition-colors'
+                  }
+                >
+                  {task.name}
+                </span>
+                {timing && (
+                  <span
+                    className={`text-[11px] tabular-nums ${
+                      timing.isOverdue
+                        ? 'text-rose-600 dark:text-rose-400 font-medium'
+                        : 'text-pro-text-muted/70'
+                    }`}
+                  >
+                    {timing.label}
+                  </span>
+                )}
+              </div>
+            </label>
+          </li>
+        );
+      })}
     </ul>
   );
   const activeTasks =
@@ -169,16 +254,24 @@ const Commitments = ({
     <details
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
-      className="mt-10 text-pro-text-muted"
+      className="group/details mt-10 border-t border-pro-border/40 pt-5 text-pro-text-muted"
     >
-      <summary className="cursor-pointer rounded text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40">
-        {projectId ? 'Open commitments' : 'Unassigned tasks'}
+      <summary className="flex cursor-pointer select-none items-center justify-between rounded-lg py-1.5 text-[13px] font-medium text-pro-text-muted hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent [&::-webkit-details-marker]:hidden list-none">
+        <div className="flex items-center gap-2">
+          <ChevronRight className="h-4 w-4 text-pro-text-muted/70 transition-transform duration-200 group-open/details:rotate-90" />
+          <span>{projectId ? 'Open commitments' : 'Unassigned tasks'}</span>
+          {activeTasks.length > 0 && (
+            <span className="rounded-full border border-pro-border/60 bg-pro-surface px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
+              {activeTasks.length}
+            </span>
+          )}
+        </div>
       </summary>
       {open && (
-        <div className="mt-5 space-y-5">
+        <div className="mt-4 rounded-xl border border-pro-border/60 bg-pro-surface/30 p-5 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
           {loading && <output className="block text-sm">Loading tasks…</output>}
           {loadError && (
-            <div role="alert" className="flex items-center gap-3 text-sm">
+            <div role="alert" className="flex items-center gap-3 text-sm text-pro-urgent">
               <p>We couldn’t load these tasks.</p>
               <button
                 type="button"
@@ -194,24 +287,24 @@ const Commitments = ({
               {activeTasks.length ? (
                 taskList(activeTasks)
               ) : (
-                <p className="text-sm">
+                <p className="text-sm text-pro-text-muted">
                   {projectId
                     ? 'No open tasks for this project.'
                     : 'No open unassigned tasks.'}
                 </p>
               )}
               {completed.length > 0 && (
-                <details>
-                  <summary className="cursor-pointer text-sm">
+                <details className="mt-4 border-t border-pro-border/40 pt-4">
+                  <summary className="cursor-pointer text-xs font-medium text-pro-text-muted hover:text-pro-text-main">
                     Completed tasks ({completed.length})
                   </summary>
-                  <div className="mt-4">{taskList(completed)}</div>
+                  <div className="mt-3">{taskList(completed)}</div>
                 </details>
               )}
             </>
           )}
           {mutationError && (
-            <p role="alert" className="text-sm">
+            <p role="alert" className="text-sm text-pro-urgent">
               {mutationError}
             </p>
           )}
@@ -220,7 +313,7 @@ const Commitments = ({
               event.preventDefault();
               void add();
             }}
-            className="flex items-center gap-3"
+            className="flex items-center gap-3 pt-2"
           >
             <input
               type="text"
@@ -231,12 +324,12 @@ const Commitments = ({
               onChange={(event) => setDraft(event.target.value)}
               disabled={busy}
               placeholder="Add a task"
-              className="min-w-0 flex-1 rounded border border-pro-border/40 bg-transparent px-3 py-2 text-sm text-pro-text-main outline-none focus:border-pro-accent/60 disabled:opacity-50"
+              className="min-w-0 flex-1 rounded-lg border border-pro-border/60 bg-pro-bg px-3.5 py-2 text-sm text-pro-text-main outline-none transition-colors placeholder:text-pro-text-muted focus:border-pro-accent focus:ring-2 focus:ring-pro-accent/20 disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={busy || !draft.trim()}
-              className={buttonClass}
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-pro-accent/10 px-3.5 text-xs font-medium text-pro-accent border border-pro-accent/25 transition-colors hover:bg-pro-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-40"
             >
               {busy ? 'Saving…' : 'Add'}
             </button>

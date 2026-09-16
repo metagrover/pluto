@@ -544,10 +544,14 @@ describe('MeetingView progressive reveal', () => {
   it('does not submit twice while a title save is pending', async () => {
     let resolveSave!: (value: string) => void;
     vi.mocked(window.ipcRenderer.invoke).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveSave = resolve;
-        }),
+      async (channel: string) => {
+        if (channel === 'UPDATE_MEETING_TITLE_IF_CURRENT') {
+          return new Promise((resolve) => {
+            resolveSave = resolve;
+          });
+        }
+        return null;
+      },
     );
     await act(async () =>
       root.render(
@@ -564,7 +568,13 @@ describe('MeetingView progressive reveal', () => {
       title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       title.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
     });
-    expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(window.ipcRenderer.invoke)
+        .mock.calls.filter(
+          ([channel]) => channel === 'UPDATE_MEETING_TITLE_IF_CURRENT',
+        ),
+    ).toHaveLength(1);
     expect(title.readOnly).toBe(true);
     expect(title.value).toBe('My manual title');
     await act(async () => resolveSave('updated'));
@@ -636,10 +646,14 @@ describe('MeetingView progressive reveal', () => {
   it('ignores an earlier visit save when returning to the same meeting and saving a new draft', async () => {
     const pending: Array<(value: string) => void> = [];
     vi.mocked(window.ipcRenderer.invoke).mockImplementation(
-      () =>
-        new Promise<string>((resolve) => {
-          pending.push(resolve);
-        }),
+      async (channel: string) => {
+        if (channel === 'UPDATE_MEETING_TITLE_IF_CURRENT') {
+          return new Promise<string>((resolve) => {
+            pending.push(resolve);
+          });
+        }
+        return null;
+      },
     );
     const fetchMeetings = vi.fn();
     await act(async () =>
