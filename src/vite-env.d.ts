@@ -34,7 +34,9 @@ interface Window {
     applyUpdate: () => Promise<void>;
     openReleaseUrl: (url?: string) => Promise<void>;
     onStatusChanged: (
-      callback: (status: import('../electron/updateChecker').UpdateInfo) => void,
+      callback: (
+        status: import('../electron/updateChecker').UpdateInfo,
+      ) => void,
     ) => () => void;
   };
 }

@@ -98,7 +98,9 @@ export const SidebarUpdateBadge = () => {
             {copied ? (
               <>
                 <Check size={11} className="text-pro-accent" />
-                <span className="text-pro-accent font-medium">Copied command</span>
+                <span className="text-pro-accent font-medium">
+                  Copied command
+                </span>
               </>
             ) : (
               <>

@@ -130,10 +130,10 @@ import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
+import { UpdateChecker } from './updateChecker';
 import { startVoiceCandidateBackfill } from './voiceCandidateBackfill';
 import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
-import { UpdateChecker } from './updateChecker';
 
 const plutoLog = createLogger('Pluto');
 const captureLog = createLogger('Capture');

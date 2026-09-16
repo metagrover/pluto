@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
+import { useAppUpdate } from '../../api/updater';
 import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
@@ -20,7 +21,6 @@ import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
-import { useAppUpdate } from '../../api/updater';
 
 interface SettingsTabProps {
   llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
