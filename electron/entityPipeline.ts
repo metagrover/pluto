@@ -17,6 +17,7 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
+import { syncMeetingActionEntitiesFromUserEdits } from './database/meetingActionSync';
 import * as db from './db';
 import type {
   EntityExtractionContext,
@@ -543,6 +544,9 @@ function persistExtractedEntities(
         dedupe_by_name: false,
         metadata: {
           full_description: actionItem.description,
+          original_description: actionItem.description,
+          source_path: `all_action_items:${actionIndex}`,
+          source_index: actionIndex,
           assignee_name: actionItem.assignee,
           commitment_state: 'possible',
           origin: 'extraction',
@@ -938,13 +942,15 @@ export async function processExtractedEntities(
   return db.withCommitmentTransaction(() => {
     ensureCurrent();
     db.retireMeetingDerivedCommitments(meetingId);
-    return persistExtractedEntities(
+    const result = persistExtractedEntities(
       extracted,
       meetingId,
       context,
       transcriptForGrounding,
       { ...options, actionIds },
     );
+    syncMeetingActionEntitiesFromUserEdits(db.db, meetingId);
+    return result;
   });
 }
 

@@ -1252,3 +1252,14 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Today’s focus uses one open personal action-item projection containing confirmed commitments and evidence-backed possible follow-ups. Persisted daily priority ranks lead, followed by overdue, stale, and active ordering. The first three items appear in the focused list and all remaining items stay reachable in the commitment backlog. Possible items carry a visible review state and inline accept/dismiss disclosure; they do not receive completion controls until explicitly confirmed.
 - **Attention boundary:** Dismissing or snoozing a linked attention alert removes that alert from hero, briefing, and attention-priority surfaces but does not hide the underlying open action item. Completed, rejected, retired, active-alias extraction rows, and explicitly third-party work remain excluded under their existing lifecycle and ownership rules.
 - **Consequence:** The home page no longer claims that nothing needs attention while open extracted work exists, and possible items are not duplicated in a separate suggestion section. This changes only dashboard projection and presentation; persistence, IPC, provenance, review history, and database schema remain unchanged.
+
+## 2026-09-16 - Synchronize meeting notes edits with commitment suggestions and knowledge graph
+
+- **Status:** Accepted and implemented.
+- **Supersedes:** The one-way un-synchronized extraction assumption between `meetings.user_edits_json` and `entities` where meeting action item corrections remained isolated to notes views.
+- **Decision:** User edits to action items in meeting notes—including wording adjustments, typo and entity corrections, completion toggles, edit reverts, and user-added continuation items—are synchronized bidirectionally with the underlying `action_item` entities in SQLite.
+- **Wording and identity:** Editing an action item text updates `entities.name`, `entities.metadata.full_description`, `entities_fts`, and meeting associations while preserving `original_description` and review state (`confirmed` / `rejected`). Reverting an edit restores original text.
+- **Completion and status:** Checking or unchecking an action item checkbox in meeting notes synchronizes `entities.status` between `'completed'` and `'active'`.
+- **Continuations:** User-added continuation items (`+ Add item`) are persisted as user-authored commitments (`origin: 'user'`, `commitment_state: 'confirmed'`) and cleanly removed if deleted from notes.
+- **Automatic recovery:** Database startup recovery automatically scans and reconciles all existing meetings that have saved user edits, ensuring historical corrections immediately propagate to Dashboard suggestions and commitment views.
+

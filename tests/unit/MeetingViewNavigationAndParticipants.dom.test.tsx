@@ -20,6 +20,7 @@ vi.mock('../../src/api/knowledgeGraph', () => ({
   getEntityMeetings: vi.fn(async () => []),
   getEntityTypeLabel: vi.fn(() => ''),
   getMeetingEntities: vi.fn(async () => []),
+  getPeopleBriefingSummaries: vi.fn(async () => []),
   getRelatedEntities: vi.fn(async () => []),
   updateEntityStatus: vi.fn(),
 }));

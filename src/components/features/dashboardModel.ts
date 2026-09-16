@@ -729,9 +729,12 @@ const buildCommitmentSourceSynthesis = (
     getLegacyAnalysisSummary(analysis.summary);
   const metadata = parseActionMetadata(action.metadata);
   const fullDescription = getTrimmedString(metadata.full_description);
-  const actionTexts = [fullDescription, getTrimmedString(action.name)].filter(
-    (value): value is string => Boolean(value),
-  );
+  const originalDescription = getTrimmedString(metadata.original_description);
+  const actionTexts = [
+    fullDescription,
+    originalDescription,
+    getTrimmedString(action.name),
+  ].filter((value): value is string => Boolean(value));
   const matchesAction = (candidate: MeetingAnalysisActionItem): boolean => {
     const candidateText = getTrimmedString(candidate.text);
     return Boolean(

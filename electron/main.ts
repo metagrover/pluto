@@ -77,6 +77,7 @@ import {
   closeApplicationDatabase,
   getApplicationDatabase,
 } from './database/applicationDatabase';
+import { syncMeetingActionEntitiesFromUserEdits } from './database/meetingActionSync';
 import { createBeforeQuitHandler } from './database/shutdown';
 import {
   AUDIO_RETENTION_ENFORCEMENT_ENV,
@@ -3564,6 +3565,10 @@ app.whenReady().then(async () => {
           ...meeting,
           user_edits_json: JSON.stringify(editsMap),
         });
+        syncMeetingActionEntitiesFromUserEdits(
+          getApplicationDatabase(),
+          String(meetingId),
+        );
         invalidateDreamingCatalog();
         return { success: true };
       } catch (e) {
@@ -3594,6 +3599,10 @@ app.whenReady().then(async () => {
         ...meeting,
         user_edits_json: JSON.stringify(editsMap),
       });
+      syncMeetingActionEntitiesFromUserEdits(
+        getApplicationDatabase(),
+        String(meetingId),
+      );
       invalidateDreamingCatalog();
       return { success: true };
     } catch (e) {

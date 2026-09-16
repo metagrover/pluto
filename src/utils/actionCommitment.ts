@@ -9,6 +9,12 @@ export interface ActionCommitmentMetadata extends Record<string, unknown> {
   reviewed_at?: string;
   full_description?: string;
   assignee_name?: string;
+  original_description?: string;
+  source_path?: string;
+  source_index?: number;
+  user_edited?: boolean;
+  user_edited_at?: string;
+  continuation_id?: string;
 }
 
 export const parseActionMetadata = (
@@ -79,7 +85,9 @@ export const isThirdPartyAssignee = (
   options?: ThirdPartyAssigneeOptions,
 ): boolean => {
   const selfNamesSet = new Set(
-    (options?.selfNames ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
+    (options?.selfNames ?? [])
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean),
   );
 
   if (assignee && typeof assignee === 'string') {
