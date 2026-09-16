@@ -142,6 +142,7 @@ const DashboardSuggestionReview = ({
   item,
   isUpdating,
   expanded,
+  compact = false,
   onToggle,
   onDecisionComplete,
   setSelectedMeetingId,
@@ -150,6 +151,7 @@ const DashboardSuggestionReview = ({
   item: DashboardActionInsightItem;
   isUpdating: boolean;
   expanded: boolean;
+  compact?: boolean;
   onToggle: () => void;
   onDecisionComplete: (state: 'confirmed' | 'rejected') => void;
   setSelectedMeetingId: (id: string | number | null) => void;
@@ -184,16 +186,22 @@ const DashboardSuggestionReview = ({
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
-        className="group flex w-full items-start gap-3 py-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+        className={`group flex w-full items-start gap-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent ${compact ? 'py-2' : 'py-4'}`}
       >
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-semibold leading-5 text-pro-text-main">
-            {item.title}
+        {compact ? (
+          <span className="min-w-0 flex-1 text-[11px] font-semibold leading-5 text-pro-accent">
+            Review details
           </span>
-          <span className="mt-1 block text-[11px] font-medium leading-5 text-pro-text-muted">
-            {basisLabel}
+        ) : (
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-semibold leading-5 text-pro-text-main">
+              {item.title}
+            </span>
+            <span className="mt-1 block text-[11px] font-medium leading-5 text-pro-text-muted">
+              {basisLabel}
+            </span>
           </span>
-        </span>
+        )}
         <ChevronRight
           className={`mt-1 h-4 w-4 shrink-0 text-pro-text-muted/65 transition-transform duration-200 ease-out group-hover:text-pro-text-main motion-reduce:transition-none ${expanded ? 'rotate-90' : ''}`}
           aria-hidden="true"
@@ -433,11 +441,6 @@ export const Dashboard = ({
   const [reviewingSuggestionId, setReviewingSuggestionId] = useState<
     string | null
   >(null);
-  const suggestionIds = model.commitments.needsConfirmation.map(
-    (item) => item.id,
-  );
-  const suggestionIdsKey = suggestionIds.join('|');
-  const [suggestionQueueIds, setSuggestionQueueIds] = useState(suggestionIds);
   const [recentlyAddedCommitmentId, setRecentlyAddedCommitmentId] = useState<
     string | null
   >(null);
@@ -506,17 +509,6 @@ export const Dashboard = ({
     setOrderedCommitmentIds(modelCommitmentIds.split('|').filter(Boolean));
   }, [modelCommitmentIds]);
 
-  useEffect(() => {
-    setSuggestionQueueIds((previousIds) => {
-      if (suggestionIds.length === 0) return [];
-      const nextIds = [...previousIds];
-      for (const id of suggestionIds) {
-        if (!nextIds.includes(id)) nextIds.push(id);
-      }
-      return nextIds;
-    });
-  }, [suggestionIdsKey]);
-
   const finishSuggestionReview = (
     itemId: string,
     state: 'confirmed' | 'rejected',
@@ -562,16 +554,6 @@ export const Dashboard = ({
   };
 
   const recentWin = model.recentWin;
-  const hasSuggestedCommitments =
-    model.commitments.needsConfirmation.length > 0;
-  const currentSuggestion = model.commitments.needsConfirmation[0];
-  const currentSuggestionPosition = currentSuggestion
-    ? Math.max(1, suggestionQueueIds.indexOf(currentSuggestion.id) + 1)
-    : 0;
-  const suggestionQueueTotal = Math.max(
-    suggestionQueueIds.length,
-    suggestionIds.length,
-  );
   const allCommitmentItems =
     model.commitments.state === 'populated'
       ? [...model.commitments.items, ...model.commitments.backlog]
@@ -801,6 +783,7 @@ export const Dashboard = ({
                 const primaryAriaLabel = getActionInsightPrimaryAriaLabel(item);
                 const showStatus =
                   recentlyAddedCommitmentId === item.id ||
+                  item.commitmentState === 'possible' ||
                   item.status !== 'active' ||
                   item.attentionLabel === 'Blocker';
                 const hasSecondaryActions = Boolean(
@@ -993,7 +976,7 @@ export const Dashboard = ({
                             ) : null}
                           </div>
                         </div>
-                        {item.sourceMeetingId ? (
+                        {item.sourceMeetingId && item.canComplete ? (
                           <button
                             type="button"
                             aria-label={`Open source meeting for ${item.title}`}
@@ -1019,6 +1002,7 @@ export const Dashboard = ({
                             <DashboardSuggestionReview
                               item={item}
                               isUpdating={isUpdating}
+                              compact
                               expanded={reviewingSuggestionId === item.id}
                               onToggle={() =>
                                 setReviewingSuggestionId((current) =>
@@ -1084,8 +1068,15 @@ export const Dashboard = ({
                     key={item.id}
                     className="flex items-center justify-between gap-4 py-3"
                   >
-                    <span className="min-w-0 truncate text-[13px] font-normal text-pro-text-main/80">
-                      {item.title}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate text-[13px] font-normal text-pro-text-main/80">
+                        {item.title}
+                      </span>
+                      {item.commitmentState === 'possible' ? (
+                        <span className="shrink-0 rounded bg-pro-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-pro-warning">
+                          Needs review
+                        </span>
+                      ) : null}
                     </span>
                     <button
                       type="button"
@@ -1106,48 +1097,6 @@ export const Dashboard = ({
                 ))}
               </div>
             </details>
-          ) : null}
-          {hasSuggestedCommitments ? (
-            <section
-              id="suggested-commitments"
-              aria-labelledby="fresh-suggestion-title"
-              className="mt-6 border-t border-pro-border/70 pt-4"
-            >
-              <p
-                id="fresh-suggestion-title"
-                className="text-[10px] font-medium text-pro-text-muted/60"
-              >
-                Fresh suggestion
-                {suggestionQueueTotal > 1
-                  ? ` · ${currentSuggestionPosition} of ${suggestionQueueTotal}`
-                  : ''}
-              </p>
-              <DashboardSuggestionReview
-                item={model.commitments.needsConfirmation[0]}
-                isUpdating={updatingTaskIds.has(
-                  model.commitments.needsConfirmation[0].id,
-                )}
-                expanded={
-                  reviewingSuggestionId ===
-                  model.commitments.needsConfirmation[0].id
-                }
-                onToggle={() =>
-                  setReviewingSuggestionId((current) =>
-                    current === model.commitments.needsConfirmation[0].id
-                      ? null
-                      : model.commitments.needsConfirmation[0].id,
-                  )
-                }
-                onDecisionComplete={(state) =>
-                  finishSuggestionReview(
-                    model.commitments.needsConfirmation[0].id,
-                    state,
-                  )
-                }
-                setSelectedMeetingId={setSelectedMeetingId}
-                handleReviewCommitment={handleReviewCommitment}
-              />
-            </section>
           ) : null}
         </section>
 

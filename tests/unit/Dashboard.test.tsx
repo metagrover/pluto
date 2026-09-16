@@ -377,7 +377,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Memory in motion');
   });
 
-  it('keeps suggestions subordinate to the empty daily-three state', () => {
+  it('renders possible follow-ups directly in the daily focus list', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -410,23 +410,49 @@ describe('Dashboard', () => {
 
     const markup = renderDashboard(model);
 
-    expect(markup).toContain('Nothing needs your attention');
-    expect(markup).toContain('Fresh suggestion · 1 of 3');
-    expect(markup).not.toContain('Possible follow-ups from your meetings.');
+    expect(markup).not.toContain('Nothing needs your attention');
+    expect(markup).not.toContain('Fresh suggestion');
     expect(markup).toContain('Draft the launch checklist');
     expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
-      1,
+      3,
     );
     expect(markup).toContain('data-testid="dashboard-suggestion-review"');
     expect(
       markup.match(/data-testid="dashboard-suggestion-review"/g) ?? [],
-    ).toHaveLength(1);
-    expect(markup).not.toContain('more suggestions waiting');
-    expect(markup).not.toContain('Review 1 suggestion');
+    ).toHaveLength(3);
+    expect(markup.match(/Needs review/g) ?? []).toHaveLength(3);
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Your wins will show up here');
+  });
+
+  it('keeps possible items beyond the focused three reachable in the backlog', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: Array.from({ length: 4 }, (_, index) =>
+        makeAction({
+          id: `possible-${index + 1}`,
+          name: `Possible item ${index + 1}`,
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ),
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderDashboard(model);
+
+    expect(markup).toContain('Remaining commitments · 1');
+    expect(markup).toContain('Add Possible item 1 to today&#x27;s three');
+    expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
+      3,
+    );
+    expect(markup.match(/Needs review/g) ?? []).toHaveLength(4);
   });
 
   it('places Upcoming meetings before Recent win and removes duplicate re-entry', () => {
@@ -956,11 +982,11 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('From Launch Review · Apr 27, 2026');
+    expect(markup).toContain('Possible follow-up · From Launch Review');
     expect(markup).toMatch(
       /aria-label="Review suggestion: Check whether privacy review is assigned"[^>]+aria-expanded="false"/,
     );
-    expect(markup).not.toContain('Needs review');
+    expect(markup).toContain('Needs review');
     expect(markup).not.toContain('Open full meeting');
     expect(markup).not.toContain('Source synthesis');
     expect(markup).not.toContain('Confirm task');
