@@ -32,7 +32,7 @@ describe('MeetingParticipants', () => {
       expect(result).toEqual([]);
     });
 
-    it('filters out unknown speakers and counts turns correctly', () => {
+    it('filters out unknown speakers and counts turns correctly for identified speakers', () => {
       const segments = [
         { speaker: 'Unknown' },
         { speaker: 'unknown' },
@@ -42,12 +42,32 @@ describe('MeetingParticipants', () => {
       ];
       const result = resolveMeetingParticipants({
         transcriptSegments: segments,
+        speakerDisplayNames: {
+          'Speaker 1': 'Avery Davis',
+          'Speaker 2': 'Jordan Lee',
+        },
       });
       expect(result).toHaveLength(2);
       const s1 = result.find((p) => p.speakerKey === 'Speaker 1');
       const s2 = result.find((p) => p.speakerKey === 'Speaker 2');
+      expect(s1?.name).toBe('Avery Davis');
       expect(s1?.turnCount).toBe(2);
+      expect(s2?.name).toBe('Jordan Lee');
       expect(s2?.turnCount).toBe(1);
+    });
+
+    it('excludes unidentified speakers without confirmed identities', () => {
+      const segments = [
+        { speaker: 'Me' },
+        { speaker: 'Speaker 1' },
+        { speaker: 'Speaker 2' },
+      ];
+      const result = resolveMeetingParticipants({
+        transcriptSegments: segments,
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].isSelf).toBe(true);
+      expect(result[0].name).toBe('You');
     });
 
     it('identifies self speaker from "Me" or "You" labels or selfPersonId', () => {
@@ -58,10 +78,10 @@ describe('MeetingParticipants', () => {
       const me = result.find((p) => p.speakerKey === 'Me');
       expect(me?.isSelf).toBe(true);
       expect(me?.name).toBe('You');
-      expect(result[0].isSelf).toBe(true); // Self sorted first
+      expect(result).toHaveLength(1); // Speaker 1 excluded because unidentified
     });
 
-    it('resolves personId and display name from identityState bindings', () => {
+    it('resolves personId and display name from identityState bindings and excludes unidentified speakers', () => {
       const segments = [{ speaker: 'Speaker 1' }, { speaker: 'Speaker 2' }];
       const identityState: MeetingIdentityState = {
         meetingId: 'm-1',
@@ -109,6 +129,7 @@ describe('MeetingParticipants', () => {
         identityState,
       });
 
+      expect(result).toHaveLength(1);
       const avery = result.find((p) => p.speakerKey === 'Speaker 1');
       expect(avery?.name).toBe('Avery Davis');
       expect(avery?.personId).toBe('person-avery');
@@ -116,11 +137,10 @@ describe('MeetingParticipants', () => {
       expect(avery?.isAnonymous).toBe(false);
 
       const s2 = result.find((p) => p.speakerKey === 'Speaker 2');
-      expect(s2?.isAnonymous).toBe(true);
-      expect(s2?.personId).toBeNull();
+      expect(s2).toBeUndefined();
     });
 
-    it('merges calendar attendees as non-speakers if not in transcript', () => {
+    it('does not add calendar attendees as non-speaking participants', () => {
       const segments = [{ speaker: 'Me' }];
       const calendarAttendeeNames = ['Avery Davis', 'Jordan Lee'];
       const result = resolveMeetingParticipants({
@@ -128,13 +148,12 @@ describe('MeetingParticipants', () => {
         calendarAttendeeNames,
       });
 
-      expect(result).toHaveLength(3);
-      const jordan = result.find((p) => p.name === 'Jordan Lee');
-      expect(jordan?.turnCount).toBe(0);
-      expect(jordan?.source).toBe('calendar');
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('You');
+      expect(result.find((p) => p.name === 'Jordan Lee')).toBeUndefined();
     });
 
-    it('augments roles from meetingEntities if entity type is person', () => {
+    it('does not add mentioned entities as participants, but augments roles for identified speakers', () => {
       const segments = [{ speaker: 'Marcus Brody' }];
       const entities: Entity[] = [
         {
@@ -148,6 +167,17 @@ describe('MeetingParticipants', () => {
           created_at: '2026-01-01',
           updated_at: '2026-01-01',
         },
+        {
+          id: 'person-mentioned',
+          name: 'Sarah Connor',
+          normalized_name: 'sarah connor',
+          type: 'person',
+          metadata: JSON.stringify({ role: 'Advisor' }),
+          saliency_score: 1,
+          domain_tag: 'work',
+          created_at: '2026-01-01',
+          updated_at: '2026-01-01',
+        },
       ];
 
       const result = resolveMeetingParticipants({
@@ -155,9 +185,11 @@ describe('MeetingParticipants', () => {
         meetingEntities: entities,
       });
 
+      expect(result).toHaveLength(1);
       const marcus = result.find((p) => p.name === 'Marcus Brody');
       expect(marcus?.role).toBe('Head of Operations');
       expect(marcus?.personId).toBe('person-marcus');
+      expect(result.find((p) => p.name === 'Sarah Connor')).toBeUndefined();
     });
   });
 
@@ -207,7 +239,7 @@ describe('MeetingParticipants', () => {
         {
           id: 'p-3',
           name: 'Unidentified Speaker 2',
-          speakerKey: 'Speaker 2',
+          speakerKey: 'Remote Speaker 2',
           personId: null,
           isSelf: false,
           isAnonymous: true,
@@ -247,13 +279,13 @@ describe('MeetingParticipants', () => {
 
       // Click "Identify" for Speaker 2
       const identifyButton = container.querySelector<HTMLButtonElement>(
-        '[data-identify-speaker="Speaker 2"]',
+        '[data-identify-speaker="Remote Speaker 2"]',
       );
       expect(identifyButton).not.toBeNull();
       await act(async () => {
         identifyButton?.click();
       });
-      expect(onIdentifySpeaker).toHaveBeenCalledWith('Speaker 2');
+      expect(onIdentifySpeaker).toHaveBeenCalledWith('Remote Speaker 2');
     });
 
     it('closes on Escape key press', async () => {

@@ -49,7 +49,6 @@ export function resolveMeetingParticipants(params: {
     speakerDisplayNames = {},
     identityState = null,
     meetingEntities = [],
-    calendarAttendeeNames = [],
   } = params;
 
   // Count turns from transcript
@@ -168,6 +167,10 @@ export function resolveMeetingParticipants(params: {
         /^Remote Speaker \d+$/iu.test(speakerKey) ||
         speakerKey.toLowerCase() === 'them');
 
+    if (isAnonymous) {
+      continue;
+    }
+
     const cleanName = isSelf
       ? 'You'
       : name?.replace(/ \(You\)$/u, '') ||
@@ -188,77 +191,14 @@ export function resolveMeetingParticipants(params: {
       speakerKey,
       personId: resolvedPersonId,
       isSelf,
-      isAnonymous,
+      isAnonymous: false,
       turnCount: turns,
       role,
       source: 'transcript',
     });
   }
 
-  // 2. Add meeting entities that weren't captured as speakers
-  for (const e of meetingEntities) {
-    if (e.type !== 'person') continue;
-    if (processedPersonIds.has(e.id)) continue;
-    if (processedNames.has(e.name.toLowerCase())) continue;
-
-    processedPersonIds.add(e.id);
-    processedNames.add(e.name.toLowerCase());
-
-    const isSelf = Boolean(
-      identityState?.selfPersonId && e.id === identityState.selfPersonId,
-    );
-
-    participants.push({
-      id: `entity:${e.id}`,
-      name: e.name,
-      personId: e.id,
-      isSelf,
-      isAnonymous: false,
-      turnCount: 0,
-      role: parsePersonRole(e.metadata),
-      source: 'entity',
-    });
-  }
-
-  // 3. Add calendar attendees not yet matched
-  for (const attendee of calendarAttendeeNames) {
-    const trimmed = attendee.trim();
-    if (!trimmed) continue;
-    const lower = trimmed.toLowerCase();
-    if (processedNames.has(lower)) continue;
-
-    let matchedPersonId: string | null = null;
-    for (const p of peopleById.values()) {
-      if (p.name.toLowerCase() === lower) {
-        matchedPersonId = p.id;
-        break;
-      }
-    }
-
-    if (matchedPersonId && processedPersonIds.has(matchedPersonId)) {
-      continue;
-    }
-
-    if (matchedPersonId) {
-      processedPersonIds.add(matchedPersonId);
-    }
-    processedNames.add(lower);
-
-    participants.push({
-      id: `calendar:${trimmed}`,
-      name: trimmed,
-      personId: matchedPersonId,
-      isSelf: false,
-      isAnonymous: false,
-      turnCount: 0,
-      role: matchedPersonId
-        ? roleByPersonId.get(matchedPersonId) || null
-        : null,
-      source: 'calendar',
-    });
-  }
-
-  // Sort: self first, then participants with profile, then anonymous, then calendar
+  // Sort: self first, then participants with profile, then by turn count, then alphabetical
   return participants.sort((a, b) => {
     if (a.isSelf && !b.isSelf) return -1;
     if (!a.isSelf && b.isSelf) return 1;
