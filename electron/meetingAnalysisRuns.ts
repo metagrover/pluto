@@ -203,6 +203,7 @@ type SettingsRecord = {
   ollama_model?: unknown;
   llm_model?: unknown;
   openai_model?: unknown;
+  openrouter_model?: unknown;
   claude_model?: unknown;
   gemini_model?: unknown;
   ollama_structured_thinking?: unknown;
@@ -324,6 +325,8 @@ const isEligibleMeetingSource = (meeting: MeetingRecord): boolean =>
 const configuredModel = (settings: SettingsRecord): string | null => {
   const provider = settings.llm_provider;
   if (provider === 'openai') return stringSetting(settings.openai_model);
+  if (provider === 'openrouter')
+    return stringSetting(settings.openrouter_model);
   if (provider === 'claude') return stringSetting(settings.claude_model);
   if (provider === 'gemini') return stringSetting(settings.gemini_model);
   return (

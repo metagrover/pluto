@@ -20,7 +20,11 @@ vi.mock('@google/genai', () => {
   return { GoogleGenAI: MockGoogleGenAI };
 });
 
-import { getAllSettings, getProvider } from '../../electron/llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderCache,
+} from '../../electron/llm/factory';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
@@ -180,8 +184,9 @@ describe('UnifiedLLMProvider', () => {
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [, init] of fetchMock.mock.calls) {
-      expect(parseRequestBody(init).response_format).toEqual({
-        type: 'json_object',
+      expect(parseRequestBody(init).response_format).toMatchObject({
+        type: 'json_schema',
+        json_schema: { strict: true },
       });
       expect(parseRequestBody(init).format).toBeUndefined();
     }
@@ -1102,6 +1107,32 @@ describe('UnifiedLLMProvider', () => {
     expect(usedModel).toBe('gpt-4.1-mini');
   });
 
+  it('routes OpenRouter statelessly with zero-data-retention requirements', async () => {
+    installFetchMock((url, init) => {
+      expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+      const body = parseRequestBody(init);
+      expect(body.store).toBe(false);
+      expect(body.provider).toEqual({
+        zdr: true,
+        data_collection: 'deny',
+        require_parameters: true,
+      });
+      expect(body.model).toBe('openai/gpt-4o-mini');
+      return jsonResponse({
+        model: 'openai/gpt-4o-mini',
+        choices: [{ message: { content: validAnalysisMarkdown } }],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'openai/gpt-4o-mini',
+    });
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
+  });
+
   it('extracts internal signals in openai JSON mode with normalized tags', async () => {
     installFetchMock((url, init) => {
       expect(url).toContain('/chat/completions');
@@ -1320,10 +1351,11 @@ describe('UnifiedLLMProvider', () => {
 
 describe('LLM factory', () => {
   afterEach(() => {
+    invalidateProviderCache();
     vi.unstubAllGlobals();
   });
 
-  it('falls back from unavailable ollama to openai', async () => {
+  it('does not silently fall back from unavailable ollama to cloud', async () => {
     installFetchMock((url) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({}, false, 'unavailable');
@@ -1336,9 +1368,15 @@ describe('LLM factory', () => {
       openai_api_key: 'fallback-openai',
     };
 
-    const provider = await getProvider(settings);
-    expect(provider.name).toBe('OpenAI');
-    expect(provider).toBeInstanceOf(UnifiedLLMProvider);
+    await expect(getProvider(settings)).rejects.toThrow(
+      'explicitly select a configured cloud provider',
+    );
+  });
+
+  it('requires current consent for a configured cloud provider', async () => {
+    await expect(
+      getProvider({ llm_provider: 'openai', openai_api_key: 'test-key' }),
+    ).rejects.toThrow('openai_cloud_consent_required');
   });
 
   it('normalizes invalid provider setting to ollama', async () => {

@@ -572,7 +572,12 @@ import {
   knowledgeSynthesisPause,
 } from './knowledgeSynthesisPause';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
-import { getAllSettings, getProvider } from './llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderCache,
+} from './llm/factory';
+import type { CloudProviderId } from './llm/inferenceTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import type {
   AnalysisArtifacts,
@@ -590,6 +595,7 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import { isSecretSettingKey } from './secureSettings';
 import { createSpeakerEnrollmentAudio } from './speakerEnrollmentAudio';
 import { buildSpeakerEnrollmentCandidate } from './speakerEnrollmentCandidate';
 import {
@@ -4629,10 +4635,52 @@ app.whenReady().then(async () => {
   });
 
   // Settings handlers
-  ipcMain.handle('GET_SETTING', (_event, key) => db.getSetting(key));
-  ipcMain.handle('SET_SETTING', (_event, { key, value }) =>
-    db.setSetting(key, value),
+  ipcMain.handle('GET_SETTING', (_event, key) => {
+    if (typeof key !== 'string' || isSecretSettingKey(key)) {
+      throw new Error('secret_setting_requires_credential_ipc');
+    }
+    return db.getSetting(key);
+  });
+  ipcMain.handle('SET_SETTING', (_event, { key, value }) => {
+    if (typeof key !== 'string' || isSecretSettingKey(key)) {
+      throw new Error('secret_setting_requires_credential_ipc');
+    }
+    const result = db.setSetting(key, String(value));
+    invalidateProviderCache();
+    return result;
+  });
+  const parseCloudProvider = (value: unknown): CloudProviderId => {
+    if (
+      value === 'openai' ||
+      value === 'openrouter' ||
+      value === 'gemini' ||
+      value === 'claude'
+    ) {
+      return value;
+    }
+    throw new Error('invalid_cloud_provider');
+  };
+  ipcMain.handle('PROVIDER_CREDENTIAL_STATUS', (_event, provider) =>
+    db.getCredentialStatus(parseCloudProvider(provider)),
   );
+  ipcMain.handle(
+    'PROVIDER_CREDENTIAL_SET',
+    (_event, input: { provider?: unknown; value?: unknown }) => {
+      const provider = parseCloudProvider(input?.provider);
+      if (typeof input?.value !== 'string' || !input.value.trim()) {
+        throw new Error('invalid_provider_credential');
+      }
+      db.setCredential(provider, input.value.trim());
+      invalidateProviderCache();
+      return db.getCredentialStatus(provider);
+    },
+  );
+  ipcMain.handle('PROVIDER_CREDENTIAL_DELETE', (_event, provider) => {
+    const parsed = parseCloudProvider(provider);
+    db.deleteCredential(parsed);
+    invalidateProviderCache();
+    return db.getCredentialStatus(parsed);
+  });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
   ipcMain.handle('AUDIO_RETENTION_SET_BUDGET', async (_event, value) => {
     const parsed = parseAudioStorageBudgetGb(value);
@@ -6301,7 +6349,9 @@ app.whenReady().then(async () => {
                 ? settings.gemini_model
                 : settings.llm_provider === 'openai'
                   ? settings.openai_model
-                  : settings.claude_model) ||
+                  : settings.llm_provider === 'openrouter'
+                    ? settings.openrouter_model
+                    : settings.claude_model) ||
             'default',
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,

@@ -19,12 +19,6 @@ vi.mock('../../src/components/features/CalendarSettings', () => ({
 const defaultProps = {
   llmProvider: 'ollama' as const,
   setLlmProvider: vi.fn(),
-  geminiApiKey: '',
-  setGeminiApiKey: vi.fn(),
-  openaiApiKey: '',
-  setOpenaiApiKey: vi.fn(),
-  claudeApiKey: '',
-  setClaudeApiKey: vi.fn(),
   ollamaModel: '',
   setOllamaModel: vi.fn(),
   autoEndEnabled: true,
@@ -56,6 +50,7 @@ beforeEach(() => {
         if (channel === 'GET_SETTING') return '';
         return null;
       }),
+      on: vi.fn(() => () => {}),
     },
   });
 });
@@ -89,7 +84,7 @@ describe('SettingsTab', () => {
     });
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
-      value: { invoke },
+      value: { invoke, on: vi.fn(() => () => {}) },
     });
     const container = document.createElement('div');
     document.body.append(container);

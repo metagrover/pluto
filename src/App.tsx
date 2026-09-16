@@ -20,6 +20,7 @@ import type {
   CalendarIntegrationSnapshot,
   MeetingCalendarContext,
 } from '../electron/calendar/types';
+import type { ProviderId } from '../electron/llm/inferenceTypes';
 import {
   connectCalendar,
   getCalendarState,
@@ -257,12 +258,7 @@ function App() {
     systemAudio: 'unknown',
   });
   const [searchQuery, setSearchQuery] = useState('');
-  const [llmProvider, setLlmProvider] = useState<
-    'ollama' | 'gemini' | 'openai' | 'claude'
-  >('ollama');
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [claudeApiKey, setClaudeApiKey] = useState('');
+  const [llmProvider, setLlmProvider] = useState<ProviderId>('ollama');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -728,16 +724,7 @@ function App() {
     fetchMeetings();
 
     window.ipcRenderer.invoke('GET_SETTING', 'llm_provider').then((val) => {
-      if (val) setLlmProvider(val as 'ollama' | 'gemini' | 'openai' | 'claude');
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'gemini_api_key').then((val) => {
-      if (val) setGeminiApiKey(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'openai_api_key').then((val) => {
-      if (val) setOpenaiApiKey(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
-      if (val) setClaudeApiKey(val);
+      if (val) setLlmProvider(val as ProviderId);
     });
     window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
       if (val) setOllamaModel(val);
@@ -1910,6 +1897,11 @@ function App() {
               activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
             }`}
           />
+          <div className="pointer-events-none absolute right-5 top-3 z-[60] rounded-full border border-pro-border/60 bg-pro-surface/90 px-2.5 py-1 text-[11px] font-medium text-pro-text-muted shadow-sm backdrop-blur">
+            {llmProvider === 'ollama'
+              ? 'Local · Ollama'
+              : `Cloud · ${llmProvider === 'openrouter' ? 'OpenRouter' : llmProvider}`}
+          </div>
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative overflow-y-scroll ${
@@ -2085,12 +2077,6 @@ function App() {
               <SettingsTab
                 llmProvider={llmProvider}
                 setLlmProvider={setLlmProvider}
-                geminiApiKey={geminiApiKey}
-                setGeminiApiKey={setGeminiApiKey}
-                openaiApiKey={openaiApiKey}
-                setOpenaiApiKey={setOpenaiApiKey}
-                claudeApiKey={claudeApiKey}
-                setClaudeApiKey={setClaudeApiKey}
                 ollamaModel={ollamaModel}
                 setOllamaModel={setOllamaModel}
                 autoEndEnabled={autoEndEnabled}

@@ -12,6 +12,15 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
+import type {
+  CloudProviderId,
+  ProviderCredentialStatus,
+  ProviderId,
+} from '../../../electron/llm/inferenceTypes';
+import {
+  CLOUD_CONSENT_VERSION,
+  cloudConsentSettingKey,
+} from '../../../electron/llm/providerCatalog';
 import { useAppUpdate } from '../../api/updater';
 import {
   OLLAMA_GENERAL_MODEL,
@@ -23,14 +32,8 @@ import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
 
 interface SettingsTabProps {
-  llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
-  setLlmProvider: (val: 'ollama' | 'gemini' | 'openai' | 'claude') => void;
-  geminiApiKey: string;
-  setGeminiApiKey: (val: string) => void;
-  openaiApiKey: string;
-  setOpenaiApiKey: (val: string) => void;
-  claudeApiKey: string;
-  setClaudeApiKey: (val: string) => void;
+  llmProvider: ProviderId;
+  setLlmProvider: (val: ProviderId) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
   autoEndEnabled: boolean;
@@ -54,8 +57,9 @@ interface SettingsTabProps {
 
 const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local', icon: Cpu },
-  { id: 'gemini', name: 'Gemini', detail: 'Google', icon: Zap },
   { id: 'openai', name: 'OpenAI', detail: 'GPT', icon: Cloud },
+  { id: 'openrouter', name: 'OpenRouter', detail: 'Multi-model', icon: Cloud },
+  { id: 'gemini', name: 'Gemini', detail: 'Google', icon: Zap },
   { id: 'claude', name: 'Claude', detail: 'Anthropic', icon: Cloud },
 ] as const;
 
@@ -169,12 +173,6 @@ const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
 export const SettingsTab = ({
   llmProvider,
   setLlmProvider,
-  geminiApiKey,
-  setGeminiApiKey,
-  openaiApiKey,
-  setOpenaiApiKey,
-  claudeApiKey,
-  setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
   autoEndEnabled,
@@ -205,6 +203,14 @@ export const SettingsTab = ({
     }
   }, [initialTab]);
   const [ollamaFastModel, setOllamaFastModel] = useState('');
+  const [credentialDraft, setCredentialDraft] = useState('');
+  const [credentialStatus, setCredentialStatus] = useState<
+    Partial<Record<CloudProviderId, ProviderCredentialStatus>>
+  >({});
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+  const [pendingCloudProvider, setPendingCloudProvider] =
+    useState<CloudProviderId | null>(null);
+  const [cloudModel, setCloudModel] = useState('');
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
@@ -229,6 +235,33 @@ export const SettingsTab = ({
         if (typeof value === 'string') setOllamaFastModel(value);
       });
   }, []);
+
+  useEffect(() => {
+    for (const provider of [
+      'openai',
+      'openrouter',
+      'gemini',
+      'claude',
+    ] as const) {
+      void window.ipcRenderer
+        .invoke('PROVIDER_CREDENTIAL_STATUS', provider)
+        .then((status: ProviderCredentialStatus) =>
+          setCredentialStatus((current) => ({
+            ...current,
+            [provider]: status,
+          })),
+        );
+    }
+  }, []);
+
+  useEffect(() => {
+    setCredentialDraft('');
+    setCredentialError(null);
+    if (llmProvider === 'ollama') return;
+    void window.ipcRenderer
+      .invoke('GET_SETTING', `${llmProvider}_model`)
+      .then((value) => setCloudModel(typeof value === 'string' ? value : ''));
+  }, [llmProvider]);
 
   useEffect(() => {
     void window.ipcRenderer
@@ -258,12 +291,28 @@ export const SettingsTab = ({
     void window.ipcRenderer.invoke('SET_SETTING', { key, value });
   };
 
-  const providerTokenValue =
-    llmProvider === 'gemini'
-      ? geminiApiKey
-      : llmProvider === 'openai'
-        ? openaiApiKey
-        : claudeApiKey;
+  const activateProvider = (provider: ProviderId) => {
+    setLlmProvider(provider);
+    persistSetting('llm_provider', provider);
+  };
+
+  const requestProviderActivation = (provider: ProviderId) => {
+    if (provider === 'ollama') return activateProvider(provider);
+    void window.ipcRenderer
+      .invoke('GET_SETTING', cloudConsentSettingKey(provider))
+      .then((version) => {
+        if (version === CLOUD_CONSENT_VERSION) activateProvider(provider);
+        else setPendingCloudProvider(provider);
+      });
+  };
+
+  const refreshCredentialStatus = async (provider: CloudProviderId) => {
+    const status = (await window.ipcRenderer.invoke(
+      'PROVIDER_CREDENTIAL_STATUS',
+      provider,
+    )) as ProviderCredentialStatus;
+    setCredentialStatus((current) => ({ ...current, [provider]: status }));
+  };
 
   const selectAndFocusTab = (index: number) => {
     const nextTab = settingsTabs[index];
@@ -593,10 +642,7 @@ export const SettingsTab = ({
                     <button
                       key={provider.id}
                       type="button"
-                      onClick={() => {
-                        setLlmProvider(provider.id);
-                        persistSetting('llm_provider', provider.id);
-                      }}
+                      onClick={() => requestProviderActivation(provider.id)}
                       className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-all text-left ${
                         active
                           ? 'border-pro-accent bg-pro-accent/5 text-pro-text-main shadow-sm ring-1 ring-pro-accent/20'
@@ -653,31 +699,93 @@ export const SettingsTab = ({
                 </SettingsRow>
               </>
             ) : (
-              <SettingsRow
-                htmlFor="api-key"
-                label="API Key"
-                helper={`Securely stored key for ${llmProvider} requests.`}
-              >
-                <Input
-                  id="api-key"
-                  type="password"
-                  placeholder={`Enter your ${llmProvider} API key`}
-                  value={providerTokenValue}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (llmProvider === 'gemini') {
-                      setGeminiApiKey(value);
-                      persistSetting('gemini_api_key', value);
-                    } else if (llmProvider === 'openai') {
-                      setOpenaiApiKey(value);
-                      persistSetting('openai_api_key', value);
-                    } else if (llmProvider === 'claude') {
-                      setClaudeApiKey(value);
-                      persistSetting('claude_api_key', value);
+              <>
+                <SettingsRow
+                  htmlFor="cloud-model"
+                  label="Model"
+                  helper="Choose a tested model or enter an advanced provider model ID."
+                >
+                  <Input
+                    id="cloud-model"
+                    type="text"
+                    placeholder={
+                      llmProvider === 'openrouter'
+                        ? 'openai/gpt-4o-mini'
+                        : 'Provider default'
                     }
-                  }}
-                />
-              </SettingsRow>
+                    value={cloudModel}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setCloudModel(value);
+                      persistSetting(`${llmProvider}_model`, value);
+                    }}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  htmlFor="api-key"
+                  label="API Key"
+                  helper={
+                    credentialStatus[llmProvider]?.configured
+                      ? 'Configured in encrypted storage. The existing key is never shown.'
+                      : 'Enter a key to store it with macOS secure storage.'
+                  }
+                >
+                  <div className="space-y-2">
+                    <Input
+                      id="api-key"
+                      type="password"
+                      autoComplete="off"
+                      placeholder={`Enter a new ${llmProvider} API key`}
+                      value={credentialDraft}
+                      onChange={(event) =>
+                        setCredentialDraft(event.target.value)
+                      }
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!credentialDraft.trim()}
+                        onClick={() => {
+                          setCredentialError(null);
+                          void window.ipcRenderer
+                            .invoke('PROVIDER_CREDENTIAL_SET', {
+                              provider: llmProvider,
+                              value: credentialDraft,
+                            })
+                            .then(() => {
+                              setCredentialDraft('');
+                              return refreshCredentialStatus(llmProvider);
+                            })
+                            .catch(() =>
+                              setCredentialError(
+                                'The key could not be stored securely. Cloud access remains disabled.',
+                              ),
+                            );
+                        }}
+                        className="rounded-lg bg-pro-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                      >
+                        Save key
+                      </button>
+                      {credentialStatus[llmProvider]?.configured ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void window.ipcRenderer
+                              .invoke('PROVIDER_CREDENTIAL_DELETE', llmProvider)
+                              .then(() => refreshCredentialStatus(llmProvider));
+                          }}
+                          className="rounded-lg border border-pro-border px-3 py-2 text-xs font-medium text-pro-text-muted"
+                        >
+                          Remove key
+                        </button>
+                      ) : null}
+                    </div>
+                    {credentialError ? (
+                      <p className="text-xs text-red-500">{credentialError}</p>
+                    ) : null}
+                  </div>
+                </SettingsRow>
+              </>
             )}
           </Section>
         </div>
@@ -769,6 +877,53 @@ export const SettingsTab = ({
               </button>
             </SettingsRow>
           </Section>
+        </div>
+      ) : null}
+
+      {pendingCloudProvider ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cloud-consent-title"
+            className="max-w-md rounded-2xl border border-pro-border bg-pro-bg p-6 shadow-2xl"
+          >
+            <h2
+              id="cloud-consent-title"
+              className="text-lg font-semibold text-pro-text-main"
+            >
+              Allow cloud inference with {pendingCloudProvider}?
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-pro-text-muted">
+              Selected transcript excerpts, notes, questions, and relevant local
+              context may leave this Mac. Audio never leaves. Requests are
+              stateless, and Pluto remains the only durable memory store.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingCloudProvider(null)}
+                className="rounded-lg border border-pro-border px-4 py-2 text-sm text-pro-text-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const provider = pendingCloudProvider;
+                  persistSetting(
+                    cloudConsentSettingKey(provider),
+                    CLOUD_CONSENT_VERSION,
+                  );
+                  activateProvider(provider);
+                  setPendingCloudProvider(null);
+                }}
+                className="rounded-lg bg-pro-accent px-4 py-2 text-sm font-semibold text-white"
+              >
+                Allow and select
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

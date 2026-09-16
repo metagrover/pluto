@@ -51,6 +51,7 @@ describe('secureSettings', () => {
   it('identifies the secret-backed setting keys', () => {
     expect(isSecretSettingKey('gemini_api_key')).toBe(true);
     expect(isSecretSettingKey('openai_api_key')).toBe(true);
+    expect(isSecretSettingKey('openrouter_api_key')).toBe(true);
     expect(isSecretSettingKey('claude_api_key')).toBe(true);
     expect(isSecretSettingKey('hf_token')).toBe(true);
     expect(isSecretSettingKey('llm_provider')).toBe(false);
@@ -89,7 +90,7 @@ describe('secureSettings', () => {
     expect(manager.get('claude_api_key')).toBe('legacy-key');
   });
 
-  it('keeps the plaintext secret when migration fails', () => {
+  it('fails closed while preserving a legacy plaintext secret when migration fails', () => {
     const plaintext = createPlaintextStore({
       hf_token: 'legacy-token',
     });
@@ -104,7 +105,7 @@ describe('secureSettings', () => {
       logFailure,
     });
 
-    expect(manager.get('hf_token')).toBe('legacy-token');
+    expect(manager.get('hf_token')).toBeNull();
     expect(plaintext.get('hf_token')).toBe('legacy-token');
     expect(logFailure).toHaveBeenCalledWith(
       'hf_token',
@@ -129,7 +130,7 @@ describe('secureSettings', () => {
     expect(manager.get('gemini_api_key')).toBe('new-gemini-key');
   });
 
-  it('falls back to plaintext persistence when secure writes fail', () => {
+  it('fails closed instead of persisting plaintext when secure writes fail', () => {
     const plaintext = createPlaintextStore();
     const logFailure = vi.fn();
     const manager = createSecureSettingsManager({
@@ -142,13 +143,34 @@ describe('secureSettings', () => {
       logFailure,
     });
 
-    manager.set('openai_api_key', 'fallback-key');
+    expect(() => manager.set('openai_api_key', 'fallback-key')).toThrow(
+      'secure_storage_write_failed',
+    );
 
-    expect(plaintext.get('openai_api_key')).toBe('fallback-key');
+    expect(plaintext.get('openai_api_key')).toBeNull();
     expect(logFailure).toHaveBeenCalledWith(
       'openai_api_key',
       'write',
       expect.any(Error),
+    );
+  });
+
+  it('reports unavailable secure storage without revealing credential data', () => {
+    const manager = createSecureSettingsManager({
+      plaintext: createPlaintextStore({ openrouter_api_key: 'legacy-key' }),
+      backend: createSecureBackend({ available: false }),
+      logFailure: vi.fn(),
+    });
+
+    expect(manager.get('openrouter_api_key')).toBeNull();
+    expect(manager.status('openrouter')).toEqual({
+      provider: 'openrouter',
+      configured: false,
+      available: false,
+      error: 'secure_storage_unavailable',
+    });
+    expect(() => manager.set('openrouter_api_key', 'secret')).toThrow(
+      'secure_storage_unavailable',
     );
   });
 

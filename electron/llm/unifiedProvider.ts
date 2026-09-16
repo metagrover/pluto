@@ -53,6 +53,10 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
+import {
+  InferenceTransportError,
+  executeOpenAICompatible,
+} from './transports/openAICompatible';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_RESIDENCY_TIMEOUT_MS = 10_000;
@@ -486,7 +490,6 @@ export class UnifiedLLMProvider implements LLMProvider {
   name: string;
   requiresApiKey: boolean;
 
-  private openAIBaseUrl = 'https://api.openai.com/v1';
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenAI | null = null;
@@ -515,6 +518,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         return !!this.settings.gemini_api_key;
       case 'openai':
         return !!this.settings.openai_api_key;
+      case 'openrouter':
+        return !!this.settings.openrouter_api_key;
       case 'claude':
         return !!this.settings.claude_api_key;
       default:
@@ -619,7 +624,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                 }),
               }
             : {}),
-          ...(this.providerType === 'ollama'
+          ...(['ollama', 'openai', 'openrouter'].includes(this.providerType)
             ? {
                 notesResponseSchema: buildNotesResponseSchema(
                   request.responseContract,
@@ -693,7 +698,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           task: request.task,
           jsonMode: true,
           signal: request.signal,
-          ...(this.providerType === 'ollama'
+          ...(['ollama', 'openai', 'openrouter'].includes(this.providerType)
             ? {
                 notesResponseSchema: buildNotesResponseSchema(
                   request.responseContract,
@@ -728,6 +733,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         );
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
+      case 'openrouter':
+        return this.settings.openrouter_model || 'openai/gpt-4o-mini';
       case 'claude':
         return this.settings.claude_model || 'claude-3-haiku-20240307';
       case 'gemini':
@@ -1042,6 +1049,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         return 'Google Gemini';
       case 'openai':
         return 'OpenAI';
+      case 'openrouter':
+        return 'OpenRouter';
       case 'claude':
         return 'Anthropic Claude';
       default:
@@ -1113,9 +1122,10 @@ export class UnifiedLLMProvider implements LLMProvider {
       let result: string;
       switch (this.providerType) {
         case 'openai':
+        case 'openrouter':
           observeNotesStarted();
           options.onStart?.();
-          result = await this.generateWithOpenAI(options);
+          result = await this.generateWithOpenAICompatible(options);
           break;
         case 'claude':
           observeNotesStarted();
@@ -1214,63 +1224,64 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
   }
 
-  private async generateWithOpenAI({
+  private async generateWithOpenAICompatible({
     prompt,
     task,
     jsonMode,
     responseSchema,
     signal,
     notesBudget,
+    notesModel,
+    notesResponseSchema,
+    onNotesMetrics,
   }: TextGenerationOptions): Promise<string> {
-    if (!this.settings.openai_api_key) {
-      throw new Error('OpenAI API key not configured');
+    const provider = this.providerType as 'openai' | 'openrouter';
+    const apiKey =
+      provider === 'openrouter'
+        ? this.settings.openrouter_api_key
+        : this.settings.openai_api_key;
+    if (!apiKey) throw new Error(`${provider} API key not configured`);
+    try {
+      const result = await executeOpenAICompatible(provider, apiKey, {
+        task,
+        model:
+          notesModel ||
+          (provider === 'openrouter'
+            ? this.settings.openrouter_model || 'openai/gpt-4o-mini'
+            : this.settings.openai_model || 'gpt-4o-mini'),
+        messages: [
+          { role: 'system', content: this.getSystemInstruction(task) },
+          { role: 'user', content: prompt },
+        ],
+        temperature: this.getTemperature(task),
+        jsonMode,
+        responseSchema: responseSchema ?? notesResponseSchema,
+        maxOutputTokens: notesBudget?.outputTokens,
+        signal,
+        egress: {
+          classification: 'selected_meeting_context',
+          userInitiated: task !== 'dreaming',
+        },
+      });
+      onNotesMetrics?.(result.usage);
+      if (notesBudget && result.finishReason === 'length')
+        throw new MeetingNotesError('notes_output_truncated');
+      if (
+        task === 'commitmentReconciliation' &&
+        result.finishReason === 'length'
+      )
+        throw new Error('commitment_response_incomplete');
+      return result.text;
+    } catch (error) {
+      if (notesBudget && error instanceof InferenceTransportError) {
+        throw new MeetingNotesError(
+          error.reportsInputOverflow
+            ? 'notes_input_overflow'
+            : 'notes_provider_error',
+        );
+      }
+      throw error;
     }
-
-    const body: Record<string, unknown> = {
-      model: this.settings.openai_model || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: this.getSystemInstruction(task) },
-        { role: 'user', content: prompt },
-      ],
-      temperature: this.getTemperature(task),
-      ...(notesBudget
-        ? { max_completion_tokens: notesBudget.outputTokens }
-        : {}),
-    };
-
-    if (jsonMode) {
-      body.response_format = responseSchema
-        ? {
-            type: 'json_schema',
-            json_schema: { name: task, schema: responseSchema, strict: true },
-          }
-        : { type: 'json_object' };
-    }
-
-    const response = await fetch(`${this.openAIBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.settings.openai_api_key}`,
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
-
-    if (!response.ok) {
-      if (notesBudget) return rejectNotesProviderResponse(response);
-      throw new Error(`OpenAI API error: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    if (notesBudget && data.choices?.[0]?.finish_reason === 'length')
-      throw new MeetingNotesError('notes_output_truncated');
-    if (
-      task === 'commitmentReconciliation' &&
-      data.choices?.[0]?.finish_reason === 'length'
-    )
-      throw new Error('commitment_response_incomplete');
-    return data.choices?.[0]?.message?.content ?? '';
   }
 
   private async generateWithClaude({

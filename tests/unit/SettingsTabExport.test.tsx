@@ -31,6 +31,7 @@ describe('SettingsTab Export settings', () => {
       configurable: true,
       value: {
         invoke: invokeMock,
+        on: vi.fn(() => () => {}),
       },
     });
   });
@@ -49,12 +50,6 @@ describe('SettingsTab Export settings', () => {
         <SettingsTab
           llmProvider="ollama"
           setLlmProvider={vi.fn()}
-          geminiApiKey=""
-          setGeminiApiKey={vi.fn()}
-          openaiApiKey=""
-          setOpenaiApiKey={vi.fn()}
-          claudeApiKey=""
-          setClaudeApiKey={vi.fn()}
           ollamaModel=""
           setOllamaModel={vi.fn()}
           autoEndEnabled={true}
