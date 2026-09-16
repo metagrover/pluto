@@ -72,7 +72,10 @@ vi.mock('../../src/components/KnowledgeGraph/PeopleTab', () => ({
         type="button"
         data-testid="people-open-meeting"
         onClick={() =>
-          onOpenMeeting?.('meeting-1', { id: 'person-avery', name: 'Avery Chen' })
+          onOpenMeeting?.('meeting-1', {
+            id: 'person-avery',
+            name: 'Avery Chen',
+          })
         }
       >
         Open Sync
@@ -150,7 +153,9 @@ describe('App Navigation History', () => {
         await flush();
       });
 
-      expect(container.querySelector('[data-testid="people-tab"]')).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="people-tab"]'),
+      ).not.toBeNull();
 
       // Open meeting from person
       const openMeetingBtn = container.querySelector<HTMLButtonElement>(
@@ -164,7 +169,9 @@ describe('App Navigation History', () => {
       });
 
       // Now in MeetingView
-      expect(container.querySelector('[data-testid="meeting-view"]')).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).not.toBeNull();
       const meetingBack = container.querySelector<HTMLButtonElement>(
         '[data-testid="meeting-back"]',
       );
@@ -178,8 +185,12 @@ describe('App Navigation History', () => {
       });
 
       // Should be back on People tab with Avery selected
-      expect(container.querySelector('[data-testid="people-tab"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="meeting-view"]')).toBeNull();
+      expect(
+        container.querySelector('[data-testid="people-tab"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).toBeNull();
     } finally {
       act(() => root.unmount());
       container.remove();
@@ -210,7 +221,9 @@ describe('App Navigation History', () => {
       });
 
       // Now in MeetingView
-      expect(container.querySelector('[data-testid="meeting-view"]')).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).not.toBeNull();
 
       // Open person profile from meeting
       const openPersonBtn = container.querySelector<HTMLButtonElement>(
@@ -224,7 +237,9 @@ describe('App Navigation History', () => {
       });
 
       // Should now be on People tab
-      expect(container.querySelector('[data-testid="people-tab"]')).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="people-tab"]'),
+      ).not.toBeNull();
       const peopleBack = container.querySelector<HTMLButtonElement>(
         '[data-testid="people-back"]',
       );
@@ -238,7 +253,9 @@ describe('App Navigation History', () => {
       });
 
       // Should be back in MeetingView
-      expect(container.querySelector('[data-testid="meeting-view"]')).not.toBeNull();
+      expect(
+        container.querySelector('[data-testid="meeting-view"]'),
+      ).not.toBeNull();
       expect(container.querySelector('[data-testid="people-tab"]')).toBeNull();
     } finally {
       act(() => root.unmount());

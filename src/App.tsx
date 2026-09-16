@@ -1326,7 +1326,12 @@ function App() {
       return;
     }
     setActiveTab('hub');
-  }, [navHistory.length, selectedMeetingId, selectedPersonId, selectedProjectId]);
+  }, [
+    navHistory.length,
+    selectedMeetingId,
+    selectedPersonId,
+    selectedProjectId,
+  ]);
 
   const currentBackLabel = useMemo(() => {
     if (navHistory.length > 0) {

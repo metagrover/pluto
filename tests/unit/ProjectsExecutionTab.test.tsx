@@ -1147,9 +1147,9 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
     });
 
     // Click "Confirm Merge"
-    const confirmBtn = Array.from(
-      modal?.querySelectorAll('button') ?? [],
-    ).find((b) => b.textContent?.includes('Confirm Merge'));
+    const confirmBtn = Array.from(modal?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent?.includes('Confirm Merge'),
+    );
     expect(confirmBtn).not.toBeNull();
 
     await act(async () => {
@@ -1511,13 +1511,17 @@ describe('ProjectsExecutionTab borderless portfolio and dossier routing', () => 
       ...qualified(),
       id: 'active-proj',
       name: 'Active Project',
-      last_mentioned_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3d ago
+      last_mentioned_at: new Date(
+        Date.now() - 3 * 24 * 60 * 60 * 1000,
+      ).toISOString(), // 3d ago
     };
     const dormantProject = {
       ...qualified(),
       id: 'dormant-proj',
       name: 'Old Untouched Project',
-      last_mentioned_at: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(), // 45d ago
+      last_mentioned_at: new Date(
+        Date.now() - 45 * 24 * 60 * 60 * 1000,
+      ).toISOString(), // 45d ago
     };
 
     getProjectPortfolioMock.mockResolvedValue([activeProject, dormantProject]);

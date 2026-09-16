@@ -452,7 +452,9 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('Do not introduce new meeting_id values');
     expect(prompt).toContain('"schema_version": 2');
     expect(prompt).toContain('Preserve item classifications');
-    expect(prompt).toContain('Preserve temporal past-tense phrasing from inputs');
+    expect(prompt).toContain(
+      'Preserve temporal past-tense phrasing from inputs',
+    );
     expect(prompt).not.toContain('Available meeting evidence (newest first):');
   });
 
@@ -474,6 +476,8 @@ describe('knowledge document prompts', () => {
     expect(personPrompt).toContain('TEMPORAL INTEGRITY (MANDATORY)');
     expect(personPrompt).toContain('CRITICAL TEMPORAL GROUNDING');
     expect(personPrompt).toContain('use past tense');
-    expect(personPrompt).toContain('NEVER claim someone "is currently", "is actively"');
+    expect(personPrompt).toContain(
+      'NEVER claim someone "is currently", "is actively"',
+    );
   });
 });

@@ -468,10 +468,7 @@ export function ProjectsOverview({
     setDraggingProject(entry);
   };
 
-  const handleDragOver = (
-    entry: ProjectPortfolioEntry,
-    e: React.DragEvent,
-  ) => {
+  const handleDragOver = (entry: ProjectPortfolioEntry, e: React.DragEvent) => {
     e.preventDefault();
     if (draggingProject && draggingProject.id !== entry.id) {
       e.dataTransfer.dropEffect = 'move';
@@ -812,9 +809,7 @@ export function ProjectsOverview({
               type="button"
               onClick={(e) => void handleToggleStar(entry, e)}
               title={
-                starred
-                  ? 'Remove from primary focus'
-                  : 'Star as primary focus'
+                starred ? 'Remove from primary focus' : 'Star as primary focus'
               }
               aria-label={
                 starred ? `Unstar ${displayTitle}` : `Star ${displayTitle}`
@@ -898,7 +893,8 @@ export function ProjectsOverview({
               </h3>
               {topic.meeting_count > 0 ? (
                 <span className="shrink-0 rounded-full border border-pro-border/60 bg-pro-surface/70 px-1.5 py-0.2 text-[10px] font-medium text-pro-text-muted">
-                  {topic.meeting_count} call{topic.meeting_count === 1 ? '' : 's'}
+                  {topic.meeting_count} call
+                  {topic.meeting_count === 1 ? '' : 's'}
                 </span>
               ) : (
                 <span className="shrink-0 rounded-full border border-pro-border/50 bg-pro-surface/50 px-1.5 py-0.2 text-[10px] font-medium text-pro-text-muted/80">
@@ -993,8 +989,12 @@ export function ProjectsOverview({
                     <FolderPlus className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-semibold text-pro-text-main">Promote to project</div>
-                    <div className="text-[10px] text-pro-text-muted truncate">Make this a standalone initiative</div>
+                    <div className="truncate font-semibold text-pro-text-main">
+                      Promote to project
+                    </div>
+                    <div className="text-[10px] text-pro-text-muted truncate">
+                      Make this a standalone initiative
+                    </div>
                   </div>
                 </button>
 
@@ -1327,10 +1327,7 @@ export function ProjectsOverview({
         <>
           {/* PRIMARY FOCUS SECTION */}
           {showPrimarySection && (
-            <section
-              aria-labelledby="primary-focus-heading"
-              className="mb-12"
-            >
+            <section aria-labelledby="primary-focus-heading" className="mb-12">
               <div className="mb-3.5 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
@@ -1378,16 +1375,20 @@ export function ProjectsOverview({
               className="mb-12"
             >
               <div className="overflow-hidden rounded-xl border border-pro-border/60 bg-pro-surface/30 divide-y divide-pro-border/40 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                {(activeSideProjects.length > 0 ? activeSideProjects : portfolio.current).map(
-                  (entry) => renderRow(entry, 'current'),
-                )}
+                {(activeSideProjects.length > 0
+                  ? activeSideProjects
+                  : portfolio.current
+                ).map((entry) => renderRow(entry, 'current'))}
               </div>
             </section>
           )}
 
           {/* ACTIVE INITIATIVES SECTION (When starred projects exist) */}
           {showPrimarySection && activeSideProjects.length > 0 && (
-            <section aria-labelledby="other-initiatives-heading" className="mb-12">
+            <section
+              aria-labelledby="other-initiatives-heading"
+              className="mb-12"
+            >
               <div className="mb-3.5 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <h2
@@ -1605,8 +1606,7 @@ export function ProjectsOverview({
         <QuickMergeModal
           source={quickMergeSource}
           candidates={entries.filter(
-            (e) =>
-              readProjectPortfolioDisposition(e.metadata) !== 'dismissed',
+            (e) => readProjectPortfolioDisposition(e.metadata) !== 'dismissed',
           )}
           onMerge={executeMerge}
           onClose={() => setQuickMergeSource(null)}
@@ -1620,10 +1620,7 @@ export function ProjectsOverview({
           source={confirmMergeData.source}
           destination={confirmMergeData.destination}
           onConfirm={() =>
-            executeMerge(
-              confirmMergeData.source,
-              confirmMergeData.destination,
-            )
+            executeMerge(confirmMergeData.source, confirmMergeData.destination)
           }
           onCancel={() => setConfirmMergeData(null)}
           isMerging={isMerging}
@@ -1690,10 +1687,7 @@ function QuickMergeModal({
       .filter((c) => c.id !== source.id)
       .filter((c) => {
         if (!q) return true;
-        const title = readProjectDisplayTitle(
-          c.metadata,
-          c.name,
-        ).toLowerCase();
+        const title = readProjectDisplayTitle(c.metadata, c.name).toLowerCase();
         return title.includes(q) || c.name.toLowerCase().includes(q);
       });
   }, [candidates, source.id, search]);
@@ -2009,8 +2003,8 @@ function MergeConfirmModal({
             All meetings, context, and commitments from{' '}
             <strong className="text-pro-text-main">{sourceTitle}</strong> will
             be consolidated into{' '}
-            <strong className="text-pro-text-main">{destTitle}</strong>. You
-            can undo this action immediately after.
+            <strong className="text-pro-text-main">{destTitle}</strong>. You can
+            undo this action immediately after.
           </p>
         </div>
 
@@ -2081,4 +2075,3 @@ function UndoToast({
     document.body,
   );
 }
-

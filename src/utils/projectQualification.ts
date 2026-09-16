@@ -398,4 +398,3 @@ export function withoutParentProject(metadata: string | null): string {
     },
   });
 }
-

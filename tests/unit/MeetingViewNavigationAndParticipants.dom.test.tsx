@@ -210,9 +210,7 @@ describe('MeetingView Navigation and Participants', () => {
       trigger?.click();
     });
 
-    const popover = container.querySelector(
-      '.meeting-participants-popover',
-    );
+    const popover = container.querySelector('.meeting-participants-popover');
     expect(popover).not.toBeNull();
     expect(popover?.textContent).toContain('Avery Davis');
 

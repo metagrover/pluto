@@ -238,7 +238,8 @@ export const ProjectDossier = ({
   const activityState = useMemo(() => {
     return getProjectActivityState(
       current?.momentum.lastActivityAt ||
-        (current?.meetings[0]?.started_at ?? current?.meetings[0]?.created_at) ||
+        (current?.meetings[0]?.started_at ??
+          current?.meetings[0]?.created_at) ||
         null,
       Date.now(),
       cadence,
@@ -310,7 +311,8 @@ export const ProjectDossier = ({
       label: 'Genesis',
       date: genesisMeeting.started_at || genesisMeeting.created_at,
       title: `First discussed in ${genesisMeeting.title || 'Initial meeting'}`,
-      description: genesisMeeting.context || 'Project originated in discussion.',
+      description:
+        genesisMeeting.context || 'Project originated in discussion.',
       meetingId: genesisMeeting.id,
       type: 'genesis',
     });
@@ -326,13 +328,15 @@ export const ProjectDossier = ({
         type: 'milestone',
       });
     } else if (orderedMeetings.length >= 3) {
-      const midMeeting = orderedMeetings[Math.floor(orderedMeetings.length / 2)];
+      const midMeeting =
+        orderedMeetings[Math.floor(orderedMeetings.length / 2)];
       points.push({
         id: `mid-${midMeeting.id}`,
         label: 'Intermediate progress',
         date: midMeeting.started_at || midMeeting.created_at,
         title: midMeeting.title || 'Progress check',
-        description: midMeeting.context || 'Midpoint alignment and scope review.',
+        description:
+          midMeeting.context || 'Midpoint alignment and scope review.',
         meetingId: midMeeting.id,
         type: 'milestone',
       });
@@ -671,7 +675,9 @@ export const ProjectDossier = ({
           <button
             type="button"
             onClick={() => void toggleStar()}
-            title={isStarred ? 'Remove from primary focus' : 'Star as primary focus'}
+            title={
+              isStarred ? 'Remove from primary focus' : 'Star as primary focus'
+            }
             aria-label={isStarred ? 'Unstar project' : 'Star project'}
             className={`${quietButton} ${
               isStarred
@@ -1442,7 +1448,8 @@ export const ProjectDossier = ({
                   </div>
                 </div>
                 <p className="mt-1 text-xs text-pro-text-muted">
-                  Constituent workstreams and topics filed under this initiative.
+                  Constituent workstreams and topics filed under this
+                  initiative.
                 </p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {relatedWork.map((entry) => (
@@ -1505,12 +1512,16 @@ export const ProjectDossier = ({
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 id="merge-project-heading" className="text-lg font-semibold text-pro-text-main">
+                  <h2
+                    id="merge-project-heading"
+                    className="text-lg font-semibold text-pro-text-main"
+                  >
                     Merge another project into {current.project.displayTitle}
                   </h2>
                   <p className="mt-1.5 max-w-[65ch] text-sm leading-6 text-pro-text-muted">
-                    Meetings, commitments, and alternate names will appear together.
-                    The original project is kept, and the merge can be undone.
+                    Meetings, commitments, and alternate names will appear
+                    together. The original project is kept, and the merge can be
+                    undone.
                   </p>
                 </div>
                 <button

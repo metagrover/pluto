@@ -886,4 +886,3 @@ it('renders Topics & Discussion Streams and allows detaching a topic', async () 
   expect(api.detachTopicFromProject).toHaveBeenCalledWith('topic-1');
   expect(onPortfolioChanged).toHaveBeenCalled();
 });
-

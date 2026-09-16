@@ -134,7 +134,11 @@ describe('project portfolio', () => {
     const baseDate = Date.parse('2026-09-15T12:00:00Z');
     const recentInitiative = entry('Active Project', 'qualified', '2026-09-10'); // 5 days ago
     const olderInitiative = entry('Dormant Project', 'qualified', '2026-07-15'); // ~62 days ago
-    const moderateInitiative = entry('Aging Project', 'qualified', '2026-08-05'); // 41 days ago
+    const moderateInitiative = entry(
+      'Aging Project',
+      'qualified',
+      '2026-08-05',
+    ); // 41 days ago
     const baseStarred = entry('Starred Old', 'qualified', '2026-06-01');
     const starredOld = {
       ...baseStarred,
@@ -166,7 +170,9 @@ describe('project portfolio', () => {
     expect(result.dormant[0].activity_state).toBe('dormant');
     expect(result.dormant[0].activity_label).toContain('Inactive for');
     expect(result.dormant[1].activity_state).toBe('stale');
-    expect(result.dormant[1].activity_label).toContain('Dormant · 2 months ago');
+    expect(result.dormant[1].activity_label).toContain(
+      'Dormant · 2 months ago',
+    );
   });
 
   it('adjusts dormancy thresholds based on configured project cadence', () => {
@@ -186,7 +192,11 @@ describe('project portfolio', () => {
     });
 
     // 80 days ago: dormant/stale by default, but active if cadence is 'quarterly' (120d threshold)
-    const quarterlyEntry = entry('Quarterly Project', 'qualified', '2026-06-27');
+    const quarterlyEntry = entry(
+      'Quarterly Project',
+      'qualified',
+      '2026-06-27',
+    );
     quarterlyEntry.metadata = JSON.stringify({
       ...JSON.parse(quarterlyEntry.metadata!),
       projectCadence: 'quarterly',

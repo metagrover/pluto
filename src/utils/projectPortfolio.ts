@@ -69,13 +69,24 @@ export function getProjectActivityState(
   label: string;
 } {
   if (!lastMentionedAt) {
-    return { state: 'dormant', daysSinceActivity: null, label: 'No recent activity' };
+    return {
+      state: 'dormant',
+      daysSinceActivity: null,
+      label: 'No recent activity',
+    };
   }
   const time = Date.parse(lastMentionedAt);
   if (Number.isNaN(time)) {
-    return { state: 'dormant', daysSinceActivity: null, label: 'No recent activity' };
+    return {
+      state: 'dormant',
+      daysSinceActivity: null,
+      label: 'No recent activity',
+    };
   }
-  const diffDays = Math.max(0, Math.floor((now - time) / (1000 * 60 * 60 * 24)));
+  const diffDays = Math.max(
+    0,
+    Math.floor((now - time) / (1000 * 60 * 60 * 24)),
+  );
 
   let activeThreshold = 30;
   let dormantThreshold = 60;

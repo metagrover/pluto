@@ -1,8 +1,11 @@
 import { ArrowRight, Sparkles, UserRound, X } from 'lucide-react';
 import type React from 'react';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { MeetingIdentityState } from '../../api/identity';
-import type { Entity } from '../../api/knowledgeGraph';
+import {
+  type Entity,
+  getPeopleBriefingSummaries,
+} from '../../api/knowledgeGraph';
 import { parsePersonRole } from '../../utils/personBriefing';
 import {
   getAnonymousSpeakerDisplayLabel,
@@ -247,7 +250,9 @@ export function resolveMeetingParticipants(params: {
       isSelf: false,
       isAnonymous: false,
       turnCount: 0,
-      role: matchedPersonId ? roleByPersonId.get(matchedPersonId) || null : null,
+      role: matchedPersonId
+        ? roleByPersonId.get(matchedPersonId) || null
+        : null,
       source: 'calendar',
     });
   }
@@ -275,6 +280,28 @@ export const MeetingParticipantsPopover: React.FC<
 > = ({ participants, onClose, onOpenPerson, onIdentifySpeaker }) => {
   const dialogId = useId();
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [openLoopsByPersonId, setOpenLoopsByPersonId] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    getPeopleBriefingSummaries()
+      .then((summaries) => {
+        if (cancelled || !summaries) return;
+        const map: Record<string, number> = {};
+        for (const s of summaries) {
+          if (s.openCommitmentCount > 0) {
+            map[s.id] = s.openCommitmentCount;
+          }
+        }
+        setOpenLoopsByPersonId(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -363,6 +390,15 @@ export const MeetingParticipantsPopover: React.FC<
                         You
                       </span>
                     )}
+                    {participant.personId &&
+                      openLoopsByPersonId[participant.personId] > 0 && (
+                        <span className="rounded border border-amber-500/25 bg-amber-500/15 px-1.5 py-0.2 text-[10px] font-medium text-amber-800 dark:text-amber-300 shrink-0">
+                          {openLoopsByPersonId[participant.personId]} open{' '}
+                          {openLoopsByPersonId[participant.personId] === 1
+                            ? 'loop'
+                            : 'loops'}
+                        </span>
+                      )}
                   </div>
 
                   <div className="flex items-center gap-2 text-[11px] text-pro-text-muted truncate">
@@ -382,7 +418,10 @@ export const MeetingParticipantsPopover: React.FC<
                       !participant.isAnonymous &&
                       participant.speakerKey !== participant.name && (
                         <span className="opacity-60 text-[10px]">
-                          · {getAnonymousSpeakerDisplayLabel(participant.speakerKey)}
+                          ·{' '}
+                          {getAnonymousSpeakerDisplayLabel(
+                            participant.speakerKey,
+                          )}
                         </span>
                       )}
                   </div>

@@ -156,7 +156,8 @@ const Commitments = ({
           0,
           Math.floor((now - time) / (1000 * 60 * 60 * 24)),
         );
-        if (diffDays <= 1) return { label: 'Completed recently', isOverdue: false };
+        if (diffDays <= 1)
+          return { label: 'Completed recently', isOverdue: false };
         if (diffDays < 7)
           return { label: `Completed ${diffDays}d ago`, isOverdue: false };
         const weeks = Math.round(diffDays / 7);
@@ -177,7 +178,10 @@ const Commitments = ({
           const weeks = Math.round(diffDays / 7);
           const overdueText =
             weeks > 0 ? `${weeks}w overdue` : `${diffDays}d overdue`;
-          return { label: `Due ${formatted} · ${overdueText}`, isOverdue: true };
+          return {
+            label: `Due ${formatted} · ${overdueText}`,
+            isOverdue: true,
+          };
         }
         return { label: `Due ${formatted}`, isOverdue: false };
       }
@@ -271,7 +275,10 @@ const Commitments = ({
         <div className="mt-4 rounded-xl border border-pro-border/60 bg-pro-surface/30 p-5 space-y-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
           {loading && <output className="block text-sm">Loading tasks…</output>}
           {loadError && (
-            <div role="alert" className="flex items-center gap-3 text-sm text-pro-urgent">
+            <div
+              role="alert"
+              className="flex items-center gap-3 text-sm text-pro-urgent"
+            >
               <p>We couldn’t load these tasks.</p>
               <button
                 type="button"

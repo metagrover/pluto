@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -32,6 +33,7 @@ import {
 import {
   type Entity,
   getMeetingEntities,
+  upsertEntity,
 } from '../../api/knowledgeGraph';
 import {
   type VoiceMatchSuggestion,
@@ -39,10 +41,6 @@ import {
 } from '../../api/speakerVoice';
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
-import {
-  MeetingParticipantsPopover,
-  resolveMeetingParticipants,
-} from './MeetingParticipants';
 import {
   parseAnalysisEditConflictsJson,
   parseUserEditsJson,
@@ -76,6 +74,10 @@ import {
   MeetingNotesDraftPreview,
   currentNotesPreview,
 } from './MeetingNotesDraftPreview';
+import {
+  MeetingParticipantsPopover,
+  resolveMeetingParticipants,
+} from './MeetingParticipants';
 import { SpeakerIdentificationModal } from './SpeakerIdentificationModal';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';

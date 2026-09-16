@@ -40,7 +40,9 @@ describe('MeetingParticipants', () => {
         { speaker: 'Speaker 1' },
         { speaker: 'Speaker 2' },
       ];
-      const result = resolveMeetingParticipants({ transcriptSegments: segments });
+      const result = resolveMeetingParticipants({
+        transcriptSegments: segments,
+      });
       expect(result).toHaveLength(2);
       const s1 = result.find((p) => p.speakerKey === 'Speaker 1');
       const s2 = result.find((p) => p.speakerKey === 'Speaker 2');
@@ -49,10 +51,7 @@ describe('MeetingParticipants', () => {
     });
 
     it('identifies self speaker from "Me" or "You" labels or selfPersonId', () => {
-      const segments = [
-        { speaker: 'Me' },
-        { speaker: 'Speaker 1' },
-      ];
+      const segments = [{ speaker: 'Me' }, { speaker: 'Speaker 1' }];
       const result = resolveMeetingParticipants({
         transcriptSegments: segments,
       });
@@ -63,16 +62,19 @@ describe('MeetingParticipants', () => {
     });
 
     it('resolves personId and display name from identityState bindings', () => {
-      const segments = [
-        { speaker: 'Speaker 1' },
-        { speaker: 'Speaker 2' },
-      ];
+      const segments = [{ speaker: 'Speaker 1' }, { speaker: 'Speaker 2' }];
       const identityState: MeetingIdentityState = {
         meetingId: 'm-1',
         speakers: ['Speaker 1', 'Speaker 2'],
         selfPersonId: 'person-self',
         revision: 1,
-        profile: { preferredName: 'Alice', aliases: [], useCases: '', role: '', industry: '' },
+        profile: {
+          preferredName: 'Alice',
+          aliases: [],
+          useCases: '',
+          role: '',
+          industry: '',
+        },
         capture: { origin: 'local', selfPersonId: 'person-self' },
         job: null,
         speakerDisplayNames: {

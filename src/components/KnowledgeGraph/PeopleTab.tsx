@@ -351,7 +351,11 @@ export const formatCommitmentChronology = (
 
   if (item.status === 'completed') {
     if (daysSinceUpdate === null || daysSinceUpdate <= 1) {
-      return { label: 'Recently completed', isOverdue: false, isLingering: false };
+      return {
+        label: 'Recently completed',
+        isOverdue: false,
+        isLingering: false,
+      };
     }
     if (daysSinceUpdate < 7) {
       return {
@@ -751,9 +755,7 @@ export const PersonDossier = ({
   // Temporal provenance for working context
   const latestMeeting = currentDetail.meetings[0] ?? null;
   const rawDate =
-    latestMeeting?.started_at ||
-    latestMeeting?.created_at ||
-    brief.freshnessAt;
+    latestMeeting?.started_at || latestMeeting?.created_at || brief.freshnessAt;
   const parsedDate = rawDate ? Date.parse(rawDate) : Number.NaN;
   const isValidDate = !Number.isNaN(parsedDate);
 
@@ -1081,7 +1083,8 @@ export const PersonDossier = ({
   };
 
   const collaborationJourney = useMemo(() => {
-    if (!currentDetail.meetings || currentDetail.meetings.length === 0) return null;
+    if (!currentDetail.meetings || currentDetail.meetings.length === 0)
+      return null;
     const sorted = [...currentDetail.meetings].sort(
       (a, b) =>
         (Date.parse(a.started_at || a.created_at || '') || 0) -
@@ -1094,7 +1097,10 @@ export const PersonDossier = ({
 
     let spanMonths = 0;
     if (earliestDate && latestDate) {
-      const diffMs = Math.max(0, Date.parse(latestDate) - Date.parse(earliestDate));
+      const diffMs = Math.max(
+        0,
+        Date.parse(latestDate) - Date.parse(earliestDate),
+      );
       spanMonths = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 30)));
     }
 
@@ -1579,7 +1585,8 @@ export const PersonDossier = ({
                   </button>
                 </div>
                 <p className="text-pro-text-muted">
-                  You acknowledged this working context as stale. Pluto will synthesize a new brief across available conversation history.
+                  You acknowledged this working context as stale. Pluto will
+                  synthesize a new brief across available conversation history.
                 </p>
               </div>
             )}
@@ -1615,7 +1622,8 @@ export const PersonDossier = ({
                           aria-hidden="true"
                         />
                         <span className="text-pro-text-muted">
-                          Historical context · Discussed {formattedDate} ({ageLabel})
+                          Historical context · Discussed {formattedDate} (
+                          {ageLabel})
                         </span>
                       </>
                     )}
@@ -1628,7 +1636,9 @@ export const PersonDossier = ({
                       className="group inline-flex items-center gap-1 text-xs text-pro-accent hover:underline focus-visible:outline-none"
                       title={`Open source meeting: ${latestMeeting.title}`}
                     >
-                      <span className="text-pro-text-muted font-normal">From</span>
+                      <span className="text-pro-text-muted font-normal">
+                        From
+                      </span>
                       <span className="font-medium max-w-[200px] truncate">
                         &ldquo;{latestMeeting.title}&rdquo;
                       </span>
@@ -1639,7 +1649,8 @@ export const PersonDossier = ({
 
                 {daysSince !== null && daysSince > 30 && (
                   <p className="text-[11.5px] text-pro-text-muted/80 leading-relaxed pt-0.5 border-t border-pro-border/40">
-                    Captured during past conversations; active focus or responsibilities may have evolved since then.
+                    Captured during past conversations; active focus or
+                    responsibilities may have evolved since then.
                   </p>
                 )}
               </div>
@@ -1740,7 +1751,8 @@ export const PersonDossier = ({
           <div className="person-dossier__major-heading mb-3">
             <h2 id="collaboration-journey">Collaboration journey</h2>
             <span className="text-xs text-pro-text-muted">
-              {collaborationJourney.meetingCount} meetings · {collaborationJourney.spanMonths}mo span
+              {collaborationJourney.meetingCount} meetings ·{' '}
+              {collaborationJourney.spanMonths}mo span
             </span>
           </div>
           <div className="rounded-xl border border-pro-border/70 bg-pro-surface/50 p-4 space-y-3">
