@@ -291,17 +291,21 @@ final class FluidAudioEouAdapterTests: XCTestCase {
         XCTAssertEqual(boundary.compactMap(\.eouUpdate).last?.tentativeText, "today")
     }
 
-    func testNativeEouCommitsTrailingWordAfterContinuedSilence() async throws {
+    func testNativeEouTailSurvivesSilenceAndLaterSubwordContinuation() async throws {
         let backend = FakeFluidEouBackend(
             callbackBatches: [
-                [.eou("send it tomorrow")],
+                [.eou("meet")],
                 [],
                 [],
+                [.partial("meeting")],
+                [.partial("meeting now")],
             ],
             rawTokenBatches: [
-                ["▁send", "▁it", "▁tomorrow"],
-                ["▁send", "▁it", "▁tomorrow"],
-                ["▁send", "▁it", "▁tomorrow"],
+                ["▁meet"],
+                ["▁meet"],
+                ["▁meet"],
+                ["▁meet", "ing"],
+                ["▁meet", "ing", "▁now"],
             ]
         )
         let manager = await FluidAudioEouManager(backend: backend, maxPendingSeconds: 0.5)
@@ -323,14 +327,22 @@ final class FluidAudioEouAdapterTests: XCTestCase {
             streamId: "meeting.mic", source: .mic, generation: 1, sequence: 3,
             frame: frame(start: 0.64)
         )
-
-        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.committedText, "send it")
-        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.tentativeText, "tomorrow")
-        XCTAssertEqual(
-            afterSilence.compactMap(\.eouUpdate).last?.committedText,
-            "send it tomorrow"
+        let continuation = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 4,
+            frame: frame(start: 0.96)
         )
-        XCTAssertEqual(afterSilence.compactMap(\.eouUpdate).last?.tentativeText, "")
+        let boundary = try await session.append(
+            streamId: "meeting.mic", source: .mic, generation: 1, sequence: 5,
+            frame: frame(start: 1.28)
+        )
+
+        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.committedText, "")
+        XCTAssertEqual(initial.compactMap(\.eouUpdate).last?.tentativeText, "meet")
+        XCTAssertTrue(afterSilence.isEmpty)
+        XCTAssertEqual(continuation.compactMap(\.eouUpdate).last?.committedText, "")
+        XCTAssertEqual(continuation.compactMap(\.eouUpdate).last?.tentativeText, "meeting")
+        XCTAssertEqual(boundary.compactMap(\.eouUpdate).last?.committedText, "meeting")
+        XCTAssertEqual(boundary.compactMap(\.eouUpdate).last?.tentativeText, "now")
     }
 
     private func frame(start: Double) throws -> EouPcmFrame {
