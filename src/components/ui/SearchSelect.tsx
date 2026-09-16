@@ -37,6 +37,7 @@ export interface SearchSelectProps {
   canCreateOption?: (value: string) => boolean;
   createOptionLabel?: (value: string) => ReactNode;
   clearLabel?: string;
+  clearOnSelect?: boolean;
   maxLength?: number;
   className?: string;
 }
@@ -63,6 +64,7 @@ export const SearchSelect = ({
   canCreateOption,
   createOptionLabel,
   clearLabel,
+  clearOnSelect = false,
   maxLength,
   className = '',
 }: SearchSelectProps) => {
@@ -175,8 +177,13 @@ export const SearchSelect = ({
   const selectOption = (option: SearchSelectOption) => {
     if (option.disabled) return;
     onValueChange(option.value);
-    onInputValueChange?.(option.label);
-    setQuery(option.label);
+    if (clearOnSelect) {
+      onInputValueChange?.('');
+      setQuery('');
+    } else {
+      onInputValueChange?.(option.label);
+      setQuery(option.label);
+    }
     setOpen(false);
     setHighlightedIndex(-1);
   };
@@ -211,15 +218,42 @@ export const SearchSelect = ({
         return;
       }
       if (event.key === ' ' && searchable) return;
-      if (!open) return;
+      if (!open) {
+        const exact = options.find(
+          (opt) => normalize(opt.label) === normalize(query),
+        );
+        if (exact) {
+          event.preventDefault();
+          selectOption(exact);
+          return;
+        }
+        if (canCreate) {
+          event.preventDefault();
+          onCreateOption?.(creatableQuery);
+          if (clearOnSelect) {
+            onInputValueChange?.('');
+            setQuery('');
+          }
+          return;
+        }
+        return;
+      }
       event.preventDefault();
       if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
         selectOption(filteredOptions[highlightedIndex]);
       } else if (canCreate) {
         onCreateOption?.(creatableQuery);
+        if (clearOnSelect) {
+          onInputValueChange?.('');
+          setQuery('');
+        }
         setOpen(false);
       } else if (allowCustomValue && query.trim()) {
         onValueChange(query.trim());
+        if (clearOnSelect) {
+          onInputValueChange?.('');
+          setQuery('');
+        }
         setOpen(false);
       }
       return;
@@ -291,6 +325,10 @@ export const SearchSelect = ({
                 onMouseEnter={() => setHighlightedIndex(filteredOptions.length)}
                 onClick={() => {
                   onCreateOption?.(creatableQuery);
+                  if (clearOnSelect) {
+                    onInputValueChange?.('');
+                    setQuery('');
+                  }
                   setOpen(false);
                 }}
                 className={`mt-1 flex w-full items-center rounded-lg border-t border-pro-border/40 px-2.5 py-2 text-left text-xs font-medium transition-colors ${

@@ -908,6 +908,56 @@ const createInvokeFallback =
       case 'GET_PROJECT_PORTFOLIO':
         result = [];
         break;
+      case 'GET_IDENTITY_STATE':
+        result = {
+          selfPersonId: 'preview-avery',
+          people: previewPeople.map(({ id, name }) => ({ id, name })),
+          revision: 1,
+          profile: {
+            preferredName: 'Avery Chen',
+            aliases: [],
+            useCases: ['work'],
+          },
+        };
+        break;
+      case 'UPSERT_ENTITY': {
+        const payload = (args[0] ?? {}) as Partial<Entity>;
+        const existing = payload.id
+          ? previewPeople.find((p) => p.id === payload.id)
+          : payload.name
+            ? previewPeople.find(
+                (p) => p.normalized_name === payload.name?.trim().toLowerCase(),
+              )
+            : undefined;
+        if (existing) {
+          result = existing;
+          break;
+        }
+        const createdName = payload.name?.trim() || 'Person';
+        const created: Entity = {
+          id: payload.id || `preview-${Date.now()}`,
+          type: payload.type || 'person',
+          name: createdName,
+          normalized_name: createdName.toLowerCase(),
+          status: payload.status ?? 'active',
+          due_date: payload.due_date ?? null,
+          assigned_to: payload.assigned_to ?? null,
+          metadata: payload.metadata
+            ? typeof payload.metadata === 'string'
+              ? payload.metadata
+              : JSON.stringify(payload.metadata)
+            : null,
+          saliency_score: 1,
+          domain_tag: 'work',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        if (created.type === 'person') {
+          previewPeople.push(created);
+        }
+        result = created;
+        break;
+      }
       case 'GET_ENTITIES_BY_TYPE':
         result = args[0] === 'person' ? previewPeople : [];
         break;

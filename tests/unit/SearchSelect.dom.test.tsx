@@ -83,4 +83,39 @@ describe('SearchSelect', () => {
     });
     expect(onValueChange).toHaveBeenLastCalledWith('Aerospace');
   });
+
+  it('clears input upon selecting an option when clearOnSelect is true', async () => {
+    const onValueChange = vi.fn();
+    const onInputValueChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <SearchSelect
+          ariaLabel="Person"
+          value=""
+          clearOnSelect
+          onValueChange={onValueChange}
+          onInputValueChange={onInputValueChange}
+          options={[
+            { value: 'ada', label: 'Ada Lovelace' },
+            { value: 'grace', label: 'Grace Hopper' },
+          ]}
+        />,
+      );
+    });
+    const input = container.querySelector(
+      '[role="combobox"]',
+    ) as HTMLInputElement;
+    await act(async () => {
+      input.focus();
+      enterText(input, 'Grace');
+    });
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(onValueChange).toHaveBeenCalledWith('grace');
+    expect(onInputValueChange).toHaveBeenLastCalledWith('');
+    expect(input.value).toBe('');
+  });
 });

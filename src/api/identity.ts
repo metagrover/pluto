@@ -5,6 +5,14 @@ import type {
   IdentityProfile,
   IdentityProfileInput,
 } from '../types/identity';
+
+export type {
+  IdentityBinding,
+  IdentityContext,
+  IdentityPerson,
+  IdentityProfile,
+  IdentityProfileInput,
+};
 import type {
   SpeakerSampleAvailability,
   SpeakerSamplePayload,

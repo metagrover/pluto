@@ -104,10 +104,16 @@ export const ZenMode = ({
       recordingStartedAtMs,
     ],
   );
-  const addParticipant = () => {
-    const participant = participantInput.trim();
+  const addParticipant = (name?: string) => {
+    const participant = (
+      typeof name === 'string' ? name : participantInput
+    ).trim();
     if (!participant) return;
-    setMeetingParticipants((previous) => [...previous, participant]);
+    setMeetingParticipants((previous) =>
+      previous.some((p) => p.trim().toLowerCase() === participant.toLowerCase())
+        ? previous
+        : [...previous, participant],
+    );
     setParticipantInput('');
   };
   const askPlutoTranscript = model.liveConversation
