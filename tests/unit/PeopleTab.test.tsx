@@ -488,8 +488,7 @@ describe('PersonDossier', () => {
             {
               id: 's1',
               title: 'API Performance & Infrastructure',
-              current_read:
-                'Working on API performance and S3 migration.',
+              current_read: 'Working on API performance and S3 migration.',
               domain: 'eng',
               status: 'active',
               last_touched_at: '2026-07-12T12:00:00.000Z',
@@ -600,9 +599,7 @@ describe('PersonDossier', () => {
     expect(markup).toContain(
       'Key initiatives include API Performance &amp; Infrastructure and Infrastructure &amp; Monitoring.',
     );
-    expect(markup).toContain(
-      'Clean up and push the backend configuration PR',
-    );
+    expect(markup).toContain('Clean up and push the backend configuration PR');
 
     // Verifies that administrative "manual participant" is completely filtered out of the UI
     expect(markup).not.toContain('manual participant');

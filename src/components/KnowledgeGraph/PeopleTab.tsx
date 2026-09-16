@@ -1,6 +1,6 @@
 import {
-  ArrowRight,
   ArrowLeft,
+  ArrowRight,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -56,8 +56,8 @@ import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import {
-  compileKnowledgeBrief,
   type KnowledgeV2Stream,
+  compileKnowledgeBrief,
 } from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
@@ -1158,9 +1158,7 @@ export const PersonDossier = ({
   const activitySummary = useMemo(() => {
     const rawName = (currentDetail.person.name || '').trim();
     const isSelf = Boolean(currentDetail.isSelf);
-    const firstName = isSelf
-      ? 'you'
-      : rawName.split(/\s+/)[0] || rawName;
+    const firstName = isSelf ? 'you' : rawName.split(/\s+/)[0] || rawName;
     const sectionTitle = isSelf
       ? "What you've been up to"
       : firstName && firstName.toLowerCase() !== 'unknown'
@@ -1234,7 +1232,7 @@ export const PersonDossier = ({
         title: `In progress: “${o.text}”`,
         detail: o.dueDate
           ? `Due ${formatDate(o.dueDate)}`
-          : (o.evidence || undefined),
+          : o.evidence || undefined,
         date: dateStr ? formatDate(dateStr) : null,
         timestamp: Date.parse(dateStr || '') || 0,
         meetingId: o.sourceMeetingId || undefined,
@@ -2025,30 +2023,44 @@ export const PersonDossier = ({
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                          {tp.kind === 'discussion' && tp.meetingId && onOpenMeeting ? (
+                          {tp.kind === 'discussion' &&
+                          tp.meetingId &&
+                          onOpenMeeting ? (
                             <button
                               type="button"
                               onClick={() => onOpenMeeting(tp.meetingId!)}
                               className="font-medium text-pro-text-main hover:text-pro-accent hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent rounded transition-colors"
                             >
                               <span>{tp.title}</span>
-                              <span aria-hidden="true" className="text-pro-accent/60 text-[10px]">↗</span>
+                              <span
+                                aria-hidden="true"
+                                className="text-pro-accent/60 text-[10px]"
+                              >
+                                ↗
+                              </span>
                             </button>
                           ) : (
                             <span className="font-medium text-pro-text-main">
                               {tp.title}
                             </span>
                           )}
-                          {tp.kind !== 'discussion' && tp.meetingId && onOpenMeeting && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenMeeting(tp.meetingId!)}
-                              className="text-pro-accent hover:text-pro-accent-hover hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent transition-colors"
-                            >
-                              <span>from "{tp.meetingTitle}"</span>
-                              <span aria-hidden="true" className="text-[10px]">↗</span>
-                            </button>
-                          )}
+                          {tp.kind !== 'discussion' &&
+                            tp.meetingId &&
+                            onOpenMeeting && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenMeeting(tp.meetingId!)}
+                                className="text-pro-accent hover:text-pro-accent-hover hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent transition-colors"
+                              >
+                                <span>from "{tp.meetingTitle}"</span>
+                                <span
+                                  aria-hidden="true"
+                                  className="text-[10px]"
+                                >
+                                  ↗
+                                </span>
+                              </button>
+                            )}
                           {tp.date && (
                             <span className="text-pro-text-muted/70">
                               · {tp.date}

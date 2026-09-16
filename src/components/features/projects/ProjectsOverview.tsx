@@ -311,9 +311,7 @@ export function ProjectsOverview({
     [sideProjects],
   );
 
-  const totalCount =
-    portfolio.current.length +
-    portfolio.completed.length;
+  const totalCount = portfolio.current.length + portfolio.completed.length;
 
   const staleRadarTopics = useMemo(() => {
     return portfolio.radarTopics.filter(
@@ -688,7 +686,8 @@ export function ProjectsOverview({
           )}
 
           {mode === 'current' &&
-            Boolean(portfolio.initiativeTopics[entry.id]?.length) && (() => {
+            Boolean(portfolio.initiativeTopics[entry.id]?.length) &&
+            (() => {
               const topics = portfolio.initiativeTopics[entry.id];
               const visible = topics.slice(0, 3);
               const overflow = topics.length - visible.length;
@@ -701,8 +700,15 @@ export function ProjectsOverview({
                       topic.name,
                     );
                     return (
-                      <span key={topic.id} className="group/chip inline-flex items-baseline gap-0.5">
-                        {i > 0 && <span className="select-none text-pro-text-muted/40 mx-0.5">·</span>}
+                      <span
+                        key={topic.id}
+                        className="group/chip inline-flex items-baseline gap-0.5"
+                      >
+                        {i > 0 && (
+                          <span className="select-none text-pro-text-muted/40 mx-0.5">
+                            ·
+                          </span>
+                        )}
                         <span
                           className="truncate max-w-[160px] hover:text-pro-text-main transition-colors cursor-default"
                           title={`Constituent topic: ${tTitle}`}
@@ -927,7 +933,9 @@ export function ProjectsOverview({
           </div>
         </div>
 
-        <div className={`flex shrink-0 items-center gap-2 transition-opacity duration-100 ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/topic:opacity-100 focus-within:opacity-100'}`}>
+        <div
+          className={`flex shrink-0 items-center gap-2 transition-opacity duration-100 ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/topic:opacity-100 focus-within:opacity-100'}`}
+        >
           {date && (
             <span className="text-[11px] tabular-nums text-pro-text-muted hidden sm:inline-block mr-0.5">
               {date}

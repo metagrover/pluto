@@ -891,7 +891,9 @@ it('renders executive at a glance panel with detected meeting rhythm and no manu
   api.getProjectBrief.mockResolvedValue(brief());
   await render();
 
-  const atAGlanceSection = host.querySelector('[aria-labelledby="project-at-a-glance"]');
+  const atAGlanceSection = host.querySelector(
+    '[aria-labelledby="project-at-a-glance"]',
+  );
   expect(atAGlanceSection).not.toBeNull();
   expect(atAGlanceSection?.textContent).toContain('At a glance');
   expect(atAGlanceSection?.textContent).toContain('Meeting rhythm');
@@ -905,7 +907,9 @@ it('renders executive at a glance panel with detected meeting rhythm and no manu
   expect(atAGlanceSection?.textContent).toContain('Complete migration review');
 
   // Verify there is NO <select> asking the user for cadence
-  expect(host.querySelector('select[aria-label="Set project cadence"]')).toBeNull();
+  expect(
+    host.querySelector('select[aria-label="Set project cadence"]'),
+  ).toBeNull();
   expect(host.querySelector('select')).toBeNull();
 });
 
@@ -950,10 +954,11 @@ it('automatically detects rhythm from meeting intervals when no recurring series
   );
 
   await render();
-  const atAGlanceSection = host.querySelector('[aria-labelledby="project-at-a-glance"]');
+  const atAGlanceSection = host.querySelector(
+    '[aria-labelledby="project-at-a-glance"]',
+  );
   expect(atAGlanceSection?.textContent).toContain('Weekly rhythm');
   expect(atAGlanceSection?.textContent).toContain(
     'Detected from meeting intervals (averages ~7d between sessions)',
   );
 });
-

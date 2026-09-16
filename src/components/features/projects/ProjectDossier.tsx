@@ -1040,7 +1040,10 @@ export const ProjectDossier = ({
                 {/* Rhythm row */}
                 <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
                   <dt className="project-dossier-property-label flex items-center gap-1.5">
-                    <Repeat2 aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                    <Repeat2
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5 text-pro-text-muted shrink-0"
+                    />
                     Rhythm
                   </dt>
                   <dd className="project-dossier-body min-w-0 text-pro-text-main">
@@ -1073,7 +1076,13 @@ export const ProjectDossier = ({
                     <p className="mt-1 text-[13px] leading-relaxed text-pro-text-muted">
                       {detectedCadence.detail}
                       {current.meetingStats.recurringSeries[0]?.title && (
-                        <> · via <em className="not-italic font-medium text-pro-text-main">{current.meetingStats.recurringSeries[0].title}</em></>
+                        <>
+                          {' '}
+                          · via{' '}
+                          <em className="not-italic font-medium text-pro-text-main">
+                            {current.meetingStats.recurringSeries[0].title}
+                          </em>
+                        </>
                       )}
                     </p>
                   </dd>
@@ -1083,14 +1092,29 @@ export const ProjectDossier = ({
                 {current.meetingStats.frequentParticipants.length > 0 && (
                   <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
                     <dt className="project-dossier-property-label flex items-center gap-1.5">
-                      <Users aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      <Users
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 text-pro-text-muted shrink-0"
+                      />
                       Regulars
                     </dt>
                     <dd className="project-dossier-body min-w-0 text-pro-text-main">
-                      {current.meetingStats.frequentParticipants.slice(0, 5).join(', ')}
-                      {peopleInvolved.length > current.meetingStats.frequentParticipants.slice(0, 5).length && (
+                      {current.meetingStats.frequentParticipants
+                        .slice(0, 5)
+                        .join(', ')}
+                      {peopleInvolved.length >
+                        current.meetingStats.frequentParticipants.slice(0, 5)
+                          .length && (
                         <span className="text-pro-text-muted">
-                          {' '}+{peopleInvolved.length - current.meetingStats.frequentParticipants.slice(0, 5).length} others across {current.meetingStats.meetingCount} meetings
+                          {' '}
+                          +
+                          {peopleInvolved.length -
+                            current.meetingStats.frequentParticipants.slice(
+                              0,
+                              5,
+                            ).length}{' '}
+                          others across {current.meetingStats.meetingCount}{' '}
+                          meetings
                         </span>
                       )}
                     </dd>
@@ -1101,52 +1125,78 @@ export const ProjectDossier = ({
                 {current.theme && current.theme.openThreads.length > 0 && (
                   <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
                     <dt className="project-dossier-property-label flex items-center gap-1.5">
-                      <Calendar aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      <Calendar
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 text-pro-text-muted shrink-0"
+                      />
                       Open threads
                     </dt>
                     <dd className="min-w-0 space-y-1.5">
-                      {current.theme.openThreads.slice(0, 2).map((thread, i) => (
-                        <p key={i} className="text-[13.5px] leading-relaxed text-pro-text-main">
-                          <span className={`mr-1.5 inline-flex items-center rounded px-1 py-px text-[10px] font-semibold uppercase tracking-wide ${
-                            thread.kind === 'risk'
-                              ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                              : thread.kind === 'decision'
-                                ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300'
-                                : 'bg-pro-surface text-pro-text-muted'
-                          }`}>
-                            {thread.kind}
-                          </span>
-                          {thread.text}
-                        </p>
-                      ))}
+                      {current.theme.openThreads
+                        .slice(0, 2)
+                        .map((thread, i) => (
+                          <p
+                            key={i}
+                            className="text-[13.5px] leading-relaxed text-pro-text-main"
+                          >
+                            <span
+                              className={`mr-1.5 inline-flex items-center rounded px-1 py-px text-[10px] font-semibold uppercase tracking-wide ${
+                                thread.kind === 'risk'
+                                  ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                                  : thread.kind === 'decision'
+                                    ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                                    : 'bg-pro-surface text-pro-text-muted'
+                              }`}
+                            >
+                              {thread.kind}
+                            </span>
+                            {thread.text}
+                          </p>
+                        ))}
                       {current.theme.openThreads.length > 2 && (
-                        <p className="text-xs text-pro-text-muted">+{current.theme.openThreads.length - 2} more open threads</p>
+                        <p className="text-xs text-pro-text-muted">
+                          +{current.theme.openThreads.length - 2} more open
+                          threads
+                        </p>
                       )}
                     </dd>
                   </div>
                 )}
 
                 {/* Commitments — only shown when there's actual data */}
-                {(current.momentum.openCommitmentCount > 0 || current.momentum.completedCommitmentCount > 0 || nextMilestone) && (
+                {(current.momentum.openCommitmentCount > 0 ||
+                  current.momentum.completedCommitmentCount > 0 ||
+                  nextMilestone) && (
                   <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
                     <dt className="project-dossier-property-label flex items-center gap-1.5">
-                      <Check aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      <Check
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 text-pro-text-muted shrink-0"
+                      />
                       Commitments
                     </dt>
                     <dd className="project-dossier-body min-w-0 text-pro-text-main">
                       {current.momentum.openCommitmentCount > 0 && (
                         <span>{current.momentum.openCommitmentCount} open</span>
                       )}
-                      {current.momentum.openCommitmentCount > 0 && current.momentum.completedCommitmentCount > 0 && (
-                        <span className="text-pro-text-muted"> · </span>
-                      )}
+                      {current.momentum.openCommitmentCount > 0 &&
+                        current.momentum.completedCommitmentCount > 0 && (
+                          <span className="text-pro-text-muted"> · </span>
+                        )}
                       {current.momentum.completedCommitmentCount > 0 && (
-                        <span className="text-pro-text-muted">{current.momentum.completedCommitmentCount} completed</span>
+                        <span className="text-pro-text-muted">
+                          {current.momentum.completedCommitmentCount} completed
+                        </span>
                       )}
                       {nextMilestone && (
                         <p className="mt-1 text-[13px] text-pro-text-muted">
-                          Next: <span className="text-pro-text-main font-medium">{nextMilestone.title}</span>
-                          {nextMilestone.timing && <span> · {nextMilestone.timing}</span>}
+                          Next:{' '}
+                          <span className="text-pro-text-main font-medium">
+                            {nextMilestone.title}
+                          </span>
+                          {nextMilestone.timing && (
+                            <span> · {nextMilestone.timing}</span>
+                          )}
                         </p>
                       )}
                     </dd>
@@ -1154,7 +1204,6 @@ export const ProjectDossier = ({
                 )}
               </dl>
             </section>
-
 
             {evolutionTouchpoints.length > 1 && (
               <section aria-labelledby="project-evolution" className="mt-10">
