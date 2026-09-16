@@ -28,4 +28,13 @@ interface Window {
 
     off: (channel: string, listener: (...args: any[]) => void) => void;
   };
+  plutoUpdater?: {
+    getStatus: () => Promise<import('../electron/updateChecker').UpdateInfo>;
+    checkNow: () => Promise<import('../electron/updateChecker').UpdateInfo>;
+    applyUpdate: () => Promise<void>;
+    openReleaseUrl: (url?: string) => Promise<void>;
+    onStatusChanged: (
+      callback: (status: import('../electron/updateChecker').UpdateInfo) => void,
+    ) => () => void;
+  };
 }

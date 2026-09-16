@@ -20,6 +20,7 @@ import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { IdentitySettings } from './IdentitySettings';
+import { useAppUpdate } from '../../api/updater';
 
 interface SettingsTabProps {
   llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
@@ -211,6 +212,15 @@ export const SettingsTab = ({
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const {
+    status: updateStatus,
+    isChecking: isCheckingUpdate,
+    isUpdating: isApplyingUpdate,
+    checkNow: checkUpdateNow,
+    applyUpdate: triggerApplyUpdate,
+    openReleaseUrl,
+  } = useAppUpdate();
 
   useEffect(() => {
     void window.ipcRenderer
@@ -679,6 +689,55 @@ export const SettingsTab = ({
           role="tabpanel"
           aria-labelledby="settings-tab-advanced"
         >
+          <Section title="Application updates">
+            <SettingsRow
+              label="Pluto Version"
+              helper={
+                updateStatus.hasUpdate
+                  ? `Update ${updateStatus.latestVersion} is available. Current version: v${updateStatus.currentVersion || '0.1.0'}.`
+                  : `Pluto is up to date (v${updateStatus.currentVersion || '0.1.0'}).`
+              }
+              actionControl
+            >
+              <div className="flex items-center gap-2">
+                {updateStatus.hasUpdate ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => openReleaseUrl(updateStatus.releaseUrl)}
+                      className="rounded-lg border border-pro-border bg-pro-surface px-3 py-2 text-[13px] font-medium text-pro-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      Release Notes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={triggerApplyUpdate}
+                      disabled={isApplyingUpdate}
+                      className="flex items-center gap-2 rounded-lg bg-pro-accent px-4 py-2 text-[13px] font-medium text-white dark:text-black transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${isApplyingUpdate ? 'animate-spin' : ''}`}
+                      />
+                      {isApplyingUpdate ? 'Updating...' : 'Update Now'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={checkUpdateNow}
+                    disabled={isCheckingUpdate}
+                    className="flex items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-4 py-2 text-[13px] font-medium text-pro-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`}
+                    />
+                    {isCheckingUpdate ? 'Checking...' : 'Check for Updates'}
+                  </button>
+                )}
+              </div>
+            </SettingsRow>
+          </Section>
+
           <Section title="Knowledge data">
             <SettingsRow
               label={<span className="text-red-500">Reset knowledge base</span>}

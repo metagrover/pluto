@@ -56,11 +56,13 @@ const productionSignature = app.isPackaged
       expectedIdentifier: PLUTO_BUNDLE_IDENTIFIER,
     })
   : { valid: false, reason: 'development_runtime' };
+const allowUnsignedPackaged = process.env.PLUTO_STRICT_SIGNATURE !== '1';
 const canOpenDatabase = canOpenProductionDatabase({
   isPackaged: app.isPackaged,
   signedBuildValid: productionSignature.valid,
   targetsProductionProfile: developmentTargetsProduction,
   recoveryKeyAvailable,
+  allowUnsignedPackaged,
 });
 const productionKeyStore =
   app.isPackaged &&

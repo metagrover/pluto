@@ -133,6 +133,7 @@ import {
 import { startVoiceCandidateBackfill } from './voiceCandidateBackfill';
 import { canRunVoiceWork, createVoiceWorkQueue } from './voiceWorkQueue';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
+import { UpdateChecker } from './updateChecker';
 
 const plutoLog = createLogger('Pluto');
 const captureLog = createLogger('Capture');
@@ -267,6 +268,7 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
+let updateChecker: UpdateChecker | null = null;
 
 export const focusPrimaryWindow = (): void => {
   if (!win || win.isDestroyed()) return;
@@ -408,6 +410,11 @@ function createWindow() {
     });
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
+  }
+
+  if (!updateChecker) {
+    updateChecker = new UpdateChecker(() => win);
+    updateChecker.start();
   }
 }
 

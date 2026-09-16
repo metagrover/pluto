@@ -45,9 +45,10 @@ export const canOpenProductionDatabase = (input: {
   signedBuildValid: boolean;
   targetsProductionProfile?: boolean;
   recoveryKeyAvailable?: boolean;
+  allowUnsignedPackaged?: boolean;
 }): boolean =>
   input.isPackaged
-    ? input.signedBuildValid
+    ? input.signedBuildValid || Boolean(input.allowUnsignedPackaged)
     : !input.targetsProductionProfile || Boolean(input.recoveryKeyAvailable);
 
 export const resolveUserDataArgument = (argv: string[]): string | null => {

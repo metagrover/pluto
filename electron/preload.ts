@@ -42,3 +42,16 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   // You can expose other APTs you need here.
   // ...
 });
+
+contextBridge.exposeInMainWorld('plutoUpdater', {
+  getStatus: () => ipcRenderer.invoke('PLUTO_UPDATER_GET_STATUS'),
+  checkNow: () => ipcRenderer.invoke('PLUTO_UPDATER_CHECK_NOW'),
+  applyUpdate: () => ipcRenderer.invoke('PLUTO_UPDATER_APPLY_UPDATE'),
+  openReleaseUrl: (url?: string) =>
+    ipcRenderer.invoke('PLUTO_UPDATER_OPEN_RELEASE_URL', url),
+  onStatusChanged: (callback: (status: unknown) => void) => {
+    const handler = (_event: unknown, status: unknown) => callback(status);
+    ipcRenderer.on('pluto-updater:status-changed', handler);
+    return () => ipcRenderer.off('pluto-updater:status-changed', handler);
+  },
+});

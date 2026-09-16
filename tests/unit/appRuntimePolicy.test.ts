@@ -96,6 +96,13 @@ describe('Pluto application runtime policy', () => {
     ).toBe(true);
     expect(
       canOpenProductionDatabase({
+        isPackaged: true,
+        signedBuildValid: false,
+        allowUnsignedPackaged: true,
+      }),
+    ).toBe(true);
+    expect(
+      canOpenProductionDatabase({
         isPackaged: false,
         signedBuildValid: false,
         targetsProductionProfile: true,
