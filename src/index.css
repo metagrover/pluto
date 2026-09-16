@@ -896,6 +896,10 @@
   .project-dossier-health {
     background: var(--project-paper-muted);
   }
+  .project-dossier-vitals {
+    border-color: var(--project-rule);
+    background: var(--project-paper-soft);
+  }
   .project-dossier-stat-card {
     border-color: var(--project-rule);
     background: var(--project-paper-soft);

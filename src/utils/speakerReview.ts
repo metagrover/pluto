@@ -81,6 +81,11 @@ export const selectReviewableAnonymousSpeakers = (
   return unique.includes('Them') ? ['Them'] : [];
 };
 
+/** True when the modal can actually review this speaker key (Remote Speaker N or Them). */
+export const isIdentifiableSpeakerKey = (speakerKey: string): boolean =>
+  REMOTE_SPEAKER_PATTERN.test(speakerKey.trim()) ||
+  speakerKey.trim() === 'Them';
+
 const selectCleanSpeakerIntervals = (
   segments: SpeakerSegment[],
   speaker: string,

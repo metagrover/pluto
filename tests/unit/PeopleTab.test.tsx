@@ -433,6 +433,181 @@ describe('PersonDossier', () => {
     // Shows Mark context as outdated button in More dropdown
     expect(markup).toContain('Mark context as outdated');
   });
+
+  it('renders "What this person has been up to" activity insight and touchpoints', () => {
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={briefingDetail}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('What Avery has been up to');
+    expect(markup).toContain('Recent Activity Insight');
+    expect(markup).toContain('Avery is coordinating the launch handoff.');
+    expect(markup).toContain('Product review');
+    expect(markup).toContain('Design handoff');
+    expect(markup).toContain('Shared the prototype walkthrough');
+    expect(markup).toContain('Send the final launch review');
+  });
+
+  it('renders comprehensive insight and structured workstream cards without leaking manual participant', () => {
+    const ayushDetail: PersonBriefingDetail = {
+      ...briefingDetail,
+      person: {
+        ...briefingDetail.person,
+        id: 'person-ayush',
+        name: 'Ayush',
+      },
+      knowledgeDoc: {
+        ...briefingDetail.knowledgeDoc!,
+        structured_json: JSON.stringify({
+          schema_version: 2,
+          current_read: {
+            headline: 'Focus on Performance Optimization',
+            supporting_bullets: [
+              'API Performance & Infrastructure: Working on API performance and S3 migration.',
+              'Infrastructure & Monitoring: Transitioning to new monitoring tools.',
+            ],
+            freshness: 'fresh',
+            source_count: 2,
+            cited_item_count: 1,
+            cited_meeting_count: 2,
+            trust_message: 'Verified',
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.9,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-07-12T12:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+          active_streams: [
+            {
+              id: 's1',
+              title: 'API Performance & Infrastructure',
+              current_read:
+                'Working on API performance and S3 migration.',
+              domain: 'eng',
+              status: 'active',
+              last_touched_at: '2026-07-12T12:00:00.000Z',
+              source_count: 2,
+              open_follow_up_count: 0,
+              decision_count: 0,
+              unresolved_question_count: 0,
+              pinned: false,
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.9,
+                cited_meeting_count: 2,
+                source_count: 2,
+                last_reinforced_at: '2026-07-12T12:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+            {
+              id: 's2',
+              title: 'Infrastructure & Monitoring',
+              current_read: 'Transitioning to new monitoring tools.',
+              domain: 'eng',
+              status: 'active',
+              last_touched_at: '2026-07-12T12:00:00.000Z',
+              source_count: 2,
+              open_follow_up_count: 0,
+              decision_count: 0,
+              unresolved_question_count: 0,
+              pinned: false,
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.9,
+                cited_meeting_count: 2,
+                source_count: 2,
+                last_reinforced_at: '2026-07-12T12:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          needs_attention: [],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+          source_quality_summary: {
+            included_count: 2,
+            excluded_count: 0,
+            weak_count: 0,
+            records: [],
+          },
+        }),
+      },
+      meetings: [
+        {
+          id: 'meeting-nct',
+          title: 'NCT Daily Check-in',
+          started_at: '2026-07-12T12:00:00.000Z',
+          created_at: '2026-07-12T12:00:00.000Z',
+          duration_seconds: 1800,
+          context: 'Manual participant',
+          evidence: 'confirmed',
+        },
+        {
+          id: 'meeting-uat',
+          title: 'UAT Development and Production Release Strategy',
+          started_at: '2026-07-10T12:00:00.000Z',
+          created_at: '2026-07-10T12:00:00.000Z',
+          duration_seconds: 2700,
+          context: null,
+          evidence: 'confirmed',
+        },
+      ],
+      commitments: {
+        open: [
+          {
+            id: 'commit-1',
+            text: 'Clean up and push the backend configuration PR',
+            status: 'active',
+            dueDate: null,
+            evidence: null,
+            sourceMeetingId: 'meeting-uat',
+            sourceMeetingTitle: 'UAT Development',
+            updatedAt: '2026-07-12T12:00:00.000Z',
+          },
+        ],
+        delivered: [],
+        candidates: [],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <PersonDossier
+        detail={ayushDetail}
+        onBack={() => {}}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    // Verifies workstream cards
+    expect(markup).toContain('Active Workstreams &amp; Initiatives');
+    expect(markup).toContain('API Performance &amp; Infrastructure');
+    expect(markup).toContain('Infrastructure &amp; Monitoring');
+
+    // Verifies comprehensive insight prose
+    expect(markup).toContain('What Ayush has been up to');
+    expect(markup).toContain(
+      'Ayush is currently focused on performance optimization.',
+    );
+    expect(markup).toContain(
+      'Key initiatives include API Performance &amp; Infrastructure and Infrastructure &amp; Monitoring.',
+    );
+    expect(markup).toContain(
+      'Clean up and push the backend configuration PR',
+    );
+
+    // Verifies that administrative "manual participant" is completely filtered out of the UI
+    expect(markup).not.toContain('manual participant');
+    expect(markup).not.toContain('(manual participant)');
+  });
 });
 
 describe('formatCommitmentChronology', () => {

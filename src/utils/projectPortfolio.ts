@@ -36,6 +36,21 @@ export function readProjectCadence(metadata: unknown): ProjectCadence | null {
   return null;
 }
 
+export function resolveProjectCadence(
+  metadata: unknown,
+  recurringCadence?: string | null,
+): ProjectCadence | null {
+  const manual = readProjectCadence(metadata);
+  if (manual) return manual;
+  if (!recurringCadence) return null;
+  const lower = recurringCadence.toLowerCase();
+  if (lower.includes('weekly') && !lower.includes('two')) return 'weekly';
+  if (lower.includes('two') || lower.includes('biweekly')) return 'biweekly';
+  if (lower.includes('monthly')) return 'monthly';
+  if (lower.includes('quarterly')) return 'quarterly';
+  return null;
+}
+
 export function withProjectCadence(
   metadata: string | null | undefined,
   cadence: ProjectCadence | null,
@@ -241,7 +256,10 @@ export function buildProjectPortfolio(
     )
       continue;
 
-    const cadence = readProjectCadence(entry.metadata);
+    const cadence = resolveProjectCadence(
+      entry.metadata,
+      entry.recurring_cadence,
+    );
     const activity = getProjectActivityState(
       entry.last_mentioned_at || entry.updated_at,
       now,

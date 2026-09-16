@@ -313,7 +313,6 @@ export function ProjectsOverview({
 
   const totalCount =
     portfolio.current.length +
-    portfolio.radarTopics.length +
     portfolio.completed.length;
 
   const staleRadarTopics = useMemo(() => {
@@ -689,42 +688,50 @@ export function ProjectsOverview({
           )}
 
           {mode === 'current' &&
-            Boolean(portfolio.initiativeTopics[entry.id]?.length) && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium text-pro-text-muted flex items-center gap-1 mr-0.5">
-                  <Layers className="h-3 w-3 text-pro-text-muted/70" />
-                  Topics:
-                </span>
-                {portfolio.initiativeTopics[entry.id].map((topic) => {
-                  const tTitle = readProjectDisplayTitle(
-                    topic.metadata,
-                    topic.name,
-                  );
-                  return (
-                    <span
-                      key={topic.id}
-                      className="group/chip inline-flex items-center gap-1 rounded-md border border-pro-border/70 bg-pro-surface/90 px-2 py-0.5 text-[11px] font-medium text-pro-text-main shadow-2xs hover:border-pro-accent/40 transition-colors"
-                      title={`Constituent topic: ${tTitle}`}
-                    >
-                      <Hash className="h-2.5 w-2.5 text-pro-text-muted/70" />
-                      <span className="truncate max-w-[140px]">{tTitle}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDetachTopic(topic, entry);
-                        }}
-                        title={`Detach "${tTitle}" from ${displayTitle}`}
-                        aria-label={`Detach ${tTitle}`}
-                        className="ml-0.5 -mr-0.5 rounded p-0.5 text-pro-text-muted/40 hover:bg-pro-hover hover:text-rose-600 dark:hover:text-rose-400 opacity-0 group-hover/chip:opacity-100 transition-all focus:opacity-100"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
+            Boolean(portfolio.initiativeTopics[entry.id]?.length) && (() => {
+              const topics = portfolio.initiativeTopics[entry.id];
+              const visible = topics.slice(0, 3);
+              const overflow = topics.length - visible.length;
+              return (
+                <div className="mt-2 flex items-baseline gap-1 text-[11.5px] text-pro-text-muted leading-snug flex-wrap">
+                  <span className="font-medium shrink-0">Topics:</span>
+                  {visible.map((topic, i) => {
+                    const tTitle = readProjectDisplayTitle(
+                      topic.metadata,
+                      topic.name,
+                    );
+                    return (
+                      <span key={topic.id} className="group/chip inline-flex items-baseline gap-0.5">
+                        {i > 0 && <span className="select-none text-pro-text-muted/40 mx-0.5">·</span>}
+                        <span
+                          className="truncate max-w-[160px] hover:text-pro-text-main transition-colors cursor-default"
+                          title={`Constituent topic: ${tTitle}`}
+                        >
+                          {tTitle}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDetachTopic(topic, entry);
+                          }}
+                          title={`Detach "${tTitle}" from ${displayTitle}`}
+                          aria-label={`Detach ${tTitle}`}
+                          className="rounded p-px text-pro-text-muted/30 hover:text-rose-500 dark:hover:text-rose-400 opacity-0 group-hover/chip:opacity-100 transition-all focus:opacity-100"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                  {overflow > 0 && (
+                    <span className="text-pro-text-muted/60 select-none">
+                      <span className="mx-0.5">·</span>+{overflow} more
                     </span>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
 
           <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-pro-text-muted">
             {mode === 'suggested' ? (
@@ -920,7 +927,7 @@ export function ProjectsOverview({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className={`flex shrink-0 items-center gap-2 transition-opacity duration-100 ${isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/topic:opacity-100 focus-within:opacity-100'}`}>
           {date && (
             <span className="text-[11px] tabular-nums text-pro-text-muted hidden sm:inline-block mr-0.5">
               {date}
@@ -1116,9 +1123,8 @@ export function ProjectsOverview({
             {portfolio.current.length} Active Initiative
             {portfolio.current.length === 1 ? '' : 's'}
             {portfolio.radarTopics.length > 0 && (
-              <span className="font-normal text-pro-text-muted text-sm ml-2">
-                · {portfolio.radarTopics.length} Discussed Topic
-                {portfolio.radarTopics.length === 1 ? '' : 's'}
+              <span className="font-normal text-pro-text-muted/70 text-sm ml-2">
+                · {portfolio.radarTopics.length} on radar
               </span>
             )}
           </p>

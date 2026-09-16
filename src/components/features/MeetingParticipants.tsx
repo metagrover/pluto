@@ -10,6 +10,7 @@ import { parsePersonRole } from '../../utils/personBriefing';
 import {
   getAnonymousSpeakerDisplayLabel,
   isGenericSpeakerLabel,
+  isIdentifiableSpeakerKey,
 } from '../../utils/speakerReview';
 
 export interface ResolvedMeetingParticipant {
@@ -335,9 +336,9 @@ export const MeetingParticipantsPopover: React.FC<
       aria-label="Meeting participants"
       className="meeting-participants-popover absolute left-0 top-full mt-2 z-50 w-80 sm:w-96 rounded-2xl border border-pro-border/80 bg-pro-surface/95 backdrop-blur-md p-4 shadow-xl text-pro-text-main animate-in fade-in zoom-in-95 duration-150"
     >
-      <div className="flex items-center justify-between pb-3 border-b border-pro-border/40 mb-3">
+      <div className="flex items-center justify-between pb-3 border-b border-pro-border/40 mb-4">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-pro-text-main">
+          <h3 className="text-[13px] font-semibold text-pro-text-main tracking-[-0.01em]">
             Participants
           </h3>
           <span className="rounded-full bg-pro-hover px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
@@ -354,13 +355,13 @@ export const MeetingParticipantsPopover: React.FC<
         </button>
       </div>
 
-      <div className="max-h-80 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+      <div className="max-h-[336px] overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
         {participants.map((participant) => {
           const initials = getInitials(participant.name);
           return (
             <div
               key={participant.id}
-              className="meeting-participant-item flex items-center justify-between gap-3 p-2 rounded-xl hover:bg-pro-hover/70 transition-colors group"
+              className="meeting-participant-item flex items-center justify-between gap-3 px-2 py-2.5 rounded-xl hover:bg-pro-hover/70 transition-colors group"
             >
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div
@@ -380,19 +381,19 @@ export const MeetingParticipantsPopover: React.FC<
                   )}
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-xs font-medium text-pro-text-main truncate">
+                <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-[12.5px] font-medium text-pro-text-main truncate">
                       {participant.name}
                     </span>
                     {participant.isSelf && (
-                      <span className="rounded px-1.5 py-0.2 text-[10px] font-medium bg-pro-accent/10 text-pro-accent shrink-0">
+                      <span className="rounded px-1.5 py-px text-[10px] font-medium bg-pro-accent/10 text-pro-accent shrink-0 leading-[1.4]">
                         You
                       </span>
                     )}
                     {participant.personId &&
                       openLoopsByPersonId[participant.personId] > 0 && (
-                        <span className="rounded border border-amber-500/25 bg-amber-500/15 px-1.5 py-0.2 text-[10px] font-medium text-amber-800 dark:text-amber-300 shrink-0">
+                        <span className="rounded border border-amber-500/25 bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:text-amber-300 shrink-0 leading-[1.4]">
                           {openLoopsByPersonId[participant.personId]} open{' '}
                           {openLoopsByPersonId[participant.personId] === 1
                             ? 'loop'
@@ -401,11 +402,11 @@ export const MeetingParticipantsPopover: React.FC<
                       )}
                   </div>
 
-                  <div className="flex items-center gap-2 text-[11px] text-pro-text-muted truncate">
+                  <div className="flex items-center gap-1.5 text-[11px] text-pro-text-muted min-w-0">
                     {participant.role ? (
                       <span className="truncate">{participant.role}</span>
                     ) : participant.turnCount > 0 ? (
-                      <span>
+                      <span className="shrink-0">
                         {participant.turnCount}{' '}
                         {participant.turnCount === 1 ? 'turn' : 'turns'}
                       </span>
@@ -417,7 +418,7 @@ export const MeetingParticipantsPopover: React.FC<
                     {participant.speakerKey &&
                       !participant.isAnonymous &&
                       participant.speakerKey !== participant.name && (
-                        <span className="opacity-60 text-[10px]">
+                        <span className="opacity-50 shrink-0">
                           ·{' '}
                           {getAnonymousSpeakerDisplayLabel(
                             participant.speakerKey,
@@ -434,20 +435,22 @@ export const MeetingParticipantsPopover: React.FC<
                     type="button"
                     data-open-person-id={participant.personId}
                     onClick={() => onOpenPerson(participant.personId!)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-pro-accent bg-pro-accent/10 hover:bg-pro-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-medium text-pro-accent bg-pro-accent/10 hover:bg-pro-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                     title={`View ${participant.name} profile in Pluto`}
                   >
                     <span>Profile</span>
                     <ArrowRight size={11} />
                   </button>
-                ) : participant.isAnonymous ? (
+                ) : participant.isAnonymous &&
+                  participant.speakerKey &&
+                  isIdentifiableSpeakerKey(participant.speakerKey) ? (
                   <button
                     type="button"
                     data-identify-speaker={participant.speakerKey}
                     onClick={() =>
                       onIdentifySpeaker(participant.speakerKey || null)
                     }
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-medium text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
                     title={`Identify speaker ${participant.name}`}
                   >
                     <Sparkles size={11} className="text-pro-accent" />

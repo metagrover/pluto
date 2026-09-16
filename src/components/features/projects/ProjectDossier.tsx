@@ -1,5 +1,6 @@
 import {
   Activity,
+  Calendar,
   Check,
   ChevronRight,
   Layers,
@@ -26,13 +27,12 @@ import {
   type DreamingUiStatus,
 } from '../../../utils/dreamingStatus';
 import type { ProjectBrief } from '../../../utils/projectBriefing';
+import { detectProjectCadence } from '../../../utils/projectCadence';
 import {
-  type ProjectCadence,
   type ProjectPortfolioEntry,
   getProjectActivityState,
   isProjectStarred,
   readProjectCadence,
-  withProjectCadence,
 } from '../../../utils/projectPortfolio';
 import { readProjectQualification } from '../../../utils/projectQualification';
 import { SearchSelect } from '../../ui/SearchSelect';
@@ -52,8 +52,6 @@ interface ProjectDossierProps {
 
 const quietButton =
   'inline-flex min-h-10 items-center gap-2 rounded px-2 text-sm text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50';
-const statCard =
-  'project-dossier-stat-card flex min-h-24 min-w-0 flex-col justify-between rounded-xl border p-4';
 
 const formatDate = (value: string | null | undefined): string => {
   const date = value ? new Date(value) : null;
@@ -234,7 +232,18 @@ export const ProjectDossier = ({
 
   const current = loadedProjectId === projectId ? brief : null;
 
-  const cadence = readProjectCadence(current?.project.metadata);
+  const detectedCadence = useMemo(() => {
+    return detectProjectCadence({
+      meetings: current?.meetings ?? [],
+      recurringSeries: current?.meetingStats.recurringSeries ?? [],
+      manualOverride: readProjectCadence(current?.project.metadata),
+    });
+  }, [
+    current?.meetings,
+    current?.meetingStats.recurringSeries,
+    current?.project.metadata,
+  ]);
+
   const activityState = useMemo(() => {
     return getProjectActivityState(
       current?.momentum.lastActivityAt ||
@@ -242,45 +251,13 @@ export const ProjectDossier = ({
           current?.meetings[0]?.created_at) ||
         null,
       Date.now(),
-      cadence,
+      detectedCadence.cadence,
     );
-  }, [current?.momentum.lastActivityAt, current?.meetings, cadence]);
-
-  const handleUpdateCadence = async (newCadence: ProjectCadence | null) => {
-    if (!current) return;
-    try {
-      const updatedMetadata = withProjectCadence(
-        current.project.metadata,
-        newCadence,
-      );
-      let parsedMeta: Record<string, unknown> = {};
-      try {
-        parsedMeta = JSON.parse(updatedMetadata);
-      } catch {
-        parsedMeta = {};
-      }
-      await upsertEntity({
-        id: current.project.id,
-        name: current.project.detectedTitle,
-        type: 'project',
-        metadata: parsedMeta,
-      });
-      setBrief((prev) =>
-        prev
-          ? {
-              ...prev,
-              project: {
-                ...prev.project,
-                metadata: updatedMetadata,
-              },
-            }
-          : prev,
-      );
-      if (onPortfolioChanged) void onPortfolioChanged();
-    } catch (err) {
-      console.error('Failed to update project cadence:', err);
-    }
-  };
+  }, [
+    current?.momentum.lastActivityAt,
+    current?.meetings,
+    detectedCadence.cadence,
+  ]);
 
   const evolutionTouchpoints = useMemo(() => {
     if (!current || !current.meetings.length) return [];
@@ -1059,83 +1036,125 @@ export const ProjectDossier = ({
               >
                 At a glance
               </h2>
-              <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                <div className={`${statCard} lg:col-span-2`}>
-                  <dt className="project-dossier-property-label">Meetings</dt>
-                  <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {current.meetingStats.meetingCount}
-                    {current.meetingStats.activeWeeks !== null
-                      ? ` over ${current.meetingStats.activeWeeks} week${current.meetingStats.activeWeeks === 1 ? '' : 's'}`
-                      : ''}
-                  </dd>
-                </div>
-                <div className={`${statCard} lg:col-span-2`}>
-                  <dt className="project-dossier-property-label">
-                    People involved
+              <dl className="mt-5 space-y-4 max-w-[68ch]">
+                {/* Rhythm row */}
+                <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                  <dt className="project-dossier-property-label flex items-center gap-1.5">
+                    <Repeat2 aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                    Rhythm
                   </dt>
-                  <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {peopleInvolved.length
-                      ? `${peopleInvolved.length} people`
-                      : 'No people yet'}
+                  <dd className="project-dossier-body min-w-0 text-pro-text-main">
+                    <span className="inline-flex items-center gap-2 flex-wrap">
+                      <span>{detectedCadence.label}</span>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          detectedCadence.rhythmHealth === 'in_rhythm'
+                            ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300'
+                            : detectedCadence.rhythmHealth === 'due_soon' ||
+                                detectedCadence.rhythmHealth === 'slipping'
+                              ? 'border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-300'
+                              : 'border border-stone-500/30 bg-stone-500/10 text-stone-700 dark:text-stone-300'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            detectedCadence.rhythmHealth === 'in_rhythm'
+                              ? 'bg-emerald-500'
+                              : detectedCadence.rhythmHealth === 'due_soon' ||
+                                  detectedCadence.rhythmHealth === 'slipping'
+                                ? 'bg-amber-500'
+                                : 'bg-stone-400'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {detectedCadence.rhythmStatusLabel}
+                      </span>
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed text-pro-text-muted">
+                      {detectedCadence.detail}
+                      {current.meetingStats.recurringSeries[0]?.title && (
+                        <> · via <em className="not-italic font-medium text-pro-text-main">{current.meetingStats.recurringSeries[0].title}</em></>
+                      )}
+                    </p>
                   </dd>
                 </div>
-                <div className={`${statCard} lg:col-span-2`}>
-                  <div className="flex items-center justify-between gap-1">
-                    <dt className="project-dossier-property-label">
-                      Expected cadence
+
+                {/* Regulars row — most frequent contributors, named */}
+                {current.meetingStats.frequentParticipants.length > 0 && (
+                  <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label flex items-center gap-1.5">
+                      <Users aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      Regulars
                     </dt>
-                    <select
-                      value={cadence || 'default'}
-                      onChange={(e) =>
-                        void handleUpdateCadence(
-                          e.target.value === 'default'
-                            ? null
-                            : (e.target.value as ProjectCadence),
-                        )
-                      }
-                      className="rounded border border-pro-border/70 bg-transparent px-1 py-0.5 text-xs text-pro-text-muted hover:text-pro-text-main focus:outline-none focus:ring-1 focus:ring-pro-accent cursor-pointer"
-                      aria-label="Set project cadence"
-                    >
-                      <option value="default">Default (30d)</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="biweekly">Bi-weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="quarterly">Quarterly</option>
-                      <option value="adhoc">Ad-hoc</option>
-                    </select>
+                    <dd className="project-dossier-body min-w-0 text-pro-text-main">
+                      {current.meetingStats.frequentParticipants.slice(0, 5).join(', ')}
+                      {peopleInvolved.length > current.meetingStats.frequentParticipants.slice(0, 5).length && (
+                        <span className="text-pro-text-muted">
+                          {' '}+{peopleInvolved.length - current.meetingStats.frequentParticipants.slice(0, 5).length} others across {current.meetingStats.meetingCount} meetings
+                        </span>
+                      )}
+                    </dd>
                   </div>
-                  <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {cadence
-                      ? cadence === 'adhoc'
-                        ? 'Ad-hoc'
-                        : cadence === 'biweekly'
-                          ? 'Bi-weekly'
-                          : cadence.charAt(0).toUpperCase() + cadence.slice(1)
-                      : current.meetingStats.recurringSeries[0]?.cadence ||
-                        'Standard rhythm'}
-                  </dd>
-                </div>
-                <div className={`${statCard} lg:col-span-3`}>
-                  <dt className="project-dossier-property-label">
-                    Commitments
-                  </dt>
-                  <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {current.momentum.openCommitmentCount} open ·{' '}
-                    {current.momentum.completedCommitmentCount} completed
-                  </dd>
-                </div>
-                <div className={`${statCard} sm:col-span-2 lg:col-span-3`}>
-                  <dt className="project-dossier-property-label">
-                    Next milestone
-                  </dt>
-                  <dd className="mt-4 break-words text-[17px] font-medium leading-6">
-                    {nextMilestone
-                      ? `${nextMilestone.title}${nextMilestone.timing ? ` · ${nextMilestone.timing}` : ''}`
-                      : 'Nothing upcoming yet'}
-                  </dd>
-                </div>
+                )}
+
+                {/* Open threads from theme synthesis */}
+                {current.theme && current.theme.openThreads.length > 0 && (
+                  <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label flex items-center gap-1.5">
+                      <Calendar aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      Open threads
+                    </dt>
+                    <dd className="min-w-0 space-y-1.5">
+                      {current.theme.openThreads.slice(0, 2).map((thread, i) => (
+                        <p key={i} className="text-[13.5px] leading-relaxed text-pro-text-main">
+                          <span className={`mr-1.5 inline-flex items-center rounded px-1 py-px text-[10px] font-semibold uppercase tracking-wide ${
+                            thread.kind === 'risk'
+                              ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                              : thread.kind === 'decision'
+                                ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                                : 'bg-pro-surface text-pro-text-muted'
+                          }`}>
+                            {thread.kind}
+                          </span>
+                          {thread.text}
+                        </p>
+                      ))}
+                      {current.theme.openThreads.length > 2 && (
+                        <p className="text-xs text-pro-text-muted">+{current.theme.openThreads.length - 2} more open threads</p>
+                      )}
+                    </dd>
+                  </div>
+                )}
+
+                {/* Commitments — only shown when there's actual data */}
+                {(current.momentum.openCommitmentCount > 0 || current.momentum.completedCommitmentCount > 0 || nextMilestone) && (
+                  <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label flex items-center gap-1.5">
+                      <Check aria-hidden="true" className="h-3.5 w-3.5 text-pro-text-muted shrink-0" />
+                      Commitments
+                    </dt>
+                    <dd className="project-dossier-body min-w-0 text-pro-text-main">
+                      {current.momentum.openCommitmentCount > 0 && (
+                        <span>{current.momentum.openCommitmentCount} open</span>
+                      )}
+                      {current.momentum.openCommitmentCount > 0 && current.momentum.completedCommitmentCount > 0 && (
+                        <span className="text-pro-text-muted"> · </span>
+                      )}
+                      {current.momentum.completedCommitmentCount > 0 && (
+                        <span className="text-pro-text-muted">{current.momentum.completedCommitmentCount} completed</span>
+                      )}
+                      {nextMilestone && (
+                        <p className="mt-1 text-[13px] text-pro-text-muted">
+                          Next: <span className="text-pro-text-main font-medium">{nextMilestone.title}</span>
+                          {nextMilestone.timing && <span> · {nextMilestone.timing}</span>}
+                        </p>
+                      )}
+                    </dd>
+                  </div>
+                )}
               </dl>
             </section>
+
 
             {evolutionTouchpoints.length > 1 && (
               <section aria-labelledby="project-evolution" className="mt-10">

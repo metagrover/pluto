@@ -886,3 +886,74 @@ it('renders Topics & Discussion Streams and allows detaching a topic', async () 
   expect(api.detachTopicFromProject).toHaveBeenCalledWith('topic-1');
   expect(onPortfolioChanged).toHaveBeenCalled();
 });
+
+it('renders executive at a glance panel with detected meeting rhythm and no manual select dropdown', async () => {
+  api.getProjectBrief.mockResolvedValue(brief());
+  await render();
+
+  const atAGlanceSection = host.querySelector('[aria-labelledby="project-at-a-glance"]');
+  expect(atAGlanceSection).not.toBeNull();
+  expect(atAGlanceSection?.textContent).toContain('At a glance');
+  expect(atAGlanceSection?.textContent).toContain('Meeting rhythm');
+  expect(atAGlanceSection?.textContent).toContain('Weekly rhythm');
+  expect(atAGlanceSection?.textContent).toContain('Rhythm slipping');
+  expect(atAGlanceSection?.textContent).toContain(
+    'Detected from recurring “Archive weekly review” (4 meetings)',
+  );
+  expect(atAGlanceSection?.textContent).toContain('7 meetings over 8 weeks');
+  expect(atAGlanceSection?.textContent).toContain('3 open · 4 completed');
+  expect(atAGlanceSection?.textContent).toContain('Complete migration review');
+
+  // Verify there is NO <select> asking the user for cadence
+  expect(host.querySelector('select[aria-label="Set project cadence"]')).toBeNull();
+  expect(host.querySelector('select')).toBeNull();
+});
+
+it('automatically detects rhythm from meeting intervals when no recurring series exists', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      meetingStats: {
+        meetingCount: 3,
+        activeWeeks: 3,
+        participantCoverage: 3,
+        typicalParticipantCount: 2,
+        frequentParticipants: ['Alex'],
+        recurringSeries: [],
+      },
+      meetings: [
+        {
+          id: 'm1',
+          title: 'Planning session',
+          started_at: '2026-08-01T10:00:00Z',
+          created_at: null,
+          participants: [],
+          context: 'Kickoff',
+        },
+        {
+          id: 'm2',
+          title: 'Design review',
+          started_at: '2026-08-08T10:00:00Z',
+          created_at: null,
+          participants: [],
+          context: 'Design',
+        },
+        {
+          id: 'm3',
+          title: 'Tech sync',
+          started_at: '2026-08-15T10:00:00Z',
+          created_at: null,
+          participants: [],
+          context: 'Tech',
+        },
+      ],
+    }),
+  );
+
+  await render();
+  const atAGlanceSection = host.querySelector('[aria-labelledby="project-at-a-glance"]');
+  expect(atAGlanceSection?.textContent).toContain('Weekly rhythm');
+  expect(atAGlanceSection?.textContent).toContain(
+    'Detected from meeting intervals (averages ~7d between sessions)',
+  );
+});
+

@@ -1,5 +1,7 @@
 import {
+  ArrowRight,
   ArrowLeft,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -53,9 +55,76 @@ import { parsePersonRole } from '../../utils/personBriefing';
 import { PersonChatDock } from '../features/PersonChatDock';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
-import { compileKnowledgeBrief } from './knowledgeDocument';
+import {
+  compileKnowledgeBrief,
+  type KnowledgeV2Stream,
+} from './knowledgeDocument';
 
 export type PersonBriefingRow = PersonBriefingSummary;
+
+const isMeaningfulMeetingContext = (
+  context: string | null | undefined,
+): boolean => {
+  if (!context) return false;
+  const trimmed = context.trim().toLowerCase();
+  const nonMeaningful = [
+    'manual participant',
+    'confirmed participant',
+    'participant',
+    'attendee',
+    'speaker',
+    'mentioned',
+    'scheduled',
+    'confirmed',
+  ];
+  if (nonMeaningful.includes(trimmed)) return false;
+  if (trimmed.startsWith('manual participant')) return false;
+  if (trimmed.startsWith('confirmed participant')) return false;
+  if (trimmed.startsWith('participant in')) return false;
+  if (trimmed.length < 8) return false;
+  return true;
+};
+
+export interface ParsedWorkstream {
+  id: string;
+  title: string;
+  detail: string;
+}
+
+const extractWorkstreams = (
+  activeStreams: KnowledgeV2Stream[] = [],
+  supportingBullets: string[] = [],
+): { workstreams: ParsedWorkstream[]; plainBullets: string[] } => {
+  if (activeStreams.length > 0) {
+    return {
+      workstreams: activeStreams.map((s, idx) => ({
+        id: s.id || `stream-${idx}`,
+        title: s.title,
+        detail: s.current_read,
+      })),
+      plainBullets: [],
+    };
+  }
+
+  const workstreams: ParsedWorkstream[] = [];
+  const plainBullets: string[] = [];
+
+  for (let idx = 0; idx < supportingBullets.length; idx++) {
+    const bullet = supportingBullets[idx];
+    const match = bullet.match(/^([^:]{3,40}):\s+(.+)$/);
+    if (match) {
+      workstreams.push({
+        id: `bullet-stream-${idx}`,
+        title: match[1].trim(),
+        detail: match[2].trim(),
+      });
+    } else {
+      plainBullets.push(bullet);
+    }
+  }
+
+  return { workstreams, plainBullets };
+};
 
 export const buildPersonBriefingRow = (
   person: Entity,
@@ -1082,38 +1151,221 @@ export const PersonDossier = ({
     }
   };
 
-  const collaborationJourney = useMemo(() => {
-    if (!currentDetail.meetings || currentDetail.meetings.length === 0)
-      return null;
-    const sorted = [...currentDetail.meetings].sort(
-      (a, b) =>
-        (Date.parse(a.started_at || a.created_at || '') || 0) -
-        (Date.parse(b.started_at || b.created_at || '') || 0),
-    );
-    const earliest = sorted[0];
-    const latest = sorted[sorted.length - 1];
-    const earliestDate = earliest.started_at || earliest.created_at;
-    const latestDate = latest.started_at || latest.created_at;
+  const { workstreams, plainBullets } = useMemo(() => {
+    return extractWorkstreams(brief.activeStreams, brief.supportingBullets);
+  }, [brief.activeStreams, brief.supportingBullets]);
 
-    let spanMonths = 0;
-    if (earliestDate && latestDate) {
-      const diffMs = Math.max(
-        0,
-        Date.parse(latestDate) - Date.parse(earliestDate),
+  const activitySummary = useMemo(() => {
+    const rawName = (currentDetail.person.name || '').trim();
+    const isSelf = Boolean(currentDetail.isSelf);
+    const firstName = isSelf
+      ? 'you'
+      : rawName.split(/\s+/)[0] || rawName;
+    const sectionTitle = isSelf
+      ? "What you've been up to"
+      : firstName && firstName.toLowerCase() !== 'unknown'
+        ? `What ${firstName} has been up to`
+        : "What they've been up to";
+
+    const allMeetings = currentDetail.meetings || [];
+    const confirmedMeetings = [...allMeetings]
+      .filter((m) => m.evidence === 'confirmed')
+      .sort(
+        (a, b) =>
+          (Date.parse(b.started_at || b.created_at || '') || 0) -
+          (Date.parse(a.started_at || a.created_at || '') || 0),
       );
-      spanMonths = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24 * 30)));
+
+    const delivered = (currentDetail.commitments.delivered || []).slice(0, 3);
+    const open = (currentDetail.commitments.open || []).slice(0, 3);
+
+    const touchpoints: Array<{
+      id: string;
+      kind: 'discussion' | 'delivered' | 'open';
+      title: string;
+      detail?: string | null;
+      date?: string | null;
+      timestamp: number;
+      meetingId?: string;
+      meetingTitle?: string;
+    }> = [];
+
+    // Recent confirmed discussions (up to 3)
+    for (const m of confirmedMeetings.slice(0, 3)) {
+      const dateStr = m.started_at || m.created_at;
+      const meaningful = isMeaningfulMeetingContext(m.context);
+      touchpoints.push({
+        id: `meeting-${m.id}`,
+        kind: 'discussion',
+        title: `Discussed in “${m.title || 'Conversation'}”`,
+        detail: meaningful ? m.context : undefined,
+        date: dateStr ? formatDate(dateStr) : null,
+        timestamp: Date.parse(dateStr || '') || 0,
+        meetingId: m.id,
+        meetingTitle: m.title || undefined,
+      });
     }
 
+    // Delivered commitments
+    for (const d of delivered) {
+      const dateStr = d.updatedAt || d.dueDate;
+      touchpoints.push({
+        id: `delivered-${d.id}`,
+        kind: 'delivered',
+        title: `Delivered: “${d.text}”`,
+        detail:
+          d.evidence ||
+          (d.sourceMeetingTitle
+            ? `Referenced in ${d.sourceMeetingTitle}`
+            : undefined),
+        date: dateStr ? formatDate(dateStr) : null,
+        timestamp: Date.parse(dateStr || '') || 0,
+        meetingId: d.sourceMeetingId || undefined,
+        meetingTitle: d.sourceMeetingTitle || undefined,
+      });
+    }
+
+    // Open commitments in flight
+    for (const o of open) {
+      const dateStr = o.dueDate || o.updatedAt;
+      touchpoints.push({
+        id: `open-${o.id}`,
+        kind: 'open',
+        title: `In progress: “${o.text}”`,
+        detail: o.dueDate
+          ? `Due ${formatDate(o.dueDate)}`
+          : (o.evidence || undefined),
+        date: dateStr ? formatDate(dateStr) : null,
+        timestamp: Date.parse(dateStr || '') || 0,
+        meetingId: o.sourceMeetingId || undefined,
+        meetingTitle: o.sourceMeetingTitle || undefined,
+      });
+    }
+
+    touchpoints.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Formulate a natural, comprehensive insight narrative
+    const subjectIs = isSelf ? 'You are' : `${firstName} is`;
+    const headline =
+      brief.headline && !brief.headline.startsWith('No reliable')
+        ? brief.headline
+        : undefined;
+
+    const sentences: string[] = [];
+
+    // 1. Primary Focus Statement
+    if (headline) {
+      const trimmed = headline.trim().replace(/[.]+$/, '');
+      if (/^focus on\s+/i.test(trimmed)) {
+        const topic = trimmed.replace(/^focus on\s+/i, '');
+        sentences.push(
+          `${subjectIs} currently focused on ${topic.toLowerCase()}.`,
+        );
+      } else if (
+        new RegExp(`^(${firstName}|you|he|she|they)\\b`, 'i').test(trimmed)
+      ) {
+        sentences.push(`${trimmed}.`);
+      } else {
+        sentences.push(`${subjectIs} focused on ${trimmed.toLowerCase()}.`);
+      }
+    } else if (workstreams.length > 0) {
+      sentences.push(
+        `${subjectIs} currently driving work across ${workstreams
+          .slice(0, 2)
+          .map((w) => w.title)
+          .join(' and ')}.`,
+      );
+    }
+
+    // 2. Active Initiatives / Streams Context
+    if (workstreams.length > 0) {
+      if (workstreams.length === 1) {
+        sentences.push(`Key work centers on ${workstreams[0].title}.`);
+      } else if (workstreams.length === 2) {
+        sentences.push(
+          `Key initiatives include ${workstreams[0].title} and ${workstreams[1].title}.`,
+        );
+      } else {
+        const titles = workstreams.map((w) => w.title);
+        sentences.push(
+          `Core initiatives span ${titles.slice(0, 2).join(', ')}, alongside ${titles[2]}.`,
+        );
+      }
+    }
+
+    // 3. Discussions across recent meetings (with sanitized context)
+    const meaningfulMeetings = confirmedMeetings.map((m) => ({
+      title: m.title || 'Discussion',
+      hasMeaningfulContext: isMeaningfulMeetingContext(m.context),
+      context: m.context ? m.context.trim().replace(/[.]+$/, '') : null,
+    }));
+
+    if (meaningfulMeetings.length > 0) {
+      const top = meaningfulMeetings[0];
+      if (meaningfulMeetings.length > 1) {
+        const second = meaningfulMeetings[1];
+        if (top.hasMeaningfulContext && top.context) {
+          sentences.push(
+            `Recently in discussions across “${top.title}” (${top.context.toLowerCase()}) and “${second.title}”.`,
+          );
+        } else {
+          sentences.push(
+            `Recently in discussions across “${top.title}” and “${second.title}”.`,
+          );
+        }
+      } else {
+        if (top.hasMeaningfulContext && top.context) {
+          sentences.push(
+            `Recently active in “${top.title}”, focusing on ${top.context.toLowerCase()}.`,
+          );
+        } else {
+          sentences.push(`Recently active in “${top.title}”.`);
+        }
+      }
+    }
+
+    // 4. Delivered and In-Flight Commitments
+    if (delivered.length > 0 && open.length > 0) {
+      const d = delivered[0];
+      const o = open[0];
+      const due = o.dueDate ? ` (due ${formatDate(o.dueDate)})` : '';
+      sentences.push(
+        `Recently delivered “${d.text}”, while currently driving “${o.text}”${due}.`,
+      );
+    } else if (delivered.length > 0) {
+      const d = delivered[0];
+      sentences.push(`Recently delivered “${d.text}”.`);
+    } else if (open.length > 0) {
+      const o = open[0];
+      const due = o.dueDate ? ` (due ${formatDate(o.dueDate)})` : '';
+      sentences.push(`Currently driving “${o.text}”${due}.`);
+    }
+
+    let insightText = sentences.join(' ');
+    if (!insightText) {
+      insightText = `${isSelf ? 'You have' : `${firstName} has`} no recorded recent activity yet.`;
+    }
+
+    const total = touchpoints.length;
+    const metaLabel = `${total} recent touchpoint${total === 1 ? '' : 's'}${
+      formattedDate ? ` · Last active ${formattedDate}` : ''
+    }`;
+
     return {
-      meetingCount: sorted.length,
-      earliestTitle: earliest.title || 'First conversation',
-      earliestDate: earliestDate ? formatDate(earliestDate) : null,
-      latestTitle: latest.title || 'Recent conversation',
-      latestDate: latestDate ? formatDate(latestDate) : null,
-      latestMeetingId: latest.id,
-      spanMonths,
+      sectionTitle,
+      metaLabel,
+      insightText,
+      touchpoints,
     };
-  }, [currentDetail.meetings]);
+  }, [
+    currentDetail.person.name,
+    currentDetail.isSelf,
+    currentDetail.meetings,
+    currentDetail.commitments,
+    brief.headline,
+    workstreams,
+    formattedDate,
+  ]);
 
   return (
     <article className="person-dossier">
@@ -1633,16 +1885,19 @@ export const PersonDossier = ({
                     <button
                       type="button"
                       onClick={() => onOpenMeeting(latestMeeting.id)}
-                      className="group inline-flex items-center gap-1 text-xs text-pro-accent hover:underline focus-visible:outline-none"
-                      title={`Open source meeting: ${latestMeeting.title}`}
+                      className="group inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 -mr-1 text-xs text-pro-text-main transition-colors hover:bg-pro-surface hover:text-pro-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent"
+                      aria-label={`Open source meeting: ${latestMeeting.title}`}
                     >
-                      <span className="text-pro-text-muted font-normal">
+                      <span className="text-pro-text-muted font-normal group-hover:text-pro-text-muted">
                         From
                       </span>
-                      <span className="font-medium max-w-[200px] truncate">
+                      <span className="font-medium text-pro-text-main max-w-[220px] truncate group-hover:text-pro-accent group-hover:underline underline-offset-2 decoration-pro-accent/40 transition-colors">
                         &ldquo;{latestMeeting.title}&rdquo;
                       </span>
-                      <ChevronRight className="h-3 w-3 text-pro-accent/70 group-hover:translate-x-0.5 transition-transform" />
+                      <ChevronRight
+                        className="h-3 w-3 text-pro-text-muted group-hover:text-pro-accent group-hover:translate-x-0.5 transition-all"
+                        aria-hidden="true"
+                      />
                     </button>
                   )}
                 </div>
@@ -1659,10 +1914,40 @@ export const PersonDossier = ({
             <p className="max-w-[68ch] font-serif text-xl leading-8 text-pro-text-main">
               {brief.headline}
             </p>
-            {brief.supportingBullets.length > 0 ? (
-              <div className="mt-3 space-y-1">
-                {brief.supportingBullets.map((bullet, idx) => (
-                  <p key={idx} className="text-sm text-pro-text-muted">
+            {workstreams.length > 0 ? (
+              <div className="mt-5 space-y-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-pro-text-muted">
+                  Active Workstreams & Initiatives
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {workstreams.map((stream) => (
+                    <div
+                      key={stream.id}
+                      className="rounded-xl border border-pro-border/70 bg-pro-surface/40 p-3.5 space-y-1.5 transition-colors hover:border-pro-accent/40 shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full bg-pro-accent shrink-0"
+                          aria-hidden="true"
+                        />
+                        <h3 className="text-xs font-semibold text-pro-text-main truncate">
+                          {stream.title}
+                        </h3>
+                      </div>
+                      <p className="text-xs text-pro-text-muted leading-relaxed">
+                        {stream.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : plainBullets.length > 0 ? (
+              <div className="mt-3 space-y-1.5">
+                {plainBullets.map((bullet, idx) => (
+                  <p
+                    key={idx}
+                    className="text-sm text-pro-text-muted leading-relaxed"
+                  >
                     {bullet}
                   </p>
                 ))}
@@ -1677,6 +1962,113 @@ export const PersonDossier = ({
           </p>
         )}
       </section>
+
+      {(activitySummary.touchpoints.length > 0 || hasReliableRead) && (
+        <section
+          aria-labelledby="person-activity-insight"
+          className="person-dossier__activity-insight mt-8 mb-10"
+        >
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2
+              id="person-activity-insight"
+              className="text-sm font-semibold tracking-tight text-pro-text-main"
+            >
+              {activitySummary.sectionTitle}
+            </h2>
+            {activitySummary.metaLabel && (
+              <span className="text-[11px] text-pro-text-muted/70 tabular-nums shrink-0">
+                {activitySummary.metaLabel}
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-pro-border/60 bg-pro-surface/50 shadow-xs">
+            {/* Insight prose */}
+            <div className="p-6">
+              <p className="text-sm leading-[1.7] text-pro-text-main max-w-[65ch]">
+                <Sparkles
+                  className="inline h-3 w-3 text-pro-accent mr-1.5 relative -top-px"
+                  aria-hidden="true"
+                />
+                {activitySummary.insightText}
+              </p>
+            </div>
+
+            {activitySummary.touchpoints.length > 0 && (
+              <div className="border-t border-pro-border/40 px-6 py-5">
+                <div className="text-[10.5px] font-semibold uppercase tracking-widest text-pro-text-muted/60 mb-4">
+                  Recent Movements & Evidence
+                </div>
+                <div className="space-y-4">
+                  {activitySummary.touchpoints.map((tp) => (
+                    <div
+                      key={tp.id}
+                      className="flex items-start gap-3 text-xs group"
+                    >
+                      <span
+                        className={`mt-0.5 inline-flex items-center justify-center h-4 w-4 rounded-full shrink-0 ${
+                          tp.kind === 'delivered'
+                            ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400'
+                            : tp.kind === 'open'
+                              ? 'bg-amber-500/12 text-amber-600 dark:text-amber-400'
+                              : 'bg-pro-accent/10 text-pro-accent'
+                        }`}
+                        aria-hidden="true"
+                      >
+                        {tp.kind === 'delivered' ? (
+                          <Check className="h-2.5 w-2.5 stroke-[2.5]" />
+                        ) : tp.kind === 'open' ? (
+                          <ArrowRight className="h-2.5 w-2.5 stroke-[2.5]" />
+                        ) : (
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                          {tp.kind === 'discussion' && tp.meetingId && onOpenMeeting ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenMeeting(tp.meetingId!)}
+                              className="font-medium text-pro-text-main hover:text-pro-accent hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent rounded transition-colors"
+                            >
+                              <span>{tp.title}</span>
+                              <span aria-hidden="true" className="text-pro-accent/60 text-[10px]">↗</span>
+                            </button>
+                          ) : (
+                            <span className="font-medium text-pro-text-main">
+                              {tp.title}
+                            </span>
+                          )}
+                          {tp.kind !== 'discussion' && tp.meetingId && onOpenMeeting && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenMeeting(tp.meetingId!)}
+                              className="text-pro-accent hover:text-pro-accent-hover hover:underline underline-offset-2 decoration-pro-accent/40 inline-flex items-center gap-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent transition-colors"
+                            >
+                              <span>from "{tp.meetingTitle}"</span>
+                              <span aria-hidden="true" className="text-[10px]">↗</span>
+                            </button>
+                          )}
+                          {tp.date && (
+                            <span className="text-pro-text-muted/70">
+                              · {tp.date}
+                            </span>
+                          )}
+                        </div>
+                        {tp.detail && (
+                          <p className="mt-1 text-pro-text-muted/80 leading-relaxed max-w-[60ch]">
+                            {tp.detail}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="person-dossier__open-loops">
         <div className="person-dossier__major-heading">
@@ -1742,49 +2134,6 @@ export const PersonDossier = ({
           </details>
         ) : null}
       </section>
-
-      {collaborationJourney && collaborationJourney.meetingCount > 1 && (
-        <section
-          aria-labelledby="collaboration-journey"
-          className="person-dossier__journey mb-8"
-        >
-          <div className="person-dossier__major-heading mb-3">
-            <h2 id="collaboration-journey">Collaboration journey</h2>
-            <span className="text-xs text-pro-text-muted">
-              {collaborationJourney.meetingCount} meetings ·{' '}
-              {collaborationJourney.spanMonths}mo span
-            </span>
-          </div>
-          <div className="rounded-xl border border-pro-border/70 bg-pro-surface/50 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-              <span className="text-pro-text-muted">
-                First met in{' '}
-                <strong className="font-medium text-pro-text-main">
-                  {collaborationJourney.earliestTitle}
-                </strong>{' '}
-                {collaborationJourney.earliestDate
-                  ? `(${collaborationJourney.earliestDate})`
-                  : ''}
-              </span>
-              <span className="text-pro-text-muted">
-                Last met in{' '}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onOpenMeeting(collaborationJourney.latestMeetingId)
-                  }
-                  className="font-medium text-pro-accent hover:underline focus-visible:outline-none"
-                >
-                  &ldquo;{collaborationJourney.latestTitle}&rdquo; ↗
-                </button>{' '}
-                {collaborationJourney.latestDate
-                  ? `(${collaborationJourney.latestDate})`
-                  : ''}
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
 
       <section className="person-dossier__history">
         <div className="person-dossier__major-heading">
