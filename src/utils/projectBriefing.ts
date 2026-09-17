@@ -259,9 +259,7 @@ const cadenceLabel = (days: number): string => {
   return 'Recurring pattern';
 };
 
-export const cleanPersonRole = (
-  role?: string | null,
-): string | undefined => {
+export const cleanPersonRole = (role?: string | null): string | undefined => {
   if (!role) return undefined;
   const trimmed = role.trim();
   if (!trimmed) return undefined;

@@ -122,7 +122,11 @@ describe('project meeting analytics', () => {
 
     const result = buildProjectMeetingStats(meetings);
     expect(result.typicalParticipantCount).toBe(2);
-    expect(result.frequentParticipants).toEqual(['Adam', 'Rachel Owen', 'Hema']);
+    expect(result.frequentParticipants).toEqual([
+      'Adam',
+      'Rachel Owen',
+      'Hema',
+    ]);
   });
 
   it('sanitizes placeholder roles with cleanPersonRole', () => {

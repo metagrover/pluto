@@ -993,9 +993,7 @@ it('synthesizes latest updates from moving pieces without raw speaker quotes', a
   );
 
   await render();
-  const aboutSection = host.querySelector(
-    '[aria-labelledby="project-about"]',
-  );
+  const aboutSection = host.querySelector('[aria-labelledby="project-about"]');
   expect(aboutSection?.textContent).not.toContain('Deepak: But I made');
   expect(aboutSection?.textContent).toContain(
     'UI changes completed and merged into main branch.',
@@ -1021,7 +1019,11 @@ it('sanitizes undefined roles and accurately deduplicates regulars across meetin
         participants: [
           { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
           { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
-          { entity_id: `rachel-${i}`, name: 'Rachel Owen', role: 'Client Advisor' },
+          {
+            entity_id: `rachel-${i}`,
+            name: 'Rachel Owen',
+            role: 'Client Advisor',
+          },
         ],
         context: null,
       })),
@@ -1110,7 +1112,11 @@ it('synthesizes raw conversational context into executive bullet points and anal
         participants: [
           { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
           { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
-          { entity_id: `rachel-${i}`, name: 'Rachel Owen', role: 'Client Advisor' },
+          {
+            entity_id: `rachel-${i}`,
+            name: 'Rachel Owen',
+            role: 'Client Advisor',
+          },
         ],
         context:
           i === 0
@@ -1170,4 +1176,3 @@ it('synthesizes raw conversational context into executive bullet points and anal
     );
   }
 });
-

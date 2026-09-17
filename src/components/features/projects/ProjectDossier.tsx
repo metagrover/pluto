@@ -657,8 +657,7 @@ export const ProjectDossier = ({
       ),
     [current, currentFocusRepeatsOutcome, projectCurrentFocus, projectOutcome],
   );
-  const projectActivitySummary =
-    movingPieces[0]?.text || projectCurrentFocus;
+  const projectActivitySummary = movingPieces[0]?.text || projectCurrentFocus;
   const keyPeople = peopleInvolved.slice(0, 3);
   const keyPeopleLabel = new Intl.ListFormat(undefined, {
     style: 'long',
@@ -707,7 +706,8 @@ export const ProjectDossier = ({
     const cadencePattern =
       detectedCadence.cadence && detectedCadence.cadence !== 'adhoc'
         ? `${detectedCadence.cadence.toLowerCase()} sync pattern`
-        : current?.meetingStats.recurringSeries[0]?.cadence.toLowerCase() || null;
+        : current?.meetingStats.recurringSeries[0]?.cadence.toLowerCase() ||
+          null;
     if (cadencePattern) {
       return {
         summary: `Next review cycle aligns with ${cadencePattern} (${current?.meetingStats.meetingCount || current?.meetings.length || 1} meetings to date). No target milestone dates set yet.`,
@@ -1653,7 +1653,9 @@ export const ProjectDossier = ({
                 }))}
                 onOpenMeeting={onOpenMeeting}
                 onChange={(milestones) =>
-                  setBrief((value) => (value ? { ...value, milestones } : value))
+                  setBrief((value) =>
+                    value ? { ...value, milestones } : value,
+                  )
                 }
               />
             </div>

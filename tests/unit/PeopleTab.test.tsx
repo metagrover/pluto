@@ -214,7 +214,11 @@ describe('PeopleBriefing', () => {
     // 3+ meetings is always regular
     expect(
       isRegularCollaborator(
-        { ...rows[0], meetingCount: 3, latestMeetingAt: '2026-01-01T00:00:00.000Z' },
+        {
+          ...rows[0],
+          meetingCount: 3,
+          latestMeetingAt: '2026-01-01T00:00:00.000Z',
+        },
         referenceNow,
       ),
     ).toBe(true);
@@ -222,7 +226,11 @@ describe('PeopleBriefing', () => {
     // 2 meetings within 60 days is regular
     expect(
       isRegularCollaborator(
-        { ...rows[0], meetingCount: 2, latestMeetingAt: '2026-07-01T00:00:00.000Z' },
+        {
+          ...rows[0],
+          meetingCount: 2,
+          latestMeetingAt: '2026-07-01T00:00:00.000Z',
+        },
         referenceNow,
       ),
     ).toBe(true);
@@ -230,7 +238,11 @@ describe('PeopleBriefing', () => {
     // 2 meetings older than 60 days is not regular
     expect(
       isRegularCollaborator(
-        { ...rows[0], meetingCount: 2, latestMeetingAt: '2026-03-01T00:00:00.000Z' },
+        {
+          ...rows[0],
+          meetingCount: 2,
+          latestMeetingAt: '2026-03-01T00:00:00.000Z',
+        },
         referenceNow,
       ),
     ).toBe(false);
@@ -238,7 +250,11 @@ describe('PeopleBriefing', () => {
     // 1 meeting is not regular
     expect(
       isRegularCollaborator(
-        { ...rows[0], meetingCount: 1, latestMeetingAt: '2026-07-15T00:00:00.000Z' },
+        {
+          ...rows[0],
+          meetingCount: 1,
+          latestMeetingAt: '2026-07-15T00:00:00.000Z',
+        },
         referenceNow,
       ),
     ).toBe(false);

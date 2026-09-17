@@ -192,7 +192,8 @@ export const sortPeopleRows = (
     const bTime = Date.parse(b.latestMeetingAt || '') || 0;
     if (bTime !== aTime) return bTime - aTime;
 
-    if (b.meetingCount !== a.meetingCount) return b.meetingCount - a.meetingCount;
+    if (b.meetingCount !== a.meetingCount)
+      return b.meetingCount - a.meetingCount;
 
     if (b.openCommitmentCount !== a.openCommitmentCount)
       return b.openCommitmentCount - a.openCommitmentCount;
@@ -236,7 +237,9 @@ export const PeopleBriefing = ({
   const otherRows = useMemo(
     () =>
       sortPeopleRows(
-        filtered.filter((row) => row.meetingCount > 0 && !regularIds.has(row.id)),
+        filtered.filter(
+          (row) => row.meetingCount > 0 && !regularIds.has(row.id),
+        ),
       ),
     [filtered, regularIds],
   );
@@ -317,9 +320,7 @@ export const PeopleBriefing = ({
               (Date.now() - Date.parse(person.latestMeetingAt)) /
                 (1000 * 60 * 60 * 24),
             ) > 45 ? (
-              <span className="person-historical">
-                Historical
-              </span>
+              <span className="person-historical">Historical</span>
             ) : null}
             <span className="person-date">
               <Clock3 aria-hidden="true" size={12} />
@@ -373,7 +374,10 @@ export const PeopleBriefing = ({
       ) : (
         <div className="people-list" aria-label="People relationships">
           {regularRows.length > 0 ? (
-            <section aria-label="Regular collaborators" className="people-section">
+            <section
+              aria-label="Regular collaborators"
+              className="people-section"
+            >
               <div className="people-list__heading">
                 <h2>Regular collaborators</h2>
                 <span>{regularRows.length}</span>
@@ -394,10 +398,7 @@ export const PeopleBriefing = ({
             </section>
           ) : null}
           {unlinkedRows.length > 0 && (
-            <details
-              aria-label="Unlinked contacts"
-              className="people-unlinked"
-            >
+            <details aria-label="Unlinked contacts" className="people-unlinked">
               <summary>
                 <span>
                   <strong>Unlinked contacts</strong>

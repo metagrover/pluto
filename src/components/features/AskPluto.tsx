@@ -229,7 +229,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       return [
         ...cleaned,
         { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
-        { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
+        {
+          id: nextMessageId(),
+          role: 'assistant',
+          content: '',
+          isLoading: true,
+        },
       ];
     });
 
