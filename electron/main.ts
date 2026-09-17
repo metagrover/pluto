@@ -2149,6 +2149,9 @@ app.whenReady().then(async () => {
         parakeetEouOwner = null;
         parakeetEouGeneration = null;
       }
+      if (error instanceof Error && error.message === 'parakeet_cancelled') {
+        return { cancelled: true };
+      }
       throw error;
     }
   });
@@ -2203,6 +2206,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('PARAKEET_EOU_CANCEL', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
+    // Cancellation can race with a pending START rejection. Once START has
+    // released the EOU owner there is no native session left to protect or
+    // cancel, so repeated cleanup is intentionally idempotent.
+    if (!parakeetEouOwner) return { cancelled: false };
     requireParakeetEouOwner(event.sender, meetingId);
     const generation = parakeetEouGeneration;
     const code =
@@ -2217,7 +2224,7 @@ app.whenReady().then(async () => {
       parakeetEouOwner = null;
       parakeetEouGeneration = null;
     }
-    return {};
+    return { cancelled: true };
   });
 
   ipcMain.handle('RECORDING_READINESS_STATUS', async () => {

@@ -521,6 +521,27 @@ describe('EOU renderer session', () => {
     });
   });
 
+  it('handles a main-process startup cancellation without restoring readiness', async () => {
+    const transport = makeTransport();
+    vi.mocked(transport.invoke).mockImplementation((channel) =>
+      Promise.resolve(
+        channel === 'PARAKEET_EOU_START' ? { cancelled: true } : {},
+      ),
+    );
+    const { session, onUnavailable } = makeSession(transport);
+
+    await expect(session.start()).resolves.toBeUndefined();
+
+    expect(session.status()).toBe('unavailable');
+    expect(onUnavailable).toHaveBeenCalledOnce();
+    expect(onUnavailable).toHaveBeenCalledWith('parakeet_cancelled');
+    expect(transport.invoke).toHaveBeenCalledWith('PARAKEET_EOU_CANCEL', {
+      meetingId: 'meeting-1',
+      generation: 1,
+      code: 'parakeet_cancelled',
+    });
+  });
+
   it('buffers 49 320ms mic frames before readiness and dispatches all 49 in order without backpressure', async () => {
     const transport = makeTransport();
     const startDeferred = deferred<unknown>();
