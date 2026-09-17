@@ -124,7 +124,7 @@ export async function executeOpenAICompatible(
           json_schema: {
             name: request.task,
             schema: request.responseSchema,
-            strict: true,
+            strict: request.responseSchemaStrict ?? true,
           },
         }
       : { type: 'json_object' };

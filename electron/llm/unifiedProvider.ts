@@ -1256,6 +1256,10 @@ export class UnifiedLLMProvider implements LLMProvider {
         temperature: this.getTemperature(task),
         jsonMode,
         responseSchema: responseSchema ?? notesResponseSchema,
+        // Pluto's notes schema deliberately contains optional fields and
+        // constraints outside the strict OpenAI schema subset. The local
+        // parser, grounding checks, and one-repair pass remain authoritative.
+        responseSchemaStrict: notesBudget ? false : undefined,
         maxOutputTokens: notesBudget?.outputTokens,
         signal,
         egress: {
@@ -1278,6 +1282,8 @@ export class UnifiedLLMProvider implements LLMProvider {
           error.reportsInputOverflow
             ? 'notes_input_overflow'
             : 'notes_provider_error',
+          undefined,
+          { cause: error },
         );
       }
       throw error;

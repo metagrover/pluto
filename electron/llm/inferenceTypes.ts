@@ -27,6 +27,8 @@ export interface InferenceRequest {
   model: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   responseSchema?: Record<string, unknown>;
+  /** Strict mode only accepts a provider-specific JSON Schema subset. */
+  responseSchemaStrict?: boolean;
   jsonMode?: boolean;
   maxOutputTokens?: number;
   temperature?: number;

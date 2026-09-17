@@ -190,7 +190,7 @@ describe('UnifiedLLMProvider', () => {
     for (const [, init] of fetchMock.mock.calls) {
       expect(parseRequestBody(init).response_format).toMatchObject({
         type: 'json_schema',
-        json_schema: { strict: true },
+        json_schema: { strict: false },
       });
       expect(parseRequestBody(init).format).toBeUndefined();
     }
