@@ -95,7 +95,36 @@ describe('person chat store', () => {
     expect(store.listThreads('maya')).toEqual([]);
     expect(store.listThreads('maya', true)).toHaveLength(1);
     expect(store.listMessages(thread.id, 'maya')).toHaveLength(1);
+    expect(() =>
+      store.appendMessage({
+        threadId: thread.id,
+        personId: 'maya',
+        role: 'user',
+        content: 'This should not revive the thread',
+      }),
+    ).toThrow('Person chat thread is archived');
+    expect(store.listThreads('maya')).toEqual([]);
     expect(store.resumeThread(thread.id, 'maya').archivedAt).toBeNull();
     expect(store.listThreads('maya')).toHaveLength(1);
+  });
+
+  it('deletes a thread and its messages', () => {
+    const store = createPersonChatStore(sqlite);
+    const thread = store.createThread('maya');
+    store.appendMessage({
+      threadId: thread.id,
+      personId: 'maya',
+      role: 'user',
+      content: 'Delete this conversation',
+    });
+
+    store.deleteThread(thread.id, 'maya');
+
+    expect(store.listThreads('maya', true)).toEqual([]);
+    expect(
+      sqlite
+        .prepare('SELECT COUNT(*) AS count FROM person_chat_messages')
+        .get(),
+    ).toEqual({ count: 0 });
   });
 });

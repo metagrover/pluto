@@ -37,6 +37,12 @@ export const resumePersonChatThread = (
 ): Promise<PersonChatThread> =>
   invoke('intelligence:person-chat:resume-thread', { personId, threadId });
 
+export const deletePersonChatThread = (
+  personId: string,
+  threadId: string,
+): Promise<{ deleted: true }> =>
+  invoke('intelligence:person-chat:delete-thread', { personId, threadId });
+
 export const listPersonChatMessages = (
   personId: string,
   threadId: string,

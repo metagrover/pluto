@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   archivePersonChatThread: vi.fn(),
   cancelPersonChatRequest: vi.fn(),
   createPersonChatThread: vi.fn(),
+  deletePersonChatThread: vi.fn(),
   getPersonChatCapability: vi.fn(),
   listPersonChatMessages: vi.fn(),
   listPersonChatThreads: vi.fn(),
@@ -41,6 +42,7 @@ describe('PersonChatDock', () => {
       updatedAt: '2026-09-13T12:00:00Z',
       archivedAt: null,
     });
+    api.deletePersonChatThread.mockResolvedValue({ deleted: true });
     api.sendPersonChatMessage.mockResolvedValue({
       status: 'answered',
       message: {
@@ -72,6 +74,10 @@ describe('PersonChatDock', () => {
         invoke: vi.fn(),
         send: vi.fn(),
       },
+    });
+    Object.defineProperty(window, 'confirm', {
+      configurable: true,
+      value: vi.fn(() => true),
     });
   });
 
@@ -232,6 +238,35 @@ describe('PersonChatDock', () => {
       'thread-archived',
     );
     expect(document.querySelector('.person-chat__sidebar')).toBeNull();
+
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(document.body.textContent).toContain(
+      'This conversation is archived. Resume it to ask more questions.',
+    );
+
+    await act(async () => hamburger.click());
+    api.listPersonChatThreads.mockResolvedValueOnce([
+      {
+        id: 'thread-current',
+        personId: 'maya',
+        title: 'Current priorities',
+        createdAt: '2026-09-13T12:00:00Z',
+        updatedAt: '2026-09-13T12:00:00Z',
+        archivedAt: null,
+      },
+    ]);
+    const deleteArchived = document.querySelector(
+      'button[aria-label="Delete conversation: Launch history"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      deleteArchived.click();
+      await Promise.resolve();
+    });
+    expect(api.deletePersonChatThread).toHaveBeenCalledWith(
+      'maya',
+      'thread-archived',
+    );
+    expect(window.confirm).toHaveBeenCalled();
 
     // 7. Click header plus button to start a fresh thread
     await act(async () => newConversationHeaderBtn.click());

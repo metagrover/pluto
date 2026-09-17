@@ -591,7 +591,10 @@ import {
   createMeetingAnalysisRunCoordinator,
 } from './meetingAnalysisRuns';
 import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
-import { createPersonChatStore } from './personChatStore';
+import {
+  PersonChatThreadArchivedError,
+  createPersonChatStore,
+} from './personChatStore';
 import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
@@ -4185,6 +4188,17 @@ app.whenReady().then(async () => {
     },
   );
   ipcMain.handle(
+    'intelligence:person-chat:delete-thread',
+    (_event, payload: { personId?: unknown; threadId?: unknown }) => {
+      if (!personChatEnabled) throw new Error('Person Chat is disabled');
+      personChatStore.deleteThread(
+        String(payload?.threadId ?? ''),
+        String(payload?.personId ?? ''),
+      );
+      return { deleted: true };
+    },
+  );
+  ipcMain.handle(
     'intelligence:person-chat:list-messages',
     (_event, payload: { personId?: unknown; threadId?: unknown }) =>
       personChatStore.listMessages(
@@ -4344,7 +4358,10 @@ app.whenReady().then(async () => {
         return {
           status: 'unavailable',
           message: null,
-          rationale: inferenceTransportErrorRationale(error),
+          rationale:
+            error instanceof PersonChatThreadArchivedError
+              ? 'This conversation is archived. Resume it before asking another question.'
+              : inferenceTransportErrorRationale(error),
         } satisfies PersonChatResponse;
       } finally {
         settle();

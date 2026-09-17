@@ -9,6 +9,7 @@ import {
   Plus,
   Send,
   Square,
+  Trash2,
   X,
 } from 'lucide-react';
 import type React from 'react';
@@ -20,6 +21,7 @@ import {
   archivePersonChatThread,
   cancelPersonChatRequest,
   createPersonChatThread,
+  deletePersonChatThread,
   getPersonChatCapability,
   listPersonChatMessages,
   listPersonChatThreads,
@@ -221,19 +223,56 @@ export const PersonChatDock: React.FC<{
     return created.id;
   };
 
-  const cancelActive = () => {
+  const cancelActive = async (): Promise<void> => {
     const requestId = activeRequest.current;
     if (!requestId) return;
     activeRequest.current = null;
     setAsking(false);
     setStreaming('');
     setStatus('');
-    void cancelPersonChatRequest(requestId);
+    await cancelPersonChatRequest(requestId);
+  };
+
+  const selectedThread = threads.find((thread) => thread.id === threadId);
+
+  const deleteConversation = async (thread: PersonChatThread) => {
+    if (
+      !window.confirm(
+        `Delete “${thread.title}”? This permanently removes the conversation.`,
+      )
+    )
+      return;
+    try {
+      if (thread.id === threadId) await cancelActive();
+      await deletePersonChatThread(personId, thread.id);
+      const next = await refreshThreads();
+      if (thread.id === threadId) {
+        setThreadId(
+          next.find((candidate) => candidate.archivedAt === null)?.id ?? null,
+        );
+      }
+    } catch {
+      setError('Pluto could not delete this conversation.');
+    }
+  };
+
+  const archiveConversation = async () => {
+    if (!threadId) return;
+    await cancelActive();
+    await archivePersonChatThread(personId, threadId);
+    const next = await refreshThreads();
+    setThreadId(next.find((thread) => thread.archivedAt === null)?.id ?? null);
   };
 
   const submit = async (value: string) => {
     const content = value.trim();
     if (!content || asking) return;
+    if (selectedThread?.archivedAt) {
+      setError(
+        'This conversation is archived. Resume it before asking another question.',
+      );
+      return;
+    }
     const targetThread = await ensureThread();
     const requestId = crypto.randomUUID();
     activeRequest.current = requestId;
@@ -361,7 +400,7 @@ export const PersonChatDock: React.FC<{
             title="New conversation"
             aria-label="New conversation"
             onClick={() => {
-              cancelActive();
+              void cancelActive();
               setThreadId(null);
               setMessages([]);
               setError('');
@@ -391,18 +430,7 @@ export const PersonChatDock: React.FC<{
                 type="button"
                 title="Archive chat"
                 aria-label="Archive chat"
-                onClick={() => {
-                  cancelActive();
-                  void archivePersonChatThread(personId, threadId).then(
-                    async () => {
-                      const next = await refreshThreads();
-                      setThreadId(
-                        next.find((thread) => thread.archivedAt === null)?.id ??
-                          null,
-                      );
-                    },
-                  );
-                }}
+                onClick={() => void archiveConversation()}
               >
                 <Archive size={15} />
               </button>
@@ -413,7 +441,7 @@ export const PersonChatDock: React.FC<{
             title="Minimize"
             aria-label="Minimize person chat"
             onClick={() => {
-              cancelActive();
+              void cancelActive();
               setExpanded(false);
               setSidebarOpen(false);
             }}
@@ -453,7 +481,7 @@ export const PersonChatDock: React.FC<{
                   aria-label="New conversation"
                   className={`person-chat__sidebar-new ${!threadId ? 'is-active' : ''}`}
                   onClick={() => {
-                    cancelActive();
+                    void cancelActive();
                     setThreadId(null);
                     setMessages([]);
                     setError('');
@@ -476,28 +504,41 @@ export const PersonChatDock: React.FC<{
                       {threads.map((thread) => {
                         const isActive = thread.id === threadId;
                         return (
-                          <button
-                            type="button"
+                          <div
+                            className="person-chat__sidebar-row"
                             key={thread.id}
-                            aria-label={`${thread.title}${thread.archivedAt ? ', archived' : ''}${isActive ? ', selected' : ''}`}
-                            className={`person-chat__sidebar-item ${isActive ? 'is-active' : ''}`}
-                            onClick={() => {
-                              cancelActive();
-                              setThreadId(thread.id);
-                              setSidebarOpen(false);
-                            }}
                           >
-                            <MessageCircle size={14} aria-hidden="true" />
-                            <span className="person-chat__sidebar-item-text">
-                              <strong>{thread.title}</strong>
-                              {thread.archivedAt ? (
-                                <small>Archived</small>
+                            <button
+                              type="button"
+                              aria-label={`${thread.title}${thread.archivedAt ? ', archived' : ''}${isActive ? ', selected' : ''}`}
+                              className={`person-chat__sidebar-item ${isActive ? 'is-active' : ''}`}
+                              onClick={() => {
+                                void cancelActive();
+                                setThreadId(thread.id);
+                                setSidebarOpen(false);
+                              }}
+                            >
+                              <MessageCircle size={14} aria-hidden="true" />
+                              <span className="person-chat__sidebar-item-text">
+                                <strong>{thread.title}</strong>
+                                {thread.archivedAt ? (
+                                  <small>Archived</small>
+                                ) : null}
+                              </span>
+                              {isActive ? (
+                                <Check size={14} aria-hidden="true" />
                               ) : null}
-                            </span>
-                            {isActive ? (
-                              <Check size={14} aria-hidden="true" />
-                            ) : null}
-                          </button>
+                            </button>
+                            <button
+                              type="button"
+                              className="person-chat__sidebar-delete"
+                              aria-label={`Delete conversation: ${thread.title}`}
+                              title="Delete conversation"
+                              onClick={() => void deleteConversation(thread)}
+                            >
+                              <Trash2 size={13} aria-hidden="true" />
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -594,41 +635,47 @@ export const PersonChatDock: React.FC<{
             <div ref={endRef} />
           </div>
 
-          <form
-            className="person-chat__composer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit(query);
-            }}
-          >
-            <textarea
-              ref={textareaRef}
-              value={query}
-              rows={1}
-              maxLength={4_000}
-              placeholder={`Chat about ${personName}`}
-              aria-label={`Chat about ${personName}`}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void submit(query);
-                }
+          {selectedThread?.archivedAt ? (
+            <div className="person-chat__archived-notice">
+              This conversation is archived. Resume it to ask more questions.
+            </div>
+          ) : (
+            <form
+              className="person-chat__composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit(query);
               }}
-            />
-            <button
-              type={asking ? 'button' : 'submit'}
-              onClick={asking ? stop : undefined}
-              disabled={!asking && !query.trim()}
-              aria-label={asking ? 'Stop answering' : 'Send message'}
             >
-              {asking ? (
-                <Square size={14} fill="currentColor" />
-              ) : (
-                <Send size={16} />
-              )}
-            </button>
-          </form>
+              <textarea
+                ref={textareaRef}
+                value={query}
+                rows={1}
+                maxLength={4_000}
+                placeholder={`Chat about ${personName}`}
+                aria-label={`Chat about ${personName}`}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    void submit(query);
+                  }
+                }}
+              />
+              <button
+                type={asking ? 'button' : 'submit'}
+                onClick={asking ? stop : undefined}
+                disabled={!asking && !query.trim()}
+                aria-label={asking ? 'Stop answering' : 'Send message'}
+              >
+                {asking ? (
+                  <Square size={14} fill="currentColor" />
+                ) : (
+                  <Send size={16} />
+                )}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </aside>,
