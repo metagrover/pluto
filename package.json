@@ -20,7 +20,7 @@
     "ensure:parakeet": "./scripts/ensure_parakeet_runtime.sh",
     "ensure:audio-cap": "./scripts/ensure_audio_cap_runtime.sh",
     "ensure:calendar-helper": "test -x resources/bin/PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper || pnpm run build:calendar-helper",
-    "build:audio-cap": "mkdir -p resources/bin && swiftc resources/swift/audiocap/*.swift -o resources/bin/audiocap -framework CoreAudio -framework AudioToolbox -framework AVFoundation",
+    "build:audio-cap": "./scripts/build_audio_cap.sh",
     "build:calendar-helper": "./scripts/build_calendar_helper.sh",
     "ensure:media-tools": "node scripts/verify_media_runtime.mjs",
     "package:verify-runtime": "node scripts/verify_packaged_runtime.mjs",
