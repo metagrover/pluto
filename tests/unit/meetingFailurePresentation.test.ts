@@ -272,4 +272,19 @@ describe('meeting regeneration failure presentation', () => {
       canRetry: true,
     });
   });
+
+  it('explains cloud rate limits without suggesting a configuration error', () => {
+    expect(
+      resolveMeetingRegenerationFailurePresentation({
+        kind: 'request_failed',
+        error: new Error('notes_provider_rate_limited'),
+        hasExistingNotes: true,
+      }),
+    ).toEqual({
+      title: "Notes weren't regenerated",
+      detail:
+        'The cloud provider is rate-limiting requests. Wait a moment, then try again. Your current notes are unchanged.',
+      canRetry: true,
+    });
+  });
 });

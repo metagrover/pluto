@@ -45,6 +45,35 @@ const classifyTransportError = (
   return `${provider}_request_failed`;
 };
 
+const rateLimitRetryDelayMs = (response: Response, retryIndex: number) => {
+  const retryAfter = response.headers?.get?.('retry-after')?.trim();
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const requestedMs = Number.isFinite(seconds)
+      ? seconds * 1_000
+      : Date.parse(retryAfter) - Date.now();
+    if (Number.isFinite(requestedMs)) {
+      return Math.min(30_000, Math.max(0, requestedMs));
+    }
+  }
+  return Math.min(8_000, 3_000 * 2 ** retryIndex);
+};
+
+const waitForRetry = (delayMs: number, signal?: AbortSignal) => {
+  signal?.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+};
+
 export class InferenceTransportError extends Error {
   constructor(
     readonly status: number,
@@ -130,19 +159,36 @@ export async function executeOpenAICompatible(
       : { type: 'json_object' };
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      ...(provider === 'openrouter'
-        ? { 'X-OpenRouter-Title': 'Pluto', 'HTTP-Referer': 'https://pluto.app' }
-        : {}),
-    },
-    body: JSON.stringify(body),
-    signal: request.signal,
-  });
-  if (!response.ok) {
+  const maxRateLimitRetries = Math.max(
+    0,
+    Math.floor(request.rateLimitRetries ?? 0),
+  );
+  let response: Response;
+  let retryIndex = 0;
+  while (true) {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        ...(provider === 'openrouter'
+          ? {
+              'X-OpenRouter-Title': 'Pluto',
+              'HTTP-Referer': 'https://pluto.app',
+            }
+          : {}),
+      },
+      body: JSON.stringify(body),
+      signal: request.signal,
+    });
+    if (response.ok) break;
+    if (response.status === 429 && retryIndex < maxRateLimitRetries) {
+      const delayMs = rateLimitRetryDelayMs(response, retryIndex);
+      retryIndex += 1;
+      await waitForRetry(delayMs, request.signal);
+      continue;
+    }
+
     let detail = '';
     try {
       detail = providerErrorDetail(await response.json());

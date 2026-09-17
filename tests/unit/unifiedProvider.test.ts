@@ -220,6 +220,7 @@ describe('UnifiedLLMProvider', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -1168,6 +1169,80 @@ describe('UnifiedLLMProvider', () => {
       'zero-retention endpoint',
     );
     expect(String(error)).not.toContain('No endpoints found');
+  });
+
+  it('honors Retry-After and retries an eligible OpenRouter 429 once', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '2',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          model: 'openai/gpt-4o-mini',
+          choices: [{ message: { content: 'Recovered' } }],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'notesWriter',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Summarize' }],
+      rateLimitRetries: 1,
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toMatchObject({ text: 'Recovered' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels an OpenRouter request while waiting to retry a 429', async () => {
+    const controller = new AbortController();
+    const cancellation = new DOMException('cancelled', 'AbortError');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'Retry-After': '30',
+            },
+          }),
+        ),
+      ),
+    );
+
+    const pending = executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'notesWriter',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Summarize' }],
+      rateLimitRetries: 1,
+      signal: controller.signal,
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    });
+    await Promise.resolve();
+    controller.abort(cancellation);
+
+    await expect(pending).rejects.toBe(cancellation);
   });
 
   it('normalizes OpenAI shorthand model IDs for OpenRouter', async () => {

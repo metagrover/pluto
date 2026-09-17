@@ -31,6 +31,8 @@ export interface InferenceRequest {
   responseSchemaStrict?: boolean;
   jsonMode?: boolean;
   maxOutputTokens?: number;
+  /** Additional attempts after a 429 response. Defaults to no retry. */
+  rateLimitRetries?: number;
   temperature?: number;
   stream?: boolean;
   signal?: AbortSignal;

@@ -168,9 +168,10 @@ it('preserves a sanitized cloud transport cause for notes failures', async () =>
     });
     return {
       ok: false,
-      status: 400,
+      status: 429,
+      headers: new Headers({ 'Retry-After': '0' }),
       json: async () => ({
-        error: { message: 'PRIVATE_MARKER invalid response schema' },
+        error: { message: 'PRIVATE_MARKER rate limit exceeded' },
       }),
     };
   });
@@ -192,12 +193,13 @@ it('preserves a sanitized cloud transport cause for notes failures', async () =>
     .catch((caught) => caught);
 
   expect(error).toBeInstanceOf(MeetingNotesError);
-  expect(error).toMatchObject({ code: 'notes_provider_error' });
+  expect(error).toMatchObject({ code: 'notes_provider_rate_limited' });
   expect(error.cause).toMatchObject({
-    status: 400,
+    status: 429,
     provider: 'openrouter',
-    code: 'openrouter_request_failed',
+    code: 'provider_rate_limited',
   });
+  expect(fetcher).toHaveBeenCalledTimes(2);
   expect(JSON.stringify(error)).not.toContain('PRIVATE_MARKER');
   expect(JSON.stringify(error.cause)).not.toContain('PRIVATE_MARKER');
 });

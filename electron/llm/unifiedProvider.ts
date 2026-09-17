@@ -1261,6 +1261,9 @@ export class UnifiedLLMProvider implements LLMProvider {
         // parser, grounding checks, and one-repair pass remain authoritative.
         responseSchemaStrict: notesBudget ? false : undefined,
         maxOutputTokens: notesBudget?.outputTokens,
+        // A rejected 429 request is safe to retry once. Do not silently switch
+        // providers or models, and leave interactive chat retries to the user.
+        rateLimitRetries: notesBudget ? 1 : 0,
         signal,
         egress: {
           classification: 'selected_meeting_context',
@@ -1281,7 +1284,9 @@ export class UnifiedLLMProvider implements LLMProvider {
         throw new MeetingNotesError(
           error.reportsInputOverflow
             ? 'notes_input_overflow'
-            : 'notes_provider_error',
+            : error.code === 'provider_rate_limited'
+              ? 'notes_provider_rate_limited'
+              : 'notes_provider_error',
           undefined,
           { cause: error },
         );
