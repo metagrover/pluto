@@ -35,44 +35,50 @@
     container: people-briefing / inline-size;
   }
   .people-search {
-    @apply flex h-8 w-[160px] items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-3 text-pro-text-muted transition-all duration-300 hover:border-pro-text-muted/60 focus-within:w-[230px] focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-pro-bg;
+    @apply flex h-8 w-[160px] items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-2.5 text-pro-text-muted transition-all duration-300 hover:border-pro-text-muted/60 focus-within:w-[240px] focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-pro-bg;
   }
   .people-search input {
     @apply min-w-0 flex-1 bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted/80;
   }
+  .people-search__clear {
+    @apply flex h-5 w-5 items-center justify-center rounded text-pro-text-muted transition-colors hover:text-pro-text-main;
+  }
   .people-list {
-    @apply mt-8 grid gap-9;
+    @apply mt-6 grid gap-8;
   }
   .people-list__heading {
     @apply mb-3 flex items-center justify-between gap-3 px-3;
   }
   .people-list__heading h2 {
-    @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/80;
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-pro-text-muted;
   }
   .people-list__heading > span {
-    @apply text-[10px] font-semibold tabular-nums text-pro-text-muted/70;
+    @apply inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-pro-border/60 bg-pro-surface px-1.5 text-[10px] font-medium tabular-nums text-pro-text-muted/80;
   }
   .person-commitments {
-    @apply inline-flex items-center rounded border border-amber-500/15 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/90;
+    @apply inline-flex items-center rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/95 tabular-nums;
   }
   .person-candidates {
-    @apply inline-flex items-center rounded border border-pro-accent/20 bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent;
+    @apply inline-flex items-center rounded border border-pro-accent/20 bg-pro-accent/5 px-1.5 py-0.5 text-[10px] font-semibold text-pro-accent tabular-nums;
+  }
+  .person-historical {
+    @apply inline-flex items-center rounded border border-pro-border/70 bg-pro-surface/60 px-1.5 py-0.5 text-[10px] font-medium text-pro-text-muted/80;
   }
   .person-row {
-    @apply relative border-b border-pro-border/50 last:border-b-0;
+    @apply relative border-b border-pro-border/40 last:border-b-0;
   }
   .person-row--selected {
     @apply rounded-xl bg-pro-accent/5;
   }
   .person-row__meeting {
-    @apply grid w-full items-center gap-x-4 gap-y-2 rounded-xl px-3 py-3.5 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
-    grid-template-columns: 2rem minmax(0, 1fr) 10rem 0.8125rem;
+    @apply grid w-full items-center gap-x-4 gap-y-2 rounded-xl px-3 py-3 text-left transition-colors duration-150 hover:bg-pro-surface/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
+    grid-template-columns: 2rem minmax(0, 1fr) 10.5rem 0.8125rem;
   }
   .person-avatar {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-[11px] font-semibold text-pro-text-muted/70 transition-colors duration-150;
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-pro-border/70 bg-pro-surface/90 text-[11px] font-semibold text-pro-text-muted transition-all duration-150;
   }
   .person-row__meeting:hover .person-avatar {
-    @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
+    @apply border-pro-accent/40 bg-pro-accent/10 text-pro-accent;
   }
   .person-copy {
     @apply flex min-w-0 flex-1 flex-col gap-1;
@@ -81,7 +87,7 @@
     @apply flex min-w-0 items-baseline gap-2;
   }
   .person-identity strong {
-    @apply break-words text-[13.5px] font-medium leading-snug text-pro-text-main transition-colors duration-150;
+    @apply break-words text-[14px] font-semibold leading-snug text-pro-text-main transition-colors duration-150 tracking-[-0.01em];
     overflow-wrap: anywhere;
   }
   .person-row__meeting:hover .person-identity strong {
@@ -94,10 +100,10 @@
     @apply max-w-full truncate;
   }
   .person-role {
-    @apply max-w-full truncate text-[11px] text-pro-text-muted/70;
+    @apply max-w-full truncate text-[11.5px] font-medium text-pro-text-muted/80;
   }
   .person-meta {
-    @apply flex min-w-0 flex-col items-end gap-1.5 text-right text-[11px] tabular-nums text-pro-text-muted/70;
+    @apply flex min-w-0 flex-col items-end gap-1 text-right text-[11px] tabular-nums text-pro-text-muted/70;
   }
   .person-meeting-count,
   .person-date {
@@ -2447,6 +2453,42 @@
 
 .animate-neural {
   animation: neural-pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Pluto Skeleton Line Shimmer */
+@keyframes pluto-skeleton-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.pluto-skeleton-line {
+  position: relative;
+  overflow: hidden;
+  background-color: hsl(var(--pro-text-main) / 0.07);
+}
+
+.pluto-skeleton-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--pro-text-main) / 0.06) 50%,
+    transparent 100%
+  );
+  animation: pluto-skeleton-sheen 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pluto-skeleton-line::after {
+    animation: none;
+  }
 }
 
 /* Window Drag Regions */

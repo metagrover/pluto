@@ -207,9 +207,10 @@ describe('People identity controls', () => {
     expect(api.restorePersonMerge).toHaveBeenCalledWith('person-2');
   });
 
-  it('requires an explicit owner decision for a name-matched open loop', async () => {
+  it('requires an explicit owner decision for a name-matched open loop for self', async () => {
     api.getPersonBriefing.mockResolvedValue({
       ...detail('person-1', 'Avery Chen'),
+      isSelf: true,
       commitments: {
         open: [],
         delivered: [],
@@ -237,6 +238,34 @@ describe('People identity controls', () => {
       'action-1',
       'person-1',
     );
+  });
+
+  it('displays commitments directly without confirmation friction for others', async () => {
+    api.getPersonBriefing.mockResolvedValue({
+      ...detail('person-1', 'Avery Chen'),
+      isSelf: false,
+      commitments: {
+        open: [
+          {
+            id: 'action-1',
+            text: 'Share the launch notes',
+            status: 'active',
+            dueDate: null,
+            evidence: 'Avery can share the notes.',
+            sourceMeetingId: 'meeting-1',
+            sourceMeetingTitle: 'Product review',
+            updatedAt: '2026-08-20T12:00:00.000Z',
+          },
+        ],
+        delivered: [],
+        candidates: [],
+      },
+    });
+    await render();
+    expect(host.textContent).toContain('Commitments');
+    expect(host.textContent).toContain('Share the launch notes');
+    expect(host.textContent).not.toContain('Needs confirmation');
+    expect(host.textContent).not.toContain('Confirm owner');
   });
 
   it('shows cancelled preparation without claiming success', async () => {

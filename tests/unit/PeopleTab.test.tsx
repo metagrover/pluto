@@ -6,6 +6,8 @@ import {
   type PersonBriefingRow,
   PersonDossier,
   formatCommitmentChronology,
+  isRegularCollaborator,
+  sortPeopleRows,
 } from '../../src/components/KnowledgeGraph/PeopleTab';
 
 const rows: PersonBriefingRow[] = [
@@ -136,6 +138,118 @@ describe('PeopleBriefing', () => {
     expect(markup).toContain(
       'People will appear as Pluto connects them to conversations.',
     );
+  });
+
+  it('groups regular collaborators at the top and occasional conversations below', () => {
+    const regularPerson: PersonBriefingRow = {
+      ...rows[0],
+      id: 'person-regular',
+      name: 'Maya Lin',
+      meetingCount: 5,
+      latestMeetingAt: '2026-07-15T12:00:00.000Z',
+    };
+    const occasionalPerson: PersonBriefingRow = {
+      ...rows[0],
+      id: 'person-occasional',
+      name: 'Devon Ray',
+      meetingCount: 1,
+      latestMeetingAt: '2026-07-14T12:00:00.000Z',
+    };
+    const unlinkedPerson: PersonBriefingRow = {
+      ...rows[0],
+      id: 'person-unlinked',
+      name: 'Sam Taylor',
+      meetingCount: 0,
+      latestMeetingAt: null,
+    };
+
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={[occasionalPerson, unlinkedPerson, regularPerson]}
+        onSelectPerson={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Regular collaborators');
+    expect(markup).toContain('Other conversations');
+    expect(markup).toContain('Unlinked contacts');
+
+    // Regular collaborator appears before Other conversations section
+    const regularIdx = markup.indexOf('data-person-id="person-regular"');
+    const otherHeadingIdx = markup.indexOf('Other conversations');
+    const occasionalIdx = markup.indexOf('data-person-id="person-occasional"');
+    const unlinkedIdx = markup.indexOf('data-person-id="person-unlinked"');
+
+    expect(regularIdx).toBeLessThan(otherHeadingIdx);
+    expect(otherHeadingIdx).toBeLessThan(occasionalIdx);
+    expect(occasionalIdx).toBeLessThan(unlinkedIdx);
+  });
+
+  it('sorts people primarily by recency of conversation rather than stale open commitments', () => {
+    const recentPerson: PersonBriefingRow = {
+      ...rows[0],
+      id: 'person-recent',
+      name: 'Elena Rostova',
+      meetingCount: 3,
+      openCommitmentCount: 0,
+      latestMeetingAt: '2026-07-20T12:00:00.000Z',
+    };
+    const olderPersonWithTask: PersonBriefingRow = {
+      ...rows[0],
+      id: 'person-task',
+      name: 'Marcus Vance',
+      meetingCount: 3,
+      openCommitmentCount: 5,
+      latestMeetingAt: '2026-06-01T12:00:00.000Z',
+    };
+
+    const sorted = sortPeopleRows([olderPersonWithTask, recentPerson]);
+    expect(sorted[0].id).toBe('person-recent');
+    expect(sorted[1].id).toBe('person-task');
+  });
+
+  it('identifies regular collaborators based on frequency and recency', () => {
+    const referenceNow = Date.parse('2026-07-15T12:00:00.000Z');
+
+    // 3+ meetings is always regular
+    expect(
+      isRegularCollaborator(
+        { ...rows[0], meetingCount: 3, latestMeetingAt: '2026-01-01T00:00:00.000Z' },
+        referenceNow,
+      ),
+    ).toBe(true);
+
+    // 2 meetings within 60 days is regular
+    expect(
+      isRegularCollaborator(
+        { ...rows[0], meetingCount: 2, latestMeetingAt: '2026-07-01T00:00:00.000Z' },
+        referenceNow,
+      ),
+    ).toBe(true);
+
+    // 2 meetings older than 60 days is not regular
+    expect(
+      isRegularCollaborator(
+        { ...rows[0], meetingCount: 2, latestMeetingAt: '2026-03-01T00:00:00.000Z' },
+        referenceNow,
+      ),
+    ).toBe(false);
+
+    // 1 meeting is not regular
+    expect(
+      isRegularCollaborator(
+        { ...rows[0], meetingCount: 1, latestMeetingAt: '2026-07-15T00:00:00.000Z' },
+        referenceNow,
+      ),
+    ).toBe(false);
+
+    // 0 meetings is not regular
+    expect(
+      isRegularCollaborator(
+        { ...rows[0], meetingCount: 0, latestMeetingAt: null },
+        referenceNow,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -444,7 +558,7 @@ describe('PersonDossier', () => {
     );
 
     expect(markup).toContain('What Avery has been up to');
-    expect(markup).toContain('Recent Activity Insight');
+    expect(markup).toContain('recent touchpoint');
     expect(markup).toContain('Avery is coordinating the launch handoff.');
     expect(markup).toContain('Product review');
     expect(markup).toContain('Design handoff');

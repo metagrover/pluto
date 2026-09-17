@@ -5,6 +5,7 @@ import {
   isUsablePersonName,
   mergePersonMeetingEvidence,
   selectCandidatePersonCommitments,
+  selectPersonCommitments,
   selectVerifiedPersonCommitments,
 } from '../../src/utils/personBriefing';
 
@@ -224,3 +225,94 @@ describe('candidate person commitments', () => {
     ]);
   });
 });
+
+describe('selectPersonCommitments', () => {
+  const verifiedAction = {
+    id: 'verified-1',
+    name: 'Verified task',
+    status: 'active' as const,
+    due_date: '2026-09-02',
+    assigned_to: 'person-1',
+    metadata: JSON.stringify({
+      owner_source: 'user',
+      commitment_state: 'confirmed',
+      source_meeting_id: 'meeting-1',
+      source_evidence: 'Confirmed task evidence.',
+    }),
+    updated_at: '2026-08-30T12:00:00.000Z',
+    sourceMeetingTitle: 'Launch review',
+  };
+
+  const extractedAction = {
+    id: 'extracted-1',
+    name: 'Extracted task from notes',
+    status: 'active' as const,
+    due_date: '2026-09-05',
+    assigned_to: null,
+    metadata: JSON.stringify({
+      assignee_name: 'Jordan Vale',
+      commitment_state: 'possible',
+      source_meeting_id: 'meeting-1',
+      source_evidence: 'Jordan will handle the extracted task.',
+    }),
+    updated_at: '2026-08-31T12:00:00.000Z',
+    sourceMeetingTitle: 'Launch review',
+  };
+
+  it('keeps candidate friction for the workspace user (isSelf === true)', () => {
+    const result = selectPersonCommitments({
+      personId: 'person-1',
+      personNames: ['Jordan Vale'],
+      actions: [verifiedAction],
+      candidateActions: [extractedAction],
+      isSelf: true,
+    });
+
+    expect(result.open.map((item) => item.id)).toEqual(['verified-1']);
+    expect(result.candidates.map((item) => item.id)).toEqual(['extracted-1']);
+    expect(result.delivered).toEqual([]);
+  });
+
+  it('removes friction for others (isSelf === false), promoting extracted commitments directly to open', () => {
+    const result = selectPersonCommitments({
+      personId: 'person-1',
+      personNames: ['Jordan Vale'],
+      actions: [verifiedAction],
+      candidateActions: [extractedAction],
+      isSelf: false,
+    });
+
+    expect(result.open.map((item) => item.id)).toEqual([
+      'verified-1',
+      'extracted-1',
+    ]);
+    expect(result.candidates).toEqual([]);
+    expect(result.delivered).toEqual([]);
+  });
+
+  it('promotes completed candidate actions to delivered for non-self individuals', () => {
+    const now = Date.parse('2026-08-31T12:00:00.000Z');
+    const completedExtractedAction = {
+      ...extractedAction,
+      id: 'completed-extracted-1',
+      status: 'completed' as const,
+      updated_at: '2026-08-25T12:00:00.000Z',
+    };
+
+    const result = selectPersonCommitments({
+      personId: 'person-1',
+      personNames: ['Jordan Vale'],
+      actions: [],
+      candidateActions: [completedExtractedAction],
+      isSelf: false,
+      now,
+    });
+
+    expect(result.open).toEqual([]);
+    expect(result.delivered.map((item) => item.id)).toEqual([
+      'completed-extracted-1',
+    ]);
+    expect(result.candidates).toEqual([]);
+  });
+});
+

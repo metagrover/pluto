@@ -243,7 +243,26 @@ describe('person briefing database read model', () => {
       },
     });
 
-    const briefing = db.getPersonBriefing(person.id);
+    // For non-self individuals (isSelf === false), extracted commitments automatically show up in open commitments
+    const peerBriefing = db.getPersonBriefing(person.id);
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id),
+    ).toMatchObject({
+      openCommitmentCount: 2,
+      candidateCommitmentCount: 0,
+    });
+    expect(peerBriefing?.commitments.open.map((item) => item.id)).toEqual([
+      'verified-action',
+      'name-only-action',
+    ]);
+    expect(peerBriefing?.commitments.candidates).toEqual([]);
+
+    // For the active workspace user (isSelf === true), friction is preserved:
+    // extracted commitments require confirmation before entering open commitments
+    db.identityStore.setSelfPersonId(person.id);
+    const selfBriefing = db.getPersonBriefing(person.id);
 
     expect(
       db
@@ -253,10 +272,10 @@ describe('person briefing database read model', () => {
       openCommitmentCount: 1,
       candidateCommitmentCount: 1,
     });
-    expect(briefing?.commitments.open.map((item) => item.id)).toEqual([
+    expect(selfBriefing?.commitments.open.map((item) => item.id)).toEqual([
       'verified-action',
     ]);
-    expect(briefing?.commitments.candidates).toEqual([
+    expect(selfBriefing?.commitments.candidates).toEqual([
       expect.objectContaining({
         id: 'name-only-action',
         suggestedOwnerName: 'Jordan Vale',
@@ -277,6 +296,7 @@ describe('person briefing database read model', () => {
       open: [expect.objectContaining({ id: 'verified-action' })],
       candidates: [],
     });
+    db.identityStore.setSelfPersonId(null);
   });
 
   it('surfaces candidate commitments from meetings where the speaker was bound to the person', () => {
@@ -318,17 +338,38 @@ describe('person briefing database read model', () => {
       evidence: [],
     });
 
-    // After binding: candidate commitment count is 1 and appears in candidates list
+    // For non-self peer: binding Speaker 1 automatically promotes the commitment to open
     expect(
       db
         .getPeopleBriefingSummaries()
         .find((summary) => summary.id === person.id),
     ).toMatchObject({
+      openCommitmentCount: 1,
+      candidateCommitmentCount: 0,
+    });
+
+    const peerBriefing = db.getPersonBriefing(person.id);
+    expect(peerBriefing?.commitments.open).toEqual([
+      expect.objectContaining({
+        id: 'action-speaker-1',
+        sourceMeetingTitle: 'Roadmap Planning',
+      }),
+    ]);
+    expect(peerBriefing?.commitments.candidates).toEqual([]);
+
+    // For the active user (isSelf === true): candidate commitments require confirmation
+    db.identityStore.setSelfPersonId(person.id);
+    expect(
+      db
+        .getPeopleBriefingSummaries()
+        .find((summary) => summary.id === person.id),
+    ).toMatchObject({
+      openCommitmentCount: 0,
       candidateCommitmentCount: 1,
     });
 
-    const briefing = db.getPersonBriefing(person.id);
-    expect(briefing?.commitments.candidates).toEqual([
+    const selfBriefing = db.getPersonBriefing(person.id);
+    expect(selfBriefing?.commitments.candidates).toEqual([
       expect.objectContaining({
         id: 'action-speaker-1',
         suggestedOwnerName: 'Ayush Grover',
@@ -360,6 +401,7 @@ describe('person briefing database read model', () => {
       open: [expect.objectContaining({ id: 'action-speaker-1' })],
       candidates: [],
     });
+    db.identityStore.setSelfPersonId(null);
   });
 
   it('returns undefined for a missing or non-person entity', () => {

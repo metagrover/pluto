@@ -63,8 +63,7 @@ import {
   isUsablePersonName,
   mergePersonMeetingEvidence,
   parsePersonRole,
-  selectCandidatePersonCommitments,
-  selectVerifiedPersonCommitments,
+  selectPersonCommitments,
 } from '../src/utils/personBriefing';
 import {
   type ProjectBrief,
@@ -6956,21 +6955,30 @@ const parseMeetingParticipants = (
         role?: unknown;
       }>;
     };
-    return (parsed.participants ?? []).flatMap((participant) =>
-      typeof participant.entity_id === 'string' &&
-      typeof participant.name === 'string'
-        ? [
-            {
-              entity_id: participant.entity_id,
-              name: participant.name,
-              ...(typeof participant.role === 'string' &&
-              participant.role.trim()
-                ? { role: participant.role.trim() }
-                : {}),
-            },
-          ]
-        : [],
-    );
+    return (parsed.participants ?? []).flatMap((participant) => {
+      if (
+        typeof participant.entity_id !== 'string' ||
+        typeof participant.name !== 'string' ||
+        !participant.name.trim()
+      ) {
+        return [];
+      }
+      const role =
+        typeof participant.role === 'string' &&
+        participant.role.trim() &&
+        !/^(?:undefined|null|n\/a|none|nobody|unknown)$/i.test(
+          participant.role.trim(),
+        )
+          ? participant.role.trim()
+          : undefined;
+      return [
+        {
+          entity_id: participant.entity_id.trim(),
+          name: participant.name.trim(),
+          ...(role ? { role } : {}),
+        },
+      ];
+    });
   } catch {
     return [];
   }
@@ -8289,6 +8297,7 @@ type PeopleBriefingSummaryRow = {
   latest_meeting_at: string | null;
   latest_context: string | null;
   open_commitment_count: number;
+  verified_open_commitment_count?: number;
   candidate_commitment_count: number;
   brief_headline: string | null;
   brief_status: string | null;
@@ -8358,17 +8367,17 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         GROUP BY person_id
       ), open_commitments AS (
         SELECT identity.canonical_id AS person_id,
-          COUNT(*) AS open_commitment_count
+          COUNT(*) AS open_commitment_count,
+          COUNT(CASE WHEN json_extract(
+            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
+            '$.owner_source'
+          ) = 'user' THEN 1 END) AS verified_open_commitment_count
         FROM entities action
         JOIN person_identity identity ON identity.source_id = action.assigned_to
         WHERE action.type = 'action_item'
           AND action.status IN ('active', 'overdue')
           AND json_type(CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.meeting_regeneration_retired_at') IS NULL
-          AND json_extract(
-            CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
-            '$.owner_source'
-          ) = 'user'
           AND COALESCE(json_extract(
             CASE WHEN json_valid(action.metadata) THEN action.metadata ELSE '{}' END,
             '$.commitment_state'
@@ -8489,6 +8498,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         latest.meeting_at AS latest_meeting_at,
         latest.context AS latest_context,
         COALESCE(commitments.open_commitment_count, 0) AS open_commitment_count,
+        COALESCE(commitments.verified_open_commitment_count, 0) AS verified_open_commitment_count,
         COALESCE(candidates.candidate_commitment_count, 0) AS candidate_commitment_count,
         CASE
           WHEN json_valid(brief.structured_json)
@@ -8526,25 +8536,49 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
     `)
     .all() as PeopleBriefingSummaryRow[];
 
+  const selfPersonId = identityStore.getSelfPersonId();
+  const canonicalSelfPersonId = selfPersonId
+    ? resolvePersonIdentityId(selfPersonId)
+    : null;
+
   return rows
     .filter((row) => isUsablePersonName(row.name))
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      role: parsePersonRole(row.metadata),
-      meetingCount: Number(row.meeting_count),
-      mentionCount: Number(row.mention_count),
-      latestMeetingId: row.latest_meeting_id,
-      latestMeetingTitle: row.latest_meeting_title,
-      latestMeetingAt: row.latest_meeting_at,
-      context: row.latest_context,
-      openCommitmentCount: Number(row.open_commitment_count),
-      candidateCommitmentCount: Number(row.candidate_commitment_count),
-      briefHeadline: row.brief_headline,
-      briefStatus: row.brief_status,
-      briefUpdatedAt: row.brief_updated_at,
-      possibleDuplicateCount: Number(row.possible_duplicate_count),
-    }));
+    .map((row) => {
+      const isSelf =
+        canonicalSelfPersonId !== null && row.id === canonicalSelfPersonId;
+      const verifiedOpenCount = Number(
+        row.verified_open_commitment_count ?? row.open_commitment_count,
+      );
+      const allAssignedOpenCount = Number(row.open_commitment_count);
+      const candidateCount = Number(row.candidate_commitment_count);
+      return {
+        id: row.id,
+        name: row.name,
+        role: parsePersonRole(row.metadata),
+        meetingCount: Number(row.meeting_count),
+        mentionCount: Number(row.mention_count),
+        latestMeetingId: row.latest_meeting_id,
+        latestMeetingTitle: row.latest_meeting_title,
+        latestMeetingAt: row.latest_meeting_at,
+        context: row.latest_context,
+        openCommitmentCount: isSelf
+          ? verifiedOpenCount
+          : allAssignedOpenCount + candidateCount,
+        candidateCommitmentCount: isSelf ? candidateCount : 0,
+        briefHeadline: row.brief_headline,
+        briefStatus: row.brief_status,
+        briefUpdatedAt: row.brief_updated_at,
+        possibleDuplicateCount: Number(row.possible_duplicate_count),
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.openCommitmentCount - a.openCommitmentCount ||
+        b.candidateCommitmentCount - a.candidateCommitmentCount ||
+        (Date.parse(b.latestMeetingAt || '') || 0) -
+          (Date.parse(a.latestMeetingAt || '') || 0) ||
+        a.name.localeCompare(b.name),
+    );
 };
 
 export interface PersonBriefingDetail {
@@ -8853,6 +8887,10 @@ export const getPersonBriefing = (
     acceptedClaims,
   );
 
+  const isSelf =
+    selfPersonId !== null &&
+    resolvePersonIdentityId(selfPersonId) === canonicalId;
+
   return {
     person,
     meetings: mergePersonMeetingEvidence({
@@ -8860,24 +8898,19 @@ export const getPersonBriefing = (
       scheduled,
       mentioned: mentionedMeetings,
     }),
-    commitments: {
-      ...selectVerifiedPersonCommitments({
-        personId: canonicalId,
-        actions: actionCandidates.map((action) => ({
-          ...action,
-          assigned_to: action.assigned_to
-            ? resolvePersonIdentityId(action.assigned_to)
-            : null,
-        })),
-      }),
-      candidates: selectCandidatePersonCommitments({
-        personNames: personNames.map((row) => row.name),
-        actions: candidateOwnerActions,
-      }),
-    },
-    isSelf:
-      selfPersonId !== null &&
-      resolvePersonIdentityId(selfPersonId) === canonicalId,
+    commitments: selectPersonCommitments({
+      personId: canonicalId,
+      personNames: personNames.map((row) => row.name),
+      actions: actionCandidates.map((action) => ({
+        ...action,
+        assigned_to: action.assigned_to
+          ? resolvePersonIdentityId(action.assigned_to)
+          : null,
+      })),
+      candidateActions: candidateOwnerActions,
+      isSelf,
+    }),
+    isSelf,
     knowledgeDoc,
     workingMemorySnapshot,
     mergedPeople,

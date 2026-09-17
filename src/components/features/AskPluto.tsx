@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   Brain,
   ChevronDown,
+  Sparkles,
   Square,
 } from 'lucide-react';
 import type React from 'react';
@@ -195,13 +196,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const handleSubmit = async (e?: React.FormEvent, presetQuery?: string) => {
     e?.preventDefault();
     const submitQuery = presetQuery || query;
-    if (!submitQuery.trim() || isProcessing) return;
+    if (!submitQuery.trim()) return;
+
+    if (isProcessing && activeRequestIdRef.current && window.ipcRenderer) {
+      void window.ipcRenderer
+        .invoke('intelligence:query:cancel', activeRequestIdRef.current)
+        .catch(() => undefined);
+    }
 
     setQuery('');
-    setMessages((prev) => [
-      ...prev,
-      { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
-    ]);
     setIsProcessing(true);
     setRequestPhase('retrieving');
     setCurrentMeeting(null);
@@ -213,15 +216,30 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         submitQuery,
       ),
     );
-    setMessages((prev) => [
-      ...prev,
-      { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
-    ]);
+    setMessages((prev) => {
+      const cleaned = prev.map((m) =>
+        m.isLoading
+          ? {
+              ...m,
+              isLoading: false,
+              content: m.content || 'Stopped.',
+            }
+          : m,
+      );
+      return [
+        ...cleaned,
+        { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
+        { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
+      ];
+    });
+
+    const requestId = window.ipcRenderer
+      ? `ask-pluto-${Date.now()}-${messageCounterRef.current}`
+      : null;
+    activeRequestIdRef.current = requestId;
 
     try {
-      if (window.ipcRenderer) {
-        const requestId = `ask-pluto-${Date.now()}-${messageCounterRef.current}`;
-        activeRequestIdRef.current = requestId;
+      if (window.ipcRenderer && requestId) {
         const priorTurns: AskPlutoConversationTurn[] = messages
           .slice(-6)
           .map((message) => ({
@@ -257,6 +275,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           ...(activeMeetingSnapshot ? { activeMeetingSnapshot } : {}),
         });
 
+        if (activeRequestIdRef.current !== requestId) return;
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
@@ -321,6 +340,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         });
       }
     } catch (e: unknown) {
+      if (activeRequestIdRef.current !== requestId) return;
       console.error('Ask Pluto error:', e);
       const cancelled =
         (e instanceof Error && e.name === 'AbortError') ||
@@ -352,8 +372,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         return newMsg;
       });
     } finally {
-      activeRequestIdRef.current = null;
-      setIsProcessing(false);
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = null;
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -480,80 +502,64 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       {msg.isLoading ? (
                         <div
                           data-testid="ask-pluto-loading-shell"
-                          className="w-full max-w-[34rem] px-1 py-0.5"
+                          className="w-full max-w-[34rem] space-y-2.5 py-0.5 animate-in fade-in duration-300"
                         >
                           <output aria-live="polite" className="block">
-                            <div className="flex min-h-8 items-center justify-between gap-6">
-                              <div className="flex min-w-0 items-center gap-2.5">
-                                <span
-                                  aria-hidden="true"
-                                  className="relative flex h-2 w-2 shrink-0"
-                                >
-                                  <span className="absolute inline-flex h-full w-full rounded-full bg-pro-accent/35 animate-ping motion-reduce:animate-none" />
-                                  <span className="relative inline-flex h-2 w-2 rounded-full bg-pro-accent/75" />
-                                </span>
-                                <span className="truncate text-[13px] font-medium text-pro-text-main/75">
-                                  {requestPhaseLabel(Boolean(msg.content))}
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => void handleCancel()}
-                                disabled={requestPhase === 'cancelling'}
-                                className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-pro-text-muted transition-colors duration-200 hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/35 disabled:opacity-50"
+                            <div className="flex min-h-7 items-center gap-2">
+                              <Sparkles className="h-3.5 w-3.5 text-pro-accent/75 shrink-0 animate-pulse [animation-duration:2.4s]" />
+                              <span className="truncate text-[13px] font-medium text-pro-text-main/80">
+                                {requestPhaseLabel(Boolean(msg.content))}
+                              </span>
+                              <div
+                                aria-hidden="true"
+                                className="flex items-center gap-1.5 ml-1 shrink-0"
                               >
-                                <Square className="h-2 w-2 fill-current" />
-                                Stop
-                              </button>
-                            </div>
-                            <div
-                              aria-hidden="true"
-                              className="mt-1.5 grid w-28 grid-cols-4 gap-1"
-                            >
-                              {[0, 1, 2, 3].map((step) => {
-                                const state =
-                                  step < loadingPhaseIndex
-                                    ? 'complete'
-                                    : step === loadingPhaseIndex
-                                      ? 'active'
-                                      : 'pending';
-                                return (
-                                  <span
-                                    key={step}
-                                    data-testid="ask-pluto-phase-step"
-                                    data-state={state}
-                                    className={`h-0.5 rounded-full transition-colors duration-200 ${
-                                      state === 'complete'
-                                        ? 'bg-pro-accent/45'
-                                        : state === 'active'
-                                          ? 'bg-pro-accent/80'
-                                          : 'bg-pro-border/55'
-                                    }`}
-                                  />
-                                );
-                              })}
+                                {[0, 1, 2, 3].map((step) => {
+                                  const state =
+                                    step < loadingPhaseIndex
+                                      ? 'complete'
+                                      : step === loadingPhaseIndex
+                                        ? 'active'
+                                        : 'pending';
+                                  return (
+                                    <span
+                                      key={step}
+                                      data-testid="ask-pluto-phase-step"
+                                      data-state={state}
+                                      className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
+                                        state === 'complete'
+                                          ? 'bg-pro-accent/70'
+                                          : state === 'active'
+                                            ? 'bg-pro-accent scale-110 shadow-[0_0_4px_rgba(21,93,177,0.5)]'
+                                            : 'bg-pro-border dark:bg-white/15'
+                                      }`}
+                                    />
+                                  );
+                                })}
+                              </div>
                             </div>
                           </output>
+
+                          {/* Streaming Content */}
                           {msg.content ? (
-                            <div className="prose prose-invert prose-sm mt-4 max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                            <div className="prose prose-invert prose-sm mt-2 max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
                               </ReactMarkdown>
                               <span
                                 data-testid="ask-pluto-stream-caret"
                                 aria-hidden="true"
-                                className="ml-0.5 inline-block h-[1em] w-px translate-y-[0.12em] bg-pro-text-muted/70 animate-pulse motion-reduce:animate-none"
+                                className="ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[0.15em] rounded-full bg-pro-accent/80 animate-pulse motion-reduce:animate-none"
                               />
                             </div>
                           ) : (
                             <div
                               data-testid="ask-pluto-loading-lines"
                               aria-hidden="true"
-                              className="mt-4 w-full max-w-md space-y-2.5 animate-pulse motion-reduce:animate-none"
+                              className="space-y-2 pt-1 max-w-sm"
                             >
-                              <div className="h-1.5 w-[94%] rounded-full bg-pro-text-muted/12" />
-                              <div className="h-1.5 w-[78%] rounded-full bg-pro-text-muted/10" />
-                              <div className="h-1.5 w-[56%] rounded-full bg-pro-text-muted/8" />
+                              <div className="pluto-skeleton-line h-2 w-[72%] rounded-full opacity-35" />
+                              <div className="pluto-skeleton-line h-2 w-[46%] rounded-full opacity-20" />
                             </div>
                           )}
                         </div>
@@ -793,16 +799,30 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               <Brain className="h-3.5 w-3.5" />
               Deep
             </button>
-            <button
-              type="submit"
-              disabled={!query.trim() || isProcessing}
-              className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit"
-            >
-              <ArrowRight
-                className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5"
-                strokeWidth={2}
-              />
-            </button>
+            {isProcessing && !query.trim() ? (
+              <button
+                type="button"
+                onClick={() => void handleCancel()}
+                disabled={requestPhase === 'cancelling'}
+                title="Stop"
+                aria-label="Stop"
+                className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center hover:opacity-90 transition-all active:scale-95 disabled:opacity-40 shadow-xs"
+              >
+                <Square className="w-2.5 h-2.5 fill-current rounded-[0.5px]" />
+                <span className="sr-only">Stop</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!query.trim()}
+                className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit shadow-xs"
+              >
+                <ArrowRight
+                  className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5"
+                  strokeWidth={2}
+                />
+              </button>
+            )}
           </form>
         </div>
       </div>

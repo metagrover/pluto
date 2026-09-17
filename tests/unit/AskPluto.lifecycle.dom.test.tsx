@@ -463,4 +463,97 @@ describe('Ask Pluto request lifecycle', () => {
       ]),
     );
   });
+
+  it('shows Stop in composer when idle while processing, but switches to Send when typing and cancels previous query', async () => {
+    let pendingResolve: ((value: unknown) => void) | null = null;
+    const invoke = vi.fn((channel: string, payload?: { query?: string }) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query:cancel')
+        return Promise.resolve({ ok: true });
+      if (channel === 'intelligence:query') {
+        if (payload?.query === 'First long query') {
+          return new Promise((resolve) => {
+            pendingResolve = resolve;
+          });
+        }
+        return Promise.resolve({
+          status: 'answered',
+          answer: 'Second query answer',
+          citations: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+
+    const input = container.querySelector('input') as HTMLInputElement;
+    const submit = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        container
+          .querySelector('form')
+          ?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+      });
+    };
+
+    // 1. Submit first query
+    await submit('First long query');
+
+    // 2. Since input is empty and processing, the Stop button is in the composer
+    const stopButton = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Stop',
+    );
+    expect(stopButton).not.toBeUndefined();
+    expect(stopButton?.getAttribute('aria-label')).toBe('Stop');
+
+    // 3. User types a new query while processing
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'Second query');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // Stop button is no longer present, Send button is active
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Stop',
+      ),
+    ).toBeUndefined();
+
+    // 4. User submits the second query
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+
+    // Should have cancelled the first query
+    expect(invoke).toHaveBeenCalledWith(
+      'intelligence:query:cancel',
+      expect.stringContaining('ask-pluto-'),
+    );
+    expect(container.textContent).toContain('Second query answer');
+    if (pendingResolve) pendingResolve(null);
+  });
 });

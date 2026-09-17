@@ -26,7 +26,10 @@ import {
   DREAMING_STATUS_LABEL,
   type DreamingUiStatus,
 } from '../../../utils/dreamingStatus';
-import type { ProjectBrief } from '../../../utils/projectBriefing';
+import {
+  type ProjectBrief,
+  cleanPersonRole,
+} from '../../../utils/projectBriefing';
 import { detectProjectCadence } from '../../../utils/projectCadence';
 import {
   type ProjectPortfolioEntry,
@@ -118,6 +121,189 @@ const healthTone: Record<ProjectBrief['health']['state'], string> = {
   watch: 'text-pro-warning',
   falling_behind: 'text-pro-urgent',
   not_enough_evidence: 'text-pro-text-muted',
+};
+
+interface ProjectMovingPiece {
+  id: string;
+  text: string;
+}
+
+const synthesizeMovingPieceFromContext = (raw: string): string => {
+  let cleaned = raw.trim();
+  const hasSpeaker = /^[A-Za-z0-9_\s.'-]+:\s*/.test(cleaned);
+  // Strip speaker label prefixes
+  cleaned = cleaned.replace(/^[A-Za-z0-9_\s.'-]+:\s*/, '');
+  // Strip surrounding quotes
+  cleaned = cleaned.replace(/^["'“](.*)["'”]$/, '$1').trim();
+
+  // Check if this is an informal/conversational quote that needs synthesis
+  const isConversationalQuote =
+    hasSpeaker ||
+    /^(?:but|and|so|well|yeah|yes|ok|okay|hey|oh|i think|we discussed that|i made|we made|i've|we've)\s+/i.test(
+      cleaned,
+    ) ||
+    /\b(?:sitting in|discussed yesterday|br main)\b/i.test(cleaned);
+
+  if (isConversationalQuote) {
+    // Pattern: UI changes on branch
+    if (
+      /\b(?:ui\s+changes?|frontend|interface)\b/i.test(cleaned) &&
+      /\b(?:branch|main|repo|pr)\b/i.test(cleaned)
+    ) {
+      return 'UI changes implemented and integrated into main branch for review.';
+    }
+
+    // Conversational to declarative transformation
+    cleaned = cleaned
+      .replace(/^(?:but|and|so|well|yeah|yes|ok|okay|hey|oh)\s+/i, '')
+      .replace(
+        /^(?:i think|i guess|i believe|we discussed that|as discussed)\s+/i,
+        '',
+      )
+      .replace(/\b(?:i|we)\s+made\s+(?:the\s+)?/i, 'Implemented ')
+      .replace(/\b(?:i|we)\s+built\s+(?:the\s+)?/i, 'Built ')
+      .replace(
+        /\b(?:i|we)\s+(?:worked on|am working on|are working on)\s+/i,
+        'Work in progress on ',
+      )
+      .replace(/\b(?:i|we)\s+(?:discussed|talked about)\s+/i, 'Discussion on ')
+      .replace(/\b(?:i|we)\s+(?:will|plan to)\s+/i, 'Scheduled to ')
+      .replace(
+        /\band\s+(?:that's|it's)\s+now\s+sitting\s+in\s+(?:the\s+)?(?:br\s+)?/i,
+        'prepared in ',
+      )
+      .replace(/\bbr\s+main\s+branch\b/i, 'main branch')
+      .replace(/\bwe discussed yesterday\b/i, 'recently')
+      .trim();
+  }
+
+  if (!cleaned) return 'Recent updates discussed in team sync.';
+  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  if (!/[.!?]$/.test(cleaned)) {
+    cleaned += '.';
+  }
+  return cleaned;
+};
+
+const getProjectMovingPieces = (
+  current: ProjectBrief | null,
+  currentFocusRepeatsOutcome: boolean,
+  projectCurrentFocus: string,
+  projectOutcome: string,
+): ProjectMovingPiece[] => {
+  if (!current) return [];
+  const pieces: ProjectMovingPiece[] = [];
+
+  // 1. Synthesized recent changes from theme
+  if (current.theme?.recentChanges?.length) {
+    for (const change of current.theme.recentChanges.slice(0, 2)) {
+      const text = change.summary?.trim();
+      if (text) {
+        pieces.push({
+          id: `recent-change-${change.sourceMeetingId || pieces.length}`,
+          text: synthesizeMovingPieceFromContext(text),
+        });
+      }
+    }
+  }
+
+  // 2. Recent deliverables / completed commitments
+  const completedTasks = current.tasks.filter((t) => t.status === 'completed');
+  for (const task of completedTasks.slice(0, 2)) {
+    if (pieces.length >= 3) break;
+    pieces.push({
+      id: `task-completed-${task.id}`,
+      text: `Completed: ${task.name}`,
+    });
+  }
+
+  // 3. Active in-flight commitments
+  const activeTasks = current.tasks.filter((t) => t.status !== 'completed');
+  for (const task of activeTasks.slice(0, 2)) {
+    if (pieces.length >= 3) break;
+    pieces.push({
+      id: `task-active-${task.id}`,
+      text: task.name,
+    });
+  }
+
+  // 4. Open thread decisions
+  if (current.theme?.openThreads?.length) {
+    for (const thread of current.theme.openThreads.slice(0, 2)) {
+      if (pieces.length >= 3) break;
+      if (thread.kind === 'decision') {
+        pieces.push({
+          id: `thread-decision-${pieces.length}`,
+          text: `Decided: ${thread.text}`,
+        });
+      }
+    }
+  }
+
+  // 5. Recent meeting progress / context synthesis (prevents quote leaks)
+  if (pieces.length < 3 && current.meetings[0]?.context) {
+    const synthesized = synthesizeMovingPieceFromContext(
+      current.meetings[0].context,
+    );
+    if (!pieces.some((p) => p.text === synthesized)) {
+      pieces.push({
+        id: 'meeting-progress',
+        text: synthesized,
+      });
+    }
+  }
+
+  // 6. Strategic focus or scope alignment (never duplicate projectOutcome)
+  if (pieces.length < 3) {
+    if (!currentFocusRepeatsOutcome && projectCurrentFocus) {
+      const focusText = synthesizeMovingPieceFromContext(projectCurrentFocus);
+      if (
+        focusText &&
+        normalizeProjectCopy(focusText) !==
+          normalizeProjectCopy(projectOutcome) &&
+        !pieces.some((p) => p.text === focusText)
+      ) {
+        pieces.push({
+          id: 'project-focus',
+          text: focusText,
+        });
+      }
+    } else if (current.meetings[0]?.title) {
+      const meetingTitle = current.meetings[0].title.trim();
+      const scopeText = `Scope and workflow alignment reviewed in ${meetingTitle}.`;
+      if (!pieces.some((p) => p.text === scopeText)) {
+        pieces.push({
+          id: 'meeting-scope',
+          text: scopeText,
+        });
+      }
+    }
+  }
+
+  // 7. Meeting cadence & coordination momentum
+  if (pieces.length < 3) {
+    const recurring = current.meetingStats.recurringSeries[0];
+    const meetingCount =
+      current.meetingStats.meetingCount || current.meetings.length;
+    if (recurring) {
+      pieces.push({
+        id: 'cadence-momentum',
+        text: `${recurring.cadence} sync series active across ${recurring.meetingCount} meetings.`,
+      });
+    } else if (meetingCount > 1) {
+      pieces.push({
+        id: 'cadence-momentum',
+        text: `Active sync cadence across ${meetingCount} meetings with ongoing team alignment.`,
+      });
+    } else if (meetingCount === 1) {
+      pieces.push({
+        id: 'cadence-momentum',
+        text: 'Initial kickoff meeting conducted; awaiting next review cycle.',
+      });
+    }
+  }
+
+  return pieces.slice(0, 3);
 };
 
 export const ProjectDossier = ({
@@ -345,7 +531,9 @@ export const ProjectDossier = ({
   const projectCurrentFocus =
     current?.theme?.currentFocus ||
     qualification?.outcome ||
-    current?.meetings[0]?.context ||
+    (current?.meetings[0]?.context
+      ? synthesizeMovingPieceFromContext(current.meetings[0].context)
+      : null) ||
     'Review the first meeting and decide whether to keep this as a project.';
   const currentFocusRepeatsOutcome =
     normalizeProjectCopy(projectCurrentFocus) ===
@@ -409,23 +597,26 @@ export const ProjectDossier = ({
     for (const meeting of current?.meetings ?? []) {
       const seen = new Set<string>();
       for (const participant of meeting.participants ?? []) {
-        const name = participant.name.trim();
-        const entityId = participant.entity_id.trim();
-        const key = entityId || name.toLocaleLowerCase();
+        const name = participant.name?.trim();
+        const entityId = participant.entity_id?.trim() || '';
         if (
           !name ||
-          participant.entity_id.toLocaleLowerCase().startsWith('speaker:') ||
-          /^(?:none|unknown|n\/a)$/i.test(name) ||
-          seen.has(key)
-        )
+          entityId.toLocaleLowerCase().startsWith('speaker:') ||
+          /^(?:speaker(?:\s*\d+)?|unknown|none|n\/a|unassigned)$/i.test(name)
+        ) {
           continue;
+        }
+        const key = name.toLocaleLowerCase();
+        if (seen.has(key)) continue;
         seen.add(key);
+
         const existing = people.get(key);
+        const role = cleanPersonRole(participant.role);
         people.set(key, {
-          id: key,
+          id: existing?.id || entityId || key,
           entityId: existing?.entityId || entityId,
-          name,
-          role: existing?.role || participant.role?.trim() || undefined,
+          name: existing?.name || name,
+          role: cleanPersonRole(existing?.role) || role,
           meetingCount: (existing?.meetingCount ?? 0) + 1,
         });
       }
@@ -439,6 +630,14 @@ export const ProjectDossier = ({
   const displayedPeople = showAllPeople
     ? peopleInvolved
     : peopleInvolved.slice(0, 6);
+  const frequentContributors = useMemo(
+    () => peopleInvolved.slice(0, 5),
+    [peopleInvolved],
+  );
+  const otherPeopleCount = Math.max(
+    0,
+    peopleInvolved.length - frequentContributors.length,
+  );
   const activeAssignments = (current?.tasks ?? [])
     .flatMap((task) => {
       if (!task.assigned_to || task.status === 'completed') return [];
@@ -448,16 +647,28 @@ export const ProjectDossier = ({
       return person ? [{ person, task }] : [];
     })
     .slice(0, 2);
-  const projectActivitySummary = currentFocusRepeatsOutcome
-    ? current?.theme?.recentChanges[0]?.summary ||
-      current?.meetings[0]?.context ||
-      `${current?.meetingStats.meetingCount ?? 0} meetings have covered this project so far.`
-    : projectCurrentFocus;
-  const rolePeople = peopleInvolved.filter((person) => person.role).slice(0, 3);
-  const rolePeopleLabel = new Intl.ListFormat(undefined, {
+  const movingPieces = useMemo(
+    () =>
+      getProjectMovingPieces(
+        current,
+        currentFocusRepeatsOutcome,
+        projectCurrentFocus,
+        projectOutcome,
+      ),
+    [current, currentFocusRepeatsOutcome, projectCurrentFocus, projectOutcome],
+  );
+  const projectActivitySummary =
+    movingPieces[0]?.text || projectCurrentFocus;
+  const keyPeople = peopleInvolved.slice(0, 3);
+  const keyPeopleLabel = new Intl.ListFormat(undefined, {
     style: 'long',
     type: 'conjunction',
-  }).format(rolePeople.map((person) => `${person.name} (${person.role})`));
+  }).format(
+    keyPeople.map((person) => {
+      const role = cleanPersonRole(person.role);
+      return role ? `${person.name} (${role})` : person.name;
+    }),
+  );
   const projectPeopleSummary = activeAssignments.length
     ? activeAssignments
         .map(
@@ -465,17 +676,57 @@ export const ProjectDossier = ({
             `${person.name} is responsible for ${task.name}`,
         )
         .join('; ')
-    : rolePeople.length > 0
-      ? `${rolePeopleLabel} ${rolePeople.length === 1 ? 'is' : 'are'} involved in this project.`
+    : keyPeople.length > 0
+      ? `${keyPeopleLabel} ${keyPeople.length === 1 ? 'is' : 'are'} involved in this project.`
       : peopleInvolved.length > 0
         ? `${peopleInvolved.length} people have discussed this project in meetings.`
-        : 'No people have been identified yet.';
+        : 'No people yet';
+  const activeDeliverables = (current?.tasks ?? []).filter(
+    (task) => task.status !== 'completed',
+  );
   const primaryAttentionTask = attentionTasks[0];
-  const projectWatchSummary = primaryAttentionTask
-    ? `${primaryAttentionTask.name}${primaryAttentionTask.due_date ? `, due ${formatDate(primaryAttentionTask.due_date)}` : ''}, needs attention.`
-    : nextMilestone
-      ? `The next milestone is ${nextMilestone.title}${nextMilestone.timing ? `, expected ${nextMilestone.timing}` : ''}.`
-      : 'No upcoming dates or commitments yet.';
+  const analyzedTimeline = useMemo(() => {
+    if (primaryAttentionTask) {
+      return {
+        summary: `${primaryAttentionTask.name}${primaryAttentionTask.due_date ? `, due ${formatDate(primaryAttentionTask.due_date)}` : ''}, needs attention.`,
+        hasMilestone: true,
+      };
+    }
+    if (nextMilestone) {
+      return {
+        summary: `Next milestone: ${nextMilestone.title}${nextMilestone.timing ? `, expected ${nextMilestone.timing}` : ''}.`,
+        hasMilestone: true,
+      };
+    }
+    if (activeDeliverables.length > 0) {
+      return {
+        summary: `${activeDeliverables.length} deliverable${activeDeliverables.length === 1 ? '' : 's'} in motion (e.g. “${activeDeliverables[0].name}”). Target delivery milestones being scheduled.`,
+        hasMilestone: false,
+      };
+    }
+    const cadencePattern =
+      detectedCadence.cadence && detectedCadence.cadence !== 'adhoc'
+        ? `${detectedCadence.cadence.toLowerCase()} sync pattern`
+        : current?.meetingStats.recurringSeries[0]?.cadence.toLowerCase() || null;
+    if (cadencePattern) {
+      return {
+        summary: `Next review cycle aligns with ${cadencePattern} (${current?.meetingStats.meetingCount || current?.meetings.length || 1} meetings to date). No target milestone dates set yet.`,
+        hasMilestone: false,
+      };
+    }
+    return {
+      summary: `Active project across ${current?.meetingStats.meetingCount || current?.meetings.length || 1} meetings. Delivery milestones have not been scheduled yet.`,
+      hasMilestone: false,
+    };
+  }, [
+    primaryAttentionTask,
+    nextMilestone,
+    activeDeliverables,
+    detectedCadence.cadence,
+    current?.meetingStats.recurringSeries,
+    current?.meetingStats.meetingCount,
+    current?.meetings.length,
+  ]);
   const isSuggestion =
     Boolean(current) &&
     !current?.theme &&
@@ -945,35 +1196,71 @@ export const ProjectDossier = ({
                 >
                   Project brief
                 </h2>
-                <p className="project-dossier-lead text-pro-text-main">
+                <p className="project-dossier-lead text-pro-text-main pb-5 border-b border-pro-rule/40 font-normal leading-[1.6]">
                   {projectOutcome}
                 </p>
-                <dl className="mt-6 max-w-[68ch] space-y-5">
-                  <div className="grid min-w-0 gap-1 sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:gap-6">
-                    <dt className="project-dossier-property-label">
+                <dl className="max-w-[68ch] divide-y divide-pro-rule/30">
+                  <div className="py-4 grid min-w-0 gap-1.5 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label font-medium text-[13px] text-pro-text-muted">
                       {currentFocusRepeatsOutcome
-                        ? 'Latest update'
+                        ? 'Latest updates'
                         : 'Current focus'}
                     </dt>
-                    <dd className="project-dossier-body min-w-0 text-pro-text-main">
-                      {projectActivitySummary}
+                    <dd className="min-w-0 text-pro-text-main">
+                      {movingPieces.length > 0 ? (
+                        <ul className="space-y-2.5">
+                          {movingPieces.map((piece) => (
+                            <li
+                              key={piece.id}
+                              className="flex items-start gap-2.5 text-[14px] leading-relaxed"
+                            >
+                              <span
+                                className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-pro-text-muted/60"
+                                aria-hidden="true"
+                              />
+                              <span className="min-w-0 flex-1">
+                                {piece.text}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-[14px] leading-relaxed">
+                          {projectActivitySummary}
+                        </span>
+                      )}
                     </dd>
                   </div>
-                  <div className="grid min-w-0 gap-1 sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:gap-6">
-                    <dt className="project-dossier-property-label">
+                  <div className="py-4 grid min-w-0 gap-1.5 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label font-medium text-[13px] text-pro-text-muted">
                       Who’s involved
                     </dt>
-                    <dd className="project-dossier-body min-w-0 text-pro-text-main">
+                    <dd className="min-w-0 text-[14px] leading-relaxed text-pro-text-main">
                       {projectPeopleSummary}
                       {activeAssignments.length > 0 ? '.' : ''}
                     </dd>
                   </div>
-                  <div className="grid min-w-0 gap-1 sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:gap-6">
-                    <dt className="project-dossier-property-label">
+                  <div className="py-4 grid min-w-0 gap-1.5 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
+                    <dt className="project-dossier-property-label font-medium text-[13px] text-pro-text-muted">
                       Coming up
                     </dt>
-                    <dd className="project-dossier-body min-w-0 text-pro-text-main">
-                      {projectWatchSummary}
+                    <dd className="min-w-0 text-[14px] leading-relaxed text-pro-text-main">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span>{analyzedTimeline.summary}</span>
+                        {!analyzedTimeline.hasMilestone && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              document
+                                .getElementById('project-milestones')
+                                ?.scrollIntoView({ behavior: 'smooth' })
+                            }
+                            className="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium text-pro-accent hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent transition-colors"
+                          >
+                            + Add milestone
+                          </button>
+                        )}
+                      </div>
                     </dd>
                   </div>
                 </dl>
@@ -1044,7 +1331,7 @@ export const ProjectDossier = ({
                       aria-hidden="true"
                       className="h-3.5 w-3.5 text-pro-text-muted shrink-0"
                     />
-                    Rhythm
+                    Meeting rhythm
                   </dt>
                   <dd className="project-dossier-body min-w-0 text-pro-text-main">
                     <span className="inline-flex items-center gap-2 flex-wrap">
@@ -1075,6 +1362,14 @@ export const ProjectDossier = ({
                     </span>
                     <p className="mt-1 text-[13px] leading-relaxed text-pro-text-muted">
                       {detectedCadence.detail}
+                      {current.meetingStats.activeWeeks &&
+                        current.meetingStats.activeWeeks > 1 && (
+                          <>
+                            {' '}
+                            · {current.meetingStats.meetingCount} meetings over{' '}
+                            {current.meetingStats.activeWeeks} weeks
+                          </>
+                        )}
                       {current.meetingStats.recurringSeries[0]?.title && (
                         <>
                           {' '}
@@ -1089,7 +1384,7 @@ export const ProjectDossier = ({
                 </div>
 
                 {/* Regulars row — most frequent contributors, named */}
-                {current.meetingStats.frequentParticipants.length > 0 && (
+                {frequentContributors.length > 0 && (
                   <div className="grid min-w-0 gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-6 sm:items-baseline">
                     <dt className="project-dossier-property-label flex items-center gap-1.5">
                       <Users
@@ -1099,21 +1394,14 @@ export const ProjectDossier = ({
                       Regulars
                     </dt>
                     <dd className="project-dossier-body min-w-0 text-pro-text-main">
-                      {current.meetingStats.frequentParticipants
-                        .slice(0, 5)
-                        .join(', ')}
-                      {peopleInvolved.length >
-                        current.meetingStats.frequentParticipants.slice(0, 5)
-                          .length && (
+                      {frequentContributors.map((p) => p.name).join(', ')}
+                      {otherPeopleCount > 0 && (
                         <span className="text-pro-text-muted">
                           {' '}
-                          +
-                          {peopleInvolved.length -
-                            current.meetingStats.frequentParticipants.slice(
-                              0,
-                              5,
-                            ).length}{' '}
-                          others across {current.meetingStats.meetingCount}{' '}
+                          + {otherPeopleCount}{' '}
+                          {otherPeopleCount === 1 ? 'other' : 'others'} across{' '}
+                          {current.meetingStats.meetingCount ||
+                            current.meetings.length}{' '}
                           meetings
                         </span>
                       )}
@@ -1354,19 +1642,21 @@ export const ProjectDossier = ({
               </section>
             )}
 
-            <ProjectMilestones
-              projectId={current.project.id}
-              milestones={current.milestones}
-              evidenceMeetings={current.meetings.map((meeting) => ({
-                id: meeting.id,
-                title: meeting.title,
-                date: meeting.started_at || meeting.created_at,
-              }))}
-              onOpenMeeting={onOpenMeeting}
-              onChange={(milestones) =>
-                setBrief((value) => (value ? { ...value, milestones } : value))
-              }
-            />
+            <div id="project-milestones">
+              <ProjectMilestones
+                projectId={current.project.id}
+                milestones={current.milestones}
+                evidenceMeetings={current.meetings.map((meeting) => ({
+                  id: meeting.id,
+                  title: meeting.title,
+                  date: meeting.started_at || meeting.created_at,
+                }))}
+                onOpenMeeting={onOpenMeeting}
+                onChange={(milestones) =>
+                  setBrief((value) => (value ? { ...value, milestones } : value))
+                }
+              />
+            </div>
 
             {current.meetingStats.recurringSeries.length > 0 && (
               <section aria-labelledby="project-meeting-rhythm">

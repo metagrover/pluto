@@ -5,6 +5,7 @@ import {
   buildProjectMilestones,
   buildProjectMomentum,
   buildUserProjectMilestones,
+  cleanPersonRole,
   readProjectDisplayTitle,
   sortProjectMilestones,
   withProjectDisplayTitle,
@@ -82,6 +83,59 @@ describe('project meeting analytics', () => {
     expect(result.participantCoverage).toBe(0);
     expect(result.typicalParticipantCount).toBeNull();
     expect(result.recurringSeries).toEqual([]);
+  });
+
+  it('deduplicates participants across meetings with different entity IDs and prevents within-meeting inflation', () => {
+    const meetings = [
+      {
+        id: 'm1',
+        title: 'Weekly sync 1',
+        started_at: '2026-08-01T10:00:00Z',
+        created_at: null,
+        participants: [
+          { entity_id: 'uuid-1', name: 'Adam' },
+          { entity_id: 'uuid-1-dup', name: 'Adam' }, // duplicate in same meeting
+          { entity_id: 'r-1', name: 'Rachel Owen' },
+        ],
+      },
+      {
+        id: 'm2',
+        title: 'Weekly sync 2',
+        started_at: '2026-08-08T10:00:00Z',
+        created_at: null,
+        participants: [
+          { entity_id: 'uuid-2', name: 'Adam' },
+          { entity_id: 'r-2', name: 'Rachel Owen' },
+        ],
+      },
+      {
+        id: 'm3',
+        title: 'Weekly sync 3',
+        started_at: '2026-08-15T10:00:00Z',
+        created_at: null,
+        participants: [
+          { entity_id: 'uuid-3', name: 'Adam' },
+          { entity_id: 'h-1', name: 'Hema' },
+        ],
+      },
+    ];
+
+    const result = buildProjectMeetingStats(meetings);
+    expect(result.typicalParticipantCount).toBe(2);
+    expect(result.frequentParticipants).toEqual(['Adam', 'Rachel Owen', 'Hema']);
+  });
+
+  it('sanitizes placeholder roles with cleanPersonRole', () => {
+    expect(cleanPersonRole('undefined')).toBeUndefined();
+    expect(cleanPersonRole('null')).toBeUndefined();
+    expect(cleanPersonRole('n/a')).toBeUndefined();
+    expect(cleanPersonRole('unknown')).toBeUndefined();
+    expect(cleanPersonRole('none')).toBeUndefined();
+    expect(cleanPersonRole('')).toBeUndefined();
+    expect(cleanPersonRole(null)).toBeUndefined();
+    expect(cleanPersonRole(undefined)).toBeUndefined();
+    expect(cleanPersonRole('Client Advisor')).toBe('Client Advisor');
+    expect(cleanPersonRole('Colleague')).toBe('Colleague');
   });
 });
 

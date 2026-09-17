@@ -259,13 +259,28 @@ const cadenceLabel = (days: number): string => {
   return 'Recurring pattern';
 };
 
+export const cleanPersonRole = (
+  role?: string | null,
+): string | undefined => {
+  if (!role) return undefined;
+  const trimmed = role.trim();
+  if (!trimmed) return undefined;
+  if (/^(?:undefined|null|n\/a|none|nobody|unknown)$/i.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+};
+
 const trustedParticipants = (
   meeting: ProjectBriefingMeeting,
 ): ProjectBriefingParticipant[] =>
   (meeting.participants ?? []).filter(
     (participant) =>
       participant.name.trim() &&
-      !participant.entity_id.toLocaleLowerCase().startsWith('speaker:'),
+      !participant.entity_id.toLocaleLowerCase().startsWith('speaker:') &&
+      !/^(?:speaker(?:\s*\d+)?|unknown|none|n\/a|unassigned)$/i.test(
+        participant.name.trim(),
+      ),
   );
 
 export const buildProjectMeetingStats = (
@@ -283,8 +298,12 @@ export const buildProjectMeetingStats = (
     { name: string; count: number }
   >();
   for (const participants of rooms) {
+    const seenInRoom = new Set<string>();
     for (const participant of participants) {
-      const key = participant.entity_id || participant.name.toLocaleLowerCase();
+      const name = participant.name.trim();
+      const key = name.toLocaleLowerCase();
+      if (!name || seenInRoom.has(key)) continue;
+      seenInRoom.add(key);
       const current = participantFrequency.get(key);
       participantFrequency.set(key, {
         name: participant.name,
@@ -353,14 +372,21 @@ export const buildProjectMeetingStats = (
           : null,
     participantCoverage: rooms.length,
     typicalParticipantCount: median(
-      rooms.map((participants) => participants.length),
+      rooms.map((participants) => {
+        const uniqueInRoom = new Set(
+          participants
+            .map((participant) => participant.name.trim().toLowerCase())
+            .filter(Boolean),
+        );
+        return uniqueInRoom.size;
+      }),
     ),
     frequentParticipants: [...participantFrequency.values()]
       .sort(
         (left, right) =>
           right.count - left.count || left.name.localeCompare(right.name),
       )
-      .slice(0, 3)
+      .slice(0, 5)
       .map((participant) => participant.name),
     recurringSeries: recurringSeries.sort(
       (left, right) => right.meetingCount - left.meetingCount,

@@ -16,6 +16,7 @@ import {
   Undo2,
   UserRound,
   Volume2,
+  X,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -167,6 +168,42 @@ const formatDate = (value: string | null) => {
   }).format(new Date(value));
 };
 
+export const isRegularCollaborator = (
+  row: PersonBriefingRow,
+  now = Date.now(),
+): boolean => {
+  if (row.meetingCount <= 0) return false;
+  if (row.meetingCount >= 3) return true;
+  if (row.meetingCount >= 2) {
+    if (!row.latestMeetingAt) return true;
+    const time = Date.parse(row.latestMeetingAt);
+    if (Number.isNaN(time)) return true;
+    const daysSince = Math.abs(now - time) / (1000 * 60 * 60 * 24);
+    return daysSince <= 60;
+  }
+  return false;
+};
+
+export const sortPeopleRows = (
+  rows: PersonBriefingRow[],
+): PersonBriefingRow[] => {
+  return [...rows].sort((a, b) => {
+    const aTime = Date.parse(a.latestMeetingAt || '') || 0;
+    const bTime = Date.parse(b.latestMeetingAt || '') || 0;
+    if (bTime !== aTime) return bTime - aTime;
+
+    if (b.meetingCount !== a.meetingCount) return b.meetingCount - a.meetingCount;
+
+    if (b.openCommitmentCount !== a.openCommitmentCount)
+      return b.openCommitmentCount - a.openCommitmentCount;
+
+    if (b.candidateCommitmentCount !== a.candidateCommitmentCount)
+      return b.candidateCommitmentCount - a.candidateCommitmentCount;
+
+    return a.name.localeCompare(b.name);
+  });
+};
+
 export const PeopleBriefing = ({
   rows,
   selectedPersonId,
@@ -187,45 +224,30 @@ export const PeopleBriefing = ({
         )
       : rows;
   }, [query, rows]);
-  const prioritized = useMemo(
+
+  const regularRows = useMemo(
+    () => sortPeopleRows(filtered.filter((row) => isRegularCollaborator(row))),
+    [filtered],
+  );
+  const regularIds = useMemo(
+    () => new Set(regularRows.map((row) => row.id)),
+    [regularRows],
+  );
+  const otherRows = useMemo(
     () =>
-      [...filtered].sort(
-        (a, b) =>
-          b.openCommitmentCount - a.openCommitmentCount ||
-          b.candidateCommitmentCount - a.candidateCommitmentCount ||
-          (Date.parse(b.briefUpdatedAt || '') || 0) -
-            (Date.parse(a.briefUpdatedAt || '') || 0) ||
-          (Date.parse(b.latestMeetingAt || '') || 0) -
-            (Date.parse(a.latestMeetingAt || '') || 0),
+      sortPeopleRows(
+        filtered.filter((row) => row.meetingCount > 0 && !regularIds.has(row.id)),
+      ),
+    [filtered, regularIds],
+  );
+  const unlinkedRows = useMemo(
+    () =>
+      [...filtered.filter((row) => row.meetingCount === 0)].sort((a, b) =>
+        a.name.localeCompare(b.name),
       ),
     [filtered],
   );
-  const briefingRows = useMemo(
-    () =>
-      prioritized.filter(
-        (row) =>
-          row.meetingCount > 0 &&
-          (row.openCommitmentCount > 0 ||
-            row.candidateCommitmentCount > 0 ||
-            Boolean(row.briefHeadline)),
-      ),
-    [prioritized],
-  );
-  const briefingIds = useMemo(
-    () => new Set(briefingRows.map((row) => row.id)),
-    [briefingRows],
-  );
-  const recentRows = useMemo(
-    () =>
-      prioritized.filter(
-        (row) => row.meetingCount > 0 && !briefingIds.has(row.id),
-      ),
-    [briefingIds, prioritized],
-  );
-  const unlinkedRows = useMemo(
-    () => prioritized.filter((row) => row.meetingCount === 0),
-    [prioritized],
-  );
+
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
     const rawCue =
@@ -282,12 +304,10 @@ export const PeopleBriefing = ({
                 {person.candidateCommitmentCount} to confirm
               </span>
             ) : null}
-            {person.possibleDuplicateCount === 0 &&
-            person.openCommitmentCount === 0 &&
-            person.candidateCommitmentCount === 0 ? (
+            {person.meetingCount > 0 ? (
               <span className="person-meeting-count">
-                <MessageCircle aria-hidden="true" size={12} />
-                {person.meetingCount} meeting link
+                <MessageCircle aria-hidden="true" size={11} />
+                {person.meetingCount} meeting
                 {person.meetingCount === 1 ? '' : 's'}
               </span>
             ) : null}
@@ -297,7 +317,7 @@ export const PeopleBriefing = ({
               (Date.now() - Date.parse(person.latestMeetingAt)) /
                 (1000 * 60 * 60 * 24),
             ) > 45 ? (
-              <span className="person-historical rounded-full border border-stone-500/20 bg-stone-500/5 px-2 py-0.5 text-[10px] font-medium text-stone-600 dark:text-stone-400">
+              <span className="person-historical">
                 Historical
               </span>
             ) : null}
@@ -329,6 +349,16 @@ export const PeopleBriefing = ({
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search people"
               />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                  className="people-search__clear"
+                >
+                  <X aria-hidden="true" size={12} />
+                </button>
+              )}
             </label>
           )}
         </div>
@@ -342,35 +372,35 @@ export const PeopleBriefing = ({
         </div>
       ) : (
         <div className="people-list" aria-label="People relationships">
-          {briefingRows.length > 0 ? (
-            <section aria-label="Relationship briefs">
+          {regularRows.length > 0 ? (
+            <section aria-label="Regular collaborators" className="people-section">
               <div className="people-list__heading">
-                <h2>Relationship briefs</h2>
-                <span>{briefingRows.length}</span>
+                <h2>Regular collaborators</h2>
+                <span>{regularRows.length}</span>
               </div>
-              {briefingRows.map(renderPerson)}
+              {regularRows.map(renderPerson)}
             </section>
           ) : null}
-          {recentRows.length > 0 ? (
+          {otherRows.length > 0 ? (
             <section
-              aria-label="Recent conversations"
-              className="people-recent"
+              aria-label="Other conversations"
+              className="people-section people-other"
             >
               <div className="people-list__heading">
-                <h2>Recent conversations</h2>
-                <span>{recentRows.length}</span>
+                <h2>Other conversations</h2>
+                <span>{otherRows.length}</span>
               </div>
-              {recentRows.map(renderPerson)}
+              {otherRows.map(renderPerson)}
             </section>
           ) : null}
           {unlinkedRows.length > 0 && (
             <details
-              aria-label="People without linked conversations"
+              aria-label="Unlinked contacts"
               className="people-unlinked"
             >
               <summary>
                 <span>
-                  <strong>Low-context people</strong>
+                  <strong>Unlinked contacts</strong>
                   <small>No linked conversations yet</small>
                 </span>
                 <span>{unlinkedRows.length}</span>

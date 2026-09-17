@@ -962,3 +962,212 @@ it('automatically detects rhythm from meeting intervals when no recurring series
     'Detected from meeting intervals (averages ~7d between sessions)',
   );
 });
+
+it('synthesizes latest updates from moving pieces without raw speaker quotes', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      meetings: [
+        {
+          id: 'm1',
+          title: 'Team sync',
+          started_at: '2026-09-16T10:00:00Z',
+          created_at: null,
+          participants: [],
+          context:
+            'Deepak: But I made the UI changes we discussed yesterday and that is now sitting in the main branch.',
+        },
+      ],
+      theme: {
+        ...brief().theme!,
+        outcome: 'Establish a validated outreach process.',
+        currentFocus: 'Establish a validated outreach process.',
+        recentChanges: [
+          {
+            sourceMeetingId: 'm1',
+            summary: 'UI changes completed and merged into main branch.',
+            evidenceQuote: 'UI changes sitting in main branch.',
+          },
+        ],
+      },
+    }),
+  );
+
+  await render();
+  const aboutSection = host.querySelector(
+    '[aria-labelledby="project-about"]',
+  );
+  expect(aboutSection?.textContent).not.toContain('Deepak: But I made');
+  expect(aboutSection?.textContent).toContain(
+    'UI changes completed and merged into main branch.',
+  );
+});
+
+it('sanitizes undefined roles and accurately deduplicates regulars across meetings', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      meetingStats: {
+        meetingCount: 13,
+        activeWeeks: 4,
+        participantCoverage: 13,
+        typicalParticipantCount: 3,
+        frequentParticipants: ['Hema', 'Adam', 'Rachel Owen'],
+        recurringSeries: [],
+      },
+      meetings: Array.from({ length: 13 }, (_, i) => ({
+        id: `m${i}`,
+        title: `Outreach sync ${i}`,
+        started_at: '2026-09-16T10:00:00Z',
+        created_at: null,
+        participants: [
+          { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
+          { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
+          { entity_id: `rachel-${i}`, name: 'Rachel Owen', role: 'Client Advisor' },
+        ],
+        context: null,
+      })),
+    }),
+  );
+
+  await render();
+  expect(host.textContent).not.toContain('(undefined)');
+  expect(host.textContent).toContain('Adam');
+  expect(host.textContent).toContain('Hema (Colleague)');
+  expect(host.textContent).toContain('Rachel Owen (Client Advisor)');
+  // Ensure we don't see "+ 25 others" or duplicate counts
+  expect(host.textContent).not.toContain('+ 25 others');
+  expect(host.textContent).not.toContain('+25 others');
+});
+
+it('displays in-flight deliverables under Coming up when no hard milestone dates exist', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      milestones: [],
+      tasks: [
+        {
+          id: 'task-1',
+          name: 'Advisor outreach engagement process',
+          status: 'active',
+          due_date: null,
+          updated_at: '2026-09-16T10:00:00Z',
+          metadata: null,
+        },
+      ],
+    }),
+  );
+
+  await render();
+  expect(host.textContent).toContain('1 deliverable in motion');
+  expect(host.textContent).toContain('Advisor outreach engagement process');
+  expect(host.textContent).toContain('+ Add milestone');
+});
+
+it('synthesizes raw conversational context into executive bullet points and analyzes timeline when theme and tasks are empty', async () => {
+  api.getProjectBrief.mockResolvedValue(
+    brief({
+      project: {
+        id: 'nct-project',
+        displayTitle: 'NCT Outreach',
+        detectedTitle: 'NCT Outreach',
+        metadata: JSON.stringify({
+          projectQualification: {
+            version: 1,
+            state: 'qualified',
+            source: 'review',
+            reason: 'Grounded scope',
+            assessedAt: '2026-09-16T12:00:00Z',
+            outcome:
+              'Establish a validated outreach process for advisors to engage with clients.',
+          },
+        }),
+        status: 'active',
+      },
+      theme: null,
+      tasks: [],
+      milestones: [],
+      meetingStats: {
+        meetingCount: 13,
+        activeWeeks: 6,
+        participantCoverage: 13,
+        typicalParticipantCount: 3,
+        frequentParticipants: ['Hema', 'Adam', 'Rachel Owen'],
+        recurringSeries: [
+          {
+            key: 'nct outreach sync',
+            title: 'NCT Outreach Sync',
+            meetingCount: 13,
+            cadence: 'Weekly pattern',
+            typicalParticipantCount: 3,
+            lastMetAt: '2026-09-16T10:00:00Z',
+            meetingIds: Array.from({ length: 13 }, (_, i) => `m${i}`),
+          },
+        ],
+      },
+      meetings: Array.from({ length: 13 }, (_, i) => ({
+        id: `m${i}`,
+        title: 'NCT Outreach Sync',
+        started_at: '2026-09-16T10:00:00Z',
+        created_at: null,
+        participants: [
+          { entity_id: `hema-${i}`, name: 'Hema', role: 'Colleague' },
+          { entity_id: `adam-${i}`, name: 'Adam', role: 'undefined' },
+          { entity_id: `rachel-${i}`, name: 'Rachel Owen', role: 'Client Advisor' },
+        ],
+        context:
+          i === 0
+            ? "Deepak: But I made the UI changes we discussed yesterday and that's now sitting in the br main branch."
+            : null,
+      })),
+    }),
+  );
+
+  await render();
+
+  const aboutSection = host.querySelector('[aria-labelledby="project-about"]');
+  // 1. Never dump raw quotes or speaker tags
+  expect(aboutSection?.textContent).not.toContain('Deepak:');
+  expect(aboutSection?.textContent).not.toContain('br main branch');
+  expect(aboutSection?.textContent).not.toContain('sitting in');
+
+  // 2. Synthesized into an executive update
+  expect(aboutSection?.textContent).toContain(
+    'UI changes implemented and integrated into main branch for review.',
+  );
+  expect(aboutSection?.textContent).toContain('Latest updates');
+
+  // 3. Sanitizes invalid roles
+  expect(host.textContent).not.toContain('(undefined)');
+  expect(host.textContent).toContain('Adam');
+  expect(host.textContent).toContain('Hema (Colleague)');
+  expect(host.textContent).toContain('Rachel Owen (Client Advisor)');
+
+  // 4. No inflated participant count or "+ 25 others"
+  expect(host.textContent).not.toContain('+ 25 others');
+  expect(host.textContent).not.toContain('+25 others');
+
+  // 5. Timeline analyzed under Coming up with + Add milestone
+  expect(aboutSection?.textContent).toContain(
+    'Next review cycle aligns with weekly sync pattern',
+  );
+  expect(aboutSection?.textContent).toContain('+ Add milestone');
+  expect(aboutSection?.textContent).not.toContain(
+    'No upcoming dates or commitments yet.',
+  );
+
+  // 6. No badge tags (IN MOTION, PRIMARY FOCUS, CADENCE)
+  expect(aboutSection?.textContent).not.toContain('IN MOTION');
+  expect(aboutSection?.textContent).not.toContain('In motion');
+  expect(aboutSection?.textContent).not.toContain('PRIMARY FOCUS');
+  expect(aboutSection?.textContent).not.toContain('Primary focus');
+  expect(aboutSection?.textContent).not.toContain('CADENCE');
+  expect(aboutSection?.textContent).not.toContain('Cadence');
+
+  // 7. No outcome duplication in bullet points
+  const listItems = Array.from(aboutSection?.querySelectorAll('li') ?? []);
+  expect(listItems.length).toBeGreaterThan(0);
+  for (const li of listItems) {
+    expect(li.textContent).not.toContain(
+      'Establish a validated outreach process for advisors to engage with clients.',
+    );
+  }
+});
+

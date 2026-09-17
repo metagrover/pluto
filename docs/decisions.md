@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-16 - Automatically accept person commitments for non-self individuals
+
+- **Status:** Accepted
+- **Supersedes:** The candidate confirmation requirement for non-self individuals in “2026-08-31 - Trusted person relationship dossiers” and “2026-08-03 - Require explicit commitment review before dashboard completion”.
+- **Decision:** Remove the manual confirmation friction to approve commitments of individuals in their dossier pages. Commitments extracted from meeting notes (matched via normalized `assignee_name` or bound meeting speakers) automatically populate the active commitments section (`commitments.open` and `commitments.delivered`) for other individuals (`!isSelf`). The confirmation gate ("Needs confirmation" / candidate review) is preserved exclusively for the active workspace user (`isSelf === true`) to review and accept tasks into their own list.
+- **Rationale:** Gating commitments behind a manual confirmation step for every peer created unnecessary friction and clutter in person dossiers. While users want strict gatekeeping over their own commitments, peer dossiers should immediately reflect obligations and action items noted during conversations without requiring explicit user approval.
+- **Consequences:** In `getPersonBriefing`, non-self dossiers return extracted commitments directly in `commitments.open` and `commitments.delivered`, with `commitments.candidates` empty. In `getPeopleBriefingSummaries`, peer `openCommitmentCount` immediately counts both explicitly assigned and note-extracted active commitments, while `candidateCommitmentCount` is `0`. The user's own profile continues to surface unconfirmed items under "Needs confirmation".
+
 ## 2026-09-15 - Recover deterministically from notes guardrail omissions without aborting publication
 
 - **Status:** Accepted
