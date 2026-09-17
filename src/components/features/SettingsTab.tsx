@@ -204,6 +204,7 @@ export const SettingsTab = ({
   }, [initialTab]);
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [credentialDraft, setCredentialDraft] = useState('');
+  const [credentialEditing, setCredentialEditing] = useState(false);
   const [credentialStatus, setCredentialStatus] = useState<
     Partial<Record<CloudProviderId, ProviderCredentialStatus>>
   >({});
@@ -256,6 +257,7 @@ export const SettingsTab = ({
 
   useEffect(() => {
     setCredentialDraft('');
+    setCredentialEditing(false);
     setCredentialError(null);
     if (llmProvider === 'ollama') return;
     void window.ipcRenderer
@@ -726,64 +728,117 @@ export const SettingsTab = ({
                   />
                 </SettingsRow>
                 <SettingsRow
-                  htmlFor="api-key"
+                  htmlFor={
+                    credentialStatus[llmProvider]?.configured &&
+                    !credentialEditing
+                      ? undefined
+                      : 'api-key'
+                  }
                   label="API Key"
                   helper={
                     credentialStatus[llmProvider]?.configured
-                      ? 'Configured in encrypted storage. The existing key is never shown.'
+                      ? 'Stored securely in macOS encrypted storage.'
                       : 'Enter a key to store it with macOS secure storage.'
                   }
                 >
                   <div className="space-y-2">
-                    <Input
-                      id="api-key"
-                      type="password"
-                      autoComplete="off"
-                      placeholder={`Enter a new ${llmProvider} API key`}
-                      value={credentialDraft}
-                      onChange={(event) =>
-                        setCredentialDraft(event.target.value)
-                      }
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={!credentialDraft.trim()}
-                        onClick={() => {
-                          setCredentialError(null);
-                          void window.ipcRenderer
-                            .invoke('PROVIDER_CREDENTIAL_SET', {
-                              provider: llmProvider,
-                              value: credentialDraft,
-                            })
-                            .then(() => {
-                              setCredentialDraft('');
-                              return refreshCredentialStatus(llmProvider);
-                            })
-                            .catch(() =>
-                              setCredentialError(
-                                'The key could not be stored securely. Cloud access remains disabled.',
-                              ),
-                            );
-                        }}
-                        className="rounded-lg bg-pro-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
-                      >
-                        Save key
-                      </button>
-                      {credentialStatus[llmProvider]?.configured ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void window.ipcRenderer
-                              .invoke('PROVIDER_CREDENTIAL_DELETE', llmProvider)
-                              .then(() => refreshCredentialStatus(llmProvider));
-                          }}
-                          className="rounded-lg border border-pro-border px-3 py-2 text-xs font-medium text-pro-text-muted"
+                    {credentialStatus[llmProvider]?.configured &&
+                    !credentialEditing ? (
+                      <>
+                        <div
+                          role="status"
+                          aria-label={`Configured ${llmProvider} API key`}
+                          onCopy={(event) => event.preventDefault()}
+                          onCut={(event) => event.preventDefault()}
+                          className="select-none rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2.5 font-mono text-[14px] text-pro-text-main"
                         >
-                          Remove key
-                        </button>
-                      ) : null}
-                    </div>
+                          {credentialStatus[llmProvider]?.maskedHint ??
+                            '********'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCredentialEditing(true)}
+                            className="rounded-lg bg-pro-accent px-3 py-2 text-xs font-semibold text-white"
+                          >
+                            Replace key
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCredentialError(null);
+                              void window.ipcRenderer
+                                .invoke(
+                                  'PROVIDER_CREDENTIAL_DELETE',
+                                  llmProvider,
+                                )
+                                .then(() => {
+                                  setCredentialEditing(false);
+                                  return refreshCredentialStatus(llmProvider);
+                                });
+                            }}
+                            className="rounded-lg border border-pro-border px-3 py-2 text-xs font-medium text-pro-text-muted"
+                          >
+                            Remove key
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Input
+                          id="api-key"
+                          type="password"
+                          autoComplete="off"
+                          placeholder={`Enter a new ${llmProvider} API key`}
+                          value={credentialDraft}
+                          onChange={(event) =>
+                            setCredentialDraft(event.target.value)
+                          }
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={!credentialDraft.trim()}
+                            onClick={() => {
+                              setCredentialError(null);
+                              void window.ipcRenderer
+                                .invoke('PROVIDER_CREDENTIAL_SET', {
+                                  provider: llmProvider,
+                                  value: credentialDraft,
+                                })
+                                .then(() => {
+                                  setCredentialDraft('');
+                                  setCredentialEditing(false);
+                                  return refreshCredentialStatus(llmProvider);
+                                })
+                                .catch(() =>
+                                  setCredentialError(
+                                    'The key could not be stored securely. Cloud access remains disabled.',
+                                  ),
+                                );
+                            }}
+                            className="rounded-lg bg-pro-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                          >
+                            {credentialStatus[llmProvider]?.configured
+                              ? 'Save replacement'
+                              : 'Save key'}
+                          </button>
+                          {credentialStatus[llmProvider]?.configured ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCredentialDraft('');
+                                setCredentialError(null);
+                                setCredentialEditing(false);
+                              }}
+                              className="rounded-lg border border-pro-border px-3 py-2 text-xs font-medium text-pro-text-muted"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </>
+                    )}
                     {credentialError ? (
                       <p className="text-xs text-red-500">{credentialError}</p>
                     ) : null}

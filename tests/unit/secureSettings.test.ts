@@ -174,6 +174,27 @@ describe('secureSettings', () => {
     );
   });
 
+  it('returns only a redacted credential hint for configured providers', () => {
+    const fullCredential = 'sk-or-v1-private-value-1234';
+    const manager = createSecureSettingsManager({
+      plaintext: createPlaintextStore(),
+      backend: createSecureBackend({
+        encrypted: { openrouter_api_key: `enc:${fullCredential}` },
+      }),
+      logFailure: vi.fn(),
+    });
+
+    const status = manager.status('openrouter');
+
+    expect(status).toEqual({
+      provider: 'openrouter',
+      configured: true,
+      available: true,
+      maskedHint: 'sk-or-********1234',
+    });
+    expect(JSON.stringify(status)).not.toContain(fullCredential);
+  });
+
   it('passes non-secret settings through the plaintext store', () => {
     const plaintext = createPlaintextStore();
     const manager = createSecureSettingsManager({

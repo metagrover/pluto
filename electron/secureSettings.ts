@@ -30,6 +30,25 @@ export function isSecretSettingKey(key: string) {
   return SECRET_SETTING_KEYS.has(key);
 }
 
+const CREDENTIAL_DISPLAY_PREFIX: Record<
+  ProviderCredentialStatus['provider'],
+  string
+> = {
+  openai: 'sk-',
+  openrouter: 'sk-or-',
+  gemini: 'AIza',
+  claude: 'sk-ant-',
+};
+
+function maskCredentialForDisplay(
+  provider: ProviderCredentialStatus['provider'],
+  value: string,
+) {
+  const trimmed = value.trim();
+  const suffix = trimmed.length >= 8 ? trimmed.slice(-4) : '';
+  return `${CREDENTIAL_DISPLAY_PREFIX[provider]}********${suffix}`;
+}
+
 function getSecureSettingsPath() {
   return path.join(app.getPath('userData'), 'secure-settings.json');
 }
@@ -162,16 +181,24 @@ export function createSecureSettingsManager({
         };
       }
       try {
-        let configured = getSecureValue(key) !== null;
-        if (!configured) {
+        let credential = getSecureValue(key);
+        if (credential === null) {
           const legacyValue = plaintext.get(key);
           if (legacyValue !== null) {
             writeSecureValue(key, legacyValue);
             plaintext.delete(key);
-            configured = true;
+            credential = legacyValue;
           }
         }
-        return { provider, configured, available: true };
+        return {
+          provider,
+          configured: credential !== null,
+          available: true,
+          maskedHint:
+            credential === null
+              ? undefined
+              : maskCredentialForDisplay(provider, credential),
+        };
       } catch (error) {
         logFailure(key, 'status', error);
         return {

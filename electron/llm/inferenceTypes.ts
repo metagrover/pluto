@@ -54,5 +54,7 @@ export interface ProviderCredentialStatus {
   provider: CloudProviderId;
   configured: boolean;
   available: boolean;
+  /** Redacted display-only hint. Never contains the complete credential. */
+  maskedHint?: string;
   error?: 'secure_storage_unavailable' | 'credential_unreadable';
 }
