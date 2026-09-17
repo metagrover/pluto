@@ -28,6 +28,10 @@ import {
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
 import {
+  executeOpenAICompatible,
+  inferenceTransportErrorRationale,
+} from '../../electron/llm/transports/openAICompatible';
+import {
   STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
   calculateOllamaContextBudget,
@@ -1089,6 +1093,7 @@ describe('UnifiedLLMProvider', () => {
     installFetchMock((url, init) => {
       expect(url).toContain('/chat/completions');
       const body = parseRequestBody(init);
+      expect(body.store).toBe(false);
       usedModel = String(body.model);
       return jsonResponse({
         choices: [{ message: { content: validAnalysisMarkdown } }],
@@ -1111,7 +1116,7 @@ describe('UnifiedLLMProvider', () => {
     installFetchMock((url, init) => {
       expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
       const body = parseRequestBody(init);
-      expect(body.store).toBe(false);
+      expect(body).not.toHaveProperty('store');
       expect(body.provider).toEqual({
         zdr: true,
         data_collection: 'deny',
@@ -1127,6 +1132,56 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('openrouter', {
       openrouter_api_key: 'test-key',
       openrouter_model: 'openai/gpt-4o-mini',
+    });
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
+  });
+
+  it('classifies OpenRouter endpoint-routing 404s without retaining the response body', async () => {
+    installFetchMock(() =>
+      Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({
+          error: { message: 'No endpoints found for this model.' },
+        }),
+      } as Response),
+    );
+
+    const error = await executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'askPluto',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Hello' }],
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      status: 404,
+      provider: 'openrouter',
+      code: 'openrouter_no_eligible_endpoint',
+    });
+    expect(inferenceTransportErrorRationale(error)).toContain(
+      'zero-retention endpoint',
+    );
+    expect(String(error)).not.toContain('No endpoints found');
+  });
+
+  it('normalizes OpenAI shorthand model IDs for OpenRouter', async () => {
+    installFetchMock((_url, init) => {
+      expect(parseRequestBody(init).model).toBe('openai/gpt-4o-mini');
+      return jsonResponse({
+        model: 'openai/gpt-4o-mini',
+        choices: [{ message: { content: validAnalysisMarkdown } }],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'gpt-4o-mini',
     });
     await expect(
       provider.generateUserAnalysisMarkdown('Speaker A: status update'),

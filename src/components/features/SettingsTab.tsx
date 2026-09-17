@@ -703,7 +703,11 @@ export const SettingsTab = ({
                 <SettingsRow
                   htmlFor="cloud-model"
                   label="Model"
-                  helper="Choose a tested model or enter an advanced provider model ID."
+                  helper={
+                    llmProvider === 'openrouter'
+                      ? 'Use an OpenRouter author/model ID, such as openai/gpt-4o-mini.'
+                      : 'Choose a tested model or enter an advanced provider model ID.'
+                  }
                 >
                   <Input
                     id="cloud-model"

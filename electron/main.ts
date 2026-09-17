@@ -584,6 +584,7 @@ import type {
   AnalysisDocument,
   InternalSignalDocument,
 } from './llm/provider';
+import { inferenceTransportErrorRationale } from './llm/transports/openAICompatible';
 import { UnifiedLLMProvider } from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
@@ -4343,7 +4344,7 @@ app.whenReady().then(async () => {
         return {
           status: 'unavailable',
           message: null,
-          rationale: 'Pluto could not answer about this person right now.',
+          rationale: inferenceTransportErrorRationale(error),
         } satisfies PersonChatResponse;
       } finally {
         settle();

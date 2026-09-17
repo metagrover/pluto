@@ -265,7 +265,7 @@ export const PersonChatDock: React.FC<{
       if (activeRequest.current !== requestId) return;
       if (response.status !== 'answered' || !response.message) {
         if (response.status !== 'cancelled')
-          setError('Pluto could not answer right now.');
+          setError(response.rationale || 'Pluto could not answer right now.');
         return;
       }
       setMessages((current) => [...current, response.message!]);
