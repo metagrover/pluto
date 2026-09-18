@@ -1,3 +1,5 @@
+import type { MeetingIdentityState } from './api/identity';
+import type { Entity } from './api/knowledgeGraph';
 import type { MeetingNotesSpeakerReferences } from './utils/meetingNotesSpeakerReferences';
 import type { TranscriptLifecycleStatus } from './utils/transcriptIntegrity';
 
@@ -273,6 +275,11 @@ export interface Meeting {
   final_transcription_state?: string | null;
   final_transcription_engine?: string | null;
   speaker_attribution_verified?: boolean | null;
+  speaker_display_names?: Record<string, string>;
+  meeting_entities?: Array<
+    Entity & { mention_count?: number; context?: string | null }
+  >;
+  identity_state?: MeetingIdentityState | null;
   automatic_attempts_exhausted?: boolean;
   dashboard_detail?: string | null;
   recent_win_title?: string | null;

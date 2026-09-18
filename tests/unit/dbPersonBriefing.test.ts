@@ -73,6 +73,7 @@ describe('person briefing database read model', () => {
       briefStatus: null,
       briefUpdatedAt: null,
       possibleDuplicateCount: 0,
+      isSelf: false,
     });
   });
 

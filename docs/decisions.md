@@ -15,6 +15,19 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-17 - Automatically assign speakers for strong voice matches
+
+- **Status:** Accepted
+- **Supersedes:** The manual confirmation requirement in “2026-09-05 - Cross-meeting speaker recognition using opt-in local voice profiles” and “2026-09-12 - Derive voice-profile representatives in one native pass”.
+- **Decision:** Automatically bind remote meeting speakers to enrolled people when acoustic evidence produces an unambiguous, strong voice match. A match is strong when it satisfies Pluto's calibrated policy: cosine similarity $\ge 0.72$, runner-up separation margin $\ge 0.10$, biometric purity gate passed ($\ge 3.0$s clean duration, $\ge 2$ clean segments/chunks, intra-candidate consistency $\ge 0.85$), and candidate not previously rejected. Auto-assignment occurs both at recording finalization (`COMMIT_FINAL_TRANSCRIPTION` prior to downstream notes generation) and retroactively when opening meetings with unassigned speakers (`SPEAKER_VOICE_GET_SUGGESTIONS`).
+- **Guardrails and Reversibility:**
+  1. *Collision guardrail:* Strict 1-to-1 matching within a meeting. If two speakers in the same meeting match the same person, or if a person is already bound to another speaker in the meeting, automatic assignment abstains for all ambiguous candidates.
+  2. *Undo suppression:* When a user clears or changes an automatic voice binding, the rejection is recorded in `identity_binding_suppressions` (`voice_match_strong_v1`). Pluto will never re-auto-assign that speaker in that meeting.
+  3. *Biometric consent isolation:* Automatic bindings are tagged with `assignment: { kind: 'voice_match_strong_v1' }`. They never auto-enroll new voice embeddings into `speaker_voice_enrollments`, preventing profile drift and feedback loops without explicit user confirmation.
+  4. *Visual transparency:* The Participants list displays a subtle `· Recognized voice` indicator with a quick `Change` action, and the speaker modal clearly communicates `Recognized as [Name]` with an `Automatically identified` badge.
+- **Rationale:** Pluto's speaker voice matching has proven reliable with calibrated thresholds and purity filters. Requiring users to manually review and click "Confirm" on unambiguous, high-confidence voice matches introduced unnecessary friction after every meeting and delayed speaker attribution in generated notes.
+- **Consequences:** Generated meeting notes immediately attribute statements to recognized speakers without requiring user interaction. Users retain frictionless override capability via the participant list and speaker identification modal.
+
 ## 2026-09-16 - Automatically accept person commitments for non-self individuals
 
 - **Status:** Accepted

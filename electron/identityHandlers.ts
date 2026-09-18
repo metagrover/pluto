@@ -6,6 +6,7 @@ import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
 import { getMeetingIdentityContext } from './commitmentIdentity';
 import * as db from './db';
 import { MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT } from './meetingParticipantIdentity';
+import { VOICE_MATCH_STRONG_ASSIGNMENT } from './speakerVoiceIdentity';
 
 export const IDENTITY_CHANNELS = [
   'GET_IDENTITY_STATE',
@@ -307,12 +308,13 @@ export function handleIdentityRequest(
         );
         if (
           previousBinding?.assignment?.kind ===
-          MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT
+            MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT ||
+          previousBinding?.assignment?.kind === VOICE_MATCH_STRONG_ASSIGNMENT
         ) {
           db.identityStore.suppressAutomaticBinding(
             context.meetingId,
             speaker,
-            MANUAL_PARTICIPANT_SINGLETON_ASSIGNMENT,
+            previousBinding.assignment.kind,
           );
         }
         db.identityStore.clearBinding(

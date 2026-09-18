@@ -116,6 +116,7 @@ interface AudioManagerProps {
   transcriptionSettings?: TranscriptionSettings;
   silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
   calendarEndTimeMs?: number | null;
+  fasterNotesEnabled?: boolean;
 
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
@@ -233,7 +234,10 @@ export const AudioManager = ({
   systemAudioStatus = 'unknown',
   silenceAutoStopDuration = '5',
   calendarEndTimeMs = null,
+  fasterNotesEnabled = true,
 }: AudioManagerProps) => {
+  const fasterNotesEnabledRef = useRef(fasterNotesEnabled);
+  fasterNotesEnabledRef.current = fasterNotesEnabled;
   const [isRecording, setIsRecording] = useState(false);
   const captureHealthRef = useRef<CaptureHealthState>({
     microphone: 'healthy',
@@ -1041,6 +1045,7 @@ export const AudioManager = ({
                 0,
               );
               if (
+                fasterNotesEnabledRef.current !== false &&
                 shouldOfferIncrementalMeetingNotes({
                   sourceCharacterCount,
                   lastOfferedCharacterCount:

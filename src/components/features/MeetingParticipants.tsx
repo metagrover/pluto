@@ -20,6 +20,7 @@ export interface ResolvedMeetingParticipant {
   personId?: string | null;
   isSelf: boolean;
   isAnonymous: boolean;
+  isVoiceMatched?: boolean;
   turnCount: number;
   role?: string | null;
   source: 'transcript' | 'identity' | 'calendar' | 'entity';
@@ -185,6 +186,12 @@ export function resolveMeetingParticipants(params: {
     }
     processedNames.add(cleanName.toLowerCase());
 
+    const binding = identityState?.bindings?.find(
+      (b) => b.speaker === speakerKey,
+    );
+    const isVoiceMatched =
+      binding?.assignment?.kind === 'voice_match_strong_v1';
+
     participants.push({
       id: `speaker:${speakerKey}`,
       name: cleanName,
@@ -192,6 +199,7 @@ export function resolveMeetingParticipants(params: {
       personId: resolvedPersonId,
       isSelf,
       isAnonymous: false,
+      isVoiceMatched,
       turnCount: turns,
       role,
       source: 'transcript',
@@ -355,32 +363,50 @@ export const MeetingParticipantsPopover: React.FC<
                     ) : (
                       <span>In meeting</span>
                     )}
-                    {participant.speakerKey &&
+                    {participant.isVoiceMatched ? (
+                      <span className="shrink-0 font-medium text-emerald-600 dark:text-emerald-400">
+                        · Recognized voice
+                      </span>
+                    ) : participant.speakerKey &&
                       !participant.isAnonymous &&
-                      participant.speakerKey !== participant.name && (
-                        <span className="opacity-50 shrink-0">
-                          ·{' '}
-                          {getAnonymousSpeakerDisplayLabel(
-                            participant.speakerKey,
-                          )}
-                        </span>
-                      )}
+                      participant.speakerKey !== participant.name ? (
+                      <span className="opacity-50 shrink-0">
+                        ·{' '}
+                        {getAnonymousSpeakerDisplayLabel(
+                          participant.speakerKey,
+                        )}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>
 
               <div className="shrink-0 flex items-center gap-1">
                 {participant.personId ? (
-                  <button
-                    type="button"
-                    data-open-person-id={participant.personId}
-                    onClick={() => onOpenPerson(participant.personId!)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-medium text-pro-accent bg-pro-accent/10 hover:bg-pro-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                    title={`View ${participant.name} profile in Pluto`}
-                  >
-                    <span>Profile</span>
-                    <ArrowRight size={11} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {participant.isVoiceMatched && participant.speakerKey && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onIdentifySpeaker(participant.speakerKey || null)
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        title={`Change speaker identification for ${participant.name}`}
+                      >
+                        Change
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      data-open-person-id={participant.personId}
+                      onClick={() => onOpenPerson(participant.personId!)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-medium text-pro-accent bg-pro-accent/10 hover:bg-pro-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                      title={`View ${participant.name} profile in Pluto`}
+                    >
+                      <span>Profile</span>
+                      <ArrowRight size={11} />
+                    </button>
+                  </div>
                 ) : participant.isAnonymous &&
                   participant.speakerKey &&
                   isIdentifiableSpeakerKey(participant.speakerKey) ? (

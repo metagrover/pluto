@@ -2069,7 +2069,19 @@
     @apply min-h-8 rounded-full px-3 font-medium text-pro-accent hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .live-conversation-warning {
-    @apply mt-4 rounded-lg border border-pro-warning/25 bg-pro-warning/5 px-4 py-3 text-xs text-pro-text-muted;
+    @apply mt-4 rounded-xl border border-pro-border/60 bg-pro-surface/50 px-4 py-3 text-xs text-pro-text-muted backdrop-blur-sm transition-all;
+  }
+  .live-conversation-warning__header {
+    @apply flex items-center gap-2 font-medium text-pro-text-main;
+  }
+  .live-conversation-warning__dot {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full bg-pro-text-muted/60;
+  }
+  .live-conversation-warning__body {
+    @apply mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between text-xs text-pro-text-muted;
+  }
+  .live-conversation-warning__action {
+    @apply shrink-0 font-medium text-pro-accent hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pro-accent self-start sm:self-auto;
   }
   .live-transcript-follow-control {
     @apply flex shrink-0 justify-center border-t border-pro-border/50 bg-pro-surface px-4 py-3;

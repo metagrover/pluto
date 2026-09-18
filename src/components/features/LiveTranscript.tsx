@@ -179,11 +179,17 @@ export const LiveTranscript = ({
   interimText,
   integrity = 'healthy',
   conversation = null,
+  onOpenSettings,
+  forceShowWarning = false,
 }: {
   segments: LiveTranscriptSegment[];
   interimText: string;
   integrity?: LiveTranscriptIntegrity;
   conversation?: LiveConversationSnapshot | null;
+  onOpenSettings?: (
+    tab?: 'personal' | 'meetings' | 'intelligence' | 'advanced',
+  ) => void;
+  forceShowWarning?: boolean;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingLiveRef = useRef(true);
@@ -246,6 +252,11 @@ export const LiveTranscript = ({
     if (!element || !followingLiveRef.current) return;
     element.scrollTop = element.scrollHeight;
   }, [conversation, interimText, segments]);
+
+  const showWarning =
+    forceShowWarning ||
+    conversation?.status === 'degraded' ||
+    conversation?.status === 'unavailable';
 
   return (
     <section
@@ -311,12 +322,6 @@ export const LiveTranscript = ({
                   }
                 />
               )}
-              {(conversation.status === 'degraded' ||
-                conversation.status === 'unavailable') && (
-                <p className="live-conversation-warning">
-                  Live wording may be incomplete. Recording continues safely.
-                </p>
-              )}
             </>
           ) : visibleSegments.length === 0 && !interimText ? (
             <div className="transcript-waiting">
@@ -332,6 +337,36 @@ export const LiveTranscript = ({
             <p className="transcript-interim" aria-hidden="true">
               {interimText}
             </p>
+          )}
+          {showWarning && (
+            <aside
+              className="live-conversation-warning"
+              aria-label="Live transcript status"
+            >
+              <div className="live-conversation-warning__header">
+                <span
+                  className="live-conversation-warning__dot"
+                  aria-hidden="true"
+                />
+                <span>Audio is recording safely · Live wording paused</span>
+              </div>
+              <div className="live-conversation-warning__body">
+                <p>
+                  To keep live transcript and questions active with local AI
+                  models, turn off Generate notes during meetings in Settings →
+                  Meetings.
+                </p>
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSettings('meetings')}
+                    className="live-conversation-warning__action"
+                  >
+                    Open Settings →
+                  </button>
+                )}
+              </div>
+            </aside>
           )}
           <p className="sr-only" role="status" aria-live="polite">
             {announcement}

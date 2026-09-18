@@ -53,6 +53,8 @@ interface SettingsTabProps {
   setCalendarPromptEnabled?: (val: boolean) => void;
   silenceAutoStopDuration?: '3' | '5' | '10' | 'disabled';
   setSilenceAutoStopDuration?: (val: '3' | '5' | '10' | 'disabled') => void;
+  fasterNotesEnabled?: boolean;
+  setFasterNotesEnabled?: (val: boolean) => void;
 }
 
 const providerOptions = [
@@ -192,6 +194,8 @@ export const SettingsTab = ({
   setCalendarPromptEnabled,
   silenceAutoStopDuration = '5',
   setSilenceAutoStopDuration,
+  fasterNotesEnabled = true,
+  setFasterNotesEnabled,
 }: SettingsTabProps) => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
     initialTab ?? 'personal',
@@ -503,6 +507,24 @@ export const SettingsTab = ({
                   const next = !autoEndEnabled;
                   setAutoEndEnabled(next);
                   persistSetting('auto_end_enabled', next ? 'true' : 'false');
+                }}
+              />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Generate notes during meetings"
+              helper="Precomputes notes in the background while recording so they are ready immediately when the meeting ends. Turn this off when using large local models to keep live transcription smooth."
+              actionControl
+            >
+              <Toggle
+                checked={fasterNotesEnabled !== false}
+                onChange={() => {
+                  const next = !(fasterNotesEnabled !== false);
+                  setFasterNotesEnabled?.(next);
+                  persistSetting(
+                    'faster_notes_enabled',
+                    next ? 'true' : 'false',
+                  );
                 }}
               />
             </SettingsRow>

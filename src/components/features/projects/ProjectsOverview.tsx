@@ -13,11 +13,13 @@ import {
   Search,
   Sparkles,
   Star,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  deleteEntity,
   demoteInitiativeToTopic,
   detachTopicFromProject,
   discoverProjectInitiative,
@@ -543,6 +545,20 @@ export function ProjectsOverview({
     }
   };
 
+  const handleDeleteProject = async (entry: ProjectPortfolioEntry) => {
+    const displayTitle = readProjectDisplayTitle(entry.metadata, entry.name);
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${displayTitle}"? This will remove this project and its milestones, and cannot be undone.`,
+    );
+    if (!confirmed) return;
+    try {
+      await deleteEntity(entry.id);
+      await reloadPortfolio();
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+    }
+  };
+
   if (activeId)
     return (
       <ProjectDossier
@@ -840,6 +856,20 @@ export function ProjectsOverview({
                     : 'text-current'
                 }`}
               />
+            </button>
+
+            {/* Quick Delete button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleDeleteProject(entry);
+              }}
+              title="Delete project"
+              aria-label={`Delete ${displayTitle}`}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-pro-text-muted/40 opacity-0 transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover/row:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
 

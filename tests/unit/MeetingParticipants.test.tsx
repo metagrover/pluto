@@ -140,6 +140,55 @@ describe('MeetingParticipants', () => {
       expect(s2).toBeUndefined();
     });
 
+    it('identifies voice matched participants with isVoiceMatched flag', () => {
+      const segments = [{ speaker: 'Speaker 1' }];
+      const identityState: MeetingIdentityState = {
+        meetingId: 'm-voice',
+        speakers: ['Speaker 1'],
+        selfPersonId: 'person-self',
+        revision: 1,
+        profile: {
+          preferredName: 'Alice',
+          aliases: [],
+          useCases: '',
+          role: '',
+          industry: '',
+        },
+        capture: { origin: 'local', selfPersonId: 'person-self' },
+        job: null,
+        speakerDisplayNames: {
+          'Speaker 1': 'Avery Davis',
+        },
+        bindings: [
+          {
+            speaker: 'Speaker 1',
+            personId: 'person-avery',
+            status: 'confirmed',
+            confidence: 1,
+            source: 'user',
+            assignment: {
+              kind: 'voice_match_strong_v1',
+            },
+            confirmedAt: '2026-09-01T00:00:00Z',
+          } as any,
+        ],
+        people: [
+          {
+            id: 'person-avery',
+            name: 'Avery Davis',
+          },
+        ],
+      };
+
+      const result = resolveMeetingParticipants({
+        transcriptSegments: segments,
+        identityState,
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].isVoiceMatched).toBe(true);
+    });
+
     it('does not add calendar attendees as non-speaking participants', () => {
       const segments = [{ speaker: 'Me' }];
       const calendarAttendeeNames = ['Avery Davis', 'Jordan Lee'];

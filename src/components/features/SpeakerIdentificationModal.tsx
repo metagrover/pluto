@@ -677,6 +677,22 @@ export const SpeakerIdentificationModal = ({
     setBusy(true);
     setError('');
     try {
+      if (
+        currentBinding &&
+        currentBinding.personId === suggestion.suggestedPersonId &&
+        state
+      ) {
+        try {
+          const next = await clearMeetingIdentityBinding(
+            meetingId,
+            currentSpeaker,
+            state.revision,
+          );
+          setState(next);
+        } catch {
+          // non-fatal if clearing fails
+        }
+      }
       await rejectSpeakerVoiceSuggestion({
         meetingId,
         speaker: currentSpeaker,
@@ -976,8 +992,12 @@ export const SpeakerIdentificationModal = ({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-pro-text-main">
-                        {displayLabel} may be{' '}
-                        {voiceSuggestions[currentSpeaker].suggestedPersonName}
+                        {currentBinding?.assignment?.kind ===
+                          'voice_match_strong_v1' &&
+                        currentBinding.personId ===
+                          voiceSuggestions[currentSpeaker].suggestedPersonId
+                          ? `${displayLabel} recognized as ${voiceSuggestions[currentSpeaker].suggestedPersonName}`
+                          : `${displayLabel} may be ${voiceSuggestions[currentSpeaker].suggestedPersonName}`}
                       </span>
                       <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-medium">
                         Strong match
@@ -991,19 +1011,28 @@ export const SpeakerIdentificationModal = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void handleConfirmSuggestion(
-                          voiceSuggestions[currentSpeaker],
-                        )
-                      }
-                      className="rounded-lg bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90 transition-colors"
-                    >
-                      Confirm{' '}
-                      {voiceSuggestions[currentSpeaker].suggestedPersonName}
-                    </button>
+                    {currentBinding?.assignment?.kind ===
+                      'voice_match_strong_v1' &&
+                    currentBinding.personId ===
+                      voiceSuggestions[currentSpeaker].suggestedPersonId ? (
+                      <span className="rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-3 py-1 text-xs font-medium">
+                        Automatically identified
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void handleConfirmSuggestion(
+                            voiceSuggestions[currentSpeaker],
+                          )
+                        }
+                        className="rounded-lg bg-pro-accent px-3 py-1 text-xs font-medium text-white hover:bg-pro-accent/90 transition-colors"
+                      >
+                        Confirm{' '}
+                        {voiceSuggestions[currentSpeaker].suggestedPersonName}
+                      </button>
+                    )}
 
                     <button
                       type="button"

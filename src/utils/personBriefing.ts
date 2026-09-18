@@ -19,6 +19,7 @@ export interface PersonBriefingSummary {
   briefStatus: string | null;
   briefUpdatedAt: string | null;
   possibleDuplicateCount: number;
+  isSelf?: boolean;
 }
 
 const NON_PERSON_LABELS = new Set([

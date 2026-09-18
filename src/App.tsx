@@ -294,6 +294,7 @@ function App() {
   const [silenceAutoStopDuration, setSilenceAutoStopDuration] = useState<
     '3' | '5' | '10' | 'disabled'
   >('5');
+  const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
   const [activeCalendarEvent, setActiveCalendarEvent] =
     useState<CalendarEvent | null>(null);
   const activeCalendarEventRef = useRef<CalendarEvent | null>(null);
@@ -756,6 +757,11 @@ function App() {
         if (val && ['3', '5', '10', 'disabled'].includes(val)) {
           setSilenceAutoStopDuration(val as '3' | '5' | '10' | 'disabled');
         }
+      });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'faster_notes_enabled')
+      .then((val) => {
+        if (val !== null) setFasterNotesEnabled(val !== 'false');
       });
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
@@ -1777,6 +1783,7 @@ function App() {
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
           silenceAutoStopDuration={silenceAutoStopDuration}
+          fasterNotesEnabled={fasterNotesEnabled}
           calendarEndTimeMs={
             resolvedActiveCalendarEvent
               ? new Date(resolvedActiveCalendarEvent.end).getTime()
@@ -1883,6 +1890,11 @@ function App() {
           setAskPlutoConversation={setMeetingAskPlutoConversation}
           askPlutoMinimized={meetingAskPlutoMinimized}
           setAskPlutoMinimized={setMeetingAskPlutoMinimized}
+          onOpenSettings={(tab = 'meetings') => {
+            setSettingsInitialTab(tab);
+            setActiveTab('settings');
+            setZenVisible(false);
+          }}
         />
       ) : (
         <main
@@ -1932,7 +1944,14 @@ function App() {
               <RecordingFinalizingView meeting={finalizingMeeting} />
             ) : selectedMeetingId ? (
               <MeetingView
+                key={selectedMeeting?.id}
                 selectedMeeting={selectedMeeting}
+                isLoadingDetail={
+                  selectedMeetingId != null &&
+                  (!selectedMeetingDetail ||
+                    String(selectedMeetingDetail.id) !==
+                      String(selectedMeetingId))
+                }
                 citationTarget={
                   askPlutoCitationTarget?.meetingId ===
                   String(selectedMeeting?.id)
@@ -2104,6 +2123,8 @@ function App() {
                 setCalendarPromptEnabled={handleCalendarPromptToggle}
                 silenceAutoStopDuration={silenceAutoStopDuration}
                 setSilenceAutoStopDuration={handleSilenceAutoStopDurationChange}
+                fasterNotesEnabled={fasterNotesEnabled}
+                setFasterNotesEnabled={setFasterNotesEnabled}
               />
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">

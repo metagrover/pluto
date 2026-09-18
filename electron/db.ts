@@ -7313,20 +7313,135 @@ export const updateActionCommitmentState = (
 };
 
 /**
- * Delete an entity and all its links
+ * Delete an entity and all its links and associations
  */
-export const deleteEntity = (id: string): void => {
-  db.prepare('DELETE FROM entities WHERE id = ?').run(id);
+export const deleteEntity = (id: string): { affectedMeetingIds: string[] } => {
+  const entity = getEntity(id);
+  if (!entity) return { affectedMeetingIds: [] };
 
-  // Delete from FTS
-  try {
-    db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(id);
-  } catch (e) {
-    dbLog.warn('Failed to delete entity from FTS', e);
+  const selfPersonId = identityStore.getSelfPersonId();
+  if (
+    selfPersonId &&
+    (id === selfPersonId || resolvePersonIdentityId(id) === selfPersonId)
+  ) {
+    throw new Error('cannot_delete_self_person');
   }
 
-  // CASCADE will handle entity_links and meeting_entities
-  dbLog.debug(`Deleted entity: ${id}`);
+  const affectedMeetingIds: string[] = [];
+
+  withCommitmentTransaction(() => {
+    // 1. If person, find meetings with identity bindings to this person
+    if (entity.type === 'person') {
+      try {
+        const bindingRows = db
+          .prepare(
+            "SELECT DISTINCT meeting_id FROM identity_bindings WHERE json_valid(payload) AND json_extract(payload, '$.personId') = ?",
+          )
+          .all(id) as Array<{ meeting_id: string }>;
+        for (const row of bindingRows) {
+          affectedMeetingIds.push(row.meeting_id);
+        }
+        db.prepare(
+          "DELETE FROM identity_bindings WHERE json_valid(payload) AND json_extract(payload, '$.personId') = ?",
+        ).run(id);
+      } catch (e) {
+        dbLog.warn('Failed to delete identity bindings for person', e);
+      }
+
+      try {
+        db.prepare(
+          "DELETE FROM identity_binding_suppressions WHERE json_valid(assignment) AND json_extract(assignment, '$.personId') = ?",
+        ).run(id);
+      } catch (e) {
+        dbLog.warn('Failed to delete identity suppressions for person', e);
+      }
+
+      try {
+        db.prepare(
+          'DELETE FROM speaker_voice_enrollments WHERE person_id = ?',
+        ).run(id);
+        db.prepare(
+          'DELETE FROM speaker_voice_profile_settings WHERE person_id = ?',
+        ).run(id);
+        db.prepare(
+          'DELETE FROM speaker_voice_rejections WHERE person_id = ?',
+        ).run(id);
+      } catch (e) {
+        dbLog.warn('Failed to delete speaker voice profiles for person', e);
+      }
+
+      try {
+        db.prepare('DELETE FROM person_chat_threads WHERE person_id = ?').run(
+          id,
+        );
+      } catch (e) {
+        dbLog.warn('Failed to delete person chat threads', e);
+      }
+
+      try {
+        db.prepare(
+          'DELETE FROM identity_person_aliases WHERE person_id = ?',
+        ).run(id);
+        db.prepare('DELETE FROM person_name_aliases WHERE person_id = ?').run(
+          id,
+        );
+        db.prepare(
+          'DELETE FROM person_aliases WHERE person_id = ? OR canonical_id = ?',
+        ).run(id, id);
+        db.prepare(
+          'DELETE FROM entity_dreaming_person_claims WHERE entity_id = ?',
+        ).run(id);
+      } catch (e) {
+        dbLog.warn('Failed to delete aliases/claims for person', e);
+      }
+    } else if (entity.type === 'project') {
+      try {
+        db.prepare(
+          'DELETE FROM project_aliases WHERE project_id = ? OR canonical_id = ?',
+        ).run(id, id);
+        db.prepare('DELETE FROM commitment_aliases WHERE canonical_id = ?').run(
+          id,
+        );
+        db.prepare(`
+          UPDATE entities
+          SET metadata = json_remove(metadata, '$.qualification.parentProjectId')
+          WHERE json_valid(metadata) AND json_extract(metadata, '$.qualification.parentProjectId') = ?
+        `).run(id);
+      } catch (e) {
+        dbLog.warn('Failed to clean up project associations', e);
+      }
+    }
+
+    // 2. Common entity cleanups
+    try {
+      db.prepare(
+        'DELETE FROM entity_links WHERE source_entity_id = ? OR target_entity_id = ?',
+      ).run(id, id);
+      db.prepare('DELETE FROM meeting_entities WHERE entity_id = ?').run(id);
+      db.prepare('DELETE FROM entity_dreaming_aliases WHERE entity_id = ?').run(
+        id,
+      );
+      db.prepare(
+        'DELETE FROM entity_dreaming_proposals WHERE entity_id = ?',
+      ).run(id);
+      db.prepare('DELETE FROM entity_corrections WHERE entity_id = ?').run(id);
+    } catch (e) {
+      dbLog.warn('Failed to clean up entity relationships/corrections', e);
+    }
+
+    // 3. Delete from entities
+    db.prepare('DELETE FROM entities WHERE id = ?').run(id);
+
+    // 4. Delete from FTS
+    try {
+      db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(id);
+    } catch (e) {
+      dbLog.warn('Failed to delete entity from FTS', e);
+    }
+  });
+
+  dbLog.debug(`Deleted entity: ${id} (${entity.type})`);
+  return { affectedMeetingIds };
 };
 
 /**
@@ -8582,6 +8697,7 @@ export const getPeopleBriefingSummaries = (): PersonBriefingSummary[] => {
         briefStatus: row.brief_status,
         briefUpdatedAt: row.brief_updated_at,
         possibleDuplicateCount: Number(row.possible_duplicate_count),
+        isSelf,
       };
     })
     .sort(

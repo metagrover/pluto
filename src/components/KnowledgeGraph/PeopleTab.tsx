@@ -13,6 +13,7 @@ import {
   Play,
   Search,
   Sparkles,
+  Trash2,
   Undo2,
   UserRound,
   Volume2,
@@ -24,6 +25,7 @@ import {
   type Entity,
   type EntityMeeting,
   type PersonBriefingDetail,
+  deleteEntity,
   getPeopleBriefingSummaries,
   getPersonBriefing,
   mergePerson,
@@ -209,10 +211,12 @@ export const PeopleBriefing = ({
   rows,
   selectedPersonId,
   onSelectPerson,
+  onDeletePerson,
 }: {
   rows: PersonBriefingRow[];
   selectedPersonId?: string | null;
   onSelectPerson: (personId: string) => void;
+  onDeletePerson?: (personId: string, personName: string) => Promise<void>;
 }) => {
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
@@ -266,7 +270,7 @@ export const PeopleBriefing = ({
     const showRole = person.role !== 'Known from conversations';
     return (
       <article
-        className={`person-row ${selected ? 'person-row--selected' : ''}`}
+        className={`person-row group relative ${selected ? 'person-row--selected' : ''}`}
         data-person-id={person.id}
         data-selected={selected ? 'true' : undefined}
         key={person.id}
@@ -333,6 +337,21 @@ export const PeopleBriefing = ({
             size={13}
           />
         </button>
+        {!person.isSelf && onDeletePerson && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              void onDeletePerson(person.id, person.name);
+            }}
+            title="Delete person"
+            aria-label={`Delete ${person.name}`}
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg bg-pro-bg/90 text-pro-text-muted/40 opacity-0 pointer-events-none transition-all hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 shadow-2xs"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </article>
     );
   };
@@ -728,6 +747,7 @@ export const PersonDossier = ({
     name: string;
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
+  const [isDeleting, setIsDeleting] = useState(false);
   const prepareGeneration = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -1182,6 +1202,24 @@ export const PersonDossier = ({
     }
   };
 
+  const handleDeletePerson = async () => {
+    if (currentDetail.isSelf || isDeleting) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${currentDetail.person.name}? This will remove them from your directory, unlink their voice profile and past speaker assignments, and cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setIsDeleting(true);
+    try {
+      await deleteEntity(currentDetail.person.id);
+      onBack();
+      await onIdentityChanged();
+    } catch (err) {
+      console.error('Failed to delete person:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const { workstreams, plainBullets } = useMemo(() => {
     return extractWorkstreams(brief.activeStreams, brief.supportingBullets);
   }, [brief.activeStreams, brief.supportingBullets]);
@@ -1486,6 +1524,22 @@ export const PersonDossier = ({
                 >
                   <Clock3 aria-hidden="true" size={14} />
                   Mark context as outdated
+                </button>
+              )}
+              {!currentDetail.isSelf && (
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={(event) => {
+                    event.currentTarget
+                      .closest('details')
+                      ?.removeAttribute('open');
+                    void handleDeletePerson();
+                  }}
+                  className="text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                >
+                  <Trash2 aria-hidden="true" size={14} />
+                  Delete person
                 </button>
               )}
             </div>
@@ -2373,6 +2427,13 @@ export const PeopleTab: React.FC<{
                 [selectedPersonId || nextDetail.person.id]: nextDetail,
                 [nextDetail.person.id]: nextDetail,
               }));
+            } else {
+              setDetails((current) => {
+                const next = { ...current };
+                delete next[selectedDetail.person.id];
+                if (selectedPersonId) delete next[selectedPersonId];
+                return next;
+              });
             }
           }}
         />
@@ -2389,6 +2450,24 @@ export const PeopleTab: React.FC<{
       rows={rows}
       selectedPersonId={selectedPersonId}
       onSelectPerson={(personId) => onSelectPerson(personId)}
+      onDeletePerson={async (personId, personName) => {
+        const confirmed = window.confirm(
+          `Are you sure you want to delete ${personName}? This will remove them from your directory, unlink their voice profile and past speaker assignments, and cannot be undone.`,
+        );
+        if (!confirmed) return;
+        try {
+          await deleteEntity(personId);
+          const nextRows = await getPeopleBriefingSummaries();
+          setRows(nextRows);
+          setDetails((current) => {
+            const next = { ...current };
+            delete next[personId];
+            return next;
+          });
+        } catch (err) {
+          console.error('Failed to delete person:', err);
+        }
+      }}
     />
   );
 };

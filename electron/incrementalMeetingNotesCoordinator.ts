@@ -8,6 +8,7 @@ export type IncrementalMeetingNotesAdmissionPolicy =
     captureOwned: boolean;
     liveTranscriptHealthy: boolean;
     onBattery: boolean;
+    fasterNotesEnabled?: boolean;
   };
 
 export const evaluateIncrementalMeetingNotesAdmission = (
@@ -17,12 +18,16 @@ export const evaluateIncrementalMeetingNotesAdmission = (
   | {
       admitted: false;
       reason:
+        | 'user_disabled'
         | 'capture_not_owned'
         | 'live_transcript_unhealthy'
         | 'battery_power'
         | 'thermal_headroom'
         | 'memory_pressure';
     } => {
+  if (policy.fasterNotesEnabled === false) {
+    return { admitted: false, reason: 'user_disabled' };
+  }
   if (!policy.captureOwned) {
     return { admitted: false, reason: 'capture_not_owned' };
   }

@@ -292,4 +292,59 @@ describe('SettingsTab', () => {
 
     act(() => root.unmount());
   });
+
+  it('renders and toggles Generate notes during meetings under the Meetings tab', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const setFasterNotesEnabled = vi.fn();
+
+    act(() =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          fasterNotesEnabled={true}
+          setFasterNotesEnabled={setFasterNotesEnabled}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('Generate notes during meetings');
+    expect(container.textContent).toContain(
+      'Precomputes notes in the background while recording',
+    );
+
+    const recordingSection = Array.from(
+      container.querySelectorAll('section'),
+    ).find((sec) => sec.textContent?.includes('Recording'));
+    expect(recordingSection).toBeDefined();
+
+    const labels = Array.from(
+      recordingSection?.querySelectorAll('label') ?? [],
+    );
+    const fasterNotesLabel = labels.find((l) =>
+      l.textContent?.includes('Generate notes during meetings'),
+    );
+    expect(fasterNotesLabel).toBeDefined();
+
+    const row = fasterNotesLabel?.closest('.flex');
+    const toggle = row?.querySelector<HTMLButtonElement>(
+      'button[role="switch"]',
+    );
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(setFasterNotesEnabled).toHaveBeenCalledWith(false);
+    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'faster_notes_enabled',
+      value: 'false',
+    });
+
+    act(() => root.unmount());
+  });
 });

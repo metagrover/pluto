@@ -8,11 +8,13 @@ import {
   Pencil,
   Repeat2,
   Star,
+  Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  deleteEntity,
   detachTopicFromProject,
   getProjectBrief,
   mergeProject,
@@ -343,6 +345,7 @@ export const ProjectDossier = ({
   } | null>(null);
   const [dreamingState, setDreamingState] = useState<DreamingUiStatus>('idle');
   const [showAllPeople, setShowAllPeople] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const prepareGeneration = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const moreDetailsRef = useRef<HTMLDetailsElement>(null);
@@ -804,6 +807,25 @@ export const ProjectDossier = ({
     }
   };
 
+  const handleDeleteProject = async () => {
+    if (!current || isDeleting) return;
+    const title = current.project.displayTitle;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${title}"? This will remove this project and its milestones, and cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setIsDeleting(true);
+    try {
+      await deleteEntity(projectId);
+      await onPortfolioChanged?.();
+      onBack();
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const performMerge = async () => {
     if (!current || !selectedMergeSource) return;
     setMergeState('saving');
@@ -992,6 +1014,20 @@ export const ProjectDossier = ({
                 className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm hover:bg-pro-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
               >
                 {DREAMING_STATUS_LABEL[dreamingState]}
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  if (moreDetailsRef.current) {
+                    moreDetailsRef.current.open = false;
+                  }
+                  void handleDeleteProject();
+                }}
+                className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+              >
+                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                Delete project
               </button>
             </div>
           </details>

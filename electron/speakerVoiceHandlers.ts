@@ -14,6 +14,7 @@ import {
   getSpeakerEnrollmentAvailability,
   isSpeakerEnrollmentSourceCurrent,
 } from './speakerEnrollmentCandidate';
+import { reconcileVoiceMatchSpeakerIdentity } from './speakerVoiceIdentity';
 import {
   deleteVoiceProfile,
   enrollSpeakerVoice,
@@ -80,6 +81,11 @@ export interface SpeakerVoiceDependencies {
       representativeInferencesMs: number[];
     };
   } | null>;
+  allowAutoAssign?: boolean;
+  onBindingChange?: (params: {
+    meetingId: string;
+    personIds: string[];
+  }) => void;
 }
 
 type ConfirmedSpeakerBinding = {
@@ -1003,6 +1009,42 @@ export async function handleSpeakerVoiceRequest(
             sourceRevision: match.sourceRevision,
             referenceInterval: match.referenceInterval,
           };
+        }
+      }
+
+      if (deps?.allowAutoAssign !== false) {
+        try {
+          const autoAssignPlan = reconcileVoiceMatchSpeakerIdentity({
+            meetingId,
+            getCandidates: () => candidates,
+            getProfiles: () => profiles,
+            getRejections: () => rejections,
+            getBindings: (mid) => db.identityStore.getBindings(mid),
+            isAutomaticBindingSuppressed: (mid, speaker, assignment) =>
+              db.identityStore.isAutomaticBindingSuppressed(
+                mid,
+                speaker,
+                assignment,
+              ),
+            setBinding: (mid, binding) =>
+              db.identityStore.setBinding(mid, binding),
+            ensureMeetingEntity: db.ensureMeetingEntity,
+            calendarAttendeePersonIds: payload?.calendarAttendeePersonIds,
+          });
+          if (
+            autoAssignPlan.status === 'bind' &&
+            autoAssignPlan.assignments.length > 0
+          ) {
+            deps?.onBindingChange?.({
+              meetingId,
+              personIds: autoAssignPlan.assignments.map((a) => a.personId),
+            });
+          }
+        } catch (error) {
+          console.warn(
+            '[Identity] Voice match speaker reconciliation was skipped in suggestions',
+            error,
+          );
         }
       }
 

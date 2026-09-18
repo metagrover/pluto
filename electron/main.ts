@@ -608,6 +608,12 @@ import {
   handleSpeakerVoiceRequest,
   reconcileConfirmedSpeakerVoiceProfiles,
 } from './speakerVoiceHandlers';
+import { reconcileVoiceMatchSpeakerIdentity } from './speakerVoiceIdentity';
+import {
+  getCanonicalVoiceProfiles,
+  getMeetingSpeakerCandidates,
+  getVoiceRejections,
+} from './speakerVoiceStore';
 import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
@@ -1161,6 +1167,23 @@ app.whenReady().then(async () => {
     awaitCandidateCleanup: true,
     scheduleCandidateBackfill: (meetingId) =>
       voiceWorkQueue?.enqueue(meetingId),
+    allowAutoAssign: true,
+    onBindingChange: ({ meetingId, personIds }) => {
+      const hasPublishedNotes = db.hasPublishedMeetingNotes(meetingId);
+      db.refreshMeetingIdentityProjection(meetingId);
+      notifyMeetingIdentityUpdated(meetingId);
+      queueKnowledgeDocsRefreshForMeeting(meetingId);
+      for (const personId of personIds) {
+        const doc = db.getKnowledgeDocByScope('person_context', personId);
+        if (doc) queueKnowledgeDocRefresh(doc.id);
+      }
+      if (hasPublishedNotes) {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed())
+            win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+        }
+      }
+    },
   });
   db.recoverInterruptedMeetingAnalysisRuns();
   const audioRetention = createAudioRetentionManager({
@@ -1918,6 +1941,7 @@ app.whenReady().then(async () => {
           thermalState: powerMonitor.getCurrentThermalState(),
           freeMemoryBytes: os.freemem(),
           totalMemoryBytes: os.totalmem(),
+          fasterNotesEnabled: db.getSetting('faster_notes_enabled') !== 'false',
           ...availableMemory,
         };
         return evaluateIncrementalMeetingNotesAdmission(policy).admitted;
@@ -3501,6 +3525,46 @@ app.whenReady().then(async () => {
         error,
       );
     }
+    try {
+      const voiceReconciliation = reconcileVoiceMatchSpeakerIdentity({
+        meetingId: String(input.meetingId),
+        getCandidates: (meetingId) =>
+          getMeetingSpeakerCandidates(meetingId, getApplicationDatabase()),
+        getProfiles: () =>
+          getCanonicalVoiceProfiles({
+            dbInstance: getApplicationDatabase(),
+            activeOnly: true,
+          }),
+        getRejections: (meetingId) =>
+          getVoiceRejections(meetingId, getApplicationDatabase()),
+        getBindings: db.identityStore.getBindings,
+        isAutomaticBindingSuppressed:
+          db.identityStore.isAutomaticBindingSuppressed,
+        setBinding: db.identityStore.setBinding,
+        ensureMeetingEntity: db.ensureMeetingEntity,
+      });
+      if (
+        voiceReconciliation.status === 'bind' &&
+        voiceReconciliation.assignments.length > 0
+      ) {
+        db.refreshMeetingIdentityProjection(String(input.meetingId));
+        notifyMeetingIdentityUpdated(String(input.meetingId));
+        queueKnowledgeDocsRefreshForMeeting(String(input.meetingId));
+        for (const assignment of voiceReconciliation.assignments) {
+          const personDoc = db.getKnowledgeDocByScope(
+            'person_context',
+            assignment.personId,
+          );
+          if (personDoc) queueKnowledgeDocRefresh(personDoc.id);
+        }
+        invalidateDreamingCatalog();
+      }
+    } catch (error) {
+      console.warn(
+        '[Identity] Voice match speaker reconciliation was skipped',
+        error,
+      );
+    }
     return committed;
   });
   ipcMain.handle(
@@ -3639,24 +3703,38 @@ app.whenReady().then(async () => {
 
   const withNotesRun = (value: unknown) => {
     const meeting = value as db.PersistedMeeting | undefined;
-    const run = meeting ? db.getMeetingAnalysisRun(meeting.id) : null;
-    return meeting
-      ? {
-          ...meeting,
-          analysis_run_json: JSON.stringify(
-            run
-              ? {
-                  ...run,
-                  automatic_attempts_exhausted:
-                    db.isMeetingAnalysisAutomaticRetryExhausted(meeting, run),
-                }
-              : null,
-          ),
-          notes_preview: meetingNotesRunCoordinator.getMeetingNotesPreview(
-            meeting.id,
-          ),
-        }
-      : meeting;
+    if (!meeting) return meeting;
+    const run = db.getMeetingAnalysisRun(meeting.id);
+    let identityState: unknown = null;
+    try {
+      identityState = handleIdentityRequest('GET_MEETING_IDENTITY', {
+        meetingId: String(meeting.id),
+      });
+    } catch {
+      // ignore
+    }
+    const speakerDisplayNames = db.getMeetingNotesIdentityProjection(
+      meeting.id,
+    ).speakerDisplayNames;
+    const meetingEntities = db.getMeetingEntities(String(meeting.id));
+    return {
+      ...meeting,
+      speaker_display_names: speakerDisplayNames,
+      meeting_entities: meetingEntities,
+      identity_state: identityState,
+      analysis_run_json: JSON.stringify(
+        run
+          ? {
+              ...run,
+              automatic_attempts_exhausted:
+                db.isMeetingAnalysisAutomaticRetryExhausted(meeting, run),
+            }
+          : null,
+      ),
+      notes_preview: meetingNotesRunCoordinator.getMeetingNotesPreview(
+        meeting.id,
+      ),
+    };
   };
   ipcMain.handle('GET_MEETINGS', () => db.getMeetingSummaries());
   ipcMain.handle('GET_MEETING_PROCESSING_STATUSES', () =>
@@ -4074,9 +4152,21 @@ app.whenReady().then(async () => {
     }),
   );
   ipcMain.handle('DELETE_ENTITY', (_event, id) => {
-    db.deleteEntity(id);
+    const result = db.deleteEntity(id);
     queueAllKnowledgeDocsRefresh();
     invalidateDreamingCatalog();
+    if (result.affectedMeetingIds && result.affectedMeetingIds.length > 0) {
+      for (const meetingId of result.affectedMeetingIds) {
+        BrowserWindow.getAllWindows().forEach((win) => {
+          win.webContents.send('MEETING_IDENTITY_UPDATED', meetingId);
+          win.webContents.send('MEETING_NOTES_UPDATED', meetingId);
+        });
+      }
+    }
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('ENTITY_DELETED', id);
+    });
+    return result;
   });
 
   // Entity relationship operations

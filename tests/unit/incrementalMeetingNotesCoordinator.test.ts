@@ -209,6 +209,7 @@ it('admits incremental notes only with explicit healthy capture headroom', () =>
 });
 
 it.each([
+  [{ ...healthyPolicy, fasterNotesEnabled: false }, 'user_disabled'],
   [{ ...healthyPolicy, captureOwned: false }, 'capture_not_owned'],
   [
     { ...healthyPolicy, liveTranscriptHealthy: false },

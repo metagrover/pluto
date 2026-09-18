@@ -1724,18 +1724,31 @@ describe('LiveTranscript reading experience', () => {
   it('shows a degraded warning even before the first live row arrives', () => {
     const projector = createLiveConversationProjection({ generation: 1 });
     const root = createRoot(container);
+    const onOpenSettings = vi.fn();
     act(() =>
       root.render(
         <LiveTranscript
           segments={[]}
           interimText=""
           conversation={projector.degraded(1)}
+          onOpenSettings={onOpenSettings}
         />,
       ),
     );
     expect(container.textContent).toContain(
-      'Live wording may be incomplete. Recording continues safely.',
+      'Audio is recording safely · Live wording paused',
     );
+    expect(container.textContent).toContain(
+      'turn off Generate notes during meetings in Settings → Meetings',
+    );
+    const button = container.querySelector<HTMLButtonElement>(
+      '.live-conversation-warning__action',
+    );
+    expect(button).not.toBeNull();
+    act(() => {
+      button?.click();
+    });
+    expect(onOpenSettings).toHaveBeenCalledWith('meetings');
     act(() => root.unmount());
   });
 });

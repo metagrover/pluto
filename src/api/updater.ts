@@ -29,7 +29,10 @@ export const openReleaseUrl = (url?: string): Promise<void> =>
 export const subscribeToUpdateStatus = (
   callback: (status: UpdateInfo) => void,
 ): (() => void) => {
-  if (typeof window === 'undefined' || !window.ipcRenderer) {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.ipcRenderer?.on !== 'function'
+  ) {
     return () => {};
   }
   return window.ipcRenderer.on(

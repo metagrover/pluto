@@ -264,4 +264,182 @@ describe('MeetingView Navigation and Participants', () => {
 
     expect(onOpenPerson).toHaveBeenCalledWith('person-avery');
   });
+
+  it('renders pre-hydrated speaker names and participants immediately without flashing unidentified speakers', async () => {
+    const preHydratedMeeting: Meeting = {
+      ...mockMeeting,
+      id: 'meeting-prehydrated',
+      speaker_display_names: {
+        'Speaker 1': 'Avery Davis',
+      },
+      meeting_entities: [
+        {
+          id: 'person-avery',
+          name: 'Avery Davis',
+          type: 'person',
+        } as any,
+      ],
+      identity_state: {
+        meetingId: 'meeting-prehydrated',
+        speakers: ['Me', 'Speaker 1'],
+        bindings: [
+          {
+            speaker: 'Speaker 1',
+            personId: 'person-avery',
+            status: 'confirmed',
+            confidence: 1,
+            source: 'manual',
+            confirmedAt: '2026-09-01T10:00:00Z',
+          } as any,
+        ],
+        capture: { origin: 'local', selfPersonId: 'person-self' },
+        people: [
+          { id: 'person-avery', name: 'Avery Davis' },
+          { id: 'person-self', name: 'You' },
+        ],
+        selfPersonId: 'person-self',
+        revision: 1,
+        speakerDisplayNames: {
+          'Speaker 1': 'Avery Davis',
+        },
+        profile: {} as any,
+        job: null,
+      },
+    };
+
+    act(() => {
+      root.render(
+        <MeetingView
+          selectedMeeting={preHydratedMeeting}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={preHydratedMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={true}
+          setTranscriptVisible={vi.fn()}
+          onOpenPerson={vi.fn()}
+        />,
+      );
+    });
+
+    // 1. Participant count trigger is rendered
+    const participantsButton = container.querySelector<HTMLButtonElement>(
+      '[data-meeting-participants-trigger]',
+    );
+    expect(participantsButton?.textContent).toContain('2 participants');
+
+    // 2. Open popover immediately and verify Avery Davis is listed as participant
+    await act(async () => {
+      participantsButton?.click();
+    });
+    const popover = container.querySelector('.meeting-participants-popover');
+    expect(popover?.textContent).toContain('Avery Davis');
+    // Verify there are no anonymous/unidentified speaker action buttons
+    expect(popover?.querySelector('button:has-text("Identify")')).toBeNull();
+
+    // 3. Transcript speaker immediately shows Avery Davis
+    const averySpeakerButton = container.querySelector<HTMLElement>(
+      '[title="View Avery Davis\'s profile"]',
+    );
+    expect(averySpeakerButton).not.toBeNull();
+    expect(averySpeakerButton?.textContent).toBe('Avery Davis');
+  });
+
+  it('renders gentle skeleton loader while meeting detail is loading and switches to notes once loaded', async () => {
+    const summaryOnlyMeeting: Meeting = {
+      id: 'meeting-summary-only',
+      title: 'Sprint Planning',
+      meeting_type: 'Recording',
+      created_at: '2026-09-01T10:00:00.000Z',
+      started_at: '2026-09-01T10:00:00.000Z',
+      transcript_status: 'validated',
+      finalization_status: 'finalized',
+    };
+
+    // 1. When switching meetings and detail is loading (summary only)
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={summaryOnlyMeeting}
+          isLoadingDetail={true}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={summaryOnlyMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      );
+    });
+
+    const skeleton = container.querySelector(
+      '[data-meeting-skeleton="notes-loading"]',
+    );
+    expect(skeleton).not.toBeNull();
+    expect(skeleton?.getAttribute('aria-label')).toBe('Loading meeting notes');
+
+    // 2. Once meeting detail arrives with analysis
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={mockMeeting}
+          isLoadingDetail={false}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue={mockMeeting.title}
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      );
+    });
+
+    expect(
+      container.querySelector('[data-meeting-skeleton="notes-loading"]'),
+    ).toBeNull();
+    expect(container.textContent).toContain('Architecture updates discussed.');
+  });
+
+  it('renders gentle skeleton loader when selectedMeeting is undefined but isLoadingDetail is true', async () => {
+    await act(async () => {
+      root.render(
+        <MeetingView
+          selectedMeeting={undefined}
+          isLoadingDetail={true}
+          editingTitle={false}
+          setEditingTitle={vi.fn()}
+          titleValue=""
+          setTitleValue={vi.fn()}
+          fetchMeetings={vi.fn()}
+          handleCopySummary={vi.fn()}
+          copySuccess={false}
+          handleDeleteMeeting={vi.fn()}
+          highlightEntities={(text) => text}
+          transcriptVisible={false}
+          setTranscriptVisible={vi.fn()}
+        />,
+      );
+    });
+
+    const skeleton = container.querySelector(
+      '[data-meeting-skeleton="notes-loading"]',
+    );
+    expect(skeleton).not.toBeNull();
+    expect(skeleton?.getAttribute('aria-label')).toBe('Loading meeting notes');
+  });
 });

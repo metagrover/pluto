@@ -147,6 +147,7 @@ const SavedEditConflicts = ({
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
+  isLoadingDetail?: boolean;
   citationTarget?: { sectionId?: string; timestampMs?: number };
   editingTitle: boolean;
   setEditingTitle: (val: boolean) => void;
@@ -416,7 +417,54 @@ export const MeetingAnalysisSkeleton = ({
     <div className="meeting-analysis-skeleton__lines">
       <div className="h-3.5 w-5/6 rounded bg-pro-text-muted/10" />
       <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10" />
-      <div className="h-3.5 w-4/5 rounded bg-pro-text-muted/10" />
+    </div>
+  </section>
+);
+
+export const MeetingNotesLoadingSkeleton = () => (
+  <section
+    aria-label="Loading meeting notes"
+    data-meeting-artifact="analysis"
+    data-state="loading"
+    data-meeting-skeleton="notes-loading"
+    className="meeting-analysis-skeleton max-w-[760px] animate-pulse motion-reduce:animate-none"
+  >
+    <div className="space-y-3 pt-2">
+      <div className="h-4 w-5/6 rounded bg-pro-text-muted/10" />
+      <div className="h-4 w-full rounded bg-pro-text-muted/10" />
+      <div className="h-4 w-3/4 rounded bg-pro-text-muted/10" />
+    </div>
+
+    <div className="space-y-4 pt-6">
+      <div className="h-3 w-28 rounded bg-pro-text-muted/15" />
+      <div className="space-y-3 pl-1">
+        <div className="flex items-center gap-3">
+          <div className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/20 shrink-0" />
+          <div className="h-3.5 w-4/5 rounded bg-pro-text-muted/10" />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/20 shrink-0" />
+          <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10" />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/20 shrink-0" />
+          <div className="h-3.5 w-2/3 rounded bg-pro-text-muted/10" />
+        </div>
+      </div>
+    </div>
+
+    <div className="space-y-4 pt-6">
+      <div className="h-3 w-24 rounded bg-pro-text-muted/15" />
+      <div className="space-y-3 pl-1">
+        <div className="flex items-center gap-3">
+          <div className="h-3.5 w-3.5 rounded border border-pro-text-muted/20 shrink-0" />
+          <div className="h-3.5 w-5/6 rounded bg-pro-text-muted/10" />
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="h-3.5 w-3.5 rounded border border-pro-text-muted/20 shrink-0" />
+          <div className="h-3.5 w-1/2 rounded bg-pro-text-muted/10" />
+        </div>
+      </div>
     </div>
   </section>
 );
@@ -702,7 +750,16 @@ export const MeetingActionCards = ({
 );
 
 export const MeetingView = (props: MeetingViewProps) => {
-  if (!props.selectedMeeting) return null;
+  if (!props.selectedMeeting) {
+    if (props.isLoadingDetail) {
+      return (
+        <div className="mx-auto w-full max-w-[760px] px-6 py-8 md:px-8">
+          <MeetingNotesLoadingSkeleton />
+        </div>
+      );
+    }
+    return null;
+  }
   return (
     <SelectedMeetingView {...props} selectedMeeting={props.selectedMeeting} />
   );
@@ -728,6 +785,7 @@ const SelectedMeetingView = ({
   onBack,
   backLabel,
   onOpenPerson,
+  isLoadingDetail = false,
 }: Omit<MeetingViewProps, 'selectedMeeting'> & {
   selectedMeeting: Meeting;
 }) => {
@@ -743,9 +801,14 @@ const SelectedMeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
+  const meetingId = String(selectedMeeting.id);
+  const [prevMeetingId, setPrevMeetingId] = useState(meetingId);
   const [speakerDisplayNamesByMeeting, setSpeakerDisplayNamesByMeeting] =
     useState<Record<string, Record<string, string>>>(() => ({
       ...speakerDisplayNamesCache,
+      ...(selectedMeeting.speaker_display_names
+        ? { [meetingId]: selectedMeeting.speaker_display_names }
+        : {}),
     }));
   const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
   const [selectedSpeakerForModal, setSelectedSpeakerForModal] = useState<
@@ -756,10 +819,27 @@ const SelectedMeetingView = ({
     suggestions: Record<string, VoiceMatchSuggestion>;
   } | null>(null);
   const [meetingIdentityState, setMeetingIdentityState] =
-    useState<MeetingIdentityState | null>(null);
+    useState<MeetingIdentityState | null>(
+      () => selectedMeeting.identity_state ?? null,
+    );
   const [meetingEntities, setMeetingEntities] = useState<
     Array<Entity & { mention_count?: number; context?: string | null }>
-  >([]);
+  >(() => selectedMeeting.meeting_entities ?? []);
+
+  if (prevMeetingId !== meetingId) {
+    setPrevMeetingId(meetingId);
+    setMeetingIdentityState(selectedMeeting.identity_state ?? null);
+    setMeetingEntities(selectedMeeting.meeting_entities ?? []);
+    if (selectedMeeting.speaker_display_names) {
+      speakerDisplayNamesCache[meetingId] =
+        selectedMeeting.speaker_display_names;
+      setSpeakerDisplayNamesByMeeting((prev) => ({
+        ...prev,
+        [meetingId]: selectedMeeting.speaker_display_names!,
+      }));
+    }
+  }
+
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const participantsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -927,7 +1007,10 @@ const SelectedMeetingView = ({
     transcriptSegments,
   );
   const displayNames =
-    speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ?? {};
+    speakerDisplayNamesByMeeting[String(selectedMeeting.id)] ??
+    selectedMeeting.speaker_display_names ??
+    meetingIdentityState?.speakerDisplayNames ??
+    {};
   const rawTranscriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,
   );
@@ -1186,6 +1269,7 @@ const SelectedMeetingView = ({
       downstreamPresentation.state === 'queued') &&
       !notesDocument.hasAnalysis) ||
     isAnalysisRetrying;
+  const isDetailLoading = Boolean(isLoadingDetail);
 
   const regenerateEnhancedNotes = async (
     reason: 'manual' | 'secondary' = 'manual',
@@ -1790,10 +1874,15 @@ const SelectedMeetingView = ({
           </section>
         ) : null}
 
-        {(isMeetingProcessing &&
-          downstreamPresentation.state === 'loading' &&
-          !draftPreview) ||
-        (isAnalysisRetrying && !draftPreview) ? (
+        {isDetailLoading &&
+        !notesDocument.hasAnalysis &&
+        !draftPreview &&
+        downstreamPresentation.state !== 'failed' ? (
+          <MeetingNotesLoadingSkeleton />
+        ) : (isMeetingProcessing &&
+            downstreamPresentation.state === 'loading' &&
+            !draftPreview) ||
+          (isAnalysisRetrying && !draftPreview) ? (
           <MeetingAnalysisSkeleton
             title={
               downstreamPresentation.state === 'loading'
