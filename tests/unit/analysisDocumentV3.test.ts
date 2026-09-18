@@ -121,6 +121,8 @@ describe('parseAnalysisDocumentV3', () => {
           win: 'Closed the Acme renewal',
           why_it_counts: 'The renewal protects recurring revenue.',
           evidence: 'We closed the Acme renewal for $80,000.',
+          ownership: 'personal',
+          owner: 'Punit',
         },
       }),
     );
@@ -129,6 +131,8 @@ describe('parseAnalysisDocumentV3', () => {
       win: 'Closed the Acme renewal',
       why_it_counts: 'The renewal protects recurring revenue.',
       evidence: 'We closed the Acme renewal for $80,000.',
+      ownership: 'personal',
+      owner: 'Punit',
     });
   });
 

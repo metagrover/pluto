@@ -49,6 +49,8 @@ describe('meeting summary read model', () => {
           why_it_counts: 'Customer accepted it',
           evidence: 'Private evidence',
           source: 'Review',
+          ownership: 'personal',
+          owner: 'Punit',
         },
       }),
       enhanced_notes: 'PRIVATE NOTES',
@@ -93,6 +95,8 @@ describe('meeting summary read model', () => {
         id: 'summary-older',
         dashboard_detail: 'Bounded overview',
         recent_win_title: 'Shipped',
+        recent_win_ownership: 'personal',
+        recent_win_owner: 'Punit',
       }),
     );
   });

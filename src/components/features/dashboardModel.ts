@@ -196,7 +196,29 @@ export interface DashboardSpotlight {
   target: DashboardTarget;
 }
 
-export type DashboardRecentWin =
+export type DashboardWeeklyWinItem =
+  | {
+      id: string;
+      kind: 'evidence';
+      title: string;
+      whyItCounts: string;
+      sourceLabel: string;
+      dateLabel: string;
+      timestamp: number;
+      meetingId: Meeting['id'];
+    }
+  | {
+      id: string;
+      kind: 'milestone';
+      title: string;
+      whyItCounts: string;
+      sourceLabel: string;
+      dateLabel: string;
+      timestamp: number;
+      meetingId: Meeting['id'];
+    };
+
+export type DashboardWeeklyWins =
   | {
       state: 'empty';
       title: string;
@@ -204,11 +226,8 @@ export type DashboardRecentWin =
     }
   | {
       state: 'populated';
-      kind: 'evidence';
-      title: string;
-      whyItCounts: string;
-      sourceLabel: string;
-      meetingId: Meeting['id'] | null;
+      items: DashboardWeeklyWinItem[];
+      total: number;
     };
 
 export type DashboardBriefingFocusKind =
@@ -244,7 +263,7 @@ export interface DashboardHomeModel {
   hero: DashboardHero;
   topOfMind: DashboardTopOfMind;
   commitments: DashboardCommitments;
-  recentWin: DashboardRecentWin;
+  recentWin: DashboardWeeklyWins;
   briefingFocus: DashboardBriefingFocus;
   latestMeeting: DashboardLatestMeeting;
   actionInsights: DashboardActionInsights;
@@ -1180,71 +1199,189 @@ interface MeetingRecentWinPayload {
   why_it_counts?: unknown;
   evidence?: unknown;
   source?: unknown;
+  ownership?: unknown;
+  owner?: unknown;
 }
 
-const buildRecentWin = (meetings: Meeting[]): DashboardRecentWin => {
-  for (const meeting of sortByNewestTimestamp(meetings, getMeetingTimestamp)) {
-    if (
-      meeting.recent_win_title?.trim() &&
-      meeting.recent_win_why?.trim() &&
-      meeting.recent_win_evidence?.trim()
-    ) {
-      return {
-        state: 'populated',
-        kind: 'evidence',
-        title: meeting.recent_win_title.trim(),
-        whyItCounts: meeting.recent_win_why.trim(),
-        sourceLabel:
-          meeting.recent_win_source?.trim() ||
-          meeting.title ||
-          'Recent meeting',
-        meetingId: meeting.id,
-      };
-    }
+type RecentWinOwnership = 'personal' | 'shared' | 'other' | 'unknown';
+
+const RECENT_WIN_OWNERSHIPS = new Set<RecentWinOwnership>([
+  'personal',
+  'shared',
+  'other',
+  'unknown',
+]);
+
+const parseRecentWinOwnership = (value: unknown): RecentWinOwnership | null =>
+  typeof value === 'string' &&
+  RECENT_WIN_OWNERSHIPS.has(value as RecentWinOwnership)
+    ? (value as RecentWinOwnership)
+    : null;
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const containsSelfAlias = (value: string, selfNames: string[]): boolean =>
+  selfNames.some((name) => {
+    const alias = name.trim();
+    if (alias.length < 2) return false;
+    return new RegExp(`(?:^|\\b)${escapeRegex(alias)}(?:\\b|$)`, 'i').test(
+      value,
+    );
+  });
+
+const COLLECTIVE_WIN_SIGNAL = /\b(?:we|we've|we’re|we're|our|ours)\b/i;
+
+const winBelongsToUser = ({
+  ownership,
+  owner,
+  evidence,
+  selfNames,
+}: {
+  ownership: RecentWinOwnership | null;
+  owner: string;
+  evidence: string;
+  selfNames: string[];
+}): boolean => {
+  if (ownership === 'shared') return true;
+  if (ownership === 'other' || ownership === 'unknown') return false;
+  if (ownership === 'personal') {
+    return (
+      containsSelfAlias(owner, selfNames) ||
+      containsSelfAlias(evidence, selfNames)
+    );
+  }
+  return (
+    containsSelfAlias(evidence, selfNames) ||
+    COLLECTIVE_WIN_SIGNAL.test(evidence)
+  );
+};
+
+const getLocalWeekRange = (dateKey: string): [number, number] => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return [start.getTime(), end.getTime()];
+};
+
+const formatWinDateLabel = (timestamp: number): string =>
+  new Date(timestamp).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
+const buildRecentWin = (
+  meetings: Meeting[],
+  dateKey: string,
+  selfNames: string[],
+): DashboardWeeklyWins => {
+  const [weekStart, weekEnd] = getLocalWeekRange(dateKey);
+  const inCurrentWeek = (timestamp: number) =>
+    timestamp >= weekStart && timestamp < weekEnd;
+  const items: DashboardWeeklyWinItem[] = [];
+
+  for (const meeting of meetings) {
+    const timestamp = toTimestamp(getMeetingTimestamp(meeting));
+    if (!timestamp || !inCurrentWeek(timestamp)) continue;
+
     const analysis = parseJsonObject<MeetingAnalysisRecentWin>(
       meeting.analysis_json,
     );
-    const recentWin = analysis?.recent_win;
+    const recentWin =
+      analysis?.recent_win &&
+      typeof analysis.recent_win === 'object' &&
+      !Array.isArray(analysis.recent_win)
+        ? (analysis.recent_win as MeetingRecentWinPayload)
+        : null;
+    const title =
+      meeting.recent_win_title?.trim() ||
+      (typeof recentWin?.win === 'string' ? recentWin.win.trim() : '');
+    const whyItCounts =
+      meeting.recent_win_why?.trim() ||
+      (typeof recentWin?.why_it_counts === 'string'
+        ? recentWin.why_it_counts.trim()
+        : '');
+    const evidence =
+      meeting.recent_win_evidence?.trim() ||
+      (typeof recentWin?.evidence === 'string'
+        ? recentWin.evidence.trim()
+        : '');
+    const ownership = parseRecentWinOwnership(
+      meeting.recent_win_ownership ?? recentWin?.ownership,
+    );
+    const owner =
+      meeting.recent_win_owner?.trim() ||
+      (typeof recentWin?.owner === 'string' ? recentWin.owner.trim() : '');
     if (
-      !recentWin ||
-      typeof recentWin !== 'object' ||
-      Array.isArray(recentWin)
+      !title ||
+      !whyItCounts ||
+      !evidence ||
+      !winBelongsToUser({ ownership, owner, evidence, selfNames })
     ) {
       continue;
     }
 
-    const payload = recentWin as MeetingRecentWinPayload;
-    const title = typeof payload.win === 'string' ? payload.win.trim() : '';
-    const whyItCounts =
-      typeof payload.why_it_counts === 'string'
-        ? payload.why_it_counts.trim()
-        : '';
-    const evidence =
-      typeof payload.evidence === 'string' ? payload.evidence.trim() : '';
-    if (!title || !whyItCounts || !evidence) continue;
-
-    return {
-      state: 'populated',
+    items.push({
+      id: `meeting-win:${meeting.id}`,
       kind: 'evidence',
       title,
       whyItCounts,
       sourceLabel:
-        typeof payload.source === 'string' && payload.source.trim()
-          ? payload.source.trim()
-          : meeting.title || 'Recent meeting',
+        meeting.recent_win_source?.trim() ||
+        (typeof recentWin?.source === 'string' && recentWin.source.trim()
+          ? recentWin.source.trim()
+          : meeting.title || 'Recent meeting'),
+      dateLabel: formatWinDateLabel(timestamp),
+      timestamp,
       meetingId: meeting.id,
-    };
+    });
+  }
+
+  const firstMeeting = [...meetings]
+    .filter((meeting) => toTimestamp(getMeetingTimestamp(meeting)) > 0)
+    .sort(
+      (a, b) =>
+        toTimestamp(getMeetingTimestamp(a)) -
+        toTimestamp(getMeetingTimestamp(b)),
+    )[0];
+  const firstMeetingTimestamp = firstMeeting
+    ? toTimestamp(getMeetingTimestamp(firstMeeting))
+    : 0;
+  if (firstMeeting && inCurrentWeek(firstMeetingTimestamp)) {
+    items.push({
+      id: `first-meeting:${firstMeeting.id}`,
+      kind: 'milestone',
+      title: 'First meeting with Pluto — done',
+      whyItCounts:
+        'You captured your first meeting and started building momentum.',
+      sourceLabel: firstMeeting.title || 'First meeting',
+      dateLabel: formatWinDateLabel(firstMeetingTimestamp),
+      timestamp: firstMeetingTimestamp,
+      meetingId: firstMeeting.id,
+    });
+  }
+
+  items.sort(
+    (a, b) =>
+      b.timestamp - a.timestamp ||
+      Number(a.kind === 'milestone') - Number(b.kind === 'milestone'),
+  );
+  if (items.length) {
+    return { state: 'populated', items, total: items.length };
   }
 
   return {
     state: 'empty',
-    title: 'Your wins will show up here',
-    detail:
-      meetings.length >= 5
-        ? 'Pluto is looking for supported moments like praise, delivered work, closed business, and revenue won.'
-        : meetings.length > 0
-          ? `${meetings.length} of 5 meetings recorded. Pluto will then start looking for praise, delivered work, closed business, and revenue won.`
-          : 'Record 5 meetings to give Pluto enough context to start looking for praise, delivered work, closed business, and revenue won.',
+    title: meetings.length
+      ? 'No wins yet this week'
+      : 'Your wins will show up here',
+    detail: meetings.length
+      ? 'Pluto is looking for supported moments like praise, delivered work, closed business, and revenue won.'
+      : 'Record your first meeting to start building a list of evidence-backed wins.',
   };
 };
 
@@ -1898,7 +2035,11 @@ export const buildDashboardHomeModel = (
     input.dateKey ?? getDashboardDateKey(),
   );
   const commitments = buildDashboardCommitments(commitmentActionInsights);
-  const recentWin = buildRecentWin(input.meetings);
+  const recentWin = buildRecentWin(
+    input.meetings,
+    input.dateKey ?? getDashboardDateKey(),
+    input.selfNames ?? [],
+  );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
     workingMemorySnapshots,

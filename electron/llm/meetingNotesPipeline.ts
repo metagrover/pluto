@@ -1666,6 +1666,24 @@ const runBoundedCompactNotes = async (
   const recentWins = reviewedDrafts.flatMap((draft) =>
     draft.recentWin ? [draft.recentWin] : [],
   );
+  const recentWinOwnerships = new Set(
+    recentWins.map((recentWin) => recentWin.ownership).filter(Boolean),
+  );
+  const recentWinOwnership =
+    recentWinOwnerships.size === 1
+      ? recentWins.find((recentWin) => recentWin.ownership)?.ownership
+      : recentWinOwnerships.size > 1
+        ? 'unknown'
+        : undefined;
+  const recentWinOwners = new Set(
+    recentWins
+      .map((recentWin) => recentWin.owner?.trim())
+      .filter((owner): owner is string => Boolean(owner)),
+  );
+  const recentWinOwner =
+    recentWinOwnership === 'personal' && recentWinOwners.size === 1
+      ? [...recentWinOwners][0]
+      : undefined;
   const combined: NotesDraft = {
     meetingType,
     // Each bounded leaf may cover only one part of the meeting. A local leaf
@@ -1703,6 +1721,8 @@ const runBoundedCompactNotes = async (
                 recentWins.flatMap(({ impact }) => impact.sources),
               ),
             },
+            ...(recentWinOwnership ? { ownership: recentWinOwnership } : {}),
+            ...(recentWinOwner ? { owner: recentWinOwner } : {}),
           },
         }
       : {}),

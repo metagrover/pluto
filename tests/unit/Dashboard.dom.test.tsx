@@ -608,6 +608,68 @@ describe('Dashboard interactions', () => {
     act(() => root.unmount());
   });
 
+  it('shows three weekly wins before expanding the full list', async () => {
+    const meetings = [
+      makeMeeting({
+        id: 'older',
+        created_at: '2026-04-20T10:00:00.000Z',
+        started_at: '2026-04-20T10:00:00.000Z',
+        analysis_json: null,
+      }),
+      ...Array.from({ length: 4 }, (_, index) =>
+        makeMeeting({
+          id: `win-${index + 1}`,
+          title: `Win ${index + 1}`,
+          created_at: `2026-04-${27 + index}T10:00:00.000Z`,
+          started_at: `2026-04-${27 + index}T10:00:00.000Z`,
+          analysis_json: JSON.stringify({
+            recent_win: {
+              win: `Win ${index + 1}`,
+              why_it_counts: `Impact ${index + 1}`,
+              evidence: `We closed sale ${index + 1}.`,
+              ownership: 'shared',
+            },
+          }),
+        }),
+      ),
+    ];
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-04-30',
+      meetings,
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const { container, root } = renderDashboard({ model });
+
+    expect(
+      container.querySelectorAll('[data-testid="dashboard-recent-win-item"]'),
+    ).toHaveLength(3);
+    expect(container.textContent).toContain('View all');
+    expect(
+      Array.from(container.querySelectorAll('button')).filter((button) =>
+        button.textContent?.includes('Celebrate this week'),
+      ),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('View all'))
+        ?.click();
+    });
+
+    expect(
+      container.querySelectorAll('[data-testid="dashboard-recent-win-item"]'),
+    ).toHaveLength(4);
+    expect(container.textContent).toContain('Show less');
+
+    act(() => root.unmount());
+  });
+
   it('uses a quiet celebration acknowledgment when reduced motion is preferred', async () => {
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -615,8 +677,8 @@ describe('Dashboard interactions', () => {
     });
     const { container, root } = renderDashboard();
 
-    const celebrate = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('Celebrate'),
+    const celebrate = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Celebrate with confetti"]',
     );
     await act(async () => celebrate?.click());
 
@@ -626,6 +688,46 @@ describe('Dashboard interactions', () => {
     expect(
       container.querySelector('[data-testid="dashboard-confetti"]'),
     ).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it('launches screen-wide confetti from the empty-state party popper', async () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn().mockReturnValue({ matches: false }),
+    });
+    const { container, root } = renderDashboard();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Celebrate with confetti"]',
+        )
+        ?.click();
+    });
+
+    expect(
+      container.querySelector('[data-testid="dashboard-confetti"]'),
+    ).toBeTruthy();
+    expect(
+      container.querySelector('[data-testid="dashboard-reduced-celebration"]'),
+    ).toBeNull();
+
+    const firstVariant = container
+      .querySelector('[data-testid="dashboard-confetti"]')
+      ?.getAttribute('data-variant');
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Celebrate with confetti"]',
+        )
+        ?.click();
+    });
+    const secondVariant = container
+      .querySelector('[data-testid="dashboard-confetti"]')
+      ?.getAttribute('data-variant');
+    expect(secondVariant).not.toBe(firstVariant);
 
     act(() => root.unmount());
   });

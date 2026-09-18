@@ -2681,6 +2681,47 @@
   }
 }
 
+@keyframes dashboard-confetti-corner {
+  0% {
+    opacity: 0;
+    transform: translate3d(-2vw, 3vh, 0) rotate(0deg) scale(0.5);
+  }
+  9% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(var(--corner-x), var(--corner-peak), 0)
+      rotate(var(--rotation-mid)) scale(1);
+  }
+  76% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--corner-end-x), 18vh, 0)
+      rotate(var(--rotation-end)) scale(0.85);
+  }
+}
+
+.dashboard-confetti-piece {
+  position: absolute;
+  will-change: transform;
+}
+
+.dashboard-confetti-piece--shower {
+  top: -16px;
+  animation: dashboard-confetti-fall var(--duration)
+    ease-out var(--delay) forwards;
+}
+
+.dashboard-confetti-piece--corner {
+  bottom: -20px;
+  left: 0 !important;
+  animation: dashboard-confetti-corner var(--duration)
+    cubic-bezier(0.2, 0.8, 0.3, 1) var(--delay) forwards;
+}
+
 .person-chat-launcher {
   position: fixed;
   z-index: 45;

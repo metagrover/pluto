@@ -254,6 +254,8 @@ const previewMeetingDashboard = (meeting: Meeting) => {
     recent_win_why: bounded(recentWin.why_it_counts, 240),
     recent_win_evidence: bounded(recentWin.evidence, 240),
     recent_win_source: bounded(recentWin.source, 160),
+    recent_win_ownership: bounded(recentWin.ownership, 16),
+    recent_win_owner: bounded(recentWin.owner, 160),
   };
 };
 

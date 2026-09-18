@@ -112,6 +112,8 @@ export interface RecentWinV3 {
   win: string;
   why_it_counts: string;
   evidence: string;
+  ownership?: 'personal' | 'shared' | 'other' | 'unknown';
+  owner?: string | null;
 }
 
 export interface TopicSection {
@@ -286,6 +288,8 @@ export interface Meeting {
   recent_win_why?: string | null;
   recent_win_evidence?: string | null;
   recent_win_source?: string | null;
+  recent_win_ownership?: RecentWinV3['ownership'] | null;
+  recent_win_owner?: string | null;
 }
 
 export interface MeetingSummary

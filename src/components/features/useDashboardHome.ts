@@ -66,6 +66,8 @@ interface DashboardHomeData {
           | 'recent_win_why'
           | 'recent_win_evidence'
           | 'recent_win_source'
+          | 'recent_win_ownership'
+          | 'recent_win_owner'
         >
       >
   >;

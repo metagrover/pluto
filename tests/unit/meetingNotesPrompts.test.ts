@@ -241,7 +241,9 @@ it('preserves draft, audit and optional editor field contracts without example c
     'meetingType: one_on_one | team_sync | brainstorm | presentation | general',
   );
   expect(writer).toContain('overview: Text | null');
-  expect(writer).toContain('recentWin: {win: Text, impact: Text} | null');
+  expect(writer).toContain(
+    'recentWin: {win: Text, impact: Text, ownership: personal | shared | other | unknown, owner: string | null} | null',
+  );
   expect(writer).toContain(
     'kind: "point" | "action" | "decision" | "question"',
   );
@@ -276,7 +278,7 @@ it('allows null metadata while limiting the nested-null restriction to recent-wi
   );
   expect(notesDraftSchema).toContain('overview: Text | null');
   expect(notesDraftSchema).toContain(
-    'recentWin: {win: Text, impact: Text} | null',
+    'recentWin: {win: Text, impact: Text, ownership: personal | shared | other | unknown, owner: string | null} | null',
   );
   expect(notesDraftSchema).toMatch(
     /recentWin\.win and recentWin\.impact.*not null/,

@@ -154,7 +154,22 @@ const parseRecentWin = (value: unknown): NotesDraft['recentWin'] | null => {
   if (!isRecord(value)) return null;
   const win = parseSupportedText(value.win, 'recent-win');
   const impact = parseSupportedText(value.impact, 'recent-win-impact');
-  return win && impact ? { win, impact } : null;
+  if (!win || !impact) return null;
+  const ownership = ['personal', 'shared', 'other', 'unknown'].includes(
+    String(value.ownership),
+  )
+    ? (value.ownership as NonNullable<NotesDraft['recentWin']>['ownership'])
+    : undefined;
+  const owner =
+    typeof value.owner === 'string' && value.owner.trim()
+      ? value.owner.trim()
+      : null;
+  return {
+    win,
+    impact,
+    ...(ownership ? { ownership } : {}),
+    ...(owner ? { owner } : {}),
+  };
 };
 
 export const parseNotesDraft = (raw: string): NotesDraft => {
@@ -1299,6 +1314,12 @@ export const projectAuditedNotes = (
               ...audited.draft.recentWin.win.sources,
               ...audited.draft.recentWin.impact.sources,
             ]),
+            ...(audited.draft.recentWin.ownership
+              ? { ownership: audited.draft.recentWin.ownership }
+              : {}),
+            ...(audited.draft.recentWin.owner
+              ? { owner: audited.draft.recentWin.owner }
+              : {}),
           },
         }
       : {}),

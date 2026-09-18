@@ -965,7 +965,7 @@ describe('meeting analysis run coordinator', () => {
           thinking: null,
           seed: null,
           contextTokens: 16384,
-          promptVersion: 'notes-v32',
+          promptVersion: 'notes-v33',
         }),
         'utf8',
       )
@@ -1271,7 +1271,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v32',
+            promptVersion: 'notes-v33',
           }),
           'utf8',
         )
@@ -1290,7 +1290,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v32',
+            promptVersion: 'notes-v33',
           }),
           'utf8',
         )

@@ -297,6 +297,7 @@ describe('buildDashboardHomeModel', () => {
   it('uses calm empty states when no attention item, commitment, or supported win exists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
+      dateKey: '2026-05-06',
       meetings: [
         makeMeeting({
           analysis_json: JSON.stringify({
@@ -324,7 +325,7 @@ describe('buildDashboardHomeModel', () => {
     });
     expect(model.recentWin).toMatchObject({
       state: 'empty',
-      title: 'Your wins will show up here',
+      title: 'No wins yet this week',
     });
   });
 
@@ -359,7 +360,13 @@ describe('buildDashboardHomeModel', () => {
   it('only surfaces a recent win when meeting analysis carries a supported win', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
+      dateKey: '2026-04-30',
       meetings: [
+        makeMeeting({
+          id: 'older-meeting',
+          created_at: '2026-04-20T18:00:00.000Z',
+          started_at: '2026-04-20T17:30:00.000Z',
+        }),
         makeMeeting({
           id: 'meeting-win',
           title: 'Customer Launch Review',
@@ -369,8 +376,9 @@ describe('buildDashboardHomeModel', () => {
               why_it_counts:
                 'The notes record the decision and the owner accepted the next step.',
               evidence:
-                'The launch blocker was resolved in the room and the owner accepted the next step.',
+                'We resolved the launch blocker in the room and accepted the next step.',
               source: 'Customer Launch Review',
+              ownership: 'shared',
             },
           }),
         }),
@@ -383,21 +391,32 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.recentWin).toEqual({
+    expect(model.recentWin).toMatchObject({
       state: 'populated',
-      kind: 'evidence',
-      title: 'The launch blocker was resolved in the room.',
-      whyItCounts:
-        'The notes record the decision and the owner accepted the next step.',
-      sourceLabel: 'Customer Launch Review',
-      meetingId: 'meeting-win',
+      total: 1,
+      items: [
+        {
+          kind: 'evidence',
+          title: 'The launch blocker was resolved in the room.',
+          whyItCounts:
+            'The notes record the decision and the owner accepted the next step.',
+          sourceLabel: 'Customer Launch Review',
+          meetingId: 'meeting-win',
+        },
+      ],
     });
   });
 
   it('preserves latest detail and recent win from bounded meeting summaries', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
+      dateKey: '2026-04-30',
       meetings: [
+        makeMeeting({
+          id: 'older-meeting',
+          created_at: '2026-04-20T18:00:00.000Z',
+          started_at: '2026-04-20T17:30:00.000Z',
+        }),
         makeMeeting({
           id: 'summary-meeting',
           title: 'Summary source',
@@ -408,6 +427,7 @@ describe('buildDashboardHomeModel', () => {
           recent_win_why: 'The customer accepted the release.',
           recent_win_evidence: 'Acceptance was recorded in the notes.',
           recent_win_source: 'Launch review',
+          recent_win_ownership: 'shared',
         }),
       ],
       overdueActions: [],
@@ -422,13 +442,17 @@ describe('buildDashboardHomeModel', () => {
       detail: 'Bounded current read.',
     });
     expect(model.recentWin).toMatchObject({
-      title: 'The launch cleared review.',
-      whyItCounts: 'The customer accepted the release.',
-      sourceLabel: 'Launch review',
+      items: [
+        {
+          title: 'The launch cleared review.',
+          whyItCounts: 'The customer accepted the release.',
+          sourceLabel: 'Launch review',
+        },
+      ],
     });
   });
 
-  it('uses five recorded meetings only as an empty-state checkpoint', () => {
+  it('uses a weekly empty state when recordings exist without wins', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: Array.from({ length: 5 }, (_, index) =>
@@ -449,9 +473,121 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.recentWin).toEqual({
       state: 'empty',
-      title: 'Your wins will show up here',
+      title: 'No wins yet this week',
       detail:
         'Pluto is looking for supported moments like praise, delivered work, closed business, and revenue won.',
+    });
+  });
+
+  it('builds a newest-first list of personal and shared wins for the local week', () => {
+    const win = (
+      id: string,
+      startedAt: string,
+      ownership?: 'personal' | 'shared' | 'other' | 'unknown',
+      owner?: string,
+      evidence = 'We closed the customer renewal.',
+    ) =>
+      makeMeeting({
+        id,
+        title: id,
+        created_at: startedAt,
+        started_at: startedAt,
+        analysis_json: JSON.stringify({
+          recent_win: {
+            win: `${id} win`,
+            why_it_counts: `${id} impact`,
+            evidence,
+            ...(ownership ? { ownership } : {}),
+            ...(owner ? { owner } : {}),
+          },
+        }),
+      });
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-04-30',
+      selfNames: ['Punit'],
+      meetings: [
+        makeMeeting({
+          id: 'older-meeting',
+          created_at: '2026-04-20T10:00:00.000Z',
+          started_at: '2026-04-20T10:00:00.000Z',
+        }),
+        win('monday', '2026-04-27T10:00:00.000Z', 'shared'),
+        win(
+          'personal',
+          '2026-04-28T10:00:00.000Z',
+          'personal',
+          'Punit',
+          'Punit closed the customer renewal.',
+        ),
+        win('other', '2026-04-29T10:00:00.000Z', 'other', 'Taylor'),
+        win('legacy-shared', '2026-04-30T10:00:00.000Z'),
+        win('sunday', '2026-05-03T10:00:00.000Z', 'shared'),
+        win('next-week', '2026-05-04T10:00:00.000Z', 'shared'),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.recentWin.state).toBe('populated');
+    if (model.recentWin.state !== 'populated') return;
+    expect(model.recentWin.items.map((item) => item.meetingId)).toEqual([
+      'sunday',
+      'legacy-shared',
+      'personal',
+      'monday',
+    ]);
+  });
+
+  it('keeps the first-meeting milestone beside later wins in its first week', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-04-30',
+      meetings: [
+        makeMeeting({
+          id: 'first',
+          title: 'First customer call',
+          created_at: '2026-04-27T10:00:00.000Z',
+          started_at: '2026-04-27T10:00:00.000Z',
+        }),
+        makeMeeting({
+          id: 'sale',
+          title: 'Renewal call',
+          created_at: '2026-04-29T10:00:00.000Z',
+          started_at: '2026-04-29T10:00:00.000Z',
+          analysis_json: JSON.stringify({
+            recent_win: {
+              win: 'Closed the renewal',
+              why_it_counts: 'The renewal protects recurring revenue.',
+              evidence: 'We closed the renewal today.',
+              ownership: 'shared',
+            },
+          }),
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.recentWin).toMatchObject({
+      state: 'populated',
+      total: 2,
+      items: [
+        { kind: 'evidence', meetingId: 'sale' },
+        {
+          kind: 'milestone',
+          meetingId: 'first',
+          title: 'First meeting with Pluto — done',
+        },
+      ],
     });
   });
 
