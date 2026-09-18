@@ -209,8 +209,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions compact writer-editor notes as notes-v32', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v32');
+  it('versions compact writer-editor notes as notes-v33', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v33');
   });
 
   beforeEach(() => {

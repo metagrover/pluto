@@ -310,6 +310,8 @@ export interface MeetingDashboardPreview {
   recent_win_why: string | null;
   recent_win_evidence: string | null;
   recent_win_source: string | null;
+  recent_win_ownership: string | null;
+  recent_win_owner: string | null;
 }
 
 export type MeetingAnalysisRunStatus =
@@ -2542,7 +2544,9 @@ export const getMeetingDashboardPreviews = (): MeetingDashboardPreview[] =>
          substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.win') END, 1, 160) AS recent_win_title,
          substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.why_it_counts') END, 1, 240) AS recent_win_why,
          substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.evidence') END, 1, 240) AS recent_win_evidence,
-         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.source') END, 1, 160) AS recent_win_source
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.source') END, 1, 160) AS recent_win_source,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.ownership') END, 1, 16) AS recent_win_ownership,
+         substr(CASE WHEN json_valid(analysis_json) THEN json_extract(analysis_json, '$.recent_win.owner') END, 1, 160) AS recent_win_owner
        FROM meetings
        WHERE analysis_json IS NOT NULL OR enhanced_notes IS NOT NULL
        ORDER BY COALESCE(started_at, created_at) DESC`,

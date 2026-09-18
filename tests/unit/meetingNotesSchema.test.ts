@@ -206,6 +206,26 @@ describe('local notes wire schemas', () => {
     expect(validate('draft', { ...draft, recentWin: null })).toBe(true);
   });
 
+  it('accepts and preserves grounded recent-win ownership metadata', () => {
+    const value = {
+      ...draft,
+      recentWin: {
+        win: text,
+        impact: text,
+        ownership: 'personal',
+        owner: 'Punit',
+      },
+    };
+
+    expect(validate('draft', value)).toBe(true);
+    expect(
+      parseNotesDraft(wire.decode(JSON.stringify(value))).recentWin,
+    ).toMatchObject({
+      ownership: 'personal',
+      owner: 'Punit',
+    });
+  });
+
   it('accepts and parses draft with explicit title as SupportedText or string', () => {
     const supportedTitle = { text: 'Quarterly Planning', sources: ['R0'] };
     const withSupported = { ...draft, title: supportedTitle };

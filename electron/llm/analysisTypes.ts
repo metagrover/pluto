@@ -179,6 +179,8 @@ export interface RecentWinV3 {
   win: string;
   why_it_counts: string;
   evidence: string;
+  ownership?: 'personal' | 'shared' | 'other' | 'unknown';
+  owner?: string | null;
 }
 
 export interface TopicSection {

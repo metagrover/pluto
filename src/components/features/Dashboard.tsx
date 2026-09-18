@@ -262,13 +262,82 @@ export const shouldUseReducedDashboardMotion = (): boolean =>
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
-export const buildDashboardConfettiPieces = () =>
-  Array.from({ length: 28 }, (_, index) => ({
-    id: `confetti-${index}`,
-    left: `${(index * 37) % 100}%`,
-    delay: `${(index % 7) * 80}ms`,
-    duration: `${900 + (index % 5) * 120}ms`,
-  }));
+const DASHBOARD_CONFETTI_COLORS = [
+  'hsl(var(--pro-accent))',
+  'hsl(var(--pro-success))',
+  'hsl(var(--pro-warning))',
+  '#f472b6',
+  '#60a5fa',
+  '#a78bfa',
+];
+
+export type DashboardConfettiVariant = 'shower' | 'corner';
+
+const DASHBOARD_CONFETTI_VARIANTS: DashboardConfettiVariant[] = [
+  'shower',
+  'corner',
+];
+
+export const pickDashboardConfettiVariant = (
+  random = Math.random,
+  previous?: DashboardConfettiVariant,
+): DashboardConfettiVariant => {
+  const choices = previous
+    ? DASHBOARD_CONFETTI_VARIANTS.filter((variant) => variant !== previous)
+    : DASHBOARD_CONFETTI_VARIANTS;
+  return choices[
+    Math.min(choices.length - 1, Math.floor(random() * choices.length))
+  ];
+};
+
+export const buildDashboardConfettiPieces = (
+  variant: DashboardConfettiVariant = 'shower',
+) =>
+  Array.from({ length: variant === 'shower' ? 28 : 52 }, (_, index) => {
+    if (variant === 'shower') {
+      return {
+        id: `confetti-${index}`,
+        left: `${(index * 37) % 100}%`,
+        delay: `${(index % 7) * 80}ms`,
+        duration: `${900 + (index % 5) * 120}ms`,
+        driftMid: '0px',
+        driftEnd: '24px',
+        rotationMid: '260deg',
+        rotationEnd: '520deg',
+        cornerX: '0vw',
+        cornerPeak: '0vh',
+        cornerEndX: '0vw',
+        width: '6px',
+        height: '10px',
+        color:
+          index % 2 === 0
+            ? 'hsl(var(--pro-warning))'
+            : 'hsl(var(--pro-success))',
+        borderRadius: '2px',
+      };
+    }
+    const drift = ((index * 47) % 180) - 90;
+    const width = 5 + (index % 4) * 2;
+    const height = index % 3 === 0 ? width : width + 5;
+    return {
+      id: `confetti-${index}`,
+      left: `${(index * 37 + (index % 5) * 7) % 100}%`,
+      delay: `${(index % 13) * 45}ms`,
+      duration: `${1650 + (index % 7) * 105}ms`,
+      driftMid: `${Math.round(drift * -0.45)}px`,
+      driftEnd: `${drift}px`,
+      rotationMid: `${180 + (index % 5) * 72}deg`,
+      rotationEnd: `${620 + (index % 8) * 115}deg`,
+      cornerX: `${8 + ((index * 19) % 88)}vw`,
+      cornerPeak: `${-48 - ((index * 13) % 52)}vh`,
+      cornerEndX: `${22 + ((index * 29) % 92)}vw`,
+      width: `${width}px`,
+      height: `${height}px`,
+      color:
+        DASHBOARD_CONFETTI_COLORS[index % DASHBOARD_CONFETTI_COLORS.length],
+      borderRadius: index % 4 === 0 ? '999px' : index % 3 === 0 ? '1px' : '3px',
+    };
+  });
 
 export const formatDashboardDate = (date: Date): string =>
   date.toLocaleDateString('en-US', {
@@ -448,9 +517,14 @@ export const Dashboard = ({
     string | null
   >(null);
   const openCommitmentMenuRef = useRef<HTMLDivElement>(null);
-  const [celebration, setCelebration] = useState<
-    'idle' | 'confetti' | 'reduced'
-  >('idle');
+  const [celebration, setCelebration] = useState<'idle' | 'reduced'>('idle');
+  const [confetti, setConfetti] = useState<{
+    runId: number;
+    variant: DashboardConfettiVariant;
+  } | null>(null);
+  const previousConfettiVariant = useRef<DashboardConfettiVariant>();
+  const confettiRunId = useRef(0);
+  const [winsExpanded, setWinsExpanded] = useState(false);
   const initialCommitmentIds =
     model.commitments.state === 'populated'
       ? model.commitments.items.map((item) => item.id)
@@ -464,10 +538,16 @@ export const Dashboard = ({
   const isSavingDailyOrderRef = useRef(false);
 
   useEffect(() => {
-    if (celebration === 'idle') return;
-    const timeout = window.setTimeout(() => setCelebration('idle'), 1600);
+    if (celebration === 'idle' && !confetti) return;
+    const timeout = window.setTimeout(
+      () => {
+        setCelebration('idle');
+        setConfetti(null);
+      },
+      confetti ? 3000 : 1600,
+    );
     return () => window.clearTimeout(timeout);
-  }, [celebration]);
+  }, [celebration, confetti]);
 
   useEffect(() => {
     if (!recentlyAddedCommitmentId) return;
@@ -550,10 +630,28 @@ export const Dashboard = ({
   };
 
   const startCelebration = () => {
-    setCelebration(shouldUseReducedDashboardMotion() ? 'reduced' : 'confetti');
+    if (shouldUseReducedDashboardMotion()) {
+      setConfetti(null);
+      setCelebration('reduced');
+      return;
+    }
+    const variant = pickDashboardConfettiVariant(
+      Math.random,
+      previousConfettiVariant.current,
+    );
+    previousConfettiVariant.current = variant;
+    confettiRunId.current += 1;
+    setCelebration('idle');
+    setConfetti({ runId: confettiRunId.current, variant });
   };
 
   const recentWin = model.recentWin;
+  const visibleWins =
+    recentWin.state === 'populated'
+      ? winsExpanded
+        ? recentWin.items
+        : recentWin.items.slice(0, 3)
+      : [];
   const allCommitmentItems =
     model.commitments.state === 'populated'
       ? [...model.commitments.items, ...model.commitments.backlog]
@@ -564,7 +662,9 @@ export const Dashboard = ({
   const backlogItems = allCommitmentItems.filter(
     (item) => !orderedCommitmentIds.includes(item.id),
   );
-  const confettiPieces = buildDashboardConfettiPieces();
+  const confettiPieces = buildDashboardConfettiPieces(
+    confetti?.variant ?? 'shower',
+  );
 
   const saveDailyOrder = async (nextIds: string[]) => {
     if (isSavingDailyOrderRef.current) return;
@@ -641,21 +741,34 @@ export const Dashboard = ({
 
   return (
     <main className="relative mx-auto w-full max-w-[1080px] animate-in pb-16">
-      {celebration === 'confetti' ? (
+      {confetti ? (
         <div
+          key={confetti.runId}
           aria-hidden="true"
           data-testid="dashboard-confetti"
+          data-variant={confetti.variant}
           className="pointer-events-none fixed inset-0 z-50 overflow-hidden"
         >
           {confettiPieces.map((piece) => (
             <span
               key={piece.id}
-              className="absolute top-[-16px] h-2.5 w-1.5 animate-[dashboard-confetti-fall_var(--duration)_ease-out_var(--delay)_forwards] rounded-sm bg-pro-accent odd:bg-pro-success even:bg-pro-warning"
+              className={`dashboard-confetti-piece dashboard-confetti-piece--${confetti.variant}`}
               style={
                 {
                   left: piece.left,
+                  width: piece.width,
+                  height: piece.height,
+                  backgroundColor: piece.color,
+                  borderRadius: piece.borderRadius,
                   '--delay': piece.delay,
                   '--duration': piece.duration,
+                  '--drift-mid': piece.driftMid,
+                  '--drift-end': piece.driftEnd,
+                  '--rotation-mid': piece.rotationMid,
+                  '--rotation-end': piece.rotationEnd,
+                  '--corner-x': piece.cornerX,
+                  '--corner-peak': piece.cornerPeak,
+                  '--corner-end-x': piece.cornerEndX,
                 } as CSSProperties
               }
             />
@@ -1116,7 +1229,9 @@ export const Dashboard = ({
             className="border-t border-pro-border/70 pt-6"
           >
             <p className="text-[10px] font-medium text-pro-text-muted/60">
-              {recentWin.state === 'populated' ? 'Evidence-backed' : 'Momentum'}
+              {recentWin.state === 'populated'
+                ? `This week · ${recentWin.total} ${recentWin.total === 1 ? 'win' : 'wins'}`
+                : 'Momentum'}
             </p>
             <h2
               id="recent-win-title"
@@ -1127,29 +1242,53 @@ export const Dashboard = ({
             <div className="mt-4 pt-4">
               {recentWin.state === 'populated' ? (
                 <>
-                  <h3 className="text-[15px] font-medium leading-6 text-pro-text-main">
-                    {recentWin.title}
-                  </h3>
-                  <p className="mt-2 text-[13px] font-normal leading-[1.55] text-pro-text-muted">
-                    {recentWin.whyItCounts}
-                  </p>
-                  <p className="mt-3 text-[10px] font-medium text-pro-text-muted/65">
-                    Source: {recentWin.sourceLabel}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {recentWin.meetingId ? (
+                  <div className="space-y-4">
+                    {visibleWins.map((win) => (
+                      <article
+                        key={win.id}
+                        data-testid="dashboard-recent-win-item"
+                        className="border-b border-pro-border/55 pb-4 last:border-b-0 last:pb-0"
+                      >
+                        <p className="text-[10px] font-semibold text-pro-text-muted/65">
+                          {win.kind === 'evidence'
+                            ? 'Evidence-backed'
+                            : 'Milestone'}{' '}
+                          · {win.dateLabel}
+                        </p>
+                        <h3 className="mt-1.5 text-[15px] font-medium leading-6 text-pro-text-main">
+                          {win.title}
+                        </h3>
+                        <p className="mt-1.5 text-[13px] font-normal leading-[1.55] text-pro-text-muted">
+                          {win.whyItCounts}
+                        </p>
+                        <p className="mt-2 text-[10px] font-medium text-pro-text-muted/65">
+                          Source: {win.sourceLabel}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedMeetingId(win.meetingId)}
+                          className="mt-2 inline-flex min-h-8 items-center gap-1 text-[12px] font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                        >
+                          {win.kind === 'evidence'
+                            ? 'Open moment'
+                            : 'Open meeting'}{' '}
+                          <ArrowRight
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {recentWin.total > 3 ? (
                       <button
                         type="button"
-                        onClick={() =>
-                          setSelectedMeetingId(recentWin.meetingId)
-                        }
+                        onClick={() => setWinsExpanded((expanded) => !expanded)}
+                        aria-expanded={winsExpanded}
                         className="inline-flex min-h-8 items-center gap-1 text-[12px] font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                       >
-                        Open moment{' '}
-                        <ArrowRight
-                          className="h-3.5 w-3.5"
-                          aria-hidden="true"
-                        />
+                        {winsExpanded ? 'Show less' : 'View all'}
                       </button>
                     ) : null}
                     <button
@@ -1158,15 +1297,20 @@ export const Dashboard = ({
                       className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[12px] font-semibold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                     >
                       <PartyPopper className="h-3.5 w-3.5" aria-hidden="true" />{' '}
-                      Celebrate
+                      Celebrate this week
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-warning/10 text-pro-warning">
+                  <button
+                    type="button"
+                    onClick={startCelebration}
+                    aria-label="Celebrate with confetti"
+                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-warning/10 text-pro-warning transition-colors hover:bg-pro-warning/20 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                  >
                     <PartyPopper className="h-4 w-4" aria-hidden="true" />
-                  </span>
+                  </button>
                   <div>
                     <h3 className="text-[14px] font-normal leading-5 text-pro-text-muted">
                       {recentWin.title}

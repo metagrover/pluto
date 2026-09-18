@@ -121,7 +121,7 @@ describe('buildMeetingNotesDocument', () => {
         provider: 'ollama',
         model: 'gemma4:12b',
         generation_path: 'single_pass',
-        prompt_version: 'notes-v32',
+        prompt_version: 'notes-v33',
         generated_at: '2026-09-13T00:00:00.000Z',
         error_categories: ['notes_quality_warning'],
         prose_review: {

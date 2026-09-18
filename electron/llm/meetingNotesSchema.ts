@@ -187,7 +187,18 @@ export const buildNotesResponseSchema = (
       sections: { ...array(section(false)), maxItems: 64 },
       recentWin: {
         anyOf: [
-          object({ win: text(false), impact: text(false) }),
+          object(
+            {
+              win: text(false),
+              impact: text(false),
+              ownership: {
+                type: 'string',
+                enum: ['personal', 'shared', 'other', 'unknown'],
+              },
+              owner: nullableString,
+            },
+            ['win', 'impact'],
+          ),
           { type: 'null' },
         ],
       },

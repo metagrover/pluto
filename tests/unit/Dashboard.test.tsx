@@ -14,6 +14,7 @@ import {
   buildDashboardConfettiPieces,
   getDashboardReviewActions,
   isCurrentReadClaimClipped,
+  pickDashboardConfettiVariant,
   reduceCurrentReadClaimState,
   shouldUseReducedDashboardMotion,
 } from '../../src/components/features/Dashboard';
@@ -186,8 +187,9 @@ const makeMeetingWithSupportedWin = (): Meeting =>
       recent_win: {
         win: 'Privacy review is ready to close',
         why_it_counts: 'The team resolved the final approval question.',
-        evidence: 'The team resolved the final approval question.',
+        evidence: 'We resolved the final approval question.',
         source: 'Launch Review',
+        ownership: 'shared',
       },
     }),
   });
@@ -284,8 +286,23 @@ describe('Dashboard', () => {
   });
 
   it('builds bounded confetti pieces and defaults to full motion without a browser preference', () => {
-    expect(buildDashboardConfettiPieces()).toHaveLength(28);
+    const pieces = buildDashboardConfettiPieces();
+    const cornerPieces = buildDashboardConfettiPieces('corner');
+    expect(pieces).toHaveLength(28);
+    expect(cornerPieces).toHaveLength(52);
+    expect(
+      new Set(cornerPieces.map((piece) => piece.color)).size,
+    ).toBeGreaterThan(3);
+    expect(
+      new Set(cornerPieces.map((piece) => piece.cornerEndX)).size,
+    ).toBeGreaterThan(10);
     expect(shouldUseReducedDashboardMotion()).toBe(false);
+  });
+
+  it('randomly picks a confetti style without immediately repeating it', () => {
+    expect(pickDashboardConfettiVariant(() => 0)).toBe('shower');
+    expect(pickDashboardConfettiVariant(() => 0, 'shower')).toBe('corner');
+    expect(pickDashboardConfettiVariant(() => 0.99, 'corner')).toBe('shower');
   });
 
   it('moves exact current-read copy out of the first dashboard viewport', () => {
@@ -424,7 +441,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
     expect(markup).toContain('Recent win');
-    expect(markup).toContain('Your wins will show up here');
+    expect(markup).toContain('No wins yet this week');
   });
 
   it('keeps possible items beyond the focused three reachable in the backlog', () => {
@@ -470,7 +487,7 @@ describe('Dashboard', () => {
     const markup = renderDashboard(model);
 
     expect(markup).toContain('Recent win');
-    expect(markup).toContain('Your wins will show up here');
+    expect(markup).toContain('No wins yet this week');
     expect(markup).toContain('Upcoming meetings');
     expect(markup.indexOf('Upcoming meetings')).toBeLessThan(
       markup.indexOf('Recent win'),
@@ -481,6 +498,7 @@ describe('Dashboard', () => {
   it('keeps a supported recent win beneath the compact agenda', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
+      dateKey: '2026-04-30',
       meetings: [makeMeetingWithSupportedWin()],
       overdueActions: [],
       staleActions: [],
@@ -494,6 +512,8 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Privacy review is ready to close');
+    expect(markup).toContain('First meeting with Pluto — done');
+    expect(markup).toContain('Celebrate this week');
     expect(markup.indexOf('Upcoming meetings')).toBeLessThan(
       markup.indexOf('Recent win'),
     );
@@ -507,7 +527,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Your wins will show up here');
     expect(markup).toContain(
-      'Record 5 meetings to give Pluto enough context to start looking for praise, delivered work, closed business, and revenue won.',
+      'Record your first meeting to start building a list of evidence-backed wins.',
     );
   });
 

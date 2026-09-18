@@ -413,7 +413,19 @@ export const parseRecentWinV3 = (raw: unknown): RecentWinV3 | undefined => {
   const whyItCounts = asString(record.why_it_counts);
   const evidence = asString(record.evidence);
   if (!win || !whyItCounts || !evidence) return undefined;
-  return { win, why_it_counts: whyItCounts, evidence };
+  const ownership = ['personal', 'shared', 'other', 'unknown'].includes(
+    String(record.ownership),
+  )
+    ? (record.ownership as RecentWinV3['ownership'])
+    : undefined;
+  const owner = asString(record.owner);
+  return {
+    win,
+    why_it_counts: whyItCounts,
+    evidence,
+    ...(ownership ? { ownership } : {}),
+    ...(owner ? { owner } : {}),
+  };
 };
 
 const parseTopicSection = (raw: unknown): TopicSection | null => {
