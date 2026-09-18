@@ -287,12 +287,16 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             manifest: manifest,
             progressHandler: progressHandler
         )
-        let ctcDirectory = stagingDirectory.appendingPathComponent(
+        try await validate(manifest: manifest, at: stagingDirectory)
+    }
+
+    public func validate(manifest: ModelManifest, at directory: URL) async throws {
+        let ctcDirectory = directory.appendingPathComponent(
             FluidAudioModelLayout.ctcDirectoryName,
             isDirectory: true
         )
         try ModelArtifactIntegrity.verify(
-            directory: stagingDirectory.appendingPathComponent(
+            directory: directory.appendingPathComponent(
                 FluidAudioModelLayout.installedAsrDirectoryName,
                 isDirectory: true
             ),
@@ -303,7 +307,7 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             expectedSHA256: manifest.vocabularyArtifactSHA256
         )
         try ModelArtifactIntegrity.verify(
-            directory: stagingDirectory.appendingPathComponent(
+            directory: directory.appendingPathComponent(
                 FluidAudioModelLayout.eouDirectoryName,
                 isDirectory: true
             ),

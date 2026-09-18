@@ -13,6 +13,8 @@ private struct ServiceModelInstaller: ModelInstalling {
         try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
         try Data("ready".utf8).write(to: model.appendingPathComponent("marker"))
     }
+
+    func validate(manifest _: ModelManifest, at _: URL) async throws {}
 }
 
 private actor ServiceInferenceDriver: ParakeetInferenceDriving {

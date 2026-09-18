@@ -6,6 +6,8 @@ public protocol ModelInstalling: Sendable {
         into stagingDirectory: URL,
         progressHandler: ModelPreparationProgressHandler?
     ) async throws
+
+    func validate(manifest: ModelManifest, at directory: URL) async throws
 }
 
 public actor ModelStore {
@@ -37,7 +39,14 @@ public actor ModelStore {
 
         if try activeVersion() == manifest.version {
             let active = versionDirectory(for: manifest.version)
-            if fileManager.fileExists(atPath: active.path) { return active }
+            if fileManager.fileExists(atPath: active.path) {
+                do {
+                    try await installer.validate(manifest: manifest, at: active)
+                    return active
+                } catch {
+                    // Reinstall below. Model bundles are rebuildable cache data.
+                }
+            }
         }
 
         let versions = root.appendingPathComponent("versions", isDirectory: true)
@@ -56,9 +65,10 @@ public actor ModelStore {
             guard directoryContainsFiles(staging) else {
                 throw RuntimeFailure.modelPreparationFailed
             }
-            if !fileManager.fileExists(atPath: destination.path) {
-                try fileManager.moveItem(at: staging, to: destination)
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
             }
+            try fileManager.moveItem(at: staging, to: destination)
             try writeActivation(version: manifest.version)
             try? removeEmptyStagingRoot(stagingRoot)
             return destination

@@ -2068,11 +2068,20 @@ app.whenReady().then(async () => {
       console.warn(
         `[ParakeetEOU] acquired live lease state=${after.state} queued=${after.queuedLeaseCount}`,
       );
-      return new ParakeetEouClient({
-        runtimeHost: parakeetRuntimeHost,
-        runtimeLease: lease,
-        maxOutstandingPerSource: 48,
-      });
+      try {
+        if (!parakeetFinalClient)
+          throw new Error('parakeet_runtime_unavailable');
+        await parakeetFinalClient.prepareForLive(lease);
+        console.warn('[ParakeetEOU] live model prepared');
+        return new ParakeetEouClient({
+          runtimeHost: parakeetRuntimeHost,
+          runtimeLease: lease,
+          maxOutstandingPerSource: 48,
+        });
+      } catch (error) {
+        await lease.release();
+        throw error;
+      }
     },
     onUpdate: ({ meetingId, owner: ownerId, event }) => {
       const owner = parakeetEouOwner;
