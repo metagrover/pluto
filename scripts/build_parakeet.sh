@@ -5,19 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/configure_swift_environment.sh"
 PACKAGE_PATH="${PROJECT_ROOT}/native/parakeet-runtime"
+BUILD_PATH="${PACKAGE_PATH}/.build"
 OUTPUT_DIRECTORY="${PROJECT_ROOT}/resources/bin"
 
 SWIFT_BUILD_OPTIONS=(
   --disable-sandbox
   --sdk "${SDKROOT}"
   --package-path "${PACKAGE_PATH}"
+  --scratch-path "${BUILD_PATH}"
   --configuration release
 )
 
 swift build "${SWIFT_BUILD_OPTIONS[@]}" --product parakeet-runtime
 swift build "${SWIFT_BUILD_OPTIONS[@]}" --product parakeet-resource-probe
 SWIFT_BIN_OUTPUT="$(swift build "${SWIFT_BUILD_OPTIONS[@]}" --show-bin-path)"
-if ! SWIFT_BIN_DIRECTORY="$(node "${SCRIPT_DIR}/lib/swift_bin_path.mjs" "${PACKAGE_PATH}/.build" <<<"${SWIFT_BIN_OUTPUT}")"; then
+if ! SWIFT_BIN_DIRECTORY="$(node "${SCRIPT_DIR}/lib/swift_bin_path.mjs" "${BUILD_PATH}" <<<"${SWIFT_BIN_OUTPUT}")"; then
   echo "Unexpected Swift output directory" >&2
   exit 1
 fi

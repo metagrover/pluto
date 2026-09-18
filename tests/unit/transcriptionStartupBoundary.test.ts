@@ -35,6 +35,10 @@ describe('transcription startup boundary', () => {
       'scripts/ensure_audio_cap_runtime.sh',
       'utf8',
     );
+    const buildAudioCapScript = readFileSync(
+      'scripts/build_audio_cap.sh',
+      'utf8',
+    );
     const buildParakeetScript = readFileSync(
       'scripts/build_parakeet.sh',
       'utf8',
@@ -68,14 +72,18 @@ describe('transcription startup boundary', () => {
       'exec "${SCRIPT_DIR}/build_parakeet.sh"',
     );
     expect(ensureAudioCapScript).toContain('-newer "${OUTPUT_PATH}"');
-    expect(ensureAudioCapScript).toContain(
-      'swiftc "${SOURCE_DIRECTORY}"/*.swift',
+    expect(buildAudioCapScript).toContain(
+      'swiftc "${PROJECT_ROOT}"/resources/swift/audiocap/*.swift',
     );
     expect(ensureAudioCapScript).toContain(
       'codesign --sign - --force "${OUTPUT_PATH}"',
     );
     expect(buildParakeetScript).toContain(
       'node "${SCRIPT_DIR}/lib/swift_bin_path.mjs"',
+    );
+    expect(buildParakeetScript).toContain('--scratch-path "${BUILD_PATH}"');
+    expect(buildParakeetScript).toContain(
+      'swift_bin_path.mjs" "${BUILD_PATH}"',
     );
     expect(buildParakeetScript).not.toContain(
       'SWIFT_BIN_DIRECTORY="$(swift build',
