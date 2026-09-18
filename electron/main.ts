@@ -572,24 +572,34 @@ import {
   knowledgeSynthesisPause,
 } from './knowledgeSynthesisPause';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
-import { getAllSettings, getProvider } from './llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderCache,
+} from './llm/factory';
+import type { CloudProviderId } from './llm/inferenceTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import type {
   AnalysisArtifacts,
   AnalysisDocument,
   InternalSignalDocument,
 } from './llm/provider';
+import { inferenceTransportErrorRationale } from './llm/transports/openAICompatible';
 import { UnifiedLLMProvider } from './llm/unifiedProvider';
 import {
   type MeetingAnalysisRunCoordinatorDb,
   createMeetingAnalysisRunCoordinator,
 } from './meetingAnalysisRuns';
 import { reconcileSingletonManualParticipantIdentity } from './meetingParticipantIdentity';
-import { createPersonChatStore } from './personChatStore';
+import {
+  PersonChatThreadArchivedError,
+  createPersonChatStore,
+} from './personChatStore';
 import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import { isSecretSettingKey } from './secureSettings';
 import { createSpeakerEnrollmentAudio } from './speakerEnrollmentAudio';
 import { buildSpeakerEnrollmentCandidate } from './speakerEnrollmentCandidate';
 import {
@@ -2058,11 +2068,20 @@ app.whenReady().then(async () => {
       console.warn(
         `[ParakeetEOU] acquired live lease state=${after.state} queued=${after.queuedLeaseCount}`,
       );
-      return new ParakeetEouClient({
-        runtimeHost: parakeetRuntimeHost,
-        runtimeLease: lease,
-        maxOutstandingPerSource: 48,
-      });
+      try {
+        if (!parakeetFinalClient)
+          throw new Error('parakeet_runtime_unavailable');
+        await parakeetFinalClient.prepareForLive(lease);
+        console.warn('[ParakeetEOU] live model prepared');
+        return new ParakeetEouClient({
+          runtimeHost: parakeetRuntimeHost,
+          runtimeLease: lease,
+          maxOutstandingPerSource: 48,
+        });
+      } catch (error) {
+        await lease.release();
+        throw error;
+      }
     },
     onUpdate: ({ meetingId, owner: ownerId, event }) => {
       const owner = parakeetEouOwner;
@@ -2139,6 +2158,9 @@ app.whenReady().then(async () => {
         parakeetEouOwner = null;
         parakeetEouGeneration = null;
       }
+      if (error instanceof Error && error.message === 'parakeet_cancelled') {
+        return { cancelled: true };
+      }
       throw error;
     }
   });
@@ -2193,6 +2215,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('PARAKEET_EOU_CANCEL', async (event, request = {}) => {
     const meetingId = String(request.meetingId || '');
+    // Cancellation can race with a pending START rejection. Once START has
+    // released the EOU owner there is no native session left to protect or
+    // cancel, so repeated cleanup is intentionally idempotent.
+    if (!parakeetEouOwner) return { cancelled: false };
     requireParakeetEouOwner(event.sender, meetingId);
     const generation = parakeetEouGeneration;
     const code =
@@ -2207,7 +2233,7 @@ app.whenReady().then(async () => {
       parakeetEouOwner = null;
       parakeetEouGeneration = null;
     }
-    return {};
+    return { cancelled: true };
   });
 
   ipcMain.handle('RECORDING_READINESS_STATUS', async () => {
@@ -4178,6 +4204,17 @@ app.whenReady().then(async () => {
     },
   );
   ipcMain.handle(
+    'intelligence:person-chat:delete-thread',
+    (_event, payload: { personId?: unknown; threadId?: unknown }) => {
+      if (!personChatEnabled) throw new Error('Person Chat is disabled');
+      personChatStore.deleteThread(
+        String(payload?.threadId ?? ''),
+        String(payload?.personId ?? ''),
+      );
+      return { deleted: true };
+    },
+  );
+  ipcMain.handle(
     'intelligence:person-chat:list-messages',
     (_event, payload: { personId?: unknown; threadId?: unknown }) =>
       personChatStore.listMessages(
@@ -4337,7 +4374,10 @@ app.whenReady().then(async () => {
         return {
           status: 'unavailable',
           message: null,
-          rationale: 'Pluto could not answer about this person right now.',
+          rationale:
+            error instanceof PersonChatThreadArchivedError
+              ? 'This conversation is archived. Resume it before asking another question.'
+              : inferenceTransportErrorRationale(error),
         } satisfies PersonChatResponse;
       } finally {
         settle();
@@ -4629,10 +4669,52 @@ app.whenReady().then(async () => {
   });
 
   // Settings handlers
-  ipcMain.handle('GET_SETTING', (_event, key) => db.getSetting(key));
-  ipcMain.handle('SET_SETTING', (_event, { key, value }) =>
-    db.setSetting(key, value),
+  ipcMain.handle('GET_SETTING', (_event, key) => {
+    if (typeof key !== 'string' || isSecretSettingKey(key)) {
+      throw new Error('secret_setting_requires_credential_ipc');
+    }
+    return db.getSetting(key);
+  });
+  ipcMain.handle('SET_SETTING', (_event, { key, value }) => {
+    if (typeof key !== 'string' || isSecretSettingKey(key)) {
+      throw new Error('secret_setting_requires_credential_ipc');
+    }
+    const result = db.setSetting(key, String(value));
+    invalidateProviderCache();
+    return result;
+  });
+  const parseCloudProvider = (value: unknown): CloudProviderId => {
+    if (
+      value === 'openai' ||
+      value === 'openrouter' ||
+      value === 'gemini' ||
+      value === 'claude'
+    ) {
+      return value;
+    }
+    throw new Error('invalid_cloud_provider');
+  };
+  ipcMain.handle('PROVIDER_CREDENTIAL_STATUS', (_event, provider) =>
+    db.getCredentialStatus(parseCloudProvider(provider)),
   );
+  ipcMain.handle(
+    'PROVIDER_CREDENTIAL_SET',
+    (_event, input: { provider?: unknown; value?: unknown }) => {
+      const provider = parseCloudProvider(input?.provider);
+      if (typeof input?.value !== 'string' || !input.value.trim()) {
+        throw new Error('invalid_provider_credential');
+      }
+      db.setCredential(provider, input.value.trim());
+      invalidateProviderCache();
+      return db.getCredentialStatus(provider);
+    },
+  );
+  ipcMain.handle('PROVIDER_CREDENTIAL_DELETE', (_event, provider) => {
+    const parsed = parseCloudProvider(provider);
+    db.deleteCredential(parsed);
+    invalidateProviderCache();
+    return db.getCredentialStatus(parsed);
+  });
   ipcMain.handle('AUDIO_RETENTION_GET_STATUS', () => audioRetention.inspect());
   ipcMain.handle('AUDIO_RETENTION_SET_BUDGET', async (_event, value) => {
     const parsed = parseAudioStorageBudgetGb(value);
@@ -6301,7 +6383,9 @@ app.whenReady().then(async () => {
                 ? settings.gemini_model
                 : settings.llm_provider === 'openai'
                   ? settings.openai_model
-                  : settings.claude_model) ||
+                  : settings.llm_provider === 'openrouter'
+                    ? settings.openrouter_model
+                    : settings.claude_model) ||
             'default',
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,

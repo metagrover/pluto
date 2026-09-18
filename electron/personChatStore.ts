@@ -26,6 +26,13 @@ type MessageRow = {
   created_at: string;
 };
 
+export class PersonChatThreadArchivedError extends Error {
+  constructor() {
+    super('Person chat thread is archived');
+    this.name = 'PersonChatThreadArchivedError';
+  }
+}
+
 const parseCitations = (value: string): PersonChatCitation[] => {
   try {
     const parsed = JSON.parse(value);
@@ -170,6 +177,13 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
       );
     },
 
+    deleteThread(threadId: string, personId: string): void {
+      requireThread(threadId, personId);
+      sqlite
+        .prepare('DELETE FROM person_chat_threads WHERE id = ?')
+        .run(threadId);
+    },
+
     listMessages(threadId: string, personId: string): PersonChatMessage[] {
       requireThread(threadId, personId);
       return (
@@ -190,7 +204,8 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
       status?: PersonChatMessageStatus;
       citations?: PersonChatCitation[];
     }): PersonChatMessage {
-      requireThread(input.threadId, input.personId);
+      const thread = requireThread(input.threadId, input.personId);
+      if (thread.archived_at) throw new PersonChatThreadArchivedError();
       const id = randomUUID();
       const now = new Date().toISOString();
       const transaction = sqlite.transaction(() => {
@@ -221,7 +236,7 @@ export const createPersonChatStore = (sqlite: Database.Database) => {
             UPDATE person_chat_threads
             SET title = CASE WHEN title = 'New conversation' AND ? IS NOT NULL
                 THEN ? ELSE title END,
-                updated_at = ?, archived_at = NULL
+                updated_at = ?
             WHERE id = ?
           `)
           .run(

@@ -493,6 +493,19 @@ export const setSetting = (key: string, value: string) => {
   return secureSettings.set(key, value);
 };
 
+export const deleteCredential = (
+  provider: import('./llm/inferenceTypes').CloudProviderId,
+) => secureSettings.delete(`${provider}_api_key`);
+
+export const setCredential = (
+  provider: import('./llm/inferenceTypes').CloudProviderId,
+  value: string,
+) => secureSettings.set(`${provider}_api_key`, value);
+
+export const getCredentialStatus = (
+  provider: import('./llm/inferenceTypes').CloudProviderId,
+) => secureSettings.status(provider);
+
 export const upsertAttentionItem = (
   input: AttentionItemUpsert,
 ): AttentionItem => {

@@ -19,12 +19,6 @@ vi.mock('../../src/components/features/CalendarSettings', () => ({
 const defaultProps = {
   llmProvider: 'ollama' as const,
   setLlmProvider: vi.fn(),
-  geminiApiKey: '',
-  setGeminiApiKey: vi.fn(),
-  openaiApiKey: '',
-  setOpenaiApiKey: vi.fn(),
-  claudeApiKey: '',
-  setClaudeApiKey: vi.fn(),
   ollamaModel: '',
   setOllamaModel: vi.fn(),
   autoEndEnabled: true,
@@ -56,6 +50,7 @@ beforeEach(() => {
         if (channel === 'GET_SETTING') return '';
         return null;
       }),
+      on: vi.fn(() => () => {}),
     },
   });
 });
@@ -89,7 +84,7 @@ describe('SettingsTab', () => {
     });
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
-      value: { invoke },
+      value: { invoke, on: vi.fn(() => () => {}) },
     });
     const container = document.createElement('div');
     document.body.append(container);
@@ -234,6 +229,66 @@ describe('SettingsTab', () => {
     expect(tabs[1].getAttribute('aria-selected')).toBe('true');
     expect(container.textContent).toContain('Calendar settings content');
     expect(container.textContent).not.toContain('Identity settings content');
+
+    act(() => root.unmount());
+  });
+
+  it('shows configured credentials as a non-copyable masked hint', async () => {
+    const invoke = vi.fn(async (channel: string, provider?: string) => {
+      if (channel === 'GET_SETTING') return '';
+      if (channel === 'PROVIDER_CREDENTIAL_STATUS') {
+        return provider === 'openrouter'
+          ? {
+              provider,
+              configured: true,
+              available: true,
+              maskedHint: 'sk-or-********1234',
+            }
+          : { provider, configured: false, available: true };
+      }
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}) },
+    });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          llmProvider="openrouter"
+          initialTab="intelligence"
+        />,
+      ),
+    );
+
+    const maskedHint = container.querySelector<HTMLElement>(
+      '[aria-label="Configured openrouter API key"]',
+    );
+    expect(maskedHint?.textContent).toBe('sk-or-********1234');
+    expect(maskedHint?.className).toContain('select-none');
+    expect(
+      container.querySelector('input[placeholder*="openrouter API key"]'),
+    ).toBeNull();
+
+    const copyEvent = new Event('copy', { bubbles: true, cancelable: true });
+    maskedHint?.dispatchEvent(copyEvent);
+    expect(copyEvent.defaultPrevented).toBe(true);
+
+    const replaceButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button'),
+    ).find((button) => button.textContent === 'Replace key');
+    await act(async () => replaceButton?.click());
+
+    expect(
+      container.querySelector('input[placeholder*="openrouter API key"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain('Save replacement');
+    expect(container.textContent).toContain('Cancel');
 
     act(() => root.unmount());
   });

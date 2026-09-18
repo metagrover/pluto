@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
+import { MeetingNotesError } from '../../electron/llm/meetingNotesTypes';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 const gemini = vi.hoisted(() => ({ model: vi.fn(), generate: vi.fn() }));
 vi.mock('@google/genai', () => ({
@@ -159,6 +160,50 @@ it('classifies reported provider input overflow without exposing error bodies', 
   );
 });
 
+it('preserves a sanitized cloud transport cause for notes failures', async () => {
+  const fetcher = vi.fn(async (_url, init) => {
+    expect(JSON.parse(init.body).response_format).toMatchObject({
+      type: 'json_schema',
+      json_schema: { strict: false },
+    });
+    return {
+      ok: false,
+      status: 429,
+      headers: new Headers({ 'Retry-After': '0' }),
+      json: async () => ({
+        error: { message: 'PRIVATE_MARKER rate limit exceeded' },
+      }),
+    };
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const provider = new UnifiedLLMProvider('openrouter', {
+    openrouter_api_key: 'test',
+    openrouter_model: 'openai/gpt-4o-mini',
+  }) as unknown as Transport;
+
+  const error = await provider
+    .generateText({
+      ...request,
+      notesResponseSchema: {
+        type: 'object',
+        properties: { optional: { type: 'string' } },
+        additionalProperties: false,
+      },
+    })
+    .catch((caught) => caught);
+
+  expect(error).toBeInstanceOf(MeetingNotesError);
+  expect(error).toMatchObject({ code: 'notes_provider_rate_limited' });
+  expect(error.cause).toMatchObject({
+    status: 429,
+    provider: 'openrouter',
+    code: 'provider_rate_limited',
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(error)).not.toContain('PRIVATE_MARKER');
+  expect(JSON.stringify(error.cause)).not.toContain('PRIVATE_MARKER');
+});
+
 it('rejects a stream that closes without a completion packet even if the JSON looks complete', async () => {
   stubOllamaFetch(async () => ({
     ok: true,
@@ -177,6 +222,7 @@ type Transport = {
     prompt: string;
     jsonMode: boolean;
     notesBudget: { contextTokens: number; outputTokens: number };
+    notesResponseSchema?: Record<string, unknown>;
     signal?: AbortSignal;
     notesStageObserver?: (event: NotesStageEvent) => void;
   }): Promise<string>;

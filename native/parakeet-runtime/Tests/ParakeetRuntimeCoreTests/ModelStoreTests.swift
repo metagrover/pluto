@@ -22,6 +22,12 @@ private actor FakeModelInstaller: ModelInstalling {
         try Data("model".utf8).write(to: stagingDirectory.appendingPathComponent("encoder.mlmodelc"))
     }
 
+    func validate(manifest _: ModelManifest, at directory: URL) async throws {
+        guard FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("encoder.mlmodelc").path
+        ) else { throw Failure.requested }
+    }
+
     func setShouldFail(_ value: Bool) { shouldFail = value }
 }
 
@@ -60,6 +66,26 @@ final class ModelStoreTests: XCTestCase {
 
         let installedVersions = await installer.installedVersions
         XCTAssertEqual(installedVersions, ["same-version"])
+    }
+
+    func testPreparingSameVersionRepairsAnIncompleteActiveInstall() async throws {
+        let root = try makeRoot()
+        let installer = FakeModelInstaller()
+        let store = ModelStore(root: root, installer: installer)
+        let manifest = ModelManifest.fixture(version: "same-version")
+
+        let active = try await store.prepare(manifest: manifest)
+        try FileManager.default.removeItem(
+            at: active.appendingPathComponent("encoder.mlmodelc")
+        )
+
+        let repaired = try await store.prepare(manifest: manifest)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: repaired.appendingPathComponent("encoder.mlmodelc").path
+        ))
+        let installedVersions = await installer.installedVersions
+        XCTAssertEqual(installedVersions, ["same-version", "same-version"])
     }
 
     func testFailedPreparationPreservesPreviouslyActiveVersion() async throws {

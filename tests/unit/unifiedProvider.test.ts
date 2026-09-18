@@ -20,9 +20,17 @@ vi.mock('@google/genai', () => {
   return { GoogleGenAI: MockGoogleGenAI };
 });
 
-import { getAllSettings, getProvider } from '../../electron/llm/factory';
+import {
+  getAllSettings,
+  getProvider,
+  invalidateProviderCache,
+} from '../../electron/llm/factory';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { LLMSettings } from '../../electron/llm/provider';
+import {
+  executeOpenAICompatible,
+  inferenceTransportErrorRationale,
+} from '../../electron/llm/transports/openAICompatible';
 import {
   STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
@@ -180,8 +188,9 @@ describe('UnifiedLLMProvider', () => {
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [, init] of fetchMock.mock.calls) {
-      expect(parseRequestBody(init).response_format).toEqual({
-        type: 'json_object',
+      expect(parseRequestBody(init).response_format).toMatchObject({
+        type: 'json_schema',
+        json_schema: { strict: false },
       });
       expect(parseRequestBody(init).format).toBeUndefined();
     }
@@ -211,6 +220,7 @@ describe('UnifiedLLMProvider', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -1084,6 +1094,7 @@ describe('UnifiedLLMProvider', () => {
     installFetchMock((url, init) => {
       expect(url).toContain('/chat/completions');
       const body = parseRequestBody(init);
+      expect(body.store).toBe(false);
       usedModel = String(body.model);
       return jsonResponse({
         choices: [{ message: { content: validAnalysisMarkdown } }],
@@ -1100,6 +1111,156 @@ describe('UnifiedLLMProvider', () => {
     );
     expect(summary).toBe(validAnalysisMarkdown);
     expect(usedModel).toBe('gpt-4.1-mini');
+  });
+
+  it('routes OpenRouter statelessly with zero-data-retention requirements', async () => {
+    installFetchMock((url, init) => {
+      expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+      const body = parseRequestBody(init);
+      expect(body).not.toHaveProperty('store');
+      expect(body.provider).toEqual({
+        zdr: true,
+        data_collection: 'deny',
+        require_parameters: true,
+      });
+      expect(body.model).toBe('openai/gpt-4o-mini');
+      return jsonResponse({
+        model: 'openai/gpt-4o-mini',
+        choices: [{ message: { content: validAnalysisMarkdown } }],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'openai/gpt-4o-mini',
+    });
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
+  });
+
+  it('classifies OpenRouter endpoint-routing 404s without retaining the response body', async () => {
+    installFetchMock(() =>
+      Promise.resolve({
+        ok: false,
+        status: 404,
+        json: async () => ({
+          error: { message: 'No endpoints found for this model.' },
+        }),
+      } as Response),
+    );
+
+    const error = await executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'askPluto',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Hello' }],
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      status: 404,
+      provider: 'openrouter',
+      code: 'openrouter_no_eligible_endpoint',
+    });
+    expect(inferenceTransportErrorRationale(error)).toContain(
+      'zero-retention endpoint',
+    );
+    expect(String(error)).not.toContain('No endpoints found');
+  });
+
+  it('honors Retry-After and retries an eligible OpenRouter 429 once', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '2',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          model: 'openai/gpt-4o-mini',
+          choices: [{ message: { content: 'Recovered' } }],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'notesWriter',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Summarize' }],
+      rateLimitRetries: 1,
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toMatchObject({ text: 'Recovered' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels an OpenRouter request while waiting to retry a 429', async () => {
+    const controller = new AbortController();
+    const cancellation = new DOMException('cancelled', 'AbortError');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'Retry-After': '30',
+            },
+          }),
+        ),
+      ),
+    );
+
+    const pending = executeOpenAICompatible('openrouter', 'test-key', {
+      task: 'notesWriter',
+      model: 'openai/gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Summarize' }],
+      rateLimitRetries: 1,
+      signal: controller.signal,
+      egress: {
+        classification: 'selected_meeting_context',
+        userInitiated: true,
+      },
+    });
+    await Promise.resolve();
+    controller.abort(cancellation);
+
+    await expect(pending).rejects.toBe(cancellation);
+  });
+
+  it('normalizes OpenAI shorthand model IDs for OpenRouter', async () => {
+    installFetchMock((_url, init) => {
+      expect(parseRequestBody(init).model).toBe('openai/gpt-4o-mini');
+      return jsonResponse({
+        model: 'openai/gpt-4o-mini',
+        choices: [{ message: { content: validAnalysisMarkdown } }],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openrouter', {
+      openrouter_api_key: 'test-key',
+      openrouter_model: 'gpt-4o-mini',
+    });
+    await expect(
+      provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+    ).resolves.toBe(validAnalysisMarkdown);
   });
 
   it('extracts internal signals in openai JSON mode with normalized tags', async () => {
@@ -1320,10 +1481,11 @@ describe('UnifiedLLMProvider', () => {
 
 describe('LLM factory', () => {
   afterEach(() => {
+    invalidateProviderCache();
     vi.unstubAllGlobals();
   });
 
-  it('falls back from unavailable ollama to openai', async () => {
+  it('does not silently fall back from unavailable ollama to cloud', async () => {
     installFetchMock((url) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({}, false, 'unavailable');
@@ -1336,9 +1498,15 @@ describe('LLM factory', () => {
       openai_api_key: 'fallback-openai',
     };
 
-    const provider = await getProvider(settings);
-    expect(provider.name).toBe('OpenAI');
-    expect(provider).toBeInstanceOf(UnifiedLLMProvider);
+    await expect(getProvider(settings)).rejects.toThrow(
+      'explicitly select a configured cloud provider',
+    );
+  });
+
+  it('requires current consent for a configured cloud provider', async () => {
+    await expect(
+      getProvider({ llm_provider: 'openai', openai_api_key: 'test-key' }),
+    ).rejects.toThrow('openai_cloud_consent_required');
   });
 
   it('normalizes invalid provider setting to ollama', async () => {

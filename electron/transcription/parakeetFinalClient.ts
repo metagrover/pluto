@@ -156,6 +156,16 @@ export class ParakeetFinalClient {
       .then((nextLease) => this.prepareInLease(nextLease, onProgress));
   }
 
+  prepareForLive(
+    lease: ParakeetRuntimeLease,
+    onProgress?: PreparationProgressListener,
+  ): Promise<TranscriptionRuntimeHealth> {
+    if (lease.kind !== 'live') {
+      return Promise.reject(new Error('parakeet_runtime_lease_invalid'));
+    }
+    return this.prepareWithLease(onProgress);
+  }
+
   private async prepareInLease(
     lease: Awaited<ReturnType<ParakeetRuntimeHost['acquire']>>,
     onProgress?: PreparationProgressListener,

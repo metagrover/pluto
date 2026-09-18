@@ -173,6 +173,26 @@ describe('ParakeetFinalClient', () => {
     });
   });
 
+  it('prepares the native worker while a live lease is held', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const lease = await host.startRecordingLive();
+
+    const ready = client.prepareForLive(lease);
+    expect(child.writes).toHaveLength(1);
+    expect(child.writes[0]).toMatchObject({
+      method: 'prepare',
+      modelRoot: paths.modelRoot,
+    });
+    child.respond(prepared(String(child.writes[0].id)));
+
+    await expect(ready).resolves.toMatchObject({ ready: true });
+    expect(host.diagnostics().state).toBe('live');
+    await lease.release();
+    host.shutdown();
+  });
+
   it('reprepares a new runtime after idle unload before final transcription', async () => {
     vi.useFakeTimers();
     const firstChild = new FakeChild();

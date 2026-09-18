@@ -756,6 +756,24 @@ const createInvokeFallback =
       case 'GET_SETTING':
         result = getSetting(args[0]);
         break;
+      case 'PROVIDER_CREDENTIAL_STATUS':
+        result = {
+          provider: args[0],
+          configured: false,
+          available: false,
+          error: 'secure_storage_unavailable',
+        };
+        break;
+      case 'PROVIDER_CREDENTIAL_SET':
+        throw new Error('secure_storage_unavailable');
+      case 'PROVIDER_CREDENTIAL_DELETE':
+        result = {
+          provider: args[0],
+          configured: false,
+          available: false,
+          error: 'secure_storage_unavailable',
+        };
+        break;
       case 'TRANSCRIPTION_PREPARE_FINAL':
         result = { ready: true, engine: 'parakeet_coreml' };
         break;

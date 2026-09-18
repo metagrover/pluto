@@ -147,6 +147,26 @@ final class FluidAudioModelInstallerTests: XCTestCase {
         }
     }
 
+    func testValidationRejectsCachedBundleWithoutEouAssets() async throws {
+        let root = try makeRoot()
+        let reference = root.appendingPathComponent("reference")
+        let digests = try fixtureDigests(at: reference)
+        try FileManager.default.removeItem(
+            at: reference.appendingPathComponent(FluidAudioModelLayout.eouDirectoryName)
+        )
+        let installer = FluidAudioModelInstaller(
+            revisionChecker: FakeRevisionChecker(),
+            downloader: FakeBundleDownloader(includeEou: true)
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            try await installer.validate(
+                manifest: self.manifest(digests: digests),
+                at: reference
+            )
+        }
+    }
+
     func testInstallerForwardsRealBundleByteProgress() async throws {
         let root = try makeRoot()
         let digests = try fixtureDigests(at: root.appendingPathComponent("reference"))

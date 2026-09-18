@@ -1,4 +1,5 @@
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
+import { CLOUD_CONSENT_VERSION, isCloudProvider } from './providerCatalog';
 import { UnifiedLLMProvider } from './unifiedProvider';
 
 let pendingProviderPromise: Promise<LLMProvider> | null = null;
@@ -16,10 +17,13 @@ function getSettingsHash(settings: LLMSettings): string {
     llm: settings.llm_model,
     gemini: settings.gemini_model,
     openai: settings.openai_model,
+    openrouter: settings.openrouter_model,
     claude: settings.claude_model,
     hasGemini: !!settings.gemini_api_key,
     hasOpenAI: !!settings.openai_api_key,
+    hasOpenRouter: !!settings.openrouter_api_key,
     hasClaude: !!settings.claude_api_key,
+    consents: settings.cloud_consents,
   });
 }
 
@@ -68,24 +72,9 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             console.log('[LLM Factory] Ollama is available');
             providerInstance = ollama;
           } else {
-            console.warn(
-              '[LLM Factory] Ollama not available, falling back to cloud provider',
+            throw new Error(
+              'Ollama is not running. Start Ollama or explicitly select a configured cloud provider in Settings.',
             );
-
-            if (settings.gemini_api_key) {
-              console.log('[LLM Factory] Falling back to Gemini');
-              providerInstance = new UnifiedLLMProvider('gemini', settings);
-            } else if (settings.openai_api_key) {
-              console.log('[LLM Factory] Falling back to OpenAI');
-              providerInstance = new UnifiedLLMProvider('openai', settings);
-            } else if (settings.claude_api_key) {
-              console.log('[LLM Factory] Falling back to Claude');
-              providerInstance = new UnifiedLLMProvider('claude', settings);
-            } else {
-              throw new Error(
-                'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
-              );
-            }
           }
           break;
         }
@@ -106,6 +95,14 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
           break;
         }
 
+        case 'openrouter': {
+          if (!settings.openrouter_api_key) {
+            throw new Error('OpenRouter API key not configured');
+          }
+          providerInstance = new UnifiedLLMProvider('openrouter', settings);
+          break;
+        }
+
         case 'claude': {
           if (!settings.claude_api_key) {
             throw new Error('Claude API key not configured');
@@ -118,6 +115,12 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
           throw new Error(`Unknown provider type: ${providerType}`);
       }
 
+      if (
+        isCloudProvider(providerType) &&
+        settings.cloud_consents?.[providerType] !== CLOUD_CONSENT_VERSION
+      ) {
+        throw new Error(`${providerType}_cloud_consent_required`);
+      }
       return providerInstance;
     })();
   }
@@ -163,6 +166,7 @@ export async function getAllSettings(db: {
     'ollama',
     'gemini',
     'openai',
+    'openrouter',
     'claude',
   ];
   const llmProvider =
@@ -175,6 +179,7 @@ export async function getAllSettings(db: {
     llm_provider: llmProvider,
     gemini_api_key: getStringSetting('gemini_api_key'),
     openai_api_key: getStringSetting('openai_api_key'),
+    openrouter_api_key: getStringSetting('openrouter_api_key'),
     claude_api_key: getStringSetting('claude_api_key'),
     llm_model: getStringSetting('llm_model'),
     ollama_model: getStringSetting('ollama_model'),
@@ -183,10 +188,25 @@ export async function getAllSettings(db: {
     ollama_seed: getIntegerSetting('ollama_seed'),
     gemini_model: getStringSetting('gemini_model'),
     openai_model: getStringSetting('openai_model'),
+    openrouter_model: getStringSetting('openrouter_model'),
     claude_model: getStringSetting('claude_model'),
+    cloud_consents: {
+      gemini: getStringSetting('cloud_consent_gemini'),
+      openai: getStringSetting('cloud_consent_openai'),
+      openrouter: getStringSetting('cloud_consent_openrouter'),
+      claude: getStringSetting('cloud_consent_claude'),
+    },
   };
 
   cachedSettings = settings;
   lastSettingsFetch = now;
   return settings;
+}
+
+export function invalidateProviderCache() {
+  pendingProviderPromise = null;
+  lastSettingsHash = null;
+  lastHealthCheck = 0;
+  cachedSettings = null;
+  lastSettingsFetch = 0;
 }

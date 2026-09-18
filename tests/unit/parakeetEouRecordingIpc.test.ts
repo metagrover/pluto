@@ -46,6 +46,21 @@ describe('Parakeet EOU recording IPC boundary', () => {
     );
   });
 
+  it('treats startup cancellation and late cleanup as idempotent', () => {
+    const handlers = sliceBetween(
+      main,
+      "ipcMain.handle('PARAKEET_EOU_START'",
+      "ipcMain.handle('RECORDING_READINESS_STATUS'",
+    );
+    expect(handlers).toContain(
+      "error instanceof Error && error.message === 'parakeet_cancelled'",
+    );
+    expect(handlers).toContain('return { cancelled: true }');
+    expect(handlers).toContain(
+      'if (!parakeetEouOwner) return { cancelled: false }',
+    );
+  });
+
   it('accepts structured PCM directly rather than receipt WAV paths', () => {
     const append = sliceBetween(
       main,

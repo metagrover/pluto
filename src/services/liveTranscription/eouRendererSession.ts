@@ -346,14 +346,23 @@ export function createEouRendererSession(options: {
       if (currentStatus !== 'idle') throw new Error('parakeet_session_invalid');
       currentStatus = 'starting';
       startPromise = (async () => {
+        let startResult: unknown;
         try {
-          await options.transport.invoke('PARAKEET_EOU_START', {
+          startResult = await options.transport.invoke('PARAKEET_EOU_START', {
             meetingId: options.meetingId,
             generation: options.generation,
           });
         } catch {
           fail('parakeet_live_unavailable');
           throw new Error('parakeet_live_unavailable');
+        }
+        if (
+          startResult !== null &&
+          typeof startResult === 'object' &&
+          (startResult as { cancelled?: unknown }).cancelled === true
+        ) {
+          if (!isUnavailable()) fail('parakeet_cancelled');
+          return;
         }
         if (isUnavailable()) {
           throw new Error('parakeet_live_unavailable');

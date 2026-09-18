@@ -177,7 +177,7 @@ it.each(['notesWriter', 'notesAudit', 'notesMerge'])(
   },
 );
 
-it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
+it.each(['ollama', 'openai', 'openrouter', 'claude', 'gemini'] as const)(
   'routes raw and indexed %s callers through the shipped legacy two-stage contract',
   async (kind) => {
     const fixture = makeDirectNotesFixture();
@@ -198,7 +198,8 @@ it.each(['ollama', 'openai', 'claude', 'gemini'] as const)(
     for (const [request] of generate.mock.calls) {
       const schema = (request as { notesResponseSchema?: unknown })
         .notesResponseSchema;
-      if (kind === 'ollama') expect(schema).toBeDefined();
+      if (['ollama', 'openai', 'openrouter'].includes(kind))
+        expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
     expect(result.generation_metadata?.prompt_version).toBe('notes-v32');

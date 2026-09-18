@@ -147,8 +147,9 @@ export class MeetingNotesError extends Error {
   constructor(
     public readonly code: string,
     public readonly validationCategory?: NotesValidationCategory,
+    options?: ErrorOptions,
   ) {
-    super(code);
+    super(code, options);
     this.name = 'MeetingNotesError';
   }
 }

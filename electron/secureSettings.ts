@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage } from 'electron';
+import type { ProviderCredentialStatus } from './llm/inferenceTypes';
+import { credentialSettingKey } from './llm/providerCatalog';
 
 export type PlaintextSettingsStore = {
   get(key: string): string | null;
@@ -19,12 +21,32 @@ export type SecureSettingsBackend = {
 const SECRET_SETTING_KEYS = new Set([
   'gemini_api_key',
   'openai_api_key',
+  'openrouter_api_key',
   'claude_api_key',
   'hf_token',
 ]);
 
 export function isSecretSettingKey(key: string) {
   return SECRET_SETTING_KEYS.has(key);
+}
+
+const CREDENTIAL_DISPLAY_PREFIX: Record<
+  ProviderCredentialStatus['provider'],
+  string
+> = {
+  openai: 'sk-',
+  openrouter: 'sk-or-',
+  gemini: 'AIza',
+  claude: 'sk-ant-',
+};
+
+function maskCredentialForDisplay(
+  provider: ProviderCredentialStatus['provider'],
+  value: string,
+) {
+  const trimmed = value.trim();
+  const suffix = trimmed.length >= 8 ? trimmed.slice(-4) : '';
+  return `${CREDENTIAL_DISPLAY_PREFIX[provider]}********${suffix}`;
 }
 
 function getSecureSettingsPath() {
@@ -49,7 +71,12 @@ function writeSecureSettingsFile(
   filePath = getSecureSettingsPath(),
 ) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(next, null, 2));
+  const temporaryPath = `${filePath}.tmp`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(next, null, 2), {
+    mode: 0o600,
+  });
+  fs.renameSync(temporaryPath, filePath);
+  fs.chmodSync(filePath, 0o600);
 }
 
 export function createElectronSecureSettingsBackend(): SecureSettingsBackend {
@@ -94,22 +121,19 @@ export function createSecureSettingsManager({
   return {
     get(key: string) {
       if (!isSecretSettingKey(key)) return plaintext.get(key);
-
-      const secureValue = getSecureValue(key);
-      if (secureValue !== null) return secureValue;
-
-      const plaintextValue = plaintext.get(key);
-      if (plaintextValue === null) return null;
-      if (!backend.isAvailable()) return plaintextValue;
-
       try {
+        if (!backend.isAvailable()) return null;
+        const secureValue = getSecureValue(key);
+        if (secureValue !== null) return secureValue;
+        const plaintextValue = plaintext.get(key);
+        if (plaintextValue === null) return null;
         writeSecureValue(key, plaintextValue);
         plaintext.delete(key);
+        return plaintextValue;
       } catch (error) {
         logFailure(key, 'read-migration', error);
+        return null;
       }
-
-      return plaintextValue;
     },
 
     set(key: string, value: string) {
@@ -126,7 +150,7 @@ export function createSecureSettingsManager({
           'write-unavailable',
           new Error('Encryption unavailable'),
         );
-        return plaintext.set(key, value);
+        throw new Error('secure_storage_unavailable');
       }
 
       try {
@@ -134,7 +158,55 @@ export function createSecureSettingsManager({
         return plaintext.delete(key);
       } catch (error) {
         logFailure(key, 'write', error);
-        return plaintext.set(key, value);
+        throw new Error('secure_storage_write_failed');
+      }
+    },
+
+    delete(key: string) {
+      if (!isSecretSettingKey(key)) return plaintext.delete(key);
+      deleteSecureValue(key);
+      return plaintext.delete(key);
+    },
+
+    status(
+      provider: ProviderCredentialStatus['provider'],
+    ): ProviderCredentialStatus {
+      const key = credentialSettingKey(provider);
+      if (!backend.isAvailable()) {
+        return {
+          provider,
+          configured: false,
+          available: false,
+          error: 'secure_storage_unavailable',
+        };
+      }
+      try {
+        let credential = getSecureValue(key);
+        if (credential === null) {
+          const legacyValue = plaintext.get(key);
+          if (legacyValue !== null) {
+            writeSecureValue(key, legacyValue);
+            plaintext.delete(key);
+            credential = legacyValue;
+          }
+        }
+        return {
+          provider,
+          configured: credential !== null,
+          available: true,
+          maskedHint:
+            credential === null
+              ? undefined
+              : maskCredentialForDisplay(provider, credential),
+        };
+      } catch (error) {
+        logFailure(key, 'status', error);
+        return {
+          provider,
+          configured: false,
+          available: true,
+          error: 'credential_unreadable',
+        };
       }
     },
   };

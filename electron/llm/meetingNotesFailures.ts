@@ -18,7 +18,11 @@ export const classifyMeetingNotesFailure = (error: unknown): string => {
 
 export const isTransientMeetingNotesLeafFailure = (error: unknown): boolean =>
   (error instanceof MeetingNotesError &&
-    ['notes_provider_error', 'notes_output_incomplete'].includes(error.code)) ||
+    [
+      'notes_provider_error',
+      'notes_provider_rate_limited',
+      'notes_output_incomplete',
+    ].includes(error.code)) ||
   error instanceof SyntaxError ||
   error instanceof TypeError ||
   (error instanceof DOMException && error.name === 'TimeoutError');

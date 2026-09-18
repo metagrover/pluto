@@ -3,12 +3,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/configure_swift_environment.sh"
 PACKAGE_PATH="${PROJECT_ROOT}/native/parakeet-runtime"
 OUTPUT_DIRECTORY="${PROJECT_ROOT}/resources/bin"
 
-swift build --package-path "${PACKAGE_PATH}" --configuration release --product parakeet-runtime
-swift build --package-path "${PACKAGE_PATH}" --configuration release --product parakeet-resource-probe
-SWIFT_BIN_OUTPUT="$(swift build --package-path "${PACKAGE_PATH}" --configuration release --show-bin-path)"
+SWIFT_BUILD_OPTIONS=(
+  --disable-sandbox
+  --sdk "${SDKROOT}"
+  --package-path "${PACKAGE_PATH}"
+  --configuration release
+)
+
+swift build "${SWIFT_BUILD_OPTIONS[@]}" --product parakeet-runtime
+swift build "${SWIFT_BUILD_OPTIONS[@]}" --product parakeet-resource-probe
+SWIFT_BIN_OUTPUT="$(swift build "${SWIFT_BUILD_OPTIONS[@]}" --show-bin-path)"
 if ! SWIFT_BIN_DIRECTORY="$(node "${SCRIPT_DIR}/lib/swift_bin_path.mjs" "${PACKAGE_PATH}/.build" <<<"${SWIFT_BIN_OUTPUT}")"; then
   echo "Unexpected Swift output directory" >&2
   exit 1

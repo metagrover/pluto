@@ -7,6 +7,7 @@ import { MeetingNotesError } from '../../electron/llm/meetingNotesTypes';
 
 it.each([
   new MeetingNotesError('notes_provider_error'),
+  new MeetingNotesError('notes_provider_rate_limited'),
   new MeetingNotesError('notes_output_incomplete'),
   new SyntaxError('malformed provider stream'),
   new DOMException('provider timeout', 'TimeoutError'),

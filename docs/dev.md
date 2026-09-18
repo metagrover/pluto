@@ -142,6 +142,13 @@ xcodebuild -version
 xcode-select --install
 ```
 
+Pluto's native build scripts verify that the active Swift compiler can import
+the selected macOS SDK. If a Command Line Tools update leaves the default SDK
+symlink temporarily incompatible, the scripts use the newest compatible SDK
+already installed on the machine and keep the module cache in a writable
+temporary directory. If no installed SDK works, update or reinstall Command
+Line Tools before continuing.
+
 ## Code Formatting with Biome
 
 This project uses [Biome](https://biomejs.dev/) for code formatting and linting.

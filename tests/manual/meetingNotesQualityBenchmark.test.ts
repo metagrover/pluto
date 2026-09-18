@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 
 import { resolveTranscriptEvidence } from '../../electron/llm/analysisGrounding';
+import type { ProviderType } from '../../electron/llm/provider';
 import {
   STRUCTURED_ANALYSIS_PROMPT_VERSION,
   UnifiedLLMProvider,
@@ -79,8 +80,21 @@ suite('real-provider meeting notes quality benchmark', () => {
   it(
     'runs production prompts and grounding with content-free reporting',
     async () => {
+      const provider = (process.env.PLUTO_BENCHMARK_PROVIDER?.trim() ||
+        'ollama') as ProviderType;
+      if (!['ollama', 'openai', 'openrouter'].includes(provider)) {
+        throw new Error(
+          'PLUTO_BENCHMARK_PROVIDER must be ollama, openai, or openrouter',
+        );
+      }
       const model =
-        process.env.OLLAMA_BENCHMARK_MODEL?.trim() || OLLAMA_GENERAL_MODEL;
+        process.env.PLUTO_BENCHMARK_MODEL?.trim() ||
+        process.env.OLLAMA_BENCHMARK_MODEL?.trim() ||
+        (provider === 'openai'
+          ? 'gpt-4o-mini'
+          : provider === 'openrouter'
+            ? 'openai/gpt-4o-mini'
+            : OLLAMA_GENERAL_MODEL);
       const repeats = Math.max(
         1,
         Number.parseInt(process.env.OLLAMA_BENCHMARK_REPEATS || '3', 10) || 3,
@@ -134,14 +148,18 @@ suite('real-provider meeting notes quality benchmark', () => {
       }> = [];
 
       for (let repeat = 0; repeat < repeats; repeat += 1) {
-        const provider = new UnifiedLLMProvider('ollama', {
+        const inferenceProvider = new UnifiedLLMProvider(provider, {
           ollama_model: model,
+          openai_model: model,
+          openrouter_model: model,
+          openai_api_key: process.env.OPENAI_API_KEY,
+          openrouter_api_key: process.env.OPENROUTER_API_KEY,
           ollama_structured_thinking: structuredThinking,
           ollama_seed: seedStart + repeat,
         });
         for (const [fixtureIndex, fixture] of fixtures.entries()) {
           const startedAt = performance.now();
-          const analysis = await provider.generateStructuredAnalysis(
+          const analysis = await inferenceProvider.generateStructuredAnalysis(
             fixture.transcript.join('\n'),
           );
           runs.push({
@@ -161,6 +179,7 @@ suite('real-provider meeting notes quality benchmark', () => {
 
       let residentModelBytes: number | null = null;
       try {
+        if (provider !== 'ollama') throw new Error('not-local');
         const response = await fetch('http://127.0.0.1:11434/api/ps');
         const payload = (await response.json()) as {
           models?: Array<{ name?: string; size?: number; size_vram?: number }>;
@@ -295,10 +314,15 @@ suite('real-provider meeting notes quality benchmark', () => {
       }, {});
       const report = {
         schema_version: 1,
-        provider: 'ollama',
+        provider,
         model,
         prompt_version: STRUCTURED_ANALYSIS_PROMPT_VERSION,
         fixture_revision: 'meeting-notes-quality-v4',
+        context_bundle_hashes: fixtures.map((fixture) =>
+          createHash('sha256')
+            .update(fixture.transcript.join('\n'))
+            .digest('hex'),
+        ),
         comparison_baseline: {
           provider: providerBaseline.provider,
           model: providerBaseline.model,
@@ -370,7 +394,7 @@ suite('real-provider meeting notes quality benchmark', () => {
       expect(report.false_positive_count).toBe(0);
       expect(report.exact_evidence_support).toBe(report.settled_items);
       expect(report.precision_cases_passed).toBe(report.precision_cases_total);
-      if (fixtureScope === 'full') {
+      if (fixtureScope === 'full' && provider === 'ollama') {
         expect(
           report.reviewed_score_by_seed.every((score) => score >= 40),
         ).toBe(true);

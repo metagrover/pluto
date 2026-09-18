@@ -15,10 +15,5 @@ if [[ -x "${OUTPUT_PATH}" && ! -L "${OUTPUT_PATH}" ]] && \
 fi
 
 echo "Audio capture runtime is missing or stale; building it before launch."
-mkdir -p "${OUTPUT_DIRECTORY}"
-swiftc "${SOURCE_DIRECTORY}"/*.swift \
-  -o "${OUTPUT_PATH}" \
-  -framework CoreAudio \
-  -framework AudioToolbox \
-  -framework AVFoundation
+"${SCRIPT_DIR}/build_audio_cap.sh"
 codesign --sign - --force "${OUTPUT_PATH}"

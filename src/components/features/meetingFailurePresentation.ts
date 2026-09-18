@@ -120,6 +120,17 @@ export const resolveMeetingRegenerationFailurePresentation = (
     };
   }
 
+  if (/rate[_ -]?limit|too many requests/i.test(evidence)) {
+    return {
+      title,
+      detail: withPreservationCopy(
+        'The cloud provider is rate-limiting requests. Wait a moment, then try again.',
+        input.hasExistingNotes,
+      ),
+      canRetry: true,
+    };
+  }
+
   if (
     input.kind === 'generation_failed' ||
     /abort|timed out|timeout|per-topic analysis passes failed|busy/i.test(
