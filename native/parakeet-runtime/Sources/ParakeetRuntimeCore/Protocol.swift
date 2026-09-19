@@ -16,6 +16,7 @@ public enum RuntimeMethod: String, Codable, Sendable {
     case eouFinish = "eou_finish"
     case eouCancel = "eou_cancel"
     case eouReset = "eou_reset"
+    case eouSpeakerEvidence = "eou_speaker_evidence"
 }
 
 public struct RuntimeRequest: Codable, Equatable, Sendable {
@@ -185,7 +186,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                 chunkStartSeconds: chunkStartSeconds,
                 chunkEndSeconds: chunkEndSeconds
             )
-        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset, .eouSpeakerEvidence:
             live = nil
             guard schemaVersion == 1 else {
                 throw protocolDecodingError(CodingKeys.schemaVersion, "unsupported schema version")
@@ -292,7 +293,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                     )
                 }
             }
-        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset, .eouSpeakerEvidence:
             guard schemaVersion == 1, let eou else {
                 throw EncodingError.invalidValue(
                     method,
@@ -423,7 +424,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                 .chunkStartSeconds,
                 .chunkEndSeconds,
             ])
-        case .eouOpen, .eouFinish, .eouCancel, .eouReset:
+        case .eouOpen, .eouFinish, .eouCancel, .eouReset, .eouSpeakerEvidence:
             return common.union([.streamId, .source, .generation])
         case .eouAppend:
             return common.union([

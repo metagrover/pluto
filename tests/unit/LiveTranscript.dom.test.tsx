@@ -1751,4 +1751,60 @@ describe('LiveTranscript reading experience', () => {
     expect(onOpenSettings).toHaveBeenCalledWith('meetings');
     act(() => root.unmount());
   });
+
+  it('decorates an existing remote row without replacing or reordering it', () => {
+    const remote = {
+      ...otherSpeakerSegment,
+      endTimestampMs: 19_000,
+    };
+    const onAction = vi.fn();
+    const root = createRoot(container);
+    act(() =>
+      root.render(<LiveTranscript segments={[remote]} interimText="" />),
+    );
+    const originalRow = container.querySelector('.transcript-turn');
+    const originalContent = originalRow?.querySelector(
+      '.transcript-turn__content',
+    )?.textContent;
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[remote]}
+          interimText=""
+          speakerIdentity={{
+            meetingId: 'meeting-1',
+            generation: 1,
+            revision: 2,
+            hints: [
+              {
+                suggestionId: 'suggestion-1',
+                displayLabel: 'Likely Ada',
+                state: 'suggested',
+                ranges: [{ startMs: 17_500, endMs: 19_500 }],
+                generation: 1,
+                revision: 2,
+              },
+            ],
+          }}
+          onSpeakerIdentityAction={onAction}
+        />,
+      ),
+    );
+
+    const decoratedRow = container.querySelector('.transcript-turn');
+    expect(decoratedRow).toBe(originalRow);
+    expect(decoratedRow?.querySelector('strong')?.textContent).toBe(
+      'Likely Ada',
+    );
+    expect(
+      decoratedRow?.querySelector('.transcript-turn__content')?.textContent,
+    ).toBe(originalContent);
+    const reject = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Not this person',
+    );
+    act(() => reject?.click());
+    expect(onAction).toHaveBeenCalledWith('suggestion-1', 'reject');
+    act(() => root.unmount());
+  });
 });

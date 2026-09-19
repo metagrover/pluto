@@ -20,6 +20,10 @@ import {
   createLiveConversationRollout,
 } from '../services/liveTranscription/liveConversationRollout';
 import {
+  type LiveSpeakerIdentitySnapshot,
+  parseLiveSpeakerIdentitySnapshot,
+} from '../services/liveTranscription/liveSpeakerIdentityContract';
+import {
   reconcileLiveTranscriptReading,
   reconcileLiveTranscriptSegments,
 } from '../services/liveTranscription/liveTranscriptReconciliation';
@@ -104,6 +108,9 @@ interface AudioManagerProps {
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
   onLiveConversation?: (conversation: LiveConversationSnapshot | null) => void;
+  onLiveSpeakerIdentity?: (
+    snapshot: LiveSpeakerIdentitySnapshot | null,
+  ) => void;
   onInterimTranscript?: (text: string) => void;
   onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
@@ -227,6 +234,7 @@ export const AudioManager = ({
   onSpeakingChange,
   onLiveTranscript,
   onLiveConversation,
+  onLiveSpeakerIdentity,
   onInterimTranscript,
   onCaptureHealthChange,
   onLiveTranscriptIntegrityChange,
@@ -262,6 +270,21 @@ export const AudioManager = ({
   useEffect(() => {
     onCaptureLifecycleChange?.(captureLifecycleRef.current);
   }, [onCaptureLifecycleChange]);
+
+  useEffect(() => {
+    const unsubscribe = window.ipcRenderer.on(
+      'LIVE_SPEAKER_IDENTITY_UPDATE',
+      (_event: unknown, value: unknown) => {
+        if (value === null) {
+          onLiveSpeakerIdentity?.(null);
+          return;
+        }
+        const snapshot = parseLiveSpeakerIdentitySnapshot(value);
+        if (snapshot) onLiveSpeakerIdentity?.(snapshot);
+      },
+    );
+    return unsubscribe;
+  }, [onLiveSpeakerIdentity]);
 
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
@@ -635,6 +658,7 @@ export const AudioManager = ({
           getSetting: (key) => window.ipcRenderer.invoke('GET_SETTING', key),
         });
       onLiveConversation?.(null);
+      onLiveSpeakerIdentity?.(null);
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
         createStopToValidatedLatencyAccumulator();

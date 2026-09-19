@@ -64,6 +64,13 @@
       "when": 1789428685802,
       "tag": "0008_hierarchical_context",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789800000000,
+      "tag": "0009_live_speaker_identity_confirmations",
+      "breakpoints": true
     }
   ]
 }

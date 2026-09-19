@@ -127,7 +127,7 @@ public actor ParakeetService {
                 )
                 return .success(id: request.id)
             case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
-                .eouCancel, .eouReset:
+                .eouCancel, .eouReset, .eouSpeakerEvidence:
                 return .failure(id: request.id, code: .invalidRequest)
             }
         } catch let terminal as LiveRuntimeTerminalFailure {
@@ -180,7 +180,7 @@ public actor ParakeetService {
         case .speakerEvidence:
             return await analyzeSpeakerEvidence(request)
         case .cancel, .shutdown, .streamOpen, .streamAppend, .streamFlush, .streamCancel,
-            .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+            .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset, .eouSpeakerEvidence:
             return .failure(id: request.id, code: .invalidRequest)
         }
     }
@@ -389,6 +389,42 @@ public actor ParakeetService {
                     generation: metadata.generation
                 )
                 events = []
+            case .eouSpeakerEvidence:
+                guard metadata.source == .system else {
+                    return .failure(id: request.id, code: .invalidRequest)
+                }
+                let snapshot = try await session.speakerEvidenceSnapshot(
+                    streamId: metadata.streamId,
+                    generation: metadata.generation
+                )
+                let raw = try await speakerEvidenceDriver.analyze(
+                    mixedInput: .pcmSamples(snapshot.systemSamples, sampleRate: snapshot.systemSampleRate),
+                    micInput: .pcmSamples(snapshot.micSamples, sampleRate: snapshot.micSampleRate),
+                    systemInput: .pcmSamples(snapshot.systemSamples, sampleRate: snapshot.systemSampleRate)
+                )
+                let offset = snapshot.startSeconds
+                let output = SpeakerEvidenceOutput(
+                    turns: raw.turns.map {
+                        SpeakerEvidenceTurn(
+                            startTime: $0.startTime + offset,
+                            endTime: min($0.endTime + offset, snapshot.endSeconds),
+                            cluster: $0.cluster
+                        )
+                    },
+                    energyWindows: raw.energyWindows.map {
+                        SpeakerEnergyWindow(
+                            startTime: $0.startTime + offset,
+                            endTime: min($0.endTime + offset, snapshot.endSeconds),
+                            micRms: $0.micRms,
+                            systemRms: $0.systemRms
+                        )
+                    },
+                    provenance: raw.provenance,
+                    timings: raw.timings,
+                    windowSeconds: raw.windowSeconds,
+                    clusterEvidence: raw.clusterEvidence
+                )
+                return .success(id: request.id, speakerEvidence: output)
             case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .streamOpen, .streamAppend,
                 .streamFlush, .streamCancel, .streamReset:
                 return .failure(id: request.id, code: .invalidRequest)
@@ -401,6 +437,9 @@ public actor ParakeetService {
                 events: [terminal.event]
             )
         } catch let failure as EouSessionFailure {
+            if request.method == .eouSpeakerEvidence {
+                return .failure(id: request.id, code: runtimeFailure(for: failure))
+            }
             return .failure(
                 id: request.id,
                 code: runtimeFailure(for: failure),
@@ -489,13 +528,15 @@ public struct ParakeetLiveServiceResult: Equatable, Sendable {
         id: String,
         events: [RuntimeEvent] = [],
         finalPreview: String? = nil,
-        degradations: [LiveStreamDegraded] = []
+        degradations: [LiveStreamDegraded] = [],
+        speakerEvidence: SpeakerEvidenceOutput? = nil
     ) -> ParakeetLiveServiceResult {
-        let result = finalPreview == nil && degradations.isEmpty
+        let result = finalPreview == nil && degradations.isEmpty && speakerEvidence == nil
             ? RuntimeResultPayload()
             : RuntimeResultPayload(
                 finalPreview: finalPreview,
-                degradations: degradations
+                degradations: degradations,
+                speakerEvidence: speakerEvidence
             )
         return ParakeetLiveServiceResult(
             response: RuntimeResponse(

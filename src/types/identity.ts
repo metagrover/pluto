@@ -50,7 +50,10 @@ export interface IdentityBinding {
   evidence: IdentityEvidence[];
   captureEvidence?: IdentityCaptureEvidence;
   assignment?: {
-    kind: 'manual_participant_singleton_v1' | 'voice_match_strong_v1';
+    kind:
+      | 'manual_participant_singleton_v1'
+      | 'voice_match_strong_v1'
+      | 'live_voice_confirmed_v1';
   };
 }
 export interface IdentityContext {
