@@ -1251,17 +1251,25 @@ describe('MeetingView progressive reveal', () => {
         .find((option) => option.dataset.value === 'project_kickoff')
         ?.click(),
     );
-    expect(template?.textContent).toContain('Project kickoff');
+    expect((template as HTMLInputElement | null)?.value).toBe(
+      'Project kickoff',
+    );
     expect(container.textContent).toContain('Notes template');
     expect(container.textContent).toContain('Export meeting notes');
     expect(container.textContent).toContain('Delete meeting');
     expect(options.map((option) => option.textContent)).toEqual([
       'Auto',
       '1:1',
+      'Manager 1:1',
       'Team sync',
+      'Daily stand-up',
       'Customer call',
+      'Sales call',
       'Interview',
       'Project kickoff',
+      'Project sync',
+      'Retrospective',
+      'Brainstorming',
     ]);
   });
 
@@ -1493,6 +1501,7 @@ describe('MeetingView progressive reveal', () => {
           highlightEntities={(text) => text}
           transcriptVisible={false}
           setTranscriptVisible={vi.fn()}
+          meetingNotesDefaultTemplate="manager_one_on_one"
         />,
       ),
     );
@@ -1505,7 +1514,7 @@ describe('MeetingView progressive reveal', () => {
     expect(invoke).toHaveBeenCalledWith('GENERATE_MEETING_NOTES', {
       meetingId: analyzedMeeting.id,
       requestId: expect.any(String),
-      template: 'auto',
+      template: 'manager_one_on_one',
       reason: 'manual',
     });
     expect(invoke).toHaveBeenCalledWith('GET_MEETING', analyzedMeeting.id);

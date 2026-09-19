@@ -26,6 +26,10 @@ import {
 import TextareaAutosize from 'react-textarea-autosize';
 import type { MeetingCalendarContext as MeetingCalendarContextValue } from '../../../electron/calendar/types';
 import {
+  type MeetingNotesTemplate,
+  meetingNotesTemplateOptions,
+} from '../../../electron/llm/meetingNotesTemplates';
+import {
   type MeetingIdentityState,
   getMeetingIdentity,
 } from '../../api/identity';
@@ -164,18 +168,11 @@ interface MeetingViewProps {
   transcriptValidationRetryOperation?: MeetingRetryOperation | null;
   calendarContext?: MeetingCalendarContextValue | null;
   exportIncludeTranscript?: boolean;
+  meetingNotesDefaultTemplate?: MeetingNotesTemplate;
   onBack?: () => void;
   backLabel?: string;
   onOpenPerson?: (personId: string) => void;
 }
-
-type MeetingNotesTemplate =
-  | 'auto'
-  | 'one_on_one'
-  | 'team_sync'
-  | 'customer_call'
-  | 'interview'
-  | 'project_kickoff';
 
 export const TranscriptIntegrityPanel = ({
   status,
@@ -782,6 +779,7 @@ const SelectedMeetingView = ({
   transcriptValidationRetryOperation = null,
   calendarContext = null,
   exportIncludeTranscript = false,
+  meetingNotesDefaultTemplate = 'auto',
   onBack,
   backLabel,
   onOpenPerson,
@@ -792,8 +790,9 @@ const SelectedMeetingView = ({
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
   const [isRestoringNotes, setIsRestoringNotes] = useState(false);
   const [isDeletingAudio, setIsDeletingAudio] = useState(false);
-  const [notesTemplate, setNotesTemplate] =
-    useState<MeetingNotesTemplate>('auto');
+  const [notesTemplate, setNotesTemplate] = useState<MeetingNotesTemplate>(
+    meetingNotesDefaultTemplate,
+  );
   const [regenerateNotesError, setRegenerateNotesError] =
     useState<MeetingRegenerationFailurePresentation | null>(null);
   const [latestTitle, setLatestTitle] = useState(selectedMeeting.title);
@@ -927,6 +926,10 @@ const SelectedMeetingView = ({
       saving: false,
     };
   }, [selectedMeeting.id]);
+
+  useEffect(() => {
+    setNotesTemplate(meetingNotesDefaultTemplate);
+  }, [meetingNotesDefaultTemplate, selectedMeeting.id]);
 
   const saveTitle = async (
     expectedTitle = titleEdit.current.expectedTitle,
@@ -1618,18 +1621,8 @@ const SelectedMeetingView = ({
                           setNotesTemplate(value as MeetingNotesTemplate)
                         }
                         ariaLabel="Notes template"
-                        searchable={false}
-                        options={[
-                          { value: 'auto', label: 'Auto' },
-                          { value: 'one_on_one', label: '1:1' },
-                          { value: 'team_sync', label: 'Team sync' },
-                          { value: 'customer_call', label: 'Customer call' },
-                          { value: 'interview', label: 'Interview' },
-                          {
-                            value: 'project_kickoff',
-                            label: 'Project kickoff',
-                          },
-                        ]}
+                        searchable
+                        options={meetingNotesTemplateOptions}
                       />
                     </label>
                   </div>

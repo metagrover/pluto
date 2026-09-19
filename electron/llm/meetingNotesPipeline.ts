@@ -37,6 +37,7 @@ import {
   buildNotesWriterPrompt,
   notesAuditCorrectionGuidance,
 } from './meetingNotesPrompts';
+import { resolveMeetingNotesTemplateInput } from './meetingNotesTemplates';
 import {
   type GenerateMeetingNotesInput,
   MeetingNotesError,
@@ -69,14 +70,18 @@ const emitDraftPreview = (
 };
 const reviewPrompt = (
   input: GenerateMeetingNotesInput,
-  options: Parameters<typeof buildNotesAuditPrompt>[0],
+  options: Omit<Parameters<typeof buildNotesAuditPrompt>[0], 'template'>,
 ) =>
   input.reviewProtocol === 'editor'
     ? buildNotesEditorPrompt({
         ...options,
+        template: input.context.template,
         compactDraft: input.compactWriterContract === true,
       })
-    : buildNotesAuditPrompt(options);
+    : buildNotesAuditPrompt({
+        ...options,
+        template: input.context.template,
+      });
 const reviewOutputTokens = (input: GenerateMeetingNotesInput) =>
   input.reviewProtocol === 'editor'
     ? WRITER_OUTPUT_TOKENS
@@ -903,6 +908,7 @@ const metadataFor = (
         : NOTES_PROMPT_VERSION,
     generated_at: new Date().toISOString(),
     error_categories: document.generation_metadata?.error_categories ?? [],
+    notes_template: resolveMeetingNotesTemplateInput(input.context.template),
     pipeline_version:
       input.reviewProtocol === 'editor'
         ? mode === 'hierarchical' && input.compactWriterContract
@@ -1529,6 +1535,7 @@ const planBoundedCompactLeaves = (
       draft: {},
       userNotes: input.context.userNotes,
       knownTerms,
+      template: input.context.template,
       compactDraft: true,
     });
     return (

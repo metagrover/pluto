@@ -18,6 +18,14 @@ import type {
   ProviderId,
 } from '../../../electron/llm/inferenceTypes';
 import {
+  MEETING_NOTES_TEMPLATE_GUIDANCE_MAX_LENGTH,
+  type MeetingNotesTemplate,
+  type MeetingNotesTemplateSettingsSnapshot,
+  type MeetingNotesTemplateSettingsUpdate,
+  createMeetingNotesTemplateSettingsSnapshot,
+  meetingNotesTemplateOptions,
+} from '../../../electron/llm/meetingNotesTemplates';
+import {
   CLOUD_CONSENT_VERSION,
   cloudConsentSettingKey,
 } from '../../../electron/llm/providerCatalog';
@@ -55,6 +63,10 @@ interface SettingsTabProps {
   setSilenceAutoStopDuration?: (val: '3' | '5' | '10' | 'disabled') => void;
   fasterNotesEnabled?: boolean;
   setFasterNotesEnabled?: (val: boolean) => void;
+  meetingNotesTemplateSettings?: MeetingNotesTemplateSettingsSnapshot;
+  onMeetingNotesTemplateSettingsChange?: (
+    snapshot: MeetingNotesTemplateSettingsSnapshot,
+  ) => void;
 }
 
 const providerOptions = [
@@ -93,6 +105,9 @@ const formatStorageBytes = (bytes: number) => {
     ? `${gib.toFixed(1)} GB`
     : `${Math.round(bytes / 1024 ** 2)} MB`;
 };
+
+const defaultMeetingNotesTemplateSettings =
+  createMeetingNotesTemplateSettingsSnapshot('auto', {});
 
 const Section = ({
   title,
@@ -196,6 +211,8 @@ export const SettingsTab = ({
   setSilenceAutoStopDuration,
   fasterNotesEnabled = true,
   setFasterNotesEnabled,
+  meetingNotesTemplateSettings = defaultMeetingNotesTemplateSettings,
+  onMeetingNotesTemplateSettingsChange = () => {},
 }: SettingsTabProps) => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(
     initialTab ?? 'personal',
@@ -222,7 +239,22 @@ export const SettingsTab = ({
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
+  const [templateToEdit, setTemplateToEdit] =
+    useState<MeetingNotesTemplate>('auto');
+  const [templateGuidanceDraft, setTemplateGuidanceDraft] = useState('');
+  const [templateSaveState, setTemplateSaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'reset' | 'error'
+  >('idle');
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedTemplate =
+    meetingNotesTemplateSettings.templates.find(
+      (template) => template.id === templateToEdit,
+    ) ?? meetingNotesTemplateSettings.templates[0];
+
+  useEffect(() => {
+    setTemplateGuidanceDraft(selectedTemplate?.resolvedGuidance ?? '');
+    setTemplateSaveState('idle');
+  }, [selectedTemplate?.id, selectedTemplate?.resolvedGuidance]);
 
   const {
     status: updateStatus,
@@ -295,6 +327,23 @@ export const SettingsTab = ({
 
   const persistSetting = (key: string, value: string) => {
     void window.ipcRenderer.invoke('SET_SETTING', { key, value });
+  };
+
+  const updateMeetingNotesTemplateSettings = async (
+    update: MeetingNotesTemplateSettingsUpdate,
+    successState: 'saved' | 'reset' = 'saved',
+  ) => {
+    setTemplateSaveState('saving');
+    try {
+      const snapshot = (await window.ipcRenderer.invoke(
+        'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS',
+        update,
+      )) as MeetingNotesTemplateSettingsSnapshot;
+      onMeetingNotesTemplateSettingsChange(snapshot);
+      setTemplateSaveState(successState);
+    } catch {
+      setTemplateSaveState('error');
+    }
   };
 
   const activateProvider = (provider: ProviderId) => {
@@ -440,6 +489,141 @@ export const SettingsTab = ({
             snapshot={calendarSnapshot}
             onSnapshotChange={onCalendarSnapshotChange}
           />
+          <Section title="Note templates">
+            <SettingsRow
+              htmlFor="default-meeting-notes-template"
+              label="Default note template"
+              helper="Used for new automatic notes. You can still choose a different template when regenerating one meeting."
+            >
+              <SearchSelect
+                id="default-meeting-notes-template"
+                ariaLabel="Default note template"
+                value={meetingNotesTemplateSettings.defaultTemplateId}
+                searchable
+                options={meetingNotesTemplateOptions}
+                onValueChange={(value) =>
+                  void updateMeetingNotesTemplateSettings({
+                    operation: 'set_default',
+                    templateId: value as MeetingNotesTemplate,
+                  })
+                }
+              />
+            </SettingsRow>
+            <div className="space-y-4 p-5">
+              <div className="space-y-1">
+                <label
+                  htmlFor="meeting-notes-template-editor-select"
+                  className="block text-[14px] font-medium text-pro-text-main"
+                >
+                  Customize template guidance
+                </label>
+                <p className="text-[13px] leading-relaxed text-pro-text-muted">
+                  Change what Pluto emphasizes while its evidence, decisions,
+                  action-item, and note-structure safeguards stay in place.
+                </p>
+              </div>
+              <SearchSelect
+                id="meeting-notes-template-editor-select"
+                ariaLabel="Template to customize"
+                value={templateToEdit}
+                searchable
+                options={meetingNotesTemplateOptions}
+                onValueChange={(value) =>
+                  setTemplateToEdit(value as MeetingNotesTemplate)
+                }
+              />
+              {selectedTemplate ? (
+                <div className="space-y-3">
+                  <p className="text-[12px] leading-relaxed text-pro-text-muted">
+                    {selectedTemplate.description}
+                    {selectedTemplate.customized ? ' · Customized' : ''}
+                  </p>
+                  <label
+                    htmlFor="meeting-notes-template-guidance"
+                    className="sr-only"
+                  >
+                    {selectedTemplate.label} template guidance
+                  </label>
+                  <textarea
+                    id="meeting-notes-template-guidance"
+                    rows={6}
+                    maxLength={MEETING_NOTES_TEMPLATE_GUIDANCE_MAX_LENGTH}
+                    value={templateGuidanceDraft}
+                    onChange={(event) => {
+                      setTemplateGuidanceDraft(event.target.value);
+                      setTemplateSaveState('idle');
+                    }}
+                    className="w-full resize-y rounded-lg border border-pro-border/80 bg-pro-bg px-3 py-2.5 text-[13px] leading-5 text-pro-text-main outline-none transition-all placeholder:text-pro-text-muted/45 focus:border-pro-accent focus:ring-1 focus:ring-pro-accent/50"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-[11px] text-pro-text-muted">
+                      {templateGuidanceDraft.length}/
+                      {MEETING_NOTES_TEMPLATE_GUIDANCE_MAX_LENGTH}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          templateSaveState === 'saving' ||
+                          !selectedTemplate.customized
+                        }
+                        onClick={() =>
+                          void updateMeetingNotesTemplateSettings(
+                            {
+                              operation: 'reset_override',
+                              templateId: templateToEdit,
+                            },
+                            'reset',
+                          )
+                        }
+                        className="rounded-lg border border-pro-border px-3 py-2 text-xs font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        Reset to built-in
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          templateSaveState === 'saving' ||
+                          !templateGuidanceDraft.trim() ||
+                          templateGuidanceDraft.trim() ===
+                            selectedTemplate.resolvedGuidance
+                        }
+                        onClick={() =>
+                          void updateMeetingNotesTemplateSettings({
+                            operation: 'save_override',
+                            templateId: templateToEdit,
+                            guidance: templateGuidanceDraft,
+                          })
+                        }
+                        className="rounded-lg bg-pro-accent px-3 py-2 text-xs font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        {templateSaveState === 'saving'
+                          ? 'Saving…'
+                          : 'Save guidance'}
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className={`min-h-4 text-[12px] ${
+                      templateSaveState === 'error'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-pro-text-muted'
+                    }`}
+                  >
+                    {templateSaveState === 'saved'
+                      ? 'Template guidance saved.'
+                      : templateSaveState === 'reset'
+                        ? 'Built-in guidance restored.'
+                        : templateSaveState === 'error'
+                          ? 'Pluto could not save this template. Check the guidance and try again.'
+                          : ''}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </Section>
           <Section title="Recording">
             <SettingsRow
               label="Parakeet local transcription"

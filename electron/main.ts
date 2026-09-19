@@ -579,6 +579,13 @@ import {
 } from './llm/factory';
 import type { CloudProviderId } from './llm/inferenceTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
+import {
+  MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
+  MEETING_NOTES_TEMPLATE_OVERRIDES_SETTING,
+  applyMeetingNotesTemplateSettingsUpdate,
+  createMeetingNotesTemplateSettingsSnapshot,
+  isMeetingNotesTemplate,
+} from './llm/meetingNotesTemplates';
 import type {
   AnalysisArtifacts,
   AnalysisDocument,
@@ -1324,7 +1331,6 @@ app.whenReady().then(async () => {
           await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
             meetingId,
             requestId: randomUUID(),
-            template: 'auto',
             reason: 'secondary',
           });
         } catch (error) {
@@ -1537,7 +1543,6 @@ app.whenReady().then(async () => {
           await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
             meetingId,
             requestId: randomUUID(),
-            template: 'auto',
             reason: 'secondary',
           });
         } catch (error) {
@@ -1950,7 +1955,6 @@ app.whenReady().then(async () => {
         meetingNotesRunCoordinator.precomputeIncrementalMeetingNotes({
           source: input.source,
           userNotes: input.userNotes,
-          template: 'auto',
           signal,
         }),
       onMetric: (metric) => {
@@ -4773,6 +4777,29 @@ app.whenReady().then(async () => {
     invalidateProviderCache();
     return result;
   });
+  const getMeetingNotesTemplateSettings = () =>
+    createMeetingNotesTemplateSettingsSnapshot(
+      db.getSetting(MEETING_NOTES_DEFAULT_TEMPLATE_SETTING),
+      db.getSetting(MEETING_NOTES_TEMPLATE_OVERRIDES_SETTING),
+    );
+  ipcMain.handle('GET_MEETING_NOTES_TEMPLATE_SETTINGS', () =>
+    getMeetingNotesTemplateSettings(),
+  );
+  ipcMain.handle('UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS', (_event, update) => {
+    const next = applyMeetingNotesTemplateSettingsUpdate(
+      getMeetingNotesTemplateSettings(),
+      update,
+    );
+    db.setSetting(
+      MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
+      next.defaultTemplateId,
+    );
+    db.setSetting(
+      MEETING_NOTES_TEMPLATE_OVERRIDES_SETTING,
+      JSON.stringify(next.overrides),
+    );
+    return next;
+  });
   const parseCloudProvider = (value: unknown): CloudProviderId => {
     if (
       value === 'openai' ||
@@ -4970,14 +4997,15 @@ app.whenReady().then(async () => {
       !input.requestId.trim() ||
       (input.reason !== 'automatic' &&
         input.reason !== 'manual' &&
-        input.reason !== 'secondary')
+        input.reason !== 'secondary') ||
+      (input.template !== undefined && !isMeetingNotesTemplate(input.template))
     ) {
       throw new Error('invalid_meeting_notes_request');
     }
     return await meetingNotesRunCoordinator.generateAndPublishMeetingNotes({
       meetingId: input.meetingId,
       requestId: input.requestId,
-      template: input.template === undefined ? 'auto' : input.template,
+      template: input.template,
       reason: input.reason,
     });
   });

@@ -61,7 +61,6 @@ const requestMeetingNotesPublication = async (
   await invoke('GENERATE_MEETING_NOTES', {
     meetingId,
     requestId: crypto.randomUUID(),
-    template: 'auto',
     reason: 'automatic',
   });
 };

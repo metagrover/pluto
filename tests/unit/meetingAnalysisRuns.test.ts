@@ -4,11 +4,23 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import {
+  createMeetingNotesTemplateSettingsSnapshot,
+  resolveMeetingNotesTemplate,
+} from '../../electron/llm/meetingNotesTemplates';
+import {
   createMeetingAnalysisRunCoordinator,
   shouldUseMeetingNotesOptionalReviewBudget,
 } from '../../electron/meetingAnalysisRuns';
 
 describe('meeting analysis run coordinator', () => {
+  const autoTemplate = resolveMeetingNotesTemplate(
+    createMeetingNotesTemplateSettingsSnapshot('auto', {}),
+    'auto',
+  );
+  const autoTemplateIdentity = {
+    id: autoTemplate.id,
+    revision: autoTemplate.revision,
+  };
   it('keeps draft previews in memory only and clears them at publication', async () => {
     let running = false;
     let current = true;
@@ -959,7 +971,7 @@ describe('meeting analysis run coordinator', () => {
         JSON.stringify({
           ...revisions,
           terms: [],
-          template: 'auto',
+          template: autoTemplateIdentity,
           provider: 'ollama',
           model: 'gemma4:12b',
           thinking: null,
@@ -1265,7 +1277,7 @@ describe('meeting analysis run coordinator', () => {
             eligibilityRevision: 'eligible-terms',
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
-            template: 'auto',
+            template: autoTemplateIdentity,
             provider: 'ollama',
             model: 'gemma4:12b',
             thinking: null,
@@ -1284,7 +1296,7 @@ describe('meeting analysis run coordinator', () => {
           JSON.stringify({
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
-            template: 'auto',
+            template: autoTemplateIdentity,
             provider: 'ollama',
             model: 'gemma4:12b',
             thinking: null,
