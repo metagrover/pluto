@@ -95,13 +95,13 @@ import {
 } from './incrementalMeetingNotesCoordinator';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
-import { createLogger } from './logger';
 import { LiveSpeakerIdentityCoordinator } from './liveSpeakerIdentityCoordinator';
 import {
   persistLiveSpeakerIdentityConfirmation,
   reconcileLiveSpeakerIdentityConfirmations,
   removeLiveSpeakerIdentityConfirmation,
 } from './liveSpeakerIdentityPersistence';
+import { createLogger } from './logger';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioPcm,
@@ -2158,14 +2158,12 @@ app.whenReady().then(async () => {
     persistConfirmation: persistLiveSpeakerIdentityConfirmation,
     removeConfirmation: removeLiveSpeakerIdentityConfirmation,
   });
-  let liveSpeakerAnalysis:
-    | {
-        meetingId: string;
-        generation: number;
-        nextAtSeconds: number;
-        inFlight: boolean;
-      }
-    | null = null;
+  let liveSpeakerAnalysis: {
+    meetingId: string;
+    generation: number;
+    nextAtSeconds: number;
+    inFlight: boolean;
+  } | null = null;
   const publishLiveSpeakerIdentity = (
     owner: WebContents,
     snapshot: ReturnType<typeof liveSpeakerIdentity.snapshot> | null,
