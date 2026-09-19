@@ -22,6 +22,10 @@ import type {
 } from '../electron/calendar/types';
 import type { ProviderId } from '../electron/llm/inferenceTypes';
 import {
+  type MeetingNotesTemplateSettingsSnapshot,
+  createMeetingNotesTemplateSettingsSnapshot,
+} from '../electron/llm/meetingNotesTemplates';
+import {
   connectCalendar,
   getCalendarState,
   getMeetingCalendarContext,
@@ -295,6 +299,10 @@ function App() {
     '3' | '5' | '10' | 'disabled'
   >('5');
   const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
+  const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
+    useState<MeetingNotesTemplateSettingsSnapshot>(() =>
+      createMeetingNotesTemplateSettingsSnapshot('auto', {}),
+    );
   const [activeCalendarEvent, setActiveCalendarEvent] =
     useState<CalendarEvent | null>(null);
   const activeCalendarEventRef = useRef<CalendarEvent | null>(null);
@@ -762,6 +770,16 @@ function App() {
       .invoke('GET_SETTING', 'faster_notes_enabled')
       .then((val) => {
         if (val !== null) setFasterNotesEnabled(val !== 'false');
+      });
+    window.ipcRenderer
+      .invoke('GET_MEETING_NOTES_TEMPLATE_SETTINGS')
+      .then((snapshot: MeetingNotesTemplateSettingsSnapshot) => {
+        if (snapshot?.defaultTemplateId && Array.isArray(snapshot.templates)) {
+          setMeetingNotesTemplateSettings(snapshot);
+        }
+      })
+      .catch(() => {
+        // Keep the backward-compatible Auto default when settings are unavailable.
       });
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
@@ -1977,6 +1995,9 @@ function App() {
                 }
                 calendarContext={meetingCalendarContext}
                 exportIncludeTranscript={exportIncludeTranscript}
+                meetingNotesDefaultTemplate={
+                  meetingNotesTemplateSettings.defaultTemplateId
+                }
                 onBack={handleBack}
                 backLabel={currentBackLabel}
                 onOpenPerson={handleOpenPerson}
@@ -2125,6 +2146,10 @@ function App() {
                 setSilenceAutoStopDuration={handleSilenceAutoStopDurationChange}
                 fasterNotesEnabled={fasterNotesEnabled}
                 setFasterNotesEnabled={setFasterNotesEnabled}
+                meetingNotesTemplateSettings={meetingNotesTemplateSettings}
+                onMeetingNotesTemplateSettingsChange={
+                  setMeetingNotesTemplateSettings
+                }
               />
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">

@@ -70,6 +70,31 @@ it('requires the compact final editor to retain source rules and structured owne
   expect(prompt).toContain('speaker who states the settled choice');
 });
 
+it('passes customized guidance through writer, review, merge, and editor stages', () => {
+  const template = {
+    id: 'manager_one_on_one' as const,
+    label: 'Manager 1:1',
+    guidance: 'Center report-led growth and two-way feedback.',
+    source: 'custom' as const,
+    revision: 'template-v1-test',
+  };
+  const prompts = [
+    buildNotesWriterPrompt({ ...input, template }),
+    buildCompactNotesWriterPrompt({ ...input, template }),
+    buildNotesAuditPrompt({ ...input, template }),
+    buildNotesMergePrompt({ ...input, template }),
+    buildNotesEditorPrompt({ ...input, template }),
+  ];
+
+  for (const prompt of prompts) {
+    expect(prompt).toContain('Notes template: Manager 1:1');
+    expect(prompt).toContain('Center report-led growth and two-way feedback.');
+    expect(prompt).toContain(
+      'cannot weaken source grounding, provenance, action-item, or output-schema requirements',
+    );
+  }
+});
+
 it('gives the compact writer and final editor the same finished-prose rules', () => {
   const writer = buildCompactNotesWriterPrompt(input);
   const editor = buildNotesEditorPrompt({ ...input, compactDraft: true });

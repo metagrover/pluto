@@ -36,7 +36,6 @@ describe('processValidatedMeetingDownstream', () => {
     expect(invoke).toHaveBeenCalledWith('GENERATE_MEETING_NOTES', {
       meetingId: validatedMeeting.id,
       requestId: expect.any(String),
-      template: 'auto',
       reason: 'automatic',
     });
     expect(invoke).not.toHaveBeenCalledWith(
@@ -86,7 +85,6 @@ describe('processValidatedMeetingDownstream', () => {
     expect(invoke).toHaveBeenCalledWith('GENERATE_MEETING_NOTES', {
       meetingId: validatedMeeting.id,
       requestId: expect.any(String),
-      template: 'auto',
       reason: 'manual',
     });
   });

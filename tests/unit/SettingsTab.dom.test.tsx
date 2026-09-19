@@ -4,6 +4,10 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  applyMeetingNotesTemplateSettingsUpdate,
+  createMeetingNotesTemplateSettingsSnapshot,
+} from '../../electron/llm/meetingNotesTemplates';
 import { SettingsTab } from '../../src/components/features/SettingsTab';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -344,6 +348,121 @@ describe('SettingsTab', () => {
       key: 'faster_notes_enabled',
       value: 'false',
     });
+
+    act(() => root.unmount());
+  });
+
+  it('selects a default template and saves customized guidance', async () => {
+    const initial = createMeetingNotesTemplateSettingsSnapshot('auto', {});
+    const onChange = vi.fn();
+    const invoke = vi.fn(async (channel: string, update?: unknown) => {
+      if (channel === 'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS') {
+        return applyMeetingNotesTemplateSettingsUpdate(initial, update);
+      }
+      if (channel === 'GET_SETTING') return '';
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}) },
+    });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          meetingNotesTemplateSettings={initial}
+          onMeetingNotesTemplateSettingsChange={onChange}
+        />,
+      ),
+    );
+
+    const defaultSelector = container.querySelector<HTMLElement>(
+      '[aria-label="Default note template"]',
+    )!;
+    await act(async () => defaultSelector.click());
+    const managerOption = [
+      ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].find((option) => option.dataset.value === 'manager_one_on_one')!;
+    await act(async () => managerOption.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS',
+      {
+        operation: 'set_default',
+        templateId: 'manager_one_on_one',
+      },
+    );
+
+    const textarea = container.querySelector<HTMLTextAreaElement>(
+      '#meeting-notes-template-guidance',
+    )!;
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter!.call(textarea, 'Focus on decisions that change priorities.');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const save = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button'),
+    ).find((button) => button.textContent === 'Save guidance')!;
+    await act(async () => save.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS',
+      {
+        operation: 'save_override',
+        templateId: 'auto',
+        guidance: 'Focus on decisions that change priorities.',
+      },
+    );
+    expect(onChange).toHaveBeenCalled();
+    expect(container.textContent).toContain('Template guidance saved.');
+
+    act(() => root.unmount());
+  });
+
+  it('resets customized template guidance to the built-in version', async () => {
+    const customized = createMeetingNotesTemplateSettingsSnapshot(
+      'auto',
+      JSON.stringify({ auto: 'Custom general guidance.' }),
+    );
+    const invoke = vi.fn(async (channel: string, update?: unknown) => {
+      if (channel === 'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS') {
+        return applyMeetingNotesTemplateSettingsUpdate(customized, update);
+      }
+      if (channel === 'GET_SETTING') return '';
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}) },
+    });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <SettingsTab
+          {...defaultProps}
+          initialTab="meetings"
+          meetingNotesTemplateSettings={customized}
+        />,
+      ),
+    );
+
+    const reset = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button'),
+    ).find((button) => button.textContent === 'Reset to built-in')!;
+    await act(async () => reset.click());
+    expect(invoke).toHaveBeenCalledWith(
+      'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS',
+      { operation: 'reset_override', templateId: 'auto' },
+    );
+    expect(container.textContent).toContain('Built-in guidance restored.');
 
     act(() => root.unmount());
   });

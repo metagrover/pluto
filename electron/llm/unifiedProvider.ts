@@ -29,6 +29,7 @@ import type {
 import { buildNotesResponseSchema } from './meetingNotesSchema';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { createNotesStreamPreview } from './meetingNotesStreamPreview';
+import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
 import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
@@ -541,6 +542,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       source?: import('./meetingNotesTypes').NotesSource;
       trustedUserTerms?: string[];
       entityHints?: string[];
+      templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       /** Explicit benchmark experiment; product callers retain every-node audits. */
       hierarchyAuditStrategy?:
@@ -579,7 +581,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       source,
       context: {
         userNotes: userNotes ?? '',
-        template,
+        template: options.templateSnapshot ?? template,
         trustedUserTerms: options.trustedUserTerms ?? [],
         entityHints: options.entityHints ?? options.knownTerms ?? [],
       },
@@ -659,6 +661,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       source?: import('./meetingNotesTypes').NotesSource;
       trustedUserTerms?: string[];
       entityHints?: string[];
+      templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       compactWriterContract?: boolean;
       stageCache: import('./meetingNotesStageCache').NotesStageCache;
@@ -680,7 +683,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       source: options.source ?? createNotesSourceFromText(transcript),
       context: {
         userNotes,
-        template,
+        template: options.templateSnapshot ?? template,
         trustedUserTerms: options.trustedUserTerms ?? [],
         entityHints: options.entityHints ?? options.knownTerms ?? [],
       },

@@ -2,6 +2,10 @@ import type {
   CalendarEvent,
   CalendarIntegrationSnapshot,
 } from '../../electron/calendar/types';
+import {
+  applyMeetingNotesTemplateSettingsUpdate,
+  createMeetingNotesTemplateSettingsSnapshot,
+} from '../../electron/llm/meetingNotesTemplates';
 import type { KnowledgeDoc } from '../api/knowledgeDocs';
 import type {
   Entity,
@@ -23,6 +27,10 @@ type BrowserCaptureJournal = {
 };
 
 const now = new Date().toISOString();
+let meetingNotesTemplateSettings = createMeetingNotesTemplateSettingsSnapshot(
+  'auto',
+  {},
+);
 
 const previewCalendar = {
   identifier: 'preview-work',
@@ -757,6 +765,16 @@ const createInvokeFallback =
       }
       case 'GET_SETTING':
         result = getSetting(args[0]);
+        break;
+      case 'GET_MEETING_NOTES_TEMPLATE_SETTINGS':
+        result = meetingNotesTemplateSettings;
+        break;
+      case 'UPDATE_MEETING_NOTES_TEMPLATE_SETTINGS':
+        meetingNotesTemplateSettings = applyMeetingNotesTemplateSettingsUpdate(
+          meetingNotesTemplateSettings,
+          args[0],
+        );
+        result = meetingNotesTemplateSettings;
         break;
       case 'PROVIDER_CREDENTIAL_STATUS':
         result = {

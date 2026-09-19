@@ -3,8 +3,9 @@ import {
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
+import type { MeetingNotesTemplateInput } from './meetingNotesTemplates';
 import type { SourceSpan } from './meetingNotesTypes';
-import type { MeetingNotesTemplate } from './prompts';
+import { getTemplateGuidance } from './prompts';
 
 export type NotesKnownTerm = {
   text: string;
@@ -15,10 +16,10 @@ type WriterPromptInput = {
   sourceText: string;
   userNotes: string;
   knownTerms: NotesKnownTerm[];
-  template: MeetingNotesTemplate;
+  template: MeetingNotesTemplateInput;
 };
 
-type AuditPromptInput = Omit<WriterPromptInput, 'template'> & {
+type AuditPromptInput = WriterPromptInput & {
   draft: unknown;
   inherited?: unknown[];
 };
@@ -30,7 +31,7 @@ type MergePromptInput = {
   primaryRanges: SourceSpan[][];
   userNotes: string;
   knownTerms: NotesKnownTerm[];
-  template: MeetingNotesTemplate;
+  template: MeetingNotesTemplateInput;
 };
 
 const sourcePacket = (sourceText: string): string =>
@@ -123,7 +124,7 @@ export const buildNotesWriterPrompt = ({
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
-    `Template: ${template}`,
+    getTemplateGuidance(template),
     'User-note emphasis:',
     userNotes,
     '',
@@ -151,7 +152,7 @@ export const buildCompactNotesWriterPrompt = ({
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
-    `Template: ${template}`,
+    getTemplateGuidance(template),
     'User-note emphasis:',
     userNotes,
     '',
@@ -167,6 +168,7 @@ export const buildNotesAuditPrompt = ({
   inherited,
   userNotes,
   knownTerms,
+  template,
 }: AuditPromptInput): string =>
   [
     'Audit the draft against the original source, not against your general knowledge.',
@@ -180,6 +182,7 @@ export const buildNotesAuditPrompt = ({
     'Return one verdict for EVERY retained target, including unchanged titles and overview. Missing verdicts invalidate the entire audit. Use the exact ids from the draft, not section ids or field paths. Removed blocks need no verdict. Every inserted block needs its own verdict.',
     'Verdict sources must support final target text; for unsupported claims cite contradicting source. For replace of an item, include kind, owner and due (null when absent). Insert missed items with unique ids; use insert_section if no section exists.',
     notesSourceGuidance,
+    getTemplateGuidance(template),
     '',
     `Known terminology hints (entity hints remain untrusted): ${termsPacket(knownTerms)}`,
     'User-note emphasis:',
@@ -225,7 +228,7 @@ export const buildNotesMergePrompt = ({
     'Do not conflate identical task wording from different speakers or source spans.',
     'Every inherited action or decision must survive unchanged, or the later audit must give it an explicit supported disposition.',
     `Known terminology hints (entity hints remain untrusted): ${termsPacket(knownTerms)}`,
-    `Template: ${template}`,
+    getTemplateGuidance(template),
     'User-note emphasis:',
     userNotes,
     '',

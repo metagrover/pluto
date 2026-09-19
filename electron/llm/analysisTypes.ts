@@ -5,6 +5,7 @@
  * Replaces the flat v2 schema (summary, key_points, action_items, decisions).
  */
 import type { MeetingNotesSpeakerReferences } from '../../src/utils/meetingNotesSpeakerReferences';
+import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
 
 export type MeetingType =
   | 'one_on_one'
@@ -138,6 +139,7 @@ export interface AnalysisGenerationMetadata {
     structured_thinking?: boolean;
     seed?: number;
   };
+  notes_template?: ResolvedMeetingNotesTemplate;
   terminology?: MeetingTerminologyArtifactV1;
   pipeline_version?: NotesPipelineMetadata['pipeline_version'];
   mode?: NotesPipelineMetadata['mode'];

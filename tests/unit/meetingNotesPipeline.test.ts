@@ -1900,7 +1900,7 @@ it('plans leaves from leaf work without reserving capacity for a hypothetical me
       generate,
       provider: 'ollama',
       model: 'test',
-      contextTokens: 16_384,
+      contextTokens: 17_000,
       onPlan,
     });
     expect(leafFit).toBe(true);

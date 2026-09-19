@@ -105,7 +105,7 @@ export type GenerateNotesText = (request: NotesRequest) => Promise<string>;
 
 export type NotesContext = {
   userNotes: string;
-  template: import('./prompts').MeetingNotesTemplate;
+  template: import('./meetingNotesTemplates').MeetingNotesTemplateInput;
   trustedUserTerms: string[];
   entityHints: string[];
 };

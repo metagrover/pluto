@@ -11,6 +11,13 @@ import {
 import { createNotesSource } from './llm/meetingNotesSource';
 import { NotesStageCache } from './llm/meetingNotesStageCache';
 import {
+  MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
+  MEETING_NOTES_TEMPLATE_OVERRIDES_SETTING,
+  type ResolvedMeetingNotesTemplate,
+  createMeetingNotesTemplateSettingsSnapshot,
+  resolveMeetingNotesTemplate,
+} from './llm/meetingNotesTemplates';
+import {
   MeetingNotesError,
   NOTES_OLLAMA_MODEL,
   NOTES_PROMPT_VERSION,
@@ -158,6 +165,7 @@ type NotesProvider = {
       source?: ReturnType<typeof createNotesSource>;
       trustedUserTerms?: string[];
       entityHints?: string[];
+      templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       compactWriterContract?: boolean;
       optionalReviewDeadlineAtMs?: number;
@@ -208,12 +216,14 @@ type SettingsRecord = {
   gemini_model?: unknown;
   ollama_structured_thinking?: unknown;
   ollama_seed?: unknown;
+  meeting_notes_default_template?: unknown;
+  meeting_notes_template_overrides?: unknown;
 };
 
 export type GenerateMeetingNotesInput = {
   meetingId: string | number;
   requestId: string;
-  template: MeetingNotesTemplate;
+  template?: MeetingNotesTemplate;
   reason: 'automatic' | 'manual' | 'secondary';
 };
 
@@ -266,7 +276,7 @@ export const createMeetingNotesStageCacheKey = (input: {
   userNotesHash: string;
   terms: string[];
   trustedUserTerms?: string[];
-  template: MeetingNotesTemplate;
+  template: Pick<ResolvedMeetingNotesTemplate, 'id' | 'revision'>;
   provider: string;
   model: string | null;
   thinking: unknown;
@@ -274,6 +284,18 @@ export const createMeetingNotesStageCacheKey = (input: {
   contextTokens: number;
   promptVersion: string;
 }): string => hashFingerprint(input);
+
+const resolveTemplateFromSettings = (
+  settings: SettingsRecord,
+  requestedTemplate?: unknown,
+) =>
+  resolveMeetingNotesTemplate(
+    createMeetingNotesTemplateSettingsSnapshot(
+      settings[MEETING_NOTES_DEFAULT_TEMPLATE_SETTING],
+      settings[MEETING_NOTES_TEMPLATE_OVERRIDES_SETTING],
+    ),
+    requestedTemplate,
+  );
 
 const hasAuthorizedPartialCaptureGap = (meeting: MeetingRecord): boolean => {
   if (
@@ -540,11 +562,12 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   const precomputeIncrementalMeetingNotes = async (input: {
     source: ReturnType<typeof createNotesSource>;
     userNotes: string;
-    template: MeetingNotesTemplate;
+    template?: MeetingNotesTemplate;
     signal: AbortSignal;
   }): Promise<'generated' | 'reused' | 'discarded'> => {
     input.signal.throwIfAborted();
     const settings = await dependencies.getSettings();
+    const template = resolveTemplateFromSettings(settings, input.template);
     const provider = await dependencies.getProvider(settings);
     if (!provider.precomputeStructuredAnalysisLeaf) return 'discarded';
     const terms = dependencies.db
@@ -559,7 +582,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     const cacheKey = createMeetingNotesStageCacheKey({
       userNotesHash,
       terms,
-      template: input.template,
+      template: { id: template.id, revision: template.revision },
       provider: provider.name,
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
@@ -570,13 +593,14 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     return provider.precomputeStructuredAnalysisLeaf(
       '',
       input.userNotes,
-      input.template,
+      template.id,
       {
         signal: input.signal,
         source: input.source,
         knownTerms: terms,
         trustedUserTerms: [],
         entityHints: terms,
+        templateSnapshot: template,
         contextTokens: NOTES_CONTEXT_TOKENS,
         compactWriterContract: true,
         stageCache,
@@ -633,6 +657,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     if (!revisions) throw new Error('meeting_notes_source_ineligible');
 
     const settings = await dependencies.getSettings();
+    const template = resolveTemplateFromSettings(
+      settings,
+      input.reason === 'manual' ? input.template : undefined,
+    );
     const provider = await dependencies.getProvider(settings);
     // All paths, including an automatic retry of secondary work, must pair
     // the current document with its run after asynchronous initialization.
@@ -703,7 +731,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       ...(projection.trustedUserTerms.length > 0
         ? { trustedUserTerms: projection.trustedUserTerms }
         : {}),
-      template: input.template,
+      template: { id: template.id, revision: template.revision },
       provider: provider.name,
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
@@ -905,7 +933,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     admittedNotesInput.projection.speakerDisplayNames,
                   ),
                   admittedMeeting.user_notes ?? '',
-                  input.template,
+                  template.id,
                   {
                     signal: controller.signal,
                     source,
@@ -916,6 +944,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                     trustedUserTerms:
                       admittedNotesInput.projection.trustedUserTerms,
                     entityHints: terms,
+                    templateSnapshot: template,
                     contextTokens: NOTES_CONTEXT_TOKENS,
                     compactWriterContract: true,
                     ...optionalReviewBudgetOptions,

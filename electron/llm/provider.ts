@@ -1,4 +1,5 @@
 import type { ProjectQualificationProposal } from '../../src/utils/projectQualification';
+import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
 // Re-export v3 analysis types for centralized access
 export type {
   AnalysisErrorCategory,
@@ -135,6 +136,7 @@ export interface LLMProvider {
       source?: import('./meetingNotesTypes').NotesSource;
       trustedUserTerms?: string[];
       entityHints?: string[];
+      templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       /** Explicit benchmark experiment; product callers retain every-node audits. */
       hierarchyAuditStrategy?:
@@ -165,6 +167,7 @@ export interface LLMProvider {
       source?: import('./meetingNotesTypes').NotesSource;
       trustedUserTerms?: string[];
       entityHints?: string[];
+      templateSnapshot?: ResolvedMeetingNotesTemplate;
       contextTokens?: number;
       compactWriterContract?: boolean;
       stageCache: import('./meetingNotesStageCache').NotesStageCache;

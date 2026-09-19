@@ -30,7 +30,6 @@ export const processValidatedMeetingDownstream = async (
     const result = (await invoke('GENERATE_MEETING_NOTES', {
       meetingId,
       requestId: crypto.randomUUID(),
-      template: 'auto',
       reason: options.reason ?? 'automatic',
     })) as PublishedMeetingNotes;
     return result.status === 'published'

@@ -354,7 +354,7 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(current.transcript_status).toBe('needs_attention');
     expect(invoke).toHaveBeenCalledWith(
       'GENERATE_MEETING_NOTES',
-      expect.objectContaining({ reason: 'automatic', template: 'auto' }),
+      expect.objectContaining({ reason: 'automatic' }),
     );
     expect(invoke).toHaveBeenCalledWith(
       'CLAIM_DOWNSTREAM_PROCESSING',
@@ -434,7 +434,7 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(current.transcript_status).toBe('needs_attention');
     expect(invoke).toHaveBeenCalledWith(
       'GENERATE_MEETING_NOTES',
-      expect.objectContaining({ reason: 'automatic', template: 'auto' }),
+      expect.objectContaining({ reason: 'automatic' }),
     );
     expect(invoke).toHaveBeenCalledWith(
       'CLAIM_DOWNSTREAM_PROCESSING',

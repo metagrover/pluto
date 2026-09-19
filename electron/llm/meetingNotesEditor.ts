@@ -14,7 +14,9 @@ import {
   notesDraftSchema,
   notesTerminologySchema,
 } from './meetingNotesPrompts';
+import type { MeetingNotesTemplateInput } from './meetingNotesTemplates';
 import type { NotesDraft, NotesSource } from './meetingNotesTypes';
+import { getTemplateGuidance } from './prompts';
 
 /** Content-level changes, excluding application-assigned ids and block order. */
 export const countEditedBlocks = (
@@ -52,6 +54,7 @@ export const buildNotesEditorPrompt = ({
   draft,
   userNotes,
   knownTerms,
+  template = 'auto',
   inherited,
   compactDraft = false,
 }: {
@@ -59,6 +62,7 @@ export const buildNotesEditorPrompt = ({
   draft: unknown;
   userNotes: string;
   knownTerms: NotesKnownTerm[];
+  template?: MeetingNotesTemplateInput;
   inherited?: unknown[];
   compactDraft?: boolean;
 }): string =>
@@ -75,6 +79,7 @@ export const buildNotesEditorPrompt = ({
       : []),
     notesProseGuidance,
     notesSourceGuidance,
+    getTemplateGuidance(template),
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',
     notesTerminologySchema,
     `Known terms with provenance: ${JSON.stringify(knownTerms)}`,
