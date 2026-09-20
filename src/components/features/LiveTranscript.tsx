@@ -30,12 +30,8 @@ import type {
 
 const LIVE_EDGE_TOLERANCE_PX = 48;
 
-const speakerLabel = (
-  turn: LiveTranscriptTurn,
-  hint?: LiveSpeakerIdentityHint | null,
-): string => {
+const speakerLabel = (turn: LiveTranscriptTurn): string => {
   if (turn.source === 'mic' || turn.speaker === 'Me') return 'Mic';
-  if (hint) return hint.displayLabel;
   if (turn.source === 'system' || turn.speaker === 'Them') return 'Call';
   return turn.speaker;
 };
@@ -112,7 +108,7 @@ const TranscriptTurn = memo(
               onAction={onSpeakerIdentityAction}
             />
           ) : (
-            <strong>{speakerLabel(turn, hint)}</strong>
+            <strong>{speakerLabel(turn)}</strong>
           )}
           <time dateTime={startedAt}>
             {isLive ? 'Live' : startedAt.slice(14, 19)}

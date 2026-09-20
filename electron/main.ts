@@ -2009,6 +2009,7 @@ app.whenReady().then(async () => {
       const released = captureSessionLease.releaseOwner(owner.id);
       if (ownsNativeAudio) stopNativeAudioCapture();
       if (ownsParakeetEou) {
+        stopLiveSpeakerIdentity();
         void parakeetEouCoordinator?.fail('parakeet_owner_destroyed');
         parakeetEouOwner = null;
         parakeetEouGeneration = null;
@@ -2138,6 +2139,7 @@ app.whenReady().then(async () => {
       console.warn(`[ParakeetEOU] unavailable code=${code}`);
       const owner = parakeetEouOwner;
       if (!owner || owner.isDestroyed() || String(owner.id) !== ownerId) return;
+      stopLiveSpeakerIdentity(owner, true);
       owner.send('PARAKEET_EOU_UNAVAILABLE', {
         meetingId,
         generation: parakeetEouGeneration,
@@ -2172,6 +2174,14 @@ app.whenReady().then(async () => {
       owner.send('LIVE_SPEAKER_IDENTITY_UPDATE', snapshot);
     }
   };
+  function stopLiveSpeakerIdentity(
+    owner?: WebContents | null,
+    clearRenderer = false,
+  ): void {
+    liveSpeakerAnalysis = null;
+    liveSpeakerIdentity.stop();
+    if (clearRenderer && owner) publishLiveSpeakerIdentity(owner, null);
+  }
   const maybeAnalyzeLiveSpeakerIdentity = (
     owner: WebContents,
     meetingId: string,
@@ -2246,19 +2256,24 @@ app.whenReady().then(async () => {
         owner: String(event.sender.id),
       });
       if (db.getSetting(LIVE_SPEAKER_IDENTITY_SETTING) === 'true') {
-        liveSpeakerAnalysis = {
-          meetingId,
-          generation,
-          nextAtSeconds: 12,
-          inFlight: false,
-        };
-        publishLiveSpeakerIdentity(
-          event.sender,
-          liveSpeakerIdentity.start(meetingId, generation),
-        );
+        try {
+          await eouCoordinator.setSpeakerEvidenceEnabled(meetingId, true);
+          liveSpeakerAnalysis = {
+            meetingId,
+            generation,
+            nextAtSeconds: 12,
+            inFlight: false,
+          };
+          publishLiveSpeakerIdentity(
+            event.sender,
+            liveSpeakerIdentity.start(meetingId, generation),
+          );
+        } catch {
+          // Older runtimes can keep EOU capture active without this optional lane.
+          stopLiveSpeakerIdentity(event.sender, true);
+        }
       } else {
-        liveSpeakerAnalysis = null;
-        liveSpeakerIdentity.stop();
+        stopLiveSpeakerIdentity();
       }
       return {};
     } catch (error) {
@@ -2340,8 +2355,7 @@ app.whenReady().then(async () => {
     requireParakeetEouOwner(event.sender, meetingId);
     const generation = parakeetEouGeneration;
     await eouCoordinator.finish(meetingId);
-    liveSpeakerAnalysis = null;
-    liveSpeakerIdentity.stop();
+    stopLiveSpeakerIdentity();
     if (
       parakeetEouOwner?.id === event.sender.id &&
       parakeetEouGeneration === generation
@@ -2365,8 +2379,7 @@ app.whenReady().then(async () => {
         ? request.code.trim()
         : 'parakeet_cancelled';
     await eouCoordinator.cancel(meetingId, code);
-    liveSpeakerAnalysis = null;
-    liveSpeakerIdentity.stop();
+    stopLiveSpeakerIdentity();
     if (
       parakeetEouOwner?.id === event.sender.id &&
       parakeetEouGeneration === generation
@@ -4897,16 +4910,21 @@ app.whenReady().then(async () => {
     }
     return db.getSetting(key);
   });
-  ipcMain.handle('SET_SETTING', (_event, { key, value }) => {
+  ipcMain.handle('SET_SETTING', async (_event, { key, value }) => {
     if (typeof key !== 'string' || isSecretSettingKey(key)) {
       throw new Error('secret_setting_requires_credential_ipc');
     }
     const result = db.setSetting(key, String(value));
     if (key === LIVE_SPEAKER_IDENTITY_SETTING && String(value) !== 'true') {
-      liveSpeakerAnalysis = null;
-      liveSpeakerIdentity.stop();
-      if (parakeetEouOwner) {
-        publishLiveSpeakerIdentity(parakeetEouOwner, null);
+      const meetingId = liveSpeakerAnalysis?.meetingId;
+      const owner = parakeetEouOwner;
+      stopLiveSpeakerIdentity(owner, true);
+      if (meetingId && eouCoordinator.isActive()) {
+        try {
+          await eouCoordinator.setSpeakerEvidenceEnabled(meetingId, false);
+        } catch {
+          // Optional cleanup must not make the persisted setting fail.
+        }
       }
     }
     invalidateProviderCache();

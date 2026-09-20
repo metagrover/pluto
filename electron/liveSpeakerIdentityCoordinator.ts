@@ -82,14 +82,9 @@ export class LiveSpeakerIdentityCoordinator {
     const session = this.requireSession();
     const profiles = this.dependencies.getProfiles();
     const rejections = this.dependencies.getRejections(session.meetingId);
-    const matches = new Map<
+    const byPerson = new Map<
       string,
-      Array<{
-        personId: string;
-        personName: string;
-        startMs: number;
-        endMs: number;
-      }>
+      { name: string; ranges: Array<{ startMs: number; endMs: number }> }
     >();
 
     for (const cluster of evidence.clusterEvidence ?? []) {
@@ -143,36 +138,21 @@ export class LiveSpeakerIdentityCoordinator {
       ) {
         continue;
       }
-      const entries = matches.get(cluster.cluster) ?? [];
+      const personId = outcome.suggestion.suggestedPersonId;
+      const matched = byPerson.get(personId) ?? {
+        name: outcome.suggestion.suggestedPersonName,
+        ranges: [],
+      };
       for (const turn of turns) {
-        entries.push({
-          personId: outcome.suggestion.suggestedPersonId,
-          personName: outcome.suggestion.suggestedPersonName,
+        matched.ranges.push({
           startMs: turn.startTime * 1_000,
           endMs: turn.endTime * 1_000,
         });
       }
-      matches.set(cluster.cluster, entries);
+      byPerson.set(personId, matched);
     }
 
-    const byPerson = new Map<
-      string,
-      { name: string; ranges: Array<{ startMs: number; endMs: number }> }
-    >();
-    for (const entries of matches.values()) {
-      const people = new Set(entries.map((entry) => entry.personId));
-      if (people.size !== 1) continue;
-      const personId = entries[0].personId;
-      const current = byPerson.get(personId) ?? {
-        name: entries[0].personName,
-        ranges: [],
-      };
-      current.ranges.push(
-        ...entries.map(({ startMs, endMs }) => ({ startMs, endMs })),
-      );
-      byPerson.set(personId, current);
-    }
-
+    const nextRevision = session.revision + 1;
     const currentPeople = new Set(byPerson.keys());
     for (const [personId, hint] of session.hints) {
       if (hint.state === 'confirmed' || hint.state === 'rejected') continue;
@@ -180,7 +160,7 @@ export class LiveSpeakerIdentityCoordinator {
         session.hints.set(personId, {
           ...hint,
           state: 'revoked',
-          revision: session.revision + 1,
+          revision: nextRevision,
         });
       }
     }
@@ -200,12 +180,12 @@ export class LiveSpeakerIdentityCoordinator {
         state: existing?.state === 'confirmed' ? 'confirmed' : 'suggested',
         ranges,
         generation: session.generation,
-        revision: session.revision + 1,
+        revision: nextRevision,
         personId,
       });
     }
     session.previousPeople = currentPeople;
-    session.revision += 1;
+    session.revision = nextRevision;
     return this.snapshot();
   }
 
@@ -219,45 +199,57 @@ export class LiveSpeakerIdentityCoordinator {
     );
     if (!entry) throw new Error('live_speaker_suggestion_not_found');
     const [personId, hint] = entry;
-    session.revision += 1;
+    if (
+      ((action === 'confirm' || action === 'reject') &&
+        hint.state !== 'suggested') ||
+      (action === 'restore' &&
+        hint.state !== 'confirmed' &&
+        hint.state !== 'rejected')
+    ) {
+      throw new Error('live_speaker_suggestion_state_invalid');
+    }
+    const nextRevision = session.revision + 1;
     if (action === 'confirm') {
       const displayLabel = hint.displayLabel.replace(/^Likely\s+/u, '');
       const next = {
         ...hint,
         state: 'confirmed' as const,
         displayLabel,
-        revision: session.revision,
+        revision: nextRevision,
       };
-      session.hints.set(personId, next);
-      session.deniedPeople.delete(personId);
       this.dependencies.persistConfirmation({
         meetingId: session.meetingId,
         suggestionId,
         personId,
         generation: session.generation,
-        revision: session.revision,
+        revision: nextRevision,
         ranges: next.ranges,
       });
-    } else if (action === 'reject') {
-      session.deniedPeople.add(personId);
-      session.hints.set(personId, {
-        ...hint,
-        state: 'rejected',
-        revision: session.revision,
-      });
-      this.dependencies.removeConfirmation(session.meetingId, suggestionId);
-    } else {
+      session.hints.set(personId, next);
       session.deniedPeople.delete(personId);
-      session.hints.set(personId, {
+    } else if (action === 'reject') {
+      this.dependencies.removeConfirmation(session.meetingId, suggestionId);
+      const next = {
         ...hint,
-        state: 'suggested',
+        state: 'rejected' as const,
+        revision: nextRevision,
+      };
+      session.deniedPeople.add(personId);
+      session.hints.set(personId, next);
+    } else {
+      this.dependencies.removeConfirmation(session.meetingId, suggestionId);
+      const next = {
+        ...hint,
+        state: 'suggested' as const,
         displayLabel: hint.displayLabel.startsWith('Likely ')
           ? hint.displayLabel
           : `Likely ${hint.displayLabel}`,
         revision: session.revision,
-      });
-      this.dependencies.removeConfirmation(session.meetingId, suggestionId);
+      };
+      session.deniedPeople.delete(personId);
+      session.hints.set(personId, next);
     }
+    session.revision = nextRevision;
     return this.snapshot();
   }
 

@@ -18,6 +18,7 @@ type EouClient = Pick<
   | 'close'
   | 'onUpdate'
   | 'onTerminalFailure'
+  | 'setSpeakerEvidenceEnabled'
   | 'speakerEvidence'
 >;
 
@@ -179,6 +180,17 @@ export class ParakeetEouMeetingCoordinator {
   async speakerEvidence(meetingId: string): Promise<SpeakerEvidenceResult> {
     const meeting = this.requireMeeting(meetingId);
     return await meeting.client.speakerEvidence(meeting.identities.system);
+  }
+
+  async setSpeakerEvidenceEnabled(
+    meetingId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const meeting = this.requireMeeting(meetingId);
+    await meeting.client.setSpeakerEvidenceEnabled(
+      meeting.identities.system,
+      enabled,
+    );
   }
 
   async cancel(

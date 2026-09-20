@@ -127,7 +127,8 @@ public actor ParakeetService {
                 )
                 return .success(id: request.id)
             case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
-                .eouCancel, .eouReset, .eouSpeakerEvidence:
+                .eouCancel, .eouReset, .eouSpeakerEvidenceEnable, .eouSpeakerEvidenceDisable,
+                .eouSpeakerEvidence:
                 return .failure(id: request.id, code: .invalidRequest)
             }
         } catch let terminal as LiveRuntimeTerminalFailure {
@@ -180,7 +181,8 @@ public actor ParakeetService {
         case .speakerEvidence:
             return await analyzeSpeakerEvidence(request)
         case .cancel, .shutdown, .streamOpen, .streamAppend, .streamFlush, .streamCancel,
-            .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset, .eouSpeakerEvidence:
+            .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset,
+            .eouSpeakerEvidenceEnable, .eouSpeakerEvidenceDisable, .eouSpeakerEvidence:
             return .failure(id: request.id, code: .invalidRequest)
         }
     }
@@ -389,6 +391,26 @@ public actor ParakeetService {
                     generation: metadata.generation
                 )
                 events = []
+            case .eouSpeakerEvidenceEnable:
+                guard metadata.source == .system else {
+                    return .failure(id: request.id, code: .invalidRequest)
+                }
+                try await session.setSpeakerEvidenceEnabled(
+                    true,
+                    streamId: metadata.streamId,
+                    generation: metadata.generation
+                )
+                events = []
+            case .eouSpeakerEvidenceDisable:
+                guard metadata.source == .system else {
+                    return .failure(id: request.id, code: .invalidRequest)
+                }
+                try await session.setSpeakerEvidenceEnabled(
+                    false,
+                    streamId: metadata.streamId,
+                    generation: metadata.generation
+                )
+                events = []
             case .eouSpeakerEvidence:
                 guard metadata.source == .system else {
                     return .failure(id: request.id, code: .invalidRequest)
@@ -437,7 +459,10 @@ public actor ParakeetService {
                 events: [terminal.event]
             )
         } catch let failure as EouSessionFailure {
-            if request.method == .eouSpeakerEvidence {
+            if request.method == .eouSpeakerEvidence
+                || request.method == .eouSpeakerEvidenceEnable
+                || request.method == .eouSpeakerEvidenceDisable
+            {
                 return .failure(id: request.id, code: runtimeFailure(for: failure))
             }
             return .failure(

@@ -185,6 +185,21 @@ export class ParakeetEouClient {
     await this.releaseRuntimeLeaseIfIdle();
   }
 
+  async setSpeakerEvidenceEnabled(
+    identity: ParakeetEouIdentity,
+    enabled: boolean,
+  ): Promise<void> {
+    this.requireUsable();
+    const state = this.requireState(identity);
+    if (state.source !== 'system' || state.closing) {
+      throw new Error('parakeet_request_invalid');
+    }
+    await this.send(
+      enabled ? 'eou_speaker_evidence_enable' : 'eou_speaker_evidence_disable',
+      identity,
+    );
+  }
+
   async speakerEvidence(
     identity: ParakeetEouIdentity,
   ): Promise<SpeakerEvidenceResult> {

@@ -88,6 +88,28 @@ const append = (source: 'mic' | 'system', sequence: number) => ({
 });
 
 describe('ParakeetEouClient', () => {
+  it('enables and disables bounded evidence only through the System stream', async () => {
+    const process = new FakeTransport();
+    const client = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await Promise.all([
+      client.open(identity('mic')),
+      client.open(identity('system')),
+    ]);
+
+    await client.setSpeakerEvidenceEnabled(identity('system'), true);
+    await client.setSpeakerEvidenceEnabled(identity('system'), false);
+
+    expect(process.requests.slice(-2).map((request) => request.method)).toEqual(
+      ['eou_speaker_evidence_enable', 'eou_speaker_evidence_disable'],
+    );
+    await expect(
+      client.setSpeakerEvidenceEnabled(identity('mic'), true),
+    ).rejects.toThrow('parakeet_request_invalid');
+  });
+
   it('requests and validates bounded live speaker evidence without forwarding it as an event', async () => {
     const process = new FakeTransport();
     const embedding = Array.from({ length: 256 }, (_, index) =>

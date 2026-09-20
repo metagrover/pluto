@@ -200,6 +200,9 @@ final class ParakeetEouSessionTests: XCTestCase {
         )
         try await session.open(streamId: "meeting.mic", source: .mic, generation: 1)
         try await session.open(streamId: "meeting.system", source: .system, generation: 1)
+        try await session.setSpeakerEvidenceEnabled(
+            true, streamId: "meeting.system", generation: 1
+        )
 
         for sequence in 1...144 {
             let start = Double(sequence - 1) * 0.32
@@ -222,6 +225,18 @@ final class ParakeetEouSessionTests: XCTestCase {
         XCTAssertEqual(snapshot.systemSampleRate, 8_000)
         XCTAssertEqual(snapshot.micSamples.count, 360_000)
         XCTAssertEqual(snapshot.systemSamples.count, 360_000)
+
+        try await session.setSpeakerEvidenceEnabled(
+            false, streamId: "meeting.system", generation: 1
+        )
+        do {
+            _ = try await session.speakerEvidenceSnapshot(
+                streamId: "meeting.system", generation: 1
+            )
+            XCTFail("Expected disabled speaker evidence to reject snapshots")
+        } catch let failure as EouSessionFailure {
+            XCTAssertEqual(failure, .inferenceFailed)
+        }
     }
 
     private func frame(start: Double) throws -> EouPcmFrame {

@@ -1,4 +1,3 @@
-import type Database from 'better-sqlite3';
 import type { IdentityBinding } from '../src/types/identity';
 import { isIdentifiableSpeakerKey } from '../src/utils/speakerReview';
 import { parseTranscriptSegments } from '../src/utils/transcript';
@@ -18,21 +17,15 @@ type ConfirmationRow = {
   state: 'pending' | 'bound' | 'needs_review';
 };
 
-const database = (override?: Database.Database): Database.Database =>
-  override ?? dbModule.db;
-
-export const persistLiveSpeakerIdentityConfirmation = (
-  input: {
-    meetingId: string;
-    suggestionId: string;
-    personId: string;
-    generation: number;
-    revision: number;
-    ranges: Array<{ startMs: number; endMs: number }>;
-  },
-  override?: Database.Database,
-): void => {
-  database(override)
+export const persistLiveSpeakerIdentityConfirmation = (input: {
+  meetingId: string;
+  suggestionId: string;
+  personId: string;
+  generation: number;
+  revision: number;
+  ranges: Array<{ startMs: number; endMs: number }>;
+}): void => {
+  dbModule.db
     .prepare(
       `INSERT INTO live_speaker_identity_confirmations (
         suggestion_id, meeting_id, person_id, generation, hint_revision,
@@ -58,9 +51,8 @@ export const persistLiveSpeakerIdentityConfirmation = (
 export const removeLiveSpeakerIdentityConfirmation = (
   meetingId: string,
   suggestionId: string,
-  override?: Database.Database,
 ): void => {
-  database(override)
+  dbModule.db
     .prepare(
       'DELETE FROM live_speaker_identity_confirmations WHERE meeting_id = ? AND suggestion_id = ?',
     )
@@ -93,9 +85,8 @@ const timedSegment = (segment: {
 
 export const reconcileLiveSpeakerIdentityConfirmations = (
   meetingId: string,
-  override?: Database.Database,
 ): { bound: IdentityBinding[]; needsReview: number } => {
-  const sqlite = database(override);
+  const sqlite = dbModule.db;
   const rows = sqlite
     .prepare(
       "SELECT * FROM live_speaker_identity_confirmations WHERE meeting_id = ? AND state = 'pending' ORDER BY created_at",
@@ -116,6 +107,7 @@ export const reconcileLiveSpeakerIdentityConfirmations = (
   let needsReview = 0;
 
   for (const row of rows) {
+    const personId = dbModule.resolvePersonIdentityId(row.person_id);
     let ranges: Array<{ startMs: number; endMs: number }> = [];
     try {
       const parsed = JSON.parse(row.ranges_json) as unknown;
@@ -163,7 +155,7 @@ export const reconcileLiveSpeakerIdentityConfirmations = (
     const collision = winner
       ? bindings.some(
           (binding) =>
-            binding.personId === row.person_id && binding.speaker !== winner[0],
+            binding.personId === personId && binding.speaker !== winner[0],
         )
       : false;
     const existing = winner
@@ -184,21 +176,23 @@ export const reconcileLiveSpeakerIdentityConfirmations = (
     }
     const binding: IdentityBinding = {
       speaker: winner[0],
-      personId: row.person_id,
+      personId,
       individual: true,
       source: 'user',
       sourceRevision: context.sourceRevision,
       evidence: [],
       assignment: { kind: LIVE_VOICE_CONFIRMED_ASSIGNMENT },
     };
-    dbModule.identityStore.setBinding(meetingId, binding);
+    sqlite.transaction(() => {
+      dbModule.identityStore.setBinding(meetingId, binding);
+      sqlite
+        .prepare(
+          "UPDATE live_speaker_identity_confirmations SET state = 'bound', updated_at = CURRENT_TIMESTAMP WHERE suggestion_id = ?",
+        )
+        .run(row.suggestion_id);
+    })();
     bindings.push(binding);
     bound.push(binding);
-    sqlite
-      .prepare(
-        "UPDATE live_speaker_identity_confirmations SET state = 'bound', updated_at = CURRENT_TIMESTAMP WHERE suggestion_id = ?",
-      )
-      .run(row.suggestion_id);
   }
   return { bound, needsReview };
 };
