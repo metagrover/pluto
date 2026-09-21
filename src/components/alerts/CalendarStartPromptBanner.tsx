@@ -7,6 +7,7 @@ import { hasConferenceLink } from '../../utils/conferenceUrl';
 interface CalendarStartPromptBannerProps {
   event: CalendarEvent;
   onStartRecording: (event: CalendarEvent) => void;
+  onPrepare: (event: CalendarEvent) => void;
   onDismiss: (occurrenceKey: string) => void;
 }
 
@@ -26,7 +27,7 @@ const formatRelativeStartTime = (isoStart: string): string => {
 
 export const CalendarStartPromptBanner: React.FC<
   CalendarStartPromptBannerProps
-> = ({ event, onStartRecording, onDismiss }) => {
+> = ({ event, onStartRecording, onPrepare, onDismiss }) => {
   const [relativeTime, setRelativeTime] = useState(() =>
     formatRelativeStartTime(event.start),
   );
@@ -70,6 +71,13 @@ export const CalendarStartPromptBanner: React.FC<
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => onPrepare(event)}
+          className="flex h-[34px] items-center rounded-md px-2 text-[11px] font-semibold text-pro-text-muted transition-colors hover:bg-pro-border/20 hover:text-pro-text-main focus:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+        >
+          Prep
+        </button>
         <button
           type="button"
           onClick={() => onStartRecording(event)}

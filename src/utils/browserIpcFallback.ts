@@ -85,6 +85,24 @@ const previewCalendarEvents = (): CalendarEvent[] => {
     organizer: { name: 'You', email: null },
     attendees: attendees.map((name) => ({ name, email: null })),
     lastModified: now,
+    calendarItemExternalIdentifier: key,
+    hasRecurrenceRules: key.includes('weekly'),
+    recurrenceRules: key.includes('weekly')
+      ? [
+          {
+            frequency: 'weekly',
+            interval: 1,
+            daysOfWeek: [2],
+            endDate: null,
+            occurrenceCount: null,
+          },
+        ]
+      : [],
+    seriesKey: key.includes('weekly') ? `preview-work|${key}` : null,
+    agenda:
+      key === 'preview-product-review'
+        ? 'Review onboarding changes\nResolve the remaining launch risk'
+        : null,
   });
   return [
     build('preview-product-review', 'Product design review', productReview, [
@@ -891,6 +909,48 @@ const createInvokeFallback =
       case 'CALENDAR_GET_MEETING_CONTEXT':
         result = null;
         break;
+      case 'PRE_MEETING_BRIEF_BUILD': {
+        const request = args[0] as
+          | { kind: 'calendar'; event: CalendarEvent }
+          | { kind: 'query'; query: string };
+        const title =
+          request.kind === 'calendar' ? request.event.title : request.query;
+        result = {
+          title: title || 'Conversation brief',
+          startsAt: request.kind === 'calendar' ? request.event.start : null,
+          agenda:
+            request.kind === 'calendar' ? request.event.agenda || null : null,
+          relationship: 'related',
+          priorMeeting: {
+            id: previewMeeting.id,
+            title: previewMeeting.title,
+            startedAt: previewMeeting.started_at,
+          },
+          lastTime: [
+            {
+              id: 'preview-decision',
+              text: 'Keep the beta focused on the smaller onboarding flow.',
+              trustStatus: 'grounded',
+              sourceMeetingId: String(previewMeeting.id),
+              sourceLabel: previewMeeting.title,
+              sourceDate: previewMeeting.started_at,
+            },
+          ],
+          stillOpen: [
+            {
+              id: 'preview-open',
+              text: 'Confirm the launch checklist owner.',
+              trustStatus: 'grounded',
+              sourceMeetingId: String(previewMeeting.id),
+              sourceLabel: previewMeeting.title,
+              sourceDate: previewMeeting.started_at,
+            },
+          ],
+          relevantContext: [],
+          emptyMessage: null,
+        };
+        break;
+      }
       case 'OPEN_CALENDAR_SYSTEM_SETTINGS':
         result = true;
         break;

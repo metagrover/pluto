@@ -48,6 +48,7 @@ import { AskPluto } from './components/features/AskPluto';
 import { Dashboard } from './components/features/Dashboard';
 import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
 import { MeetingView } from './components/features/MeetingView';
+import { PreMeetingBriefSheet } from './components/features/PreMeetingBriefSheet';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
 import { ZenMode } from './components/features/ZenMode';
@@ -295,6 +296,9 @@ function App() {
   const [meetingCalendarContext, setMeetingCalendarContext] =
     useState<MeetingCalendarContext | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [preMeetingBriefVisible, setPreMeetingBriefVisible] = useState(false);
+  const [preMeetingBriefEvent, setPreMeetingBriefEvent] =
+    useState<CalendarEvent | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] =
     useState<SettingsTabId>('personal');
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
@@ -1049,6 +1053,16 @@ function App() {
     [dismissPrompt],
   );
 
+  const handlePrepareMeeting = useCallback((event: CalendarEvent) => {
+    setPreMeetingBriefEvent(event);
+    setPreMeetingBriefVisible(true);
+  }, []);
+
+  const handlePrepareAnother = useCallback(() => {
+    setPreMeetingBriefEvent(null);
+    setPreMeetingBriefVisible(true);
+  }, []);
+
   // Synchronize calendar meeting prompt with the native macOS notification alert window (outside the app)
   useEffect(() => {
     if (!window.ipcRenderer) return;
@@ -1093,6 +1107,18 @@ function App() {
       }
     };
 
+    const handlePrepareIpc = (
+      _event: unknown,
+      payload?: { occurrenceKey?: string },
+    ) => {
+      const target =
+        calendarEvents.find(
+          (calendarEvent) =>
+            calendarEvent.occurrenceKey === payload?.occurrenceKey,
+        ) || activePromptEvent;
+      if (target) handlePrepareMeeting(target);
+    };
+
     const unsubRecord = window.ipcRenderer.on(
       'CALENDAR_PROMPT_START_RECORDING',
       handleRecordIpc,
@@ -1101,12 +1127,23 @@ function App() {
       'CALENDAR_PROMPT_DISMISSED',
       handleDismissIpc,
     );
+    const unsubPrepare = window.ipcRenderer.on(
+      'CALENDAR_PROMPT_PREPARE',
+      handlePrepareIpc,
+    );
 
     return () => {
       unsubRecord?.();
       unsubDismiss?.();
+      unsubPrepare?.();
     };
-  }, [calendarEvents, activePromptEvent, handleStartFromPrompt, dismissPrompt]);
+  }, [
+    calendarEvents,
+    activePromptEvent,
+    handleStartFromPrompt,
+    handlePrepareMeeting,
+    dismissPrompt,
+  ]);
 
   const handleRecordingChange = (recording: boolean) => {
     const wasRecording = isRecording;
@@ -2065,6 +2102,8 @@ function App() {
                   onCalendarSelectCalendars={handleCalendarSelectCalendars}
                   onCalendarRefresh={handleCalendarRefresh}
                   onCalendarOpenSettings={handleCalendarOpenSettings}
+                  onPrepareMeeting={handlePrepareMeeting}
+                  onPrepareAnother={handlePrepareAnother}
                 />
               </>
             ) : activeTab === 'people' ? (
@@ -2270,6 +2309,16 @@ function App() {
         }}
       />
 
+      <PreMeetingBriefSheet
+        visible={preMeetingBriefVisible}
+        event={preMeetingBriefEvent}
+        onClose={() => setPreMeetingBriefVisible(false)}
+        onOpenMeeting={(meetingId) => {
+          setPreMeetingBriefVisible(false);
+          handleOpenMeeting(meetingId, { label: 'Back to Dashboard' });
+        }}
+      />
+
       {autoEndTriggered && (
         <AutoEndToast
           reason={autoEndReason}
@@ -2288,6 +2337,7 @@ function App() {
         <CalendarStartPromptBanner
           event={activePromptEvent}
           onStartRecording={handleStartFromPrompt}
+          onPrepare={handlePrepareMeeting}
           onDismiss={dismissPrompt}
         />
       )}

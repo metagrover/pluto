@@ -281,6 +281,42 @@ describe('calendar store', () => {
     expect(matched?.calendarTitle).toBe('Personal');
   });
 
+  it('preserves historical context for retained calendars and purges removed calendars', () => {
+    const store = createCalendarStore(sql);
+    store.selectCalendars([calendar, calendarB]);
+    store.replaceEvents({
+      revision: 1,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T16:00:00.000Z',
+      events: [calendarEvent, calendarEventB],
+    });
+    sql
+      .prepare(
+        'INSERT INTO meetings (id, title, started_at) VALUES (?, ?, ?), (?, ?, ?)',
+      )
+      .run(
+        'meeting-a',
+        'Product review',
+        calendarEvent.start,
+        'meeting-b',
+        'Family dinner',
+        calendarEventB.start,
+      );
+    store.setMeetingContext('meeting-a', calendarEvent.occurrenceKey, 'user');
+    store.setMeetingContext('meeting-b', calendarEventB.occurrenceKey, 'user');
+
+    store.selectCalendars([calendar]);
+
+    expect(store.getMeetingContext('meeting-a')).not.toBeNull();
+    expect(store.getMeetingContext('meeting-b')).toBeNull();
+    expect(
+      store.listPriorMeetingContexts('2026-09-01T00:00:00.000Z'),
+    ).toMatchObject([
+      { meetingId: 'meeting-a', meetingTitle: 'Product review' },
+    ]);
+  });
+
   it('matches active calendar event at start time and associates context immediately', () => {
     const store = createCalendarStore(sql);
     store.selectCalendars([calendar, calendarB]);

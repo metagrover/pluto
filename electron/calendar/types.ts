@@ -29,6 +29,14 @@ export interface CalendarDescriptor {
   colorHex: string | null;
 }
 
+export interface CalendarRecurrenceRule {
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'unknown';
+  interval: number;
+  daysOfWeek: number[];
+  endDate: string | null;
+  occurrenceCount: number | null;
+}
+
 export interface CalendarEvent {
   occurrenceKey: string;
   eventIdentifier: string;
@@ -42,6 +50,13 @@ export interface CalendarEvent {
   organizer: CalendarPerson | null;
   attendees: CalendarPerson[];
   lastModified: string | null;
+  calendarItemIdentifier?: string | null;
+  calendarItemExternalIdentifier?: string | null;
+  notes?: string | null;
+  agenda?: string | null;
+  hasRecurrenceRules?: boolean;
+  recurrenceRules?: CalendarRecurrenceRule[];
+  seriesKey?: string | null;
 }
 
 export interface CalendarIntegrationSnapshot {
@@ -65,4 +80,10 @@ export interface MeetingCalendarContext {
   event: CalendarEvent;
   matchOrigin: 'automatic' | 'user';
   matchEvidence: 'time_overlap' | 'user_selected';
+}
+
+export interface PriorMeetingCalendarContext extends MeetingCalendarContext {
+  meetingId: string;
+  meetingTitle: string;
+  meetingStartedAt: string;
 }

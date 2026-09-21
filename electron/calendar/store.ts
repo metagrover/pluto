@@ -10,6 +10,7 @@ import type {
   CalendarDescriptor,
   CalendarEvent,
   MeetingCalendarContext,
+  PriorMeetingCalendarContext,
 } from './types';
 
 type SqlDatabase = Database.Database;
@@ -36,6 +37,12 @@ interface ContextRow {
   occurrence_key: string;
   match_origin: 'automatic' | 'user';
   match_evidence: 'time_overlap' | 'user_selected';
+}
+
+interface PriorContextRow extends ContextRow {
+  meeting_id: string;
+  meeting_title: string;
+  meeting_started_at: string;
 }
 export const createCalendarStore = (sql: SqlDatabase) => {
   const readIntegration = () =>
@@ -93,7 +100,18 @@ export const createCalendarStore = (sql: SqlDatabase) => {
   const selectCalendars = (calendars: CalendarDescriptor[]) => {
     sql.transaction(() => {
       sql.prepare('DELETE FROM calendar_events').run();
-      sql.prepare('DELETE FROM meeting_calendar_context').run();
+      if (calendars.length === 0) {
+        sql.prepare('DELETE FROM meeting_calendar_context').run();
+      } else {
+        const placeholders = calendars.map(() => '?').join(', ');
+        sql
+          .prepare(`
+            DELETE FROM meeting_calendar_context
+            WHERE COALESCE(json_extract(event_json, '$.calendarIdentifier'), '')
+              NOT IN (${placeholders})
+          `)
+          .run(...calendars.map((calendar) => calendar.identifier));
+      }
       const primaryCalendar = calendars[0] ?? null;
       sql
         .prepare(`
@@ -219,6 +237,35 @@ export const createCalendarStore = (sql: SqlDatabase) => {
       matchOrigin: row.match_origin,
       matchEvidence: row.match_evidence,
     };
+  };
+
+  const listPriorMeetingContexts = (
+    before: string,
+    requestedLimit = 80,
+  ): PriorMeetingCalendarContext[] => {
+    const limit = Math.min(200, Math.max(1, Math.floor(requestedLimit)));
+    const rows = sql
+      .prepare(`
+        SELECT context.*, meeting.title AS meeting_title,
+               COALESCE(meeting.started_at, meeting.created_at, '') AS meeting_started_at
+        FROM meeting_calendar_context AS context
+        JOIN meetings AS meeting ON meeting.id = context.meeting_id
+        WHERE COALESCE(meeting.started_at, meeting.created_at, '') < ?
+        ORDER BY COALESCE(meeting.started_at, meeting.created_at) DESC
+        LIMIT ?
+      `)
+      .all(before, limit) as PriorContextRow[];
+    return rows.map((row) => ({
+      sourceKind: 'macos_calendar',
+      occurrenceKey: row.occurrence_key,
+      calendarTitle: row.calendar_title,
+      event: JSON.parse(row.event_json) as CalendarEvent,
+      matchOrigin: row.match_origin,
+      matchEvidence: row.match_evidence,
+      meetingId: row.meeting_id,
+      meetingTitle: row.meeting_title,
+      meetingStartedAt: row.meeting_started_at,
+    }));
   };
 
   const setMeetingContext = (
@@ -373,6 +420,7 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     matchActiveEvent,
     setMeetingContext,
     getMeetingContext,
+    listPriorMeetingContexts,
     recordFailure,
     disconnect,
   };

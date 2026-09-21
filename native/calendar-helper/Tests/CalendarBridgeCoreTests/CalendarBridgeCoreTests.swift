@@ -71,7 +71,18 @@ import Testing
         availability: "busy",
         organizer: CalendarPerson(name: "Alex", email: "alex@example.com"),
         attendees: [CalendarPerson(name: "Sam", email: "sam@example.com")],
-        lastModified: start.addingTimeInterval(-60)
+        lastModified: start.addingTimeInterval(-60),
+        calendarItemIdentifier: "local-a",
+        calendarItemExternalIdentifier: "series-a",
+        notes: "Review launch risks",
+        hasRecurrenceRules: true,
+        recurrenceRules: [CalendarRecurrenceRule(
+            frequency: "weekly",
+            interval: 1,
+            daysOfWeek: [2],
+            endDate: nil,
+            occurrenceCount: nil
+        )]
     )
 
     let normalized = CalendarBridgeProtocol.normalize(
@@ -84,6 +95,10 @@ import Testing
     #expect(normalized.organizer?.email == "alex@example.com")
     #expect(normalized.attendees.map(\.name) == ["Sam"])
     #expect(normalized.start == start)
+    #expect(normalized.calendarItemExternalIdentifier == "series-a")
+    #expect(normalized.notes == "Review launch risks")
+    #expect(normalized.hasRecurrenceRules)
+    #expect(normalized.recurrenceRules.first?.frequency == "weekly")
 }
 
 @Test func recurringOccurrencesHaveDistinctStableKeys() {
@@ -99,7 +114,9 @@ import Testing
         availability: nil,
         organizer: nil,
         attendees: [],
-        lastModified: nil
+        lastModified: nil,
+        calendarItemExternalIdentifier: "recurring-series-a",
+        hasRecurrenceRules: true
     )
     let occurrenceOne = CalendarBridgeProtocol.normalize(
         calendarIdentifier: "calendar-a",
@@ -112,4 +129,6 @@ import Testing
 
     #expect(occurrenceOne.occurrenceKey == CalendarBridgeProtocol.normalize(calendarIdentifier: "calendar-a", event: base).occurrenceKey)
     #expect(occurrenceOne.occurrenceKey != occurrenceTwo.occurrenceKey)
+    #expect(occurrenceOne.hasRecurrenceRules)
+    #expect(occurrenceOne.calendarItemExternalIdentifier == "recurring-series-a")
 }

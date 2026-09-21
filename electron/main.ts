@@ -109,6 +109,10 @@ import {
 import { resolveUnpackedExecutablePath } from './packagedExecutablePath';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
+  type PreMeetingBriefRequest,
+  buildPreMeetingBrief,
+} from './preMeetingBrief';
+import {
   isProjectScopeReviewBusy,
   reviewProjectScopeBatch,
 } from './projectScopeReview';
@@ -1703,6 +1707,21 @@ app.whenReady().then(async () => {
     db.calendarStore.getMeetingContext(String(meetingId)),
   );
   ipcMain.handle(
+    'PRE_MEETING_BRIEF_BUILD',
+    (_event, request: PreMeetingBriefRequest) =>
+      buildPreMeetingBrief(request, {
+        listPriorMeetingContexts: db.calendarStore.listPriorMeetingContexts,
+        getMeeting: (id) =>
+          db.getMeeting(id) as db.PersistedMeeting | undefined,
+        getMeetingEntities: db.getMeetingEntities,
+        getBlockedActionItems: db.getBlockedActionItems,
+        searchMeetingSummaries: db.searchMeetingSummaries,
+        getGlobalWorkingMemory: () =>
+          db.getWorkingMemorySnapshot('global', 'global'),
+        getPeopleBriefingSummaries: db.getPeopleBriefingSummaries,
+      }),
+  );
+  ipcMain.handle(
     'CALENDAR_MATCH_ACTIVE',
     (_event, payload?: { atTime?: string }) =>
       calendarService.matchActiveEvent(payload?.atTime),
@@ -2864,7 +2883,7 @@ app.whenReady().then(async () => {
     (
       _event,
       payload?: {
-        action?: 'record' | 'dismiss';
+        action?: 'record' | 'prepare' | 'dismiss';
         occurrenceKey?: string;
       },
     ) => {
@@ -2873,6 +2892,14 @@ app.whenReady().then(async () => {
           if (!win.isVisible()) win.show();
           win.focus();
           win.webContents.send('CALENDAR_PROMPT_START_RECORDING', {
+            occurrenceKey: payload.occurrenceKey,
+          });
+        }
+      } else if (payload?.action === 'prepare') {
+        if (win) {
+          if (!win.isVisible()) win.show();
+          win.focus();
+          win.webContents.send('CALENDAR_PROMPT_PREPARE', {
             occurrenceKey: payload.occurrenceKey,
           });
         }
