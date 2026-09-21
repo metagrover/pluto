@@ -1,9 +1,15 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { extractText } from 'unpdf';
 import type { TrustStatus } from '../src/utils/trustStatus';
 
-export type LocalArtifactType = 'markdown' | 'text' | 'pdf';
+const execFileAsync = promisify(execFile);
+
+export type LocalArtifactType = 'markdown' | 'text' | 'pdf' | 'docx' | 'pages';
 export type LocalArtifactStatus = 'active' | 'noisy' | 'excluded';
 export type LocalArtifactSourceQuality = 'usable' | 'limited' | 'noisy';
 
@@ -35,8 +41,13 @@ export interface LocalArtifactImportInput {
 const SUPPORTED_EXTENSIONS = new Map<string, LocalArtifactType>([
   ['.md', 'markdown'],
   ['.markdown', 'markdown'],
+  ['.mdown', 'markdown'],
+  ['.mkd', 'markdown'],
   ['.txt', 'text'],
+  ['.text', 'text'],
   ['.pdf', 'pdf'],
+  ['.docx', 'docx'],
+  ['.pages', 'pages'],
 ]);
 
 export const normalizeLocalArtifactText = (content: string): string =>
@@ -67,16 +78,129 @@ export const extractTextFromPdf = async (
   }
 };
 
+export const extractTextFromDocx = async (
+  filePath: string,
+): Promise<string> => {
+  try {
+    const { stdout } = await execFileAsync(
+      '/usr/bin/textutil',
+      ['-convert', 'txt', filePath, '-stdout'],
+      { maxBuffer: 20 * 1024 * 1024 },
+    );
+    return normalizeLocalArtifactText(stdout);
+  } catch (error) {
+    throw new Error(
+      `failed_to_extract_docx_text: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
+export const extractTextFromPages = async (
+  filePath: string,
+): Promise<string> => {
+  const tmpPlistPath = path.join(
+    os.tmpdir(),
+    `pluto-pages-${randomUUID()}.plist`,
+  );
+  try {
+    await execFileAsync(
+      '/usr/bin/mdimport',
+      ['-t', '-o', tmpPlistPath, filePath],
+      { maxBuffer: 20 * 1024 * 1024 },
+    );
+    if (!fs.existsSync(tmpPlistPath)) {
+      return '';
+    }
+    let rawText = '';
+    try {
+      const { stdout } = await execFileAsync(
+        '/usr/bin/plutil',
+        ['-extract', 'kMDItemTextContent', 'raw', tmpPlistPath],
+        { maxBuffer: 20 * 1024 * 1024 },
+      );
+      rawText = stdout;
+    } catch (plutilError) {
+      const msg =
+        plutilError instanceof Error
+          ? plutilError.message
+          : String(plutilError);
+      if (
+        msg.includes('No value at that key path') ||
+        msg.includes('invalid key path')
+      ) {
+        return '';
+      }
+      throw plutilError;
+    }
+    const cleaned = rawText.replace(
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\r?$/gm,
+      '',
+    );
+    return normalizeLocalArtifactText(cleaned);
+  } catch (error) {
+    throw new Error(
+      `failed_to_extract_pages_text: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    try {
+      if (fs.existsSync(tmpPlistPath)) {
+        fs.unlinkSync(tmpPlistPath);
+      }
+    } catch {
+      // Ignore temporary file cleanup failure
+    }
+  }
+};
+
 export const extractArtifactContent = async (
   filePath: string,
-  buffer: Buffer,
+  buffer?: Buffer,
 ): Promise<string> => {
   const type = resolveLocalArtifactType(filePath);
   if (!type) throw new Error('unsupported_artifact_type');
   if (type === 'pdf') {
-    return extractTextFromPdf(buffer);
+    const data = buffer ?? (await fs.promises.readFile(filePath));
+    return extractTextFromPdf(data);
   }
-  return normalizeLocalArtifactText(buffer.toString('utf8'));
+  if (type === 'docx') {
+    if (buffer && !fs.existsSync(filePath)) {
+      const tmpPath = path.join(os.tmpdir(), `pluto-test-${randomUUID()}.docx`);
+      try {
+        await fs.promises.writeFile(tmpPath, buffer);
+        return await extractTextFromDocx(tmpPath);
+      } finally {
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch {
+          // Ignore temp cleanup error
+        }
+      }
+    }
+    return extractTextFromDocx(filePath);
+  }
+  if (type === 'pages') {
+    if (buffer && !fs.existsSync(filePath)) {
+      const tmpPath = path.join(
+        os.tmpdir(),
+        `pluto-test-${randomUUID()}.pages`,
+      );
+      try {
+        await fs.promises.writeFile(tmpPath, buffer);
+        return await extractTextFromPages(tmpPath);
+      } finally {
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch {
+          // Ignore temp cleanup error
+        }
+      }
+    }
+    return extractTextFromPages(filePath);
+  }
+  const text = buffer
+    ? buffer.toString('utf8')
+    : await fs.promises.readFile(filePath, 'utf8');
+  return normalizeLocalArtifactText(text);
 };
 
 export const classifyLocalArtifactQuality = (

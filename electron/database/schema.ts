@@ -160,7 +160,7 @@ export const localArtifacts = sqliteTable(
   (table) => [
     check(
       'local_artifacts_type_check',
-      sql`${table.type} IN ('markdown', 'text', 'pdf')`,
+      sql`${table.type} IN ('markdown', 'text', 'pdf', 'docx', 'pages')`,
     ),
     check(
       'local_artifacts_quality_check',

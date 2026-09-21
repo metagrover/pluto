@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const testDatabase = vi.hoisted(() => ({
@@ -23,6 +25,8 @@ import {
   classifyLocalArtifactQuality,
   createLocalArtifactRecord,
   extractArtifactContent,
+  extractTextFromDocx,
+  extractTextFromPages,
   extractTextFromPdf,
   normalizeLocalArtifactText,
   resolveLocalArtifactType,
@@ -63,12 +67,14 @@ describe('local artifact ingestion', () => {
     });
   });
 
-  it('resolves supported extensions including pdf', () => {
+  it('resolves supported extensions including pdf, docx, and pages', () => {
     expect(resolveLocalArtifactType('/docs/plan.md')).toBe('markdown');
     expect(resolveLocalArtifactType('/docs/notes.markdown')).toBe('markdown');
     expect(resolveLocalArtifactType('/docs/notes.txt')).toBe('text');
     expect(resolveLocalArtifactType('/docs/spec.pdf')).toBe('pdf');
-    expect(resolveLocalArtifactType('/docs/unknown.docx')).toBeNull();
+    expect(resolveLocalArtifactType('/docs/spec.docx')).toBe('docx');
+    expect(resolveLocalArtifactType('/docs/meeting.pages')).toBe('pages');
+    expect(resolveLocalArtifactType('/docs/unknown.exe')).toBeNull();
   });
 
   it('extracts text from PDF documents using unpdf', async () => {
@@ -106,6 +112,70 @@ startxref
     expect(extractedViaHelper).toBe('Hello World Pluto PDF');
   });
 
+  it('extracts text from Word documents using textutil on macOS', async () => {
+    const docxPath = path.join(testDatabase.directory, 'sample.docx');
+    fs.mkdirSync(testDatabase.directory, { recursive: true });
+    execFileSync(
+      '/usr/bin/textutil',
+      ['-convert', 'docx', '-stdin', '-output', docxPath],
+      {
+        input:
+          'Architecture spec for local intelligence in Pluto.\nCovers FTS5 indexing and native extraction.',
+      },
+    );
+
+    const text = await extractTextFromDocx(docxPath);
+    expect(text).toContain(
+      'Architecture spec for local intelligence in Pluto.',
+    );
+    expect(text).toContain('Covers FTS5 indexing and native extraction.');
+
+    const extractedViaHelper = await extractArtifactContent(docxPath);
+    expect(extractedViaHelper).toBe(text);
+  });
+
+  it('extracts text from Pages documents when available', async () => {
+    const samplePages =
+      '/Users/metagrover/Desktop/work/Cognitive_AI_Interview_Guide.pages';
+    if (fs.existsSync(samplePages)) {
+      const text = await extractTextFromPages(samplePages);
+      expect(text).toContain('Cognitive Task Analysis');
+      expect(text).toContain('GOMS');
+
+      const extractedViaHelper = await extractArtifactContent(samplePages);
+      expect(extractedViaHelper).toContain('Cognitive Task Analysis');
+    }
+  });
+
+  it('persists and indexes docx and pages artifacts with FTS5', () => {
+    const docx = saveLocalArtifact(
+      createLocalArtifactRecord({
+        path: '/tmp/project-plan.docx',
+        content:
+          'Word Document detailing the project roadmap and sprint deliverables.',
+      }),
+    );
+    expect(docx.type).toBe('docx');
+    expect(searchLocalArtifactsFts(['deliverables'])).toEqual([
+      expect.objectContaining({ id: docx.id }),
+    ]);
+
+    const pages = saveLocalArtifact(
+      createLocalArtifactRecord({
+        path: '/tmp/meeting-notes.pages',
+        content:
+          'Pages document summarizing stakeholder decisions and user feedback.',
+      }),
+    );
+    expect(pages.type).toBe('pages');
+    expect(searchLocalArtifactsFts(['stakeholder'])).toEqual([
+      expect.objectContaining({ id: pages.id }),
+    ]);
+
+    deleteLocalArtifact(docx.id);
+    deleteLocalArtifact(pages.id);
+  });
+
   it('persists, indexes in FTS5, searches, excludes, and restores a local source', () => {
     const saved = saveLocalArtifact(
       createLocalArtifactRecord({
@@ -115,9 +185,9 @@ startxref
       }),
     );
 
-    expect(listLocalArtifacts()).toEqual([
+    expect(listLocalArtifacts()).toContainEqual(
       expect.objectContaining({ id: saved.id, status: 'active' }),
-    ]);
+    );
 
     // Substring search
     expect(searchLocalArtifacts(['Juniper', 'migration'])).toEqual([

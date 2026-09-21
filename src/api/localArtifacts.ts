@@ -1,6 +1,6 @@
 import type { TrustStatus } from '../utils/trustStatus';
 
-export type LocalArtifactType = 'markdown' | 'text' | 'pdf';
+export type LocalArtifactType = 'markdown' | 'text' | 'pdf' | 'docx' | 'pages';
 export type LocalArtifactStatus = 'active' | 'noisy' | 'excluded';
 export type LocalArtifactSourceQuality = 'usable' | 'limited' | 'noisy';
 

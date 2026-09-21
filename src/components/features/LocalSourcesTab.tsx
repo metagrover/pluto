@@ -114,10 +114,10 @@ export const LocalSourcesTab = ({
           : String(importError);
       setError(
         message.includes('artifact_too_large')
-          ? 'That source exceeds the file size limit (15 MB for PDFs, 5 MB for text). Choose a smaller file.'
+          ? 'That source exceeds the file size limit (15 MB for documents, 5 MB for text). Choose a smaller file.'
           : message.includes('artifact_has_no_text')
             ? 'That source does not contain readable text.'
-            : 'Pluto could not add that source. Choose a Markdown, text, or PDF file and try again.',
+            : 'Pluto could not add that source. Choose a Markdown, text, PDF, Pages, or Word file and try again.',
       );
       setFailedAction('import');
     } finally {
@@ -146,8 +146,8 @@ export const LocalSourcesTab = ({
           : String(importError);
       setError(
         message.includes('artifact_too_large')
-          ? 'One or more dropped files exceed the size limit (15 MB for PDFs, 5 MB for text).'
-          : 'Pluto could not process the dropped files. Ensure they are Markdown, text, or PDF files.',
+          ? 'One or more dropped files exceed the size limit (15 MB for documents, 5 MB for text).'
+          : 'Pluto could not process the dropped files. Ensure they are Markdown, text, PDF, Pages, or Word files.',
       );
     } finally {
       setImporting(false);
@@ -200,6 +200,10 @@ export const LocalSourcesTab = ({
         return 'Markdown';
       case 'pdf':
         return 'PDF Document';
+      case 'docx':
+        return 'Word Document';
+      case 'pages':
+        return 'Pages Document';
       default:
         return 'Text';
     }
@@ -237,7 +241,7 @@ export const LocalSourcesTab = ({
         <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-pro-accent bg-pro-accent/[0.08] backdrop-blur-sm">
           <UploadCloud className="mb-3 h-12 w-12 text-pro-accent animate-bounce" />
           <p className="text-[16px] font-semibold text-pro-text-main">
-            Drop notes or PDFs here
+            Drop notes, PDFs, or documents here
           </p>
           <p className="mt-1 text-[13px] text-pro-text-muted">
             Files will be imported into Pluto's local sources
@@ -266,9 +270,10 @@ export const LocalSourcesTab = ({
           Your local reference material
         </h2>
         <p className="text-[14px] leading-6 text-pro-text-muted">
-          Add Markdown notes, plain-text documents, or PDF files. Pluto indexes
-          the extracted text on this Mac with full-text search; active sources
-          participate in evidence-backed recall in Chat with Pluto.
+          Add Markdown notes, plain-text documents, PDFs, Pages, or Word files.
+          Pluto indexes the extracted text on this Mac with full-text search;
+          active sources participate in evidence-backed recall in Chat with
+          Pluto.
         </p>
       </div>
 
@@ -312,12 +317,12 @@ export const LocalSourcesTab = ({
         <div className="flex min-h-[260px] flex-col items-center justify-center rounded-xl border-y border-dashed border-pro-border px-6 text-center">
           <FileText className="mb-4 h-8 w-8 text-pro-text-muted/50" />
           <h3 className="text-[15px] font-semibold text-pro-text-main">
-            Bring a note or PDF into Pluto
+            Bring a note or document into Pluto
           </h3>
           <p className="mt-2 max-w-md text-[13px] leading-5 text-pro-text-muted">
-            Drag and drop a Markdown note, research paper, or project spec, or
-            choose files from disk. You can exclude sources or delete them at
-            any time.
+            Drag and drop a Markdown note, research paper, Word doc, or Pages
+            file, or choose files from disk. You can exclude sources or delete
+            them at any time.
           </p>
           <button
             type="button"

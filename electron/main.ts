@@ -4822,14 +4822,15 @@ app.whenReady().then(async () => {
   );
   const importLocalArtifactFile = async (filePath: string) => {
     const stat = await fs.promises.stat(filePath);
-    if (!stat.isFile()) return null;
     const ext = path.extname(filePath).toLowerCase();
-    const maxSize = ext === '.pdf' ? 15 * 1024 * 1024 : 5 * 1024 * 1024;
-    if (stat.size > maxSize) {
+    const isPagesPackage = ext === '.pages' && stat.isDirectory();
+    if (!stat.isFile() && !isPagesPackage) return null;
+    const isDocument = ext === '.pdf' || ext === '.docx' || ext === '.pages';
+    const maxSize = isDocument ? 15 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (stat.isFile() && stat.size > maxSize) {
       throw new Error('artifact_too_large');
     }
-    const buffer = await fs.promises.readFile(filePath);
-    const content = await extractArtifactContent(filePath, buffer);
+    const content = await extractArtifactContent(filePath);
     return db.saveLocalArtifact(
       createLocalArtifactRecord({
         path: filePath,
@@ -4848,10 +4849,15 @@ app.whenReady().then(async () => {
       filters: [
         {
           name: 'All supported sources',
-          extensions: ['md', 'markdown', 'txt', 'pdf'],
+          extensions: ['md', 'markdown', 'txt', 'text', 'pdf', 'docx', 'pages'],
         },
-        { name: 'Notes & Markdown', extensions: ['md', 'markdown', 'txt'] },
+        { name: 'Word documents', extensions: ['docx'] },
+        { name: 'Pages documents', extensions: ['pages'] },
         { name: 'PDF documents', extensions: ['pdf'] },
+        {
+          name: 'Notes & Markdown',
+          extensions: ['md', 'markdown', 'txt', 'text'],
+        },
       ],
     });
     if (selection.canceled) return [];
