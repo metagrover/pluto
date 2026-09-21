@@ -133,6 +133,7 @@ export type GenerateMeetingNotesInput = {
   onDraft?: (draft: NotesDraft, phase?: 'streaming' | 'complete') => void;
   onPlan?: (plan: { plannedLeafCount: number }) => void;
   onRepartition?: () => void;
+  onTransitionToHierarchy?: () => void;
   /** Product deadline for optional model review; writers remain fail-closed. */
   optionalReviewDeadlineAtMs?: number;
   /** Minimum remaining wall time required before starting optional review. */

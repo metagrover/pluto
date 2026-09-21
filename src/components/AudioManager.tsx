@@ -982,6 +982,15 @@ export const AudioManager = ({
           system: () => systemPcmSampleRateRef.current,
         },
         maxOutstanding: 48,
+        // Raise the retained-audio budget above the Ollama live inference ceiling
+        // (OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20 s). When askPlutoLive saturates
+        // the CPU/ANE the Parakeet EOU IPC round-trip slows and the renderer
+        // queue can accumulate up to ~20 s of PCM before the main process drains
+        // it. 45 s gives a comfortable margin; 24 MiB covers both sources at
+        // 16 kHz Float32 for the full window (2 × 45 s × 16 000 × 4 B ≈ 5.76 MiB
+        // each, 11.5 MiB total — well within 24 MiB).
+        maxRetainedAudioSecondsPerSource: 45,
+        maxRetainedPcmBytes: 24 * 1024 * 1024,
         transport: {
           invoke: (channel, payload) =>
             window.ipcRenderer.invoke(channel, payload),

@@ -122,6 +122,7 @@ import {
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 import { AllMeetingsTab } from './components/features/AllMeetingsTab';
+import { LocalSourcesTab } from './components/features/LocalSourcesTab';
 
 import {
   SettingsTab,
@@ -229,7 +230,14 @@ function App() {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [navHistory, setNavHistory] = useState<
     Array<{
-      tab: 'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings';
+      tab:
+        | 'hub'
+        | 'people'
+        | 'projects'
+        | 'sources'
+        | 'meetings'
+        | 'chat'
+        | 'settings';
       meetingId: string | number | null;
       personId: string | null;
       personName?: string | null;
@@ -239,7 +247,7 @@ function App() {
     }>
   >([]);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'meetings' | 'chat' | 'settings'
+    'hub' | 'people' | 'projects' | 'sources' | 'meetings' | 'chat' | 'settings'
   >(
     window.__PLUTO_BROWSER_PREVIEW__ &&
       !meetingPreviewEnabled &&
@@ -247,6 +255,7 @@ function App() {
       ? 'projects'
       : 'hub',
   );
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(
     (!window.__PLUTO_BROWSER_PREVIEW__ ||
       meetingPreviewEnabled ||
@@ -1278,6 +1287,8 @@ function App() {
         defaultLabel = 'Back to Project';
       } else if (activeTab === 'projects') {
         defaultLabel = 'Back to Projects';
+      } else if (activeTab === 'sources') {
+        defaultLabel = 'Back to Sources';
       } else if (activeTab === 'meetings') {
         defaultLabel = 'All meetings';
       } else if (activeTab === 'chat') {
@@ -2151,6 +2162,8 @@ function App() {
                 }
                 handleDeleteMeeting={handleDeleteMeeting}
               />
+            ) : activeTab === 'sources' ? (
+              <LocalSourcesTab selectedSourceId={selectedSourceId} />
             ) : activeTab === 'chat' ? (
               <div className="flex-1 w-full animate-in flex flex-col">
                 <AskPluto
@@ -2159,6 +2172,10 @@ function App() {
                   onOpenMeeting={(meetingId, target) => {
                     setAskPlutoCitationTarget({ meetingId, ...target });
                     handleOpenMeeting(meetingId, { label: 'Back to Chat' });
+                  }}
+                  onOpenArtifact={(artifactId) => {
+                    setSelectedSourceId(artifactId);
+                    setActiveTab('sources');
                   }}
                   activeMeetingSnapshot={
                     captureLifecycle.state === 'recording' &&

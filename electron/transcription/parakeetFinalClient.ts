@@ -97,7 +97,6 @@ export const parseSpeakerEvidenceResult = (
     Number(entry.endTime) > Number(entry.startTime);
   const turnsValid =
     Array.isArray(candidate.turns) &&
-    candidate.turns.length <= 256 &&
     candidate.turns.every(
       (turn) =>
         finiteRange(turn) &&
@@ -108,7 +107,6 @@ export const parseSpeakerEvidenceResult = (
   const windowsValid =
     Array.isArray(candidate.energyWindows) &&
     candidate.energyWindows.length > 0 &&
-    candidate.energyWindows.length <= 1_024 &&
     candidate.energyWindows.every(
       (window) =>
         finiteRange(window) &&

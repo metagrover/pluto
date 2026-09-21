@@ -139,6 +139,7 @@ export type MeetingAnalysisRunCoordinatorDb = {
     speakerDisplayNames: Record<string, string>;
     trustedUserTerms: string[];
   };
+  getMeetingAttachedArtifactsText?(meetingId: string | number): string;
   upsertMeetingAnalysisRunMetric?(input: {
     meetingId: string | number;
     runId: string;
@@ -926,13 +927,22 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
               }, deadlineMs);
             });
             try {
+              const attachedArtifactsText =
+                dependencies.db.getMeetingAttachedArtifactsText?.(
+                  admittedMeeting.id,
+                ) ?? '';
+              const combinedUserNotes = attachedArtifactsText
+                ? admittedMeeting.user_notes
+                  ? `${admittedMeeting.user_notes}\n\n${attachedArtifactsText}`
+                  : attachedArtifactsText
+                : (admittedMeeting.user_notes ?? '');
               return await Promise.race([
                 provider.generateStructuredAnalysis(
                   buildAnalysisTranscriptFromJson(
                     admittedMeeting.transcript_json!,
                     admittedNotesInput.projection.speakerDisplayNames,
                   ),
-                  admittedMeeting.user_notes ?? '',
+                  combinedUserNotes,
                   template.id,
                   {
                     signal: controller.signal,

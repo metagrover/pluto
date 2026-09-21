@@ -15,6 +15,25 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-21 - Raise EOU renderer retained-audio budget to survive local Ollama inference
+
+- **Status:** Accepted
+- **Decision:** Explicitly configure `createEouRendererSession` in `AudioManager` with `maxRetainedAudioSecondsPerSource: 45` and `maxRetainedPcmBytes: 24 MiB`, replacing the previous defaults of 20 s / 8 MiB.
+- **Rationale:** When `askPlutoLive` runs local Ollama (phi4-mini) during a meeting it can occupy the CPU/ANE for up to `OLLAMA_LIVE_ASK_PLUTO_TIMEOUT_MS = 20 s`. This slows Parakeet EOU's IPC round-trip in the main process. Because the renderer-side EOU pump dispatches frames serially and measures retained audio including queued and in-flight frames, a prolonged IPC stall causes the per-source retained duration to accumulate up to the live inference latency. The previous 20 s default matched the worst-case inference ceiling exactly, leaving zero headroom and causing `parakeet_backpressure` to terminate live transcription for the rest of the meeting. The 24 MiB byte cap comfortably covers 45 s × 2 sources at 16 kHz Float32 (≈ 11.5 MiB).
+- **Consequences:** Live transcription survives local Ollama inference spikes up to 45 s per source without dropping to `parakeet_backpressure`. No impact on short-latency paths or normal operation.
+
+## 2026-09-21 - Dynamic call budget and extended leaf capacity for meeting notes of any size
+
+- **Status:** Accepted
+- **Supersedes:** The 4-leaf admission limit in “2026-09-12 - Admit compact notes from the existing call budget” and the fixed six-call ceiling in “2026-09-04 - Attribute recovered mic speech to the user and bound production notes.”
+- **Decision:** Pluto supports meeting notes generation for meetings of any size without failing on bounded compact plan admission:
+  1. *Extended compact leaf ceiling:* Raise `MAX_BOUNDED_COMPACT_LEAVES` from 4 leaves (~32,000 characters / ~35 minutes) to 64 leaves (~512,000 characters / ~10 hours, aligning with `NOTES_HIERARCHY_LIMITS.maxNodes / 2`).
+  2. *Dynamic model call budget:* Derive the model call budget dynamically from the planned leaf count: for $\le 4$ leaves, preserve the existing 6-call ceiling (`NOTES_BOUNDED_LIMITS.maxModelCalls`); for $> 4$ leaves, scale the ceiling dynamically to $\min(128, \text{plannedLeafCount} \times 2)$ so that every admitted leaf completes its writer packet with recovery split allowance, while optional editor reviews run within the budget or gracefully fall back to deterministic source checks.
+  3. *Hierarchical fallback:* If an ultra-long meeting exceeds bounded compact capacity, `runMeetingNotes` smoothly falls back to `runHierarchy` rather than throwing `notes_bounded_plan_exceeded`.
+  4. *Preserved safety bounds:* The 12-minute absolute deadline, single writer recovery split per leaf, conservative mechanical acceptance, and source grounding remain in full force.
+- **Rationale:** A meeting assistant must reliably generate notes for meetings of any ordinary or extended duration. The previous hardcoded 4-leaf ceiling caused all meetings exceeding ~35 minutes to abort with `notes_bounded_plan_exceeded` before making a single model call, presenting users with `"This transcript exceeds Pluto's current analysis capacity"`. Because bounded compact notes orchestrate each leaf independently in linear $O(N)$ writer calls without complex tree merges, admitting larger leaf counts remains fast, token-efficient, and well within the 12-minute deadline.
+- **Consequences:** All meetings from short standups to multi-hour conferences generate complete, grounded notes. The `notes_bounded_plan_exceeded` failure is eliminated for standard meetings.
+
 ## 2026-09-17 - Automatically assign speakers for strong voice matches
 
 - **Status:** Accepted

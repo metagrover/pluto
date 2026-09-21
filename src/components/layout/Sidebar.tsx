@@ -1,4 +1,5 @@
 import {
+  Files,
   FolderKanban,
   Home,
   Library,
@@ -25,6 +26,7 @@ type ActiveTab =
   | 'hub'
   | 'people'
   | 'projects'
+  | 'sources'
   | 'meetings'
   | 'chat'
   | 'settings';
@@ -223,6 +225,24 @@ export const Sidebar = ({
               }
             />
             <span className="text-[14px]">People</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('sources');
+              setSelectedMeetingId(null);
+            }}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'sources' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
+          >
+            <Files
+              size={16}
+              className={
+                activeTab === 'sources' && !selectedMeetingId
+                  ? 'text-pro-text-main'
+                  : ''
+              }
+            />
+            <span className="text-[14px]">Sources</span>
           </button>
         </div>
 

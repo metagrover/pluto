@@ -6,6 +6,7 @@ import type { NativeChildProcess } from '../../electron/transcription/nativeJson
 import {
   ParakeetFinalClient,
   type ParakeetRuntimePaths,
+  parseSpeakerEvidenceResult,
 } from '../../electron/transcription/parakeetFinalClient';
 import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
 
@@ -348,6 +349,67 @@ describe('ParakeetFinalClient', () => {
     await expect(request).resolves.toMatchObject({
       turns: [{ cluster: 'S1' }],
     });
+  });
+
+  it('accepts full meeting speaker evidence with > 1024 energy windows and > 256 turns', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const request = client.speakerEvidence({
+      mixedAudioPath: '/user/recordings/mixed.wav',
+      micAudioPath: '/user/recordings/mic.wav',
+      systemAudioPath: '/user/recordings/system.wav',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const response = speakerEvidenceSuccess(String(child.writes[0].id));
+    response.result.speakerEvidence.turns = Array.from(
+      { length: 300 },
+      (_, i) => ({
+        startTime: i,
+        endTime: i + 0.8,
+        cluster: `S${(i % 3) + 1}`,
+      }),
+    );
+    response.result.speakerEvidence.energyWindows = Array.from(
+      { length: 3_000 },
+      (_, i) => ({
+        startTime: i * 0.1,
+        endTime: (i + 1) * 0.1,
+        micRms: 0.1,
+        systemRms: 0.05,
+      }),
+    );
+    child.respond(response);
+
+    const result = await request;
+    expect(result.turns).toHaveLength(300);
+    expect(result.energyWindows).toHaveLength(3_000);
+  });
+
+  it('validates speaker evidence of any meeting length without arbitrary caps', () => {
+    const valid = {
+      turns: Array.from({ length: 500 }, (_, i) => ({
+        startTime: i,
+        endTime: i + 0.8,
+        cluster: `S${(i % 5) + 1}`,
+      })),
+      energyWindows: Array.from({ length: 20_000 }, (_, i) => ({
+        startTime: i * 0.1,
+        endTime: (i + 1) * 0.1,
+        micRms: 0.1,
+        systemRms: 0.1,
+      })),
+      provenance: {
+        modelIdentifier: 'speaker-diarization-offline-v1',
+        modelRevision: 'a'.repeat(40),
+        artifactDigest: 'b'.repeat(64),
+        runtimeVersion: 'test',
+      },
+      timings: { diarizationMs: 100, energyAnalysisMs: 50, totalMs: 150 },
+      windowSeconds: 0.1,
+    };
+    const parsed = parseSpeakerEvidenceResult(valid);
+    expect(parsed.turns).toHaveLength(500);
+    expect(parsed.energyWindows).toHaveLength(20_000);
   });
 
   it('deserializes clusterEvidence and profileAlgorithmVersion when present', async () => {

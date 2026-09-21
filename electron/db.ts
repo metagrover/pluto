@@ -141,6 +141,11 @@ import {
   serializeMeetingNotesRunMetric,
 } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
+import {
+  type LocalArtifactRecord,
+  type LocalArtifactStatus,
+  localArtifactStatusProjection,
+} from './localArtifacts';
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
@@ -715,6 +720,367 @@ export const listWorkingMemorySnapshots = (): WorkingMemorySnapshot[] => {
         new Date(right.generated_at).getTime() -
         new Date(left.generated_at).getTime(),
     );
+};
+
+export const getLocalArtifact = (
+  id: string,
+): LocalArtifactRecord | undefined => {
+  const artifact = db
+    .prepare('SELECT * FROM local_artifacts WHERE id = ?')
+    .get(id) as LocalArtifactRecord | undefined;
+  if (!artifact) return undefined;
+  const attached_meetings = listMeetingsForArtifact(id);
+  return {
+    ...artifact,
+    attached_meetings,
+  };
+};
+
+export const listLocalArtifacts = (): LocalArtifactRecord[] => {
+  const artifacts = db
+    .prepare(
+      'SELECT * FROM local_artifacts ORDER BY datetime(imported_at) DESC, id ASC',
+    )
+    .all() as LocalArtifactRecord[];
+
+  try {
+    const junctionRows = db
+      .prepare(`
+        SELECT mla.artifact_id, m.id as meeting_id, m.title as meeting_title
+        FROM meeting_local_artifacts mla
+        JOIN meetings m ON mla.meeting_id = m.id
+      `)
+      .all() as Array<{
+      artifact_id: string;
+      meeting_id: string | number;
+      meeting_title: string | null;
+    }>;
+
+    const meetingsByArtifact = new Map<
+      string,
+      Array<{ id: string; title: string }>
+    >();
+    for (const row of junctionRows) {
+      const list = meetingsByArtifact.get(row.artifact_id) ?? [];
+      list.push({
+        id: String(row.meeting_id),
+        title: row.meeting_title || 'Untitled Meeting',
+      });
+      meetingsByArtifact.set(row.artifact_id, list);
+    }
+
+    return artifacts.map((artifact) => ({
+      ...artifact,
+      attached_meetings: meetingsByArtifact.get(artifact.id) ?? [],
+    }));
+  } catch (error) {
+    console.error('[db] Failed to associate meetings with artifacts:', error);
+    return artifacts;
+  }
+};
+
+const syncLocalArtifactFts = (
+  artifactId: string,
+  title: string,
+  extractedText: string,
+): void => {
+  try {
+    db.prepare('DELETE FROM local_artifacts_fts WHERE artifact_id = ?').run(
+      artifactId,
+    );
+    db.prepare(
+      'INSERT INTO local_artifacts_fts (title, extracted_text, artifact_id) VALUES (?, ?, ?)',
+    ).run(title, extractedText, artifactId);
+  } catch (error) {
+    console.error('[db] Failed to sync local_artifacts_fts:', error);
+  }
+};
+
+export const saveLocalArtifact = (
+  artifact: LocalArtifactRecord,
+): LocalArtifactRecord => {
+  const existing = db
+    .prepare(
+      'SELECT * FROM local_artifacts WHERE content_hash = ? OR original_path = ?',
+    )
+    .get(artifact.content_hash, artifact.original_path) as
+    | LocalArtifactRecord
+    | undefined;
+
+  if (existing) {
+    db.prepare(`
+      UPDATE local_artifacts
+      SET title = ?, type = ?, captured_at = ?, imported_at = ?, original_path = ?,
+          content_hash = ?, extracted_text = ?, metadata_json = ?,
+          source_quality = ?, trust_status = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      artifact.title,
+      artifact.type,
+      artifact.captured_at,
+      artifact.imported_at,
+      artifact.original_path,
+      artifact.content_hash,
+      artifact.extracted_text,
+      artifact.metadata_json,
+      artifact.source_quality,
+      artifact.trust_status,
+      artifact.updated_at,
+      existing.id,
+    );
+    syncLocalArtifactFts(existing.id, artifact.title, artifact.extracted_text);
+    return getLocalArtifact(existing.id)!;
+  }
+
+  db.prepare(`
+    INSERT INTO local_artifacts (
+      id, type, title, captured_at, imported_at, original_path, content_hash,
+      extracted_text, metadata_json, source_quality, trust_status, status,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    artifact.id,
+    artifact.type,
+    artifact.title,
+    artifact.captured_at,
+    artifact.imported_at,
+    artifact.original_path,
+    artifact.content_hash,
+    artifact.extracted_text,
+    artifact.metadata_json,
+    artifact.source_quality,
+    artifact.trust_status,
+    artifact.status,
+    artifact.created_at,
+    artifact.updated_at,
+  );
+  syncLocalArtifactFts(artifact.id, artifact.title, artifact.extracted_text);
+  return getLocalArtifact(artifact.id)!;
+};
+
+export const setLocalArtifactStatus = (
+  id: string,
+  status: LocalArtifactStatus,
+): LocalArtifactRecord | undefined => {
+  const artifact = getLocalArtifact(id);
+  if (!artifact) return undefined;
+  const next = localArtifactStatusProjection(artifact, status);
+  db.prepare(`
+    UPDATE local_artifacts
+    SET status = ?, source_quality = ?, trust_status = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    next.status,
+    next.source_quality,
+    next.trust_status,
+    next.updated_at,
+    id,
+  );
+  return getLocalArtifact(id);
+};
+
+export const deleteLocalArtifact = (id: string): boolean => {
+  try {
+    db.prepare('DELETE FROM meeting_local_artifacts WHERE artifact_id = ?').run(
+      id,
+    );
+  } catch (error) {
+    console.error('[db] Failed to delete from meeting_local_artifacts:', error);
+  }
+  try {
+    db.prepare('DELETE FROM local_artifacts_fts WHERE artifact_id = ?').run(id);
+  } catch (error) {
+    console.error('[db] Failed to delete from local_artifacts_fts:', error);
+  }
+  return (
+    db.prepare('DELETE FROM local_artifacts WHERE id = ?').run(id).changes === 1
+  );
+};
+
+export const attachArtifactToMeeting = (
+  meetingId: string | number,
+  artifactId: string,
+): boolean => {
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO meeting_local_artifacts (meeting_id, artifact_id)
+      VALUES (?, ?)
+    `).run(String(meetingId), artifactId);
+    return true;
+  } catch (error) {
+    console.error('[db] Failed to attach artifact to meeting:', error);
+    return false;
+  }
+};
+
+export const detachArtifactFromMeeting = (
+  meetingId: string | number,
+  artifactId: string,
+): boolean => {
+  try {
+    const result = db
+      .prepare(`
+        DELETE FROM meeting_local_artifacts
+        WHERE meeting_id = ? AND artifact_id = ?
+      `)
+      .run(String(meetingId), artifactId);
+    return result.changes > 0;
+  } catch (error) {
+    console.error('[db] Failed to detach artifact from meeting:', error);
+    return false;
+  }
+};
+
+export const listArtifactsForMeeting = (
+  meetingId: string | number,
+): LocalArtifactRecord[] => {
+  try {
+    return db
+      .prepare(`
+        SELECT a.*
+        FROM meeting_local_artifacts mla
+        JOIN local_artifacts a ON mla.artifact_id = a.id
+        WHERE mla.meeting_id = ?
+        ORDER BY datetime(a.imported_at) DESC, a.id ASC
+      `)
+      .all(String(meetingId)) as LocalArtifactRecord[];
+  } catch (error) {
+    console.error('[db] Failed to list artifacts for meeting:', error);
+    return [];
+  }
+};
+
+export const listMeetingsForArtifact = (
+  artifactId: string,
+): Array<{ id: string; title: string }> => {
+  try {
+    const rows = db
+      .prepare(`
+        SELECT m.id, m.title
+        FROM meeting_local_artifacts mla
+        JOIN meetings m ON mla.meeting_id = m.id
+        WHERE mla.artifact_id = ?
+        ORDER BY datetime(m.created_at) DESC
+      `)
+      .all(artifactId) as Array<{ id: string | number; title: string | null }>;
+    return rows.map((r) => ({
+      id: String(r.id),
+      title: r.title || 'Untitled Meeting',
+    }));
+  } catch (error) {
+    console.error('[db] Failed to list meetings for artifact:', error);
+    return [];
+  }
+};
+
+export const getMeetingAttachedArtifactsText = (
+  meetingId: string | number,
+): string => {
+  const artifacts = listArtifactsForMeeting(meetingId);
+  const activeArtifacts = artifacts.filter(
+    (a) =>
+      a.status !== 'excluded' &&
+      typeof a.extracted_text === 'string' &&
+      a.extracted_text.trim(),
+  );
+  if (activeArtifacts.length === 0) return '';
+  return activeArtifacts
+    .map((a) => `[Attached Document: ${a.title}]\n${a.extracted_text.trim()}`)
+    .join('\n\n');
+};
+
+export const searchLocalArtifactsFts = (
+  rawTerms: string[] | string,
+  requestedLimit = 8,
+): Array<LocalArtifactRecord & { match_score: number; snippet?: string }> => {
+  const terms = Array.isArray(rawTerms) ? rawTerms : rawTerms.split(/\s+/);
+
+  const cleanTerms = [
+    ...new Set(
+      terms
+        .flatMap((term) => term.toLocaleLowerCase().split(/\s+/))
+        .map((term) => term.replace(/[^\p{L}\p{N}_-]/gu, '').trim())
+        .filter((term) => term.length >= 2),
+    ),
+  ];
+
+  if (cleanTerms.length === 0) return [];
+
+  const ftsQuery = cleanTerms.map((term) => `"${term}"*`).join(' OR ');
+
+  try {
+    const rows = db
+      .prepare(`
+        SELECT 
+          a.*,
+          snippet(local_artifacts_fts, 1, '...', '...', '...', 32) AS snippet,
+          bm25(local_artifacts_fts) AS rank
+        FROM local_artifacts_fts f
+        JOIN local_artifacts a ON f.artifact_id = a.id
+        WHERE local_artifacts_fts MATCH ?
+          AND a.status = 'active'
+        ORDER BY rank
+        LIMIT ?
+      `)
+      .all(ftsQuery, Math.max(1, Math.min(requestedLimit, 20))) as Array<
+      LocalArtifactRecord & { snippet?: string; rank: number }
+    >;
+
+    if (rows.length > 0) {
+      return rows.map((row) => ({
+        ...row,
+        match_score: Math.max(0.1, 1 / (1 + Math.abs(row.rank || 0))),
+      }));
+    }
+  } catch (error) {
+    console.error(
+      '[db] local_artifacts_fts MATCH failed, falling back to substring:',
+      error,
+    );
+  }
+
+  return searchLocalArtifacts(cleanTerms, requestedLimit);
+};
+
+export const searchLocalArtifacts = (
+  rawTerms: string[],
+  requestedLimit = 6,
+): Array<LocalArtifactRecord & { match_score: number }> => {
+  const terms = [
+    ...new Set(
+      rawTerms
+        .flatMap((term) => term.toLocaleLowerCase().split(/\s+/))
+        .map((term) => term.replace(/[^\p{L}\p{N}_-]+/gu, '').trim())
+        .filter((term) => term.length >= 2),
+    ),
+  ];
+  if (terms.length === 0) return [];
+  const rows = db
+    .prepare("SELECT * FROM local_artifacts WHERE status = 'active'")
+    .all() as LocalArtifactRecord[];
+
+  return rows
+    .map((artifact) => {
+      const title = artifact.title.toLocaleLowerCase();
+      const content = artifact.extracted_text.toLocaleLowerCase();
+      const matchedTerms = terms.filter(
+        (term) => title.includes(term) || content.includes(term),
+      );
+      const titleMatches = matchedTerms.filter((term) =>
+        title.includes(term),
+      ).length;
+      return {
+        ...artifact,
+        match_score: matchedTerms.length / terms.length + titleMatches * 0.15,
+      };
+    })
+    .filter((artifact) => artifact.match_score > 0)
+    .sort(
+      (left, right) =>
+        right.match_score - left.match_score ||
+        Date.parse(right.imported_at) - Date.parse(left.imported_at),
+    )
+    .slice(0, Math.max(1, Math.min(requestedLimit, 20)));
 };
 
 export const upsertWorkingMemorySnapshot = (input: {
@@ -3034,10 +3400,16 @@ export const getMeetingAnalysisPublicationRevisions = (
             : null,
       }),
     );
+    const attachedArtifactsText = getMeetingAttachedArtifactsText(meeting.id);
+    const combinedNotes = attachedArtifactsText
+      ? meeting.user_notes
+        ? `${meeting.user_notes}\n\n${attachedArtifactsText}`
+        : attachedArtifactsText
+      : meeting.user_notes;
     return {
       sourceRevision: source.revision,
       eligibilityRevision,
-      userNotesHash: hashMeetingAnalysisValue(meeting.user_notes),
+      userNotesHash: hashMeetingAnalysisValue(combinedNotes),
     };
   } catch {
     return null;
@@ -3524,6 +3896,7 @@ export const deleteMeeting = (id: string | number) => {
     'identity_captures',
     'identity_resolutions',
     'identity_resolution_history',
+    'meeting_local_artifacts',
   ]) {
     db.prepare(`DELETE FROM ${table} WHERE meeting_id = ?`).run(safeId);
   }

@@ -31,6 +31,7 @@ interface AskPlutoProps {
     id: string,
     target?: { sectionId?: string; timestampMs?: number },
   ) => void;
+  onOpenArtifact: (id: string) => void;
   visible: boolean;
   onClose: () => void;
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
@@ -55,7 +56,12 @@ interface Message {
 const groupCitationsByMeeting = (citations: CitationChain[]) => {
   const groups = new Map<
     string,
-    { meetingId: string; meetingTitle: string; citations: CitationChain[] }
+    {
+      meetingId: string;
+      meetingTitle: string;
+      sourceType: 'meeting' | 'artifact';
+      citations: CitationChain[];
+    }
   >();
 
   for (const citation of citations) {
@@ -67,6 +73,7 @@ const groupCitationsByMeeting = (citations: CitationChain[]) => {
     groups.set(citation.meeting_id, {
       meetingId: citation.meeting_id,
       meetingTitle: citation.meeting_title || 'Untitled meeting',
+      sourceType: citation.source_type || 'meeting',
       citations: [citation],
     });
   }
@@ -76,6 +83,7 @@ const groupCitationsByMeeting = (citations: CitationChain[]) => {
 
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
+  onOpenArtifact,
   visible,
   activeMeetingSnapshot,
 }) => {
@@ -658,15 +666,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                             <span>
                               {msg.citations.length}{' '}
                               {msg.citations.length === 1
-                                ? 'source'
-                                : 'sources'}
+                                ? 'reference'
+                                : 'references'}
                             </span>
                             <span className="text-pro-text-muted/50">·</span>
                             <span className="font-normal">
                               {citationGroups.length}{' '}
                               {citationGroups.length === 1
-                                ? 'meeting'
-                                : 'meetings'}
+                                ? 'source'
+                                : 'sources'}
                             </span>
                             <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-open/source:rotate-180" />
                           </summary>
@@ -697,8 +705,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                 >
                                   <button
                                     type="button"
-                                    aria-label={`Open ${group.meetingTitle}`}
+                                    aria-label={
+                                      group.sourceType === 'artifact'
+                                        ? `Open local source ${group.meetingTitle}`
+                                        : `Open ${group.meetingTitle}`
+                                    }
                                     onClick={() => {
+                                      if (group.sourceType === 'artifact') {
+                                        onOpenArtifact(group.meetingId);
+                                        return;
+                                      }
                                       if (!navigationCitation) {
                                         onOpenMeeting(group.meetingId);
                                         return;
@@ -726,24 +742,26 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                                         {group.meetingTitle}
                                       </span>
                                       <span className="mt-0.5 block text-[11px] text-pro-text-muted">
-                                        {navigationCitation?.section_heading ||
-                                          (navigationCitation?.timestamp_ms !==
-                                          undefined
-                                            ? `Transcript · ${Math.floor(
-                                                navigationCitation.timestamp_ms /
-                                                  60000,
-                                              )}:${Math.floor(
-                                                (navigationCitation.timestamp_ms /
-                                                  1000) %
-                                                  60,
-                                              )
-                                                .toString()
-                                                .padStart(2, '0')}`
-                                            : `${group.citations.length} ${
-                                                group.citations.length === 1
-                                                  ? 'reference'
-                                                  : 'references'
-                                              }`)}
+                                        {group.sourceType === 'artifact'
+                                          ? 'Local source'
+                                          : navigationCitation?.section_heading ||
+                                            (navigationCitation?.timestamp_ms !==
+                                            undefined
+                                              ? `Transcript · ${Math.floor(
+                                                  navigationCitation.timestamp_ms /
+                                                    60000,
+                                                )}:${Math.floor(
+                                                  (navigationCitation.timestamp_ms /
+                                                    1000) %
+                                                    60,
+                                                )
+                                                  .toString()
+                                                  .padStart(2, '0')}`
+                                              : `${group.citations.length} ${
+                                                  group.citations.length === 1
+                                                    ? 'reference'
+                                                    : 'references'
+                                                }`)}
                                       </span>
                                     </span>
                                     <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pro-text-muted/60 transition-colors group-hover/meeting:text-pro-accent" />

@@ -298,6 +298,8 @@ export const buildCitationChain = (
         meeting_id: source.meeting_id,
         meeting_title:
           source.meeting_title || source.mid?.title || 'Unknown Meeting',
+        source_type: source.source_type || 'meeting',
+        source_id: source.source_id || source.meeting_id,
         evidence_span: evidenceSpan,
         evidence_valid: false, // set by auditCitations
         trust_status: 'needs_review',
@@ -330,6 +332,8 @@ export const buildCitationChain = (
         claim,
         meeting_id,
         meeting_title: meetingTitle,
+        source_type: source?.source_type || 'meeting',
+        source_id: source?.source_id || meeting_id,
         entity_id: entity_id || undefined,
         evidence_span: evidence_span || undefined,
         evidence_valid: false,

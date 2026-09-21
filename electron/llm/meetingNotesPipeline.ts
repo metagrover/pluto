@@ -115,15 +115,13 @@ export const NOTES_HIERARCHY_LIMITS = {
 } as const;
 export const NOTES_BOUNDED_LIMITS = {
   maxModelCalls: 6,
+  maxLeaves: 64,
   maxRecoverySplits: 1,
   maxSourceCharactersPerLeaf: 8_000,
 } as const;
-// One failed writer plus its two replacement writers consumes two calls beyond
-// the call already planned for that leaf. Reserve that recovery capacity before
-// admitting a compact plan; any remaining calls are optional editor reviews.
-const MAX_BOUNDED_COMPACT_LEAVES =
-  NOTES_BOUNDED_LIMITS.maxModelCalls -
-  NOTES_BOUNDED_LIMITS.maxRecoverySplits * 2;
+// Compact plans admit up to maxLeaves (supporting meetings up to 10+ hours).
+// The model call budget scales dynamically to guarantee every writer packet completes.
+const MAX_BOUNDED_COMPACT_LEAVES = NOTES_BOUNDED_LIMITS.maxLeaves;
 
 const uniqueSpans = (spans: SourceSpan[]): SourceSpan[] => {
   const seen = new Set<string>();
@@ -1553,8 +1551,9 @@ const planBoundedCompactLeaves = (
 const runBoundedCompactNotes = async (
   input: GenerateMeetingNotesInput,
   knownTerms: NotesKnownTerm[],
+  plannedLeaves?: ReturnType<typeof planBoundedCompactLeaves>,
 ): Promise<AnalysisDocumentV3> => {
-  const leaves = planBoundedCompactLeaves(input, knownTerms);
+  const leaves = plannedLeaves ?? planBoundedCompactLeaves(input, knownTerms);
   input.onPlan?.({ plannedLeafCount: leaves.length });
   if (leaves.length > MAX_BOUNDED_COMPACT_LEAVES) {
     throw new MeetingNotesError('notes_bounded_plan_exceeded');
@@ -1751,7 +1750,10 @@ const runBoundedCompactNotes = async (
         writtenLeaves.length *
         (input.hierarchyAuditStrategy === 'deterministic_only' ? 1 : 2),
       max_depth: 1,
-      max_nodes: NOTES_BOUNDED_LIMITS.maxModelCalls,
+      max_nodes: Math.max(
+        NOTES_BOUNDED_LIMITS.maxModelCalls,
+        writtenLeaves.length * 2,
+      ),
     },
   );
 };
@@ -1795,10 +1797,11 @@ const runMeetingNotes = async (
       : WRITER_OUTPUT_TOKENS;
     if (!fits(input, writerPrompt, writerOutputTokens)) {
       if (input.compactWriterContract) {
-        return runBoundedCompactNotes(
-          { ...input, reviewProtocol: 'editor' },
-          knownTerms,
-        );
+        const compactInput = { ...input, reviewProtocol: 'editor' as const };
+        const leaves = planBoundedCompactLeaves(compactInput, knownTerms);
+        if (leaves.length <= MAX_BOUNDED_COMPACT_LEAVES) {
+          return runBoundedCompactNotes(compactInput, knownTerms, leaves);
+        }
       }
       return runHierarchy(input, knownTerms);
     }
@@ -1829,8 +1832,20 @@ const runMeetingNotes = async (
     evidenceSpans,
   );
   if (capacity.mode !== 'direct') {
-    if (!compactEditor) return runHierarchy(input, knownTerms);
-    return runBoundedCompactNotes(input, knownTerms);
+    if (compactEditor) {
+      const leaves = planBoundedCompactLeaves(input, knownTerms);
+      if (leaves.length <= MAX_BOUNDED_COMPACT_LEAVES) {
+        return runBoundedCompactNotes(input, knownTerms, leaves);
+      }
+      const hierarchyInput: GenerateMeetingNotesInput = {
+        ...input,
+        compactWriterContract: undefined,
+        reviewProtocol: undefined,
+      };
+      input.onTransitionToHierarchy?.();
+      return runHierarchy(hierarchyInput, knownTerms);
+    }
+    return runHierarchy(input, knownTerms);
   }
 
   const draft = compactEditor
@@ -1912,16 +1927,33 @@ export const generateMeetingNotes = async (
   let repairs = 0;
   let generatedNodes = 0;
   let modelCalls = 0;
-  const boundedCompact =
+  let plannedLeafCount = 0;
+  let isBoundedCompact =
     input.compactWriterContract && input.reviewProtocol === 'editor';
+  const getCallLimit = () => {
+    if (!isBoundedCompact) return NOTES_HIERARCHY_LIMITS.maxNodes;
+    if (plannedLeafCount <= 4) return NOTES_BOUNDED_LIMITS.maxModelCalls;
+    return Math.min(
+      NOTES_HIERARCHY_LIMITS.maxNodes,
+      Math.max(NOTES_BOUNDED_LIMITS.maxModelCalls, plannedLeafCount * 2),
+    );
+  };
   const runInput: GenerateMeetingNotesInput = {
     ...input,
     generate: async (request) => {
-      if (boundedCompact && modelCalls >= NOTES_BOUNDED_LIMITS.maxModelCalls) {
+      if (isBoundedCompact && modelCalls >= getCallLimit()) {
         throw new MeetingNotesError('notes_model_call_limit');
       }
       modelCalls += 1;
       return input.generate(request);
+    },
+    onPlan: (plan) => {
+      plannedLeafCount = plan.plannedLeafCount;
+      input.onPlan?.(plan);
+    },
+    onTransitionToHierarchy: () => {
+      isBoundedCompact = false;
+      input.onTransitionToHierarchy?.();
     },
     onStage: (task) => {
       if (
@@ -1949,7 +1981,7 @@ export const generateMeetingNotes = async (
             );
       result.quality.retry_count = repairs;
       const hierarchy = result.generation_metadata?.hierarchy;
-      if (boundedCompact && hierarchy) {
+      if (isBoundedCompact && hierarchy) {
         hierarchy.nodes = modelCalls;
       }
       return result;
@@ -1959,7 +1991,7 @@ export const generateMeetingNotes = async (
         error.code !== 'notes_input_overflow'
       )
         throw error;
-      if (boundedCompact) {
+      if (isBoundedCompact) {
         throw error;
       }
       planningTokens = Math.floor(planningTokens * 0.75);

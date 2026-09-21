@@ -40,6 +40,8 @@ const expectedTables = [
   'knowledge_docs',
   'live_meeting_context_checkpoints',
   'live_speaker_identity_confirmations',
+  'local_artifacts',
+  'local_artifacts_fts',
   'meeting_analysis_run_history',
   'meeting_analysis_runs',
   'meeting_audio_migrations',
@@ -50,6 +52,7 @@ const expectedTables = [
   'meeting_context_sections_fts',
   'meeting_context_snapshots',
   'meeting_entities',
+  'meeting_local_artifacts',
   'meeting_notes_fts',
   'meeting_speaker_candidates',
   'meetings',
@@ -90,7 +93,7 @@ const readApplicationTableNames = (sqlite: Database.Database) =>
     .map(({ name }) => name)
     .filter(
       (name) =>
-        !/^(entities_fts|meeting_context_sections_fts|meeting_notes_fts|meetings_fts)_(config|content|data|docsize|idx)$/.test(
+        !/^(entities_fts|local_artifacts_fts|meeting_context_sections_fts|meeting_notes_fts|meetings_fts)_(config|content|data|docsize|idx)$/.test(
           name,
         ),
     );

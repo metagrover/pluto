@@ -306,4 +306,12 @@ describe('AudioManager Parakeet EOU wiring', () => {
   it('configures EOU renderer session with warm-up queue tolerance (maxOutstanding: 48)', () => {
     expect(source).toContain('maxOutstanding: 48');
   });
+
+  it('raises the retained-audio budget to survive local Ollama inference latency (askPlutoLive ≤ 20 s)', () => {
+    // 45 s per source gives headroom above the 20 s Ollama live timeout so that
+    // CPU/ANE contention during askPlutoLive does not trigger parakeet_backpressure.
+    // 24 MiB covers both sources at 16 kHz Float32 for the full 45 s window.
+    expect(source).toContain('maxRetainedAudioSecondsPerSource: 45');
+    expect(source).toContain('maxRetainedPcmBytes: 24 * 1024 * 1024');
+  });
 });

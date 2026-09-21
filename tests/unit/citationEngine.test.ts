@@ -21,6 +21,36 @@ describe('Citation Engine', () => {
   });
 
   describe('buildCitationChain', () => {
+    it('preserves local artifact provenance in citations', () => {
+      const context = [
+        {
+          meeting_id: 'artifact-1',
+          meeting_title: 'Launch reference',
+          source_type: 'artifact',
+          source_id: 'artifact-1',
+          evidence_kind: 'artifact',
+          evidence_text: 'The Juniper launch uses a canary rollout.',
+          source_revision: 'revision-1',
+          trust_status: 'grounded',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const citations = buildCitationChain(
+        'Juniper uses a canary rollout. [Source 1]',
+        context,
+      );
+
+      expect(citations[0]).toMatchObject({
+        meeting_id: 'artifact-1',
+        meeting_title: 'Launch reference',
+        source_type: 'artifact',
+        source_id: 'artifact-1',
+        evidence_kind: 'artifact',
+        source_revision: 'revision-1',
+      });
+    });
+
     it('extracts citation tags from LLM output correctly', () => {
       const answer =
         'Here is what happened: <cite meeting="m1" entity="e1" quote="let\'s migrate">We decided to migrate</cite>. Later, <cite meeting="m2">No quote</cite>.';

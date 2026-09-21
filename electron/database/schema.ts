@@ -139,6 +139,63 @@ export const settings = sqliteTable('settings', {
   value: text('value'),
 });
 
+export const localArtifacts = sqliteTable(
+  'local_artifacts',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    title: text('title').notNull(),
+    capturedAt: datetime('captured_at').notNull(),
+    importedAt: datetime('imported_at').notNull(),
+    originalPath: text('original_path').notNull(),
+    contentHash: text('content_hash').notNull(),
+    extractedText: text('extracted_text').notNull(),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+    sourceQuality: text('source_quality').notNull(),
+    trustStatus: text('trust_status').notNull(),
+    status: text('status').notNull().default('active'),
+    createdAt: datetime('created_at').notNull().default(now),
+    updatedAt: datetime('updated_at').notNull().default(now),
+  },
+  (table) => [
+    check(
+      'local_artifacts_type_check',
+      sql`${table.type} IN ('markdown', 'text', 'pdf', 'docx', 'pages')`,
+    ),
+    check(
+      'local_artifacts_quality_check',
+      sql`${table.sourceQuality} IN ('usable', 'limited', 'noisy')`,
+    ),
+    check(
+      'local_artifacts_status_check',
+      sql`${table.status} IN ('active', 'noisy', 'excluded')`,
+    ),
+    uniqueIndex('idx_local_artifacts_content_hash').on(table.contentHash),
+    index('idx_local_artifacts_status_imported').on(
+      table.status,
+      desc(table.importedAt),
+    ),
+  ],
+);
+
+export const meetingLocalArtifacts = sqliteTable(
+  'meeting_local_artifacts',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => localArtifacts.id, { onDelete: 'cascade' }),
+    createdAt: datetime('created_at').notNull().default(now),
+  },
+  (table) => [
+    primaryKey({ columns: [table.meetingId, table.artifactId] }),
+    index('idx_meeting_local_artifacts_meeting').on(table.meetingId),
+    index('idx_meeting_local_artifacts_artifact').on(table.artifactId),
+  ],
+);
+
 export const meetingAudioRetention = sqliteTable('meeting_audio_retention', {
   meetingId: text('meeting_id')
     .primaryKey()

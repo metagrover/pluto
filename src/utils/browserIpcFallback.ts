@@ -14,6 +14,7 @@ import type {
   PersonBriefingDetail,
 } from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
+import type { LocalArtifact } from '../api/localArtifacts';
 import type { Meeting } from '../types';
 import { hasVerifiedSpeakerAttribution } from './speakerAttributionTrust';
 
@@ -27,6 +28,25 @@ type BrowserCaptureJournal = {
 };
 
 const now = new Date().toISOString();
+const previewLocalArtifacts: LocalArtifact[] = [
+  {
+    id: 'preview-local-source',
+    type: 'markdown',
+    title: 'Launch research notes',
+    captured_at: '2026-09-18T17:30:00.000Z',
+    imported_at: '2026-09-19T09:15:00.000Z',
+    original_path: '/Users/you/Documents/Launch research notes.md',
+    content_hash: 'preview-source-revision',
+    extracted_text:
+      'Customer research supports a staged launch and a support-owned announcement.',
+    metadata_json: '{"extension":".md"}',
+    source_quality: 'usable',
+    trust_status: 'grounded',
+    status: 'active',
+    created_at: '2026-09-19T09:15:00.000Z',
+    updated_at: '2026-09-19T09:15:00.000Z',
+  },
+];
 let meetingNotesTemplateSettings = createMeetingNotesTemplateSettingsSnapshot(
   'auto',
   {},
@@ -985,6 +1005,55 @@ const createInvokeFallback =
       case 'GET_KNOWLEDGE_DOC': {
         const id = String(args[0] || '');
         result = docs.find((doc) => doc.id === id);
+        break;
+      }
+      case 'LOCAL_ARTIFACTS_LIST':
+        result = previewLocalArtifacts;
+        break;
+      case 'LOCAL_ARTIFACTS_IMPORT':
+      case 'LOCAL_ARTIFACTS_IMPORT_PATHS':
+        result = [];
+        break;
+      case 'LOCAL_ARTIFACTS_SET_STATUS': {
+        const input = args[0] as {
+          id?: string;
+          status?: LocalArtifact['status'];
+        };
+        const index = previewLocalArtifacts.findIndex(
+          (artifact) => artifact.id === input.id,
+        );
+        if (index < 0 || !input.status) {
+          throw new Error('local_artifact_not_found');
+        }
+        previewLocalArtifacts[index] = {
+          ...previewLocalArtifacts[index],
+          status: input.status,
+          source_quality:
+            input.status === 'noisy'
+              ? 'noisy'
+              : previewLocalArtifacts[index].source_quality === 'noisy'
+                ? 'usable'
+                : previewLocalArtifacts[index].source_quality,
+          trust_status:
+            input.status === 'noisy'
+              ? 'weak_evidence'
+              : previewLocalArtifacts[index].trust_status === 'weak_evidence'
+                ? 'grounded'
+                : previewLocalArtifacts[index].trust_status,
+          updated_at: new Date().toISOString(),
+        };
+        result = previewLocalArtifacts[index];
+        break;
+      }
+      case 'LOCAL_ARTIFACTS_DELETE': {
+        const id = String(args[0] || '');
+        const idx = previewLocalArtifacts.findIndex((a) => a.id === id);
+        if (idx >= 0) {
+          previewLocalArtifacts.splice(idx, 1);
+          result = true;
+        } else {
+          result = false;
+        }
         break;
       }
       case 'REFRESH_KNOWLEDGE_DOC': {

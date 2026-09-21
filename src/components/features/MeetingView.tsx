@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   MoreHorizontal,
+  Paperclip,
   Sparkles,
   Undo2,
   Users,
@@ -34,6 +35,10 @@ import {
   getMeetingIdentity,
 } from '../../api/identity';
 import { type Entity, getMeetingEntities } from '../../api/knowledgeGraph';
+import {
+  importAndAttachMeetingArtifactPaths,
+  importAndAttachMeetingArtifacts,
+} from '../../api/localArtifacts';
 import {
   type VoiceMatchSuggestion,
   getSpeakerVoiceSuggestions,
@@ -67,6 +72,7 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { SearchSelect } from '../ui/SearchSelect';
+import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import {
@@ -800,6 +806,22 @@ const SelectedMeetingView = ({
   const [titleSaveError, setTitleSaveError] = useState<
     'conflict' | 'missing' | 'failed' | null
   >(null);
+  const [attachmentsRefreshKey, setAttachmentsRefreshKey] = useState(0);
+  const [isDraggingOverMeeting, setIsDraggingOverMeeting] = useState(false);
+
+  const handleAttachReferenceDocument = async () => {
+    if (!selectedMeeting) return;
+    try {
+      const imported = await importAndAttachMeetingArtifacts(
+        selectedMeeting.id,
+      );
+      if (imported.length > 0) {
+        setAttachmentsRefreshKey((k) => k + 1);
+      }
+    } catch (error) {
+      console.error('Failed to attach document:', error);
+    }
+  };
   const meetingId = String(selectedMeeting.id);
   const [prevMeetingId, setPrevMeetingId] = useState(meetingId);
   const [speakerDisplayNamesByMeeting, setSpeakerDisplayNamesByMeeting] =
@@ -1344,7 +1366,54 @@ const SelectedMeetingView = ({
         transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
       } ${isMeetingProcessing ? 'meeting-document--processing' : ''}`}
     >
-      <div className="meeting-notes-surface" aria-label="Notes">
+      <div
+        className="meeting-notes-surface relative"
+        aria-label="Notes"
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!isDraggingOverMeeting) setIsDraggingOverMeeting(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setIsDraggingOverMeeting(false);
+        }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          setIsDraggingOverMeeting(false);
+          const files = e.dataTransfer.files;
+          const paths: string[] = [];
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i] as unknown as { path?: string };
+            if (file.path) paths.push(file.path);
+          }
+          if (paths.length === 0 || !selectedMeeting) return;
+          try {
+            const imported = await importAndAttachMeetingArtifactPaths(
+              selectedMeeting.id,
+              paths,
+            );
+            if (imported.length > 0) {
+              setAttachmentsRefreshKey((k) => k + 1);
+            }
+          } catch (err) {
+            console.error('Failed to import dropped files:', err);
+          }
+        }}
+      >
+        {isDraggingOverMeeting && (
+          <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center bg-pro-bg/85 backdrop-blur-xs">
+            <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-pro-accent/60 bg-pro-accent/[0.05] p-8 text-center shadow-lg">
+              <Paperclip className="mb-2.5 h-8 w-8 text-pro-accent animate-bounce" />
+              <p className="text-[14px] font-semibold text-pro-text-main">
+                Drop document to attach to this meeting
+              </p>
+              <p className="mt-1 text-[12px] text-pro-text-muted">
+                Word, Pages, PDF, or text files will ground notes synthesis
+              </p>
+            </div>
+          </div>
+        )}
         {onBack && (
           <div className="meeting-document-topline">
             <button
@@ -1710,6 +1779,25 @@ const SelectedMeetingView = ({
                       </svg>
                       <span>Export meeting notes</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        (
+                          e.currentTarget.closest(
+                            'details',
+                          ) as HTMLDetailsElement | null
+                        )?.removeAttribute('open');
+                        void handleAttachReferenceDocument();
+                      }}
+                      className="meeting-toolbar-button"
+                      aria-label="Attach reference document"
+                    >
+                      <Paperclip
+                        aria-hidden="true"
+                        className="h-4 w-4 shrink-0"
+                      />
+                      <span>Attach reference document…</span>
+                    </button>
                   </div>
                   {selectedMeeting.finalization_status !==
                   'recovery_required' ? (
@@ -1852,6 +1940,14 @@ const SelectedMeetingView = ({
             </button>
           </section>
         ) : null}
+
+        <MeetingAttachmentsBar
+          meetingId={selectedMeeting.id}
+          hasExistingNotes={notesDocument.hasAnalysis}
+          onRegenerateNotes={() => void regenerateEnhancedNotes()}
+          isRegeneratingNotes={isRegeneratingNotes}
+          refreshTrigger={attachmentsRefreshKey}
+        />
 
         {pendingUserNotes ? (
           <section

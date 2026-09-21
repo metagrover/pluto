@@ -28,6 +28,8 @@ vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
   searchMeetingNotesFts: vi.fn(),
   searchMeetingContextSectionsFts: vi.fn().mockReturnValue([]),
+  searchLocalArtifacts: vi.fn().mockReturnValue([]),
+  searchLocalArtifactsFts: vi.fn().mockReturnValue([]),
   searchEntitiesWithMeetingContext: vi.fn(),
   walkEntityGraph: vi.fn(),
   getTemporalMeetings: vi.fn(),
@@ -54,7 +56,12 @@ vi.mock('../../electron/llm/factory', () => ({
 describe('Query Engine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(dbModule.searchMeetingsFts).mockReturnValue([]);
+    vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([]);
     vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([]);
+    vi.mocked(dbModule.searchLocalArtifacts).mockReturnValue([]);
+    vi.mocked(dbModule.searchLocalArtifactsFts).mockReturnValue([]);
+    vi.mocked(dbModule.walkEntityGraph).mockReturnValue([]);
     vi.mocked(dbModule.findEntity).mockReturnValue(undefined);
     vi.mocked(dbModule.getEntity).mockReturnValue(undefined);
     vi.mocked(dbModule.getCanonicalPersonCommitments).mockReturnValue({
@@ -216,6 +223,68 @@ describe('Query Engine', () => {
   });
 
   describe('retrieveContext', () => {
+    it('includes active local artifacts as first-class retrieval sources', async () => {
+      const mockArtifact = {
+        id: 'artifact-1',
+        type: 'markdown' as const,
+        title: 'Launch reference',
+        captured_at: '2026-09-19T18:00:00.000Z',
+        imported_at: '2026-09-20T18:00:00.000Z',
+        original_path: '/tmp/launch-reference.md',
+        content_hash: 'revision-1',
+        extracted_text:
+          'The Juniper launch uses a canary rollout before the Friday announcement.',
+        metadata_json: '{}',
+        source_quality: 'usable' as const,
+        trust_status: 'grounded' as const,
+        status: 'active' as const,
+        created_at: '2026-09-20T18:00:00.000Z',
+        updated_at: '2026-09-20T18:00:00.000Z',
+        match_score: 1,
+      };
+      vi.mocked(dbModule.searchLocalArtifacts).mockReturnValue([mockArtifact]);
+      vi.mocked(dbModule.searchLocalArtifactsFts).mockReturnValue([
+        mockArtifact,
+      ]);
+
+      const result = await retrieveContext({
+        keywords: ['Juniper', 'launch'],
+        expanded_keywords: [],
+        entity_mentions: [],
+        temporal_range: null,
+        intent: 'factual',
+      });
+
+      expect(result[0]).toMatchObject({
+        meeting_id: 'artifact-1',
+        meeting_title: 'Launch reference',
+        source_type: 'artifact',
+        source_id: 'artifact-1',
+        evidence_kind: 'artifact',
+        trust_status: 'grounded',
+        source_revision: 'revision-1',
+      });
+      expect(result[0].evidence_text).toContain('canary rollout');
+
+      vi.mocked(dbModule.searchLocalArtifacts).mockClear();
+      vi.mocked(dbModule.searchLocalArtifactsFts).mockClear();
+      const meetingScoped = await retrieveContext(
+        {
+          keywords: ['Juniper'],
+          expanded_keywords: [],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { meetingIds: ['meeting-1'] },
+      );
+      expect(meetingScoped).not.toContainEqual(
+        expect.objectContaining({ source_type: 'artifact' }),
+      );
+      expect(dbModule.searchLocalArtifacts).not.toHaveBeenCalled();
+      expect(dbModule.searchLocalArtifactsFts).not.toHaveBeenCalled();
+    });
+
     it('merges FTS search and graph walk seamlessly', async () => {
       const mockProvider = {
         classifyQueryIntent: vi.fn().mockResolvedValue('{"intent":"factual"}'),
