@@ -840,16 +840,16 @@ export const deleteLocalArtifact = (id: string): boolean => {
   } catch (error) {
     console.error('[db] Failed to delete from local_artifacts_fts:', error);
   }
-  return db.prepare('DELETE FROM local_artifacts WHERE id = ?').run(id).changes === 1;
+  return (
+    db.prepare('DELETE FROM local_artifacts WHERE id = ?').run(id).changes === 1
+  );
 };
 
 export const searchLocalArtifactsFts = (
   rawTerms: string[] | string,
   requestedLimit = 8,
 ): Array<LocalArtifactRecord & { match_score: number; snippet?: string }> => {
-  const terms = Array.isArray(rawTerms)
-    ? rawTerms
-    : rawTerms.split(/\s+/);
+  const terms = Array.isArray(rawTerms) ? rawTerms : rawTerms.split(/\s+/);
 
   const cleanTerms = [
     ...new Set(
@@ -879,8 +879,8 @@ export const searchLocalArtifactsFts = (
         LIMIT ?
       `)
       .all(ftsQuery, Math.max(1, Math.min(requestedLimit, 20))) as Array<
-        LocalArtifactRecord & { snippet?: string; rank: number }
-      >;
+      LocalArtifactRecord & { snippet?: string; rank: number }
+    >;
 
     if (rows.length > 0) {
       return rows.map((row) => ({
@@ -889,7 +889,10 @@ export const searchLocalArtifactsFts = (
       }));
     }
   } catch (error) {
-    console.error('[db] local_artifacts_fts MATCH failed, falling back to substring:', error);
+    console.error(
+      '[db] local_artifacts_fts MATCH failed, falling back to substring:',
+      error,
+    );
   }
 
   return searchLocalArtifacts(cleanTerms, requestedLimit);

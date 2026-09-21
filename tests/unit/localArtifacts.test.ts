@@ -126,9 +126,7 @@ startxref
 
     // FTS5 BM25 search
     const ftsMatches = searchLocalArtifactsFts(['Juniper', 'migration']);
-    expect(ftsMatches).toEqual([
-      expect.objectContaining({ id: saved.id }),
-    ]);
+    expect(ftsMatches).toEqual([expect.objectContaining({ id: saved.id })]);
     expect(ftsMatches[0].match_score).toBeGreaterThan(0);
 
     // Exclude
@@ -153,14 +151,16 @@ startxref
     const first = saveLocalArtifact(
       createLocalArtifactRecord({
         path: filePath,
-        content: 'Original roadmap: Launch v1 in Q3 with focus on local storage.',
+        content:
+          'Original roadmap: Launch v1 in Q3 with focus on local storage.',
       }),
     );
 
     const second = saveLocalArtifact(
       createLocalArtifactRecord({
         path: filePath,
-        content: 'Revised roadmap: Launch v1 in Q4 with focus on local storage and encryption.',
+        content:
+          'Revised roadmap: Launch v1 in Q4 with focus on local storage and encryption.',
       }),
     );
 
@@ -168,14 +168,14 @@ startxref
     expect(second.extracted_text).toContain('Revised roadmap');
     expect(second.content_hash).not.toBe(first.content_hash);
 
-    const all = listLocalArtifacts().filter((a) => a.original_path === filePath);
+    const all = listLocalArtifacts().filter(
+      (a) => a.original_path === filePath,
+    );
     expect(all).toHaveLength(1);
 
     // Verify FTS5 indexed the updated content
     const searchResult = searchLocalArtifactsFts(['encryption']);
-    expect(searchResult).toEqual([
-      expect.objectContaining({ id: first.id }),
-    ]);
+    expect(searchResult).toEqual([expect.objectContaining({ id: first.id })]);
   });
 
   it('deletes a local artifact and purges its FTS entry', () => {

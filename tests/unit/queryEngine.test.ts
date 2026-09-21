@@ -243,7 +243,9 @@ describe('Query Engine', () => {
         match_score: 1,
       };
       vi.mocked(dbModule.searchLocalArtifacts).mockReturnValue([mockArtifact]);
-      vi.mocked(dbModule.searchLocalArtifactsFts).mockReturnValue([mockArtifact]);
+      vi.mocked(dbModule.searchLocalArtifactsFts).mockReturnValue([
+        mockArtifact,
+      ]);
 
       const result = await retrieveContext({
         keywords: ['Juniper', 'launch'],

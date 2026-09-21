@@ -266,9 +266,9 @@ export const LocalSourcesTab = ({
           Your local reference material
         </h2>
         <p className="text-[14px] leading-6 text-pro-text-muted">
-          Add Markdown notes, plain-text documents, or PDF files. Pluto indexes the
-          extracted text on this Mac with full-text search; active sources participate
-          in evidence-backed recall in Chat with Pluto.
+          Add Markdown notes, plain-text documents, or PDF files. Pluto indexes
+          the extracted text on this Mac with full-text search; active sources
+          participate in evidence-backed recall in Chat with Pluto.
         </p>
       </div>
 
@@ -315,8 +315,9 @@ export const LocalSourcesTab = ({
             Bring a note or PDF into Pluto
           </h3>
           <p className="mt-2 max-w-md text-[13px] leading-5 text-pro-text-muted">
-            Drag and drop a Markdown note, research paper, or project spec, or choose files
-            from disk. You can exclude sources or delete them at any time.
+            Drag and drop a Markdown note, research paper, or project spec, or
+            choose files from disk. You can exclude sources or delete them at
+            any time.
           </p>
           <button
             type="button"
@@ -331,7 +332,8 @@ export const LocalSourcesTab = ({
         <ul className="divide-y divide-pro-border/50 border-y border-pro-border/50">
           {artifacts.map((artifact) => {
             const trust = getTrustStatusMeta(artifact.trust_status);
-            const busy = updatingId === artifact.id || deletingId === artifact.id;
+            const busy =
+              updatingId === artifact.id || deletingId === artifact.id;
             const isConfirmingDelete = confirmDeleteId === artifact.id;
 
             return (
@@ -399,23 +401,25 @@ export const LocalSourcesTab = ({
                     role="group"
                     aria-label={`Memory status for ${artifact.title}`}
                   >
-                    {(['active', 'noisy', 'excluded'] as const).map((status) => (
-                      <button
-                        key={status}
-                        type="button"
-                        disabled={busy}
-                        aria-pressed={artifact.status === status}
-                        onClick={() => void handleStatus(artifact, status)}
-                        className={`inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:cursor-wait disabled:opacity-60 ${
-                          artifact.status === status
-                            ? 'bg-pro-surface text-pro-text-main shadow-sm'
-                            : 'text-pro-text-muted hover:text-pro-text-main'
-                        }`}
-                      >
-                        {status === 'excluded' && <Ban className="h-3 w-3" />}
-                        {statusCopy[status].label}
-                      </button>
-                    ))}
+                    {(['active', 'noisy', 'excluded'] as const).map(
+                      (status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          disabled={busy}
+                          aria-pressed={artifact.status === status}
+                          onClick={() => void handleStatus(artifact, status)}
+                          className={`inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:cursor-wait disabled:opacity-60 ${
+                            artifact.status === status
+                              ? 'bg-pro-surface text-pro-text-main shadow-sm'
+                              : 'text-pro-text-muted hover:text-pro-text-main'
+                          }`}
+                        >
+                          {status === 'excluded' && <Ban className="h-3 w-3" />}
+                          {statusCopy[status].label}
+                        </button>
+                      ),
+                    )}
                   </div>
 
                   {isConfirmingDelete ? (
