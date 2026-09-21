@@ -165,6 +165,17 @@ export const ActiveCallAlertWindow = () => {
     window.close();
   };
 
+  const handlePrepare = () => {
+    window.cancelAnimationFrame(rafRef.current);
+    if (alertData.type === 'calendar') {
+      window.ipcRenderer?.send('CALENDAR_PROMPT_ALERT_ACTION', {
+        action: 'prepare',
+        occurrenceKey: alertData.occurrenceKey,
+      });
+    }
+    window.close();
+  };
+
   useEffect(() => {
     rafRef.current = window.requestAnimationFrame(updateProgress);
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -256,14 +267,23 @@ export const ActiveCallAlertWindow = () => {
       </div>
       <div className="actions">
         {isCalendar ? (
-          <button
-            type="button"
-            className="take-notes"
-            onClick={handleStartRecording}
-          >
-            <span className="record-dot" aria-hidden="true" />
-            <span>Record</span>
-          </button>
+          <>
+            <button
+              type="button"
+              className="prepare-brief"
+              onClick={handlePrepare}
+            >
+              Prep
+            </button>
+            <button
+              type="button"
+              className="take-notes"
+              onClick={handleStartRecording}
+            >
+              <span className="record-dot" aria-hidden="true" />
+              <span>Record</span>
+            </button>
+          </>
         ) : (
           <button
             type="button"

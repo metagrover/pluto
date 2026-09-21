@@ -1,8 +1,10 @@
+import { calendarSeriesKey, sanitizeCalendarAgenda } from './agenda';
 import type {
   CalendarAuthorizationStatus,
   CalendarDescriptor,
   CalendarEvent,
   CalendarPerson,
+  CalendarRecurrenceRule,
 } from './types';
 
 export type CalendarMethod =
@@ -70,7 +72,16 @@ const normalizeEvent = (value: unknown): CalendarEvent | null => {
     typeof value.isCancelled !== 'boolean' ||
     !Array.isArray(value.attendees) ||
     (value.availability !== undefined && !isStringOrNull(value.availability)) ||
-    (value.lastModified !== undefined && !isStringOrNull(value.lastModified))
+    (value.lastModified !== undefined && !isStringOrNull(value.lastModified)) ||
+    (value.calendarItemIdentifier !== undefined &&
+      !isStringOrNull(value.calendarItemIdentifier)) ||
+    (value.calendarItemExternalIdentifier !== undefined &&
+      !isStringOrNull(value.calendarItemExternalIdentifier)) ||
+    (value.notes !== undefined && !isStringOrNull(value.notes)) ||
+    (value.hasRecurrenceRules !== undefined &&
+      typeof value.hasRecurrenceRules !== 'boolean') ||
+    (value.recurrenceRules !== undefined &&
+      !Array.isArray(value.recurrenceRules))
   ) {
     return null;
   }
@@ -83,7 +94,43 @@ const normalizeEvent = (value: unknown): CalendarEvent | null => {
   if (value.organizer !== undefined && value.organizer !== null && !organizer) {
     return null;
   }
-  return {
+  const recurrenceRules: CalendarRecurrenceRule[] = Array.isArray(
+    value.recurrenceRules,
+  )
+    ? value.recurrenceRules.flatMap((rule) => {
+        if (!isRecord(rule)) return [];
+        const frequency =
+          rule.frequency === 'daily' ||
+          rule.frequency === 'weekly' ||
+          rule.frequency === 'monthly' ||
+          rule.frequency === 'yearly'
+            ? rule.frequency
+            : 'unknown';
+        const interval =
+          typeof rule.interval === 'number' && rule.interval > 0
+            ? Math.floor(rule.interval)
+            : 1;
+        const daysOfWeek = Array.isArray(rule.daysOfWeek)
+          ? rule.daysOfWeek.filter(
+              (day): day is number =>
+                typeof day === 'number' && day >= 1 && day <= 7,
+            )
+          : [];
+        return [
+          {
+            frequency,
+            interval,
+            daysOfWeek,
+            endDate: isStringOrNull(rule.endDate) ? rule.endDate : null,
+            occurrenceCount:
+              typeof rule.occurrenceCount === 'number'
+                ? rule.occurrenceCount
+                : null,
+          },
+        ];
+      })
+    : [];
+  const event: CalendarEvent = {
     occurrenceKey: value.occurrenceKey,
     eventIdentifier: value.eventIdentifier,
     calendarIdentifier: value.calendarIdentifier,
@@ -96,7 +143,17 @@ const normalizeEvent = (value: unknown): CalendarEvent | null => {
     organizer,
     attendees: attendees as CalendarPerson[],
     lastModified: value.lastModified ?? null,
+    calendarItemIdentifier: value.calendarItemIdentifier ?? null,
+    calendarItemExternalIdentifier:
+      value.calendarItemExternalIdentifier ?? null,
+    notes: value.notes ?? null,
+    agenda: sanitizeCalendarAgenda(value.notes ?? null),
+    hasRecurrenceRules: value.hasRecurrenceRules ?? recurrenceRules.length > 0,
+    recurrenceRules,
+    seriesKey: null,
   };
+  event.seriesKey = calendarSeriesKey(event);
+  return event;
 };
 
 const parseResult = (value: unknown): CalendarHelperResult => {

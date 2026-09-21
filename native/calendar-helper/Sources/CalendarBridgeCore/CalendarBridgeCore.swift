@@ -45,6 +45,22 @@ public struct CalendarPerson: Codable, Equatable, Sendable {
     }
 }
 
+public struct CalendarRecurrenceRule: Codable, Equatable, Sendable {
+    public let frequency: String
+    public let interval: Int
+    public let daysOfWeek: [Int]
+    public let endDate: Date?
+    public let occurrenceCount: Int?
+
+    public init(frequency: String, interval: Int, daysOfWeek: [Int], endDate: Date?, occurrenceCount: Int?) {
+        self.frequency = frequency
+        self.interval = interval
+        self.daysOfWeek = daysOfWeek
+        self.endDate = endDate
+        self.occurrenceCount = occurrenceCount
+    }
+}
+
 public struct EventValue: Equatable, Sendable {
     public let identifier: String
     public let title: String
@@ -56,6 +72,11 @@ public struct EventValue: Equatable, Sendable {
     public let organizer: CalendarPerson?
     public let attendees: [CalendarPerson]
     public let lastModified: Date?
+    public let calendarItemIdentifier: String?
+    public let calendarItemExternalIdentifier: String?
+    public let notes: String?
+    public let hasRecurrenceRules: Bool
+    public let recurrenceRules: [CalendarRecurrenceRule]
 
     public init(
         identifier: String,
@@ -67,7 +88,12 @@ public struct EventValue: Equatable, Sendable {
         availability: String?,
         organizer: CalendarPerson?,
         attendees: [CalendarPerson],
-        lastModified: Date?
+        lastModified: Date?,
+        calendarItemIdentifier: String? = nil,
+        calendarItemExternalIdentifier: String? = nil,
+        notes: String? = nil,
+        hasRecurrenceRules: Bool = false,
+        recurrenceRules: [CalendarRecurrenceRule] = []
     ) {
         self.identifier = identifier
         self.title = title
@@ -79,6 +105,11 @@ public struct EventValue: Equatable, Sendable {
         self.organizer = organizer
         self.attendees = attendees
         self.lastModified = lastModified
+        self.calendarItemIdentifier = calendarItemIdentifier
+        self.calendarItemExternalIdentifier = calendarItemExternalIdentifier
+        self.notes = notes
+        self.hasRecurrenceRules = hasRecurrenceRules
+        self.recurrenceRules = recurrenceRules
     }
 
     public func withDates(start: Date, end: Date) -> EventValue {
@@ -92,7 +123,12 @@ public struct EventValue: Equatable, Sendable {
             availability: availability,
             organizer: organizer,
             attendees: attendees,
-            lastModified: lastModified
+            lastModified: lastModified,
+            calendarItemIdentifier: calendarItemIdentifier,
+            calendarItemExternalIdentifier: calendarItemExternalIdentifier,
+            notes: notes,
+            hasRecurrenceRules: hasRecurrenceRules,
+            recurrenceRules: recurrenceRules
         )
     }
 }
@@ -110,6 +146,11 @@ public struct NormalizedEvent: Codable, Equatable, Sendable {
     public let organizer: CalendarPerson?
     public let attendees: [CalendarPerson]
     public let lastModified: Date?
+    public let calendarItemIdentifier: String?
+    public let calendarItemExternalIdentifier: String?
+    public let notes: String?
+    public let hasRecurrenceRules: Bool
+    public let recurrenceRules: [CalendarRecurrenceRule]
 }
 
 public enum CalendarBridgeProtocol {
@@ -186,7 +227,12 @@ public enum CalendarBridgeProtocol {
             availability: event.availability,
             organizer: event.organizer,
             attendees: event.attendees,
-            lastModified: event.lastModified
+            lastModified: event.lastModified,
+            calendarItemIdentifier: event.calendarItemIdentifier,
+            calendarItemExternalIdentifier: event.calendarItemExternalIdentifier,
+            notes: event.notes,
+            hasRecurrenceRules: event.hasRecurrenceRules || !event.recurrenceRules.isEmpty,
+            recurrenceRules: event.recurrenceRules
         )
     }
 

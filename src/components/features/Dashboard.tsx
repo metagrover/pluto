@@ -77,6 +77,8 @@ interface DashboardProps {
   ) => Promise<void>;
   onCalendarRefresh?: () => Promise<void>;
   onCalendarOpenSettings?: () => void;
+  onPrepareMeeting?: (event: CalendarEvent) => void;
+  onPrepareAnother?: () => void;
 }
 
 const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
@@ -502,6 +504,8 @@ export const Dashboard = ({
   onCalendarSelectCalendars = async () => {},
   onCalendarRefresh = async () => {},
   onCalendarOpenSettings = () => {},
+  onPrepareMeeting = () => {},
+  onPrepareAnother = () => {},
 }: DashboardProps) => {
   const [addingCommitment, setAddingCommitment] = useState(false);
   const [commitmentText, setCommitmentText] = useState('');
@@ -1223,6 +1227,8 @@ export const Dashboard = ({
             onSelectCalendars={onCalendarSelectCalendars}
             onRefreshCalendar={onCalendarRefresh}
             onOpenSettings={onCalendarOpenSettings}
+            onPrepare={onPrepareMeeting}
+            onPrepareAnother={onPrepareAnother}
           />
           <section
             aria-labelledby="recent-win-title"

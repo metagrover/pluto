@@ -4,6 +4,10 @@ import type {
   CalendarIntegrationSnapshot,
   MeetingCalendarContext,
 } from '../../electron/calendar/types';
+import type {
+  PreMeetingBrief,
+  PreMeetingBriefRequest,
+} from '../../electron/preMeetingBrief';
 
 const invoke = <T>(channel: string, ...args: unknown[]) =>
   window.ipcRenderer.invoke(channel, ...args) as Promise<T>;
@@ -50,3 +54,6 @@ export const associateMeetingAtStart = (meetingId: string, atTime?: string) =>
     context: MeetingCalendarContext | null;
     event: CalendarEvent | null;
   }>('CALENDAR_ASSOCIATE_START', { meetingId, atTime });
+
+export const buildPreMeetingBrief = (request: PreMeetingBriefRequest) =>
+  invoke<PreMeetingBrief>('PRE_MEETING_BRIEF_BUILD', request);

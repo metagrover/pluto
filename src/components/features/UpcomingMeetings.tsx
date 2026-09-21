@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { BookOpenText, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import type {
@@ -16,6 +16,8 @@ interface UpcomingMeetingsProps {
   onSelectCalendars?: (calendars: CalendarDescriptor[]) => Promise<void>;
   onRefreshCalendar: () => Promise<void>;
   onOpenSettings: () => void;
+  onPrepare: (event: CalendarEvent) => void;
+  onPrepareAnother: () => void;
 }
 
 const LARGE_DASHBOARD_QUERY = '(min-width: 1024px)';
@@ -100,6 +102,8 @@ export const UpcomingMeetings = ({
   onSelectCalendars,
   onRefreshCalendar,
   onOpenSettings,
+  onPrepare,
+  onPrepareAnother,
 }: UpcomingMeetingsProps) => {
   const [expanded, setExpanded] = useState(false);
   const [usesLargeLayout, setUsesLargeLayout] = useState(matchesLargeDashboard);
@@ -410,13 +414,27 @@ export const UpcomingMeetings = ({
                         </time>
                       </span>
                     </div>
-                    <div className="min-w-0">
-                      <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
-                        {event.title || 'Untitled event'}
-                      </h3>
-                      <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
-                        {formatDuration(event)}
-                      </p>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
+                          {event.title || 'Untitled event'}
+                        </h3>
+                        <p className="text-[10px] font-medium leading-4 text-pro-text-muted/70">
+                          {formatDuration(event)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Prepare for ${event.title || 'upcoming meeting'}`}
+                        onClick={() => onPrepare(event)}
+                        className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent"
+                      >
+                        <BookOpenText
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
+                        Prep
+                      </button>
                     </div>
                   </article>
                 );
@@ -491,6 +509,14 @@ export const UpcomingMeetings = ({
             className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
           >
             Change
+          </button>
+          <button
+            type="button"
+            aria-label="Prepare another conversation"
+            onClick={onPrepareAnother}
+            className="shrink-0 rounded-sm px-1 py-1 font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+          >
+            Prepare…
           </button>
         </div>
       ) : null}

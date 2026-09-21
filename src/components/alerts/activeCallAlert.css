@@ -234,6 +234,25 @@ body {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+  gap: 4px;
+}
+
+.prepare-brief {
+  border: 0;
+  height: 34px;
+  background: transparent;
+  color: var(--alert-text-muted);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.prepare-brief:hover {
+  color: var(--alert-text-main);
+  background: var(--alert-surface-subtle);
 }
 
 .take-notes {

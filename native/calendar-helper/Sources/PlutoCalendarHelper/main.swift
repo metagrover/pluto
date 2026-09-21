@@ -141,6 +141,26 @@ private func person(_ participant: EKParticipant?) -> CalendarPerson? {
     return CalendarPerson(name: participant.name, email: email)
 }
 
+private func recurrenceFrequency(_ value: EKRecurrenceFrequency) -> String {
+    switch value {
+    case .daily: return "daily"
+    case .weekly: return "weekly"
+    case .monthly: return "monthly"
+    case .yearly: return "yearly"
+    @unknown default: return "unknown"
+    }
+}
+
+private func recurrenceRule(_ rule: EKRecurrenceRule) -> CalendarRecurrenceRule {
+    CalendarRecurrenceRule(
+        frequency: recurrenceFrequency(rule.frequency),
+        interval: rule.interval,
+        daysOfWeek: rule.daysOfTheWeek?.map { $0.dayOfTheWeek.rawValue } ?? [],
+        endDate: rule.recurrenceEnd?.endDate,
+        occurrenceCount: rule.recurrenceEnd?.occurrenceCount
+    )
+}
+
 @MainActor
 private func events(params: [String: String]) throws -> [NormalizedEvent] {
     guard
@@ -170,7 +190,12 @@ private func events(params: [String: String]) throws -> [NormalizedEvent] {
                 availability: availability(event.availability),
                 organizer: person(event.organizer),
                 attendees: (event.attendees ?? []).compactMap(person),
-                lastModified: event.lastModifiedDate
+                lastModified: event.lastModifiedDate,
+                calendarItemIdentifier: event.calendarItemIdentifier,
+                calendarItemExternalIdentifier: event.calendarItemExternalIdentifier,
+                notes: event.notes.map { String($0.prefix(32_000)) },
+                hasRecurrenceRules: event.hasRecurrenceRules,
+                recurrenceRules: (event.recurrenceRules ?? []).map(recurrenceRule)
             )
         )
     }
