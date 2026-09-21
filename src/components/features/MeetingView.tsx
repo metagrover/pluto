@@ -36,13 +36,13 @@ import {
 } from '../../api/identity';
 import { type Entity, getMeetingEntities } from '../../api/knowledgeGraph';
 import {
-  type VoiceMatchSuggestion,
-  getSpeakerVoiceSuggestions,
-} from '../../api/speakerVoice';
-import {
   importAndAttachMeetingArtifactPaths,
   importAndAttachMeetingArtifacts,
 } from '../../api/localArtifacts';
+import {
+  type VoiceMatchSuggestion,
+  getSpeakerVoiceSuggestions,
+} from '../../api/speakerVoice';
 import { canImproveHistoricalSpeakerLabels } from '../../services/postMeetingProcessingCoordinator';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
@@ -1792,7 +1792,7 @@ const SelectedMeetingView = ({
                       className="meeting-toolbar-button"
                       aria-label="Attach reference document"
                     >
-                      <Paperclip aria-hidden="true" className="h-4 w-4" />
+                      <Paperclip aria-hidden="true" className="h-4 w-4 shrink-0" />
                       <span>Attach reference document…</span>
                     </button>
                   </div>

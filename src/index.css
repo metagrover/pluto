@@ -1098,12 +1098,15 @@
     @apply hidden;
   }
   .meeting-document-menu__panel {
-    @apply absolute right-0 top-full mt-1.5 z-50 flex min-w-56 flex-col rounded-xl border p-1.5 shadow-lg;
+    @apply absolute right-0 top-full mt-1.5 z-50 flex min-w-64 w-max max-w-xs flex-col rounded-xl border p-1.5 shadow-lg;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
   }
   .meeting-document-menu__panel .meeting-toolbar-button {
-    @apply min-h-9 h-auto w-full justify-start rounded-lg px-2.5 py-1.5 text-xs;
+    @apply min-h-9 h-auto w-full justify-start rounded-lg px-2.5 py-1.5 text-left text-xs whitespace-nowrap;
+  }
+  .meeting-document-menu__panel .meeting-toolbar-button svg {
+    @apply shrink-0;
   }
   .meeting-document-menu__section {
     @apply flex flex-col gap-1 p-1;
