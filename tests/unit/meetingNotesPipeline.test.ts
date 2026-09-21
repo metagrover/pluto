@@ -1649,11 +1649,64 @@ it('admits four compact leaves within the existing six-call budget', async () =>
   }
 });
 
-it('rejects a compact plan that would consume the writer recovery reserve', async () => {
+it('admits five compact leaves within the dynamic model call budget', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'First fact. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'Second fact. '.repeat(2_000) },
+    { speaker: 'Milo', text: 'Third fact. '.repeat(2_000) },
+    { speaker: 'Nira', text: 'Fourth fact. '.repeat(2_000) },
+    { speaker: 'Milo', text: 'Fifth fact. '.repeat(2_000) },
+  ]);
+  const leaves = source.segments.map((segment) => {
+    const span = { segment: segment.index, start: 0, end: 20 };
+    return {
+      primarySpans: [span],
+      overlapSpans: [],
+      primaryText: segment.text.slice(0, span.end),
+      sourceText: segment.text.slice(0, span.end),
+      sourceRevision: source.revision,
+    };
+  });
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(leaves);
+  const generate = vi.fn(async (request: NotesRequest) => {
+    if (request.task === 'notesWriter') {
+      return JSON.stringify({ title: null, sections: [] });
+    }
+    return auditFor(
+      request.prompt,
+      sourceDescriptors(request.prompt)[0]!.descriptor,
+    );
+  });
+
+  try {
+    const result = await generateMeetingNotes({
+      reviewProtocol: 'editor',
+      compactWriterContract: true,
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      contextTokens: 8_192,
+    });
+
+    expect(
+      generate.mock.calls.filter(([request]) => request.task === 'notesWriter'),
+    ).toHaveLength(5);
+    expect(result.generation_metadata.mode).toBe('hierarchical');
+    expect(result.generation_metadata.pipeline_version).toBe(
+      'writer-editor-bounded-v1',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('rejects a compact plan that exceeds maximum bounded compact capacity', async () => {
   const source = makeSyntheticNotesSource(
-    Array.from({ length: 5 }, (_, index) => ({
+    Array.from({ length: 65 }, (_, index) => ({
       speaker: index % 2 ? 'Nira' : 'Milo',
-      text: `Fact ${index}`,
+      text: `Fact ${index}. ${'Context '.repeat(500)}`,
     })),
   );
   const leaves = source.segments.map((segment) => {
@@ -1679,9 +1732,9 @@ it('rejects a compact plan that would consume the writer recovery reserve', asyn
         generate,
         provider: 'ollama',
         model: 'qwen3.5:9b',
-        contextTokens: 4_096,
+        contextTokens: 16_384,
       }),
-    ).rejects.toThrow('notes_bounded_plan_exceeded');
+    ).rejects.toThrow('notes_hierarchy_limit');
     expect(generate).not.toHaveBeenCalled();
   } finally {
     plan.mockRestore();
