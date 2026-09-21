@@ -24,6 +24,9 @@ export const getAskPlutoPrompt = (
   correctionGuidance = 'None',
 ): string => {
   const largeScope = context.length > 6;
+  const hasArtifactSources = context.some(
+    (source) => source.source_type === 'artifact',
+  );
   const multiMeetingSynthesis =
     context.length > 1 &&
     /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i.test(
@@ -47,7 +50,7 @@ export const getAskPlutoPrompt = (
       ? 'None'
       : context
           .map((c, i) => {
-            const title = c.meeting_title || c.mid?.title || 'Unknown Meeting';
+            const title = c.meeting_title || c.mid?.title || 'Unknown source';
             const topicNames =
               c.mid?.topics
                 ?.map((t) => t.name)
@@ -70,7 +73,7 @@ export const getAskPlutoPrompt = (
             }
             if (decisions !== 'None') details.push(`Decisions: ${decisions}`);
             if (actions !== 'None') details.push(`Action Items: ${actions}`);
-            return `[Source ${i + 1}] Meeting: "${title}" (ID: ${c.meeting_id})
+            return `[Source ${i + 1}] ${c.source_type === 'artifact' ? 'Local artifact' : 'Meeting'}: "${title}" (ID: ${c.source_id || c.meeting_id})
 ${details.join('\n')}`;
           })
           .join('\n\n---\n\n');
@@ -96,14 +99,14 @@ ${details.join('\n')}`;
         .join('\n')
     : 'None';
 
-  let prompt = `You are Pluto, an AI meeting intelligence assistant.
+  let prompt = `You are Pluto, a local-first memory assistant.
 
 RULES:
-1. Answer meeting-fact questions using ONLY information from the Context below. Never invent facts.
+1. Answer factual questions using ONLY information from the Context below. Never invent facts.
 2. ${formatGuidance}
-3. Start with the answer immediately. Meeting grounding is implicit. Never begin with “Based on the meeting evidence provided”, “Based on the evidence”, “According to the meeting evidence”, “Based on the context”, “Here is what I found”, or similar evidence-policy narration.
+3. Start with the answer immediately. ${hasArtifactSources ? 'Source' : 'Meeting'} grounding is implicit. Never begin with “Based on the meeting evidence provided”, “Based on the evidence”, “According to the meeting evidence”, “Based on the context”, “Here is what I found”, or similar evidence-policy narration.
 4. Use specific details: participant names, project names, dates, numbers, exact decisions — pull these directly from the evidence.
-5. If a meeting-fact answer is absent, say: “The meetings didn't establish that.” State the specific missing detail only when useful.
+5. If the answer is absent, say: “${hasArtifactSources ? 'The available sources' : 'The meetings'} didn't establish that.” State the specific missing detail only when useful.
 6. User corrections are authoritative constraints on what the user says is wrong. Never cite a user correction as meeting evidence, and never use one to make an otherwise unsupported meeting claim look grounded.
 7. Keep each sentence to one independently verifiable claim. Split compound facts into separate sentences.
 8. Prefer wording already present in the evidence. A concise supported answer is better than a broader paraphrase the evidence cannot verify.

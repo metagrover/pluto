@@ -6,6 +6,8 @@ export interface CitationChain {
   claim: string;
   meeting_id: string;
   meeting_title: string;
+  source_type?: 'meeting' | 'artifact';
+  source_id?: string;
   entity_id?: string;
   evidence_span?: string;
   evidence_valid: boolean;
@@ -15,6 +17,7 @@ export interface CitationChain {
     | 'section'
     | 'commitment'
     | 'note'
+    | 'artifact'
     | 'transcript'
     | 'live';
   section_id?: string;

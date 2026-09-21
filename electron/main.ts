@@ -12,6 +12,7 @@ import {
   Tray,
   type WebContents,
   app,
+  dialog,
   ipcMain,
   nativeImage,
   powerMonitor,
@@ -101,6 +102,10 @@ import {
   reconcileLiveSpeakerIdentityConfirmations,
   removeLiveSpeakerIdentityConfirmation,
 } from './liveSpeakerIdentityPersistence';
+import {
+  createLocalArtifactRecord,
+  extractArtifactContent,
+} from './localArtifacts';
 import { createLogger } from './logger';
 import {
   canReuseRunningCaptureForProbe,
@@ -4815,6 +4820,82 @@ app.whenReady().then(async () => {
   ipcMain.handle('LIST_WORKING_MEMORY_SNAPSHOTS', () =>
     db.listWorkingMemorySnapshots(),
   );
+  const importLocalArtifactFile = async (filePath: string) => {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return null;
+    const ext = path.extname(filePath).toLowerCase();
+    const maxSize = ext === '.pdf' ? 15 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (stat.size > maxSize) {
+      throw new Error('artifact_too_large');
+    }
+    const buffer = await fs.promises.readFile(filePath);
+    const content = await extractArtifactContent(filePath, buffer);
+    return db.saveLocalArtifact(
+      createLocalArtifactRecord({
+        path: filePath,
+        content,
+        capturedAt: stat.mtime.toISOString(),
+      }),
+    );
+  };
+
+  ipcMain.handle('LOCAL_ARTIFACTS_LIST', () => db.listLocalArtifacts());
+  ipcMain.handle('LOCAL_ARTIFACTS_IMPORT', async () => {
+    const selection = await dialog.showOpenDialog(win!, {
+      title: 'Add local sources',
+      buttonLabel: 'Add to Pluto',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: 'All supported sources',
+          extensions: ['md', 'markdown', 'txt', 'pdf'],
+        },
+        { name: 'Notes & Markdown', extensions: ['md', 'markdown', 'txt'] },
+        { name: 'PDF documents', extensions: ['pdf'] },
+      ],
+    });
+    if (selection.canceled) return [];
+
+    const imported = [];
+    for (const filePath of selection.filePaths) {
+      const saved = await importLocalArtifactFile(filePath);
+      if (saved) imported.push(saved);
+    }
+    return imported;
+  });
+  ipcMain.handle(
+    'LOCAL_ARTIFACTS_IMPORT_PATHS',
+    async (_event, paths: unknown) => {
+      if (!Array.isArray(paths)) return [];
+      const imported = [];
+      for (const filePath of paths) {
+        if (typeof filePath !== 'string') continue;
+        const saved = await importLocalArtifactFile(filePath);
+        if (saved) imported.push(saved);
+      }
+      return imported;
+    },
+  );
+  ipcMain.handle(
+    'LOCAL_ARTIFACTS_SET_STATUS',
+    (_event, input: { id?: unknown; status?: unknown }) => {
+      const id = typeof input?.id === 'string' ? input.id : '';
+      const status = input?.status;
+      if (
+        !id ||
+        (status !== 'active' && status !== 'noisy' && status !== 'excluded')
+      ) {
+        throw new Error('invalid_local_artifact_status');
+      }
+      const artifact = db.setLocalArtifactStatus(id, status);
+      if (!artifact) throw new Error('local_artifact_not_found');
+      return artifact;
+    },
+  );
+  ipcMain.handle('LOCAL_ARTIFACTS_DELETE', (_event, id: unknown) => {
+    if (typeof id !== 'string' || !id) return false;
+    return db.deleteLocalArtifact(id);
+  });
   ipcMain.handle('GET_KNOWLEDGE_DOC_VERSIONS', (_event, { docId, limit }) =>
     db.getKnowledgeDocVersions(docId, limit),
   );
@@ -6174,18 +6255,26 @@ app.whenReady().then(async () => {
               }
             : inheritedScope || {
                 kind:
-                  overviewContextUsed || context.length === 0
+                  overviewContextUsed ||
+                  context.length === 0 ||
+                  context.some((result) => result.source_type === 'artifact')
                     ? 'global'
                     : 'meeting_ids',
-                meetingIds: context.map((result) => result.meeting_id),
+                meetingIds: context
+                  .filter((result) => result.source_type !== 'artifact')
+                  .map((result) => result.meeting_id),
                 resolvedAt: new Date().toISOString(),
                 source: 'explicit',
               });
         const baseRetrievalSummary: AskPlutoRetrievalSummary =
           explicitRetrievalSummary ||
             temporalRetrievalSummary || {
-              matchedMeetingCount: context.length,
-              includedMeetingCount: context.length,
+              matchedMeetingCount: context.filter(
+                (result) => result.source_type !== 'artifact',
+              ).length,
+              includedMeetingCount: context.filter(
+                (result) => result.source_type !== 'artifact',
+              ).length,
               preparedEvidenceCount: context.length,
               transcriptOnlyCount: 0,
               omittedMeetingCount: 0,
@@ -6204,6 +6293,9 @@ app.whenReady().then(async () => {
           includedSectionCount: matchedSectionCount,
           transcriptPassageCount,
           commitmentCount: assigneeRecall?.commitmentCount || 0,
+          artifactCount: context.filter(
+            (result) => result.source_type === 'artifact',
+          ).length,
           retrievalLevel: assigneeRecall
             ? 'commitment'
             : transcriptPassageCount > 0
@@ -6263,7 +6355,7 @@ app.whenReady().then(async () => {
             status: 'answered' as const,
             answer:
               assigneeRecall?.answer ??
-              "I couldn't find information about that in your meetings.",
+              "I couldn't find information about that in your sources.",
             citations: [],
             currentMeeting: currentMeetingStatus,
             outcome: 'no_evidence' as const,

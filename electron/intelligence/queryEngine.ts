@@ -1025,6 +1025,48 @@ export const retrieveContext = async (
       };
     }
 
+    if (
+      !options.meetingIds?.length &&
+      !/\b(?:meetings|calls)\b/i.test(options.query || '')
+    ) {
+      const searchFn =
+        dbModule.searchLocalArtifactsFts || dbModule.searchLocalArtifacts;
+      for (const artifact of searchFn(allKeywords, 8)) {
+        const titleLower = artifact.title.toLowerCase();
+        const textLower = artifact.extracted_text.toLowerCase();
+        const entityMatches = (parsed.entity_mentions || []).filter(
+          (entity: string) =>
+            titleLower.includes(entity.toLowerCase()) ||
+            textLower.includes(entity.toLowerCase()),
+        );
+        const entityWeight = entityMatches.length * 0.15;
+        const score = artifact.match_score * 0.4 + entityWeight;
+
+        resultsMap[`artifact:${artifact.id}`] = {
+          meeting_id: artifact.id,
+          meeting_title: artifact.title,
+          source_type: 'artifact',
+          source_id: artifact.id,
+          mid: null,
+          evidence_text: [
+            `[Local artifact]: ${artifact.title}`,
+            `[Captured]: ${artifact.captured_at}`,
+            `[Content]: ${artifact.extracted_text.slice(0, 3200)}`,
+          ].join('\n'),
+          score,
+          score_breakdown: {
+            fts_rank: artifact.match_score,
+            graph_proximity: entityWeight,
+            recency_decay: calculateRecencyDecay(artifact.captured_at),
+            mention_weight: entityWeight,
+          },
+          evidence_kind: 'artifact',
+          source_revision: artifact.content_hash,
+          trust_status: artifact.trust_status,
+        };
+      }
+    }
+
     // Transcript-only meetings are considered only after notes and headings
     // fail, and only the matching meetings are eligible for deepening below.
     if (

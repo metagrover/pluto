@@ -71,6 +71,13 @@
       "when": 1789800000000,
       "tag": "0009_live_speaker_identity_confirmations",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789967259886,
+      "tag": "0010_local_artifacts",
+      "breakpoints": true
     }
   ]
 }

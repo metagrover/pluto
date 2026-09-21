@@ -3,6 +3,34 @@ import { describe, expect, it } from 'vitest';
 import { getAskPlutoPrompt } from '../../electron/intelligence/queryPrompts';
 
 describe('getAskPlutoPrompt', () => {
+  it('labels local artifacts and preserves source-wide absence wording', () => {
+    const prompt = getAskPlutoPrompt(
+      'What did the launch note say?',
+      [
+        {
+          meeting_id: 'artifact-1',
+          source_id: 'artifact-1',
+          source_type: 'artifact',
+          meeting_title: 'Launch note',
+          mid: null,
+          evidence_text: 'The staged launch starts Friday.',
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+    );
+
+    expect(prompt).toContain('Local artifact: "Launch note" (ID: artifact-1)');
+    expect(prompt).toContain('Source grounding is implicit');
+    expect(prompt).toContain("The available sources didn't establish that.");
+  });
+
   it('includes bounded conversation and the resolved meeting title', () => {
     const prompt = getAskPlutoPrompt(
       'Why did that change?',

@@ -62,7 +62,7 @@ describe('database migration history', () => {
     const history = readPackagedMigrationHistory(
       path.join(process.cwd(), 'drizzle'),
     );
-    expect(history).toHaveLength(10);
+    expect(history).toHaveLength(11);
     expect(history[0]).toMatchObject({ tag: '0000_pluto_baseline' });
     expect(history[1]).toMatchObject({ tag: '0001_voice_representatives' });
     expect(history[2]).toMatchObject({
@@ -83,6 +83,7 @@ describe('database migration history', () => {
     expect(history[9]).toMatchObject({
       tag: '0009_live_speaker_identity_confirmations',
     });
+    expect(history[10]).toMatchObject({ tag: '0010_local_artifacts' });
     for (const migration of history) {
       expect(migration.when).toEqual(expect.any(Number));
       expect(migration.hash).toMatch(/^[a-f0-9]{64}$/);

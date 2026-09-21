@@ -50,6 +50,7 @@ export interface AskPlutoRetrievalSummary {
   includedSectionCount?: number;
   transcriptPassageCount?: number;
   commitmentCount?: number;
+  artifactCount?: number;
   retrievalLevel?:
     | 'overview'
     | 'section'

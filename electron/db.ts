@@ -141,6 +141,11 @@ import {
   serializeMeetingNotesRunMetric,
 } from './llm/meetingNotesRunMetrics';
 import { createNotesSource } from './llm/meetingNotesSource';
+import {
+  type LocalArtifactRecord,
+  type LocalArtifactStatus,
+  localArtifactStatusProjection,
+} from './localArtifacts';
 import { createLogger } from './logger';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { buildMeetingNotesIdentityProjection } from './meetingParticipantIdentity';
@@ -715,6 +720,220 @@ export const listWorkingMemorySnapshots = (): WorkingMemorySnapshot[] => {
         new Date(right.generated_at).getTime() -
         new Date(left.generated_at).getTime(),
     );
+};
+
+export const getLocalArtifact = (id: string): LocalArtifactRecord | undefined =>
+  db.prepare('SELECT * FROM local_artifacts WHERE id = ?').get(id) as
+    | LocalArtifactRecord
+    | undefined;
+
+export const listLocalArtifacts = (): LocalArtifactRecord[] =>
+  db
+    .prepare(
+      'SELECT * FROM local_artifacts ORDER BY datetime(imported_at) DESC, id ASC',
+    )
+    .all() as LocalArtifactRecord[];
+
+const syncLocalArtifactFts = (
+  artifactId: string,
+  title: string,
+  extractedText: string,
+): void => {
+  try {
+    db.prepare('DELETE FROM local_artifacts_fts WHERE artifact_id = ?').run(
+      artifactId,
+    );
+    db.prepare(
+      'INSERT INTO local_artifacts_fts (title, extracted_text, artifact_id) VALUES (?, ?, ?)',
+    ).run(title, extractedText, artifactId);
+  } catch (error) {
+    console.error('[db] Failed to sync local_artifacts_fts:', error);
+  }
+};
+
+export const saveLocalArtifact = (
+  artifact: LocalArtifactRecord,
+): LocalArtifactRecord => {
+  const existing = db
+    .prepare(
+      'SELECT * FROM local_artifacts WHERE content_hash = ? OR original_path = ?',
+    )
+    .get(artifact.content_hash, artifact.original_path) as
+    | LocalArtifactRecord
+    | undefined;
+
+  if (existing) {
+    db.prepare(`
+      UPDATE local_artifacts
+      SET title = ?, type = ?, captured_at = ?, imported_at = ?, original_path = ?,
+          content_hash = ?, extracted_text = ?, metadata_json = ?,
+          source_quality = ?, trust_status = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      artifact.title,
+      artifact.type,
+      artifact.captured_at,
+      artifact.imported_at,
+      artifact.original_path,
+      artifact.content_hash,
+      artifact.extracted_text,
+      artifact.metadata_json,
+      artifact.source_quality,
+      artifact.trust_status,
+      artifact.updated_at,
+      existing.id,
+    );
+    syncLocalArtifactFts(existing.id, artifact.title, artifact.extracted_text);
+    return getLocalArtifact(existing.id)!;
+  }
+
+  db.prepare(`
+    INSERT INTO local_artifacts (
+      id, type, title, captured_at, imported_at, original_path, content_hash,
+      extracted_text, metadata_json, source_quality, trust_status, status,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    artifact.id,
+    artifact.type,
+    artifact.title,
+    artifact.captured_at,
+    artifact.imported_at,
+    artifact.original_path,
+    artifact.content_hash,
+    artifact.extracted_text,
+    artifact.metadata_json,
+    artifact.source_quality,
+    artifact.trust_status,
+    artifact.status,
+    artifact.created_at,
+    artifact.updated_at,
+  );
+  syncLocalArtifactFts(artifact.id, artifact.title, artifact.extracted_text);
+  return getLocalArtifact(artifact.id)!;
+};
+
+export const setLocalArtifactStatus = (
+  id: string,
+  status: LocalArtifactStatus,
+): LocalArtifactRecord | undefined => {
+  const artifact = getLocalArtifact(id);
+  if (!artifact) return undefined;
+  const next = localArtifactStatusProjection(artifact, status);
+  db.prepare(`
+    UPDATE local_artifacts
+    SET status = ?, source_quality = ?, trust_status = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    next.status,
+    next.source_quality,
+    next.trust_status,
+    next.updated_at,
+    id,
+  );
+  return getLocalArtifact(id);
+};
+
+export const deleteLocalArtifact = (id: string): boolean => {
+  try {
+    db.prepare('DELETE FROM local_artifacts_fts WHERE artifact_id = ?').run(id);
+  } catch (error) {
+    console.error('[db] Failed to delete from local_artifacts_fts:', error);
+  }
+  return db.prepare('DELETE FROM local_artifacts WHERE id = ?').run(id).changes === 1;
+};
+
+export const searchLocalArtifactsFts = (
+  rawTerms: string[] | string,
+  requestedLimit = 8,
+): Array<LocalArtifactRecord & { match_score: number; snippet?: string }> => {
+  const terms = Array.isArray(rawTerms)
+    ? rawTerms
+    : rawTerms.split(/\s+/);
+
+  const cleanTerms = [
+    ...new Set(
+      terms
+        .flatMap((term) => term.toLocaleLowerCase().split(/\s+/))
+        .map((term) => term.replace(/[^\p{L}\p{N}_-]/gu, '').trim())
+        .filter((term) => term.length >= 2),
+    ),
+  ];
+
+  if (cleanTerms.length === 0) return [];
+
+  const ftsQuery = cleanTerms.map((term) => `"${term}"*`).join(' OR ');
+
+  try {
+    const rows = db
+      .prepare(`
+        SELECT 
+          a.*,
+          snippet(local_artifacts_fts, 1, '...', '...', '...', 32) AS snippet,
+          bm25(local_artifacts_fts) AS rank
+        FROM local_artifacts_fts f
+        JOIN local_artifacts a ON f.artifact_id = a.id
+        WHERE local_artifacts_fts MATCH ?
+          AND a.status = 'active'
+        ORDER BY rank
+        LIMIT ?
+      `)
+      .all(ftsQuery, Math.max(1, Math.min(requestedLimit, 20))) as Array<
+        LocalArtifactRecord & { snippet?: string; rank: number }
+      >;
+
+    if (rows.length > 0) {
+      return rows.map((row) => ({
+        ...row,
+        match_score: Math.max(0.1, 1 / (1 + Math.abs(row.rank || 0))),
+      }));
+    }
+  } catch (error) {
+    console.error('[db] local_artifacts_fts MATCH failed, falling back to substring:', error);
+  }
+
+  return searchLocalArtifacts(cleanTerms, requestedLimit);
+};
+
+export const searchLocalArtifacts = (
+  rawTerms: string[],
+  requestedLimit = 6,
+): Array<LocalArtifactRecord & { match_score: number }> => {
+  const terms = [
+    ...new Set(
+      rawTerms
+        .flatMap((term) => term.toLocaleLowerCase().split(/\s+/))
+        .map((term) => term.replace(/[^\p{L}\p{N}_-]+/gu, '').trim())
+        .filter((term) => term.length >= 2),
+    ),
+  ];
+  if (terms.length === 0) return [];
+  const rows = db
+    .prepare("SELECT * FROM local_artifacts WHERE status = 'active'")
+    .all() as LocalArtifactRecord[];
+
+  return rows
+    .map((artifact) => {
+      const title = artifact.title.toLocaleLowerCase();
+      const content = artifact.extracted_text.toLocaleLowerCase();
+      const matchedTerms = terms.filter(
+        (term) => title.includes(term) || content.includes(term),
+      );
+      const titleMatches = matchedTerms.filter((term) =>
+        title.includes(term),
+      ).length;
+      return {
+        ...artifact,
+        match_score: matchedTerms.length / terms.length + titleMatches * 0.15,
+      };
+    })
+    .filter((artifact) => artifact.match_score > 0)
+    .sort(
+      (left, right) =>
+        right.match_score - left.match_score ||
+        Date.parse(right.imported_at) - Date.parse(left.imported_at),
+    )
+    .slice(0, Math.max(1, Math.min(requestedLimit, 20)));
 };
 
 export const upsertWorkingMemorySnapshot = (input: {
