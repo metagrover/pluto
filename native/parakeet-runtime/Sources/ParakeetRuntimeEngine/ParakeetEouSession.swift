@@ -90,6 +90,17 @@ struct EouSessionTerminalFailure: Error, Equatable, Sendable {
 }
 
 actor ParakeetEouSession {
+    struct SpeakerEvidenceSnapshot: Sendable {
+        let micSamples: [Float]
+        let micSampleRate: Double
+        let systemSamples: [Float]
+        let systemSampleRate: Double
+        let startSeconds: Double
+        let endSeconds: Double
+    }
+
+    private static let speakerEvidenceWindowSeconds = 45.0
+
     private struct State {
         let streamId: String
         let source: LiveSource
@@ -102,6 +113,11 @@ actor ParakeetEouSession {
         var tentative = ""
         var committedTokenCount = 0
         var inFlight = false
+        var pcmSamples: [Float] = []
+        var pcmStartIndex = 0
+        var pcmSampleRate = 0
+        var pcmStartSeconds = 0.0
+        var speakerEvidenceEnabled = false
     }
 
     private let driver: any ParakeetEouDriving
@@ -182,6 +198,7 @@ actor ParakeetEouSession {
         current.inFlight = false
         current.nextSequence += 1
         current.audioEndSeconds = frame.audioEndSeconds
+        appendEvidenceFrame(frame, to: &current)
         do {
             let events = try apply(snapshots, to: &current)
             states[source] = current
@@ -242,6 +259,98 @@ actor ParakeetEouSession {
         states.removeAll()
         for state in active {
             await state.manager.cancel()
+        }
+    }
+
+    func speakerEvidenceSnapshot(
+        streamId: String,
+        generation: Int
+    ) throws -> SpeakerEvidenceSnapshot {
+        guard let system = states[.system], system.streamId == streamId else {
+            throw EouSessionFailure.streamNotFound
+        }
+        guard let mic = states[.mic] else { throw EouSessionFailure.streamNotFound }
+        guard system.generation == generation, mic.generation == generation else {
+            throw EouSessionFailure.generationMismatch
+        }
+        guard mic.speakerEvidenceEnabled, system.speakerEvidenceEnabled,
+            mic.pcmSampleRate > 0, system.pcmSampleRate > 0
+        else {
+            throw EouSessionFailure.inferenceFailed
+        }
+        let start = max(mic.pcmStartSeconds, system.pcmStartSeconds)
+        let end = min(mic.audioEndSeconds, system.audioEndSeconds)
+        guard end - start >= 3 else { throw EouSessionFailure.inferenceFailed }
+
+        func slice(_ state: State) -> [Float] {
+            let rate = Double(state.pcmSampleRate)
+            let lower = state.pcmStartIndex
+                + max(0, Int(((start - state.pcmStartSeconds) * rate).rounded(.down)))
+            let upper = min(
+                state.pcmSamples.count,
+                state.pcmStartIndex
+                    + Int(((end - state.pcmStartSeconds) * rate).rounded(.up))
+            )
+            return lower < upper ? Array(state.pcmSamples[lower..<upper]) : []
+        }
+
+        let micSamples = slice(mic)
+        let systemSamples = slice(system)
+        guard !micSamples.isEmpty, !systemSamples.isEmpty else {
+            throw EouSessionFailure.inferenceFailed
+        }
+        return SpeakerEvidenceSnapshot(
+            micSamples: micSamples,
+            micSampleRate: Double(mic.pcmSampleRate),
+            systemSamples: systemSamples,
+            systemSampleRate: Double(system.pcmSampleRate),
+            startSeconds: start,
+            endSeconds: end
+        )
+    }
+
+    func setSpeakerEvidenceEnabled(
+        _ enabled: Bool,
+        streamId: String,
+        generation: Int
+    ) throws {
+        guard let system = states[.system], system.streamId == streamId,
+            let mic = states[.mic], system.generation == generation,
+            mic.generation == generation
+        else {
+            throw EouSessionFailure.streamNotFound
+        }
+        for source in [LiveSource.mic, .system] {
+            guard var state = states[source] else { continue }
+            state.speakerEvidenceEnabled = enabled
+            state.pcmSamples.removeAll(keepingCapacity: enabled)
+            state.pcmStartIndex = 0
+            state.pcmSampleRate = 0
+            state.pcmStartSeconds = state.audioEndSeconds
+            states[source] = state
+        }
+    }
+
+    private func appendEvidenceFrame(_ frame: EouPcmFrame, to state: inout State) {
+        guard state.speakerEvidenceEnabled else { return }
+        if state.pcmSampleRate != frame.sampleRate {
+            state.pcmSamples.removeAll(keepingCapacity: true)
+            state.pcmStartIndex = 0
+            state.pcmSampleRate = frame.sampleRate
+            state.pcmStartSeconds = frame.audioStartSeconds
+        }
+        if state.pcmSamples.isEmpty { state.pcmStartSeconds = frame.audioStartSeconds }
+        state.pcmSamples.append(contentsOf: frame.samples)
+        let limit = Int(Self.speakerEvidenceWindowSeconds * Double(frame.sampleRate))
+        let bufferedCount = state.pcmSamples.count - state.pcmStartIndex
+        if bufferedCount > limit {
+            let overflow = bufferedCount - limit
+            state.pcmStartIndex += overflow
+            state.pcmStartSeconds += Double(overflow) / Double(frame.sampleRate)
+        }
+        if state.pcmStartIndex >= limit / 2 {
+            state.pcmSamples.removeFirst(state.pcmStartIndex)
+            state.pcmStartIndex = 0
         }
     }
 

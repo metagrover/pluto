@@ -39,6 +39,7 @@ const expectedTables = [
   'knowledge_doc_versions',
   'knowledge_docs',
   'live_meeting_context_checkpoints',
+  'live_speaker_identity_confirmations',
   'meeting_analysis_run_history',
   'meeting_analysis_runs',
   'meeting_audio_migrations',

@@ -15,6 +15,11 @@ import type {
 } from '../../services/liveTranscription/liveConversationProjection';
 import { buildLiveConversationTimeline } from '../../services/liveTranscription/liveConversationProjection';
 import {
+  type LiveSpeakerIdentityHint,
+  type LiveSpeakerIdentitySnapshot,
+  liveSpeakerHintForRange,
+} from '../../services/liveTranscription/liveSpeakerIdentityContract';
+import {
   type LiveTranscriptTurn,
   buildLiveTranscriptTurns,
 } from './liveTranscriptPresentation';
@@ -31,18 +36,93 @@ const speakerLabel = (turn: LiveTranscriptTurn): string => {
   return turn.speaker;
 };
 
+const SpeakerIdentityControls = ({
+  hint,
+  fallbackLabel,
+  onAction,
+}: {
+  hint: LiveSpeakerIdentityHint;
+  fallbackLabel: string;
+  onAction?: (
+    suggestionId: string,
+    action: 'confirm' | 'reject' | 'restore',
+  ) => void;
+}) => {
+  if (!onAction) {
+    return (
+      <strong>
+        {hint.state === 'rejected' || hint.state === 'revoked'
+          ? fallbackLabel
+          : hint.displayLabel}
+      </strong>
+    );
+  }
+  return (
+    <span className="live-speaker-identity">
+      <strong>
+        {hint.state === 'rejected' ? fallbackLabel : hint.displayLabel}
+      </strong>
+      {hint.state === 'suggested' ? (
+        <span className="live-speaker-identity__actions">
+          <button
+            type="button"
+            onClick={() => onAction(hint.suggestionId, 'confirm')}
+          >
+            Confirm
+          </button>
+          <button
+            type="button"
+            onClick={() => onAction(hint.suggestionId, 'reject')}
+          >
+            Not this person
+          </button>
+        </span>
+      ) : hint.state === 'confirmed' || hint.state === 'rejected' ? (
+        <button
+          type="button"
+          className="live-speaker-identity__undo"
+          onClick={() => onAction(hint.suggestionId, 'restore')}
+        >
+          Undo
+        </button>
+      ) : null}
+    </span>
+  );
+};
+
 const TranscriptTurn = memo(
   ({
     turn,
+    speakerIdentity,
+    onSpeakerIdentityAction,
   }: {
     turn: LiveTranscriptTurn;
+    speakerIdentity?: LiveSpeakerIdentitySnapshot | null;
+    onSpeakerIdentityAction?: (
+      suggestionId: string,
+      action: 'confirm' | 'reject' | 'restore',
+    ) => void;
   }) => {
     const startedAt = new Date(turn.timestampMs).toISOString();
     const isLive = turn.segments.some((segment) => !segment.confirmed);
+    const endMs =
+      turn.segments.at(-1)?.endTimestampMs ?? turn.segments.at(-1)?.timestampMs;
+    const hint =
+      turn.source === 'system' && endMs !== undefined
+        ? liveSpeakerHintForRange(speakerIdentity, turn.timestampMs, endMs)
+        : null;
     return (
       <article className="transcript-turn">
         <div className="transcript-speaker">
-          <strong>{speakerLabel(turn)}</strong>
+          {hint ? (
+            <SpeakerIdentityControls
+              hint={hint}
+              fallbackLabel={speakerLabel(turn)}
+              onAction={onSpeakerIdentityAction}
+            />
+          ) : (
+            <strong>{speakerLabel(turn)}</strong>
+          )}
           <time dateTime={startedAt}>
             {isLive ? 'Live' : startedAt.slice(14, 19)}
           </time>
@@ -76,10 +156,29 @@ const sourceLabel = (source: 'mic' | 'system'): string =>
   source === 'mic' ? 'Mic' : 'Call';
 
 const ConversationTimelineTurn = memo(
-  ({ item }: { item: LiveConversationTimelineItem }) => {
+  ({
+    item,
+    speakerIdentity,
+    onSpeakerIdentityAction,
+  }: {
+    item: LiveConversationTimelineItem;
+    speakerIdentity?: LiveSpeakerIdentitySnapshot | null;
+    onSpeakerIdentityAction?: (
+      suggestionId: string,
+      action: 'confirm' | 'reject' | 'restore',
+    ) => void;
+  }) => {
     const first = item.kind === 'committed' ? item.row : item.part;
     const startedAt = new Date(first.timestampMs).toISOString();
     const draft = item.kind === 'draft';
+    const hint =
+      !draft && first.source === 'system'
+        ? liveSpeakerHintForRange(
+            speakerIdentity,
+            first.timestampMs,
+            first.endTimestampMs,
+          )
+        : null;
     const paragraphs =
       item.kind === 'committed'
         ? [
@@ -117,7 +216,15 @@ const ConversationTimelineTurn = memo(
           : {})}
       >
         <div className="transcript-speaker">
-          <strong>{sourceLabel(first.source)}</strong>
+          {hint ? (
+            <SpeakerIdentityControls
+              hint={hint}
+              fallbackLabel={sourceLabel(first.source)}
+              onAction={onSpeakerIdentityAction}
+            />
+          ) : (
+            <strong>{sourceLabel(first.source)}</strong>
+          )}
           <time dateTime={startedAt}>
             {draft ? 'Live' : startedAt.slice(14, 19)}
           </time>
@@ -181,6 +288,8 @@ export const LiveTranscript = ({
   conversation = null,
   onOpenSettings,
   forceShowWarning = false,
+  speakerIdentity = null,
+  onSpeakerIdentityAction,
 }: {
   segments: LiveTranscriptSegment[];
   interimText: string;
@@ -190,6 +299,11 @@ export const LiveTranscript = ({
     tab?: 'personal' | 'meetings' | 'intelligence' | 'advanced',
   ) => void;
   forceShowWarning?: boolean;
+  speakerIdentity?: LiveSpeakerIdentitySnapshot | null;
+  onSpeakerIdentityAction?: (
+    suggestionId: string,
+    action: 'confirm' | 'reject' | 'restore',
+  ) => void;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingLiveRef = useRef(true);
@@ -307,6 +421,8 @@ export const LiveTranscript = ({
                 <ConversationTimelineTurn
                   key={conversationTimelineKey(item)}
                   item={item}
+                  speakerIdentity={speakerIdentity}
+                  onSpeakerIdentityAction={onSpeakerIdentityAction}
                 />
               ))}
               {conversation.draft && (
@@ -331,7 +447,35 @@ export const LiveTranscript = ({
               </span>
             </div>
           ) : (
-            turns.map((turn) => <TranscriptTurn key={turn.id} turn={turn} />)
+            turns.map((turn) => (
+              <TranscriptTurn
+                key={turn.id}
+                turn={turn}
+                speakerIdentity={speakerIdentity}
+                onSpeakerIdentityAction={onSpeakerIdentityAction}
+              />
+            ))
+          )}
+          {speakerIdentity?.hints.some((hint) => hint.state === 'rejected') && (
+            <aside
+              className="live-speaker-identity-dismissed"
+              aria-label="Dismissed speaker suggestion"
+            >
+              Suggestion dismissed.
+              {speakerIdentity.hints
+                .filter((hint) => hint.state === 'rejected')
+                .map((hint) => (
+                  <button
+                    key={hint.suggestionId}
+                    type="button"
+                    onClick={() =>
+                      onSpeakerIdentityAction?.(hint.suggestionId, 'restore')
+                    }
+                  >
+                    Undo
+                  </button>
+                ))}
+            </aside>
           )}
           {!showingConversation && interimText && (
             <p className="transcript-interim" aria-hidden="true">

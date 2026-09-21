@@ -17,6 +17,7 @@ class FakeTransport implements NativeJsonLineTransport {
   readonly pendingAppends: Pending[] = [];
   private eventListeners = new Set<(event: NativeEvent) => void>();
   private failureListeners = new Set<(code: string) => void>();
+  speakerEvidenceResult: Record<string, unknown> | null = null;
 
   request = vi.fn(async (payload: Record<string, unknown>) => {
     this.requests.push(payload);
@@ -24,6 +25,17 @@ class FakeTransport implements NativeJsonLineTransport {
       return await new Promise<NativeResponse>((resolve) => {
         this.pendingAppends.push({ payload, resolve });
       });
+    }
+    if (
+      payload.method === 'eou_speaker_evidence' &&
+      this.speakerEvidenceResult
+    ) {
+      return {
+        schemaVersion: 1 as const,
+        id: String(payload.id),
+        ok: true,
+        result: { speakerEvidence: this.speakerEvidenceResult },
+      };
     }
     return {
       schemaVersion: 1 as const,
@@ -76,6 +88,76 @@ const append = (source: 'mic' | 'system', sequence: number) => ({
 });
 
 describe('ParakeetEouClient', () => {
+  it('enables and disables bounded evidence only through the System stream', async () => {
+    const process = new FakeTransport();
+    const client = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await Promise.all([
+      client.open(identity('mic')),
+      client.open(identity('system')),
+    ]);
+
+    await client.setSpeakerEvidenceEnabled(identity('system'), true);
+    await client.setSpeakerEvidenceEnabled(identity('system'), false);
+
+    expect(process.requests.slice(-2).map((request) => request.method)).toEqual(
+      ['eou_speaker_evidence_enable', 'eou_speaker_evidence_disable'],
+    );
+    await expect(
+      client.setSpeakerEvidenceEnabled(identity('mic'), true),
+    ).rejects.toThrow('parakeet_request_invalid');
+  });
+
+  it('requests and validates bounded live speaker evidence without forwarding it as an event', async () => {
+    const process = new FakeTransport();
+    const embedding = Array.from({ length: 256 }, (_, index) =>
+      index === 0 ? 1 : 0,
+    );
+    process.speakerEvidenceResult = {
+      turns: [{ startTime: 1, endTime: 4, cluster: 'a' }],
+      energyWindows: [
+        { startTime: 1, endTime: 1.1, micRms: 0, systemRms: 0.1 },
+      ],
+      provenance: {
+        modelIdentifier: 'speaker-diarization-offline-v1',
+        modelRevision: '1ed7a662fdc7109e36d822db793ee6eebdaf8594',
+        artifactDigest:
+          'e0b6b63bdb2a12d087031067d61600f5e2b6b9a26f9c9e511118d2a6206349cd',
+        runtimeVersion: 'fluidaudio-0.15.5',
+        profileAlgorithmVersion: 'v1',
+      },
+      timings: { diarizationMs: 1, energyAnalysisMs: 1, totalMs: 2 },
+      windowSeconds: 0.1,
+      clusterEvidence: [
+        {
+          cluster: 'a',
+          embedding,
+          representativeEmbeddings: [embedding, embedding],
+          cleanChunkCount: 2,
+          cleanSegmentCount: 2,
+          cleanDurationSeconds: 3,
+          minimumChunkSimilarity: 0.8,
+          meanChunkSimilarity: 0.9,
+        },
+      ],
+    };
+    const client = new ParakeetEouClient({
+      process,
+      maxOutstandingPerSource: 4,
+    });
+    await client.open(identity('system'));
+
+    const result = await client.speakerEvidence(identity('system'));
+
+    expect(result.clusterEvidence?.[0]?.embedding).toHaveLength(256);
+    expect(process.requests.at(-1)).toMatchObject({
+      method: 'eou_speaker_evidence',
+      source: 'system',
+    });
+  });
+
   it('opens exactly one independent stream for each source', async () => {
     const process = new FakeTransport();
     const client = new ParakeetEouClient({

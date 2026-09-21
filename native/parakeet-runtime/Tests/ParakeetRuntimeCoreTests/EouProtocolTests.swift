@@ -17,6 +17,9 @@ final class EouProtocolTests: XCTestCase {
             (#"{"schemaVersion":1,"id":"f","method":"eou_finish","streamId":"s","source":"mic","generation":1}"#, .eouFinish, nil),
             (#"{"schemaVersion":1,"id":"c","method":"eou_cancel","streamId":"s","source":"mic","generation":1}"#, .eouCancel, nil),
             (#"{"schemaVersion":1,"id":"r","method":"eou_reset","streamId":"s","source":"mic","generation":2}"#, .eouReset, nil),
+            (#"{"schemaVersion":1,"id":"ee","method":"eou_speaker_evidence_enable","streamId":"s","source":"system","generation":2}"#, .eouSpeakerEvidenceEnable, nil),
+            (#"{"schemaVersion":1,"id":"ed","method":"eou_speaker_evidence_disable","streamId":"s","source":"system","generation":2}"#, .eouSpeakerEvidenceDisable, nil),
+            (#"{"schemaVersion":1,"id":"e","method":"eou_speaker_evidence","streamId":"s","source":"system","generation":2}"#, .eouSpeakerEvidence, nil),
         ]
 
         for (json, method, sequence) in cases {

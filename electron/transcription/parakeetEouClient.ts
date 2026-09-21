@@ -6,6 +6,10 @@ import type {
   NativeLiveSource,
   NativeResponse,
 } from './nativeJsonLineProcess';
+import {
+  type SpeakerEvidenceResult,
+  parseSpeakerEvidenceResult,
+} from './parakeetFinalClient';
 import type {
   ParakeetRuntimeHost,
   ParakeetRuntimeLease,
@@ -179,6 +183,42 @@ export class ParakeetEouClient {
     const state = this.requireState(identity);
     await this.cancelState(state);
     await this.releaseRuntimeLeaseIfIdle();
+  }
+
+  async setSpeakerEvidenceEnabled(
+    identity: ParakeetEouIdentity,
+    enabled: boolean,
+  ): Promise<void> {
+    this.requireUsable();
+    const state = this.requireState(identity);
+    if (state.source !== 'system' || state.closing) {
+      throw new Error('parakeet_request_invalid');
+    }
+    await this.send(
+      enabled ? 'eou_speaker_evidence_enable' : 'eou_speaker_evidence_disable',
+      identity,
+    );
+  }
+
+  async speakerEvidence(
+    identity: ParakeetEouIdentity,
+  ): Promise<SpeakerEvidenceResult> {
+    this.requireUsable();
+    const state = this.requireState(identity);
+    if (state.source !== 'system' || state.closing) {
+      throw new Error('parakeet_request_invalid');
+    }
+    const response = await this.request('eou_speaker_evidence', identity);
+    if (!response.ok) {
+      throw new Error(response.error?.code ?? 'parakeet_native_failed');
+    }
+    if (
+      !response.result ||
+      Object.keys(response.result).some((key) => key !== 'speakerEvidence')
+    ) {
+      throw new Error('parakeet_protocol_invalid');
+    }
+    return parseSpeakerEvidenceResult(response.result.speakerEvidence);
   }
 
   close(cleanupTimeoutMs = this.cleanupTimeoutMs): Promise<void> {
@@ -400,6 +440,18 @@ export class ParakeetEouClient {
       ...fields,
     });
     this.requireEmptySuccess(response);
+  }
+
+  private request(
+    method: string,
+    fields: Record<string, unknown>,
+  ): Promise<NativeResponse> {
+    return this.process.request({
+      schemaVersion: 1,
+      id: `eou-${method}-${++this.nextId}`,
+      method,
+      ...fields,
+    });
   }
 
   private requireEmptySuccess(response: NativeResponse): void {

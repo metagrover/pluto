@@ -83,6 +83,110 @@ export type SpeakerEvidenceResult = {
   clusterEvidence?: SpeakerClusterEvidence[];
 };
 
+export const parseSpeakerEvidenceResult = (
+  value: unknown,
+): SpeakerEvidenceResult => {
+  if (!value || typeof value !== 'object') {
+    throw new Error('parakeet_protocol_invalid');
+  }
+  const candidate = value as Partial<SpeakerEvidenceResult>;
+  const finiteRange = (entry: { startTime?: unknown; endTime?: unknown }) =>
+    Number.isFinite(entry.startTime) &&
+    Number.isFinite(entry.endTime) &&
+    Number(entry.startTime) >= 0 &&
+    Number(entry.endTime) > Number(entry.startTime);
+  const turnsValid =
+    Array.isArray(candidate.turns) &&
+    candidate.turns.length <= 256 &&
+    candidate.turns.every(
+      (turn) =>
+        finiteRange(turn) &&
+        typeof turn.cluster === 'string' &&
+        turn.cluster.length > 0 &&
+        turn.cluster.length <= 128,
+    );
+  const windowsValid =
+    Array.isArray(candidate.energyWindows) &&
+    candidate.energyWindows.length > 0 &&
+    candidate.energyWindows.length <= 1_024 &&
+    candidate.energyWindows.every(
+      (window) =>
+        finiteRange(window) &&
+        Number.isFinite(window.micRms) &&
+        Number.isFinite(window.systemRms) &&
+        window.micRms >= 0 &&
+        window.systemRms >= 0,
+    );
+  const provenance = candidate.provenance;
+  const timings = candidate.timings;
+  const hex = (text: string, length: number) =>
+    text.length === length && /^[a-f0-9]+$/i.test(text);
+  if (
+    !turnsValid ||
+    !windowsValid ||
+    !provenance ||
+    typeof provenance.modelIdentifier !== 'string' ||
+    !hex(provenance.modelRevision, 40) ||
+    !hex(provenance.artifactDigest, 64) ||
+    typeof provenance.runtimeVersion !== 'string' ||
+    (provenance.profileAlgorithmVersion !== undefined &&
+      (typeof provenance.profileAlgorithmVersion !== 'string' ||
+        provenance.profileAlgorithmVersion.length === 0)) ||
+    !timings ||
+    !Number.isFinite(timings.diarizationMs) ||
+    !Number.isFinite(timings.energyAnalysisMs) ||
+    !Number.isFinite(timings.totalMs) ||
+    timings.diarizationMs < 0 ||
+    timings.energyAnalysisMs < 0 ||
+    timings.totalMs < 0 ||
+    !Number.isFinite(candidate.windowSeconds) ||
+    Number(candidate.windowSeconds) <= 0
+  ) {
+    throw new Error('parakeet_protocol_invalid');
+  }
+  if (candidate.clusterEvidence !== undefined) {
+    if (
+      !Array.isArray(candidate.clusterEvidence) ||
+      candidate.clusterEvidence.length > 64 ||
+      !candidate.clusterEvidence.every(
+        (evidence) =>
+          evidence &&
+          typeof evidence === 'object' &&
+          typeof evidence.cluster === 'string' &&
+          evidence.cluster.length > 0 &&
+          evidence.cluster.length <= 128 &&
+          Array.isArray(evidence.embedding) &&
+          evidence.embedding.length === 256 &&
+          evidence.embedding.every(
+            (v) => typeof v === 'number' && Number.isFinite(v),
+          ) &&
+          (evidence.representativeEmbeddings === undefined ||
+            (Array.isArray(evidence.representativeEmbeddings) &&
+              evidence.representativeEmbeddings.length <= 4 &&
+              evidence.representativeEmbeddings.every(
+                (embedding) =>
+                  Array.isArray(embedding) &&
+                  embedding.length === 256 &&
+                  embedding.every(
+                    (v) => typeof v === 'number' && Number.isFinite(v),
+                  ),
+              ))) &&
+          Number.isInteger(evidence.cleanChunkCount) &&
+          evidence.cleanChunkCount >= 0 &&
+          Number.isInteger(evidence.cleanSegmentCount) &&
+          evidence.cleanSegmentCount >= 0 &&
+          Number.isFinite(evidence.cleanDurationSeconds) &&
+          evidence.cleanDurationSeconds >= 0 &&
+          Number.isFinite(evidence.minimumChunkSimilarity) &&
+          Number.isFinite(evidence.meanChunkSimilarity),
+      )
+    ) {
+      throw new Error('parakeet_protocol_invalid');
+    }
+  }
+  return candidate as SpeakerEvidenceResult;
+};
+
 type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
 export type ParakeetPreparationProgress = Pick<
   NativePreparationProgressEvent,
@@ -533,101 +637,7 @@ export class ParakeetFinalClient {
   }
 
   private parseSpeakerEvidence(value: unknown): SpeakerEvidenceResult {
-    if (!value || typeof value !== 'object') {
-      throw new Error('parakeet_protocol_invalid');
-    }
-    const candidate = value as Partial<SpeakerEvidenceResult>;
-    const finiteRange = (entry: { startTime?: unknown; endTime?: unknown }) =>
-      Number.isFinite(entry.startTime) &&
-      Number.isFinite(entry.endTime) &&
-      Number(entry.startTime) >= 0 &&
-      Number(entry.endTime) > Number(entry.startTime);
-    const turnsValid =
-      Array.isArray(candidate.turns) &&
-      candidate.turns.every(
-        (turn) =>
-          finiteRange(turn) &&
-          typeof turn.cluster === 'string' &&
-          turn.cluster.length > 0,
-      );
-    const windowsValid =
-      Array.isArray(candidate.energyWindows) &&
-      candidate.energyWindows.length > 0 &&
-      candidate.energyWindows.every(
-        (window) =>
-          finiteRange(window) &&
-          Number.isFinite(window.micRms) &&
-          Number.isFinite(window.systemRms) &&
-          window.micRms >= 0 &&
-          window.systemRms >= 0,
-      );
-    const provenance = candidate.provenance;
-    const timings = candidate.timings;
-    const hex = (text: string, length: number) =>
-      text.length === length && /^[a-f0-9]+$/i.test(text);
-    if (
-      !turnsValid ||
-      !windowsValid ||
-      !provenance ||
-      typeof provenance.modelIdentifier !== 'string' ||
-      !hex(provenance.modelRevision, 40) ||
-      !hex(provenance.artifactDigest, 64) ||
-      typeof provenance.runtimeVersion !== 'string' ||
-      (provenance.profileAlgorithmVersion !== undefined &&
-        (typeof provenance.profileAlgorithmVersion !== 'string' ||
-          provenance.profileAlgorithmVersion.length === 0)) ||
-      !timings ||
-      !Number.isFinite(timings.diarizationMs) ||
-      !Number.isFinite(timings.energyAnalysisMs) ||
-      !Number.isFinite(timings.totalMs) ||
-      timings.diarizationMs < 0 ||
-      timings.energyAnalysisMs < 0 ||
-      timings.totalMs < 0 ||
-      !Number.isFinite(candidate.windowSeconds) ||
-      Number(candidate.windowSeconds) <= 0
-    ) {
-      throw new Error('parakeet_protocol_invalid');
-    }
-    if (candidate.clusterEvidence !== undefined) {
-      if (
-        !Array.isArray(candidate.clusterEvidence) ||
-        candidate.clusterEvidence.length > 64 ||
-        !candidate.clusterEvidence.every(
-          (evidence) =>
-            evidence &&
-            typeof evidence === 'object' &&
-            typeof evidence.cluster === 'string' &&
-            evidence.cluster.length > 0 &&
-            Array.isArray(evidence.embedding) &&
-            evidence.embedding.length === 256 &&
-            evidence.embedding.every(
-              (v) => typeof v === 'number' && Number.isFinite(v),
-            ) &&
-            (evidence.representativeEmbeddings === undefined ||
-              (Array.isArray(evidence.representativeEmbeddings) &&
-                evidence.representativeEmbeddings.length <= 4 &&
-                evidence.representativeEmbeddings.every(
-                  (embedding) =>
-                    Array.isArray(embedding) &&
-                    embedding.length === 256 &&
-                    embedding.every(
-                      (v) => typeof v === 'number' && Number.isFinite(v),
-                    ),
-                ))) &&
-            Number.isInteger(evidence.cleanChunkCount) &&
-            evidence.cleanChunkCount >= 0 &&
-            Number.isInteger(evidence.cleanSegmentCount) &&
-            evidence.cleanSegmentCount >= 0 &&
-            Number.isFinite(evidence.cleanDurationSeconds) &&
-            evidence.cleanDurationSeconds >= 0 &&
-            Number.isFinite(evidence.minimumChunkSimilarity) &&
-            Number.isFinite(evidence.meanChunkSimilarity),
-        )
-      ) {
-        throw new Error('parakeet_protocol_invalid');
-      }
-    }
-    return candidate as SpeakerEvidenceResult;
+    return parseSpeakerEvidenceResult(value);
   }
 
   private isApprovedAudioPath(audioPath: string): boolean {

@@ -7,6 +7,7 @@ import type {
   ParakeetEouClient,
   ParakeetEouIdentity,
 } from './parakeetEouClient';
+import type { SpeakerEvidenceResult } from './parakeetFinalClient';
 
 type EouClient = Pick<
   ParakeetEouClient,
@@ -17,6 +18,8 @@ type EouClient = Pick<
   | 'close'
   | 'onUpdate'
   | 'onTerminalFailure'
+  | 'setSpeakerEvidenceEnabled'
+  | 'speakerEvidence'
 >;
 
 export type ParakeetEouMeetingStart = {
@@ -172,6 +175,22 @@ export class ParakeetEouMeetingCoordinator {
       if (this.active === meeting) await this.fail('parakeet_live_unavailable');
       throw new Error('parakeet_live_unavailable');
     }
+  }
+
+  async speakerEvidence(meetingId: string): Promise<SpeakerEvidenceResult> {
+    const meeting = this.requireMeeting(meetingId);
+    return await meeting.client.speakerEvidence(meeting.identities.system);
+  }
+
+  async setSpeakerEvidenceEnabled(
+    meetingId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const meeting = this.requireMeeting(meetingId);
+    await meeting.client.setSpeakerEvidenceEnabled(
+      meeting.identities.system,
+      enabled,
+    );
   }
 
   async cancel(

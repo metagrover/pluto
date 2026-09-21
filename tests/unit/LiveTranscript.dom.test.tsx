@@ -364,6 +364,47 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('keeps a rejected live speaker suggestion anonymous and reversible', () => {
+    const root = createRoot(container);
+    const onAction = vi.fn();
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[{ ...otherSpeakerSegment, endTimestampMs: 20_000 }]}
+          interimText=""
+          speakerIdentity={{
+            meetingId: 'meeting-1',
+            generation: 1,
+            revision: 4,
+            hints: [
+              {
+                suggestionId: 'hint-1',
+                displayLabel: 'Likely Alex',
+                state: 'rejected',
+                generation: 1,
+                revision: 4,
+                ranges: [{ startMs: 18_000, endMs: 20_000 }],
+              },
+            ],
+          }}
+          onSpeakerIdentityAction={onAction}
+        />,
+      ),
+    );
+
+    expect(
+      container.querySelector('.transcript-speaker strong')?.textContent,
+    ).toBe('Call');
+    const undo = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Undo',
+    );
+    expect(undo).toBeDefined();
+    act(() => undo?.click());
+    expect(onAction).toHaveBeenCalledWith('hint-1', 'restore');
+
+    act(() => root.unmount());
+  });
+
   it('keeps an uncorroborated microphone wording change visible', () => {
     const root = createRoot(container);
     const mic = {
@@ -1749,6 +1790,62 @@ describe('LiveTranscript reading experience', () => {
       button?.click();
     });
     expect(onOpenSettings).toHaveBeenCalledWith('meetings');
+    act(() => root.unmount());
+  });
+
+  it('decorates an existing remote row without replacing or reordering it', () => {
+    const remote = {
+      ...otherSpeakerSegment,
+      endTimestampMs: 19_000,
+    };
+    const onAction = vi.fn();
+    const root = createRoot(container);
+    act(() =>
+      root.render(<LiveTranscript segments={[remote]} interimText="" />),
+    );
+    const originalRow = container.querySelector('.transcript-turn');
+    const originalContent = originalRow?.querySelector(
+      '.transcript-turn__content',
+    )?.textContent;
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[remote]}
+          interimText=""
+          speakerIdentity={{
+            meetingId: 'meeting-1',
+            generation: 1,
+            revision: 2,
+            hints: [
+              {
+                suggestionId: 'suggestion-1',
+                displayLabel: 'Likely Ada',
+                state: 'suggested',
+                ranges: [{ startMs: 17_500, endMs: 19_500 }],
+                generation: 1,
+                revision: 2,
+              },
+            ],
+          }}
+          onSpeakerIdentityAction={onAction}
+        />,
+      ),
+    );
+
+    const decoratedRow = container.querySelector('.transcript-turn');
+    expect(decoratedRow).toBe(originalRow);
+    expect(decoratedRow?.querySelector('strong')?.textContent).toBe(
+      'Likely Ada',
+    );
+    expect(
+      decoratedRow?.querySelector('.transcript-turn__content')?.textContent,
+    ).toBe(originalContent);
+    const reject = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Not this person',
+    );
+    act(() => reject?.click());
+    expect(onAction).toHaveBeenCalledWith('suggestion-1', 'reject');
     act(() => root.unmount());
   });
 });
