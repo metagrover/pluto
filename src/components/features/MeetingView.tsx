@@ -1792,7 +1792,10 @@ const SelectedMeetingView = ({
                       className="meeting-toolbar-button"
                       aria-label="Attach reference document"
                     >
-                      <Paperclip aria-hidden="true" className="h-4 w-4 shrink-0" />
+                      <Paperclip
+                        aria-hidden="true"
+                        className="h-4 w-4 shrink-0"
+                      />
                       <span>Attach reference document…</span>
                     </button>
                   </div>
