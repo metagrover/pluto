@@ -4902,6 +4902,94 @@ app.whenReady().then(async () => {
     if (typeof id !== 'string' || !id) return false;
     return db.deleteLocalArtifact(id);
   });
+  ipcMain.handle('MEETING_ARTIFACTS_LIST', (_event, meetingId: unknown) => {
+    if (!meetingId) return [];
+    return db.listArtifactsForMeeting(String(meetingId));
+  });
+  ipcMain.handle(
+    'MEETING_ARTIFACTS_ATTACH',
+    (
+      _event,
+      input: { meetingId?: unknown; artifactId?: unknown },
+    ) => {
+      const meetingId = input?.meetingId;
+      const artifactId = input?.artifactId;
+      if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
+        return false;
+      }
+      return db.attachArtifactToMeeting(String(meetingId), artifactId);
+    },
+  );
+  ipcMain.handle(
+    'MEETING_ARTIFACTS_DETACH',
+    (
+      _event,
+      input: { meetingId?: unknown; artifactId?: unknown },
+    ) => {
+      const meetingId = input?.meetingId;
+      const artifactId = input?.artifactId;
+      if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
+        return false;
+      }
+      return db.detachArtifactFromMeeting(String(meetingId), artifactId);
+    },
+  );
+  ipcMain.handle(
+    'MEETING_ARTIFACTS_IMPORT_AND_ATTACH',
+    async (_event, meetingId: unknown) => {
+      if (!meetingId) return [];
+      const selection = await dialog.showOpenDialog(win!, {
+        title: 'Attach document to meeting',
+        buttonLabel: 'Attach to meeting',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'All supported sources',
+            extensions: ['md', 'markdown', 'txt', 'text', 'pdf', 'docx', 'pages'],
+          },
+          { name: 'Word documents', extensions: ['docx'] },
+          { name: 'Pages documents', extensions: ['pages'] },
+          { name: 'PDF documents', extensions: ['pdf'] },
+          {
+            name: 'Notes & Markdown',
+            extensions: ['md', 'markdown', 'txt', 'text'],
+          },
+        ],
+      });
+      if (selection.canceled) return [];
+
+      const imported = [];
+      for (const filePath of selection.filePaths) {
+        const saved = await importLocalArtifactFile(filePath);
+        if (saved) {
+          db.attachArtifactToMeeting(String(meetingId), saved.id);
+          imported.push(saved);
+        }
+      }
+      return imported;
+    },
+  );
+  ipcMain.handle(
+    'MEETING_ARTIFACTS_IMPORT_PATHS_AND_ATTACH',
+    async (
+      _event,
+      input: { meetingId?: unknown; paths?: unknown },
+    ) => {
+      const meetingId = input?.meetingId;
+      const paths = input?.paths;
+      if (!meetingId || !Array.isArray(paths)) return [];
+      const imported = [];
+      for (const filePath of paths) {
+        if (typeof filePath !== 'string') continue;
+        const saved = await importLocalArtifactFile(filePath);
+        if (saved) {
+          db.attachArtifactToMeeting(String(meetingId), saved.id);
+          imported.push(saved);
+        }
+      }
+      return imported;
+    },
+  );
   ipcMain.handle('GET_KNOWLEDGE_DOC_VERSIONS', (_event, { docId, limit }) =>
     db.getKnowledgeDocVersions(docId, limit),
   );

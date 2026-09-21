@@ -178,6 +178,24 @@ export const localArtifacts = sqliteTable(
   ],
 );
 
+export const meetingLocalArtifacts = sqliteTable(
+  'meeting_local_artifacts',
+  {
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => localArtifacts.id, { onDelete: 'cascade' }),
+    createdAt: datetime('created_at').notNull().default(now),
+  },
+  (table) => [
+    primaryKey({ columns: [table.meetingId, table.artifactId] }),
+    index('idx_meeting_local_artifacts_meeting').on(table.meetingId),
+    index('idx_meeting_local_artifacts_artifact').on(table.artifactId),
+  ],
+);
+
 export const meetingAudioRetention = sqliteTable('meeting_audio_retention', {
   meetingId: text('meeting_id')
     .primaryKey()

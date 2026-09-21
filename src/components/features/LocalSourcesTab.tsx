@@ -1,8 +1,8 @@
 import {
-  Ban,
   Check,
   FilePlus2,
   FileText,
+  Paperclip,
   RefreshCw,
   ShieldAlert,
   Trash2,
@@ -11,33 +11,13 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import {
   type LocalArtifact,
-  type LocalArtifactStatus,
   deleteLocalArtifact,
   importLocalArtifactPaths,
   importLocalArtifacts,
   listLocalArtifacts,
-  setLocalArtifactStatus,
 } from '../../api/localArtifacts';
 import { getTrustStatusMeta } from '../../utils/trustStatus';
 import { PageHeader } from '../ui/PageHeader';
-
-const statusCopy: Record<
-  LocalArtifactStatus,
-  { label: string; description: string }
-> = {
-  active: {
-    label: 'Included',
-    description: 'Available to Ask Pluto and future memory synthesis.',
-  },
-  noisy: {
-    label: 'Noisy',
-    description: 'Retained locally but withheld from retrieval.',
-  },
-  excluded: {
-    label: 'Excluded',
-    description: 'Retained locally and excluded from memory features.',
-  },
-};
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
@@ -53,17 +33,13 @@ export const LocalSourcesTab = ({
   const [artifacts, setArtifacts] = useState<LocalArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [failedAction, setFailedAction] = useState<
-    | 'load'
-    | 'import'
-    | { artifact: LocalArtifact; status: LocalArtifactStatus }
-    | null
-  >(null);
+  const [failedAction, setFailedAction] = useState<'load' | 'import' | null>(
+    null,
+  );
   const [openedId, setOpenedId] = useState<string | null>(
     selectedSourceId ?? null,
   );
@@ -154,26 +130,6 @@ export const LocalSourcesTab = ({
     }
   };
 
-  const handleStatus = async (
-    artifact: LocalArtifact,
-    status: LocalArtifactStatus,
-  ) => {
-    if (artifact.status === status) return;
-    setUpdatingId(artifact.id);
-    setError(null);
-    setFailedAction(null);
-    try {
-      const updated = await setLocalArtifactStatus(artifact.id, status);
-      setArtifacts((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      );
-    } catch {
-      setError('Pluto could not update that source. Try again.');
-      setFailedAction({ artifact, status });
-    } finally {
-      setUpdatingId(null);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
@@ -287,9 +243,7 @@ export const LocalSourcesTab = ({
             type="button"
             onClick={() => {
               if (failedAction === 'import') void handleImport();
-              else if (failedAction && typeof failedAction === 'object') {
-                void handleStatus(failedAction.artifact, failedAction.status);
-              } else void refresh();
+              else void refresh();
             }}
             className="shrink-0 font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40"
           >
@@ -337,8 +291,7 @@ export const LocalSourcesTab = ({
         <ul className="divide-y divide-pro-border/50 border-y border-pro-border/50">
           {artifacts.map((artifact) => {
             const trust = getTrustStatusMeta(artifact.trust_status);
-            const busy =
-              updatingId === artifact.id || deletingId === artifact.id;
+            const busy = deletingId === artifact.id;
             const isConfirmingDelete = confirmDeleteId === artifact.id;
 
             return (
@@ -376,7 +329,17 @@ export const LocalSourcesTab = ({
                         )}
                         {trust.label}
                       </span>
-                      <span>{statusCopy[artifact.status].description}</span>
+                      {artifact.attached_meetings &&
+                      artifact.attached_meetings.length > 0 ? (
+                        <span>
+                          Attached to {artifact.attached_meetings.length}{' '}
+                          {artifact.attached_meetings.length === 1
+                            ? 'meeting'
+                            : 'meetings'}
+                        </span>
+                      ) : (
+                        <span>Global reference</span>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -400,32 +363,28 @@ export const LocalSourcesTab = ({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <div
-                    className="flex items-center gap-1 rounded-lg bg-black/[0.035] p-1 dark:bg-white/[0.05]"
-                    role="group"
-                    aria-label={`Memory status for ${artifact.title}`}
-                  >
-                    {(['active', 'noisy', 'excluded'] as const).map(
-                      (status) => (
-                        <button
-                          key={status}
-                          type="button"
-                          disabled={busy}
-                          aria-pressed={artifact.status === status}
-                          onClick={() => void handleStatus(artifact, status)}
-                          className={`inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:cursor-wait disabled:opacity-60 ${
-                            artifact.status === status
-                              ? 'bg-pro-surface text-pro-text-main shadow-sm'
-                              : 'text-pro-text-muted hover:text-pro-text-main'
-                          }`}
+                <div className="flex flex-wrap items-center gap-3">
+                  {artifact.attached_meetings &&
+                  artifact.attached_meetings.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {artifact.attached_meetings.map((meeting) => (
+                        <span
+                          key={meeting.id}
+                          className="inline-flex items-center gap-1 rounded-md bg-pro-accent/10 px-2 py-1 text-[11px] font-medium text-pro-accent"
+                          title={`Attached to meeting: ${meeting.title}`}
                         >
-                          {status === 'excluded' && <Ban className="h-3 w-3" />}
-                          {statusCopy[status].label}
-                        </button>
-                      ),
-                    )}
-                  </div>
+                          <Paperclip className="h-3 w-3 shrink-0" />
+                          <span className="max-w-[140px] truncate">
+                            {meeting.title}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-black/[0.04] px-2.5 py-1 text-[11px] font-medium text-pro-text-muted dark:bg-white/[0.06]">
+                      Global reference
+                    </span>
+                  )}
 
                   {isConfirmingDelete ? (
                     <div className="flex items-center gap-1">

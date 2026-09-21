@@ -19,6 +19,7 @@ export interface LocalArtifact {
   status: LocalArtifactStatus;
   created_at: string;
   updated_at: string;
+  attached_meetings?: Array<{ id: string; title: string }>;
 }
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
@@ -46,3 +47,31 @@ export const setLocalArtifactStatus = (
 
 export const deleteLocalArtifact = (id: string): Promise<boolean> =>
   invoke('LOCAL_ARTIFACTS_DELETE', id);
+
+export const listMeetingArtifacts = (
+  meetingId: string | number,
+): Promise<LocalArtifact[]> =>
+  invoke('MEETING_ARTIFACTS_LIST', meetingId);
+
+export const attachMeetingArtifact = (
+  meetingId: string | number,
+  artifactId: string,
+): Promise<boolean> =>
+  invoke('MEETING_ARTIFACTS_ATTACH', { meetingId, artifactId });
+
+export const detachMeetingArtifact = (
+  meetingId: string | number,
+  artifactId: string,
+): Promise<boolean> =>
+  invoke('MEETING_ARTIFACTS_DETACH', { meetingId, artifactId });
+
+export const importAndAttachMeetingArtifacts = (
+  meetingId: string | number,
+): Promise<LocalArtifact[]> =>
+  invoke('MEETING_ARTIFACTS_IMPORT_AND_ATTACH', meetingId);
+
+export const importAndAttachMeetingArtifactPaths = (
+  meetingId: string | number,
+  paths: string[],
+): Promise<LocalArtifact[]> =>
+  invoke('MEETING_ARTIFACTS_IMPORT_PATHS_AND_ATTACH', { meetingId, paths });

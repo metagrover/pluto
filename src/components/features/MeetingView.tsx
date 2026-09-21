@@ -68,6 +68,7 @@ import {
 } from '../../utils/transcriptTrustState';
 import { SearchSelect } from '../ui/SearchSelect';
 import { MeetingCalendarContext } from './MeetingCalendarContext';
+import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import {
   MeetingNotesDraftPreview,
@@ -1852,6 +1853,13 @@ const SelectedMeetingView = ({
             </button>
           </section>
         ) : null}
+
+        <MeetingAttachmentsBar
+          meetingId={selectedMeeting.id}
+          hasExistingNotes={notesDocument.hasAnalysis}
+          onRegenerateNotes={() => void regenerateEnhancedNotes()}
+          isRegeneratingNotes={isRegeneratingNotes}
+        />
 
         {pendingUserNotes ? (
           <section

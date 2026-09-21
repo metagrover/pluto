@@ -28,6 +28,7 @@ export interface LocalArtifactRecord {
   status: LocalArtifactStatus;
   created_at: string;
   updated_at: string;
+  attached_meetings?: Array<{ id: string; title: string }>;
 }
 
 export interface LocalArtifactImportInput {

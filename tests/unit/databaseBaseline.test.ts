@@ -52,6 +52,7 @@ const expectedTables = [
   'meeting_context_sections_fts',
   'meeting_context_snapshots',
   'meeting_entities',
+  'meeting_local_artifacts',
   'meeting_notes_fts',
   'meeting_speaker_candidates',
   'meetings',
