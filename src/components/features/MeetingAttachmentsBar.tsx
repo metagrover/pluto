@@ -1,11 +1,10 @@
-import { FilePlus2, Loader2, Paperclip, Sparkles, X } from 'lucide-react';
+import { Loader2, Paperclip, Plus, Sparkles, X } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type LocalArtifact,
   type LocalArtifactType,
   detachMeetingArtifact,
-  importAndAttachMeetingArtifactPaths,
   importAndAttachMeetingArtifacts,
   listMeetingArtifacts,
 } from '../../api/localArtifacts';
@@ -15,6 +14,7 @@ export interface MeetingAttachmentsBarProps {
   hasExistingNotes?: boolean;
   onRegenerateNotes?: () => void;
   isRegeneratingNotes?: boolean;
+  refreshTrigger?: number;
 }
 
 const formatTypeBadge = (type: LocalArtifactType): string => {
@@ -39,6 +39,7 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
   hasExistingNotes = false,
   onRegenerateNotes,
   isRegeneratingNotes = false,
+  refreshTrigger = 0,
 }) => {
   const [artifacts, setArtifacts] = useState<LocalArtifact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -47,7 +48,6 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
   const [viewingArtifact, setViewingArtifact] = useState<LocalArtifact | null>(
     null,
   );
-  const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsRegeneration, setNeedsRegeneration] = useState(false);
 
@@ -66,8 +66,7 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
 
   useEffect(() => {
     void loadArtifacts();
-    setNeedsRegeneration(false);
-  }, [loadArtifacts]);
+  }, [loadArtifacts, refreshTrigger]);
 
   // When regenerating completes, clear the regeneration reminder banner
   useEffect(() => {
@@ -122,177 +121,99 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-
-    const files = e.dataTransfer.files;
-    const paths: string[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i] as unknown as { path?: string };
-      if (file.path) paths.push(file.path);
-    }
-    if (paths.length === 0) return;
-
-    setImporting(true);
-    setError(null);
-    try {
-      const imported = await importAndAttachMeetingArtifactPaths(
-        meetingId,
-        paths,
-      );
-      if (imported.length > 0) {
-        await loadArtifacts();
-        if (hasExistingNotes) {
-          setNeedsRegeneration(true);
-        }
-      }
-    } catch (dropError) {
-      const message =
-        dropError instanceof Error ? dropError.message : String(dropError);
-      setError(
-        message.includes('artifact_too_large')
-          ? 'File exceeds size limit (15 MB for docs, 5 MB for text).'
-          : 'Could not attach document. Drop Word, Pages, PDF, or text files.',
-      );
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isDragOver) setIsDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-  };
+  // If there are no artifacts and not viewing one, render nothing to avoid visual clutter
+  if (artifacts.length === 0 && !loading && !viewingArtifact) {
+    return null;
+  }
 
   return (
-    <div
-      className="mx-auto w-full max-w-[760px] px-6 md:px-8"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      <div
-        className={`relative rounded-xl border p-3 transition-colors ${
-          isDragOver
-            ? 'border-pro-accent bg-pro-accent/[0.08]'
-            : 'border-pro-border/70 bg-pro-surface/50'
-        }`}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Paperclip className="h-4 w-4 text-pro-text-muted" />
-            <span className="text-[12px] font-semibold uppercase tracking-wider text-pro-text-muted">
-              Reference Assets
-            </span>
-            {artifacts.length > 0 && (
-              <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[11px] font-medium text-pro-text-muted dark:bg-white/[0.08]">
-                {artifacts.length}
-              </span>
-            )}
-          </div>
+    <>
+      {artifacts.length > 0 && (
+        <section
+          aria-label="Attached reference documents"
+          className="mx-auto mb-4 w-full max-w-[760px] px-6 md:px-8"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-pro-text-muted">
+            <div className="flex items-center gap-1.5 font-medium text-pro-text-main/80">
+              <Paperclip className="h-3.5 w-3.5 text-pro-text-muted" />
+              <span>Reference docs:</span>
+            </div>
 
-          <button
-            type="button"
-            onClick={() => void handleAttach()}
-            disabled={importing || loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-pro-border/80 bg-pro-surface px-2.5 py-1 text-[12px] font-medium text-pro-text-main transition-colors hover:border-pro-accent/40 hover:text-pro-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {importing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <FilePlus2 className="h-3.5 w-3.5" />
-            )}
-            <span>{importing ? 'Attaching…' : 'Attach document'}</span>
-          </button>
-        </div>
-
-        {/* Attachment chips list or empty prompt */}
-        <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {artifacts.length === 0 && !loading && (
-            <p className="text-[12px] text-pro-text-muted/80">
-              Attach project briefs, slide decks, Word docs, Pages, or PDFs.
-              Extracted content will ground generated meeting notes.
-            </p>
-          )}
-
-          {artifacts.map((artifact) => (
-            <div
-              key={artifact.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => setViewingArtifact(artifact)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  setViewingArtifact(artifact);
-                }
-              }}
-              title={`Click to preview extracted text from ${artifact.title}`}
-              className="group inline-flex cursor-pointer items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-2.5 py-1 text-[12px] text-pro-text-main shadow-xs transition-all hover:border-pro-accent/50 hover:bg-pro-accent/[0.04]"
-            >
-              <span className="rounded bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-pro-accent dark:bg-white/[0.1]">
-                {formatTypeBadge(artifact.type)}
-              </span>
-              <span className="max-w-[200px] truncate font-medium">
-                {artifact.title}
-              </span>
-              <button
-                type="button"
-                aria-label={`Detach ${artifact.title}`}
-                disabled={detachingId === artifact.id}
-                onClick={(e) => void handleDetach(e, artifact.id)}
-                className="ml-0.5 rounded p-0.5 text-pro-text-muted/60 transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:cursor-wait"
+            {artifacts.map((artifact) => (
+              <div
+                key={artifact.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setViewingArtifact(artifact)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    setViewingArtifact(artifact);
+                  }
+                }}
+                title={`Preview extracted text from ${artifact.title}`}
+                className="group inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-pro-border/70 bg-black/[0.03] px-2 py-0.5 text-[12px] text-pro-text-main transition-colors hover:border-pro-accent/40 hover:bg-black/[0.06] dark:bg-white/[0.05] dark:hover:bg-white/[0.09]"
               >
-                {detachingId === artifact.id ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <X className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-          ))}
-        </div>
+                <span className="rounded bg-pro-accent/10 px-1 py-0.2 text-[9px] font-bold uppercase tracking-wider text-pro-accent">
+                  {formatTypeBadge(artifact.type)}
+                </span>
+                <span className="max-w-[170px] truncate font-medium">
+                  {artifact.title}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Detach ${artifact.title}`}
+                  disabled={detachingId === artifact.id}
+                  onClick={(e) => void handleDetach(e, artifact.id)}
+                  className="ml-0.5 rounded text-pro-text-muted/60 transition-colors hover:text-red-500 disabled:cursor-wait"
+                >
+                  {detachingId === artifact.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <X className="h-3 w-3" />
+                  )}
+                </button>
+              </div>
+            ))}
 
-        {/* Regeneration callout when attachment was added/removed */}
-        {needsRegeneration && onRegenerateNotes && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-pro-accent/30 bg-pro-accent/[0.08] px-3 py-2 text-[12px] text-pro-text-main">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-pro-accent" />
-              <span>
-                Meeting documents changed. Regenerate notes to synthesize them.
-              </span>
-            </div>
             <button
               type="button"
-              onClick={onRegenerateNotes}
-              disabled={isRegeneratingNotes}
-              className="inline-flex items-center gap-1.5 rounded-md bg-pro-accent px-2.5 py-1 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleAttach()}
+              disabled={importing}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main disabled:opacity-50"
+              aria-label="Add another reference document"
             >
-              {isRegeneratingNotes ? (
+              {importing ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Sparkles className="h-3 w-3" />
+                <Plus className="h-3 w-3" />
               )}
-              <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
+              <span>{importing ? 'Adding…' : 'Add'}</span>
             </button>
-          </div>
-        )}
 
-        {/* Error notification */}
-        {error && (
-          <div className="mt-2 text-[12px] text-red-600 dark:text-red-400">
-            {error}
+            {needsRegeneration && onRegenerateNotes && (
+              <button
+                type="button"
+                onClick={onRegenerateNotes}
+                disabled={isRegeneratingNotes}
+                className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-pro-accent transition-opacity hover:underline disabled:opacity-50"
+              >
+                <Sparkles className="h-3 w-3" />
+                <span>
+                  {isRegeneratingNotes
+                    ? 'Updating notes…'
+                    : 'Docs changed · Regenerate notes'}
+                </span>
+              </button>
+            )}
           </div>
-        )}
-      </div>
+
+          {error && (
+            <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+              {error}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Extracted Text Preview Modal */}
       {viewingArtifact && (
@@ -352,6 +273,6 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
