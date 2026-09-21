@@ -67,8 +67,8 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { SearchSelect } from '../ui/SearchSelect';
-import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingAttachmentsBar } from './MeetingAttachmentsBar';
+import { MeetingCalendarContext } from './MeetingCalendarContext';
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import {
   MeetingNotesDraftPreview,

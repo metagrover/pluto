@@ -4908,10 +4908,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(
     'MEETING_ARTIFACTS_ATTACH',
-    (
-      _event,
-      input: { meetingId?: unknown; artifactId?: unknown },
-    ) => {
+    (_event, input: { meetingId?: unknown; artifactId?: unknown }) => {
       const meetingId = input?.meetingId;
       const artifactId = input?.artifactId;
       if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
@@ -4922,10 +4919,7 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'MEETING_ARTIFACTS_DETACH',
-    (
-      _event,
-      input: { meetingId?: unknown; artifactId?: unknown },
-    ) => {
+    (_event, input: { meetingId?: unknown; artifactId?: unknown }) => {
       const meetingId = input?.meetingId;
       const artifactId = input?.artifactId;
       if (!meetingId || typeof artifactId !== 'string' || !artifactId) {
@@ -4945,7 +4939,15 @@ app.whenReady().then(async () => {
         filters: [
           {
             name: 'All supported sources',
-            extensions: ['md', 'markdown', 'txt', 'text', 'pdf', 'docx', 'pages'],
+            extensions: [
+              'md',
+              'markdown',
+              'txt',
+              'text',
+              'pdf',
+              'docx',
+              'pages',
+            ],
           },
           { name: 'Word documents', extensions: ['docx'] },
           { name: 'Pages documents', extensions: ['pages'] },
@@ -4971,10 +4973,7 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle(
     'MEETING_ARTIFACTS_IMPORT_PATHS_AND_ATTACH',
-    async (
-      _event,
-      input: { meetingId?: unknown; paths?: unknown },
-    ) => {
+    async (_event, input: { meetingId?: unknown; paths?: unknown }) => {
       const meetingId = input?.meetingId;
       const paths = input?.paths;
       if (!meetingId || !Array.isArray(paths)) return [];

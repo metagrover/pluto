@@ -1,10 +1,4 @@
-import {
-  FilePlus2,
-  Loader2,
-  Paperclip,
-  Sparkles,
-  X,
-} from 'lucide-react';
+import { FilePlus2, Loader2, Paperclip, Sparkles, X } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import {

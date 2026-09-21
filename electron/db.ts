@@ -722,10 +722,12 @@ export const listWorkingMemorySnapshots = (): WorkingMemorySnapshot[] => {
     );
 };
 
-export const getLocalArtifact = (id: string): LocalArtifactRecord | undefined => {
-  const artifact = db.prepare('SELECT * FROM local_artifacts WHERE id = ?').get(id) as
-    | LocalArtifactRecord
-    | undefined;
+export const getLocalArtifact = (
+  id: string,
+): LocalArtifactRecord | undefined => {
+  const artifact = db
+    .prepare('SELECT * FROM local_artifacts WHERE id = ?')
+    .get(id) as LocalArtifactRecord | undefined;
   if (!artifact) return undefined;
   const attached_meetings = listMeetingsForArtifact(id);
   return {
@@ -749,10 +751,10 @@ export const listLocalArtifacts = (): LocalArtifactRecord[] => {
         JOIN meetings m ON mla.meeting_id = m.id
       `)
       .all() as Array<{
-        artifact_id: string;
-        meeting_id: string | number;
-        meeting_title: string | null;
-      }>;
+      artifact_id: string;
+      meeting_id: string | number;
+      meeting_title: string | null;
+    }>;
 
     const meetingsByArtifact = new Map<
       string,

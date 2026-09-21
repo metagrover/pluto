@@ -50,8 +50,7 @@ export const deleteLocalArtifact = (id: string): Promise<boolean> =>
 
 export const listMeetingArtifacts = (
   meetingId: string | number,
-): Promise<LocalArtifact[]> =>
-  invoke('MEETING_ARTIFACTS_LIST', meetingId);
+): Promise<LocalArtifact[]> => invoke('MEETING_ARTIFACTS_LIST', meetingId);
 
 export const attachMeetingArtifact = (
   meetingId: string | number,

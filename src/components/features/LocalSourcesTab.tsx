@@ -130,7 +130,6 @@ export const LocalSourcesTab = ({
     }
   };
 
-
   const handleDelete = async (id: string) => {
     setDeletingId(id);
     setError(null);
