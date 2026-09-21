@@ -364,6 +364,47 @@ describe('LiveTranscript reading experience', () => {
     act(() => root.unmount());
   });
 
+  it('keeps a rejected live speaker suggestion anonymous and reversible', () => {
+    const root = createRoot(container);
+    const onAction = vi.fn();
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[{ ...otherSpeakerSegment, endTimestampMs: 20_000 }]}
+          interimText=""
+          speakerIdentity={{
+            meetingId: 'meeting-1',
+            generation: 1,
+            revision: 4,
+            hints: [
+              {
+                suggestionId: 'hint-1',
+                displayLabel: 'Likely Alex',
+                state: 'rejected',
+                generation: 1,
+                revision: 4,
+                ranges: [{ startMs: 18_000, endMs: 20_000 }],
+              },
+            ],
+          }}
+          onSpeakerIdentityAction={onAction}
+        />,
+      ),
+    );
+
+    expect(
+      container.querySelector('.transcript-speaker strong')?.textContent,
+    ).toBe('Call');
+    const undo = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Undo',
+    );
+    expect(undo).toBeDefined();
+    act(() => undo?.click());
+    expect(onAction).toHaveBeenCalledWith('hint-1', 'restore');
+
+    act(() => root.unmount());
+  });
+
   it('keeps an uncorroborated microphone wording change visible', () => {
     const root = createRoot(container);
     const mic = {

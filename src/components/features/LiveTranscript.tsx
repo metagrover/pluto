@@ -38,18 +38,30 @@ const speakerLabel = (turn: LiveTranscriptTurn): string => {
 
 const SpeakerIdentityControls = ({
   hint,
+  fallbackLabel,
   onAction,
 }: {
   hint: LiveSpeakerIdentityHint;
+  fallbackLabel: string;
   onAction?: (
     suggestionId: string,
     action: 'confirm' | 'reject' | 'restore',
   ) => void;
 }) => {
-  if (!onAction) return <strong>{hint.displayLabel}</strong>;
+  if (!onAction) {
+    return (
+      <strong>
+        {hint.state === 'rejected' || hint.state === 'revoked'
+          ? fallbackLabel
+          : hint.displayLabel}
+      </strong>
+    );
+  }
   return (
     <span className="live-speaker-identity">
-      <strong>{hint.displayLabel}</strong>
+      <strong>
+        {hint.state === 'rejected' ? fallbackLabel : hint.displayLabel}
+      </strong>
       {hint.state === 'suggested' ? (
         <span className="live-speaker-identity__actions">
           <button
@@ -65,7 +77,7 @@ const SpeakerIdentityControls = ({
             Not this person
           </button>
         </span>
-      ) : hint.state === 'confirmed' ? (
+      ) : hint.state === 'confirmed' || hint.state === 'rejected' ? (
         <button
           type="button"
           className="live-speaker-identity__undo"
@@ -105,6 +117,7 @@ const TranscriptTurn = memo(
           {hint ? (
             <SpeakerIdentityControls
               hint={hint}
+              fallbackLabel={speakerLabel(turn)}
               onAction={onSpeakerIdentityAction}
             />
           ) : (
@@ -206,6 +219,7 @@ const ConversationTimelineTurn = memo(
           {hint ? (
             <SpeakerIdentityControls
               hint={hint}
+              fallbackLabel={sourceLabel(first.source)}
               onAction={onSpeakerIdentityAction}
             />
           ) : (

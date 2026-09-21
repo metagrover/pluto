@@ -39,13 +39,19 @@ describe('live speaker identity renderer contract', () => {
     ).toBeNull();
   });
 
-  it('does not decorate revoked or rejected suggestions', () => {
-    for (const state of ['revoked', 'rejected'] as const) {
-      const parsed = parseLiveSpeakerIdentitySnapshot({
-        ...snapshot,
-        hints: [{ ...snapshot.hints[0], state }],
-      });
-      expect(liveSpeakerHintForRange(parsed, 1_500, 3_500)).toBeNull();
-    }
+  it('retains rejected coverage for reversible UI while hiding revoked suggestions', () => {
+    const rejected = parseLiveSpeakerIdentitySnapshot({
+      ...snapshot,
+      hints: [{ ...snapshot.hints[0], state: 'rejected' }],
+    });
+    expect(liveSpeakerHintForRange(rejected, 1_500, 3_500)?.state).toBe(
+      'rejected',
+    );
+
+    const revoked = parseLiveSpeakerIdentitySnapshot({
+      ...snapshot,
+      hints: [{ ...snapshot.hints[0], state: 'revoked' }],
+    });
+    expect(liveSpeakerHintForRange(revoked, 1_500, 3_500)).toBeNull();
   });
 });

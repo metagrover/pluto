@@ -5,8 +5,8 @@ import { DEFAULT_CALIBRATION_POLICY_V1 } from '../../src/services/speakerVoiceMa
 const vector = (index: number) =>
   Array.from({ length: 256 }, (_, current) => (current === index ? 1 : 0));
 
-const evidence = (embedding = vector(0)) => ({
-  turns: [{ startTime: 4, endTime: 8, cluster: 'speaker-a' }],
+const evidence = (embedding = vector(0), cluster = 'speaker-a') => ({
+  turns: [{ startTime: 4, endTime: 8, cluster }],
   energyWindows: [{ startTime: 4, endTime: 8, micRms: 0, systemRms: 0.2 }],
   provenance: {
     ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey,
@@ -15,7 +15,7 @@ const evidence = (embedding = vector(0)) => ({
   windowSeconds: 0.1,
   clusterEvidence: [
     {
-      cluster: 'speaker-a',
+      cluster,
       embedding,
       representativeEmbeddings: [embedding, embedding],
       cleanChunkCount: 3,
@@ -43,6 +43,16 @@ describe('LiveSpeakerIdentityCoordinator', () => {
           representativeEmbeddings: [vector(0), vector(0)],
           provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
         },
+        {
+          canonicalPersonId: 'person-blair',
+          personName: 'Blair',
+          sampleCount: 2,
+          cleanDurationSeconds: 12,
+          isActive: true,
+          embedding: vector(1),
+          representativeEmbeddings: [vector(1), vector(1)],
+          provenance: { ...DEFAULT_CALIBRATION_POLICY_V1.compatibilityKey },
+        },
       ],
       getRejections: () => [],
       persistConfirmation,
@@ -67,6 +77,33 @@ describe('LiveSpeakerIdentityCoordinator', () => {
     expect(JSON.stringify(second)).not.toContain('embedding');
   });
 
+  it('requires the same cluster and person pairing across consecutive revisions', () => {
+    const { coordinator } = setup();
+
+    expect(coordinator.applyEvidence(evidence(vector(0))).hints).toEqual([]);
+    expect(coordinator.applyEvidence(evidence(vector(1))).hints).toEqual([]);
+    expect(coordinator.applyEvidence(evidence(vector(0))).hints).toEqual([]);
+    expect(coordinator.applyEvidence(evidence(vector(1))).hints).toEqual([]);
+
+    expect(coordinator.applyEvidence(evidence(vector(1))).hints).toEqual([
+      expect.objectContaining({
+        displayLabel: 'Likely Blair',
+        state: 'suggested',
+      }),
+    ]);
+  });
+
+  it('does not carry consecutive evidence across different acoustic clusters', () => {
+    const { coordinator } = setup();
+
+    expect(
+      coordinator.applyEvidence(evidence(vector(0), 'speaker-a')).hints,
+    ).toEqual([]);
+    expect(
+      coordinator.applyEvidence(evidence(vector(0), 'speaker-b')).hints,
+    ).toEqual([]);
+  });
+
   it('persists confirmation, supports rejection undo, and never oscillates to a weak candidate', () => {
     const { coordinator, persistConfirmation, removeConfirmation } = setup();
     coordinator.applyEvidence(evidence());
@@ -85,6 +122,7 @@ describe('LiveSpeakerIdentityCoordinator', () => {
     expect(restored.hints[0]).toMatchObject({
       displayLabel: 'Likely Alex',
       state: 'suggested',
+      revision: restored.revision,
     });
     expect(removeConfirmation).toHaveBeenCalled();
 

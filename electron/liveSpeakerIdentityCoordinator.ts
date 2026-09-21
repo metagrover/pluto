@@ -22,7 +22,7 @@ type Session = {
   meetingId: string;
   generation: number;
   revision: number;
-  previousPeople: Set<string>;
+  previousMatches: Map<string, string>;
   hints: Map<string, InternalHint>;
   deniedPeople: Set<string>;
 };
@@ -67,7 +67,7 @@ export class LiveSpeakerIdentityCoordinator {
       meetingId,
       generation,
       revision: 1,
-      previousPeople: new Set(),
+      previousMatches: new Map(),
       hints: new Map(),
       deniedPeople: new Set(),
     };
@@ -82,7 +82,8 @@ export class LiveSpeakerIdentityCoordinator {
     const session = this.requireSession();
     const profiles = this.dependencies.getProfiles();
     const rejections = this.dependencies.getRejections(session.meetingId);
-    const byPerson = new Map<
+    const currentMatches = new Map<string, string>();
+    const stableByPerson = new Map<
       string,
       { name: string; ranges: Array<{ startMs: number; endMs: number }> }
     >();
@@ -139,7 +140,9 @@ export class LiveSpeakerIdentityCoordinator {
         continue;
       }
       const personId = outcome.suggestion.suggestedPersonId;
-      const matched = byPerson.get(personId) ?? {
+      currentMatches.set(cluster.cluster, personId);
+      if (session.previousMatches.get(cluster.cluster) !== personId) continue;
+      const matched = stableByPerson.get(personId) ?? {
         name: outcome.suggestion.suggestedPersonName,
         ranges: [],
       };
@@ -149,11 +152,11 @@ export class LiveSpeakerIdentityCoordinator {
           endMs: turn.endTime * 1_000,
         });
       }
-      byPerson.set(personId, matched);
+      stableByPerson.set(personId, matched);
     }
 
     const nextRevision = session.revision + 1;
-    const currentPeople = new Set(byPerson.keys());
+    const currentPeople = new Set(stableByPerson.keys());
     for (const [personId, hint] of session.hints) {
       if (hint.state === 'confirmed' || hint.state === 'rejected') continue;
       if (!currentPeople.has(personId)) {
@@ -164,8 +167,7 @@ export class LiveSpeakerIdentityCoordinator {
         });
       }
     }
-    for (const [personId, matched] of byPerson) {
-      if (!session.previousPeople.has(personId)) continue;
+    for (const [personId, matched] of stableByPerson) {
       const existing = session.hints.get(personId);
       const ranges = mergeRanges([
         ...(existing?.ranges ?? []),
@@ -184,7 +186,7 @@ export class LiveSpeakerIdentityCoordinator {
         personId,
       });
     }
-    session.previousPeople = currentPeople;
+    session.previousMatches = currentMatches;
     session.revision = nextRevision;
     return this.snapshot();
   }
@@ -244,7 +246,7 @@ export class LiveSpeakerIdentityCoordinator {
         displayLabel: hint.displayLabel.startsWith('Likely ')
           ? hint.displayLabel
           : `Likely ${hint.displayLabel}`,
-        revision: session.revision,
+        revision: nextRevision,
       };
       session.deniedPeople.delete(personId);
       session.hints.set(personId, next);

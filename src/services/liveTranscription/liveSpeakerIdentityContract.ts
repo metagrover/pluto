@@ -107,13 +107,16 @@ export const liveSpeakerHintForRange = (
   if (!snapshot || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
     return null;
   }
-  const matches = snapshot.hints.filter(
-    (hint) =>
-      (hint.state === 'suggested' || hint.state === 'confirmed') &&
-      hint.ranges.some(
-        (range) => range.startMs <= startMs && range.endMs >= endMs,
-      ),
+  const covered = snapshot.hints.filter((hint) =>
+    hint.ranges.some(
+      (range) => range.startMs <= startMs && range.endMs >= endMs,
+    ),
+  );
+  const matches = covered.filter(
+    (hint) => hint.state === 'suggested' || hint.state === 'confirmed',
   );
   const labels = new Set(matches.map((hint) => hint.displayLabel));
-  return matches.length > 0 && labels.size === 1 ? matches[0] : null;
+  if (matches.length > 0) return labels.size === 1 ? matches[0] : null;
+  const rejected = covered.filter((hint) => hint.state === 'rejected');
+  return rejected.length === 1 ? rejected[0] : null;
 };

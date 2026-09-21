@@ -164,7 +164,7 @@ export const reconcileLiveSpeakerIdentityConfirmations = (
     if (
       !unambiguous ||
       collision ||
-      (existing?.personId && existing.personId !== row.person_id)
+      (existing?.personId && existing.personId !== personId)
     ) {
       sqlite
         .prepare(
