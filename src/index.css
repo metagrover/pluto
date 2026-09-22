@@ -2028,23 +2028,6 @@
   .transcript-speaker {
     @apply flex flex-col gap-1 text-xs;
   }
-  .live-speaker-identity {
-    @apply flex flex-col items-start gap-1;
-  }
-  .live-speaker-identity strong {
-    @apply text-pro-accent;
-  }
-  .live-speaker-identity__actions {
-    @apply flex flex-col items-start gap-0.5;
-  }
-  .live-speaker-identity__actions button,
-  .live-speaker-identity__undo,
-  .live-speaker-identity-dismissed button {
-    @apply rounded px-1 py-0.5 text-[10px] font-medium text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .live-speaker-identity-dismissed {
-    @apply flex items-center gap-2 border-b border-pro-border/60 py-2 text-xs text-pro-text-muted;
-  }
   .transcript-speaker time {
     @apply font-mono text-[10px] text-pro-text-muted;
   }

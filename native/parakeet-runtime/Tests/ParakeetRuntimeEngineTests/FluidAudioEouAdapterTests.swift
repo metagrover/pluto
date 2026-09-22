@@ -15,6 +15,7 @@ private actor FakeFluidEouBackend: FluidAudioEouBackend {
     private var callbackBatches: [[FakeFluidEouCallback]]
     private var rawTokenBatches: [[String]]
     private var currentRawTokens: [String] = []
+    private(set) var tokenReadCount = 0
     private(set) var observedFormat: (Double, AVAudioChannelCount, AVAudioFrameCount)?
     private(set) var cleanedUp = false
 
@@ -67,14 +68,32 @@ private actor FakeFluidEouBackend: FluidAudioEouBackend {
 
     func finish() async throws -> String { "hello final" }
     func getTokenTimestampsMs() async -> [Int] {
-        currentRawTokens.indices.map { 100 + $0 * 100 }
+        tokenReadCount += 1
+        return currentRawTokens.indices.map { 100 + $0 * 100 }
     }
-    func getRawTokenStrings() async -> [String] { currentRawTokens }
+    func getRawTokenStrings() async -> [String] {
+        tokenReadCount += 1
+        return currentRawTokens
+    }
     func getEouTimestampsMs() async -> [Int] { [320] }
     func cleanup() async { cleanedUp = true }
 }
 
 final class FluidAudioEouAdapterTests: XCTestCase {
+    func testSilentFramesDoNotRebuildTheEntireMeetingTokenList() async throws {
+        let backend = FakeFluidEouBackend(
+            callbackBatches: Array(repeating: [], count: 80),
+            rawTokenBatches: Array(repeating: ["▁earlier"], count: 80)
+        )
+        let manager = await FluidAudioEouManager(backend: backend)
+        for index in 0..<80 {
+            let snapshots = try await manager.append(frame(start: Double(index) * 0.32))
+            XCTAssertTrue(snapshots.isEmpty)
+        }
+        let tokenReadCount = await backend.tokenReadCount
+        XCTAssertEqual(tokenReadCount, 0)
+    }
+
     func testAppendPreservesDeclaredPcmFormatAndReturnsOrderedCallbacks() async throws {
         let backend = FakeFluidEouBackend()
         let manager = await FluidAudioEouManager(backend: backend)

@@ -188,6 +188,7 @@ public actor StreamingEouAsrManager {
 
     // Accumulated token IDs from incremental decoding (NeMo-style)
     private var accumulatedTokenIds: [Int] = []
+    private var accumulatedDecodedText = ""
     // Accumulated token timestamps in ms, aligned with accumulatedTokenIds
     private var accumulatedTokenTimestampsMs: [Int] = []
     // Accumulated raw token strings, aligned with accumulatedTokenIds
@@ -448,14 +449,15 @@ public actor StreamingEouAsrManager {
         }
 
         // 2. Return accumulated transcript from incremental decoding
-        guard let tokenizer = tokenizer else {
+        guard tokenizer != nil else {
             return ""
         }
 
-        let transcript = tokenizer.decode(ids: accumulatedTokenIds)
+        let transcript = accumulatedDecodedText.trimmingCharacters(in: .whitespaces)
 
         // Clear accumulated tokens
         accumulatedTokenIds.removeAll()
+        accumulatedDecodedText = ""
         accumulatedTokenTimestampsMs.removeAll()
         accumulatedRawTokenStrings.removeAll()
         accumulatedEouTimestampsMs.removeAll()
@@ -470,6 +472,7 @@ public actor StreamingEouAsrManager {
             processedChunks: &processedChunks
         )
         accumulatedTokenTimestampsMs.removeAll()
+        accumulatedDecodedText = ""
         accumulatedRawTokenStrings.removeAll()
         accumulatedEouTimestampsMs.removeAll()
         debugFeatureBuffer.removeAll()
@@ -586,6 +589,13 @@ public actor StreamingEouAsrManager {
                 tokenizer.rawToken(for: tokenId) ?? "<id:\(tokenId)>"
             }
             accumulatedRawTokenStrings.append(contentsOf: rawTokens)
+            for tokenId in decodeResult.tokenIds {
+                if let piece = tokenizer.rawToken(for: tokenId) {
+                    accumulatedDecodedText.append(
+                        piece.replacingOccurrences(of: "\u{2581}", with: " ")
+                    )
+                }
+            }
         }
 
         // Convert per-chunk frame indices into global timestamps (ms) aligned with tokens.
@@ -609,9 +619,8 @@ public actor StreamingEouAsrManager {
         }
 
         // Invoke partial callback for ghost text (only when new tokens decoded)
-        if let callback = partialCallback, let tokenizer = tokenizer, !decodeResult.tokenIds.isEmpty {
-            let partial = tokenizer.decode(ids: accumulatedTokenIds)
-            callback(partial)
+        if let callback = partialCallback, tokenizer != nil, !decodeResult.tokenIds.isEmpty {
+            callback(accumulatedDecodedText.trimmingCharacters(in: .whitespaces))
         }
 
         // Track total samples for timing
@@ -646,9 +655,8 @@ public actor StreamingEouAsrManager {
                     accumulatedEouTimestampsMs.append(eouTimestampMs)
 
                     // Invoke callback with current transcript
-                    if let callback = eouCallback, let tokenizer = tokenizer {
-                        let transcript = tokenizer.decode(ids: accumulatedTokenIds)
-                        callback(transcript)
+                    if let callback = eouCallback, tokenizer != nil {
+                        callback(accumulatedDecodedText.trimmingCharacters(in: .whitespaces))
                     }
                 }
             }
@@ -700,8 +708,8 @@ extension StreamingEouAsrManager: StreamingAsrManager {
     }
 
     public func getPartialTranscript() -> String {
-        guard let tokenizer = tokenizer else { return "" }
-        return tokenizer.decode(ids: accumulatedTokenIds)
+        guard tokenizer != nil else { return "" }
+        return accumulatedDecodedText.trimmingCharacters(in: .whitespaces)
     }
 }
 

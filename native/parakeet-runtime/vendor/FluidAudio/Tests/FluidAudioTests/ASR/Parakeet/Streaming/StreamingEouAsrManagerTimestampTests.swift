@@ -27,6 +27,28 @@ final class StreamingEouAsrManagerTimestampTests: XCTestCase {
         XCTAssertTrue(timestamps.isEmpty)
     }
 
+    func testIncrementalTranscriptMatchesFullTokenizerDecodeAcrossChunks() async throws {
+        let manager = StreamingEouAsrManager(chunkSize: .ms320)
+        let tokenizer = try makeTokenizer()
+        let callbacks = EouTranscripts()
+        await manager.setPartialCallback { callbacks.append($0) }
+        var ids: [Int] = []
+        for batch in [[1], [2, 3], [999], [2], [3]] {
+            ids.append(contentsOf: batch)
+            await manager.consumeDecodeResult(
+                DecodeResult(tokenIds: batch, tokenFrames: [], eouDetected: false),
+                tokenizer: tokenizer
+            )
+            XCTAssertEqual(callbacks.values.last, tokenizer.decode(ids: ids))
+        }
+        await manager.reset()
+        await manager.consumeDecodeResult(
+            DecodeResult(tokenIds: [3], tokenFrames: [], eouDetected: false),
+            tokenizer: tokenizer
+        )
+        XCTAssertEqual(callbacks.values.last, "third")
+    }
+
     func testRepeatedUtterancesPreserveCumulativeTranscriptAndTimestamps() async throws {
         let manager = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 640)
         let tokenizer = try makeTokenizer()

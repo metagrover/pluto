@@ -25,8 +25,6 @@ export const IdentitySettings = () => {
   const [saved, setSaved] = useState(false);
   const [formVersion, setFormVersion] = useState(0);
   const [clearConfirmed, setClearConfirmed] = useState(false);
-  const [liveSuggestionsEnabled, setLiveSuggestionsEnabled] = useState(false);
-  const [liveSuggestionsBusy, setLiveSuggestionsBusy] = useState(false);
   const request = useRef(0);
 
   const load = useCallback(async (preserveError = false) => {
@@ -50,10 +48,6 @@ export const IdentitySettings = () => {
 
   useEffect(() => {
     void load();
-    void window.ipcRenderer
-      .invoke('GET_SETTING', 'voice_profile_live_suggestions_v1')
-      .then((value) => setLiveSuggestionsEnabled(value === 'true'))
-      .catch(() => setLiveSuggestionsEnabled(false));
     return () => {
       request.current++;
     };
@@ -102,45 +96,6 @@ export const IdentitySettings = () => {
                 setChoice(next.selfPersonId ?? '');
               }}
             />
-            <div className="flex items-start justify-between gap-5 border-t border-pro-border/60 pt-4">
-              <div>
-                <label
-                  htmlFor="live-speaker-suggestions"
-                  className="text-[13px] font-medium text-pro-text-main"
-                >
-                  Suggest recognized speakers during meetings
-                </label>
-                <p className="mt-1 max-w-[62ch] text-[12px] leading-relaxed text-pro-text-muted">
-                  Opt-in beta. Pluto analyzes clean call audio locally and may
-                  show a provisional name. Suggestions never change transcript
-                  wording and remain anonymous when evidence is uncertain.
-                  Enabling applies to the next meeting; disabling also clears
-                  suggestions from a meeting in progress.
-                </p>
-              </div>
-              <input
-                id="live-speaker-suggestions"
-                type="checkbox"
-                className="mt-1 accent-pro-accent"
-                checked={liveSuggestionsEnabled}
-                disabled={liveSuggestionsBusy}
-                onChange={async (event) => {
-                  const next = event.target.checked;
-                  setLiveSuggestionsBusy(true);
-                  try {
-                    await window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'voice_profile_live_suggestions_v1',
-                      value: String(next),
-                    });
-                    setLiveSuggestionsEnabled(next);
-                  } catch {
-                    setError('Could not update live speaker suggestions.');
-                  } finally {
-                    setLiveSuggestionsBusy(false);
-                  }
-                }}
-              />
-            </div>
             <details className="border-t border-pro-border/60 pt-4">
               <summary className="cursor-pointer text-[13px] font-medium text-pro-text-main">
                 Advanced identity options

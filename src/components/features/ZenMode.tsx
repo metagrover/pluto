@@ -5,7 +5,6 @@ import {
   type LiveConversationSnapshot,
   liveConversationTranscriptSegments,
 } from '../../services/liveTranscription/liveConversationProjection';
-import type { LiveSpeakerIdentitySnapshot } from '../../services/liveTranscription/liveSpeakerIdentityContract';
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
@@ -35,11 +34,6 @@ interface ZenModeProps {
   setCurrentNotes: (value: string) => void;
   liveTranscript: LiveTranscriptSegment[];
   liveConversation?: LiveConversationSnapshot | null;
-  liveSpeakerIdentity?: LiveSpeakerIdentitySnapshot | null;
-  onLiveSpeakerIdentityAction?: (
-    suggestionId: string,
-    action: 'confirm' | 'reject' | 'restore',
-  ) => void;
   interimText?: string;
   captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
@@ -72,8 +66,6 @@ export const ZenMode = ({
   setCurrentNotes,
   liveTranscript,
   liveConversation = null,
-  liveSpeakerIdentity = null,
-  onLiveSpeakerIdentityAction,
   interimText = '',
   captureHealth,
   liveTranscriptIntegrity,
@@ -165,8 +157,6 @@ export const ZenMode = ({
           interimText={model.interimText}
           integrity={liveTranscriptIntegrity}
           conversation={model.liveConversation}
-          speakerIdentity={liveSpeakerIdentity}
-          onSpeakerIdentityAction={onLiveSpeakerIdentityAction}
           onOpenSettings={onOpenSettings}
         />
         <MeetingAskPlutoDock

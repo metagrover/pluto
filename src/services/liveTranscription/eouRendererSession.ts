@@ -418,6 +418,15 @@ export function createEouRendererSession(options: {
             maxRetainedAudioSecondsPerSource ||
           currentTotalBytes + incomingBytes > maxRetainedPcmBytes
         ) {
+          console.warn('[ParakeetEOU] renderer audio backlog', {
+            at: new Date().toISOString(),
+            source,
+            status: currentStatus,
+            retainedSeconds: Number(currentSourceDuration.toFixed(2)),
+            incomingSeconds: Number(incomingDurationSeconds.toFixed(2)),
+            retainedBytes: currentTotalBytes,
+            inFlight: queues[source].inFlight !== null,
+          });
           fail('parakeet_backpressure');
           return;
         }

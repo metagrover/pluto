@@ -191,54 +191,6 @@ final class ParakeetEouSessionTests: XCTestCase {
         XCTAssertEqual(events.compactMap(\.eouUpdate).first?.tentativeText, "new generation")
     }
 
-    func testSpeakerEvidenceSnapshotIsSynchronizedAndBounded() async throws {
-        let mic = FakeEouManager(appendSnapshots: Array(repeating: [], count: 144))
-        let system = FakeEouManager(appendSnapshots: Array(repeating: [], count: 144))
-        let session = ParakeetEouSession(
-            driver: FakeEouDriver(managers: [.mic: mic, .system: system]),
-            activeModelURL: URL(fileURLWithPath: "/models")
-        )
-        try await session.open(streamId: "meeting.mic", source: .mic, generation: 1)
-        try await session.open(streamId: "meeting.system", source: .system, generation: 1)
-        try await session.setSpeakerEvidenceEnabled(
-            true, streamId: "meeting.system", generation: 1
-        )
-
-        for sequence in 1...144 {
-            let start = Double(sequence - 1) * 0.32
-            _ = try await session.append(
-                streamId: "meeting.mic", source: .mic, generation: 1,
-                sequence: sequence, frame: try frame(start: start)
-            )
-            _ = try await session.append(
-                streamId: "meeting.system", source: .system, generation: 1,
-                sequence: sequence, frame: try frame(start: start)
-            )
-        }
-
-        let snapshot = try await session.speakerEvidenceSnapshot(
-            streamId: "meeting.system", generation: 1
-        )
-        XCTAssertEqual(snapshot.startSeconds, 1.08, accuracy: 0.000_001)
-        XCTAssertEqual(snapshot.endSeconds, 46.08, accuracy: 0.000_001)
-        XCTAssertEqual(snapshot.micSampleRate, 8_000)
-        XCTAssertEqual(snapshot.systemSampleRate, 8_000)
-        XCTAssertEqual(snapshot.micSamples.count, 360_000)
-        XCTAssertEqual(snapshot.systemSamples.count, 360_000)
-
-        try await session.setSpeakerEvidenceEnabled(
-            false, streamId: "meeting.system", generation: 1
-        )
-        do {
-            _ = try await session.speakerEvidenceSnapshot(
-                streamId: "meeting.system", generation: 1
-            )
-            XCTFail("Expected disabled speaker evidence to reject snapshots")
-        } catch let failure as EouSessionFailure {
-            XCTAssertEqual(failure, .inferenceFailed)
-        }
-    }
-
     private func frame(start: Double) throws -> EouPcmFrame {
         let samples = [Float](repeating: 0, count: 2_560)
         let data = samples.withUnsafeBytes { Data($0) }

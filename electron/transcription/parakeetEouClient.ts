@@ -6,10 +6,6 @@ import type {
   NativeLiveSource,
   NativeResponse,
 } from './nativeJsonLineProcess';
-import {
-  type SpeakerEvidenceResult,
-  parseSpeakerEvidenceResult,
-} from './parakeetFinalClient';
 import type {
   ParakeetRuntimeHost,
   ParakeetRuntimeLease,
@@ -60,6 +56,7 @@ export class ParakeetEouClient {
   private closePromise: Promise<void> | null = null;
   private terminalCode: string | null = null;
   private readonly cleanupTimeoutMs: number;
+  private readonly lastSlowAppendLog = new Map<NativeLiveSource, number>();
 
   constructor(
     private readonly options: {
@@ -185,42 +182,6 @@ export class ParakeetEouClient {
     await this.releaseRuntimeLeaseIfIdle();
   }
 
-  async setSpeakerEvidenceEnabled(
-    identity: ParakeetEouIdentity,
-    enabled: boolean,
-  ): Promise<void> {
-    this.requireUsable();
-    const state = this.requireState(identity);
-    if (state.source !== 'system' || state.closing) {
-      throw new Error('parakeet_request_invalid');
-    }
-    await this.send(
-      enabled ? 'eou_speaker_evidence_enable' : 'eou_speaker_evidence_disable',
-      identity,
-    );
-  }
-
-  async speakerEvidence(
-    identity: ParakeetEouIdentity,
-  ): Promise<SpeakerEvidenceResult> {
-    this.requireUsable();
-    const state = this.requireState(identity);
-    if (state.source !== 'system' || state.closing) {
-      throw new Error('parakeet_request_invalid');
-    }
-    const response = await this.request('eou_speaker_evidence', identity);
-    if (!response.ok) {
-      throw new Error(response.error?.code ?? 'parakeet_native_failed');
-    }
-    if (
-      !response.result ||
-      Object.keys(response.result).some((key) => key !== 'speakerEvidence')
-    ) {
-      throw new Error('parakeet_protocol_invalid');
-    }
-    return parseSpeakerEvidenceResult(response.result.speakerEvidence);
-  }
-
   close(cleanupTimeoutMs = this.cleanupTimeoutMs): Promise<void> {
     this.closePromise ??= this.closeOnce(cleanupTimeoutMs);
     return this.closePromise;
@@ -289,9 +250,20 @@ export class ParakeetEouClient {
       this.failAll(this.errorCode(error), true);
       return;
     }
+    const startedAt = Date.now();
     void this.send('eou_append', encoded).then(
       () => {
         if (state.inFlight !== job) return;
+        const durationMs = Date.now() - startedAt;
+        if (
+          durationMs >= 1_000 &&
+          startedAt - (this.lastSlowAppendLog.get(state.source) ?? 0) >= 10_000
+        ) {
+          this.lastSlowAppendLog.set(state.source, startedAt);
+          console.warn(
+            `[ParakeetEOU] slow native append at=${new Date().toISOString()} source=${state.source} durationMs=${durationMs} queued=${state.queue.length}`,
+          );
+        }
         state.inFlight = null;
         job.resolve();
         this.pump(state);
@@ -440,18 +412,6 @@ export class ParakeetEouClient {
       ...fields,
     });
     this.requireEmptySuccess(response);
-  }
-
-  private request(
-    method: string,
-    fields: Record<string, unknown>,
-  ): Promise<NativeResponse> {
-    return this.process.request({
-      schemaVersion: 1,
-      id: `eou-${method}-${++this.nextId}`,
-      method,
-      ...fields,
-    });
   }
 
   private requireEmptySuccess(response: NativeResponse): void {

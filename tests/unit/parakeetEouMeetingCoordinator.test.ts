@@ -12,8 +12,6 @@ const makeClient = () => {
     finish: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
-    setSpeakerEvidenceEnabled: vi.fn(async () => {}),
-    speakerEvidence: vi.fn(async () => ({}) as never),
     onUpdate: vi.fn((listener: (event: NativeEouUpdateEvent) => void) => {
       updateListener = listener;
       return () => {
@@ -158,25 +156,6 @@ describe('ParakeetEouMeetingCoordinator', () => {
       source: 'system',
       generation: 1,
     });
-  });
-
-  it('controls optional speaker evidence through the System stream', async () => {
-    const { coordinator, client } = makeCoordinator();
-    await coordinator.start(start);
-
-    await coordinator.setSpeakerEvidenceEnabled('meeting-1', true);
-    await coordinator.setSpeakerEvidenceEnabled('meeting-1', false);
-
-    expect(client.setSpeakerEvidenceEnabled).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ source: 'system' }),
-      true,
-    );
-    expect(client.setSpeakerEvidenceEnabled).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ source: 'system' }),
-      false,
-    );
   });
 
   it('assigns independent source sequences and rejects the wrong meeting', async () => {

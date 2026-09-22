@@ -9,10 +9,6 @@ import { AutoEndToast } from './components/ui/AutoEndToast';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
 import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 import type { LiveConversationSnapshot } from './services/liveTranscription/liveConversationProjection';
-import {
-  type LiveSpeakerIdentitySnapshot,
-  parseLiveSpeakerIdentitySnapshot,
-} from './services/liveTranscription/liveSpeakerIdentityContract';
 
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
@@ -334,8 +330,6 @@ function App() {
   );
   const [liveConversation, setLiveConversation] =
     useState<LiveConversationSnapshot | null>(null);
-  const [liveSpeakerIdentity, setLiveSpeakerIdentity] =
-    useState<LiveSpeakerIdentitySnapshot | null>(null);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
     number | null
@@ -1851,7 +1845,6 @@ function App() {
           onStartSessionRef={startSessionRef}
           onLiveTranscript={setLiveTranscript}
           onLiveConversation={setLiveConversation}
-          onLiveSpeakerIdentity={setLiveSpeakerIdentity}
           onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
@@ -1866,7 +1859,6 @@ function App() {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
             setLiveConversation(null);
-            setLiveSpeakerIdentity(null);
             setInterimTranscript('');
             setLiveTranscriptIntegrity('healthy');
           }}
@@ -1955,22 +1947,6 @@ function App() {
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
           liveConversation={liveConversation}
-          liveSpeakerIdentity={liveSpeakerIdentity}
-          onLiveSpeakerIdentityAction={(suggestionId, action) => {
-            if (!liveSpeakerIdentity) return;
-            void window.ipcRenderer
-              .invoke('LIVE_SPEAKER_IDENTITY_ACTION', {
-                meetingId: liveSpeakerIdentity.meetingId,
-                generation: liveSpeakerIdentity.generation,
-                suggestionId,
-                action,
-              })
-              .then((value) => {
-                const parsed = parseLiveSpeakerIdentitySnapshot(value);
-                if (parsed) setLiveSpeakerIdentity(parsed);
-              })
-              .catch(() => undefined);
-          }}
           interimText={interimTranscript}
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}

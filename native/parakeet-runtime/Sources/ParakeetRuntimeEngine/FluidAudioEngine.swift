@@ -733,6 +733,7 @@ actor FluidAudioEouManager: ParakeetEouManaging {
     private func snapshots(
         from callbacks: [(ParakeetEouSnapshotKind, String)]
     ) async -> [ParakeetEouManagerSnapshot] {
+        guard !callbacks.isEmpty else { return [] }
         let tokens = await currentTokens()
         return callbacks.map { callback in
             ParakeetEouManagerSnapshot(

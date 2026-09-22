@@ -1208,43 +1208,6 @@ export const identityInputRevision = sqliteTable('identity_input_revision', {
   revision: integer('revision').notNull(),
 });
 
-export const liveSpeakerIdentityConfirmations = sqliteTable(
-  'live_speaker_identity_confirmations',
-  {
-    suggestionId: text('suggestion_id').primaryKey(),
-    meetingId: text('meeting_id')
-      .notNull()
-      .references(() => meetings.id, { onDelete: 'cascade' }),
-    personId: text('person_id')
-      .notNull()
-      .references(() => entities.id, { onDelete: 'cascade' }),
-    generation: integer('generation').notNull(),
-    hintRevision: integer('hint_revision').notNull(),
-    rangesJson: text('ranges_json').notNull(),
-    state: text('state').notNull().default('pending'),
-    createdAt: datetime('created_at').notNull().default(now),
-    updatedAt: datetime('updated_at').notNull().default(now),
-  },
-  (table) => [
-    index('idx_live_speaker_identity_confirmations_meeting').on(
-      table.meetingId,
-      table.state,
-    ),
-    check(
-      'live_speaker_identity_confirmations_state_check',
-      sql`${table.state} IN ('pending', 'bound', 'needs_review')`,
-    ),
-    check(
-      'live_speaker_identity_confirmations_generation_check',
-      sql`${table.generation} > 0`,
-    ),
-    check(
-      'live_speaker_identity_confirmations_revision_check',
-      sql`${table.hintRevision} > 0`,
-    ),
-  ],
-);
-
 export const meetingSpeakerCandidates = sqliteTable(
   'meeting_speaker_candidates',
   {

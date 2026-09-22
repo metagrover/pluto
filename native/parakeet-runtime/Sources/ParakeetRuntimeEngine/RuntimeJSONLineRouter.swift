@@ -54,8 +54,7 @@ public actor RuntimeJSONLineRouter {
     public func route(_ request: RuntimeRequest) async -> RuntimeJSONLineOutput {
         switch request.method {
         case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset,
-            .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset,
-            .eouSpeakerEvidenceEnable, .eouSpeakerEvidenceDisable, .eouSpeakerEvidence:
+            .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
             let result = await service.handleLive(request)
             return RuntimeJSONLineOutput(events: result.events, response: result.response)
         case .shutdown:

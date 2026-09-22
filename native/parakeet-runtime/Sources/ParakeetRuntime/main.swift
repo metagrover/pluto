@@ -125,8 +125,7 @@ private struct Arguments {
                 streams[live.streamId] = stream
                 return .success(id: request.id)
             case .prepare, .transcribe, .speakerEvidence, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
-                .eouCancel, .eouReset, .eouSpeakerEvidenceEnable,
-                .eouSpeakerEvidenceDisable, .eouSpeakerEvidence:
+                .eouCancel, .eouReset:
                 return .failure(id: request.id, code: .invalidRequest)
             }
         }
