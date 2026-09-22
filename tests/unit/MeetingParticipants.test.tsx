@@ -281,6 +281,7 @@ describe('MeetingParticipants', () => {
           personId: 'person-avery',
           isSelf: false,
           isAnonymous: false,
+          isVoiceMatched: true,
           turnCount: 6,
           role: 'Lead Architect',
           source: 'identity' as const,
@@ -315,6 +316,8 @@ describe('MeetingParticipants', () => {
       expect(container.textContent).toContain('Avery Davis');
       expect(container.textContent).toContain('Lead Architect');
       expect(container.textContent).toContain('Unidentified Speaker 2');
+      expect(container.textContent).toContain('Recognized voice');
+      expect(container.textContent).not.toContain('turns');
 
       // Click "View profile" for Avery
       const viewProfileButton = container.querySelector<HTMLButtonElement>(
@@ -325,6 +328,15 @@ describe('MeetingParticipants', () => {
         viewProfileButton?.click();
       });
       expect(onOpenPerson).toHaveBeenCalledWith('person-avery');
+
+      const changeSpeakerButton = container.querySelector<HTMLButtonElement>(
+        '[title="Change speaker identification for Avery Davis"]',
+      );
+      expect(changeSpeakerButton).not.toBeNull();
+      await act(async () => {
+        changeSpeakerButton?.click();
+      });
+      expect(onIdentifySpeaker).toHaveBeenCalledWith('Speaker 1');
 
       // Click "Identify" for Speaker 2
       const identifyButton = container.querySelector<HTMLButtonElement>(

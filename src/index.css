@@ -975,7 +975,7 @@
     @apply flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[0.85rem] leading-5;
     color: var(--notes-muted);
   }
-  .meeting-document-meta span + span::before {
+  .meeting-document-meta > span + span::before {
     content: "·";
     @apply mr-3 text-pro-border;
   }
@@ -1861,7 +1861,7 @@
     .meeting-document-meta {
       @apply gap-x-2 gap-y-1 text-[0.75rem];
     }
-    .meeting-document-meta span + span::before {
+    .meeting-document-meta > span + span::before {
       @apply mr-2;
     }
     .meeting-notes-document {

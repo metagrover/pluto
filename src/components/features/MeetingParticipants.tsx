@@ -282,131 +282,132 @@ export const MeetingParticipantsPopover: React.FC<
       role="dialog"
       aria-modal="false"
       aria-label="Meeting participants"
-      className="meeting-participants-popover absolute left-0 top-full mt-2 z-50 w-80 sm:w-96 rounded-2xl border border-pro-border/80 bg-pro-surface/95 backdrop-blur-md p-4 shadow-xl text-pro-text-main animate-in fade-in zoom-in-95 duration-150"
+      className="meeting-participants-popover absolute left-0 top-full z-50 mt-2 w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-pro-border bg-pro-bg p-3 text-pro-text-main shadow-xl animate-in fade-in zoom-in-95 duration-150"
     >
-      <div className="flex items-center justify-between pb-3 border-b border-pro-border/40 mb-4">
-        <div className="flex items-center gap-2">
+      <div className="mb-1 flex items-center justify-between px-2 pb-3 pt-1">
+        <div className="flex items-baseline gap-2">
           <h3 className="text-[13px] font-semibold text-pro-text-main tracking-[-0.01em]">
             Participants
           </h3>
-          <span className="rounded-full bg-pro-hover px-2 py-0.5 text-[11px] font-medium text-pro-text-muted">
-            {participants.length}
+          <span className="text-[11px] text-pro-text-muted">
+            {participants.length}{' '}
+            {participants.length === 1 ? 'person' : 'people'}
           </span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-lg p-1 text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-pro-text-muted transition-colors hover:bg-pro-hover/70 hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
           aria-label="Close participants list"
         >
           <X size={15} />
         </button>
       </div>
 
-      <div className="max-h-[336px] overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
+      <div className="max-h-[360px] overflow-y-auto border-t border-pro-border/60 custom-scrollbar">
         {participants.map((participant) => {
           const initials = getInitials(participant.name);
+          const openLoopCount = participant.personId
+            ? (openLoopsByPersonId[participant.personId] ?? 0)
+            : 0;
+          const contextLabel = participant.role
+            ? participant.role
+            : participant.source === 'calendar'
+              ? 'Calendar invitee'
+              : participant.isSelf
+                ? 'Your profile'
+                : 'In this meeting';
           return (
             <div
               key={participant.id}
-              className="meeting-participant-item flex items-center justify-between gap-3 px-2 py-2.5 rounded-xl hover:bg-pro-hover/70 transition-colors group"
+              className="meeting-participant-item group grid min-h-[68px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-pro-border/40 px-2 py-3 transition-colors last:border-b-0 hover:bg-pro-hover/40"
             >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div
-                  className={`meeting-participant-avatar h-9 w-9 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold ${
-                    participant.isSelf
-                      ? 'bg-pro-accent/15 text-pro-accent border border-pro-accent/30'
-                      : participant.isAnonymous
-                        ? 'bg-pro-hover text-pro-text-muted border border-pro-border/60'
-                        : 'bg-pro-surface border border-pro-border text-pro-text-main'
-                  }`}
-                  aria-hidden="true"
-                >
-                  {participant.isAnonymous ? (
-                    <UserRound size={14} className="opacity-70" />
-                  ) : (
-                    initials
-                  )}
+              <div
+                className={`meeting-participant-avatar flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${
+                  participant.isSelf
+                    ? 'border-pro-accent/30 bg-pro-accent/10 text-pro-accent'
+                    : participant.isAnonymous
+                      ? 'border-pro-border/70 bg-pro-hover/60 text-pro-text-muted'
+                      : 'border-pro-border/70 bg-pro-surface text-pro-text-main'
+                }`}
+                aria-hidden="true"
+              >
+                {participant.isAnonymous ? (
+                  <UserRound size={14} className="opacity-70" />
+                ) : (
+                  initials
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-medium leading-5 text-pro-text-main">
+                  {participant.name}
                 </div>
 
-                <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <span className="text-[12.5px] font-medium text-pro-text-main truncate">
-                      {participant.name}
-                    </span>
-                    {participant.isSelf && (
-                      <span className="rounded px-1.5 py-px text-[10px] font-medium bg-pro-accent/10 text-pro-accent shrink-0 leading-[1.4]">
-                        You
+                <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] leading-4 text-pro-text-muted">
+                  <span className="min-w-0 truncate">{contextLabel}</span>
+                  {openLoopCount > 0 && (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="h-3 w-px shrink-0 bg-pro-border"
+                      />
+                      <span className="shrink-0 text-amber-700 dark:text-amber-300">
+                        {openLoopCount} open{' '}
+                        {openLoopCount === 1 ? 'loop' : 'loops'}
                       </span>
-                    )}
-                    {participant.personId &&
-                      openLoopsByPersonId[participant.personId] > 0 && (
-                        <span className="rounded border border-amber-500/25 bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:text-amber-300 shrink-0 leading-[1.4]">
-                          {openLoopsByPersonId[participant.personId]} open{' '}
-                          {openLoopsByPersonId[participant.personId] === 1
-                            ? 'loop'
-                            : 'loops'}
-                        </span>
-                      )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-[11px] text-pro-text-muted min-w-0">
-                    {participant.role ? (
-                      <span className="truncate">{participant.role}</span>
-                    ) : participant.turnCount > 0 ? (
-                      <span className="shrink-0">
-                        {participant.turnCount}{' '}
-                        {participant.turnCount === 1 ? 'turn' : 'turns'}
-                      </span>
-                    ) : participant.source === 'calendar' ? (
-                      <span>Calendar invitee</span>
-                    ) : (
-                      <span>In meeting</span>
-                    )}
+                    </>
+                  )}
+                </div>
+                {(participant.isVoiceMatched ||
+                  (participant.speakerKey &&
+                    !participant.isAnonymous &&
+                    !participant.isSelf &&
+                    participant.speakerKey !== participant.name)) && (
+                  <div className="mt-1 flex min-w-0 flex-col items-start gap-1 text-[11px] leading-4">
                     {participant.isVoiceMatched ? (
-                      <span className="shrink-0 font-medium text-emerald-600 dark:text-emerald-400">
-                        · Recognized voice
+                      <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap text-emerald-700 dark:text-emerald-300">
+                        <span className="h-1 w-1 rounded-full bg-current" />
+                        Recognized voice
+                        {participant.speakerKey && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onIdentifySpeaker(participant.speakerKey || null)
+                            }
+                            className="ml-1 rounded px-0.5 font-medium text-pro-text-muted underline decoration-pro-border underline-offset-2 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                            title={`Change speaker identification for ${participant.name}`}
+                          >
+                            Change
+                          </button>
+                        )}
                       </span>
                     ) : participant.speakerKey &&
                       !participant.isAnonymous &&
+                      !participant.isSelf &&
                       participant.speakerKey !== participant.name ? (
-                      <span className="opacity-50 shrink-0">
-                        ·{' '}
+                      <span className="text-pro-text-muted/70">
                         {getAnonymousSpeakerDisplayLabel(
                           participant.speakerKey,
                         )}
                       </span>
                     ) : null}
                   </div>
-                </div>
+                )}
               </div>
 
-              <div className="shrink-0 flex items-center gap-1">
+              <div className="shrink-0">
                 {participant.personId ? (
-                  <div className="flex items-center gap-1">
-                    {participant.isVoiceMatched && participant.speakerKey && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onIdentifySpeaker(participant.speakerKey || null)
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-pro-text-muted hover:text-pro-text-main hover:bg-pro-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                        title={`Change speaker identification for ${participant.name}`}
-                      >
-                        Change
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      data-open-person-id={participant.personId}
-                      onClick={() => onOpenPerson(participant.personId!)}
-                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11.5px] font-medium text-pro-accent bg-pro-accent/10 hover:bg-pro-accent/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                      title={`View ${participant.name} profile in Pluto`}
-                    >
-                      <span>Profile</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    data-open-person-id={participant.personId}
+                    onClick={() => onOpenPerson(participant.personId!)}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[11.5px] font-medium text-pro-text-muted transition-colors hover:bg-pro-accent/10 hover:text-pro-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                    title={`View ${participant.name} profile in Pluto`}
+                  >
+                    <span>Profile</span>
+                    <ArrowRight size={12} />
+                  </button>
                 ) : participant.isAnonymous &&
                   participant.speakerKey &&
                   isIdentifiableSpeakerKey(participant.speakerKey) ? (
