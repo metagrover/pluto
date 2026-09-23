@@ -1,3 +1,4 @@
+import type { AskPlutoResearchTask } from './askPlutoConversation';
 import type { RetrievalResult } from './intelligenceTypes';
 
 export const getIntentClassificationPrompt = (query: string): string => {
@@ -22,6 +23,7 @@ export const getAskPlutoPrompt = (
   intent: string,
   priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = [],
   correctionGuidance = 'None',
+  task: AskPlutoResearchTask = 'lookup',
 ): string => {
   const largeScope = context.length > 6;
   const hasArtifactSources = context.some(
@@ -78,16 +80,36 @@ ${details.join('\n')}`;
           })
           .join('\n\n---\n\n');
 
-  const formatGuidance = multiMeetingSynthesis
-    ? 'Write a rich, readable breakdown using one bullet for each meeting that has meaningful evidence. Start each bullet with the exact meeting title and occurrence date from that source, then explain its concrete topics, decisions, and follow-ups in 1-2 evidence-close sentences. Begin directly with the meeting bullets; do not spend output on an uncited overview.'
-    : ownershipQuestion
+  const taskGuidance =
+    task === 'draft'
+      ? 'Write only the requested copy-ready draft. Use the recent conversation for audience, goal, and tone, but take every factual detail from the provided context. Do not include evidence-policy narration or a sources section. Add inline source references to factual sentences; Pluto removes those references from the displayed draft after validation.'
+      : task === 'analysis'
+        ? 'Provide a thoughtful evidence-grounded analysis. Separate direct observations from interpretation. Call something a recurring pattern only when at least two sources support it. When asked what someone is most concerned about or prioritizing, identify one primary theme only when multiple explicit signals converge; otherwise present the distinct concerns without inventing a ranking. Identify strengths as well as opportunities. Prefix each recommendation with “Suggestion:” and do not introduce new factual details in it. Never diagnose personality, motivation, or performance from thin evidence.'
+        : task === 'comparison'
+          ? 'Compare the sources explicitly. State what stayed consistent, what changed, and what remains unknown. Do not infer progress, causality, or completion from silence in a later meeting.'
+          : multiMeetingSynthesis
+            ? 'Write a rich, readable breakdown using one bullet for each meeting that has meaningful evidence. Start each bullet with the exact meeting title and occurrence date from that source, then explain its concrete topics, decisions, and follow-ups in 1-2 evidence-close sentences. Begin directly with the meeting bullets; do not spend output on an uncited overview.'
+            : intent === 'factual'
+              ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence. Include the decision, owner, deadline, or next step when it directly helps answer the question.'
+              : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
+  const formatGuidance = [
+    taskGuidance,
+    ownershipQuestion
       ? 'Search every provided source for relevant follow-ups. Separate items that explicitly name the person as owner from possible follow-ups where the notes mention the person but do not establish ownership. Never convert participation, discussion, or an unnamed owner into an assignment.'
-      : intent === 'factual'
-        ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence. Include the decision, owner, deadline, or next step when it directly helps answer the question.'
-        : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
-  const responseLimit = multiMeetingSynthesis
-    ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
-    : 'Use up to 4 supported points and stay under 160 words. Return fewer rather than inventing coverage.';
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const responseLimit =
+    task === 'analysis'
+      ? 'Use up to 300 words. Prefer a small number of well-supported observations and useful recommendations over a long speculative review.'
+      : task === 'draft'
+        ? 'Keep the draft under 240 words unless the user explicitly asks for a longer format.'
+        : task === 'comparison'
+          ? 'Use up to 260 words and cover every material comparison supported by the selected sources.'
+          : multiMeetingSynthesis
+            ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
+            : 'Use up to 4 supported points and stay under 160 words. Return fewer rather than inventing coverage.';
 
   const conversation = priorTurns.length
     ? priorTurns

@@ -135,6 +135,37 @@ describe('Citation Engine', () => {
         'The launch moved from Tuesday to Friday.',
       ]);
     });
+
+    it('recovers a missing inline reference only when retrieved evidence strongly supports the claim', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Client lending review',
+          evidence_text:
+            'Jordan said clients are concerned about structuring lending without advisor help.',
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const recovered = auditCitations(
+        buildCitationChain(
+          'Jordan said clients are concerned about structuring lending without advisor help.',
+          context,
+        ),
+        context,
+      );
+      const unsupported = buildCitationChain(
+        'Jordan approved an automated lending launch.',
+        context,
+      );
+
+      expect(recovered).toHaveLength(1);
+      expect(recovered[0]).toMatchObject({
+        meeting_id: 'm1',
+        evidence_valid: true,
+      });
+      expect(unsupported).toEqual([]);
+    });
   });
 
   describe('createValidatedAnswerStream', () => {
@@ -196,6 +227,57 @@ describe('Citation Engine', () => {
       stream.push('[Source 1]');
 
       expect(deltas.join('')).toBe('- Sam owns launch signoff');
+    });
+
+    it('preserves draft structure while removing an unsupported factual paragraph', () => {
+      const draft = [
+        'Subject: Launch plan follow-up',
+        'Hi Jordan,',
+        'The launch is Friday. [Source 1]',
+        'The budget was approved. [Source 1]',
+        'Could you send the final checklist?',
+        'Best,',
+      ].join('\n\n');
+      const stream = createValidatedAnswerStream(
+        sources,
+        () => undefined,
+        'draft',
+      );
+
+      const presentation = stream.finalize(draft);
+
+      expect(presentation).toMatchObject({
+        outcome: 'partial',
+        unsupportedClaimCount: 1,
+      });
+      expect(presentation.answer).toContain('Subject: Launch plan follow-up');
+      expect(presentation.answer).toContain('Hi Jordan,');
+      expect(presentation.answer).toContain('The launch is Friday.');
+      expect(presentation.answer).toContain(
+        'Could you send the final checklist?',
+      );
+      expect(presentation.answer).toContain('Best,');
+      expect(presentation.answer).not.toContain('budget was approved');
+    });
+
+    it('keeps explicitly labeled analytical guidance separate from grounded observations', () => {
+      const stream = createValidatedAnswerStream(
+        sources,
+        () => undefined,
+        'analysis',
+      );
+
+      const presentation = stream.finalize(
+        'Sam owns launch signoff. [Source 1]\n\nSuggestion: Reserve time to confirm the final handoff.',
+      );
+
+      expect(presentation).toMatchObject({
+        outcome: 'answered',
+        unsupportedClaimCount: 0,
+      });
+      expect(presentation.answer).toContain(
+        'Suggestion: Reserve time to confirm the final handoff.',
+      );
     });
   });
 
@@ -649,6 +731,25 @@ describe('Citation Engine', () => {
           meeting_id: 'm1',
           meeting_title: 'Launch review',
           evidence_span: 'The launch moved later.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+      ];
+
+      expect(auditAnswerGrounding(answer, citations)).toEqual({
+        trustStatus: 'needs_review',
+        unsupportedClaimCount: 1,
+      });
+    });
+
+    it('requires a primary concern synthesis to cite at least two meetings', () => {
+      const answer = "Jordan's primary concern is lending accuracy. [Source 1]";
+      const citations = [
+        {
+          claim: "Jordan's primary concern is lending accuracy.",
+          meeting_id: 'm1',
+          meeting_title: 'Lending review',
+          evidence_span: 'Jordan raised a concern about lending accuracy.',
           evidence_valid: true,
           trust_status: 'grounded' as const,
         },

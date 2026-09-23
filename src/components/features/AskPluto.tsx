@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   Brain,
   ChevronDown,
+  MessageSquarePlus,
   Sparkles,
   Square,
 } from 'lucide-react';
@@ -35,9 +36,11 @@ interface AskPlutoProps {
   visible: boolean;
   onClose: () => void;
   activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
+  messages?: AskPlutoMessage[];
+  setMessages?: React.Dispatch<React.SetStateAction<AskPlutoMessage[]>>;
 }
 
-interface Message {
+export interface AskPlutoMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -86,9 +89,25 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenArtifact,
   visible,
   activeMeetingSnapshot,
+  messages: controlledMessages,
+  setMessages: setControlledMessages,
 }) => {
   const [query, setQuery] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<AskPlutoMessage[]>([]);
+  const messages = Array.isArray(controlledMessages)
+    ? controlledMessages
+    : Array.isArray(localMessages)
+      ? localMessages
+      : [];
+  const rawSetMessages = setControlledMessages ?? setLocalMessages;
+  const setMessages: React.Dispatch<React.SetStateAction<AskPlutoMessage[]>> = (
+    next,
+  ) => {
+    rawSetMessages((current) => {
+      const safeCurrent = Array.isArray(current) ? current : [];
+      return typeof next === 'function' ? next(safeCurrent) : next;
+    });
+  };
   const [isProcessing, setIsProcessing] = useState(false);
   const [requestPhase, setRequestPhase] =
     useState<AskPlutoQueryPhase>('retrieving');
@@ -186,9 +205,19 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         setIsLoadingQueries(true);
         window.ipcRenderer
           .invoke('intelligence:suggested-queries')
-          .then((queries: string[]) => {
-            setDynamicQueries(queries);
-            queryCacheRef.current = { queries, fetchedAt: Date.now() };
+          .then((queries: unknown) => {
+            const safeQueries = Array.isArray(queries)
+              ? queries.filter(
+                  (candidate): candidate is string =>
+                    typeof candidate === 'string' &&
+                    candidate.trim().length > 0,
+                )
+              : [];
+            setDynamicQueries(safeQueries);
+            queryCacheRef.current = {
+              queries: safeQueries,
+              fetchedAt: Date.now(),
+            };
           })
           .catch((e: unknown) => {
             console.error('Failed to load dynamic queries', e);
@@ -399,6 +428,18 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     await window.ipcRenderer.invoke('intelligence:query:cancel', requestId);
   };
 
+  const handleNewConversation = () => {
+    if (isProcessing) return;
+    setMessages([]);
+    setQuery('');
+    setCurrentMeeting(null);
+    setCurrentMeetingRequested(false);
+    setComparisonMeetingCount(0);
+    setScopeLabel(null);
+    setScopeMeetingCount(0);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   const resolvedScopeLabel =
     currentMeetingRequested && currentMeeting?.kind === 'active_recording'
       ? 'Reading the current recording · live evidence'
@@ -434,12 +475,30 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   if (!visible) return null;
 
   return (
-    <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 bg-pro-bg">
+    <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 motion-reduce:animate-none bg-pro-bg">
+      {messages.length > 0 ? (
+        <div className="absolute right-4 top-4 z-10 sm:right-8">
+          <button
+            type="button"
+            onClick={handleNewConversation}
+            disabled={isProcessing}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MessageSquarePlus aria-hidden="true" className="h-3.5 w-3.5" />
+            New conversation
+          </button>
+        </div>
+      ) : null}
       {/* Scrollable message area — same width as the input */}
       <div className="flex-1 relative flex flex-col w-full max-w-3xl mx-auto px-4 sm:px-8">
-        <div className="flex-1 space-y-10 pb-32 flex flex-col pt-16 w-full">
+        <div
+          role="log"
+          aria-label="Conversation with Pluto"
+          aria-live="polite"
+          className="flex-1 space-y-10 pb-32 flex flex-col pt-16 w-full"
+        >
           {messages.length === 0 ? (
-            <div className="flex flex-col items-start justify-center h-full space-y-8 pb-20 mt-4 animate-in fade-in zoom-in-95 duration-700">
+            <div className="flex flex-col items-start justify-center h-full space-y-8 pb-20 mt-4 animate-in fade-in zoom-in-95 duration-700 motion-reduce:animate-none">
               {/* Greeting — serif, left-aligned to match input */}
               <div>
                 <h1 className="font-serif text-[36px] font-medium tracking-[-0.01em] text-pro-text-main leading-tight">
@@ -468,7 +527,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       key={sq}
                       type="button"
                       onClick={() => handleSubmit(undefined, sq)}
-                      className="px-4 py-2 rounded-full bg-transparent border border-pro-border/50 hover:bg-pro-surface hover:border-pro-border text-pro-text-muted hover:text-pro-text-main text-[13px] font-medium transition-all duration-200"
+                      className="min-h-11 px-4 py-2 rounded-full bg-transparent border border-pro-border/50 hover:bg-pro-surface hover:border-pro-border text-pro-text-muted hover:text-pro-text-main text-[13px] font-medium transition-all duration-200"
                     >
                       {sq}
                     </button>
@@ -491,10 +550,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               return (
                 <div
                   key={msg.id}
+                  role="article"
+                  aria-label={msg.role === 'user' ? 'You' : 'Pluto'}
                   className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   {msg.role === 'assistant' && (
-                    <div className="relative top-1 w-8 h-8 rounded-full bg-[oklch(0.965_0.018_82)] dark:bg-[oklch(0.38_0.025_82)] flex items-center justify-center shrink-0">
+                    <div
+                      aria-hidden="true"
+                      className="relative top-1 w-8 h-8 rounded-full bg-[oklch(0.965_0.018_82)] dark:bg-[oklch(0.38_0.025_82)] flex items-center justify-center shrink-0"
+                    >
                       <Logo size={22} variant="default" />
                     </div>
                   )}
@@ -603,13 +667,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                           }`}
                         >
                           {msg.outcome === 'no_evidence'
-                            ? 'No matching evidence'
+                            ? 'Not enough supporting detail'
                             : msg.outcome === 'partial'
-                              ? `Partial answer${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim omitted' : 'claims omitted'}` : ''}`
+                              ? `Limited answer${msg.unsupportedClaimCount ? ` · Left out ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail' : 'details'} that could not be verified` : ''}`
                               : msg.evidenceState === 'provisional'
                                 ? 'Provisional live answer'
                                 : msg.trustStatus === 'needs_review'
-                                  ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim' : 'claims'}` : ''}`
+                                  ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail could' : 'details could'} not be verified` : ''}`
                                   : msg.trustStatus === 'inferred'
                                     ? 'Supported synthesis'
                                     : 'Grounded answer'}
@@ -797,6 +861,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           >
             <input
               ref={inputRef}
+              aria-label="Ask Pluto"
+              autoComplete="off"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-28 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
@@ -837,6 +903,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             ) : (
               <button
                 type="submit"
+                aria-label="Send message"
                 disabled={!query.trim()}
                 className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit shadow-xs"
               >

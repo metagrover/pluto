@@ -1,3 +1,7 @@
+import type {
+  AskPlutoConversationRelation,
+  AskPlutoResearchTask,
+} from './askPlutoConversation';
 import type { ParsedQuery } from './intelligenceTypes';
 
 export type AskPlutoReasoningMode = 'fast' | 'deep';
@@ -16,7 +20,11 @@ export const queryReferencesPriorTurn = (query: string): boolean =>
 export const shouldIncludePriorConversation = (
   query: string,
   hasExplicitMeetingScope: boolean,
-): boolean => !hasExplicitMeetingScope || queryReferencesPriorTurn(query);
+  relation?: AskPlutoConversationRelation,
+): boolean => {
+  if (relation) return relation !== 'new_topic';
+  return !hasExplicitMeetingScope || queryReferencesPriorTurn(query);
+};
 
 export const getCrossMeetingCandidateLimit = (
   query: string,
@@ -43,13 +51,17 @@ export const shouldRestrictToPriorConversationEvidence = ({
   currentMeetingRequested,
   intent,
   priorPinnedCount,
+  task = 'lookup',
 }: {
   currentMeetingRequested: boolean;
   intent: ParsedQuery['intent'];
   priorPinnedCount: number;
+  task?: AskPlutoResearchTask;
 }): boolean =>
   !currentMeetingRequested &&
   priorPinnedCount > 0 &&
+  task !== 'analysis' &&
+  task !== 'comparison' &&
   intent !== 'comparative' &&
   intent !== 'exploratory';
 
@@ -65,12 +77,15 @@ export const resolveAskPlutoReasoningMode = ({
   query,
   intent,
   override = 'auto',
+  task = 'lookup',
 }: {
   query: string;
   intent: ParsedQuery['intent'];
   override?: AskPlutoReasoningOverride;
+  task?: AskPlutoResearchTask;
 }): AskPlutoReasoningMode => {
   if (override !== 'auto') return override;
+  if (task !== 'lookup') return 'deep';
   if (intent === 'comparative' || intent === 'exploratory') return 'deep';
   return DEEP_REASONING_PATTERN.test(query) ||
     MULTI_MEETING_SYNTHESIS_PATTERN.test(query)

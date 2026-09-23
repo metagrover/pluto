@@ -1023,6 +1023,11 @@
     border-color: var(--notes-rule);
     color: var(--notes-muted);
   }
+  .meeting-failure-notice
+    ~ .meeting-document-workspace
+    .meeting-notes-document--drafting {
+    @apply pt-6;
+  }
   .meeting-notes-draft-status__indicator {
     @apply flex items-center gap-2.5;
   }

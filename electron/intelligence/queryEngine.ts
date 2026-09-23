@@ -589,7 +589,7 @@ export const buildAssigneeActionRecall = (
         .join('\n');
       return {
         ...source,
-        evidence_text: `[Commitments]:\n${evidence}`,
+        evidence_text: `${source.evidence_text}\n[Commitments]:\n${evidence}`,
         evidence_kind: 'commitment' as const,
       };
     });
@@ -814,13 +814,42 @@ export const resolveExplicitMeetingScope = (
     };
   }
 
-  if (!/\b(?:recent|latest)\s+(?:meetings|calls)\b/i.test(query)) {
+  const numberWords: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+  };
+  const boundedCount = (value: string | undefined): number | undefined => {
+    if (!value) return undefined;
+    const parsed = numberWords[value.toLocaleLowerCase()] ?? Number(value);
+    return Number.isFinite(parsed)
+      ? Math.min(24, Math.max(1, parsed))
+      : undefined;
+  };
+  const countedRecentMatch = query.match(
+    /\b(?:last|previous|recent|latest)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:meetings?|calls?)\b/i,
+  );
+  const requestedCount = boundedCount(countedRecentMatch?.[1]);
+  if (
+    !requestedCount &&
+    !/\b(?:recent|latest)\s+(?:meetings|calls)\b/i.test(query)
+  ) {
     return null;
   }
+  const limit = requestedCount ?? recentLimit;
   return {
     kind: 'recent',
-    label: 'your recent meetings',
-    meetings: meetings.slice(0, recentLimit),
+    label: requestedCount
+      ? `your last ${limit} ${limit === 1 ? 'meeting' : 'meetings'}`
+      : 'your recent meetings',
+    meetings: meetings.slice(0, limit),
   };
 };
 
@@ -998,16 +1027,15 @@ export const retrieveContext = async (
       };
     }
 
-    // Legacy note-level fallback covers databases while a section index is
-    // being backfilled and notes that predate structured sections.
-    const meetings =
-      sectionMatches.length === 0
-        ? searchMeetingNotesFts(ftsQueryStr, { limit: 20 }).filter(
-            (meeting) =>
-              !options.meetingIds?.length ||
-              options.meetingIds.includes(String(meeting.id)),
-          )
-        : [];
+    // Search note-level evidence as well as sections. A database can be only
+    // partially backfilled, so one section match must not hide other matching
+    // meetings that currently exist only in the notes index.
+    const meetings = searchMeetingNotesFts(ftsQueryStr, { limit: 20 }).filter(
+      (meeting) =>
+        (!options.meetingIds?.length ||
+          options.meetingIds.includes(String(meeting.id))) &&
+        !resultsMap[String(meeting.id)],
+    );
     for (const [idx, m] of meetings.entries()) {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order

@@ -496,7 +496,7 @@ import {
   inheritConversationScope,
   isDiagnosticConversationFollowUp,
   latestAssistantTurn,
-  resolveConversationQuery,
+  resolveAskPlutoConversation,
 } from './intelligence/askPlutoConversation';
 import {
   detectExplicitAskPlutoCorrection,
@@ -5749,10 +5749,11 @@ app.whenReady().then(async () => {
         sendStatus('scope_resolved');
         sendStatus('retrieving');
 
-        const effectiveQueryText = resolveConversationQuery(
+        const conversationResolution = resolveAskPlutoConversation(
           queryText,
           priorTurns,
         );
+        const effectiveQueryText = conversationResolution.retrievalQuery;
         const parsed = await parseQuery(effectiveQueryText, {
           signal: controller.signal,
           useModelClassification: false,
@@ -5760,6 +5761,11 @@ app.whenReady().then(async () => {
         const assigneeRecall = buildAssigneeActionRecall(
           effectiveQueryText,
           persistedMeetings,
+        );
+        const usePreparedAssigneeRecall = Boolean(
+          assigneeRecall &&
+            !assigneeRecall.coverageLimited &&
+            conversationResolution.relation === 'new_topic',
         );
         const overviewRecall = buildWorkingMemoryOverviewRecall(
           effectiveQueryText,
@@ -5778,6 +5784,7 @@ app.whenReady().then(async () => {
           query: effectiveQueryText,
           intent: parsed.intent,
           override: requestedMode,
+          task: conversationResolution.task,
         });
 
         if (parsed.cannedResponse) {
@@ -5794,7 +5801,11 @@ app.whenReady().then(async () => {
           queryReferencesCurrentMeeting(effectiveQueryText);
         const inheritedScope = parsed.temporal_range
           ? undefined
-          : inheritConversationScope(queryText, priorTurns);
+          : inheritConversationScope(
+              queryText,
+              priorTurns,
+              conversationResolution.relation,
+            );
         const previousAssistantTurn = latestAssistantTurn(priorTurns);
         if (
           isDiagnosticConversationFollowUp(queryText) &&
@@ -6084,7 +6095,8 @@ app.whenReady().then(async () => {
         const priorMeetingIds = [
           ...new Set([
             ...(inheritedScope?.meetingIds || []),
-            ...(queryReferencesPriorTurn(effectiveQueryText)
+            ...(conversationResolution.relation !== 'new_topic' ||
+            queryReferencesPriorTurn(effectiveQueryText)
               ? priorTurns
                   .filter((turn) => turn.role === 'assistant')
                   .flatMap((turn) => turn.meetingIds || [])
@@ -6142,39 +6154,39 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             intent: parsed.intent,
             priorPinnedCount: priorPinnedResults.length,
+            task: conversationResolution.task,
           });
         const restrictToPinnedCurrentComparison =
           shouldRestrictToPinnedCurrentComparison({
             currentMeetingRequested,
             historicalCandidateLimit,
           });
-        const generalContext =
-          !assigneeRecall || assigneeRecall.coverageLimited
-            ? explicitResolvedScope
+        const generalContext = !usePreparedAssigneeRecall
+          ? explicitResolvedScope
+            ? await retrieveContext(parsed, {
+                pinnedResults: explicitlyScopedPinnedResults,
+                query: effectiveQueryText,
+                meetingIds: explicitResolvedScope.meetingIds,
+              })
+            : temporalResolvedScope
               ? await retrieveContext(parsed, {
-                  pinnedResults: explicitlyScopedPinnedResults,
+                  pinnedResults,
                   query: effectiveQueryText,
-                  meetingIds: explicitResolvedScope.meetingIds,
+                  meetingIds: temporalResolvedScope.meetingIds,
                 })
-              : temporalResolvedScope
-                ? await retrieveContext(parsed, {
-                    pinnedResults,
-                    query: effectiveQueryText,
-                    meetingIds: temporalResolvedScope.meetingIds,
-                  })
-                : restrictToCurrentMeeting && currentPinnedResult
-                  ? [currentPinnedResult]
-                  : restrictToPinnedCurrentComparison
-                    ? pinnedResults
-                    : restrictToPriorConversation
-                      ? priorPinnedResults
-                      : await retrieveContext(parsed, {
-                          pinnedResults,
-                          query: effectiveQueryText,
-                        })
-            : [];
+              : restrictToCurrentMeeting && currentPinnedResult
+                ? [currentPinnedResult]
+                : restrictToPinnedCurrentComparison
+                  ? pinnedResults
+                  : restrictToPriorConversation
+                    ? priorPinnedResults
+                    : await retrieveContext(parsed, {
+                        pinnedResults,
+                        query: effectiveQueryText,
+                      })
+          : [];
         const context =
-          assigneeRecall && !assigneeRecall.coverageLimited
+          usePreparedAssigneeRecall && assigneeRecall
             ? assigneeRecall.context
             : mergeRetrievalResultsByMeeting(
                 assigneeRecall?.context ?? [],
@@ -6309,7 +6321,7 @@ app.whenReady().then(async () => {
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
         );
 
-        if (assigneeRecall && !assigneeRecall.coverageLimited) {
+        if (usePreparedAssigneeRecall) {
           sendStatus('writing');
         } else {
           sendStatus('waiting');
@@ -6324,15 +6336,20 @@ app.whenReady().then(async () => {
               delta,
             });
           },
+          conversationResolution.task === 'draft'
+            ? 'draft'
+            : conversationResolution.task === 'analysis'
+              ? 'analysis'
+              : 'grounded',
         );
         const extractiveAnswer =
-          assigneeRecall && !assigneeRecall.coverageLimited
+          usePreparedAssigneeRecall && assigneeRecall
             ? assigneeRecall.answer
             : buildExtractiveTemporalSummary(effectiveQueryText, context);
         let answerRaw: string;
         if (
           extractiveAnswer &&
-          (Boolean(assigneeRecall && !assigneeRecall.coverageLimited) ||
+          (usePreparedAssigneeRecall ||
             shouldUsePreparedExtractiveAnswer({
               mode: reasoningMode,
               contextCount: context.length,
@@ -6346,16 +6363,18 @@ app.whenReady().then(async () => {
           const settings = await getAllSettings(db);
           const provider = await getProvider(settings);
           const prompt = getAskPlutoPrompt(
-            effectiveQueryText,
+            conversationResolution.answerQuery,
             context,
             parsed.intent,
             shouldIncludePriorConversation(
               effectiveQueryText,
               Boolean(explicitMeetingScope),
+              conversationResolution.relation,
             )
               ? priorTurns
               : [],
             formatAskPlutoCorrectionsForPrompt(relevantCorrections),
+            conversationResolution.task,
           );
           console.log(
             `[Pluto] Generating answer via provider: ${provider.name} ...`,
@@ -6376,7 +6395,25 @@ app.whenReady().then(async () => {
         }
         generationCompletedAt = Date.now();
 
-        const presentation = validatedAnswerStream.finalize(answerRaw);
+        let presentation = validatedAnswerStream.finalize(answerRaw);
+        if (
+          conversationResolution.relation === 'expansion' &&
+          assigneeRecall &&
+          presentation.outcome === 'no_evidence'
+        ) {
+          const verifiedRecall = createValidatedAnswerStream(
+            assigneeRecall.context,
+            () => undefined,
+          ).finalize(assigneeRecall.answer);
+          if (verifiedRecall.outcome !== 'no_evidence') {
+            presentation = {
+              ...verifiedRecall,
+              answer: `${verifiedRecall.answer}\n\nThat is the full extent of the explicit assignment evidence I could verify. The retrieved meetings did not establish additional status, rationale, constraints, or related decisions.`,
+              outcome: 'partial',
+              unsupportedClaimCount: 0,
+            };
+          }
+        }
         const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
         const answer = coverageLimited
           ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${presentation.answer}`

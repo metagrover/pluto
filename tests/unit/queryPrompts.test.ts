@@ -203,6 +203,61 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain(
       'Never convert participation, discussion, or an unnamed owner into an assignment',
     );
+
+    const analyticalExpansion = getAskPlutoPrompt(
+      'Tell me more about what is assigned to Jordan.',
+      [],
+      'factual',
+      [],
+      'None',
+      'analysis',
+    );
+    expect(analyticalExpansion).toContain(
+      'Provide a thoughtful evidence-grounded analysis',
+    );
+    expect(analyticalExpansion).toContain(
+      'Never convert participation, discussion, or an unnamed owner into an assignment',
+    );
+  });
+
+  it('gives analytical requests an evidence-safe reflection contract', () => {
+    const prompt = getAskPlutoPrompt(
+      'What could I have done better as a manager?',
+      [],
+      'factual',
+      [],
+      'None',
+      'analysis',
+    );
+
+    expect(prompt).toContain(
+      'Separate direct observations from interpretation',
+    );
+    expect(prompt).toContain('only when at least two sources support it');
+    expect(prompt).toContain(
+      'identify one primary theme only when multiple explicit signals converge',
+    );
+    expect(prompt).toContain('strengths as well as opportunities');
+    expect(prompt).toContain('Prefix each recommendation with “Suggestion:”');
+    expect(prompt).toContain('Never diagnose personality');
+    expect(prompt).toContain('Use up to 300 words');
+  });
+
+  it('keeps drafting conversational while grounding factual details', () => {
+    const prompt = getAskPlutoPrompt(
+      'Draft a follow-up email about that.',
+      [],
+      'factual',
+      [{ role: 'user', content: 'Use a warm but direct tone.' }],
+      'None',
+      'draft',
+    );
+
+    expect(prompt).toContain('Write only the requested copy-ready draft');
+    expect(prompt).toContain('audience, goal, and tone');
+    expect(prompt).toContain('every factual detail from the provided context');
+    expect(prompt).toContain('Pluto removes those references');
+    expect(prompt).toContain('under 240 words');
   });
 
   it('bounds each source before sending it to the synchronous chat model', () => {

@@ -39,7 +39,7 @@ import {
 import { updateAlertStatus } from './api/intelligence';
 import type { Entity } from './api/knowledgeGraph';
 import { CalendarStartPromptBanner } from './components/alerts/CalendarStartPromptBanner';
-import { AskPluto } from './components/features/AskPluto';
+import { AskPluto, type AskPlutoMessage } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
@@ -133,6 +133,7 @@ import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel'
 // Types
 import type { Meeting, MeetingSummary } from './types';
 import type { MeetingAskPlutoConversationMessage } from './types/askPluto';
+import { previewMeeting } from './utils/browserIpcFallback';
 import {
   isGrantedStatus,
   resolveMicrophoneStatus,
@@ -140,10 +141,15 @@ import {
   shouldRunBootPermissionProbe,
 } from './utils/permissions';
 
-const meetingPreviewEnabled =
-  new URLSearchParams(window.location.search).get('preview') === 'meeting';
-const dashboardPreviewEnabled =
-  new URLSearchParams(window.location.search).get('preview') === 'dashboard';
+const previewParam =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('preview')
+    : null;
+const meetingPreviewEnabled = previewParam === 'meeting';
+const dashboardPreviewEnabled = previewParam === 'dashboard';
+const chatPreviewEnabled = previewParam === 'chat';
+const peoplePreviewEnabled = previewParam === 'people';
+const projectsPreviewEnabled = previewParam === 'projects';
 
 type MeetingRetryRoute =
   | 'final_transcription'
@@ -181,7 +187,7 @@ function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [selectedMeetingDetail, setSelectedMeetingDetail] =
-    useState<Meeting | null>(null);
+    useState<Meeting | null>(meetingPreviewEnabled ? previewMeeting : null);
   const selectedMeetingIdRef = useRef<string | number | null>(null);
   const notesStatusRequestsRef = useRef(createMeetingStatusRequestGate());
   const [
@@ -201,6 +207,66 @@ function App() {
   const [participantInput, setParticipantInput] = useState('');
   const [meetingAskPlutoConversation, setMeetingAskPlutoConversation] =
     useState<MeetingAskPlutoConversationMessage[]>([]);
+  const [askPlutoConversation, setAskPlutoConversation] = useState<
+    AskPlutoMessage[]
+  >(
+    chatPreviewEnabled
+      ? [
+          {
+            id: 'preview-chat-q1',
+            role: 'user',
+            content:
+              'What decisions were made about API Migration and SOC2 compliance across our recent syncs?',
+          },
+          {
+            id: 'preview-chat-a1',
+            role: 'assistant',
+            content: `Across the **Architecture docs review** and **Q2 roadmap sync**:
+
+1. **Docs-as-Code Workflow**: The team confirmed adopting a Markdown-based docs-as-code workflow versioned directly inside the repository, using CI for automated validation.
+2. **SOC2 Audit & Credential Rotation**: Token rotation is completed. Maya Chen confirmed database credential rotation will be finalized by **Thursday at 5:00 PM** before production cutover.
+3. **CoreML Engine Benchmark**: Local on-device transcription latency was validated at **3.2x faster than real-time** on M-series Apple Silicon chips with zero cloud audio leakage.`,
+            citations: [
+              {
+                claim: 'Docs-as-code workflow adoption',
+                meeting_id: 'preview-architecture-docs',
+                meeting_title: 'Architecture docs review',
+                evidence_span:
+                  "I'd like us to adopt a docs-as-code approach using Markdown in the repo so that documentation lives alongside the code and can be versioned and reviewed the same way.",
+                evidence_valid: true,
+                trust_status: 'grounded',
+                source_type: 'meeting',
+              },
+              {
+                claim: 'SOC2 credential rotation deadline',
+                meeting_id: 'preview-roadmap-sync',
+                meeting_title: 'Q2 roadmap sync',
+                evidence_span:
+                  'Token rotation is completed. We just need to verify the database credential rotation before production cutover.',
+                evidence_valid: true,
+                trust_status: 'grounded',
+                source_type: 'meeting',
+              },
+            ],
+            trustStatus: 'grounded',
+            outcome: 'answered',
+            resolvedScope: {
+              kind: 'meeting_ids',
+              meetingIds: ['preview-architecture-docs', 'preview-roadmap-sync'],
+              resolvedAt: new Date().toISOString(),
+              source: 'explicit',
+            },
+            retrievalSummary: {
+              matchedMeetingCount: 2,
+              includedMeetingCount: 2,
+              preparedEvidenceCount: 6,
+              transcriptOnlyCount: 0,
+              omittedMeetingCount: 0,
+            },
+          },
+        ]
+      : [],
+  );
   const [meetingAskPlutoMinimized, setMeetingAskPlutoMinimized] =
     useState(false);
 
@@ -223,7 +289,9 @@ function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(
+    peoplePreviewEnabled ? 'preview-maya' : null,
+  );
   const [navHistory, setNavHistory] = useState<
     Array<{
       tab:
@@ -245,18 +313,22 @@ function App() {
   const [activeTab, setActiveTab] = useState<
     'hub' | 'people' | 'projects' | 'sources' | 'meetings' | 'chat' | 'settings'
   >(
-    window.__PLUTO_BROWSER_PREVIEW__ &&
-      !meetingPreviewEnabled &&
-      !dashboardPreviewEnabled
-      ? 'projects'
-      : 'hub',
+    chatPreviewEnabled
+      ? 'chat'
+      : peoplePreviewEnabled
+        ? 'people'
+        : projectsPreviewEnabled
+          ? 'projects'
+          : dashboardPreviewEnabled || meetingPreviewEnabled
+            ? 'hub'
+            : window.__PLUTO_BROWSER_PREVIEW__
+              ? 'projects'
+              : 'hub',
   );
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(
-    (!window.__PLUTO_BROWSER_PREVIEW__ ||
-      meetingPreviewEnabled ||
-      dashboardPreviewEnabled) &&
-      window.innerWidth >= 1024,
+    Boolean(previewParam) ||
+      (!window.__PLUTO_BROWSER_PREVIEW__ && window.innerWidth >= 1024),
   );
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
@@ -985,6 +1057,7 @@ function App() {
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+        { reason: 'manual' },
       );
       const refreshedMeetings = await fetchMeetings();
       if (result.status !== 'superseded') {
@@ -1990,7 +2063,9 @@ function App() {
                   : activeTab === 'settings'
                     ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
                     : !selectedMeetingId && activeTab === 'hub'
-                      ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                      ? previewParam
+                        ? 'px-4 md:px-8 lg:px-10 py-5 space-y-5'
+                        : 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
                       : !selectedMeetingId && activeTab === 'people'
                         ? 'px-5 pt-[50px] pb-6 md:px-8 md:pb-8'
                         : !selectedMeetingId && activeTab === 'projects'
@@ -2144,6 +2219,8 @@ function App() {
               <div className="flex-1 w-full animate-in flex flex-col">
                 <AskPluto
                   visible={true}
+                  messages={askPlutoConversation}
+                  setMessages={setAskPlutoConversation}
                   onClose={() => setActiveTab('hub')}
                   onOpenMeeting={(meetingId, target) => {
                     setAskPlutoCitationTarget({ meetingId, ...target });

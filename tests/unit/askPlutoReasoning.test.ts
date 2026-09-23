@@ -33,6 +33,20 @@ describe('resolveAskPlutoReasoningMode', () => {
         intent: 'factual',
       }),
     ).toBe('deep');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'Could I have handled these meetings better?',
+        intent: 'factual',
+        task: 'analysis',
+      }),
+    ).toBe('deep');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'Draft a follow-up email.',
+        intent: 'factual',
+        task: 'draft',
+      }),
+    ).toBe('deep');
   });
 
   it('uses deep synthesis for multi-meeting summaries and breakdowns', () => {
@@ -90,6 +104,15 @@ describe('resolveAskPlutoReasoningMode', () => {
     expect(shouldIncludePriorConversation('Who owns pricing?', false)).toBe(
       true,
     );
+    expect(
+      shouldIncludePriorConversation('Who owns pricing?', false, 'new_topic'),
+    ).toBe(false);
+    expect(
+      shouldIncludePriorConversation('Tell me more', false, 'expansion'),
+    ).toBe(true);
+    expect(
+      shouldIncludePriorConversation('Tell me more', true, 'expansion'),
+    ).toBe(true);
   });
 
   it('selects bounded historical anchors for current-meeting comparisons', () => {
@@ -142,6 +165,22 @@ describe('resolveAskPlutoReasoningMode', () => {
         priorPinnedCount: 1,
       }),
     ).toBe(false);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+        task: 'analysis',
+      }),
+    ).toBe(false);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+        task: 'draft',
+      }),
+    ).toBe(true);
   });
 
   it('uses only the frozen pair for current-versus-previous comparisons', () => {

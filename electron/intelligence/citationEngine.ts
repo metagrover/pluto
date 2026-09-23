@@ -207,15 +207,17 @@ export const claimIsSupportedByEvidence = (
  * Get the first meaningful evidence span from a retrieval result's MID.
  */
 const getSourceEvidenceCandidates = (source: RetrievalResult): string[] => {
-  const evidenceUnits = source.evidence_text.split('\n').flatMap((line) => {
-    const cleanLine = line.replace(/^\[[^\]]+\]:?\s*/, '').trim();
-    if (!cleanLine) return [];
-    const sentences = cleanLine
-      .split(/(?<=[.!?])\s+/)
-      .map((sentence) => sentence.trim())
-      .filter((sentence) => sentence.length > 20);
-    return sentences.length > 1 ? sentences : [cleanLine];
-  });
+  const evidenceUnits = (source.evidence_text || '')
+    .split('\n')
+    .flatMap((line) => {
+      const cleanLine = line.replace(/^\[[^\]]+\]:?\s*/, '').trim();
+      if (!cleanLine) return [];
+      const sentences = cleanLine
+        .split(/(?<=[.!?])\s+/)
+        .map((sentence) => sentence.trim())
+        .filter((sentence) => sentence.length > 20);
+      return sentences.length > 1 ? sentences : [cleanLine];
+    });
   const adjacentEvidence = evidenceUnits.flatMap((_, index) =>
     [2, 3]
       .map((windowSize) => evidenceUnits.slice(index, index + windowSize))
@@ -350,6 +352,74 @@ export const buildCitationChain = (
     }
   }
 
+  // Small local models occasionally omit an inline reference even when their
+  // sentence closely follows one retrieved source. Recover only claims that
+  // pass the same deterministic evidence checks used by the citation audit.
+  const answerClaims = answer
+    .replace(/<?\-?cite[^>]*>/gi, '')
+    .replace(/<\/cite>/gi, '')
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((claim) => claim.replace(/\[Source\s+\d+\]/gi, '').trim())
+    .filter((claim) => contentTokens(claim).length >= 2);
+  for (const claim of answerClaims) {
+    if (
+      COMPARATIVE_CLAIM_PATTERN.test(claim) ||
+      citations.some(
+        (citation) =>
+          citation.claim.trim().toLocaleLowerCase() ===
+          claim.toLocaleLowerCase(),
+      )
+    ) {
+      continue;
+    }
+    const sourceIndex = sources.findIndex((source) => {
+      const evidenceSpan = getBestEvidenceSpan(source, claim);
+      return claimIsSupportedByEvidence(
+        claim,
+        [
+          evidenceSpan || '',
+          source.meeting_title || source.mid?.title || '',
+          source.evidence_text,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    });
+    if (sourceIndex < 0) continue;
+
+    const source = sources[sourceIndex];
+    const evidenceSpan = getBestEvidenceSpan(source, claim);
+    const transcriptPassage = source.transcript_passages?.find((passage) =>
+      evidenceSpan
+        ? passage.quote
+            .toLocaleLowerCase()
+            .includes(evidenceSpan.toLocaleLowerCase()) ||
+          evidenceSpan
+            .toLocaleLowerCase()
+            .includes(passage.quote.toLocaleLowerCase())
+        : false,
+    );
+    const section = source.retrieved_sections?.[0];
+    citations.push({
+      claim,
+      meeting_id: source.meeting_id,
+      meeting_title:
+        source.meeting_title || source.mid?.title || 'Unknown Meeting',
+      source_type: source.source_type || 'meeting',
+      source_id: source.source_id || source.meeting_id,
+      evidence_span: evidenceSpan,
+      evidence_valid: false,
+      trust_status: 'needs_review',
+      evidence_kind: transcriptPassage ? 'transcript' : source.evidence_kind,
+      section_id: section?.section_id,
+      section_heading: section?.heading,
+      timestamp_ms: transcriptPassage?.start_ms,
+      timestamp_end_ms: transcriptPassage?.end_ms,
+      source_revision:
+        transcriptPassage?.source_revision || source.source_revision,
+    });
+  }
+
   return citations;
 };
 
@@ -470,12 +540,35 @@ export const auditCitations = (
 };
 
 const COMPARATIVE_CLAIM_PATTERN =
-  /\b(compare|compared|difference|different|changed?|moved|more|less|earlier|later|whereas|while|unlike|versus|vs)\b/i;
+  /\b(compare|compared|difference|different|changed?|moved|more|most|less|earlier|later|whereas|while|unlike|versus|vs|primary|main concern|biggest|recurring|pattern|consistently|across meetings)\b/i;
 
-const isMaterialClaim = (sentence: string): boolean => {
+type AnswerValidationMode = 'grounded' | 'analysis' | 'draft';
+
+const isNonFactualResponseText = (
+  sentence: string,
+  mode: AnswerValidationMode,
+): boolean => {
+  const text = sentence.replace(/\[Source\s+\d+\]/gi, '').trim();
+  if (mode === 'analysis' && /^Suggestion:/i.test(text)) return true;
+  if (mode !== 'draft') return false;
+  return (
+    /^(?:Subject:|Hi(?:\s+[\p{L}'-]+){0,4},?$|Hello(?:\s+[\p{L}'-]+){0,4},?$|Dear(?:\s+[\p{L}'-]+){0,4},?$|Best,?$|Regards,?$|Sincerely,?$|Thanks,?$|Thank you,?$)/iu.test(
+      text,
+    ) ||
+    /^(?:Could you|Would you|Please|Let me know|Can we|I'd like to|I would like to|Looking forward)\b/i.test(
+      text,
+    )
+  );
+};
+
+const isMaterialClaim = (
+  sentence: string,
+  mode: AnswerValidationMode = 'grounded',
+): boolean => {
   const withoutCitations = sentence.replace(/\[Source\s+\d+\]/gi, '').trim();
   if (!withoutCitations) return false;
   if (/^I couldn't find information/i.test(withoutCitations)) return false;
+  if (isNonFactualResponseText(withoutCitations, mode)) return false;
   return contentTokens(withoutCitations).length >= 2;
 };
 
@@ -490,6 +583,7 @@ const isContextfulClaim = (claim: string): boolean =>
 export const auditAnswerGrounding = (
   answer: string,
   citations: CitationChain[],
+  mode: AnswerValidationMode = 'grounded',
 ): {
   trustStatus: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount: number;
@@ -497,7 +591,7 @@ export const auditAnswerGrounding = (
   const sentences = answer
     .split(/(?<=[.!?])\s+|\n+/)
     .map((sentence) => sentence.trim())
-    .filter(isMaterialClaim);
+    .filter((sentence) => isMaterialClaim(sentence, mode));
   let unsupportedClaimCount = 0;
   let inferred = false;
 
@@ -544,6 +638,7 @@ export const auditAnswerGrounding = (
 export const buildSafeAnswerPresentation = (
   answer: string,
   citations: CitationChain[],
+  mode: AnswerValidationMode = 'grounded',
 ): {
   answer: string;
   citations: CitationChain[];
@@ -565,7 +660,7 @@ export const buildSafeAnswerPresentation = (
     };
   }
 
-  const grounding = auditAnswerGrounding(answer, citations);
+  const grounding = auditAnswerGrounding(answer, citations, mode);
   if (grounding.unsupportedClaimCount === 0) {
     return {
       answer: cleanAnswer,
@@ -605,6 +700,40 @@ export const buildSafeAnswerPresentation = (
   }
 
   const supportedClaims = supportedGroups.map((group) => group[0].claim.trim());
+  const supportedClaimKeys = new Set(
+    supportedClaims.map((claim) =>
+      claim
+        .replace(/\[Source\s+\d+\]/gi, '')
+        .trim()
+        .replace(/[.!?]+$/, '')
+        .toLocaleLowerCase(),
+    ),
+  );
+  const preservedAnswer =
+    mode === 'grounded'
+      ? undefined
+      : answer
+          .split(/\n+/)
+          .map((paragraph) => paragraph.trim())
+          .filter(Boolean)
+          .filter((paragraph) =>
+            paragraph
+              .split(/(?<=[.!?])\s+/)
+              .map((sentence) => sentence.trim())
+              .every((sentence) => {
+                if (!isMaterialClaim(sentence, mode)) return true;
+                const key = sentence
+                  .replace(/\[Source\s+\d+\]/gi, '')
+                  .trim()
+                  .replace(/[.!?]+$/, '')
+                  .toLocaleLowerCase();
+                return supportedClaimKeys.has(key);
+              }),
+          )
+          .map((paragraph) =>
+            paragraph.replace(/\[Source\s+\d+\]/gi, '').trim(),
+          )
+          .join('\n\n');
   const supportedClaimSeparator = supportedClaims.every((claim) =>
     /^[-*]\s/.test(claim),
   )
@@ -616,7 +745,7 @@ export const buildSafeAnswerPresentation = (
       group.some((citation) => citation.trust_status === 'inferred'),
   );
   return {
-    answer: supportedClaims.join(supportedClaimSeparator),
+    answer: preservedAnswer || supportedClaims.join(supportedClaimSeparator),
     citations: supportedCitations,
     outcome: 'partial',
     trustStatus: inferred ? 'inferred' : 'grounded',
@@ -635,6 +764,7 @@ type SafeAnswerPresentation = ReturnType<typeof buildSafeAnswerPresentation>;
 export const createValidatedAnswerStream = (
   sources: RetrievalResult[],
   onDelta: (delta: string) => void,
+  mode: AnswerValidationMode = 'grounded',
 ): {
   push: (delta: string) => void;
   finalize: (answer: string) => SafeAnswerPresentation;
@@ -664,7 +794,7 @@ export const createValidatedAnswerStream = (
       buildCitationChain(rawAnswer, sources),
       sources,
     );
-    return buildSafeAnswerPresentation(rawAnswer, citations);
+    return buildSafeAnswerPresentation(rawAnswer, citations, mode);
   };
 
   const push = (delta: string): void => {

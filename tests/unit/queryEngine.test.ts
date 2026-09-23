@@ -382,12 +382,71 @@ describe('Query Engine', () => {
           { section_id: 'topic:release', heading: 'Release timing' },
         ],
       });
-      expect(dbModule.searchMeetingNotesFts).not.toHaveBeenCalled();
+      expect(dbModule.searchMeetingNotesFts).toHaveBeenCalled();
       expect(dbModule.searchMeetingsFts).not.toHaveBeenCalled();
       expect(dbModule.searchMeetingContextSectionsFts).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ meetingIds: ['section-meeting'] }),
       );
+    });
+
+    it('keeps note-only matches visible while the section index is partially backfilled', async () => {
+      const sectionMeeting = {
+        id: 'section-meeting',
+        title: 'Launch review',
+        started_at: '2026-09-01T10:00:00.000Z',
+      } as dbModule.PersistedMeeting;
+      const noteOnlyMeeting = {
+        id: 'note-only-meeting',
+        title: 'Customer readiness',
+        started_at: '2026-09-02T10:00:00.000Z',
+        enhanced_notes:
+          'The customer readiness review depends on the revised launch plan.',
+      } as FtsRow;
+      vi.mocked(dbModule.searchMeetingContextSectionsFts).mockReturnValue([
+        {
+          meeting: sectionMeeting,
+          section: {
+            id: 1,
+            meeting_id: sectionMeeting.id,
+            section_id: 'topic:release',
+            heading: 'Release timing',
+            kind: 'topic',
+            summary: 'The release moved to Friday.',
+            content: 'The release moved to Friday after final QA.',
+            entities_text: 'release QA',
+            evidence_json: '[]',
+            transcript_start_index: null,
+            transcript_end_index: null,
+            source_revision: 'revision-1',
+            trust_status: 'grounded',
+            updated_at: '2026-09-01T10:30:00.000Z',
+          },
+          snippet: 'Release timing',
+        } satisfies SectionFtsRow,
+      ]);
+      vi.mocked(dbModule.searchMeetingNotesFts).mockReturnValue([
+        noteOnlyMeeting,
+      ]);
+
+      const result = await retrieveContext(
+        {
+          keywords: ['launch'],
+          expanded_keywords: [],
+          entity_mentions: [],
+          temporal_range: null,
+          intent: 'factual',
+        },
+        { query: 'What changed in the launch plan?' },
+      );
+
+      expect(result.map((item) => item.meeting_id)).toEqual(
+        expect.arrayContaining(['section-meeting', 'note-only-meeting']),
+      );
+      expect(
+        result.find((item) => item.meeting_id === 'note-only-meeting')
+          ?.evidence_text,
+      ).toContain('customer readiness review');
     });
 
     it('deepens a matching section into bounded timestamped transcript passages', async () => {
@@ -630,6 +689,8 @@ describe('Query Engine', () => {
         id: 'planning',
         title: 'Launch planning',
         started_at: '2026-08-31T18:00:00.000Z',
+        enhanced_notes:
+          'The revised launch plan unblocks the customer readiness review.',
         mid_json: JSON.stringify({
           mid_version: 1,
           meeting_id: 'planning',
@@ -819,6 +880,12 @@ describe('Query Engine', () => {
       expect(dbModule.getCanonicalPersonCommitments).toHaveBeenCalledWith(
         'person-self',
       );
+      expect(recall?.context[0].evidence_text).toContain(
+        'The revised launch plan unblocks the customer readiness review.',
+      );
+      expect(recall?.context[0].evidence_text).toContain(
+        '[Commitments]:\nConfirmed assignment: Send the revised launch plan.',
+      );
 
       const completed = buildAssigneeActionRecall(
         'What are my completed commitments?',
@@ -911,6 +978,25 @@ describe('Query Engine', () => {
       ).toMatchObject({
         kind: 'recent',
         meetings: [{ id: 'latest' }, { id: 'diagnosis' }],
+      });
+    });
+
+    it('resolves an explicit last-N request without silently using the default', () => {
+      expect(
+        resolveExplicitMeetingScope(
+          'Looking at my last two meetings, what could I have done better?',
+          meetings,
+        ),
+      ).toMatchObject({
+        kind: 'recent',
+        label: 'your last 2 meetings',
+        meetings: [{ id: 'latest' }, { id: 'diagnosis' }],
+      });
+      expect(
+        resolveExplicitMeetingScope('Analyze my previous 1 meeting', meetings),
+      ).toMatchObject({
+        label: 'your last 1 meeting',
+        meetings: [{ id: 'latest' }],
       });
     });
 

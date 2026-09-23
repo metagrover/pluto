@@ -560,7 +560,47 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toEqual({ status: 'validated' });
     expect(invoke).toHaveBeenCalledWith(
       'GENERATE_MEETING_NOTES',
-      expect.objectContaining({ meetingId: 'synthetic-id' }),
+      expect.objectContaining({
+        meetingId: 'synthetic-id',
+        reason: 'automatic',
+      }),
+    );
+  });
+
+  it('preserves a user-initiated retry as manual when publishing notes', async () => {
+    const current = {
+      ...meeting,
+      transcript_status: 'validated' as const,
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'GENERATE_MEETING_NOTES') {
+        return { status: 'published' };
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke, {
+        reason: 'manual',
+      }),
+    ).resolves.toEqual({ status: 'validated' });
+    expect(invoke).toHaveBeenCalledWith(
+      'GENERATE_MEETING_NOTES',
+      expect.objectContaining({
+        meetingId: 'synthetic-id',
+        reason: 'manual',
+      }),
     );
   });
 

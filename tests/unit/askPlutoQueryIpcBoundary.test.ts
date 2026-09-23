@@ -17,11 +17,23 @@ describe('Ask Pluto query IPC boundary', () => {
     );
     expect(queryHandler).toContain('assigneeRecall?.context');
     expect(queryHandler).toContain('assigneeRecall?.answer');
+    expect(queryHandler).toContain('!assigneeRecall.coverageLimited');
+    expect(queryHandler).toContain('const usePreparedAssigneeRecall');
     expect(queryHandler).toContain(
-      'assigneeRecall && !assigneeRecall.coverageLimited',
+      "conversationResolution.relation === 'new_topic'",
     );
     expect(queryHandler).toContain('mergeRetrievalResultsByMeeting');
-    expect(queryHandler).toContain('resolveConversationQuery');
+    expect(queryHandler).toContain('resolveAskPlutoConversation');
+    expect(queryHandler).toContain('conversationResolution.retrievalQuery');
+    expect(queryHandler).toContain('conversationResolution.answerQuery');
+    expect(queryHandler).toContain('task: conversationResolution.task');
+    expect(queryHandler).toContain(
+      "conversationResolution.relation === 'expansion'",
+    );
+    expect(queryHandler).toContain('.finalize(assigneeRecall.answer)');
+    expect(queryHandler).toContain(
+      'That is the full extent of the explicit assignment evidence I could verify.',
+    );
   });
 
   it('publishes waiting and writing phases around model generation', () => {

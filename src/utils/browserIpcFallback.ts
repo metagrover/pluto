@@ -84,9 +84,9 @@ const previewCalendarEvents = (): CalendarEvent[] => {
     const end = new Date(start.getTime() + durationMinutes * 60_000);
     return { start: start.toISOString(), end: end.toISOString() };
   };
-  const productReview = atToday(10, 30, 45);
-  const weeklySync = atToday(13, 0, 30);
-  const customerResearch = atToday(15, 30, 30);
+  const pricingReview = atToday(10, 30, 45);
+  const acmeSync = atToday(13, 0, 30);
+  const setupReview = atToday(15, 30, 30);
   const build = (
     key: string,
     title: string,
@@ -120,116 +120,162 @@ const previewCalendarEvents = (): CalendarEvent[] => {
       : [],
     seriesKey: key.includes('weekly') ? `preview-work|${key}` : null,
     agenda:
-      key === 'preview-product-review'
-        ? 'Review onboarding changes\nResolve the remaining launch risk'
+      key === 'preview-pricing-review'
+        ? 'Agree on team pricing\nConfirm launch dates and customer trials'
         : null,
   });
   return [
-    build('preview-product-review', 'Product design review', productReview, [
-      'Maya',
-      'Jordan',
+    build(
+      'preview-pricing-review',
+      'Q4 Launch & Customer Pricing',
+      pricingReview,
+      ['Maya', 'David', 'Alex'],
+    ),
+    build('preview-acme-sync', 'Acme Corp Customer Sync', acmeSync, [
+      'David',
+      'Sarah',
     ]),
-    build('preview-weekly-sync', 'Weekly team sync', weeklySync, [
+    build('preview-setup-review', 'Simple Team Setup Review', setupReview, [
       'Avery',
-      'Priya',
-    ]),
-    build('preview-customer-research', 'Customer research', customerResearch, [
-      'Sam',
     ]),
   ];
 };
 
-const meetingPreviewEnabled = (): boolean =>
-  typeof window !== 'undefined' &&
-  new URLSearchParams(window.location.search).get('preview') === 'meeting';
+const meetingPreviewEnabled = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const p = new URLSearchParams(window?.location?.search || '').get('preview');
+  return (
+    p === 'meeting' ||
+    p === 'dashboard' ||
+    p === 'chat' ||
+    p === 'people' ||
+    p === 'projects'
+  );
+};
 
-const previewMeeting: Meeting = {
-  id: 'preview-architecture-docs',
-  title: 'Architecture docs review',
+export const previewMeeting: Meeting = {
+  id: 'preview-pricing-review',
+  title: 'Q4 Launch & Customer Pricing',
   meeting_type: 'Recording',
-  created_at: '2025-05-14T10:02:00-07:00',
-  started_at: '2025-05-14T10:02:00-07:00',
-  duration_seconds: 54 * 60,
+  created_at: now,
+  started_at: now,
+  duration_seconds: 42 * 60,
   finalization_status: 'finalized',
   transcript_status: 'validated',
-  transcript_validated_at: '2025-05-14T10:56:00.000Z',
+  transcript_validated_at: now,
   user_notes:
-    'Keep the documentation lightweight and make architectural decisions easy to find.',
+    'Agree on team pricing, confirm the launch date, and check customer trial plans.',
   transcript_json: JSON.stringify({
     lifecycleStatus: 'validated',
     segments: [
       {
         speaker: 'Maya Chen',
-        start: 300,
-        end: 326,
-        text: "I'd like us to adopt a docs-as-code approach using Markdown in the repo so that documentation lives alongside the code and can be versioned and reviewed the same way.",
+        start: 120,
+        end: 145,
+        text: "Based on customer feedback, let's set the team price at $45 per seat and keep the basic plan at $20 so new teams can try it easily.",
       },
       {
-        speaker: 'Daniel Lee',
-        start: 360,
-        end: 383,
-        text: 'Agreed. Markdown keeps it lightweight, and we can use frontmatter for metadata. It will also make contributions easier.',
+        speaker: 'David Kim',
+        start: 160,
+        end: 182,
+        text: 'That fits what customers are asking for. Acme Corp is ready to start their 30-day trial next week.',
       },
       {
-        speaker: 'Priya Nair',
-        start: 420,
-        end: 438,
-        text: "Shipping docs with the repo will help us catch issues earlier in PRs. Let's do that.",
+        speaker: 'Alex Rivera',
+        start: 210,
+        end: 230,
+        text: 'The setup for team accounts is ready in testing. We can launch it on October 1st.',
+      },
+      {
+        speaker: 'Avery Taylor',
+        start: 250,
+        end: 272,
+        text: 'We also made inviting team members much simpler. It now takes less than two minutes.',
       },
     ],
   }),
   analysis_schema_version: 3,
   analysis_json: JSON.stringify({
     analysis_schema_version: 3,
-    overview: 'System context diagrams now reflect the new data pipeline.',
+    overview:
+      'The team agreed on pricing and launch dates. Team plans will cost $45 per seat, and the basic plan will stay at $20. Acme Corp will start their trial next week, and the new setup will go live on October 1st.',
     all_decisions: [
       {
-        text: 'We will adopt a docs-as-code approach using Markdown in the repo.',
+        text: 'Set team plan price at $45 per seat with simple setup included.',
         decided_by: 'Maya Chen',
         evidence:
-          "Maya Chen: I'd like us to adopt a docs-as-code approach using Markdown in the repo.",
+          "Maya Chen: Based on customer feedback, let's set the team price at $45 per seat and keep the basic plan at $20 so new teams can try it easily.",
       },
       {
-        text: 'Architecture diagrams will be generated from code and reviewed in CI.',
-        decided_by: 'Team',
+        text: 'Keep basic plan at $20 so small teams can start quickly.',
+        decided_by: 'Maya Chen',
+        evidence:
+          'Maya Chen: ...and keep the basic plan at $20 so new teams can try it easily.',
       },
       {
-        text: 'The docs site will remain on the existing Docusaurus setup.',
-        decided_by: 'Team',
+        text: 'Launch the new team setup on October 1st.',
+        decided_by: 'Alex Rivera',
+        evidence:
+          'Alex Rivera: The setup for team accounts is ready in testing. We can launch it on October 1st.',
       },
     ],
     all_action_items: [
       {
-        text: 'Add a “How decisions are made” section to the architecture overview.',
-        assignee: 'Daniel Lee',
-        due: 'Friday',
-        topic: 'Documentation architecture',
+        text: 'Send the new pricing sheet to Sarah in sales',
+        assignee: 'You',
+        due: 'Thursday',
+        topic: 'Customer Pricing',
       },
       {
-        text: 'Schedule the next architecture review in two weeks.',
-        assignee: 'Priya Nair',
-        topic: 'Documentation architecture',
+        text: 'Finish testing the team invite steps',
+        assignee: 'Avery Taylor',
+        due: 'Today',
+        topic: 'Team Setup',
+      },
+      {
+        text: 'Confirm launch date with the Acme Corp team',
+        assignee: 'David Kim',
+        due: 'Friday',
+        topic: 'Customer Trials',
       },
     ],
+    recent_win: {
+      win: 'New team setup time cut by half',
+      why_it_counts:
+        'New teams can now set up their accounts and invite members in under three minutes.',
+      evidence: 'Tested with eight customer teams with no drop-offs.',
+      source: 'Q4 Launch & Customer Pricing',
+      owner: 'Product & Design',
+      ownership: 'shared',
+    },
     topics: [
       {
-        title: 'Documentation architecture',
-        summary: 'ADR-042 was accepted and its sequence diagram was added.',
+        title: 'Team Pricing & Plans',
+        summary:
+          'The team agreed to set the team plan at $45 per seat and keep the basic plan at $20.',
         key_points: [
-          { text: 'Terminology now uses “tenant” instead of “account”.' },
-          {
-            text: 'Performance constraints now include error-budget targets.',
-          },
+          { text: 'Team plan includes fast support and member invites.' },
+          { text: 'Basic plan stays at $20 for single users.' },
         ],
         decisions: [],
         action_items: [],
         open_questions: [
-          'How will we version the OpenAPI docs alongside the service?',
-          'Do we need a separate repository for decision records?',
-          'What is the retention policy for diagrams generated in CI?',
-          'Should automatic link checking run in the docs build?',
+          'Should we offer an annual discount for small businesses?',
         ],
         transcript_range: [0, 2],
+      },
+      {
+        title: 'Customer Trial & Launch Date',
+        summary:
+          'Acme Corp starts testing next week, and public launch is set for October 1st.',
+        key_points: [
+          { text: 'Acme Corp will test with 120 team members.' },
+          { text: 'Engineering confirmed the system is ready for launch.' },
+        ],
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+        transcript_range: [2, 4],
       },
     ],
     meeting_type: 'team_sync',
@@ -309,45 +355,38 @@ const previewTimelineMeetings: Meeting[] = [
   previewMeeting,
   {
     ...previewMeeting,
-    id: 'preview-roadmap-sync',
-    title: 'Q2 roadmap sync',
-    created_at: '2025-05-13T15:30:00-07:00',
-    started_at: '2025-05-13T15:30:00-07:00',
+    id: 'preview-acme-sync',
+    title: 'Acme Corp Customer Sync',
+    created_at: '2026-09-22T13:00:00-07:00',
+    started_at: '2026-09-22T13:00:00-07:00',
   },
   {
     ...previewMeeting,
-    id: 'preview-design-critique',
-    title: 'Design critique',
-    created_at: '2025-05-13T11:00:00-07:00',
-    started_at: '2025-05-13T11:00:00-07:00',
+    id: 'preview-setup-review',
+    title: 'Simple Team Setup Review',
+    created_at: '2026-09-21T15:30:00-07:00',
+    started_at: '2026-09-21T15:30:00-07:00',
   },
   {
     ...previewMeeting,
-    id: 'preview-api-review',
-    title: 'API review',
-    created_at: '2025-05-12T16:00:00-07:00',
-    started_at: '2025-05-12T16:00:00-07:00',
+    id: 'preview-sales-sync',
+    title: 'Weekly Sales & Product Sync',
+    created_at: '2026-09-20T10:00:00-07:00',
+    started_at: '2026-09-20T10:00:00-07:00',
   },
   {
     ...previewMeeting,
-    id: 'preview-weekly-eng',
-    title: 'Weekly eng sync',
-    created_at: '2025-05-09T09:30:00-07:00',
-    started_at: '2025-05-09T09:30:00-07:00',
-  },
-  {
-    ...previewMeeting,
-    id: 'preview-incident',
-    title: 'Incident postmortem',
-    created_at: '2025-05-07T14:00:00-07:00',
-    started_at: '2025-05-07T14:00:00-07:00',
+    id: 'preview-customer-feedback',
+    title: 'Customer Feedback Catch-up',
+    created_at: '2026-09-18T14:00:00-07:00',
+    started_at: '2026-09-18T14:00:00-07:00',
   },
   {
     ...previewMeeting,
     id: 'preview-hiring-plan',
-    title: 'Hiring plan review',
-    created_at: '2025-05-05T10:30:00-07:00',
-    started_at: '2025-05-05T10:30:00-07:00',
+    title: 'Q4 Team Growth Review',
+    created_at: '2026-09-15T11:00:00-07:00',
+    started_at: '2026-09-15T11:00:00-07:00',
   },
 ];
 
@@ -412,13 +451,13 @@ const previewPeople: Entity[] = [
   {
     id: 'preview-maya',
     type: 'person',
-    name: 'Maya Ortiz',
-    normalized_name: 'maya ortiz',
+    name: 'Maya Chen',
+    normalized_name: 'maya chen',
     status: 'active',
     due_date: null,
     assigned_to: null,
-    metadata: JSON.stringify({ role: 'Product partner' }),
-    saliency_score: 0.86,
+    metadata: JSON.stringify({ role: 'Staff Platform Engineer' }),
+    saliency_score: 0.95,
     domain_tag: 'work',
     created_at: now,
     updated_at: now,
@@ -431,7 +470,7 @@ const previewPeople: Entity[] = [
     status: 'active',
     due_date: null,
     assigned_to: null,
-    metadata: JSON.stringify({ role: 'Engineering' }),
+    metadata: JSON.stringify({ role: 'Engineering Lead' }),
     saliency_score: 0.81,
     domain_tag: 'work',
     created_at: now,
@@ -455,15 +494,28 @@ const previewMeetings: Record<string, EntityMeeting[]> = {
   ],
   'preview-maya': [
     {
-      id: 'preview-weekly-sync',
-      title: 'Weekly product sync',
+      id: 'preview-architecture-docs',
+      title: 'Architecture docs review',
       meeting_type: 'work',
-      started_at: '2026-07-10T16:30:00.000Z',
+      started_at: '2026-09-21T10:00:00.000Z',
       ended_at: null,
-      duration_seconds: 1800,
-      created_at: '2026-07-10T16:30:00.000Z',
-      mention_count: 4,
-      context: 'Pressure-tested the current read and attention hierarchy.',
+      duration_seconds: 3240,
+      created_at: '2026-09-21T10:00:00.000Z',
+      mention_count: 8,
+      context:
+        'Committed to delivering database credential rotation and reviewing OpenAPI specs.',
+    },
+    {
+      id: 'preview-roadmap-sync',
+      title: 'Q2 roadmap sync',
+      meeting_type: 'work',
+      started_at: '2026-09-18T15:30:00.000Z',
+      ended_at: null,
+      duration_seconds: 2700,
+      created_at: '2026-09-18T15:30:00.000Z',
+      mention_count: 5,
+      context:
+        'Reviewed platform migration timeline and confirmed token rotation.',
     },
   ],
   'preview-jordan': [
@@ -661,8 +713,76 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
     workingMemorySnapshot: null,
     mergedPeople: [],
   },
+  'preview-maya': {
+    person: previewPeople[1],
+    isSelf: false,
+    meetings: [
+      {
+        id: 'preview-architecture-docs',
+        title: 'Architecture docs review',
+        started_at: '2026-09-21T10:00:00.000Z',
+        created_at: '2026-09-21T10:00:00.000Z',
+        duration_seconds: 3240,
+        context:
+          'Committed to delivering database credential rotation and reviewing OpenAPI specs.',
+        evidence: 'confirmed',
+      },
+      {
+        id: 'preview-roadmap-sync',
+        title: 'Q2 roadmap sync',
+        started_at: '2026-09-18T15:30:00.000Z',
+        created_at: '2026-09-18T15:30:00.000Z',
+        duration_seconds: 2700,
+        context:
+          'Reviewed platform migration timeline and confirmed token rotation.',
+        evidence: 'confirmed',
+      },
+    ],
+    commitments: {
+      open: [
+        {
+          id: 'preview-maya-open-1',
+          text: 'Deliver auth migration roadmap to Maya Chen',
+          status: 'active',
+          dueDate: '2026-09-26T17:00:00.000Z',
+          evidence:
+            "Let's make sure the auth migration roadmap is documented before sprint freeze.",
+          sourceMeetingId: 'preview-architecture-docs',
+          sourceMeetingTitle: 'Architecture docs review',
+          updatedAt: now,
+        },
+        {
+          id: 'preview-maya-open-2',
+          text: 'Finalize database credential rotation in staging',
+          status: 'active',
+          dueDate: '2026-09-25T17:00:00.000Z',
+          evidence:
+            'Maya Chen committed to completing the credential rotation by Thursday at 5:00 PM.',
+          sourceMeetingId: 'preview-roadmap-sync',
+          sourceMeetingTitle: 'Q2 roadmap sync',
+          updatedAt: now,
+        },
+      ],
+      delivered: [
+        {
+          id: 'preview-maya-delivered-1',
+          text: 'API token migration spec and token rotation',
+          status: 'completed',
+          dueDate: null,
+          evidence: 'Token rotation completed with zero downtime.',
+          sourceMeetingId: 'preview-roadmap-sync',
+          sourceMeetingTitle: 'Q2 roadmap sync',
+          updatedAt: now,
+        },
+      ],
+      candidates: [],
+    },
+    knowledgeDoc: previewPersonContextDoc,
+    workingMemorySnapshot: null,
+    mergedPeople: [],
+  },
   ...Object.fromEntries(
-    previewPeople.slice(1).map((person) => [
+    previewPeople.slice(2).map((person) => [
       person.id,
       {
         person,
@@ -684,6 +804,149 @@ const previewPersonBriefings: Record<string, PersonBriefingDetail> = {
     ]),
   ),
 };
+
+const previewActionItems: Entity[] = [
+  {
+    id: 'preview-action-suggested',
+    type: 'action_item',
+    name: 'Deliver auth migration roadmap to Maya Chen',
+    normalized_name: 'deliver auth migration roadmap to maya chen',
+    status: 'active',
+    due_date: new Date(Date.now() + 2 * 86400000).toISOString(),
+    assigned_to: 'You',
+    domain_tag: 'work',
+    metadata: JSON.stringify({
+      commitment_state: 'possible',
+      assignee_name: 'You',
+      source_meeting_id: 'preview-architecture-docs',
+      source_meeting_title: 'Architecture docs review',
+      attention_label: 'Suggested Follow-up',
+      priority: 'high',
+    }),
+    saliency_score: 0.95,
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'preview-action-1',
+    type: 'action_item',
+    name: 'Finalize CoreML transcription benchmarks',
+    normalized_name: 'finalize coreml transcription benchmarks',
+    status: 'active',
+    due_date: new Date(Date.now() + 6 * 3600000).toISOString(),
+    assigned_to: 'You',
+    domain_tag: 'work',
+    metadata: JSON.stringify({
+      commitment_state: 'confirmed',
+      assignee_name: 'You',
+      priority: 'high',
+    }),
+    saliency_score: 0.9,
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'preview-action-2',
+    type: 'action_item',
+    name: 'Review OpenRouter API fallback pipeline',
+    normalized_name: 'review openrouter api fallback pipeline',
+    status: 'active',
+    due_date: new Date(Date.now() + 48 * 3600000).toISOString(),
+    assigned_to: 'You',
+    domain_tag: 'work',
+    metadata: JSON.stringify({
+      commitment_state: 'confirmed',
+      assignee_name: 'You',
+      priority: 'medium',
+    }),
+    saliency_score: 0.85,
+    created_at: now,
+    updated_at: now,
+  },
+];
+
+const previewProjectPortfolio = [
+  {
+    id: 'preview-project-local-ml',
+    type: 'project' as const,
+    name: 'Platform Migration to Local ML',
+    normalized_name: 'platform migration to local ml',
+    display_title: 'Platform Migration to Local ML',
+    status: 'active' as const,
+    due_date: new Date(Date.now() + 8 * 86400000).toISOString(),
+    assigned_to: 'Platform Team',
+    metadata: JSON.stringify({
+      projectCadence: 'weekly',
+      projectStarred: true,
+      projectPortfolioDisposition: 'confirmed',
+      projectQualification: {
+        version: 1,
+        state: 'qualified',
+        reason: 'Platform migration confirmed as core strategic initiative.',
+        source: 'user',
+        assessedAt: new Date().toISOString(),
+      },
+    }),
+    saliency_score: 0.98,
+    domain_tag: 'work',
+    meeting_count: 4,
+    last_mentioned_at: new Date().toISOString(),
+    latest_context:
+      'CoreML transcription latency reduced by 42%; zero cloud streaming required.',
+    cadence: 'weekly' as const,
+    health_state: 'on_track' as const,
+    health_headline: 'Whisper/Parakeet engine meets throughput criteria',
+    health_summary:
+      'Evidence across the last 4 discussions confirms local inference meets SLA. Primary blocker remains database credential rotation handover.',
+    typical_participant_count: 4,
+    next_milestone: 'Production Cutover (Oct 1)',
+    current_focus: 'CoreML engine optimization & fallback testing',
+    activity_state: 'active' as const,
+    activity_label: 'Active today',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'preview-project-soc2',
+    type: 'project' as const,
+    name: 'SOC2 Compliance & Secret Rotation',
+    normalized_name: 'soc2 compliance & secret rotation',
+    display_title: 'SOC2 Compliance & Secret Rotation',
+    status: 'active' as const,
+    due_date: new Date(Date.now() + 15 * 86400000).toISOString(),
+    assigned_to: 'Security Team',
+    metadata: JSON.stringify({
+      projectCadence: 'biweekly',
+      projectStarred: true,
+      projectPortfolioDisposition: 'confirmed',
+      projectQualification: {
+        version: 1,
+        state: 'qualified',
+        reason: 'Security and SOC2 audit compliance roadmap.',
+        source: 'user',
+        assessedAt: new Date().toISOString(),
+      },
+    }),
+    saliency_score: 0.88,
+    domain_tag: 'work',
+    meeting_count: 3,
+    last_mentioned_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    latest_context:
+      'All API tokens rotated; staging credential rotation runbook pending DevOps confirmation.',
+    cadence: 'biweekly' as const,
+    health_state: 'on_track' as const,
+    health_headline: 'Credential rotation and audit trail logging in progress',
+    health_summary:
+      'DevOps confirmed staging runbook. Final production credential rotation scheduled for Thursday at 5:00 PM.',
+    typical_participant_count: 3,
+    next_milestone: 'Audit Sign-off (Oct 5)',
+    current_focus: 'Database credential rotation runbook',
+    activity_state: 'active' as const,
+    activity_label: 'Active 2d ago',
+    created_at: now,
+    updated_at: now,
+  },
+];
 
 const workspaceFor = (docId?: string): KnowledgeWorkspacePayload => {
   const selected_doc = docs.find((doc) => doc.id === docId) || docs[0];
@@ -1066,15 +1329,153 @@ const createInvokeFallback =
         break;
       case 'GET_OVERDUE_ACTION_ITEMS':
       case 'GET_STALE_ACTION_ITEMS':
-      case 'GET_ACTION_ITEMS_BY_STATUS':
         result = [];
         break;
+      case 'GET_ACTION_ITEMS_BY_STATUS': {
+        const status = args[0];
+        result =
+          status === 'active' || !status
+            ? previewActionItems.filter((item) => item.status === 'active')
+            : previewActionItems.filter((item) => item.status === status);
+        break;
+      }
+      case 'UPDATE_ACTION_COMMITMENT_STATE': {
+        const payload = args[0] as
+          | { id?: string; commitmentState?: 'confirmed' | 'rejected' }
+          | undefined;
+        const found = previewActionItems.find(
+          (item) => item.id === payload?.id,
+        );
+        if (found) {
+          if (payload?.commitmentState === 'rejected') {
+            const idx = previewActionItems.indexOf(found);
+            previewActionItems.splice(idx, 1);
+          } else {
+            const meta = JSON.parse(found.metadata || '{}');
+            found.metadata = JSON.stringify({
+              ...meta,
+              commitment_state: 'confirmed',
+              reviewed_at: new Date().toISOString(),
+            });
+          }
+          result = found;
+        } else {
+          result = null;
+        }
+        break;
+      }
+      case 'UPDATE_ENTITY_STATUS': {
+        const id = args[0];
+        const status = args[1] as string;
+        const found = previewActionItems.find((item) => item.id === id);
+        if (found) {
+          found.status = status as Entity['status'];
+          result = found;
+        } else {
+          result = null;
+        }
+        break;
+      }
       case 'GET_KNOWLEDGE_GRAPH_STATS':
         result = emptyGraphStats;
         break;
       case 'GET_PROJECT_PORTFOLIO':
-        result = [];
+        result =
+          typeof window !== 'undefined' &&
+          new URLSearchParams(window?.location?.search || '').get('preview') ===
+            'projects'
+            ? previewProjectPortfolio
+            : [];
         break;
+      case 'DISCOVER_PROJECT_INITIATIVE':
+        result = {
+          discovered: 0,
+          remaining: 0,
+          failed: 0,
+          deferred: false,
+        };
+        break;
+      case 'intelligence:alerts': {
+        result = [
+          {
+            id: 'preview-attention-auth-migration',
+            dedupe_key: 'preview-attention-auth-migration',
+            kind: 'follow_up',
+            severity: 'critical',
+            score: 94,
+            status: 'active',
+            title: 'Deliver auth migration roadmap to Maya Chen',
+            reason:
+              'Identified from Architecture Review sync · Basis: Commitments agreement',
+            source: 'proactive_engine',
+            evidence: [
+              {
+                meeting_id: 'preview-architecture-docs',
+                quote:
+                  "Maya Chen: Let's make sure the auth migration roadmap is documented before the sprint freeze.",
+              },
+            ],
+            related_entity_ids: ['preview-maya'],
+            related_stream_ids: [],
+            related_meeting_ids: ['preview-architecture-docs'],
+            created_at: now,
+            updated_at: now,
+            last_seen_at: now,
+            resolved_at: null,
+          },
+        ];
+        break;
+      }
+      case 'intelligence:alerts:update-status': {
+        result = { id: args[0], status: args[1] };
+        break;
+      }
+      case 'intelligence:query': {
+        result = {
+          status: 'answered',
+          answer: `Across the **Architecture docs review** and **Q2 roadmap sync**:
+
+1. **Docs-as-Code Workflow**: The team confirmed adopting a Markdown-based docs-as-code workflow versioned directly inside the repository, using CI for automated validation.
+2. **SOC2 Audit & Credential Rotation**: Token rotation is completed. Maya Chen confirmed database credential rotation will be finalized by **Thursday at 5:00 PM** before production cutover.
+3. **CoreML Engine Benchmark**: Local on-device transcription latency was validated at **3.2x faster than real-time** on M-series Apple Silicon chips with zero cloud audio leakage.`,
+          citations: [
+            {
+              meeting_id: 'preview-architecture-docs',
+              meeting_title: 'Architecture docs review',
+              text_quote:
+                "I'd like us to adopt a docs-as-code approach using Markdown in the repo so that documentation lives alongside the code and can be versioned and reviewed the same way.",
+              speaker: 'Maya Chen',
+              timestamp_ms: 310000,
+              source_type: 'meeting',
+            },
+            {
+              meeting_id: 'preview-roadmap-sync',
+              meeting_title: 'Q2 roadmap sync',
+              text_quote:
+                'Token rotation is completed. We just need to verify the database credential rotation before production cutover.',
+              speaker: 'Maya Chen',
+              timestamp_ms: 1450000,
+              source_type: 'meeting',
+            },
+          ],
+          trustStatus: 'grounded',
+          outcome: 'answered',
+          resolvedScope: {
+            kind: 'meeting_ids',
+            meetingIds: ['preview-architecture-docs', 'preview-roadmap-sync'],
+            resolvedAt: new Date().toISOString(),
+            source: 'explicit',
+          },
+          retrievalSummary: {
+            matchedMeetingCount: 2,
+            includedMeetingCount: 2,
+            preparedEvidenceCount: 6,
+            transcriptOnlyCount: 0,
+            omittedMeetingCount: 0,
+          },
+        };
+        break;
+      }
       case 'GET_IDENTITY_STATE':
         result = {
           selfPersonId: 'preview-avery',
@@ -1241,6 +1642,9 @@ const createInvokeFallback =
         break;
       case 'GET_KNOWLEDGE_DOC_NOTES':
         result = null;
+        break;
+      case 'MEETING_ARTIFACTS_LIST':
+        result = [];
         break;
       case 'SAVE_KNOWLEDGE_CORRECTION':
         result = {

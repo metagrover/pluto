@@ -144,7 +144,7 @@ const DashboardSuggestionReview = ({
   item,
   isUpdating,
   expanded,
-  compact = false,
+  compact: _compact = false,
   onToggle,
   onDecisionComplete,
   setSelectedMeetingId,
@@ -174,53 +174,64 @@ const DashboardSuggestionReview = ({
     item.sourceSynthesis?.overview ??
     item.sourceSynthesis?.evidence ??
     null;
-  const basisLabel = item.basisLabel.replace(/^Possible follow-up · /, '');
 
   return (
     <article
       data-testid="dashboard-suggestion-review"
       aria-busy={isUpdating}
-      className={`-mx-3 rounded-lg px-3 transition-colors ${expanded ? 'bg-pro-surface/45' : 'hover:bg-pro-surface/25'}`}
+      className="mt-1.5"
     >
-      <button
-        type="button"
-        aria-label={`Review suggestion: ${item.title}`}
-        aria-expanded={expanded}
-        aria-controls={panelId}
-        onClick={onToggle}
-        className={`group flex w-full items-start gap-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent ${compact ? 'py-2' : 'py-4'}`}
-      >
-        {compact ? (
-          <span className="min-w-0 flex-1 text-[11px] font-semibold leading-5 text-pro-accent">
-            Review details
-          </span>
-        ) : (
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-semibold leading-5 text-pro-text-main">
-              {item.title}
-            </span>
-            <span className="mt-1 block text-[11px] font-medium leading-5 text-pro-text-muted">
-              {basisLabel}
-            </span>
-          </span>
-        )}
-        <ChevronRight
-          className={`mt-1 h-4 w-4 shrink-0 text-pro-text-muted/65 transition-transform duration-200 ease-out group-hover:text-pro-text-main motion-reduce:transition-none ${expanded ? 'rotate-90' : ''}`}
-          aria-hidden="true"
-        />
-      </button>
-      {expanded ? (
-        <div
-          id={panelId}
-          className="animate-in fade-in pb-4 duration-150 motion-reduce:animate-none"
+      <div className="flex flex-wrap items-center gap-2">
+        {decisionActions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            aria-label={action.ariaLabel}
+            disabled={isUpdating}
+            onClick={async () => {
+              await action.onClick();
+              onDecisionComplete(
+                action.kind === 'primary' ? 'confirmed' : 'rejected',
+              );
+            }}
+            className={
+              action.kind === 'primary'
+                ? 'inline-flex h-6 items-center gap-1 rounded bg-pro-accent px-2.5 text-[11px] font-medium text-white shadow-2xs transition-colors hover:bg-pro-accent/90 active:scale-98 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+                : 'inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+            }
+          >
+            {action.kind === 'primary' ? (
+              <Plus className="h-3 w-3 stroke-[2.5]" aria-hidden="true" />
+            ) : null}
+            {action.label}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          aria-label={`Review suggestion: ${item.title}`}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={onToggle}
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-pro-text-muted/60 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
         >
+          <span>{expanded ? 'Hide details' : 'Details'}</span>
+          <ChevronRight
+            className={`h-3 w-3 shrink-0 text-pro-text-muted/60 transition-transform duration-200 ease-out motion-reduce:transition-none ${expanded ? 'rotate-90' : ''}`}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+
+      {expanded ? (
+        <div id={panelId} className="mt-1.5 w-full">
           {sourceAction ? (
             <button
               type="button"
               aria-label={`Open source meeting for ${item.title}`}
               disabled={isUpdating}
               onClick={sourceAction.onClick}
-              className="line-clamp-1 w-full text-left text-[11px] font-medium leading-5 text-pro-text-muted/85 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+              className="line-clamp-1 block w-full text-left text-[11px] font-medium text-pro-text-muted/75 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
             >
               {sourceExcerpt ?? 'Source context is available in the meeting.'}
             </button>
@@ -229,29 +240,6 @@ const DashboardSuggestionReview = ({
               No source context is available for this suggestion.
             </p>
           )}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {decisionActions.map((action) => (
-              <button
-                key={action.label}
-                type="button"
-                aria-label={action.ariaLabel}
-                disabled={isUpdating}
-                onClick={async () => {
-                  await action.onClick();
-                  onDecisionComplete(
-                    action.kind === 'primary' ? 'confirmed' : 'rejected',
-                  );
-                }}
-                className={
-                  action.kind === 'primary'
-                    ? 'inline-flex min-h-8 items-center rounded-md bg-pro-accent px-3 text-[11px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
-                    : 'inline-flex min-h-8 items-center rounded-md px-2 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
-                }
-              >
-                {action.kind === 'primary' ? 'Add commitment' : action.label}
-              </button>
-            ))}
-          </div>
         </div>
       ) : null}
     </article>
@@ -803,7 +791,7 @@ export const Dashboard = ({
           </span>
         ) : null}
       </header>
-      <div className="grid gap-8 pt-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-12">
+      <div className="grid gap-6 pt-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(330px,0.9fr)] lg:gap-8">
         <section
           id="todays-focus"
           aria-labelledby="commitments-title"
@@ -936,9 +924,9 @@ export const Dashboard = ({
                     onDrop={() => dropCommitment(item.id)}
                     className={`group py-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-start gap-3">
                       <span
-                        className="flex w-5 shrink-0 cursor-grab items-center justify-center self-center text-pro-text-muted/45 active:cursor-grabbing"
+                        className="flex h-7 w-5 shrink-0 cursor-grab items-center justify-center text-pro-text-muted/45 active:cursor-grabbing"
                         title={`Drag ${item.title} to reorder`}
                         aria-hidden="true"
                       >
@@ -958,8 +946,16 @@ export const Dashboard = ({
                             <Check className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover/complete:opacity-100 group-focus-visible/complete:opacity-100 motion-reduce:transition-none" />
                           )}
                         </button>
-                      ) : null}
-                      <div className="min-w-0 flex-1">
+                      ) : (
+                        <div
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-pro-border/80 text-pro-text-muted/40 transition-colors"
+                          title="Suggested commitment from meeting"
+                          aria-hidden="true"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-pro-text-muted/35" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1 pt-0.5">
                         <div className="flex items-start justify-between gap-3">
                           <h3 className="text-[14px] font-normal leading-5 text-pro-text-main">
                             {item.title}

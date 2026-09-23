@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AskPluto } from '../../src/components/features/AskPluto';
+import {
+  AskPluto,
+  type AskPlutoMessage,
+} from '../../src/components/features/AskPluto';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -21,6 +24,118 @@ describe('Ask Pluto request lifecycle', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('keeps the chat usable when suggested queries are unavailable', async () => {
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries') {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+
+    expect(container.textContent).toContain("Hello, I'm Pluto.");
+    expect(container.textContent).toContain(
+      'Record a meeting to get personalized suggestions.',
+    );
+    expect(
+      container.querySelector('input[aria-label="Ask Pluto"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('button[aria-label="Send message"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(
+        '[role="log"][aria-label="Conversation with Pluto"]',
+      ),
+    ).not.toBeNull();
+  });
+
+  it('preserves a controlled conversation when the chat view remounts', async () => {
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') {
+        return Promise.resolve({
+          status: 'answered',
+          answer: 'Jordan owns the holdings update.',
+          citations: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    const Harness = () => {
+      const [open, setOpen] = useState(true);
+      const [messages, setMessages] = useState<AskPlutoMessage[]>([]);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen((value) => !value)}>
+            Toggle chat
+          </button>
+          {open ? (
+            <AskPluto
+              visible
+              onClose={vi.fn()}
+              onOpenMeeting={vi.fn()}
+              messages={messages}
+              setMessages={setMessages}
+            />
+          ) : null}
+        </>
+      );
+    };
+
+    await act(async () => root.render(<Harness />));
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, "What's assigned to Jordan?");
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(container.textContent).toContain('Jordan owns the holdings update.');
+
+    const toggle = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Toggle chat',
+    ) as HTMLButtonElement;
+    await act(async () => toggle.click());
+    expect(container.textContent).not.toContain(
+      'Jordan owns the holdings update.',
+    );
+    await act(async () => toggle.click());
+    expect(container.textContent).toContain('Jordan owns the holdings update.');
+
+    const newConversation = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('New conversation'),
+    ) as HTMLButtonElement;
+    await act(async () => newConversation.click());
+    expect(container.textContent).not.toContain(
+      'Jordan owns the holdings update.',
+    );
+    expect(container.textContent).toContain("Hello, I'm Pluto.");
   });
 
   it('shows request phases, exposes cancellation, and restores the composer', async () => {
@@ -194,7 +309,7 @@ describe('Ask Pluto request lifecycle', () => {
     });
 
     expect(container.textContent).toContain('Needs review');
-    expect(container.textContent).toContain('1 unsupported claim');
+    expect(container.textContent).toContain('1 detail could not be verified');
   });
 
   it('presents citations as a collapsed source disclosure instead of meeting cards', async () => {
@@ -446,7 +561,7 @@ describe('Ask Pluto request lifecycle', () => {
     };
 
     await submit("Summarize today's meetings");
-    expect(container.textContent).toContain('No matching evidence');
+    expect(container.textContent).toContain('Not enough supporting detail');
     await submit('What went wrong here?');
 
     const queryCalls = invoke.mock.calls.filter(

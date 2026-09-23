@@ -56,7 +56,7 @@ export const MeetingAttachmentsBar: React.FC<MeetingAttachmentsBarProps> = ({
     setLoading(true);
     try {
       const items = await listMeetingArtifacts(meetingId);
-      setArtifacts(items);
+      setArtifacts(Array.isArray(items) ? items : []);
     } catch (err) {
       console.error('[MeetingAttachmentsBar] Failed to load artifacts:', err);
     } finally {

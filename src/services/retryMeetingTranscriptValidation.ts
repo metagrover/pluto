@@ -57,11 +57,12 @@ const logRejectedTrustCandidate = (input: {
 const requestMeetingNotesPublication = async (
   meetingId: string | number,
   invoke: Invoke,
+  reason: 'automatic' | 'manual',
 ): Promise<void> => {
   await invoke('GENERATE_MEETING_NOTES', {
     meetingId,
     requestId: crypto.randomUUID(),
-    reason: 'automatic',
+    reason,
   });
 };
 
@@ -446,6 +447,7 @@ export const retryMeetingTranscriptValidation = async (
   options: {
     now?: () => number;
     validationTimeoutMs?: number;
+    reason?: 'automatic' | 'manual';
   } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
@@ -535,7 +537,11 @@ export const retryMeetingTranscriptValidation = async (
     }
 
     try {
-      await requestMeetingNotesPublication(meeting.id, invoke);
+      await requestMeetingNotesPublication(
+        meeting.id,
+        invoke,
+        options.reason ?? 'automatic',
+      );
     } catch (error) {
       console.error('[Pluto] Retry notes publication request failed', error);
     }
@@ -980,7 +986,11 @@ export const retryMeetingTranscriptValidation = async (
   }
 
   try {
-    await requestMeetingNotesPublication(meetingId, invoke);
+    await requestMeetingNotesPublication(
+      meetingId,
+      invoke,
+      options.reason ?? 'automatic',
+    );
   } catch (error) {
     console.error(
       '[Pluto] Post-validation notes publication request failed',
