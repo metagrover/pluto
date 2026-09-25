@@ -18,7 +18,8 @@ const EXPLICIT_TOPIC_SWITCH_PATTERN =
 const SELF_CONTAINED_TOPIC_PATTERN =
   /^(?:what|how) about (?!that\b|this\b|it\b|those\b|these\b|the (?:first|second|third|fourth|last|former|latter)\b)/i;
 const REFERENTIAL_FOLLOW_UP_PATTERN =
-  /\b(?:it|that|this|those|these|the (?:first|second|third|fourth|last|former|latter) (?:point|item|one)|your (?:answer|point|concern|recommendation|suggestion)|you (?:said|mentioned|suggested|recommended)|the (?:concern|risk|recommendation|suggestion|reason) you (?:raised|mentioned|gave))\b/i;
+  /\b(?:it|that|this|those|these|she|he|they|her|him|the (?:participant|speaker|other person|client|prospect|candidate|lead)|the (?:first|second|third|fourth|last|former|latter) (?:point|item|one)|your (?:answer|point|concern|recommendation|suggestion)|you (?:said|mentioned|suggested|recommended)|the (?:concern|risk|recommendation|suggestion|reason) you (?:raised|mentioned|gave))\b/i;
+
 const CONTINUATION_PATTERN =
   /^(?:and|but|also|so|then|what about|how about|tell me more|explain|elaborate|go deeper|can you expand|what do you mean)\b/i;
 const SHORT_FOLLOW_UP_PATTERN =

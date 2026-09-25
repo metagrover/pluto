@@ -11,11 +11,15 @@ import type { PersistedMeeting } from '../db';
 import type { MidFrontmatter } from './intelligenceTypes';
 import type { MeetingAskPlutoAssistanceRoute } from './meetingAskPlutoAssistance';
 import type { MeetingAskPlutoConversationResolution } from './meetingAskPlutoConversation';
-import { stripMeetingAskPlutoPreamble } from './meetingAskPlutoStream';
+import {
+  stripMeetingAskPlutoPreamble,
+  stripMeetingAskPlutoTimestampNarration,
+} from './meetingAskPlutoStream';
 import {
   buildMeetingNotesEvidenceDocument,
   resolveSavedMeetingEvidencePolicy,
 } from './meetingNotesEvidence';
+
 
 export const MEETING_ASK_PLUTO_TURN_LIMIT = 6;
 export const MEETING_ASK_PLUTO_TURN_CHAR_LIMIT = 1200;
@@ -69,8 +73,69 @@ interface TranscriptSegmentLike {
   speaker?: unknown;
   start?: unknown;
   end?: unknown;
+  startTime?: unknown;
+  endTime?: unknown;
   text?: unknown;
 }
+
+const COMMON_QUERY_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
+  'at', 'from', 'by', 'for', 'with', 'about', 'against', 'between',
+  'into', 'through', 'during', 'before', 'after', 'above', 'below',
+  'to', 'of', 'in', 'on', 'what', 'who', 'how', 'why', 'where', 'which',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+  'do', 'does', 'did', 'can', 'could', 'will', 'would', 'should',
+  'this', 'that', 'these', 'those', 'meeting', 'call', 'discussion', 'say',
+]);
+
+const selectRelevantTranscriptSegments = (
+  segments: Array<{ id: string; text: string; quote: string }>,
+  query: string,
+  limit: number,
+) => {
+  if (segments.length <= limit) return segments;
+
+  const queryTerms = query
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((term) => term.length > 2 && !COMMON_QUERY_STOP_WORDS.has(term));
+
+  if (queryTerms.length === 0) {
+    return segments.slice(-limit);
+  }
+
+  const scored = segments.map((segment, index) => {
+    const lower = segment.text.toLowerCase();
+    let score = 0;
+    for (const term of queryTerms) {
+      if (lower.includes(term)) {
+        score += 1;
+      }
+    }
+    return { segment, index, score };
+  });
+
+  const matching = scored.filter((item) => item.score > 0);
+  if (matching.length === 0) {
+    return segments.slice(-limit);
+  }
+
+  matching.sort((a, b) => b.score - a.score);
+  const selectedIndices = new Set<number>();
+  for (const item of matching) {
+    if (selectedIndices.size >= limit) break;
+    selectedIndices.add(item.index);
+    if (item.index + 1 < segments.length && selectedIndices.size < limit) {
+      selectedIndices.add(item.index + 1);
+    }
+  }
+
+  return [...selectedIndices]
+    .sort((a, b) => a - b)
+    .slice(0, limit)
+    .map((index) => segments[index]);
+};
 
 const asString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -122,8 +187,18 @@ const transcriptSegmentsFromJson = (transcriptJson: unknown) => {
       const text = asString(segment.text);
       if (!text) return null;
       const speaker = asString(segment.speaker) ?? 'Speaker';
-      const start = typeof segment.start === 'number' ? segment.start : null;
-      const end = typeof segment.end === 'number' ? segment.end : null;
+      const start =
+        typeof segment.startTime === 'number'
+          ? segment.startTime
+          : typeof segment.start === 'number'
+            ? segment.start
+            : null;
+      const end =
+        typeof segment.endTime === 'number'
+          ? segment.endTime
+          : typeof segment.end === 'number'
+            ? segment.end
+            : null;
       const time =
         start !== null && end !== null
           ? ` (${Math.round(start)}s-${Math.round(end)}s)`
@@ -138,6 +213,7 @@ const transcriptSegmentsFromJson = (transcriptJson: unknown) => {
       Boolean(segment),
     );
 };
+
 
 const deriveContextTrustStatus = ({
   meeting,
@@ -206,18 +282,24 @@ export const buildMeetingAskPlutoContext = ({
     query,
     notesDocument.hasUsableNotes,
   );
-  const transcriptEvidenceItems = transcriptSegmentsFromJson(
-    meeting.transcript_json,
-  )
-    .slice(-SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT)
-    .map((segment) => ({
-      id: segment.id,
-      kind: 'transcript' as const,
-      meetingId: scope.meetingId,
-      title: 'Transcript',
-      text: segment.text,
-      quote: segment.quote,
-    }));
+  const allSegments = transcriptSegmentsFromJson(meeting.transcript_json);
+  const selectedSegments =
+    evidencePolicy === 'transcript_exact'
+      ? allSegments.slice(-SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT)
+      : selectRelevantTranscriptSegments(
+          allSegments,
+          query,
+          MEETING_ASK_PLUTO_EVIDENCE_LIMIT,
+        );
+  const transcriptEvidenceItems = selectedSegments.map((segment) => ({
+    id: segment.id,
+    kind: 'transcript' as const,
+    meetingId: scope.meetingId,
+    title: 'Transcript',
+    text: segment.text,
+    quote: segment.quote,
+  }));
+
 
   if (notesDocument.notesText) {
     addEvidence(evidenceItems, {
@@ -284,14 +366,17 @@ export const buildMeetingAskPlutoContext = ({
   }
 
   const includeTranscript = evidencePolicy !== 'notes_only';
+  const transcriptLimit =
+    evidencePolicy === 'transcript_exact'
+      ? SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT
+      : MEETING_ASK_PLUTO_EVIDENCE_LIMIT;
   const boundedEvidenceItems = includeTranscript
     ? [
         ...evidenceItems.slice(
           0,
-          MEETING_ASK_PLUTO_EVIDENCE_LIMIT -
-            SAVED_MEETING_TRANSCRIPT_EVIDENCE_LIMIT,
+          Math.max(0, MEETING_ASK_PLUTO_EVIDENCE_LIMIT - transcriptLimit),
         ),
-        ...transcriptEvidenceItems,
+        ...transcriptEvidenceItems.slice(-transcriptLimit),
       ]
     : evidenceItems.slice(0, MEETING_ASK_PLUTO_EVIDENCE_LIMIT);
   if (
@@ -319,12 +404,14 @@ export const buildMeetingAskPlutoContext = ({
     evidencePolicy === 'transcript_exact'
       ? 'This answer may use bounded transcript evidence for an exact-wording request.'
       : evidencePolicy === 'transcript_fallback'
-        ? 'Meeting notes are unavailable, so this answer may use weak transcript evidence.'
+        ? 'Meeting notes are unavailable, so this answer may use transcript evidence directly from the transcript.'
+
         : isLiveOrProvisional(meeting)
           ? 'This answer uses live or provisional meeting notes.'
           : status === 'ready'
             ? 'This answer is scoped to saved meeting notes.'
             : 'No notes or structured meeting evidence is available yet.';
+
 
   return {
     status,
@@ -695,6 +782,19 @@ Rules:
 10. Do not merely repeat transcript lines. Explain the situation, decisions, open questions, and next steps when relevant.
 11. Keep the answer concise unless the user asks for detail.
 12. Speaker labels describe evidence provenance, not verified identity: “Me” is the user's microphone and “Call audio” is the combined remote audio stream, which may contain one or more people. Generic or numbered speaker labels do not prove that different people spoke. Do not infer participant count or identity from segment boundaries.
+13. Reference and pronoun resolution:
+    - When questions refer to people via pronouns ("she", "he", "they") or roles ("the participant", "the client", "the candidate", "the manager", "the lead"), resolve them to individuals discussed, quoted, or speaking in the meeting evidence.
+    - If there is a single clear person of that gender or role in context, answer about them directly.
+    - If multiple individuals match, state who you are answering for or briefly distinguish them.
+    - Never treat a pronoun as a literal person's name (never claim "there is no person named 'she/he'").
+14. Interpreting inquiries (concerns, objections, risks, intent):
+    - Interpret questions about what someone is "concerned about", "hesitant on", "asking for", or "prioritizing" broadly across any meeting context.
+    - Look for operational friction, constraints, capacity limits, objections, edge cases, unresolved questions, timeline risks, or conditions raised during the conversation.
+    - Do not dismiss substantive business, operational, or technical discussions as merely "directed at a system or software"—these reflect the human participants' real concerns and responsibilities.
+15. Never narrate timestamps or elapsed seconds:
+    - Never recite timestamps, elapsed seconds, or evidence mechanics in your answer prose (e.g. do not write "at 110 seconds", "as mentioned at 58s", "the speaker at 795 seconds suggests", or "according to Evidence 3").
+    - Write clean, natural sentences. Provenance is tracked exclusively via [Evidence N] tags; the user should never see raw seconds or timing offsets in the text.
+    - If the user explicitly asks when an event or discussion occurred, describe the timing in natural elapsed minutes (e.g. "about 15 minutes into the meeting"), never in raw seconds.
 
 ${assistancePolicy}
 ${conversationPolicy}
@@ -745,10 +845,13 @@ export const buildMeetingAskPlutoResponseFromAnswer = ({
       };
     },
   );
-  const cleanAnswer = stripMeetingAskPlutoPreamble(answerRaw)
-    .replace(/\[Evidence\s+\d+\]/gi, '')
-    .trim();
+  const cleanAnswer = stripMeetingAskPlutoTimestampNarration(
+    stripMeetingAskPlutoPreamble(answerRaw)
+      .replace(/\[Evidence\s+\d+\]/gi, '')
+      .trim(),
+  ).trim();
   const responseTrustStatus = 'needs_review';
+
 
   return {
     status: 'answered',

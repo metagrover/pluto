@@ -751,4 +751,122 @@ describe('meeting-scoped Ask Pluto context', () => {
     );
     expect(prompt).toContain('Question:\nWhat should I do about that?');
   });
+
+  it('supports startTime and endTime segment properties and includes timestamps in text', () => {
+    const meeting = makeMeeting({
+      enhanced_notes: null,
+      analysis_json: null,
+      mid_json: null,
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Avery',
+            startTime: 58.2,
+            endTime: 64.5,
+            text: 'We discussed client feedback and decided to proceed.',
+          },
+        ],
+      }),
+    });
+
+    const context = buildMeetingAskPlutoContext({
+      meeting,
+      query: 'What was discussed?',
+    });
+
+    const transcriptItem = context.evidenceItems.find(
+      (item) => item.kind === 'transcript',
+    );
+    expect(transcriptItem).toBeDefined();
+    expect(transcriptItem?.text).toContain('(58s-65s)');
+    expect(transcriptItem?.text).toContain(
+      'We discussed client feedback and decided to proceed.',
+    );
+  });
+
+  it('retrieves relevant segments across the entire meeting in transcript fallback mode', () => {
+    const meeting = makeMeeting({
+      enhanced_notes: null,
+      analysis_json: null,
+      mid_json: null,
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Sarah',
+            startTime: 10,
+            endTime: 20,
+            text: 'Opening remarks and welcome.',
+          },
+          {
+            speaker: 'Rachel',
+            startTime: 120,
+            endTime: 140,
+            text: 'Rachel expressed concern about the client data discrepancies.',
+          },
+          {
+            speaker: 'Alex',
+            startTime: 500,
+            endTime: 520,
+            text: 'Midway review of infrastructure.',
+          },
+          {
+            speaker: 'Sam',
+            startTime: 900,
+            endTime: 910,
+            text: 'Closing remarks and meeting wrap up.',
+          },
+        ],
+      }),
+    });
+
+    const context = buildMeetingAskPlutoContext({
+      meeting,
+      query: 'What was Rachel concerned about?',
+    });
+
+    const transcriptItems = context.evidenceItems.filter(
+      (item) => item.kind === 'transcript',
+    );
+    expect(transcriptItems.length).toBeGreaterThan(0);
+    // Should retrieve Rachel's concern from the middle of the transcript, not just the tail
+    expect(
+      transcriptItems.some((item) =>
+        item.text.includes('Rachel expressed concern'),
+      ),
+    ).toBe(true);
+  });
+
+  it('includes universal coreference, broad intent, and anti-timestamp rules in the prompt', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What is she concerned about?',
+    });
+    const prompt = buildMeetingAskPlutoPrompt({
+      query: 'What is she concerned about?',
+      context,
+    });
+
+    expect(prompt).toContain('Reference and pronoun resolution:');
+    expect(prompt).toContain('Interpreting inquiries (concerns, objections, risks, intent):');
+    expect(prompt).toContain('Never narrate timestamps or elapsed seconds:');
+    expect(prompt).toContain('do not write "at 110 seconds"');
+  });
+
+  it('strips timestamp narration clauses in buildMeetingAskPlutoResponseFromAnswer', () => {
+    const context = buildMeetingAskPlutoContext({
+      meeting: makeMeeting(),
+      query: 'What was discussed?',
+    });
+    const response = buildMeetingAskPlutoResponseFromAnswer({
+      answerRaw:
+        'A decision to continue writing despite issues, as mentioned by the speaker at 58 seconds. Also an IPO is planned, asked at 860 seconds.',
+      context,
+    });
+
+    expect(response.answer).not.toContain('at 58 seconds');
+    expect(response.answer).not.toContain('at 860 seconds');
+    expect(response.answer).toContain('A decision to continue writing despite issues.');
+    expect(response.answer).toContain('Also an IPO is planned.');
+  });
 });
+

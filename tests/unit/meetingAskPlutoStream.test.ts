@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import {
+  createMeetingAskPlutoVisibleStream,
+  stripMeetingAskPlutoTimestampNarration,
+} from '../../electron/intelligence/meetingAskPlutoStream';
 
-import { createMeetingAskPlutoVisibleStream } from '../../electron/intelligence/meetingAskPlutoStream';
+
 
 const streamChunks = (chunks: string[], flush = true) => {
   const visible: string[] = [];
@@ -59,4 +63,55 @@ describe('meeting Ask Pluto visible stream', () => {
   it('does not expose an unfinished evidence reference on flush', () => {
     expect(streamChunks(['Isha [Evidence 2'])).toBe('Isha ');
   });
+
+  it('strips awkward raw timestamp narration clauses from prose', () => {
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'A decision to continue writing despite some issues, as mentioned by the speaker at 58 seconds.',
+      ),
+    ).toBe('A decision to continue writing despite some issues.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'The importance of a client that was highlighted in the last meeting, as indicated at 361 seconds.',
+      ),
+    ).toBe('The importance of a client that was highlighted in the last meeting.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'A question about whether an IPO is one of the biggest things the team will do, asked at 860 seconds.',
+      ),
+    ).toBe('A question about whether an IPO is one of the biggest things the team will do.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'The possibility of trimming information, as discussed at 1029 seconds.',
+      ),
+    ).toBe('The possibility of trimming information.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'A discussion about the planning process, which the speaker at 795 seconds suggests might be too late.',
+      ),
+    ).toBe('A discussion about the planning process, which might be too late.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration('as mentioned on 110 seconds.'),
+    ).toBe('');
+  });
+
+  it('preserves substantive numbers and durations that are not timestamp narration', () => {
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'The timeout increased by 110 seconds.',
+      ),
+    ).toBe('The timeout increased by 110 seconds.');
+
+    expect(
+      stripMeetingAskPlutoTimestampNarration(
+        'Revenue grew by 25 percent this quarter.',
+      ),
+    ).toBe('Revenue grew by 25 percent this quarter.');
+  });
 });
+

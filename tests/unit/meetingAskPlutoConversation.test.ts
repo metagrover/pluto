@@ -174,4 +174,44 @@ describe('meeting Ask Pluto conversational context', () => {
 
     expect(resolution.relation).toBe('new_topic');
   });
+
+  it('recognizes pronoun and participant role follow-ups across domains', () => {
+    // Sales domain: pronoun follow-up
+    const salesFollowUp = resolveMeetingAskPlutoConversation({
+      query: 'What is she concerned about?',
+      turns: exchange(
+        'What did the prospect say about pricing?',
+        'Sarah indicated budget approval is pending for Q4.',
+        ['Sarah said budget approval is pending for Q4.'],
+      ),
+    });
+    expect(salesFollowUp.relation).toBe('follow_up');
+    expect(salesFollowUp.retrievalQuery).toContain(
+      'Current follow-up: What is she concerned about?',
+    );
+    expect(salesFollowUp.retrievalQuery).toContain(
+      'Prior user topic: What did the prospect say about pricing?',
+    );
+
+    // Recruiting domain: pronoun follow-up
+    const candidateFollowUp = resolveMeetingAskPlutoConversation({
+      query: 'What is he looking for?',
+      turns: exchange(
+        'How did the candidate interview go?',
+        'Alex prefers remote work and wants to lead frontend architecture.',
+      ),
+    });
+    expect(candidateFollowUp.relation).toBe('follow_up');
+
+    // Generic meeting role follow-up
+    const participantFollowUp = resolveMeetingAskPlutoConversation({
+      query: 'What did the participant suggest?',
+      turns: exchange(
+        'Were there any blockers discussed?',
+        'Yes, bandwidth constraints were raised on the roadmap.',
+      ),
+    });
+    expect(participantFollowUp.relation).toBe('follow_up');
+  });
 });
+

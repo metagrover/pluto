@@ -46,6 +46,39 @@ export const stripMeetingAskPlutoPreamble = (value: string): string => {
     .replace(/\p{Ll}/u, (letter) => letter.toLocaleUpperCase());
 };
 
+const TIMESTAMP_NARRATION_PATTERN =
+  /(?:,\s*)?(?:\b(?:as|which(?:\s+the\s+speaker)?)\s+)?\b(?:mentioned|indicated|discussed|noted|asked|suggested|questioned|highlighted|stated|referenced)\s+(?:by\s+the\s+speaker\s+|by\s+[^,\n]+?\s+)?(?:at|on|around)\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\b/gi;
+
+const STANDALONE_TIMESTAMP_AT_PATTERN =
+  /(?:,\s*)?\b(?:asked|questioned|noted|discussed|stated)\s+at\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\b/gi;
+
+const SPEAKER_AT_SECONDS_PATTERN =
+  /\bthe\s+speaker\s+at\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)\s*(?:suggests?|notes?|mentions?|states?|asks?|indicates?)\b/gi;
+
+const LEADING_AT_SECONDS_PATTERN =
+  /(?:^|(?<=[.!?]\s+))At\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s),?\s*/gi;
+
+export const stripMeetingAskPlutoTimestampNarration = (
+  value: string,
+): string => {
+  let cleaned = value
+    .replace(TIMESTAMP_NARRATION_PATTERN, '')
+    .replace(STANDALONE_TIMESTAMP_AT_PATTERN, '')
+    .replace(SPEAKER_AT_SECONDS_PATTERN, '')
+    .replace(LEADING_AT_SECONDS_PATTERN, '');
+  cleaned = cleaned
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/([.,;:!?])\s*\1+/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s*[,;:—-]\s*/, '')
+    .trim();
+  if (/^[.,;:!?\s-]*$/.test(cleaned)) {
+    return '';
+  }
+  return cleaned.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase());
+};
+
+
 const couldBecomeEvidenceReference = (value: string) => {
   const normalized = value.toLowerCase();
   if (EVIDENCE_PREFIX.startsWith(normalized)) return true;
