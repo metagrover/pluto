@@ -15,6 +15,13 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-09-25 - Limit the dashboard agenda to two weeks
+
+- **Status:** Accepted.
+- **Supersedes:** The 30-day dashboard agenda window in the 2026-09-07 "Scale the upcoming-meetings agenda with the dashboard layout" decision.
+- **Decision:** Upcoming meetings shows events from today's local midnight through the start of the date fourteen days later. The calendar cache may continue reading a broader range for other calendar features.
+- **Rationale:** The dashboard should stay focused on meetings in the next two weeks.
+
 ## 2026-09-21 - Raise EOU renderer retained-audio budget to survive local Ollama inference
 
 - **Status:** Accepted
