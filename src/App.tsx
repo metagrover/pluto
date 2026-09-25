@@ -100,6 +100,7 @@ import {
   loadSelectedMeetingDetail,
   mergeMeetingStatus,
 } from './services/selectedMeetingDetail';
+import { calendarAgendaWindow } from './utils/calendarAgenda';
 import {
   getCalendarRosterNames,
   isMatchedActiveCalendarResult,
@@ -426,14 +427,8 @@ function App() {
         (snapshot.state === 'ready' || snapshot.state === 'read_failed')
       ) {
         const now = new Date();
-        const start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
-        end.setDate(end.getDate() + 30);
-        const events = await listCalendarDay(
-          start.toISOString(),
-          end.toISOString(),
-        );
+        const { start, end } = calendarAgendaWindow(now);
+        const events = await listCalendarDay(start, end);
         setCalendarEvents(
           events.filter(
             (event) => new Date(event.end).getTime() > now.getTime(),

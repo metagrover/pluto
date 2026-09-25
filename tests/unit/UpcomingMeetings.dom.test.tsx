@@ -138,6 +138,35 @@ afterEach(() => {
 });
 
 describe('UpcomingMeetings', () => {
+  it('formats durations in minutes below an hour and hours with remaining minutes', () => {
+    const durations = [30, 60, 115, 120, 500];
+    const events = durations.map((minutes, index) => ({
+      ...meeting(index),
+      start: '2026-09-25T12:00:00.000Z',
+      end: new Date(
+        Date.parse('2026-09-25T12:00:00.000Z') + minutes * 60_000,
+      ).toISOString(),
+    }));
+    const agenda = render({ events });
+    const more = agenda.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Show 2 more meetings"]',
+    );
+    act(() => more?.click());
+    const rows = agenda.container.querySelectorAll(
+      '[data-testid="upcoming-meeting-row"]',
+    );
+    expect(
+      Array.from(rows, (row) => row.querySelector('p')?.textContent),
+    ).toEqual([
+      '30 minutes',
+      '1 hour',
+      '1 hr 55 mins',
+      '2 hours',
+      '8 hrs 20 mins',
+    ]);
+    act(() => agenda.root.unmount());
+  });
+
   it('shows three compact rows and five large-layout rows before disclosure', async () => {
     const media = installMatchMedia(false);
     const { container, root } = render({

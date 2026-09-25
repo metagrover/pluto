@@ -41,9 +41,12 @@ const formatDuration = (event: CalendarEvent) => {
         60_000,
     ),
   );
-  if (minutes === 60) return '1 hour';
-  if (minutes > 60 && minutes % 60 === 0) return `${minutes / 60} hours`;
-  return `${minutes} minutes`;
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0)
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  return `${hours} ${hours === 1 ? 'hr' : 'hrs'} ${remainingMinutes} mins`;
 };
 
 const isSameLocalDay = (left: Date, right: Date) =>
